@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from spice.tasks import gitsync
+
 GIT_CONFLICT_EXIT_CODE = 1
 GIT_FATAL_EXIT_CODE = 128
 
@@ -141,6 +143,64 @@ def test_historical_ref_first_checkpoint_records_parent_before_merged_tree(
         "head_tree": merged_tree,
         "index_tree": agent_tree,
         "worktree_baseline_path": "absent",
+    }
+
+
+def test_marker_recovery_pins_merged_sha_while_origin_advances(tmp_path: Path) -> None:
+    repo, merged_upstream = _conflicting_repositories(tmp_path)
+    agent_head = _git(repo, "rev-parse", "HEAD")
+    _run(repo, "git", "fetch", "origin")
+    conflicted = _run_unchecked(
+        repo, "git", "merge", "--no-ff", "--no-commit", merged_upstream
+    )
+    merge_head_path = repo / _git(repo, "rev-parse", "--git-path", "MERGE_HEAD")
+    merge_head_path.unlink()
+
+    peer = tmp_path / "peer"
+    (peer / "peer-later.txt").write_text("later peer work\n", encoding="utf-8")
+    _run(peer, "git", "add", "peer-later.txt")
+    _run(peer, "git", "commit", "-m", "later peer work")
+    _run(peer, "git", "push", "origin", "main")
+    later_upstream = _git(peer, "rev-parse", "HEAD")
+
+    message = gitsync._merge_conflict_recovery("TASK-1kPinned", repo, merged_upstream)
+    commit_tree_line = next(
+        line.strip()
+        for line in message.splitlines()
+        if line.strip().startswith("merge_commit=$(git commit-tree")
+    )
+    assert conflicted.returncode == GIT_CONFLICT_EXIT_CODE
+    assert f"-p HEAD -p {merged_upstream}" in commit_tree_line
+
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "-A")
+    rescue = _git(
+        repo,
+        "commit-tree",
+        _git(repo, "write-tree"),
+        "-p",
+        agent_head,
+        "-p",
+        merged_upstream,
+        "-m",
+        "Resolve baseline overlap for TASK-1kPinned",
+    )
+    _run(repo, "git", "update-ref", "refs/heads/main", rescue, agent_head)
+
+    result = gitsync.integrate_and_publish("TASK-1kPinned", repo_root=repo)
+    captured = dict(item.split(":", 1) for item in result.uda_args)
+    published = captured["done_merge_head"]
+    outcome = {
+        "recovery_parents": _git(repo, "show", "-s", "--format=%P", rescue),
+        "later_upstream": captured["done_upstream_head"],
+        "early_peer": _git(repo, "show", f"{published}:peer.txt"),
+        "later_peer": _git(repo, "show", f"{published}:peer-later.txt"),
+    }
+    assert outcome == {
+        "recovery_parents": f"{agent_head} {merged_upstream}",
+        "later_upstream": later_upstream,
+        "early_peer": "peer feature",
+        "later_peer": "later peer work",
     }
 
 

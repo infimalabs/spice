@@ -395,7 +395,7 @@ def _integrate_advanced_baseline(
     # merged index nor a baseline parent. merge-tree closes that failure
     # window; conflicts are materialized below as a complete merge state.
     if _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
-        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+        raise MergeConflict(_merge_conflict_recovery(label, repo_root, upstream_head))
     merge = _run(
         repo_root,
         "merge-tree",
@@ -415,7 +415,7 @@ def _integrate_advanced_baseline(
             upstream_head=upstream_head,
             message=message,
         )
-        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+        raise MergeConflict(_merge_conflict_recovery(label, repo_root, upstream_head))
     if merge.returncode != 0 or not merged_tree:
         raise SpiceError(_fail("compute task merge tree", merge))
     return _synthesize_and_fast_forward(
@@ -536,7 +536,9 @@ def _retry_publish_after_race(
                 upstream_head=fresh_upstream_head,
                 message=message,
             )
-            raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+            raise MergeConflict(
+                _merge_conflict_recovery(label, repo_root, fresh_upstream_head)
+            )
         if merge.returncode != 0 or not merged_tree:
             raise SpiceError(_fail("compute publish-race merge tree", merge))
         retry_head = _synthesize_and_fast_forward(
@@ -956,10 +958,14 @@ def _publish_race_recovery(
     return "\n".join(lines)
 
 
-def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
+def _merge_conflict_recovery(
+    label: str, repo_root: Path, merged_upstream_head: str
+) -> str:
     conflicts = _conflict_paths(repo_root)
     if not _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
-        return _merge_conflict_marker_recovery(label, repo_root, conflicts)
+        return _merge_conflict_marker_recovery(
+            label, repo_root, conflicts, merged_upstream_head
+        )
     lines = [
         "your changes overlap with the current baseline; git is paused in a "
         "merge state",
@@ -990,11 +996,13 @@ def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
 
 
 def _merge_conflict_marker_recovery(
-    label: str, repo_root: Path, conflicts: list[str]
+    label: str,
+    repo_root: Path,
+    conflicts: list[str],
+    merged_upstream_head: str,
 ) -> str:
     marker_paths = _working_tree_conflict_marker_paths(repo_root)
     paths = conflicts or marker_paths
-    _, baseline = branch_upstream_target(repo_root) or ("", "<baseline>")
     lines = [
         "your changes overlap with the current baseline; git left conflict "
         "markers without an open MERGE_HEAD",
@@ -1020,7 +1028,8 @@ def _merge_conflict_marker_recovery(
             "  edit the files above and remove every marker line",
             "  git add -A  # stage every merged path, peer changes included",
             "  merge_commit=$(git commit-tree $(git write-tree) "
-            f'-p HEAD -p {baseline} -m "Resolve baseline overlap for {label}")',
+            f"-p HEAD -p {merged_upstream_head} "
+            f'-m "Resolve baseline overlap for {label}")',
             '  git update-ref refs/heads/$(git branch --show-current) "$merge_commit"',
             f'  spice task done {label} --validation "..."',
         ]
