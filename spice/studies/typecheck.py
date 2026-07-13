@@ -18,7 +18,8 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.repocfg import policy_table, read_pyproject
+from spice.configlayer import effective_table
+from spice.repocfg import read_pyproject
 from spice.studies.shape import configured_package_roots
 
 # Fixed, opinionated: fail on type errors, in the repo's [tool.pyright] mode.
@@ -99,7 +100,7 @@ def run_python_typecheck(repo_root: Path) -> None:
 
 
 def _configured_typecheck_interpreter(repo_root: Path) -> Path | None:
-    raw = policy_table(repo_root).get(PYTHON_TYPECHECK_INTERPRETER_KEY)
+    raw = effective_table(repo_root, "policy").get(PYTHON_TYPECHECK_INTERPRETER_KEY)
     if raw is None:
         return None
     if not isinstance(raw, str) or not raw.strip():

@@ -102,6 +102,64 @@ def load_packaged_config() -> ConfigLayer:
     )
 
 
+def effective_mapping(repo_root: Path | None) -> dict[str, Any]:
+    """Return a mutable consumer view of the canonical effective mapping."""
+    values = (
+        load_config(repo_root).effective
+        if repo_root is not None
+        else load_packaged_config().values
+    )
+    return _thaw_mapping(values)
+
+
+def effective_table(repo_root: Path | None, *path: str) -> dict[str, Any]:
+    """Return one mutable effective table, or an empty table for a non-table."""
+    value: Any = effective_mapping(repo_root)
+    for part in path:
+        if not isinstance(value, Mapping):
+            return {}
+        value = value.get(part)
+    return value if isinstance(value, dict) else {}
+
+
+def layer_table(repo_root: Path, layer_name: str, *path: str) -> dict[str, Any]:
+    """Return one mutable table from a specific named configuration layer."""
+    value: Any = load_config(repo_root).layer(layer_name).values
+    for part in path:
+        if not isinstance(value, Mapping):
+            return {}
+        value = value.get(part)
+    return _thaw_mapping(value) if isinstance(value, Mapping) else {}
+
+
+def effective_commands(repo_root: Path | None) -> dict[str, Any]:
+    """Return effective mounted commands flattened to dotted command names."""
+    flattened: dict[str, Any] = {}
+    _flatten_mapping(effective_table(repo_root, "commands"), flattened)
+    return flattened
+
+
+def config_string_list(raw: Any) -> list[str]:
+    """Normalize one effective TOML list to unique non-empty strings."""
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+    values: list[str] = []
+    for item in raw:
+        value = str(item or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def effective_context(repo_root: Path, *path: str) -> str:
+    """Identify an effective dotted key and its winning source for diagnostics."""
+    dotted = ".".join(path)
+    source = load_config(repo_root).source_for(path)
+    if source is None:
+        return dotted
+    return f"{dotted} (source={source.name} path={source.path})"
+
+
 def _read_toml(path: Path) -> tuple[dict[str, Any], bool]:
     try:
         with path.open("rb") as handle:
@@ -165,3 +223,26 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_freeze(item) for item in value)
     return value
+
+
+def _thaw_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): _thaw(value) for key, value in raw.items()}
+
+
+def _thaw(raw: Any) -> Any:
+    if isinstance(raw, Mapping):
+        return _thaw_mapping(raw)
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        return [_thaw(item) for item in raw]
+    return raw
+
+
+def _flatten_mapping(
+    source: Mapping[str, Any], destination: dict[str, Any], *, prefix: str = ""
+) -> None:
+    for key, value in source.items():
+        name = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, Mapping):
+            _flatten_mapping(value, destination, prefix=name)
+        else:
+            destination[name] = value

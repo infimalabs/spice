@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spice.errors import SpiceError
-from spice.repocfg import policy_table
+from spice.configlayer import effective_table
 from spice.studies import walk
 
 ASSERTION_HELPERS_KEY = "assertion_helpers"
@@ -173,7 +173,7 @@ def private_internal_coupling_key(
 
 
 def configured_internal_couplings(repo_root: Path) -> frozenset[InternalCouplingKey]:
-    raw = policy_table(repo_root).get(INTERNAL_COUPLINGS_KEY)
+    raw = effective_table(repo_root, "policy").get(INTERNAL_COUPLINGS_KEY)
     if raw is None:
         return frozenset()
     if not isinstance(raw, list):
@@ -256,7 +256,7 @@ def _internal_coupling_field(
 
 
 def _configured_assertion_helpers(repo_root: Path) -> frozenset[str]:
-    raw = policy_table(repo_root).get(ASSERTION_HELPERS_KEY)
+    raw = effective_table(repo_root, "policy").get(ASSERTION_HELPERS_KEY)
     if raw is None:
         return frozenset()
     if not isinstance(raw, list):
