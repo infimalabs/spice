@@ -434,7 +434,9 @@ def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     root = _root_or_current(repo_root)
     if root is None:
         return False
-    return _config_flag(_section(root, JUDGE_KEY).get(JUDGE_ENABLED_KEY))
+    return _config_flag(
+        layer_table(root, WORKTREE_SOURCE, JUDGE_KEY).get(JUDGE_ENABLED_KEY)
+    )
 
 
 def _config_flag(value: Any) -> bool:

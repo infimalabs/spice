@@ -27,7 +27,7 @@ from spice.sessions.briefing import (
 )
 from spice.sessions.deadline import (
     DEFAULT_REHYDRATION_DEADLINE_SECONDS,
-    rehydration_deadline,
+    run_with_rehydration_deadline,
 )
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
 from spice.sessions.util import format_int, normalize_timestamp
@@ -306,29 +306,36 @@ def handle_session(args: argparse.Namespace) -> int:
     if action == "thread":
         print(render_thread_summary(str(args.thread_id)))
         return 0
-    files = resolve_files(list(getattr(args, "files", []) or []))
+    raw_files = list(getattr(args, "files", []) or [])
     if action == "briefing":
-        with _rehydration_command_deadline(args, action=action, files=files):
-            print(
-                render_briefing(
-                    files,
-                    **_filter_kwargs(args),
-                    max_lines=max(
-                        1,
-                        int(getattr(args, "max_lines", DEFAULT_BRIEFING_MAX_LINES)),
-                    ),
-                    max_bytes=max(
-                        1,
-                        int(getattr(args, "max_bytes", DEFAULT_BRIEFING_MAX_BYTES)),
-                    ),
-                    explain_pruning=bool(getattr(args, "explain_pruning", False)),
-                )
+
+        def briefing_output() -> str:
+            files = resolve_files(raw_files)
+            return render_briefing(
+                files,
+                **_filter_kwargs(args),
+                max_lines=max(
+                    1,
+                    int(getattr(args, "max_lines", DEFAULT_BRIEFING_MAX_LINES)),
+                ),
+                max_bytes=max(
+                    1,
+                    int(getattr(args, "max_bytes", DEFAULT_BRIEFING_MAX_BYTES)),
+                ),
+                explain_pruning=bool(getattr(args, "explain_pruning", False)),
             )
+
+        print(_run_rehydration_command(args, action=action, callback=briefing_output))
         return 0
     if action == "sweep":
-        with _rehydration_command_deadline(args, action=action, files=files):
-            print(render_sweep(files, count=max(1, args.count), **_filter_kwargs(args)))
+
+        def sweep_output() -> str:
+            files = resolve_files(raw_files)
+            return render_sweep(files, count=max(1, args.count), **_filter_kwargs(args))
+
+        print(_run_rehydration_command(args, action=action, callback=sweep_output))
         return 0
+    files = resolve_files(raw_files)
     if action == "summary":
         _print_summary(files, recent=max(1, args.recent))
         return 0
@@ -371,15 +378,16 @@ def handle_session(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown session action {action!r}")
 
 
-def _rehydration_command_deadline(
-    args: argparse.Namespace, *, action: str, files: list[Path]
+def _run_rehydration_command(
+    args: argparse.Namespace, *, action: str, callback: Any
 ) -> Any:
     timeout_seconds = float(
         getattr(args, "deadline_seconds", DEFAULT_REHYDRATION_DEADLINE_SECONDS)
     )
-    return rehydration_deadline(
+    return run_with_rehydration_deadline(
+        callback,
         action=action,
-        inputs=tuple(str(path) for path in files),
+        inputs=tuple(str(path) for path in list(getattr(args, "files", []) or [])),
         timeout_seconds=timeout_seconds,
     )
 
