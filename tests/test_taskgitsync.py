@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from spice import gitprocess
 from spice.errors import SpiceError
 from spice.tasks import gitsync
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-GIT_TIMEOUT_RETURN_CODE = 124
 
 
 def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path):
@@ -1012,7 +1012,7 @@ def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
     assert _git(repo, "status", "--porcelain") == ""
 
 
-def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkeypatch):
+def _hook_aborted_merge_repositories(tmp_path):
     remote = tmp_path / "remote.git"
     _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
     repo = _init_repo(tmp_path / "agent")
@@ -1034,20 +1034,23 @@ def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkey
     _run(peer, "git", "commit", "-m", "baseline work with peer feature")
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
+    return repo, agent_head, upstream_head
+
+
+def _install_hook_aborted_merge(repo, monkeypatch):
+    attempts = [0]
 
     real_run = gitsync._run
-    merge_attempts = 0
 
     def hook_aborted_run(
         repo_root: Path, *args: str
     ) -> subprocess.CompletedProcess[str]:
-        nonlocal merge_attempts
         if (
             repo_root == repo
             and args[:3] == ("merge", "--no-ff", "--no-commit")
-            and merge_attempts == 0
+            and attempts[0] == 0
         ):
-            merge_attempts += 1
+            attempts[0] += 1
             # A reference-transaction hook aborted the merge after it wrote the
             # working tree but before MERGE_HEAD: the conflicted file carries
             # markers and the clean peer file rides along untracked, so nothing
@@ -1070,12 +1073,32 @@ def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkey
         return real_run(repo_root, *args)
 
     monkeypatch.setattr(gitsync, "_run", hook_aborted_run)
+    return attempts
+
+
+def _stage_hook_aborted_resolution(repo):
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "--", "README.md")
+    conflict_only_tree = _git(repo, "write-tree")
+    _run(repo, "git", "add", "-A")
+    merged_tree = _git(repo, "write-tree")
+    merged_names = set(_git(repo, "ls-tree", "--name-only", merged_tree).split())
+    conflict_only_names = set(
+        _git(repo, "ls-tree", "--name-only", conflict_only_tree).split()
+    )
+    cached_names = set(_git(repo, "diff", "--cached", "--name-only").split())
+    return merged_tree, merged_names, conflict_only_names, cached_names
+
+
+def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkeypatch):
+    repo, agent_head, upstream_head = _hook_aborted_merge_repositories(tmp_path)
+    merge_attempts = _install_hook_aborted_merge(repo, monkeypatch)
 
     with pytest.raises(gitsync.MergeConflict) as exc_info:
         gitsync.integrate_and_publish("TASK-20260101T000000000009Z", repo_root=repo)
 
     message = str(exc_info.value)
-    assert merge_attempts == 1
+    assert merge_attempts == [1]
     assert "git add -A" in message  # the recipe stages every merged path
     assert _merge_head_missing(repo)
 
@@ -1084,19 +1107,11 @@ def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkey
     # untracked peer file. The two trees differ by exactly that peer file, so
     # the fixed recipe is what keeps peer work the old `git add -- <file>`
     # would have dropped.
-    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
-    _run(repo, "git", "add", "--", "README.md")
-    conflict_only_tree = _git(repo, "write-tree")
-    _run(repo, "git", "add", "-A")
-    merged_tree = _git(repo, "write-tree")
-
-    merged_names = set(_git(repo, "ls-tree", "--name-only", merged_tree).split())
-    conflict_only_names = set(
-        _git(repo, "ls-tree", "--name-only", conflict_only_tree).split()
+    merged_tree, merged_names, conflict_only_names, cached_names = (
+        _stage_hook_aborted_resolution(repo)
     )
     assert "peer.txt" in merged_names  # the fixed recipe keeps the peer file
     assert merged_names - conflict_only_names == {"peer.txt"}
-    cached_names = set(_git(repo, "diff", "--cached", "--name-only").split())
     assert "peer.txt" in cached_names  # git diff --cached now shows the peer change
 
     rescue_merge = _git(
@@ -1135,7 +1150,16 @@ def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkey
     assert agent_head in _merge_parents(repo, rescue_merge)
 
 
-def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("args", "expected_timeout"),
+    [
+        (("fetch", "origin"), gitsync.GIT_NETWORK_TIMEOUT_SECONDS),
+        (("status",), gitprocess.DEFAULT_GIT_TIMEOUT_SECONDS),
+    ],
+)
+def test_gitsync_commands_are_noninteractive_and_bounded(
+    tmp_path, monkeypatch, args, expected_timeout
+):
     seen: dict[str, object] = {}
 
     def fake_run(command: list[str], **kwargs):
@@ -1144,30 +1168,33 @@ def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monke
         seen["timeout"] = kwargs.get("timeout")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitprocess.subprocess, "run", fake_run)
 
-    gitsync._run(tmp_path, "fetch", "origin")
+    gitsync._run(tmp_path, *args)
 
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GIT_SSH_COMMAND"] == gitsync.TASK_GIT_SSH_COMMAND
-    assert seen["timeout"] == gitsync.GIT_NETWORK_TIMEOUT_SECONDS
+    assert seen["timeout"] == expected_timeout
 
 
-def test_gitsync_network_timeout_returns_failed_process(tmp_path, monkeypatch):
+def test_gitsync_timeout_names_the_bounded_command(tmp_path, monkeypatch):
     def fake_run(command: list[str], **kwargs):
         raise subprocess.TimeoutExpired(
             command, kwargs["timeout"], output="partial", stderr="stalled"
         )
 
-    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitprocess.subprocess, "run", fake_run)
 
-    completed = gitsync._run(tmp_path, "fetch", "origin")
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync._run(tmp_path, "fetch", "origin")
 
-    assert completed.returncode == GIT_TIMEOUT_RETURN_CODE
-    assert completed.stdout == "partial"
-    assert "git fetch timed out after 30s" in completed.stderr
+    assert str(exc_info.value) == (
+        f"git command timed out after {gitsync.GIT_NETWORK_TIMEOUT_SECONDS}s: "
+        f"git -C {tmp_path} fetch origin; increase "
+        f"{gitprocess.GIT_TIMEOUT_ENV} for a slower repository"
+    )
 
 
 def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
