@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import shlex
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
@@ -28,7 +27,6 @@ SHELL_HOOK_DIR_NAME = "shellhooks"
 STATIC_SHELL_HOOK_DIR_NAME = "staticshellhooks"
 AGENT_WRAPPERS_KEY = "wrappers"
 WRAPPER_ENTRY_POINT_GROUP = SPICE_WRAPPER_ENTRY_POINT_GROUP
-SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
 SHELL_HOOK_WRAPPERS_ENV = "SPICE_SHELL_HOOK_WRAPPERS"  # env-policy: allow
 SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
@@ -109,10 +107,8 @@ def packaged_shell_steering_static_hook_dir() -> Path:
 def shell_steering_runtime_environment(
     *,
     base_env: Mapping[str, str],
-    python_command: Sequence[str] | None = None,
     repo_root: Path | None = None,
 ) -> dict[str, str]:
-    python = single_python_executable(python_command or (sys.executable,))
     original_zdotdir = original_shell_startup_value(
         base_env,
         original_name=SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
@@ -124,7 +120,6 @@ def shell_steering_runtime_environment(
         active_name=BASH_ENV_ENV,
     )
     env = {
-        SHELL_HOOK_PYTHON_ENV: python,
         SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: original_zdotdir,
         SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: original_bash_env,
         SHELL_HOOK_ORIGINAL_HISTFILE_ENV: original_zsh_history_value(
@@ -197,17 +192,6 @@ def is_generated_shell_hook_path(value: str) -> bool:
         and parts[-2] == "agent"
         and parts[-3] == "spice"
     )
-
-
-def single_python_executable(command: Sequence[str]) -> str:
-    if len(command) != 1:
-        raise SpiceError(
-            f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be one executable path"
-        )
-    python = str(command[0]).strip()
-    if not python:
-        raise SpiceError(f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be non-empty")
-    return python
 
 
 def render_agent_wrapper_lines(repo_root: Path) -> list[str]:

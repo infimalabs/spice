@@ -129,7 +129,6 @@ def test_stage_two_descendant_shells_use_static_hooks_without_reexec(
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "",
         **shellhook.shell_steering_runtime_environment(
             base_env={"HOME": str(home)},
-            python_command=("/bin/false",),
         ),
     }
 

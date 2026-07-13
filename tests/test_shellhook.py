@@ -609,7 +609,6 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     )
     wrap_bin.chmod(0o755)
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
-    fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = dict(os.environ)  # env-policy: allow
     base_env["PATH"] = (
         str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
@@ -621,7 +620,6 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
         tmp_path,
         base_env=base_env,
     )
-    ambient_env[shellhook.SHELL_HOOK_PYTHON_ENV] = str(fake_python)
     for name, value in ambient_env.items():
         monkeypatch.setenv(name, value)
 
@@ -663,7 +661,6 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
-    assert env[shellhook.SHELL_HOOK_PYTHON_ENV] == sys.executable
     assert env[shellhook.SHELL_HOOK_REPO_ROOT_ENV] == str(tmp_path.resolve())
     assert shellhook.SHELL_HOOK_WRAPPERS_ENV.startswith(
         "SPICE_SHELL_HOOK_"  # env-policy: allow
@@ -694,7 +691,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
         groups={
             "common": {
                 "wrap": ["grep", "git"],
-                "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+                "pytest": {"argv": ["python", "-m", "pytest"]},
             }
         },
     )
@@ -710,7 +707,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
             *_expected_wrapper_lines("wrap", ["grep", "git"]),
-            *_expected_active_python_module_wrapper_lines(["pytest"]),
+            *_expected_python_module_wrapper_lines(["pytest"]),
         ]
     )
 
@@ -788,7 +785,6 @@ def test_shell_steering_runtime_environment_ignores_generated_hook_as_original()
                 hook_dir / shellhook.BASH_HOOK_NAME
             ),
         },
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
@@ -805,7 +801,6 @@ def test_shell_steering_runtime_environment_keeps_real_original_before_hook():
             shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: "/real-zdotdir",
             shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: "/real-bash-env",
         },
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == "/real-zdotdir"
@@ -815,7 +810,6 @@ def test_shell_steering_runtime_environment_keeps_real_original_before_hook():
 def test_shell_steering_runtime_environment_maps_zsh_history_to_home(tmp_path):
     env = shellhook.shell_steering_runtime_environment(
         base_env={"HOME": str(tmp_path)},
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV] == str(
@@ -829,7 +823,6 @@ def test_shell_steering_runtime_environment_maps_zsh_history_to_original_zdotdir
     real_zdotdir = tmp_path / "real-zdotdir"
     env = shellhook.shell_steering_runtime_environment(
         base_env={shellhook.ZDOTDIR_ENV: str(real_zdotdir)},
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV] == str(
@@ -841,7 +834,6 @@ def test_shell_steering_runtime_environment_preserves_explicit_zsh_history(tmp_p
     history = tmp_path / "custom-history"
     env = shellhook.shell_steering_runtime_environment(
         base_env={shellhook.HISTFILE_ENV: str(history)},
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV] == str(history)
@@ -856,7 +848,6 @@ def test_shell_steering_runtime_environment_ignores_generated_hook_zsh_history(
             "HOME": str(tmp_path),
             shellhook.HISTFILE_ENV: str(hook_dir / ".zsh_history"),
         },
-        python_command=["agent-python"],
     )
 
     assert env[shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV] == str(
@@ -892,6 +883,24 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         ".zlogin",
         shellhook.BASH_HOOK_NAME,
     }
+    expected_reexec_lines = {
+        ".zshenv": [
+            'exec spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"',
+            'exec spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"',
+        ],
+        ".zprofile": [
+            'exec spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"',
+            'exec spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"',
+        ],
+        ".zlogin": [
+            'exec spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"',
+            'exec spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"',
+        ],
+        shellhook.BASH_HOOK_NAME: [
+            'exec spice agent run -- "$_spice_shell_bin" -lc "$BASH_EXECUTION_STRING"',
+            'exec spice agent run -- "$_spice_shell_bin" -c "$BASH_EXECUTION_STRING"',
+        ],
+    }
 
     for filename in (*shellhook.ZSH_HOOK_NAMES, shellhook.BASH_HOOK_NAME):
         text = (hook_dir / filename).read_text(encoding="utf-8")
@@ -900,7 +909,12 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
         if filename in dynamic_surfaces:
-            assert "spice agent run --" in text
+            reexec_lines = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip().startswith("exec spice agent run --")
+            ]
+            assert reexec_lines == expected_reexec_lines[filename]
         assert "staticshellhooks" in text
         assert "--preserve-shell-hook-env" not in text
         if filename == shellhook.BASH_HOOK_NAME:
@@ -1004,7 +1018,7 @@ def _toml_key(value: str) -> str:
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
         *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
-        *_expected_active_python_module_wrapper_lines(["pytest"]),
+        *_expected_python_module_wrapper_lines(["pytest"]),
     ]
 
 
@@ -1070,32 +1084,15 @@ def _expected_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
     return lines
 
 
-def _expected_active_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
-    lines: list[str] = []
-    for selector in selectors:
-        lines.extend(
-            [
-                "",
-                f"{selector}() {{",
-                f'  "$SPICE_SHELL_HOOK_PYTHON" -m {selector} "$@"',
-                "}",
-            ]
-        )
-    return lines
-
-
-def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> Path:
-    path = tmp_path / "fake-python"
+def _fake_spice_executable(tmp_path: Path, *, run_agent_commands: bool = False) -> Path:
+    path = tmp_path / "installed" / "bin" / "spice"
+    path.parent.mkdir(parents=True, exist_ok=True)
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     agent_run_exec = (
         (
-            'if [ "$1" = "-P" ]; then\n'
-            "  shift\n"
-            "fi\n"
-            'if [ "$1" = "-m" ] && [ "$2" = "spice" ] '
-            '&& [ "$3" = "agent" ] && [ "$4" = "run" ] '
-            '&& [ "$5" = "--" ]; then\n'
-            "  shift 5\n"
+            'if [ "$1" = "agent" ] && [ "$2" = "run" ] '
+            '&& [ "$3" = "--" ]; then\n'
+            "  shift 3\n"
             '  if [ "$2" = "-c" ] || [ "$2" = "-lc" ]; then\n'
             f"    export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
             f"    export BASH_ENV={shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"

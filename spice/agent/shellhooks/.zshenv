@@ -1,6 +1,4 @@
 # Packaged by spice; do not edit.
-: "${SPICE_SHELL_HOOK_PYTHON:?spice shell hook: missing SPICE_SHELL_HOOK_PYTHON}"
-
 _spice_shell_hook_name=".zshenv"
 _spice_shell_hook_dir="${ZDOTDIR:?spice shell hook: missing ZDOTDIR}"
 _spice_shell_hook_self="${_spice_shell_hook_dir}/${_spice_shell_hook_name}"
@@ -18,13 +16,13 @@ if [ -n "${ZSH_EXECUTION_STRING-}" ]; then
   if [[ -o login ]]; then
     unset ZDOTDIR
     unset BASH_ENV
-    exec "$SPICE_SHELL_HOOK_PYTHON" -P -m spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"
+    exec spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"
     printf "%s\n" "spice shell hook: failed to exec agent run" >&2
     exit 127
   fi
   unset ZDOTDIR
   unset BASH_ENV
-  exec "$SPICE_SHELL_HOOK_PYTHON" -P -m spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"
+  exec spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"
   printf "%s\n" "spice shell hook: failed to exec agent run" >&2
   exit 127
 fi
