@@ -122,7 +122,8 @@ checklist.
   symbol findings.
 - Commit messages wrap at the configured limit; literal `\n` is rejected;
   every Git trailer -- including Co-Authored-By -- rides through unless a repo
-  configures an allowed or blocked trailer set.
+  configures an allowed or blocked trailer set, and a driver's native
+  attribution is disabled to match when the repo would reject its trailer.
 - Env policy requires `env-policy: allow` for tracked env literals and, by
   default, every env access site. Env-name ledger separately accounts exact
   env names.

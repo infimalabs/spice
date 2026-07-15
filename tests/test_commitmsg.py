@@ -39,6 +39,39 @@ def test_validate_blocks_only_configured_trailers():
     )
 
 
+def test_commit_message_trailer_rejection_reports_the_governing_reason():
+    # One predicate drives both the commit-msg gate and the driver-attribution
+    # decision, so the two always agree about which trailers a repo permits.
+    assert (
+        commitmsg.commit_message_trailer_rejection(
+            "Co-Authored-By", allowed_trailers=None, blocked_trailers=None
+        )
+        is None
+    )
+    assert (
+        commitmsg.commit_message_trailer_rejection(
+            "Co-Authored-By",
+            allowed_trailers=None,
+            blocked_trailers=frozenset({"co-authored-by"}),
+        )
+        == "blocked"
+    )
+    assert (
+        commitmsg.commit_message_trailer_rejection(
+            "Co-Authored-By",
+            allowed_trailers=frozenset({"task"}),
+            blocked_trailers=None,
+        )
+        == "disallowed"
+    )
+    assert (
+        commitmsg.commit_message_trailer_rejection(
+            "Task", allowed_trailers=frozenset({"task"}), blocked_trailers=None
+        )
+        is None
+    )
+
+
 def test_commit_msg_rejects_wip_subject_and_accepts_real_subject(tmp_path):
     placeholder = tmp_path / "PLACEHOLDER_COMMIT_EDITMSG"
     placeholder.write_text("wip\n", encoding="utf-8")
