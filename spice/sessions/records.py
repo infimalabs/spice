@@ -71,8 +71,11 @@ _SHAPE_PREFIXES: tuple[tuple[str, MessageShape], ...] = (
     ),
 )
 
-# Harness injections open with a tag-like block; operator prose does not.
-_TAG_OPENING_RE = re.compile(r"^<[A-Za-z][\w-]*")
+# Future harness injections may introduce new tag names, but must occupy the
+# complete message behind one matching outer envelope.
+_TAG_ENVELOPE_RE = re.compile(
+    r"<(?P<tag>[A-Za-z][\w-]*)(?:\s[^<>]*)?>.*</(?P=tag)>", re.DOTALL
+)
 _COMPACTION_INTENT_SECTION_RE = re.compile(
     r"(?im)^\s*\d+[.)]\s+\*{0,2}Primary Request and Intent\*{0,2}\s*:\s*(.*)$"
 )
@@ -83,14 +86,14 @@ def classify_user_message(text: str) -> MessageShape:
     """Classify a user-role message by its opening shape.
 
     One deterministic path: a known scaffold prefix maps to its specific class,
-    an otherwise tag-like opening is treated as forward-compatible environment
-    scaffolding, and everything else is a human message.
+    an otherwise complete tag envelope is treated as forward-compatible
+    environment scaffolding, and everything else is a human message.
     """
-    stripped = text.lstrip()
+    stripped = text.strip()
     for prefix, shape in _SHAPE_PREFIXES:
         if stripped.startswith(prefix):
             return shape
-    if _TAG_OPENING_RE.match(stripped):
+    if _TAG_ENVELOPE_RE.fullmatch(stripped):
         return MessageShape.ENVIRONMENT_SCAFFOLD
     return MessageShape.HUMAN
 
