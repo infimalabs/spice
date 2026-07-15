@@ -28,7 +28,9 @@ BLOCKING_METHODS = {
     "wait",
 }
 LOCK_FACTORIES = {"Lock", "RLock", "threading.Lock", "threading.RLock"}
-DOC_REFERENCE_RE = re.compile(r"(spice/[A-Za-z0-9_./-]+\.py):([0-9,-]+)")
+DOC_ANCHOR_RE = re.compile(
+    r"(spice/[A-Za-z0-9_./-]+\.py)::([A-Za-z0-9_.<>]+)#([A-Za-z0-9_]+)"
+)
 
 
 def test_blocking_surface_audit_covers_every_deterministically_scanned_call():
@@ -37,8 +39,9 @@ def test_blocking_surface_audit_covers_every_deterministically_scanned_call():
     missing = sorted(discovered - documented)
 
     assert documented.issuperset(discovered), (
-        "unclassified production blocking surface(s); add each file:line to "
-        f"{AUDIT_PATH.relative_to(PROJECT_ROOT)} with impact and invariant: {missing}"
+        "unclassified production blocking surface(s); add each path::function#call "
+        f"anchor to {AUDIT_PATH.relative_to(PROJECT_ROOT)} with impact and "
+        f"invariant: {missing}"
     )
 
 
@@ -62,10 +65,50 @@ def _production_blocking_call_sites() -> set[str]:
     found: set[str] = set()
     for path in sorted((PROJECT_ROOT / "spice").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        scopes = _function_scopes(tree)
+        rel = path.relative_to(PROJECT_ROOT).as_posix()
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _is_blocking_call(node, path):
-                found.add(f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}")
+                qualified = _enclosing_qualified_name(scopes, node.lineno)
+                call = _qualified_name(node.func).rsplit(".", 1)[-1]
+                found.add(f"{rel}::{qualified}#{call}")
     return found
+
+
+def _function_scopes(tree: ast.AST) -> list[tuple[int, int, str]]:
+    # Each blocking call is anchored to its enclosing function so the audit
+    # references survive line drift; the span lets us resolve a call's lineno
+    # to the innermost function that contains it.
+    scopes: list[tuple[int, int, str]] = []
+    stack: list[str] = []
+
+    class _Scopes(ast.NodeVisitor):
+        def _enter_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            stack.append(node.name)
+            scopes.append(
+                (node.lineno, node.end_lineno or node.lineno, ".".join(stack))
+            )
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._enter_function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._enter_function(node)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+    _Scopes().visit(tree)
+    return scopes
+
+
+def _enclosing_qualified_name(scopes: list[tuple[int, int, str]], lineno: int) -> str:
+    containing = [name for start, end, name in scopes if start <= lineno <= end]
+    return containing[-1] if containing else "<module>"
 
 
 def _is_blocking_call(node: ast.Call, path: Path) -> bool:
@@ -141,13 +184,7 @@ def _qualified_name(node: ast.expr) -> str:
 
 
 def _documented_call_sites(text: str) -> set[str]:
-    found: set[str] = set()
-    for match in DOC_REFERENCE_RE.finditer(text):
-        path, specification = match.groups()
-        for portion in specification.split(","):
-            if "-" in portion:
-                start, end = (int(value) for value in portion.split("-", 1))
-                found.update(f"{path}:{line}" for line in range(start, end + 1))
-            else:
-                found.add(f"{path}:{int(portion)}")
-    return found
+    return {
+        f"{path}::{qualified}#{call}"
+        for path, qualified, call in DOC_ANCHOR_RE.findall(text)
+    }
