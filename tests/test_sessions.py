@@ -547,9 +547,22 @@ def test_classify_user_message_human_prose(text):
 
 
 def test_classify_user_message_unknown_tag_is_environment_scaffold():
-    shape = records.classify_user_message("<future-harness-block>new envelope")
+    shape = records.classify_user_message(
+        "<future-harness-block>new envelope</future-harness-block>"
+    )
 
     assert shape is records.MessageShape.ENVIRONMENT_SCAFFOLD
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<future-harness-block>new envelope",
+        "<future-harness-block>new envelope</different-block>",
+    ],
+)
+def test_classify_user_message_non_envelope_tag_text_is_human(text):
+    assert records.classify_user_message(text) is records.MessageShape.HUMAN
 
 
 def test_turn_user_messages_carry_shape(tmp_path):

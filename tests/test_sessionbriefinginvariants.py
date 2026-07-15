@@ -6,9 +6,7 @@ import json
 import os
 import time
 
-import pytest
 
-from spice.errors import SpiceError
 from spice.sessions import records
 from spice.sessions.briefing import render_briefing, render_sweep
 from tests.test_sessionbriefing import (
@@ -79,9 +77,10 @@ def test_supervised_fixture_work_windows_render_substantive_sweep_rows(
         )
 
 
-def test_unknown_non_human_message_shape_raises_loudly():
-    with pytest.raises(SpiceError):
-        records.classify_user_message("<system-reminder>new harness block")
+def test_unknown_tag_fragment_remains_human_input():
+    shape = records.classify_user_message("<system-reminder>new harness block")
+
+    assert shape is records.MessageShape.HUMAN
 
 
 def test_window_bound_and_recency_cap_evict_stale_rows(tmp_path, monkeypatch):
