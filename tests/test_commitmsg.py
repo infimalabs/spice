@@ -6,23 +6,21 @@ from spice.errors import SpiceError
 from spice.hooks import commitmsg
 
 
-def test_commit_msg_rejects_co_authored_by_trailer(tmp_path):
+def test_commit_msg_default_allows_co_authored_by_trailer(tmp_path):
+    # Spice bakes in no per-trailer opinion: with no repo policy configured,
+    # Co-Authored-By rides through like any other Git trailer.
     message = (
-        "Block delegated commit authorship\n"
+        "Record delegated commit authorship\n"
         "\n"
-        "The harness owns the visible commit author contract.\n"
+        "The harness attributes the commit through its native trailer.\n"
         "\n"
         "Co-Authored-By: Agent <agent@example.test>\n"
     )
     path = tmp_path / "COMMIT_EDITMSG"
     path.write_text(message, encoding="utf-8")
 
-    with pytest.raises(SpiceError) as exc_info:
-        commitmsg.handle_commit_msg(str(path), tmp_path)
-
-    error = str(exc_info.value)
-    assert "blocked trailer co-authored-by" in error
-    assert "blocked trailers: co-authored-by" in error
+    assert commitmsg.handle_commit_msg(str(path), tmp_path) == 0
+    assert path.read_text(encoding="utf-8") == message
 
 
 def test_validate_blocks_only_configured_trailers():

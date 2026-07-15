@@ -486,9 +486,6 @@ def steering_key_prompt_line(repo_root: Path) -> str:
     )
 
 
-CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
-    "attribution": {"commit": "", "sessionUrl": False},
-}
 # One agent inhabits one worktree: a sub-agent spawn is refused mechanically at
 # the settings layer, not left to the skill's "do not spawn sub-agents" prose.
 # Task is Claude Code's sub-agent tool; Agent covers the alternate label. Keep
@@ -578,15 +575,13 @@ def claude_auto_compact_environment(
 def claude_settings_json(
     repo_root: Path | None = None, driver: AgentDriver | None = None
 ) -> str:
-    settings: dict[str, Any] = {
-        key: value.copy() if isinstance(value, dict) else value
-        for key, value in CLAUDE_ATTRIBUTION_DISABLED_SETTINGS.items()
-    }
     # Claude applies exact bare-name denials before bypassPermissions and
-    # removes the matching built-ins from model context. Keep this in the same
-    # inline document as attribution and hooks so every launch path has one
-    # authoritative settings payload.
-    settings["permissions"] = {"deny": list(CLAUDE_DENIED_TOOLS)}
+    # removes the matching built-ins from model context. Spice injects no
+    # attribution override: Claude's native attribution (the Co-Authored-By
+    # trailer and session URL) governs, so commits carry harness attribution
+    # wherever the harness supports it. Keep denials and hooks in one inline
+    # document so every launch path has one authoritative settings payload.
+    settings: dict[str, Any] = {"permissions": {"deny": list(CLAUDE_DENIED_TOOLS)}}
     if repo_root is not None and driver is not None:
         settings["hooks"] = post_tool_hook_settings(repo_root, driver)
     return json.dumps(settings, separators=(",", ":"), sort_keys=True)

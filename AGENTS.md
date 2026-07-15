@@ -44,9 +44,10 @@ rules apply to the agents working here.
 
 ## Commit hygiene
 
-- Never add `Co-Authored-By` trailers to commit messages. The commit-msg hook
-  rejects them; no commit that includes one will land. Write commits without
-  attribution trailers.
+- Commit attribution is the harness's job: native drivers add their own
+  attribution trailer (such as `Co-Authored-By`) where they support it, and
+  spice passes every Git trailer through untouched. Do not hand-add or strip
+  attribution trailers; write the commit body and let the harness attribute it.
 
 ## Code health
 
