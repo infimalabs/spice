@@ -65,6 +65,28 @@ def _commit_message_trailer_key(line: str) -> str | None:
     return match.group("key").lower()
 
 
+def commit_message_trailer_rejection(
+    key: str,
+    *,
+    allowed_trailers: frozenset[str] | None,
+    blocked_trailers: frozenset[str] | None,
+) -> str | None:
+    """Why a trailer policy rejects ``key``, or ``None`` if it is accepted.
+
+    ``"blocked"`` when an explicit block set names the (case-insensitive) key;
+    ``"disallowed"`` when an explicit allow set omits it. Both sets unset means
+    every trailer is accepted -- spice bakes in no per-trailer opinion. This is
+    the single source the commit-msg gate and the driver-attribution decision
+    both read, so the two never disagree about which trailers a repo permits.
+    """
+    normalized = key.lower()
+    if blocked_trailers is not None and normalized in blocked_trailers:
+        return "blocked"
+    if allowed_trailers is not None and normalized not in allowed_trailers:
+        return "disallowed"
+    return None
+
+
 def _placeholder_commit_message_subject(subject: str) -> str:
     normalized = re.sub(r"\s+", " ", subject.strip().casefold())
     return normalized.strip(PLACEHOLDER_COMMIT_MESSAGE_SUBJECT_TRAILING_CHARS)
@@ -92,14 +114,20 @@ def validate_commit_message_text(
         key = _commit_message_trailer_key(line)
         if key is None:
             continue
-        if blocked_trailers is not None and key in blocked_trailers:
+        rejection = commit_message_trailer_rejection(
+            key,
+            allowed_trailers=allowed_trailers,
+            blocked_trailers=blocked_trailers,
+        )
+        if rejection == "blocked":
+            assert blocked_trailers is not None  # a "blocked" verdict names a set
             blocked = ", ".join(sorted(blocked_trailers))
             failures.append(
                 f"line {line_number} uses blocked trailer {key}; "
                 f"blocked trailers: {blocked}"
             )
-            continue
-        if allowed_trailers is not None and key not in allowed_trailers:
+        elif rejection == "disallowed":
+            assert allowed_trailers is not None  # a "disallowed" verdict names a set
             allowed = ", ".join(sorted(allowed_trailers)) or "none"
             failures.append(
                 f"line {line_number} uses disallowed trailer {key}; "

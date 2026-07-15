@@ -486,6 +486,13 @@ def steering_key_prompt_line(repo_root: Path) -> str:
     )
 
 
+CLAUDE_ATTRIBUTION_TRAILER_KEY = "Co-Authored-By"
+# Claude's native attribution adds the Co-Authored-By trailer and a session URL.
+# Spice leaves that on by default -- the harness owns commit attribution -- and
+# re-disables it only when the repo's own commit-message trailer policy would
+# reject that trailer, so the driver never emits a trailer the commit-msg gate
+# then rejects. Empty commit plus no sessionUrl is Claude's documented off state.
+CLAUDE_ATTRIBUTION_DISABLED_VALUE = {"commit": "", "sessionUrl": False}
 # One agent inhabits one worktree: a sub-agent spawn is refused mechanically at
 # the settings layer, not left to the skill's "do not spawn sub-agents" prose.
 # Task is Claude Code's sub-agent tool; Agent covers the alternate label. Keep
@@ -576,15 +583,35 @@ def claude_settings_json(
     repo_root: Path | None = None, driver: AgentDriver | None = None
 ) -> str:
     # Claude applies exact bare-name denials before bypassPermissions and
-    # removes the matching built-ins from model context. Spice injects no
-    # attribution override: Claude's native attribution (the Co-Authored-By
-    # trailer and session URL) governs, so commits carry harness attribution
-    # wherever the harness supports it. Keep denials and hooks in one inline
-    # document so every launch path has one authoritative settings payload.
+    # removes the matching built-ins from model context. Spice leaves attribution
+    # to the harness by default -- Claude's native Co-Authored-By trailer and
+    # session URL govern -- and disables it only when the repo's commit-message
+    # trailer policy would reject that trailer, keeping the driver and the
+    # commit-msg gate consistent. Keep denials, hooks, and any attribution
+    # override in one inline document so every launch path has one authoritative
+    # settings payload.
     settings: dict[str, Any] = {"permissions": {"deny": list(CLAUDE_DENIED_TOOLS)}}
     if repo_root is not None and driver is not None:
         settings["hooks"] = post_tool_hook_settings(repo_root, driver)
+        if _commit_policy_rejects_claude_attribution(repo_root):
+            settings["attribution"] = dict(CLAUDE_ATTRIBUTION_DISABLED_VALUE)
     return json.dumps(settings, separators=(",", ":"), sort_keys=True)
+
+
+def _commit_policy_rejects_claude_attribution(repo_root: Path) -> bool:
+    """True when this repo's trailer policy rejects the attribution trailer."""
+    from spice.hooks.commitmsg import commit_message_trailer_rejection
+    from spice.policyconfig import resolve_policy
+
+    policy = resolve_policy(repo_root).commit_message
+    return (
+        commit_message_trailer_rejection(
+            CLAUDE_ATTRIBUTION_TRAILER_KEY,
+            allowed_trailers=policy.allowed_trailers,
+            blocked_trailers=policy.blocked_trailers,
+        )
+        is not None
+    )
 
 
 def dashed_uuid(value: str) -> str:

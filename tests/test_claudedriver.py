@@ -119,6 +119,41 @@ def test_claude_command_leaves_commit_attribution_to_the_harness(tmp_path):
     assert sorted(settings) == ["hooks", "permissions"]
 
 
+def test_claude_settings_disable_attribution_when_repo_blocks_trailer(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy.commit_message]\nblocked_trailers = ["Co-Authored-By"]\n',
+        encoding="utf-8",
+    )
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+    )
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    # A repo that explicitly blocks the attribution trailer inverts the driver
+    # default: spice disables Claude's native attribution so it never emits a
+    # trailer the commit-msg gate would then reject.
+    assert sorted(settings) == ["attribution", "hooks", "permissions"]
+    assert settings["attribution"] == {"commit": "", "sessionUrl": False}
+
+
+def test_claude_settings_disable_attribution_when_allow_set_omits_trailer(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy.commit_message]\nallowed_trailers = ["Task"]\n',
+        encoding="utf-8",
+    )
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+    )
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    # An explicit allow-set that omits the attribution trailer rejects it just
+    # as a block does, so the driver disables native attribution to match.
+    assert sorted(settings) == ["attribution", "hooks", "permissions"]
+    assert settings["attribution"] == {"commit": "", "sessionUrl": False}
+
+
 def test_claude_command_writes_post_tool_hook_settings(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,

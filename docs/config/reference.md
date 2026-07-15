@@ -509,6 +509,9 @@ match wins; exact/prefix matchers outrank globs.
 `allowed_trailers` optionally limits Git trailer keys to a finite set;
 `blocked_trailers` optionally rejects specific keys. Both are unset by
 default, so every trailer -- including `Co-Authored-By` -- rides through.
+When a configured policy would reject the attribution trailer
+(`Co-Authored-By`), spice also disables the native driver's attribution so it
+never emits a trailer the commit-msg gate then rejects.
 
 Command-step tables accept:
 
