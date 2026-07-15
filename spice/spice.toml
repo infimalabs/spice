@@ -62,9 +62,6 @@ jitter_percent = 5
 [policy.complexity]
 hotspot_limit = 20
 
-[policy.commit_message]
-blocked_trailers = ["Co-Authored-By"]
-
 [policy.taste.words]
 'hallucinat*' = "confabulate"
 master = "main, primary, or leader"

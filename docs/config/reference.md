@@ -506,8 +506,9 @@ match wins; exact/prefix matchers outrank globs.
 
 ### `[tool.spice.policy.commit_message]`
 
-`allowed_trailers` optionally limits Git trailer keys. `Co-Authored-By` is
-always rejected.
+`allowed_trailers` optionally limits Git trailer keys to a finite set;
+`blocked_trailers` optionally rejects specific keys. Both are unset by
+default, so every trailer -- including `Co-Authored-By` -- rides through.
 
 Command-step tables accept:
 

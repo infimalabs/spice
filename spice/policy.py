@@ -36,15 +36,13 @@ FLEX_DENOMINATOR = _FLEX_RATIO.denominator
 
 # --- commit messages ----------------------------------------------------------
 # Subject must fit; body prose is auto-folded; URLs and allowed trailers are
-# exempt. ``None`` keeps the legacy policy: any Git trailer is allowed except
-# Co-Authored-By. Repos may configure a finite allowed-trailer set.
+# exempt. Spice bakes in no per-trailer opinion: every Git trailer -- including
+# Co-Authored-By -- rides through untouched. A repo that wants a finite
+# allowed-trailer set or specific blocked keys configures them under
+# ``[tool.spice.policy.commit_message]``; ``None`` on both means no restriction.
 COMMIT_MESSAGE_WRAP_LIMIT = defaults.integer("policy", "limits", "commit_message_wrap")
 COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
-# Blocked trailers are configurable rather than baked in; the default keeps
-# Co-Authored-By rejected so commits never add co-authors.
-COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = defaults.strings(
-    "policy", "commit_message", "blocked_trailers"
-)
+COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = None
 
 # --- taste ----------------------------------------------------------------------
 # Low-value or poor-taste words mapped to a suggestion (empty = rephrase). A

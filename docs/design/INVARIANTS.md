@@ -121,7 +121,8 @@ checklist.
 - Reachability is provider-backed and routes module findings separately from
   symbol findings.
 - Commit messages wrap at the configured limit; literal `\n` is rejected;
-  allowed trailers are explicit; Co-Authored-By is rejected.
+  every Git trailer -- including Co-Authored-By -- rides through unless a repo
+  configures an allowed or blocked trailer set.
 - Env policy requires `env-policy: allow` for tracked env literals and, by
   default, every env access site. Env-name ledger separately accounts exact
   env names.

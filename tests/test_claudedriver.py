@@ -107,15 +107,16 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
-def test_claude_command_disables_commit_attribution(tmp_path):
+def test_claude_command_leaves_commit_attribution_to_the_harness(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
     )
     settings = json.loads(command[command.index("--settings") + 1])
 
-    assert settings["attribution"]["commit"] == ""
-    assert settings["attribution"]["sessionUrl"] is False
+    # Spice injects no attribution override, so Claude's native attribution
+    # governs: the settings payload carries only denials and hooks.
+    assert sorted(settings) == ["hooks", "permissions"]
 
 
 def test_claude_command_writes_post_tool_hook_settings(tmp_path):
@@ -615,9 +616,7 @@ def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():
     ],
     ids=("initial", "resumed"),
 )
-def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
-    tmp_path, thread_id, resume_tail
-):
+def test_claude_commands_apply_task_denials_and_hooks(tmp_path, thread_id, resume_tail):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
@@ -630,7 +629,7 @@ def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
     expected_prompt = command[command.index("--append-system-prompt") + 1]
     assert command[-(len(resume_tail) + 1) :] == [*resume_tail, expected_prompt]
     assert settings["permissions"]["deny"] == [*CLAUDE_SUPERVISED_TASK_TOOLS, "Monitor"]
-    assert settings["attribution"] == {"commit": "", "sessionUrl": False}
+    assert sorted(settings) == ["hooks", "permissions"]
     hook_group = settings["hooks"][POST_TOOL_HOOK_EVENT][0]
     assert hook_group["matcher"] == "*"
     assert hook_group["hooks"][0]["statusMessage"] == "Checking spice steering"
