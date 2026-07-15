@@ -73,7 +73,6 @@ _SHAPE_PREFIXES: tuple[tuple[str, MessageShape], ...] = (
 
 # Harness injections open with a tag-like block; operator prose does not.
 _TAG_OPENING_RE = re.compile(r"^<[A-Za-z][\w-]*")
-_SHAPE_ERROR_PREVIEW_CHARS = 80
 _COMPACTION_INTENT_SECTION_RE = re.compile(
     r"(?im)^\s*\d+[.)]\s+\*{0,2}Primary Request and Intent\*{0,2}\s*:\s*(.*)$"
 )
@@ -83,21 +82,16 @@ _COMPACTION_NEXT_SECTION_RE = re.compile(r"(?m)^\s*\d+[.)]\s+\S.*:\s*$")
 def classify_user_message(text: str) -> MessageShape:
     """Classify a user-role message by its opening shape.
 
-    One deterministic path: a known scaffold prefix maps to its class, an
-    unrecognized tag-like opening fails loud (a new harness injection must be
-    classified deliberately, never silently counted as an operator ask), and
-    everything else is a human message.
+    One deterministic path: a known scaffold prefix maps to its specific class,
+    an otherwise tag-like opening is treated as forward-compatible environment
+    scaffolding, and everything else is a human message.
     """
     stripped = text.lstrip()
     for prefix, shape in _SHAPE_PREFIXES:
         if stripped.startswith(prefix):
             return shape
     if _TAG_OPENING_RE.match(stripped):
-        raise SpiceError(
-            "unrecognized scaffold-shaped user message: opens with "
-            f"{stripped[:_SHAPE_ERROR_PREVIEW_CHARS]!r}. Add its shape to "
-            "spice.sessions.records before it can be classified."
-        )
+        return MessageShape.ENVIRONMENT_SCAFFOLD
     return MessageShape.HUMAN
 
 

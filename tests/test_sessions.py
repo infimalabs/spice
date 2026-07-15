@@ -505,6 +505,10 @@ COMPACTION_SUMMARY_TEXT = (
             records.MessageShape.TASK_NOTIFICATION,
         ),
         (
+            "<recommended_plugins>plugin catalog</recommended_plugins>",
+            records.MessageShape.ENVIRONMENT_SCAFFOLD,
+        ),
+        (
             "<user_instructions>be brief</user_instructions>",
             records.MessageShape.ENVIRONMENT_SCAFFOLD,
         ),
@@ -542,9 +546,10 @@ def test_classify_user_message_human_prose(text):
     assert records.classify_user_message(text) is records.MessageShape.HUMAN
 
 
-def test_classify_user_message_unknown_tag_fails_loud():
-    with pytest.raises(SpiceError, match="unrecognized scaffold-shaped"):
-        records.classify_user_message("<system-reminder>new harness block")
+def test_classify_user_message_unknown_tag_is_environment_scaffold():
+    shape = records.classify_user_message("<future-harness-block>new envelope")
+
+    assert shape is records.MessageShape.ENVIRONMENT_SCAFFOLD
 
 
 def test_turn_user_messages_carry_shape(tmp_path):
