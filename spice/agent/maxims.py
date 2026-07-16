@@ -48,6 +48,9 @@ DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 MAXIM_PROPOSAL_MIN_RECURRENCE = defaults.integer("maxim", "proposal_min_recurrence")
 MAXIM_PROPOSAL_DRAFT_MAX_WORDS = defaults.integer("maxim", "proposal_draft_max_words")
 MAXIM_PROPOSAL_TASK_CREATION_SURFACE = "maxim_proposal"
+MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT = 8
+MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT = 320
+MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT = 6
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 DEFAULT_PROMPT_LINES = defaults.strings("maxim", "prompt_lines")
 DEFAULT_PROMPT_TEMPLATE = "\n".join(DEFAULT_PROMPT_LINES) + "\n"
@@ -104,6 +107,10 @@ class MaximProposalTheme:
     dispositions: tuple[MaximProposalDispositionCount, ...]
     evidence: tuple[MaximProposalEvidence, ...]
 
+    @property
+    def source_key_count(self) -> int:
+        return len(self.source_keys)
+
 
 @dataclass(frozen=True)
 class MaximProposalDraft:
@@ -116,6 +123,10 @@ class MaximProposalDraft:
     source_keys: tuple[str, ...]
     dispositions: tuple[MaximProposalDispositionCount, ...]
     evidence: tuple[MaximProposalEvidence, ...]
+
+    @property
+    def source_key_count(self) -> int:
+        return len(self.source_keys)
 
 
 @dataclass(frozen=True)
@@ -263,11 +274,22 @@ def file_maxim_proposal_tasks(
 
 def maxim_proposal_task_description(draft: MaximProposalDraft) -> str:
     evidence_rows = [
-        f"- {item.field}: {_compact_proposal_description_text(item.text)}"
-        for item in draft.evidence
+        f"- {item.field}: {render_maxim_proposal_evidence_text(item.text)}"
+        for item in draft.evidence[:MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT]
     ]
     if not evidence_rows:
         evidence_rows = ["- none"]
+    evidence_omitted = max(
+        0, len(draft.evidence) - MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT
+    )
+    source_keys = draft.source_keys[:MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT]
+    source_keys_omitted = draft.source_key_count - len(source_keys)
+    provenance_rows = [
+        f"- source_key_count: {draft.source_key_count}",
+        f"- source_keys: {', '.join(source_keys) or '-'}",
+    ]
+    if source_keys_omitted:
+        provenance_rows.append(f"- source_keys_omitted: {source_keys_omitted}")
     return "\n".join(
         [
             "Mergeable maxim stanza:",
@@ -279,9 +301,10 @@ def maxim_proposal_task_description(draft: MaximProposalDraft) -> str:
             "Evidence:",
             f"- theme: {draft.theme_name}",
             f"- evidence_count: {draft.evidence_count}",
-            f"- source_keys: {', '.join(draft.source_keys) or '-'}",
+            *provenance_rows,
             f"- dispositions: {_format_proposal_dispositions(draft)}",
             *evidence_rows,
+            *([f"- evidence_omitted: {evidence_omitted}"] if evidence_omitted else []),
         ]
     )
 
@@ -299,7 +322,10 @@ def render_maxim_proposal_draft_stanza(draft: MaximProposalDraft) -> str:
 def _maxim_proposal_source_record(
     record: AckStateRecord,
 ) -> MaximProposalSourceRecord | None:
-    steering_text = _normalize_proposal_text(parse_inbox_payload(record.text).body)
+    payload = parse_inbox_payload(record.text)
+    if payload.priority == "maxim":
+        return None
+    steering_text = _normalize_proposal_text(payload.body)
     ack_text = _normalize_proposal_text(record.ack_text)
     ack_content = _normalize_proposal_text(record.ack_content)
     evidence = tuple(
@@ -431,9 +457,10 @@ _MAXIM_PROPOSAL_IMPERATIVE_STARTS = (
 
 
 def _maxim_proposal_terms(record: MaximProposalSourceRecord) -> frozenset[str]:
-    text = " ".join(item.text for item in record.evidence)
     tokens = []
-    for raw in _MAXIM_PROPOSAL_TOKEN_RE.findall(text.casefold().replace("-", " ")):
+    for raw in _MAXIM_PROPOSAL_TOKEN_RE.findall(
+        record.steering_text.casefold().replace("-", " ")
+    ):
         token = raw.strip()
         if len(token) < 4:
             continue
@@ -497,10 +524,10 @@ def _maxim_proposal_draft_bag_name(
 def _maxim_proposal_draft_message(
     theme: MaximProposalTheme, words: Sequence[str]
 ) -> str:
-    preferred = tuple(
+    operator_evidence = tuple(
         item for item in theme.evidence if item.field == "steering_text"
-    ) + tuple(item for item in theme.evidence if item.field != "steering_text")
-    for item in preferred:
+    )
+    for item in operator_evidence:
         message = _clean_proposal_draft_message(item.text)
         if message and _looks_imperative(message):
             return _ensure_terminal_punctuation(message)
@@ -514,7 +541,8 @@ def _maxim_proposal_draft_message(
 def _clean_proposal_draft_message(raw: str) -> str:
     message = _normalize_proposal_text(raw)
     message = _ACK_MESSAGE_PREFIX_RE.sub("", message)
-    return message.removeprefix("[MAXIM] ").strip()
+    message = message.removeprefix("[MAXIM] ").strip()
+    return _bounded_proposal_text(message)
 
 
 def _looks_imperative(message: str) -> bool:
@@ -547,8 +575,17 @@ def _format_proposal_dispositions(draft: MaximProposalDraft) -> str:
     return ",".join(f"{item.disposition}={item.count}" for item in draft.dispositions)
 
 
-def _compact_proposal_description_text(value: str) -> str:
-    return " ".join(str(value or "").split())
+def render_maxim_proposal_evidence_text(value: str) -> str:
+    """Bound one human-readable evidence row without changing stored evidence."""
+    return _bounded_proposal_text(_normalize_proposal_text(value))
+
+
+def _bounded_proposal_text(value: str) -> str:
+    if len(value) <= MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT:
+        return value
+    prefix = value[:MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT].rstrip()
+    omitted = len(value) - len(prefix)
+    return f"{prefix} ... [{omitted} chars omitted]"
 
 
 def _render_toml_key(key: str) -> str:
@@ -568,21 +605,15 @@ def _maxim_proposal_clusters(
 ) -> list[list[_PreparedProposalSource]]:
     clusters: list[list[_PreparedProposalSource]] = []
     for source in sources:
-        matches = [
-            index
-            for index, cluster in enumerate(clusters)
-            if any(
+        for cluster in clusters:
+            if all(
                 _maxim_proposal_terms_close(source.terms, item.terms)
                 for item in cluster
-            )
-        ]
-        if not matches:
+            ):
+                cluster.append(source)
+                break
+        else:
             clusters.append([source])
-            continue
-        first = matches[0]
-        clusters[first].append(source)
-        for index in reversed(matches[1:]):
-            clusters[first].extend(clusters.pop(index))
     return clusters
 
 
@@ -606,16 +637,17 @@ def _maxim_proposal_theme(
         return None
     records = tuple(source.record for source in cluster)
     disposition_counts = Counter(record.disposition for record in records)
+    evidence = tuple(item for record in records for item in record.evidence)
     return MaximProposalTheme(
         name="/".join(recurring_terms[:4]),
         recurring_terms=recurring_terms,
-        evidence_count=len(records),
+        evidence_count=len(evidence),
         source_keys=tuple(record.key for record in records),
         dispositions=tuple(
             MaximProposalDispositionCount(disposition=disposition, count=count)
             for disposition, count in sorted(disposition_counts.items())
         ),
-        evidence=tuple(item for record in records for item in record.evidence),
+        evidence=evidence,
     )
 
 

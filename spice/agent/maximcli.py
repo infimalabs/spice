@@ -17,6 +17,8 @@ from spice.agent.maximmetrics import (
 from spice.agent.maxims import (
     ALL_MAXIM,
     DEFAULT_PROMPT_TEMPLATE,
+    MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT,
+    MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT,
     META_MAXIMS,
     MaximBag,
     FiledMaximProposalTask,
@@ -31,6 +33,7 @@ from spice.agent.maxims import (
     maxim_proposal_source_records,
     maxim_proposal_themes,
     render_maxim_proposal_draft_stanza,
+    render_maxim_proposal_evidence_text,
     resolved_maxim_bags,
     resolve_maxim,
     set_maxim_bag_disabled,
@@ -51,7 +54,6 @@ MAXIM_PROPOSE_CONTRACT_ROW = (
     "candidate contract: raw evidence-backed candidates for human triage; "
     "local judge pre-screen not required; no maxim configuration installed."
 )
-MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT = 8
 
 
 @dataclass
@@ -624,12 +626,17 @@ def _render_source_evidence(record: MaximProposalSourceRecord) -> str:
 
 
 def _render_maxim_proposal_draft(draft: MaximProposalDraft) -> list[str]:
+    source_keys = draft.source_keys[:MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT]
     rows = [
         f"# theme = {draft.theme_name}",
         f"# evidence_count = {draft.evidence_count}",
+        f"# source_key_count = {draft.source_key_count}",
         f"# dispositions = {_render_proposal_dispositions(draft)}",
-        f"# source_keys = {','.join(draft.source_keys)}",
+        f"# source_keys = {','.join(source_keys)}",
     ]
+    source_keys_omitted = draft.source_key_count - len(source_keys)
+    if source_keys_omitted:
+        rows.append(f"# source_keys omitted = {source_keys_omitted}")
     rows.extend(_render_proposal_evidence_comments(draft.evidence))
     rows.extend(render_maxim_proposal_draft_stanza(draft).splitlines())
     return rows
@@ -641,10 +648,10 @@ def _render_proposal_evidence_comments(
     rows = [
         f"# evidence {index} {item.field}: {_render_toml_comment(item.text)}"
         for index, item in enumerate(
-            evidence[:MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT], start=1
+            evidence[:MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT], start=1
         )
     ]
-    omitted = len(evidence) - MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT
+    omitted = len(evidence) - MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT
     if omitted > 0:
         rows.append(f"# evidence omitted = {omitted}")
     return rows
@@ -669,7 +676,7 @@ def render_filed_maxim_proposal_tasks(
 
 
 def _render_toml_comment(value: str) -> str:
-    return " ".join(value.split())
+    return render_maxim_proposal_evidence_text(value)
 
 
 def _render_trigger_key(key: str) -> str:
