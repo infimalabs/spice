@@ -585,41 +585,64 @@ def _configure_capture_parser(actions: Any) -> None:
     capture.set_defaults(func=handle)
 
 
+_ADD_DUE_HELP = (
+    "Native due date; defaults from priority SLA (deferred tasks start "
+    "the SLA clock at wake instead)."
+)
+
+_ADD_EPILOG = (
+    "Routing:\n"
+    "  Public CLI tasks with no --acceptance and no --flow start in "
+    "plan, then continue through the project's default flow. Pass "
+    "--flow for an intentional non-default route.\n\n"
+    "Batch input:\n"
+    "  Use key=value segments separated by `|`. Repeat collection "
+    "fields flow=..., tags=..., after=..., and acceptance=... to "
+    "accrue values in input order.\n\n"
+    "Private work:\n"
+    "  Use --private, or omit --project, to create this agent's "
+    "private task. Only allowed in Steer lifetime; Drive and Drain "
+    "require --project.\n"
+    "  Do not pass agent.*; agent stems are reserved for automatic "
+    "private task creation.\n"
+    "  Private tasks share the origin contract: cite the "
+    "acknowledgment that prompted the work (--origin ack:<key>) "
+    "unless an active claim supplies it.\n\n"
+    "Examples:\n"
+    '  spice task add "Clarify CLI help" --project task.cli '
+    '--description "Longer merge body context"\n'
+    '  spice task add "Private scratch task" --private '
+    "--origin ack:<key>\n"
+    '  spice task add "Private scratch task" --origin ack:<key>'
+)
+
+
 def _configure_add_parser(actions: Any) -> None:
     add = actions.add_parser(
         "add",
         help="Create a task (positional title, or batch from stdin).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Routing:\n"
-            "  Public CLI tasks with no --acceptance and no --flow start in "
-            "plan, then continue through the project's default flow. Pass "
-            "--flow for an intentional non-default route.\n\n"
-            "Batch input:\n"
-            "  Use key=value segments separated by `|`. Repeat collection "
-            "fields flow=..., tags=..., after=..., and acceptance=... to "
-            "accrue values in input order.\n\n"
-            "Private work:\n"
-            "  Use --private, or omit --project, to create this agent's "
-            "private task. Only allowed in Steer lifetime; Drive and Drain "
-            "require --project.\n"
-            "  Do not pass agent.*; agent stems are reserved for automatic "
-            "private task creation.\n"
-            "  Private tasks share the origin contract: cite the "
-            "acknowledgment that prompted the work (--origin ack:<key>) "
-            "unless an active claim supplies it.\n\n"
-            "Examples:\n"
-            '  spice task add "Clarify CLI help" --project task.cli '
-            '--description "Longer merge body context"\n'
-            '  spice task add "Private scratch task" --private '
-            "--origin ack:<key>\n"
-            '  spice task add "Private scratch task" --origin ack:<key>'
-        ),
+        epilog=_ADD_EPILOG,
         recovery_examples=(
             'spice task add "Clarify CLI help" --project task.cli',
             'spice task add "Private scratch task" --private --origin ack:<key>',
         ),
     )
+    _configure_add_content_arguments(add)
+    _configure_add_scheduling_arguments(add)
+    add.add_argument("--claim", action="store_true")
+    add.add_argument(
+        "--origin",
+        help=(
+            "Provenance reference: ack:<inbox-key> for the acknowledgment "
+            "that steered this work, or task:<handle> for the task it "
+            "descends from. Required unless an active claim supplies it."
+        ),
+    )
+    add.set_defaults(func=handle)
+
+
+def _configure_add_content_arguments(add: Any) -> None:
     add.add_argument("title", nargs="?")
     add.add_argument(
         "--title",
@@ -685,6 +708,9 @@ def _configure_add_parser(actions: Any) -> None:
             "when the task should start in plan unless --flow is explicit."
         ),
     )
+
+
+def _configure_add_scheduling_arguments(add: Any) -> None:
     add.add_argument("--wait")
     add.add_argument(
         "--deferred",
@@ -693,17 +719,7 @@ def _configure_add_parser(actions: Any) -> None:
     )
     add.add_argument("--scheduled")
     add.add_argument("--until")
-    add.add_argument("--due", help="Native due date; defaults from priority SLA.")
-    add.add_argument("--claim", action="store_true")
-    add.add_argument(
-        "--origin",
-        help=(
-            "Provenance reference: ack:<inbox-key> for the acknowledgment "
-            "that steered this work, or task:<handle> for the task it "
-            "descends from. Required unless an active claim supplies it."
-        ),
-    )
-    add.set_defaults(func=handle)
+    add.add_argument("--due", help=_ADD_DUE_HELP)
 
 
 def _configure_oops_parser(actions: Any) -> None:

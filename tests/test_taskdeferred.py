@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,9 @@ from spice.tasks import alloc, claimstate, config, create, identity, ops, render
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 SCHEDULING_FIELDS = ("wait", "scheduled", "due", "until")
+
+# Slack for comparing two SLA clocks started moments apart within one test.
+SLA_TOLERANCE_SECONDS = 120.0
 
 # scheduled sits in the past so +READY (which excludes future-scheduled rows)
 # turns on wait alone once the task wakes.
@@ -28,6 +32,10 @@ DEFERRAL = {
 def _scheduling_snapshot(handle: str) -> dict[str, str]:
     row = identity.resolve(handle)
     return {field: str(row.get(field) or "") for field in SCHEDULING_FIELDS}
+
+
+def _parse_tw_datetime(value: str) -> datetime:
+    return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
 
 
 def _deferred_task(title: str, *, flow: list[str] | None = None) -> str:
@@ -225,6 +233,80 @@ def test_ready_task_claim_preserves_scheduling(task_repo):
 
     assert _scheduling_snapshot(handle) == before
     assert handle in {identity.render_handle(r) for r in tw.export(["+ACTIVE"])}
+
+
+def test_deferred_creation_suspends_sla_and_wake_starts_it(task_repo):
+    deferred = create.add(
+        "Deferred task starts its SLA clock at wake",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["the SLA clock starts at wake"],
+        deferred=True,
+    )
+    assert _scheduling_snapshot(deferred)["due"] == ""
+
+    output = ops.wake([deferred])
+    ordinary = create.add(
+        "Ordinary task of the same priority",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["the ordinary SLA baseline"],
+    )
+
+    woken_due = _parse_tw_datetime(_scheduling_snapshot(deferred)["due"])
+    ordinary_due = _parse_tw_datetime(_scheduling_snapshot(ordinary)["due"])
+    assert f"woke {deferred}: wait: due:" in output
+    # Same seam, same priority, moments apart: the woken clock matches the
+    # ordinary creation clock to within test runtime.
+    assert abs((woken_due - ordinary_due).total_seconds()) <= SLA_TOLERANCE_SECONDS
+    assert deferred in _ready_handles()
+
+
+def test_deferred_explicit_due_stays_exact_through_wake(task_repo):
+    handle = create.add(
+        "Deferred task keeps its explicit due",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["an explicit due survives deferral"],
+        deferred=True,
+        due="2099-03-04T05:06:07Z",
+    )
+    before = _scheduling_snapshot(handle)
+    assert before["due"] == "20990304T050607Z"
+
+    output = ops.wake([handle])
+
+    after = _scheduling_snapshot(handle)
+    assert f"woke {handle}: wait:" in output
+    assert after["due"] == before["due"]
+    assert after["wait"] == ""
+    assert handle in _ready_handles()
+
+
+def test_wake_into_promotion_starts_sla_clock(task_repo):
+    created = ops.oops(
+        "Promoted oops starts its SLA clock",
+        description="promotion candidate",
+        origin="ack:20260101T000000000000Z",
+    )
+    handle = created.split()[1]
+    assert _scheduling_snapshot(handle)["due"] == ""
+    started = datetime.now(UTC)
+
+    output = ops.wake([handle], into="task.unit")
+
+    row = identity.resolve(handle)
+    fresh = identity.render_handle(row)
+    priority = str(row.get("priority") or "")
+    sla_seconds = config.SLA_DUE_SECONDS[priority]
+    due_delta = (_parse_tw_datetime(str(row.get("due"))) - started).total_seconds()
+    assert f"promoted {handle} -> {fresh}: wait: project:task.unit due:" in output
+    assert sla_seconds - SLA_TOLERANCE_SECONDS <= due_delta
+    assert due_delta <= sla_seconds + SLA_TOLERANCE_SECONDS
+    assert fresh in _ready_handles()
 
 
 def test_wake_clears_only_wait(task_repo):
