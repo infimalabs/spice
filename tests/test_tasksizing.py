@@ -110,13 +110,12 @@ def test_task_sizing_distinguishes_unavailable_evidence_from_measured_zero():
 
 
 def test_task_sizing_marks_incomplete_phase_effort_unavailable():
-    row = _completed_row(title="Partial effort", uuid="task-partial")
+    row = _completed_row(title="Incomplete effort", uuid="task-incomplete")
     windows = (
         _window(
-            "task-partial",
+            "task-incomplete",
             start=20,
             end=None,
-            markers=(effort.PARTIAL_MISSING_END,),
         ),
     )
 
@@ -125,6 +124,26 @@ def test_task_sizing_marks_incomplete_phase_effort_unavailable():
     assert report.score is None
     assert _components(report)["elapsed"] == sizing.SizingComponent(
         "elapsed", None, "incomplete_phase_effort_window"
+    )
+
+
+def test_task_sizing_marks_partial_handoff_unavailable_even_with_timestamps():
+    row = _completed_row(title="Handoff effort", uuid="task-handoff")
+    windows = (
+        _window(
+            "task-handoff",
+            start=20,
+            end=80,
+            markers=(effort.PARTIAL_HANDOFF,),
+        ),
+    )
+
+    report = sizing.size_completed_task(row, windows=windows)
+
+    assert report.label is None
+    assert report.score is None
+    assert _components(report)["elapsed"] == sizing.SizingComponent(
+        "elapsed", None, "partial_phase_effort_window"
     )
 
 
