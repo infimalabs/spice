@@ -206,6 +206,11 @@ class AgentSideChannelServer:
                     return
                 if wake_reader in readable:
                     _drain_wakeup(wake_reader)
+                    # The stop event wakes every stream; injecting here would
+                    # hold teardown hostage to injector work (Taskwarrior
+                    # export, state reads), so close the stream instead.
+                    if self._stopping.is_set():
+                        return
                     try:
                         emit()
                     except OSError:
