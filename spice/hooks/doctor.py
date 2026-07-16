@@ -108,10 +108,6 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
 
 
-def render_doctor(repo_root: Path) -> str:
-    return run_doctor(repo_root).render()
-
-
 def _apply_safe_fixes(repo_root: Path) -> list[str]:
     from spice.hooks.install import install_hooks_for_repo
 

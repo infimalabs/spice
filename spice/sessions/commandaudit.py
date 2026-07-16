@@ -6,7 +6,6 @@ import re
 import shlex
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
 
 from spice.sessions.commandrecords import CommandRecord
 
@@ -53,18 +52,6 @@ def audit_command_records(
             f"{label}:{count}" for label, count in top_noncanonical.most_common(limit)
         ],
     )
-
-
-def command_audit_payload(audit: CommandAudit) -> dict[str, Any]:
-    return {
-        "total": audit.total,
-        "wrapper_commands": audit.wrapper_commands,
-        "non_wrapper_commands": audit.non_wrapper_commands,
-        "shell_pipelines": audit.shell_pipelines,
-        "canonical_pipelines": audit.canonical_pipelines,
-        "noncanonical_pipelines": audit.noncanonical_pipelines,
-        "top_noncanonical": audit.top_noncanonical,
-    }
 
 
 def command_has_shell_pipeline(command: str) -> bool:

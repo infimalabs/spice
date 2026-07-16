@@ -60,13 +60,6 @@ def parse_source(
     )
 
 
-def parser_for_suffix(suffix: str) -> Parser | None:
-    language = language_for_suffix(suffix)
-    if language is None:
-        return None
-    return parser_for_language(language)
-
-
 @lru_cache(maxsize=None)
 def parser_for_language(language: TreeSitterLanguage) -> Parser:
     return Parser(language_object(language))

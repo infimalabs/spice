@@ -145,20 +145,6 @@ def normalize_say_rate_multiplier(value: str | int | float | None) -> float:
     return max(MIN_SAY_RATE_MULTIPLIER, min(rate, MAX_SAY_RATE_MULTIPLIER))
 
 
-def render_say_audio(
-    text: str,
-    *,
-    repo_root: Path | None = None,
-    rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
-) -> bytes:
-    """Render configured speech audio bytes, preserving the historical API."""
-    return render_speech_audio(
-        text,
-        repo_root=repo_root,
-        rate_multiplier=rate_multiplier,
-    ).data
-
-
 def render_speech_audio(
     text: str,
     *,

@@ -196,11 +196,6 @@ def visible_active_rows(actor: str) -> list[dict[str, Any]]:
     ]
 
 
-def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending"])
-    return [r for r in rows if not is_hidden(r)]
-
-
 def briefing_snapshot(actor: str) -> BriefingTaskSnapshot:
     """Export one board snapshot and mark rows visible through the actor's route."""
     route = lanes.team_route_for_actor(actor)

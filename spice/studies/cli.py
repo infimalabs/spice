@@ -36,6 +36,7 @@ from spice.studies import (
     links,
     magicnums,
     mutations,
+    pythonunused,
     reachability,
     repodocs,
     shape,
@@ -85,6 +86,7 @@ def configure_study_parser(subparsers: Any) -> None:
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_reachability_parser(actions)
     _configure_symbol_reachability_parser(actions)
+    _configure_python_unused_parser(actions)
     _configure_subsumption_parser(actions)
     _configure_assertion_free_parser(actions)
     _configure_private_internals_parser(actions)
@@ -288,6 +290,20 @@ def _configure_symbol_reachability_parser(actions: Any) -> None:
         "Test-only symbols inside production-reachable modules.",
     )
     symbol.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of findings to show.",
+    )
+
+
+def _configure_python_unused_parser(actions: Any) -> None:
+    unused = _add_study_action(
+        actions,
+        "python-unused",
+        "Candidate-unused and test-only production Python top-level symbols.",
+    )
+    unused.add_argument(
         "--limit",
         type=_positive_int_arg,
         default=None,
@@ -861,6 +877,15 @@ def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_python_unused(args: argparse.Namespace, root: Path) -> int:
+    findings = pythonunused.scan_python_unused_symbols(root)
+    if args.emit_json:
+        _print_study_json(args.study_action, findings=findings, limit=args.limit)
+        return 1 if findings else 0
+    print(pythonunused.render_python_unused_board(findings, limit=args.limit))
+    return 1 if findings else 0
+
+
 def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(root), root=root
@@ -1152,6 +1177,7 @@ _STUDY_ACTIONS: dict[str, StudyHandler] = {
     "taste": _study_taste,
     "reachability": _study_reachability,
     "symbol-reachability": _study_symbol_reachability,
+    "python-unused": _study_python_unused,
     "assertion-free-tests": _study_assertion_free_tests,
     "private-internals": _study_private_internals,
     "subsumption": _study_subsumption,

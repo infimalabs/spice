@@ -609,10 +609,6 @@ def _project_example(
     return PROJECT_DELIMITER.join(segments)
 
 
-def is_internal_project_stem(stem: str) -> bool:
-    return stem in INTERNAL_STEMS
-
-
 def is_internal_or_hidden_project(project: str) -> bool:
     return is_hidden_project(project) or project_stem(project) in INTERNAL_STEMS
 

@@ -153,33 +153,6 @@ def save_flex_slice_claims(
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def prune_flex_slice_claims(
-    *,
-    root: Path,
-    state_path: Path | None = None,
-    git_path: str = FLEX_SLICE_CLAIMS_GIT_PATH,
-    renames: dict[Path, Path] | None = None,
-    now: float | None = None,
-) -> tuple[FlexSliceClaim, ...]:
-    path = state_path or flex_slice_claims_state_path(root=root, git_path=git_path)
-    if not path.exists():
-        return ()
-    active = load_flex_slice_claims(
-        root=root,
-        state_path=path,
-        git_path=git_path,
-        renames=renames,
-        now=now,
-    )
-    save_flex_slice_claims(
-        active,
-        root=root,
-        state_path=path,
-        git_path=git_path,
-    )
-    return active
-
-
 def claim_flex_slice_paths(
     paths: Iterable[Path],
     *,
