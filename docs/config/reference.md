@@ -64,6 +64,21 @@ test/generated roles remain classification datasets. Task phases remain live
 allocator routing state. The four configuration-layer names remain precedence
 metadata. None is accepted as a `scopes` axis.
 
+Lane and task routing use similarly named fields, but they are live control
+plane predicates rather than configurable entry applicability:
+
+| Runtime field or vocabulary | Classification | Why it is not `scopes` |
+| --- | --- | --- |
+| Team `members` (`agent_id` / `team_id`) | Live team membership | Membership records which worktree-bound actors currently form a lane; it changes through compose, split, merge, and renewal events. |
+| `lifetime = Steer | Drive | Drain` | Lifetime lens | The selected lifetime reinterprets durable route state: manual pins, all stored subscriptions, or every assignable stem. It does not select configuration entries. |
+| `task_filter_entries`, route `filter` / `manual`, and `project:<stem>` / `phase:<phase>` / `+tag` terms | Allocator project filters | These are Taskwarrior query predicates derived from current team state and task projects. They control queue visibility, not whether a configuration entry applies. |
+| Private `project:agent.<actor>.task` and `origin_thread.is:<actor>` terms | Origin visibility | These terms preserve an actor's private work and provenance visibility across Drive/Drain routing. They are computed per actor and task row. |
+| Task-row `phase` | Allocator lifecycle state | This phase advances as work is done; only the separately named pre-commit command-step phase is configuration applicability. |
+
+Configuration may still contain payload that initializes or influences those
+runtime models, such as `serve.default_lifetime`. That does not turn the live
+membership, lifetime, filter, origin, or task-phase fields into selector axes.
+
 The `pyproject` scope alone uses the `tool.spice` prefix:
 
 ```toml
@@ -591,11 +606,21 @@ Maxim bags extend or replace the live prose conscience.
 | --- | --- | --- |
 | `words` | required for new bags; inherited for built-ins | Alphabetic trigger words or phrases. |
 | `message` | required for new bags; inherited for built-ins | The maxim text published to the agent as steering on a match; when adjudication is enabled it is sent to the judge first and published only on a violation verdict. |
-| `drivers` | all shipped drivers | Driver allowlist; cite `spice maxim report` evidence before narrowing. |
+| `scopes` | `{}` (unconstrained) | Universal applicability selector. Maxim bags support the shared `drivers` axis; cite `spice maxim report` evidence before narrowing it. |
+
+```toml
+[tool.spice.maxims.routes]
+words = ["quiet route"]
+message = "Respond to the real event instead."
+scopes = { drivers = ["codex"] }
+```
 
 Bag names are case-folded. Trigger phrases are normalized to lowercase words.
 Configured bags merge with built-ins, so a repo can tune existing bags or add
-new curated near-universal preferences.
+new curated near-universal preferences. An absent `scopes` leaf applies to all
+drivers. The displaced per-bag `drivers` key is unsupported; maxim driver
+selection uses the same normalization, validation, matching, and explanation
+contract as every other `scopes.drivers` consumer.
 
 Watchdog reminders are deduped by content-derived reminder key within one
 compaction epoch. A later compaction can make the same key eligible to publish
