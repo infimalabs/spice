@@ -485,16 +485,12 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     created_paths: list[str] = []
     options: dict[str, object] = {}
 
-    def create_tasks(findings, **kwargs):
-        created_paths.extend(f.path for f in findings)
+    def create_tasks(specs, **kwargs):
+        created_paths.extend(spec.finding_identity[-1] for spec in specs)
         options.update(kwargs)
         return ["created"]
 
-    monkeypatch.setattr(
-        studies_cli,
-        "_create_exhaust_tasks",
-        create_tasks,
-    )
+    monkeypatch.setattr(studies_cli, "create_study_tasks", create_tasks)
     args = build_parser().parse_args(
         [
             "study",
@@ -520,23 +516,8 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     }
 
 
-def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
-    monkeypatch, capsys
-):
-    created = []
-    options: dict[str, object] = {}
-
-    def fake_create(specs, **kwargs):
-        created.extend(specs)
-        options.update(kwargs)
-        handles = [f"EXHAUST-{index}" for index in range(1, len(specs) + 1)]
-        for handle in handles:
-            print(f"  task created: {handle}")
-        return handles
-
-    monkeypatch.setattr(studies_cli, "create_study_tasks", fake_create)
-
-    studies_cli._create_exhaust_tasks(
+def test_exhaust_task_specs_add_decision_metadata_for_each_finding():
+    created = studies_cli._exhaust_task_specs(
         [
             ReachabilityFinding(
                 subject="spice.onlytest",
@@ -548,15 +529,10 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
                 path="spice/empty.py",
                 only_test_imports=[],
             ),
-        ],
-        controls=studies_cli.StudyTaskCreationControls(
-            deferred=False,
-            origin=None,
-            print_created=True,
-        ),
+        ]
     )
 
-    assert created == [
+    assert created == (
         studies_cli.StudyTaskSpec(
             study="reachability",
             finding_identity=(
@@ -593,16 +569,6 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
                 "Current test-only importers: unknown.",
             ),
         ),
-    ]
-    assert options == {
-        "controls": studies_cli.StudyTaskCreationControls(
-            deferred=False,
-            origin=None,
-            print_created=True,
-        )
-    }
-    assert capsys.readouterr().out == (
-        "  task created: EXHAUST-1\n  task created: EXHAUST-2\n"
     )
 
 

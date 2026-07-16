@@ -106,24 +106,55 @@ def test_task_generating_studies_share_deferred_origin_flags():
 def test_task_generator_registry_drives_parser_and_dispatch_controls(
     tmp_path, monkeypatch
 ):
-    seen = {}
+    generated = {}
+    created = {}
 
-    def recording_handler(action):
-        def handler(args, root, controls):
-            seen[action] = (args.study_action, root, controls)
-            return 0
+    def recording_generator(action):
+        def generator(args, root):
+            generated[action] = (args.study_action, root)
+            spec = studies_cli.StudyTaskSpec(
+                study=action,
+                finding_identity=("registry-contract",),
+                title=f"Registry contract: {action}",
+                project="tests.quality",
+                tags=("registry-contract",),
+                acceptance=("central dispatch creates this task",),
+            )
+            return studies_cli.TaskGeneratingStudyResult(
+                task_specs=(spec,),
+                has_findings=True,
+                text_output=f"{action}: registry contract",
+                json_fields={"findings": [action]},
+            )
 
-        return handler
+        return generator
+
+    def configure_probe(actions):
+        studies_cli._add_study_action(
+            actions, "registry-probe", "Synthetic registry dispatch probe."
+        )
 
     registry = {
         action: studies_cli.TaskGeneratingStudyAction(
             configure_parser=entry.configure_parser,
             create_tasks_help=entry.create_tasks_help,
-            handler=recording_handler(action),
+            generator=recording_generator(action),
         )
         for action, entry in studies_cli.TASK_GENERATING_STUDY_ACTIONS.items()
     }
+    registry["registry-probe"] = studies_cli.TaskGeneratingStudyAction(
+        configure_parser=configure_probe,
+        create_tasks_help="Create the synthetic registry probe task.",
+        generator=recording_generator("registry-probe"),
+    )
+
+    def create_tasks(specs, *, controls):
+        action = specs[0].study
+        created[action] = (tuple(specs), controls)
+        return [f"TASK-{action}"]
+
     monkeypatch.setattr(studies_cli, "TASK_GENERATING_STUDY_ACTIONS", registry)
+    monkeypatch.setattr(studies_cli, "create_study_tasks", create_tasks)
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
     parser = build_parser()
 
@@ -139,16 +170,18 @@ def test_task_generator_registry_drives_parser_and_dispatch_controls(
                 "--json",
             ]
         )
-        assert args.func(args) == 0
+        assert args.func(args) == 1
 
     expected_controls = studies_cli.StudyTaskCreationControls(
         deferred=True,
         origin="ack:20260101T000000000000Z",
         print_created=False,
     )
-    assert seen == {
-        action: (action, tmp_path, expected_controls) for action in registry
-    }
+    assert generated == {action: (action, tmp_path) for action in registry}
+    assert {
+        action: (specs[0].study, controls)
+        for action, (specs, controls) in created.items()
+    } == {action: (action, expected_controls) for action in registry}
 
 
 def test_taste_cli_renders_exact_inclusive_inflection_suggestions(
