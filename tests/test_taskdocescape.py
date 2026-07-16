@@ -50,9 +50,13 @@ def test_description_escape_round_trips_every_covered_shape(
     ],
 )
 def test_node_stores_escaped_author_lines_as_prose(authored: str, stored: str) -> None:
-    node = Node(idx=0, kind="heading", title="Root", line=1)
-
-    node.store_description_line(authored)
+    node = Node(
+        idx=0,
+        kind="heading",
+        title="Root",
+        line=1,
+        desc=[unescape_prose(authored)],
+    )
 
     assert node.description() == stored
     assert node.escaped_description_lines(node.content_col) == [authored]

@@ -2,6 +2,7 @@
 
 from spice.tasks import config as task_config
 from spice.serve.team.store import ServeTeamStore, TeamConfig
+from tests.test_teamstorehelpers import store_remove_agent
 
 
 def test_update_team_config_does_not_wake_the_lane_watchers(tmp_path):
@@ -21,7 +22,7 @@ def test_update_team_config_does_not_wake_the_lane_watchers(tmp_path):
         assert event_path.read_text(encoding="utf-8") == after_create  # no wake
 
         # A membership change still wakes -- its lane stream genuinely changes.
-        store.remove_agent(team.team_id, "thread:a")
+        store_remove_agent(store, team.team_id, "thread:a")
         assert event_path.read_text(encoding="utf-8") != after_create
 
         assert store.team_config(team.team_id).lifetime == "Steer"

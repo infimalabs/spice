@@ -14,6 +14,13 @@ from spice.serve.team.store import (
     TeamCommandService,
     TeamConfig,
 )
+from tests.test_teamstorehelpers import (
+    store_global_revision,
+    store_merge_teams,
+    store_remove_agent,
+    store_reorder_team_agents,
+    store_split_team_back,
+)
 
 IDENTITY_RENEWAL_REVISION = 42
 
@@ -75,12 +82,14 @@ def test_reorder_does_not_wake_the_lane_watchers(tmp_path):
         team = store.create_team(members=["thread:a", "thread:b", "thread:c"])
 
         after_create = event_path.read_text(encoding="utf-8")
-        store.reorder_team_agents(team.team_id, ["thread:b", "thread:a", "thread:c"])
+        store_reorder_team_agents(
+            store, team.team_id, ["thread:b", "thread:a", "thread:c"]
+        )
         after_reorder = event_path.read_text(encoding="utf-8")
         assert after_reorder == after_create  # reorder did NOT wake the watchers
 
         # A membership change still wakes them (its stream genuinely changes).
-        store.remove_agent(team.team_id, "thread:c")
+        store_remove_agent(store, team.team_id, "thread:c")
         assert event_path.read_text(encoding="utf-8") != after_reorder
 
         state = store.team_state(team.team_id)
@@ -125,9 +134,9 @@ def test_split_team_back_restores_latest_merged_source_team(tmp_path):
     source = store.create_team(members=["agent-a", "agent-b", "agent-c", "agent-d"])
     destination = store.create_team(members=["agent-e"])
 
-    store.merge_teams(source.team_id, destination.team_id)
+    store_merge_teams(store, source.team_id, destination.team_id)
     merged = store.team_state(destination.team_id)
-    restored = store.split_team_back(destination.team_id)
+    restored = store_split_team_back(store, destination.team_id)
 
     open_members = {
         team.team_id: [member.agent_id for member in team.members]
@@ -148,10 +157,10 @@ def test_split_team_back_unwinds_nested_team_merges_one_boundary_at_a_time(tmp_p
     middle = store.create_team(members=["agent-c", "agent-d"])
     outer = store.create_team(members=["agent-e"])
 
-    store.merge_teams(inner.team_id, middle.team_id)
-    store.merge_teams(middle.team_id, outer.team_id)
-    restored_middle = store.split_team_back(outer.team_id)
-    restored_inner = store.split_team_back(middle.team_id)
+    store_merge_teams(store, inner.team_id, middle.team_id)
+    store_merge_teams(store, middle.team_id, outer.team_id)
+    restored_middle = store_split_team_back(store, outer.team_id)
+    restored_inner = store_split_team_back(store, middle.team_id)
 
     open_members = {
         team.team_id: [member.agent_id for member in team.members]
@@ -232,7 +241,7 @@ def test_team_membership_is_capped_at_six_across_growth_paths(tmp_path):
 
     source = store.create_team(members=["thread:s1", "thread:s2"])
     with pytest.raises(SpiceError, match="limited to 6 agents"):
-        store.merge_teams(source.team_id, full.team_id)
+        store_merge_teams(store, source.team_id, full.team_id)
     # Both teams untouched by the rejected merge.
     assert len(store.team_state(full.team_id).members) == 6
     assert len(store.team_state(source.team_id).members) == 2
@@ -692,7 +701,8 @@ def test_reorder_then_renew_preserves_successor_visible_slot(tmp_path):
     team = store.create_team(
         members=["thread:agent-a", "thread:agent-b", "thread:agent-c"]
     )
-    store.reorder_team_agents(
+    store_reorder_team_agents(
+        store,
         team.team_id,
         ["thread:agent-c", "thread:agent-a", "thread:agent-b"],
     )
@@ -730,7 +740,8 @@ def test_renew_then_reorder_moves_successor_by_position(tmp_path):
         ancestor_thread_id="agent-b",
     )
 
-    store.reorder_team_agents(
+    store_reorder_team_agents(
+        store,
         team.team_id,
         ["thread:agent-c", "thread:agent-b-renewed", "thread:agent-a"],
     )
@@ -779,7 +790,7 @@ def test_removing_final_agent_closes_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
 
-    revision = store.remove_agent(team.team_id, "agent-a")
+    revision = store_remove_agent(store, team.team_id, "agent-a")
     snapshot = store.team_snapshot()
     with store.connect() as connection:
         team_rows = connection.execute(
@@ -900,13 +911,13 @@ def test_team_task_filter_api_tracks_sources_and_projection(tmp_path):
         {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL}
     ]
 
-    initial_revision = store.global_revision()
+    initial_revision = store_global_revision(store)
     duplicate = store.add_task_filter(
         team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_MANUAL
     )
 
     assert duplicate == initial_revision
-    assert store.global_revision() == initial_revision
+    assert store_global_revision(store) == initial_revision
 
     added_auto = store.add_task_filter(
         team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_AUTO_CREATE

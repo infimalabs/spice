@@ -78,9 +78,17 @@ REACHABILITY_ALLOWLIST: tuple[str, ...] = (
 # are reached dynamically in production (getattr/registry/string-key dispatch),
 # which the AST scanner cannot see. Entries are either a dotted module path
 # (exempts every symbol in that module) or a fully-qualified ``module.symbol``
-# (exempts one function/class/``Class.method``). Empty by default: the clean
-# repo scans to zero, so any entry is a declared, reviewed exception.
-SYMBOL_REACHABILITY_ALLOWLIST: tuple[str, ...] = ()
+# (exempts one function/class/``Class.method``). The entries below are concrete
+# protocol or duck-typed implementations: production calls them through a
+# structural interface whose runtime target the AST scanner cannot resolve.
+SYMBOL_REACHABILITY_ALLOWLIST: tuple[str, ...] = (
+    "spice.agent.watchdog.JsonStdoutScanner.close",
+    "spice.agent.watchdog.JsonStdoutScanner.process_line",
+    "spice.serve.app.ServeState.record_http_request",
+    "spice.serve.app.ServeState.rollout_cursor",
+    "spice.serve.app.ServeState.team_store",
+    "spice.serve.app.ServeState.worktree_targets",
+)
 
 PYTHON_PROVIDER = "python"
 REACHABILITY_PROVIDERS_KEY = "reachability_providers"
@@ -523,14 +531,12 @@ def _scan_python_symbol_reachability(
         definitions,
         pkg_root=pkg_root,
         package=package,
-        enhanced_aliases=True,
     )
     test_refs, test_importers = _collect_symbol_refs(
         test_paths,
         definitions,
         pkg_root=pkg_root,
         package=package,
-        enhanced_aliases=False,
     )
 
     allowset = {*SYMBOL_REACHABILITY_ALLOWLIST, *allowlist}

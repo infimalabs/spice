@@ -192,7 +192,6 @@ def _collect_symbol_refs(
     *,
     pkg_root: Path,
     package: str,
-    enhanced_aliases: bool,
 ) -> tuple[set[_SymbolRef], dict[_SymbolRef, set[str]]]:
     refs: set[_SymbolRef] = set()
     importers: dict[_SymbolRef, set[str]] = {}
@@ -217,7 +216,6 @@ def _collect_symbol_refs(
             path,
             package,
             current_module,
-            enhanced_aliases=enhanced_aliases,
         )
         refs.update(path_refs)
         display = path.name
@@ -234,8 +232,6 @@ def _symbol_refs_for_tree(
     path: Path,
     package: str,
     current_module: str | None,
-    *,
-    enhanced_aliases: bool,
 ) -> set[_SymbolRef]:
     refs: set[_SymbolRef] = set()
     symbol_aliases: dict[str, _SymbolRef] = {}
@@ -278,7 +274,6 @@ def _symbol_refs_for_tree(
         class_aliases,
         instance_aliases,
         call_result_aliases,
-        enhanced_aliases=enhanced_aliases,
     )
     if current_module is not None:
         refs.update(_refs_from_local_class_methods(tree, definitions, current_module))
@@ -415,8 +410,6 @@ def _collect_usage_symbol_refs(
     class_aliases: dict[str, tuple[str, str]],
     instance_aliases: dict[str, tuple[str, str]],
     call_result_aliases: dict[str, tuple[str, str]],
-    *,
-    enhanced_aliases: bool,
 ) -> None:
     _collect_usage_aliases(
         tree,
@@ -424,7 +417,6 @@ def _collect_usage_symbol_refs(
         class_aliases,
         instance_aliases,
         call_result_aliases,
-        enhanced_aliases=enhanced_aliases,
     )
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in symbol_aliases:
@@ -449,14 +441,7 @@ def _collect_usage_aliases(
     class_aliases: dict[str, tuple[str, str]],
     instance_aliases: dict[str, tuple[str, str]],
     call_result_aliases: dict[str, tuple[str, str]],
-    *,
-    enhanced_aliases: bool,
 ) -> None:
-    if not enhanced_aliases:
-        _collect_legacy_assignment_aliases(
-            tree, module_aliases, class_aliases, instance_aliases
-        )
-        return
     changed = True
     while changed:
         changed = False
@@ -490,23 +475,6 @@ def _collect_usage_aliases(
                     )
                     or changed
                 )
-
-
-def _collect_legacy_assignment_aliases(
-    tree: ast.AST,
-    module_aliases: dict[str, str],
-    class_aliases: dict[str, tuple[str, str]],
-    instance_aliases: dict[str, tuple[str, str]],
-) -> None:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        class_ref = _class_ref_from_expr(node.value, module_aliases, class_aliases)
-        if class_ref is None:
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                instance_aliases[target.id] = class_ref
 
 
 def _collect_assignment_aliases(

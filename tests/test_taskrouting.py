@@ -12,6 +12,7 @@ from spice.serve.team.store import (
     TeamConfig,
 )
 from spice.tasks import alloc, config, create, identity, lanes, ops, projectsubs, render
+from tests.test_teamstorehelpers import store_global_revision
 
 from tests.test_tasks import (
     ACTOR_A,
@@ -191,13 +192,13 @@ def test_steer_manual_claim_never_subscribes(task_repo):
         priority="medium",
         acceptance=["steer manual claim leaves team filters untouched"],
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     claimed = ops.claim(handle)
     after_claim = store.team_config(team.team_id)
 
     assert handle in claimed.splitlines()
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert after_claim.task_filters == ()
     assert after_claim.task_filter_entries == ()
 
@@ -216,10 +217,10 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
         priority="medium",
         acceptance=["auto claim leaves filter store unchanged"],
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     assigned = alloc.next_task()
-    after = store.global_revision()
+    after = store_global_revision(store)
     entries = store.team_config(team.team_id).task_filter_entries
 
     assert identity.render_handle(assigned or {}) == handle
@@ -241,12 +242,12 @@ def test_manual_claim_skips_private_project_subscription(task_repo):
         acceptance=["private claims do not touch team filters"],
         origin="ack:20260101T000000000000Z",
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     claimed = ops.claim(handle)
 
     assert handle in claimed.splitlines()
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert store.team_config(team.team_id).task_filters == ()
 
 
@@ -260,12 +261,12 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
         priority="medium",
         acceptance=["teamless claims do not create subscriptions"],
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     claimed = ops.claim(handle)
 
     assert handle in claimed.splitlines()
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
 
 
 def test_manual_claim_skips_oops_subscription(task_repo):
@@ -280,12 +281,12 @@ def test_manual_claim_skips_oops_subscription(task_repo):
         origin="ack:20260101T000000000000Z",
     )
     handle = created.split()[1]
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     claimed = ops.claim(handle)
 
     assert handle in claimed.splitlines()
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert store.team_config(team.team_id).task_filters == ()
 
 
@@ -390,12 +391,12 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
 
     ops.delete(child, "child abandoned")
     emptied = store.team_config(team.team_id)
-    after_empty_revision = store.global_revision()
+    after_empty_revision = store_global_revision(store)
     projectsubs._gc_empty_project_task_filters("task.unit")
 
     assert emptied.task_filters == ()
     assert emptied.task_filter_entries == ()
-    assert store.global_revision() == after_empty_revision
+    assert store_global_revision(store) == after_empty_revision
 
 
 def test_empty_project_gc_counts_waiting_tasks(task_repo):
@@ -452,7 +453,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
         priority="medium",
         acceptance=["drive creation subscribes"],
     )
-    after_first = store.global_revision()
+    after_first = store_global_revision(store)
     after_first_config = store.team_config(team.team_id)
     second = create.add(
         "Drive creates second task",
@@ -461,7 +462,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
         priority="medium",
         acceptance=["duplicate drive creation is idempotent"],
     )
-    after_second = store.global_revision()
+    after_second = store_global_revision(store)
 
     assert first != second
     assert after_first_config.task_filters == ("task.unit",)
@@ -477,7 +478,7 @@ def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     handle = create.add(
         "Steer creates task",
@@ -488,7 +489,7 @@ def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
     )
 
     assert identity.resolve(handle)["project"] == "task.unit"
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert store.team_config(team.team_id).task_filters == ()
 
 
@@ -498,7 +499,7 @@ def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_re
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain")
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     handle = create.add(
         "Drain creates task",
@@ -509,14 +510,14 @@ def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_re
     )
 
     assert identity.resolve(handle)["project"] == "task.unit"
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert store.team_config(team.team_id).task_filters == ()
 
 
 def test_teamless_task_creation_routes_creator_without_team_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     handle = create.add(
         "Teamless creates task",
@@ -527,7 +528,7 @@ def test_teamless_task_creation_routes_creator_without_team_subscription(task_re
     )
 
     assert identity.resolve(handle)["project"] == "task.unit"
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
@@ -622,7 +623,7 @@ def test_drive_oops_creation_skips_subscription(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     created = ops.oops(
         "Drive oops creation",
@@ -635,7 +636,7 @@ def test_drive_oops_creation_skips_subscription(task_repo):
     assert row["project"] == config.OOPS_PROJECT
     assert row["phase"] == "plan"
     assert row.get("tags", []) == []
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert store.team_config(team.team_id).task_filters == ()
 
 
