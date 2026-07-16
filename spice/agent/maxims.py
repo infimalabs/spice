@@ -18,18 +18,18 @@ import subprocess
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from spice import defaults
-from spice.agent.driver import driver_choices
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
+from spice.scopes import MAXIM_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 from spice.configlayer import (
     config_string_list,
     contextualize_config_error,
@@ -64,7 +64,7 @@ class MaximBag:
     name: str
     words: frozenset[str]
     message: str
-    drivers: frozenset[str] = field(default_factory=lambda: frozenset(driver_choices()))
+    scopes: ScopeSelector = ScopeSelector()
 
 
 @dataclass(frozen=True)
@@ -665,6 +665,7 @@ def _flatten_bag_keys(bags: Mapping[str, MaximBag]) -> dict[str, str]:
 
 _WORD_REGEX = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]+(?![A-Za-z0-9_])")
 _MAXIM_KEY_RE = re.compile(r"^[a-z]+(?: [a-z]+)*$")
+_MAXIM_BAG_CONFIG_KEYS = frozenset({"words", "message", SCOPES_KEY})
 
 
 def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
@@ -725,11 +726,18 @@ def _load_configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
         name = _normalize_bag_name(raw_name)
         if not isinstance(raw_config, dict):
             raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")
+        unsupported = sorted(set(raw_config) - _MAXIM_BAG_CONFIG_KEYS)
+        if unsupported:
+            expected = ", ".join(sorted(_MAXIM_BAG_CONFIG_KEYS))
+            raise SpiceError(
+                f"[tool.spice.maxims.{name}] unsupported keys: "
+                f"{', '.join(unsupported)}; expected: {expected}"
+            )
         bags[name] = MaximBag(
             name=name,
             words=_configured_words(raw_config, None, name),
             message=_configured_message(raw_config, None, name),
-            drivers=_configured_drivers(raw_config, name),
+            scopes=MAXIM_SCOPES.parse(raw_config.get(SCOPES_KEY)),
         )
     _flatten_bag_keys(bags)
     return bags
@@ -833,30 +841,6 @@ def _configured_message(
     if not message:
         raise SpiceError(f"[tool.spice.maxims.{name}] message must be non-empty")
     return message
-
-
-def _configured_drivers(raw_config: Mapping[str, Any], name: str) -> frozenset[str]:
-    if "drivers" not in raw_config:
-        return _known_driver_names()
-    known = _known_driver_names()
-    configured: list[str] = []
-    for raw_driver in config_string_list(raw_config.get("drivers")):
-        driver = raw_driver.casefold()
-        if driver not in known:
-            expected = ", ".join(sorted(known))
-            raise SpiceError(
-                f"[tool.spice.maxims.{name}] drivers must be known agent "
-                f"drivers; got {raw_driver!r}; expected one of: {expected}"
-            )
-        if driver not in configured:
-            configured.append(driver)
-    if not configured:
-        raise SpiceError(f"[tool.spice.maxims.{name}] drivers must be non-empty")
-    return frozenset(configured)
-
-
-def _known_driver_names() -> frozenset[str]:
-    return frozenset(driver_choices())
 
 
 def _resolved_lookup(
@@ -1067,7 +1051,7 @@ def triggered_maxims(
     maxim's frozenset bag, not in match-time word mutation.
     """
     bags, key_to_name, bag_order = _resolved_lookup(repo_root)
-    driver_scope = _normalized_driver_scope_name(driver_name)
+    scope_context = _maxim_scope_context(driver_name)
     seen: set[str] = set()
     trigger_parts = {key: tuple(key.split()) for key in key_to_name}
     for statement in statements:
@@ -1085,7 +1069,7 @@ def triggered_maxims(
     return [
         bag
         for bag in (bags[name] for name in sorted(seen, key=bag_order.__getitem__))
-        if _maxim_bag_matches_driver(bag, driver_scope)
+        if scope_context is None or bag.scopes.matches(scope_context)
     ]
 
 
@@ -1098,7 +1082,7 @@ def triggered_maxim_matches(
 ) -> list[MaximTriggerMatch]:
     """Return matched maxim trigger keys with their owning bag."""
     bags, key_to_name, bag_order = _resolved_lookup(repo_root)
-    driver_scope = _normalized_driver_scope_name(driver_name)
+    scope_context = _maxim_scope_context(driver_name)
     trigger_parts = {key: tuple(key.split()) for key in key_to_name}
     seen: set[tuple[str, str]] = set()
     for statement in statements:
@@ -1115,7 +1099,7 @@ def triggered_maxim_matches(
             if not starts:
                 continue
             bag_name = key_to_name[key]
-            if _maxim_bag_matches_driver(bags[bag_name], driver_scope):
+            if scope_context is None or bags[bag_name].scopes.matches(scope_context):
                 seen.add((bag_name, key))
     return [
         MaximTriggerMatch(
@@ -1142,23 +1126,11 @@ def _trigger_starts(
     )
 
 
-def _normalized_driver_scope_name(driver_name: str | None) -> str:
-    if driver_name is None:
-        return ""
-    driver = str(driver_name or "").strip().casefold()
-    if not driver:
-        return ""
-    known = _known_driver_names()
-    if driver not in known:
-        expected = ", ".join(sorted(known))
-        raise SpiceError(
-            f"maxim driver scope {driver_name!r} must be one of: {expected}"
-        )
-    return driver
-
-
-def _maxim_bag_matches_driver(bag: MaximBag, driver_name: str) -> bool:
-    return not driver_name or driver_name in bag.drivers
+def _maxim_scope_context(driver_name: str | None) -> ScopeContext | None:
+    if driver_name is None or not driver_name.strip():
+        return None
+    selector = MAXIM_SCOPES.parse({"drivers": [driver_name]})
+    return ScopeContext(driver=selector.drivers[0])
 
 
 def _contains_word_phrase(words: Sequence[str], phrase: tuple[str, ...]) -> bool:

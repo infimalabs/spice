@@ -48,7 +48,7 @@ DEFAULT_OUTPUT_FORMAT = "{maxim}"
 SCOPE_DECISION_EVIDENCE_ROW = (
     "scope decisions: run `spice maxim report` and cite per-driver fire_rate, "
     "confirm_rate, and recurrence before editing "
-    "[tool.spice.maxims.<bag>].drivers or using maxim disable/enable."
+    "[tool.spice.maxims.<bag>].scopes.drivers or using maxim disable/enable."
 )
 MAXIM_PROPOSE_CONTRACT_ROW = (
     "candidate contract: raw evidence-backed candidates for human triage; "
@@ -131,7 +131,8 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Show durable maxim metric counts for scope decisions.",
         description=(
             "Show per-bag, per-driver, per-thread maxim metric history. Cite "
-            "this report before narrowing [tool.spice.maxims.<bag>].drivers "
+            "this report before narrowing "
+            "[tool.spice.maxims.<bag>].scopes.drivers "
             "or using worktree-local maxim disable/enable."
         ),
     )
