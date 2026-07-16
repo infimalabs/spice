@@ -796,7 +796,19 @@ def _list_status_filters(args: argparse.Namespace) -> list[str]:
         return [f"status:{status}"]
     if getattr(args, "all", False):
         return []
-    return ["status:pending"]
+    # Pending rows plus active claims: a claimed deferred task keeps its wait
+    # (status:waiting at filter time) yet must stay listed with the board.
+    return [
+        "(",
+        "status:pending",
+        "or",
+        "(",
+        "status:waiting",
+        "and",
+        "+ACTIVE",
+        ")",
+        ")",
+    ]
 
 
 def _apply_list_project_filter(

@@ -128,7 +128,7 @@ def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
     )
 
     def fake_export(args=None):
-        assert args == ["status:pending", "+ACTIVE"]
+        assert args == ["+ACTIVE"]
         return [
             {
                 "claim_at": claim_at,

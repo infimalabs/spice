@@ -699,7 +699,7 @@ def _working_state_claim(
     try:
         from spice.tasks import identity, tw
 
-        rows = tw.export(["status:pending", "+ACTIVE"])
+        rows = tw.export(["+ACTIVE"])
     except Exception:
         return "", "", None
     own_rows = [

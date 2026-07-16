@@ -171,7 +171,9 @@ def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
 
 
 def visible_active_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending", "+ACTIVE"])
+    # Bare +ACTIVE: claims preserve wait, and status:pending filters out
+    # future-wait rows, which would hide claimed deferred tasks.
+    rows = visible_rows(actor, ["+ACTIVE"])
     return [r for r in rows if not is_hidden(r) and str(r.get("claim_by") or "")]
 
 
@@ -275,7 +277,7 @@ def _claim_first(
 
 def next_task() -> dict[str, Any] | None:
     actor = tw.current_actor()
-    active_rows = tw.export(["status:pending", "+ACTIVE"])
+    active_rows = tw.export(["+ACTIVE"])
     own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     if own_active:
         return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
@@ -286,7 +288,6 @@ def next_task() -> dict[str, Any] | None:
     include_origin = _route_includes_origin(route)
     scoped_active = tw.export(
         [
-            "status:pending",
             "+ACTIVE",
             *_scope_filter(actor, lane_filter, include_origin=include_origin),
         ],

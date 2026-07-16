@@ -459,7 +459,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
     monkeypatch.setenv(DRIVER.thread_id_env, actor)
 
     def fake_export(args=None):
-        assert args == ["status:pending", "+ACTIVE"]
+        assert args == ["+ACTIVE"]
         return [
             {
                 "claim_at": claim_at.isoformat().replace("+00:00", "Z"),
