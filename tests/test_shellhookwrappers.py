@@ -349,6 +349,9 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
             "set -u",
             *wrapper_lines,
             "rtk grep --files src",
+            "rtk grep -g '*.md' needle docs",
+            "rtk grep --glob '*.toml' needle .",
+            "rtk grep --glob='*.py' needle src",
             "rtk grep needle src",
             "rtk grep -F 'a|b' src",
             "rtk grep -G 'a\\|b' src",
@@ -379,6 +382,9 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
+        "rg:-g *.md needle docs",
+        "rg:--glob *.toml needle .",
+        "rg:--glob=*.py needle src",
         "resolved:grep -E needle src",
         "resolved:grep -E -F a|b src",
         "resolved:grep -E -G a\\|b src",

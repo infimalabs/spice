@@ -95,7 +95,8 @@ The built-in `common` group contains the global `rtk` and plain `grep`
 wrappers. It does not choose commands for RTK; it preserves native semantics
 after RTK selection by routing:
 
-- rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`) to `rg`;
+- rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`, `-g`,
+  `--glob`, `--glob=*`) to `rg`;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every remaining Codex-authored `rtk grep` through a final head-only
