@@ -9,7 +9,6 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from spice.configlayer import (
     load_config,
 )
 from spice.errors import SpiceError
+from spice.version import runtime_version
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_BRAND = defaults.string("serve", "brand")
@@ -94,19 +94,6 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
 """
 
 
-def spice_runtime_version() -> str:
-    """Version of the installed spice runtime serving this UI.
-
-    Reads the active package metadata so the UI reports the running tool, not a
-    hard-coded or worktree-derived string. Empty when spice is run from a source
-    tree with no installed distribution.
-    """
-    try:
-        return metadata.version("spice-harness")
-    except metadata.PackageNotFoundError:
-        return ""
-
-
 def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     loaded = load_config(repo_root) if repo_root is not None else None
     raw_serve = (
@@ -164,7 +151,7 @@ def render_index_html(
         {
             "name": resolved.name,
             "defaultLifetime": resolved.default_lifetime,
-            "version": spice_runtime_version(),
+            "version": runtime_version(),
         },
         ensure_ascii=False,
     ).replace("</", "<\\/")
