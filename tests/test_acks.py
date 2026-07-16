@@ -3,11 +3,9 @@
 import io
 import json
 import subprocess
-from pathlib import Path
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
-from spice.mail.attachments import prepare_inbox_attachments
 from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.ackarchive import (
@@ -41,18 +39,10 @@ from spice.mail.inbox import (
     collect_refused_inbox_items,
     compose_inbox_text,
     inbox_ack_state_context_rows,
-    inbox_dir,
-    inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
 )
 from spice.mail.inbox import write_inbox_item
-from spice.mail.watch import (
-    AckWatchOutcome,
-    AckWatchState,
-    extract_owned_ack_utterance,
-    extract_owned_nack_utterance,
-)
 
 KEY_A = "20260513T184251491561Z"
 KEY_B = "20260513T184252000000Z"
@@ -811,216 +801,6 @@ def test_inline_multi_ack_splitting_keeps_each_body_with_its_key():
         "first handled.",
         "second handled.",
     ]
-
-
-def test_owned_ack_utterance_selects_matching_key_stem_and_bodyless_fallback():
-    text = f"ACK {KEY_A}: other answer. ACK {KEY_B[:-1]}: owned answer."
-    assert extract_owned_ack_utterance(text, KEY_B) == "owned answer."
-    assert extract_owned_ack_utterance(f"ACK {KEY_B}", KEY_B) == "ACK"
-
-
-def test_owned_nack_utterance_requires_reason_for_matching_key():
-    text = f"NACK {KEY_A}: other refusal. NACK {KEY_B[:-1]}: owned refusal."
-    assert extract_owned_nack_utterance(text, KEY_B) == "owned refusal."
-    assert extract_owned_nack_utterance(f"NACK {KEY_B}", KEY_B) is None
-
-
-def test_resend_lineage_end_to_end_contract(tmp_path, monkeypatch):
-    _init_repo(tmp_path)
-    monkeypatch.setenv(DRIVER.thread_id_env, THREAD_A)
-    original_key = "20260101T000000000001Z"
-    name = f"{original_key}.txt"
-    original_text = compose_inbox_text(
-        body="verify the whole lineage",
-        priority=None,
-        stop=False,
-    )
-    attachments = prepare_inbox_attachments(
-        [
-            {
-                "name": "paste.png",
-                "contentType": "image/png",
-                "dataUrl": "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
-            }
-        ]
-    )
-    write_inbox_item(tmp_path, name, original_text, attachments=attachments)
-    state = AckWatchState(
-        inbox_key=original_key,
-        original_text=original_text,
-        target_repo_root=tmp_path,
-        quiet=True,
-    )
-
-    for index in range(6):
-        state.process_line(_assistant_line(f"ordinary response {index}"))
-
-    pending = collect_inbox_items(tmp_path)
-    payload = parse_inbox_payload(pending[0].text)
-    readout = "\n".join(inbox_payload_rows(pending))
-    assert state.resends == 2
-    assert state.current_key == original_key
-    assert [item.name for item in pending] == [name]
-    assert pending_inbox_count(tmp_path) == 1
-    assert payload.priority == "critical"
-    assert payload.resend_count == 2
-    assert [attempt.messages_elapsed for attempt in payload.resend_attempts] == [
-        3,
-        3,
-    ]
-    assert pending[0].attachments[0].name == "paste.png"
-    assert "resend #2" in readout
-    assert "priority=critical" in readout
-
-    ack_message = f"ACK {original_key[:-1]}: handled the lineage once."
-    state.process_line(_assistant_line(ack_message))
-    summary = summarize_ack_archival(tmp_path, ack_message)
-
-    archived = collect_acked_inbox_items(tmp_path)
-    records = ack_state_records(tmp_path)
-    archived_attachment = archived[0].attachments[0]
-    assert state.outcome() == AckWatchOutcome(
-        acked=True,
-        assistant_messages_seen=7,
-        resends=2,
-    )
-    assert summary.archived == [original_key]
-    assert summary.unmatched == []
-    assert pending_inbox_count(tmp_path) == 0
-    assert collect_inbox_items(tmp_path) == []
-    assert archived_attachment.name == "paste.png"
-    assert archived_attachment.path.read_bytes() == b"image-bytes"
-    assert [
-        (
-            record.key,
-            record.inbox_name,
-            record.ack_content,
-            record.lineage,
-            record.attachments[0]["name"],
-        )
-        for record in records
-    ] == [
-        (
-            original_key,
-            name,
-            "handled the lineage once.",
-            {
-                "thread_id": THREAD_A,
-                "resend_count": 2,
-                "resend_attempts": [
-                    {
-                        "attempt": 1,
-                        "at": payload.resend_attempts[0].at,
-                        "messages_elapsed": 3,
-                    },
-                    {
-                        "attempt": 2,
-                        "at": payload.resend_attempts[1].at,
-                        "messages_elapsed": 3,
-                    },
-                ],
-            },
-            "paste.png",
-        )
-    ]
-
-    repo_root = Path(__file__).resolve().parents[1]
-    docs_text = "\n".join(
-        (
-            (
-                repo_root / "docs/design/accepted/semantic-ack-standalone-protocol.md"
-            ).read_text(encoding="utf-8"),
-            (repo_root / "docs/overview.md").read_text(encoding="utf-8"),
-        )
-    )
-    assert "resend #N" in docs_text
-    for stale in (
-        "fresh key",
-        "fresh-key",
-        "fresh closure",
-        "fresh-closure",
-        "under a fresh key",
-        "creating a fresh key",
-    ):
-        assert stale not in docs_text
-
-
-def test_ack_watch_nack_halts_resend_escalation(tmp_path):
-    original_key = "20260101T000000000001Z"
-    original_text = compose_inbox_text(body="consider this", priority=None, stop=False)
-    write_inbox_item(tmp_path, f"{original_key}.txt", original_text)
-    state = AckWatchState(
-        inbox_key=original_key,
-        original_text=original_text,
-        target_repo_root=tmp_path,
-        quiet=True,
-    )
-
-    state.process_line(
-        _assistant_line(f"NACK {original_key[:-1]}: refusing with a concrete reason.")
-    )
-    for index in range(3):
-        state.process_line(_assistant_line(f"ordinary response {index}"))
-
-    assert state.outcome() == AckWatchOutcome(
-        acked=False, assistant_messages_seen=1, resends=0, refused=True
-    )
-    assert state.current_key == original_key
-
-
-def test_ack_watch_resends_after_budget_and_escalates_stop_payload(tmp_path):
-    original_key = "20260101T000000000001Z"
-    original_text = compose_inbox_text(
-        body="wind down after this", priority=None, stop=True
-    )
-    write_inbox_item(tmp_path, f"{original_key}.txt", original_text)
-    observed_acks: list[tuple[str, str]] = []
-    state = AckWatchState(
-        inbox_key=original_key,
-        original_text=original_text,
-        target_repo_root=tmp_path,
-        quiet=True,
-        on_ack=lambda text, key: observed_acks.append((text, key)),
-    )
-
-    for index in range(3):
-        state.process_line(_assistant_line(f"ordinary response {index}"))
-
-    first_resend = inbox_dir(tmp_path) / f"{original_key}.txt"
-    first_payload = parse_inbox_payload(first_resend.read_text(encoding="utf-8"))
-    assert state.resends == 1
-    assert state.current_key == original_key
-    assert first_payload.priority == "urgent"
-    assert first_payload.body == "wind down after this"
-    assert first_payload.is_stop is True
-    assert first_payload.resend_count == 1
-    assert [attempt.messages_elapsed for attempt in first_payload.resend_attempts] == [
-        3
-    ]
-
-    for index in range(3, 6):
-        state.process_line(_assistant_line(f"ordinary response {index}"))
-
-    second_resend = inbox_dir(tmp_path) / f"{original_key}.txt"
-    second_payload = parse_inbox_payload(second_resend.read_text(encoding="utf-8"))
-    assert state.resends == 2
-    assert state.current_key == original_key
-    assert second_payload.priority == "critical"
-    assert second_payload.body == "wind down after this"
-    assert second_payload.is_stop is True
-    assert second_payload.resend_count == 2
-    assert [attempt.messages_elapsed for attempt in second_payload.resend_attempts] == [
-        3,
-        3,
-    ]
-
-    ack_text = f"ACK {state.current_key[:-1]}: received after retry."
-    state.process_line(_assistant_line(ack_text))
-
-    assert state.outcome() == AckWatchOutcome(
-        acked=True, assistant_messages_seen=7, resends=2
-    )
-    assert observed_acks == [(ack_text, original_key)]
 
 
 def test_supervised_nack_reports_refused_key(tmp_path, monkeypatch):

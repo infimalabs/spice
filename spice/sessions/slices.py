@@ -41,34 +41,6 @@ class CompactionWindowSelection:
         return len(self.selected_boundaries)
 
 
-def select_compaction_windows(
-    turns: Sequence[TurnRecord],
-    compactions: Sequence[CompactionRecord],
-    *,
-    count: int,
-    end: str | None = None,
-    hard_cap: int = 5,
-) -> CompactionWindowSelection:
-    requested = max(0, int(count))
-    capped = min(requested, max(0, int(hard_cap)))
-    eligible = tuple(record.ts for record in compactions if not end or record.ts <= end)
-    cap_excludes = requested > hard_cap and len(eligible) > hard_cap
-    if not eligible or capped == 0:
-        return CompactionWindowSelection(
-            start_ts=None,
-            basis="hard_cap" if cap_excludes else "compaction_count",
-            requested_count=requested,
-            selected_boundaries=(),
-        )
-    selected = eligible[-min(capped, len(eligible)) :]
-    return CompactionWindowSelection(
-        start_ts=selected[0],
-        basis="hard_cap" if cap_excludes else "compaction_count",
-        requested_count=requested,
-        selected_boundaries=selected,
-    )
-
-
 def select_compaction_windows_from_files(
     files: Sequence[Path],
     *,

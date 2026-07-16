@@ -63,6 +63,34 @@ def render_list(rows: list[dict[str, Any]]) -> str:
     return "\n".join(render_row(r) for r in rows)
 
 
+def render_task_list(
+    rows: list[dict[str, Any]], *, scope: str, detail: str = ""
+) -> str:
+    if scope == "actor-route":
+        if not detail:
+            raise ValueError("actor-route task-list scope requires a filter")
+        scope_line = f"scope actor-route filter {detail}"
+    elif scope == "explicit-project":
+        if not detail:
+            raise ValueError("explicit-project task-list scope requires a project")
+        scope_line = f"scope explicit-project {detail}"
+    elif scope == "global":
+        if detail:
+            raise ValueError("global task-list scope does not accept detail")
+        scope_line = "scope global --all"
+    else:
+        raise ValueError(f"unknown task-list scope {scope!r}")
+    if rows:
+        return "\n".join([scope_line, *(render_row(row) for row in rows)])
+    if scope == "global":
+        return f"{scope_line}\nno tasks in global scope"
+    return (
+        f"{scope_line}\n"
+        "no tasks in scope; use --all for global rows or --project PROJECT "
+        "for one project"
+    )
+
+
 def _deps_lines(row: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for dep_uuid in row.get("depends") or []:

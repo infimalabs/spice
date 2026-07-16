@@ -41,6 +41,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "markdown links",
     "reachability",
     "symbol reachability",
+    "python unused",
     "assertion-free tests",
     "private internals",
 ]
@@ -64,6 +65,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "markdown-links",
     "reachability",
     "symbol-reachability",
+    "python-unused",
     "assertion-free-tests",
     "private-internals",
 ]
@@ -518,6 +520,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "markdown links",
         "reachability",
         "symbol reachability",
+        "python unused",
         "assertion-free tests",
         "private internals",
     ]
@@ -918,6 +921,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_python_unused_guard",
+        lambda repo_root: record("python unused"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_assertion_free_test_guard",
         lambda repo_root: record("assertion-free tests"),
     )
@@ -965,6 +973,7 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
+    monkeypatch.setattr(precommit, "_run_python_unused_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )

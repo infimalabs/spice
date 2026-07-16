@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -295,6 +296,41 @@ def test_scavenge_removes_dead_roots_and_spares_live_runs(tmp_path):
     assert sorted(entry.name for entry in parent.iterdir()) == sorted(
         [live_marked.name, live_named.name]
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX zombie state is required")
+def test_scavenge_recovers_zombie_owner_and_reports_root(tmp_path):
+    parent = tmp_path / "scratch"
+    parent.mkdir()
+    zombie = subprocess.Popen(["true"])
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            state = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(zombie.pid)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+            if state.startswith("Z"):
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("child did not enter zombie state")
+        abandoned = parent / f"run-{zombie.pid}-deadbeef"
+        abandoned.mkdir()
+        (abandoned / "leftover.py").write_text("leftover = 1\n", encoding="utf-8")
+        paths.atomic_write_json(
+            abandoned / scratch.OWNER_MARKER_NAME, {"pid": zombie.pid}
+        )
+
+        recovery = scratch.scavenge_abandoned_roots(parent)
+
+        assert recovery.removed == (abandoned.name,)
+        assert tuple(parent.iterdir()) == ()
+    finally:
+        zombie.wait()
 
 
 def test_study_reports_recovered_abandoned_roots(tmp_path, monkeypatch):

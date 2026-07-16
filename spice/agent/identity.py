@@ -65,13 +65,3 @@ def ambient_thread_id() -> str | None:
     """Return the ambient agent's thread id, or None."""
     ambient = ambient_thread()
     return ambient[0] if ambient is not None else None
-
-
-def is_ambient_agent_invocation() -> bool:
-    """True iff the current process is running under an agent.
-
-    Canonical predicate for commands that must refuse to run from an agent
-    context (or, conversely, that need agent-only behavior). The backing
-    signal is :func:`ambient_thread_id`.
-    """
-    return ambient_thread_id() is not None

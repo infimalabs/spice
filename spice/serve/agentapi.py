@@ -215,18 +215,6 @@ def deadletter_failed_agent_ensure_payload(
     return payload
 
 
-def pending_inbox_count_after_agent_ensure(
-    pending_count: int,
-    agent_ensure: dict[str, Any] | None,
-) -> int:
-    if not isinstance(agent_ensure, dict):
-        return pending_count
-    try:
-        return int(agent_ensure.get("pendingInboxCount", pending_count))
-    except (TypeError, ValueError):
-        return pending_count
-
-
 def _ensure_due(
     target_id: str,
     *,

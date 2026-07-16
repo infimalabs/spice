@@ -59,14 +59,6 @@ def _clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
     return flat[: limit - 1].rstrip() + "…"
 
 
-def dirty_path_count() -> int:
-    repo_root = _briefing_repo_root_from_cwd()
-    if repo_root is None:
-        return 0
-    pressure = _build_dirty_worktree_pressure(repo_root=repo_root)
-    return int(pressure.get("dirtyPathCount") or 0)
-
-
 def git_posture_lines() -> list[str]:
     repo_root = _briefing_repo_root_from_cwd()
     if repo_root is None:

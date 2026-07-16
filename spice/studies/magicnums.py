@@ -57,40 +57,6 @@ class MagicFinding:
     literal: str
 
 
-def scan_paths_magic_numbers(
-    paths: list[Path],
-    *,
-    root: Path,
-    examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
-    examine_threshold_for_path: MagicThresholdForPath | None = None,
-    suffixes: tuple[str, ...] = MAGIC_SUFFIXES,
-    c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
-) -> list[MagicFinding]:
-    findings: list[MagicFinding] = []
-    for rel_path in paths:
-        if rel_path.suffix not in suffixes or is_excluded_path(
-            rel_path, repo_root=root
-        ):
-            continue
-        abs_path = root / rel_path
-        if not abs_path.exists():
-            continue
-        text = abs_path.read_text(encoding="utf-8", errors="replace")
-        findings.extend(
-            scan_text_magic_numbers(
-                rel_path,
-                text,
-                examine_threshold=_threshold_for_path(
-                    rel_path,
-                    default=examine_threshold,
-                    resolver=examine_threshold_for_path,
-                ),
-                c_grammar_suffixes=c_grammar_suffixes,
-            )
-        )
-    return findings
-
-
 def scan_text_magic_numbers(
     rel_path: Path,
     text: str,

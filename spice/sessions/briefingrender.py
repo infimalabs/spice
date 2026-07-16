@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol, TypeVar
 
 from spice.mail.inbox import (
     INBOX_RESPONSE_ROW,
@@ -19,34 +18,6 @@ from spice.mail.inbox import (
 )
 from spice.paths import repo_root_from_cwd
 from spice.sessions import records
-
-
-class AskCandidateLike(Protocol):
-    @property
-    def label(self) -> str: ...
-
-    @property
-    def timestamp(self) -> str: ...
-
-    @property
-    def text(self) -> str: ...
-
-
-Candidate = TypeVar("Candidate", bound=AskCandidateLike)
-
-
-def drop_human_ask_duplicates(candidates: Sequence[Candidate]) -> list[Candidate]:
-    real_asks = {
-        (candidate.timestamp, candidate.text)
-        for candidate in candidates
-        if candidate.label != "human"
-    }
-    return [
-        candidate
-        for candidate in candidates
-        if candidate.label != "human"
-        or (candidate.timestamp, candidate.text) not in real_asks
-    ]
 
 
 def active_filter_lines(

@@ -76,17 +76,6 @@ from spice.agent.shellhook import (
     packaged_shell_steering_static_hook_dir,
 )
 from spice.errors import SpiceError
-from spice.sessions.meter import (
-    ContextMeter,
-    active_context_percent,
-    collect_latest_context_meter,
-    context_meter_cache_payload,
-    context_meter_from_cache_payload,
-    GuidanceState,
-    context_meter_instruction,
-    context_pressure_level,
-    context_pressure_should_warn,
-)
 
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
@@ -127,15 +116,6 @@ class WorkingStateSnapshot:
 
 ProcessFactory = Callable[..., Any]
 TimeFactory = Callable[[], float]
-ContextMeterFactory = Callable[[Path | None], ContextMeter | None]
-
-
-def context_meter_cache_path(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / "context-meter.json"
-
-
-def context_warning_state_path(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / "context-warning.json"
 
 
 def working_state_state_path(repo_root: Path) -> Path:
@@ -756,139 +736,6 @@ def _iso_timestamp_seconds(value: str) -> float | None:
         return None
 
 
-class AgentContextMeterInjector:
-    """Write keep-working guidance to stderr, repeat-suppressed on disk."""
-
-    def __init__(
-        self,
-        repo_root: Path | None,
-        *,
-        stderr: TextIO,
-        repeat_interval_seconds: float = AGENT_RUN_INBOX_REPEAT_SECONDS,
-        time_factory: TimeFactory = time.monotonic,
-        meter_factory: ContextMeterFactory,
-    ) -> None:
-        self.repo_root = repo_root
-        self.stderr = stderr
-        self.repeat_interval_seconds = max(0.0, repeat_interval_seconds)
-        self.time_factory = time_factory
-        self.meter_factory = meter_factory
-        self.displayed_at: float | None = None
-        self.displayed_key: ContextWarningKey | None = None
-
-    def inject(self, *, force: bool) -> None:
-        warning = render_agent_context_warning(self.meter_factory(self.repo_root))
-        if warning is None:
-            return
-        signature, text = warning
-        key = context_warning_key(signature)
-        now = self.time_factory()
-        if self._should_suppress(key, now=now):
-            return
-        self.stderr.write(text)
-        if not text.endswith("\n"):
-            self.stderr.write("\n")
-        self.stderr.flush()
-        self._record_displayed(key, now=now)
-
-    def _should_suppress(self, key: ContextWarningKey, *, now: float) -> bool:
-        if self._is_recent_match(self.displayed_key, self.displayed_at, key, now=now):
-            return True
-        stored_key, stored_at = read_context_warning_state(self.repo_root)
-        if self._is_recent_match(stored_key, stored_at, key, now=now):
-            self.displayed_key = stored_key
-            self.displayed_at = stored_at
-            return True
-        return False
-
-    def _record_displayed(self, key: ContextWarningKey, *, now: float) -> None:
-        self.displayed_key = key
-        self.displayed_at = now
-        write_context_warning_state(self.repo_root, key, now=now)
-
-    def _is_recent_match(
-        self,
-        displayed_key: ContextWarningKey | None,
-        displayed_at: float | None,
-        key: ContextWarningKey,
-        *,
-        now: float,
-    ) -> bool:
-        if displayed_key != key or displayed_at is None:
-            return False
-        age = now - displayed_at
-        return 0 <= age < self.repeat_interval_seconds
-
-
-def agent_context_meter(repo_root: Path | None) -> ContextMeter | None:
-    thread_id = ambient_thread_id()
-    if repo_root is None or not thread_id:
-        return None
-    now = time.time()
-    cached = read_cached_agent_context_meter(repo_root, thread_id, now=now)
-    if cached is not None:
-        return cached
-    try:
-        transcript_path = driver_for(repo_root).thread_transcript_path(thread_id)
-    except (RuntimeError, SystemExit):
-        return None
-    try:
-        meter = collect_latest_context_meter([transcript_path])
-    except OSError:
-        return None
-    write_cached_agent_context_meter(repo_root, thread_id, meter, now=now)
-    return meter
-
-
-def context_warning_key(signature: ContextWarningSignature) -> ContextWarningKey:
-    return (signature[0],)
-
-
-def read_context_warning_state(
-    repo_root: Path | None,
-) -> tuple[ContextWarningKey | None, float | None]:
-    if repo_root is None:
-        return None, None
-    payload = read_context_meter_cache_payload(context_warning_state_path(repo_root))
-    raw_key = payload.get("key")
-    displayed_at = _float_payload_value(payload.get("displayedAt"))
-    if (
-        not isinstance(raw_key, list)
-        or len(raw_key) != 1
-        or not isinstance(raw_key[0], str)
-        or displayed_at is None
-    ):
-        return None, None
-    return (raw_key[0],), displayed_at
-
-
-def write_context_warning_state(
-    repo_root: Path | None, key: ContextWarningKey, *, now: float
-) -> None:
-    if repo_root is None:
-        return
-    path = context_warning_state_path(repo_root)
-    atomic_write_json(
-        path,
-        {"displayedAt": now, "key": list(key)},
-        compact=True,
-    )
-
-
-def read_cached_agent_context_meter(
-    repo_root: Path, thread_id: str, *, now: float
-) -> ContextMeter | None:
-    payload = read_context_meter_cache_payload(context_meter_cache_path(repo_root))
-    if payload.get("threadId") != thread_id:
-        return None
-    checked_at = _float_payload_value(payload.get("checkedAt"))
-    if checked_at is None:
-        return None
-    if now - checked_at > AGENT_RUN_CONTEXT_METER_CACHE_SECONDS:
-        return None
-    return context_meter_from_cache_payload(payload.get("meter"))
-
-
 def read_context_meter_cache_payload(path: Path) -> dict[str, Any]:
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -897,39 +744,9 @@ def read_context_meter_cache_payload(path: Path) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def write_cached_agent_context_meter(
-    repo_root: Path, thread_id: str, meter: ContextMeter, *, now: float
-) -> None:
-    path = context_meter_cache_path(repo_root)
-    atomic_write_json(
-        path,
-        {
-            "checkedAt": now,
-            "threadId": thread_id,
-            "meter": context_meter_cache_payload(meter),
-        },
-        compact=True,
-    )
-
-
 def _float_payload_value(value: Any) -> float | None:
     return float(value) if isinstance(value, int | float) else None
 
 
 def _int_payload_value(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def render_agent_context_warning(
-    meter: ContextMeter | None,
-) -> tuple[ContextWarningSignature, str] | None:
-    if meter is None or meter.latest_snapshot is None:
-        return None
-    snapshot = meter.latest_snapshot
-    percent = active_context_percent(snapshot)
-    level = context_pressure_level(percent)
-    if not context_pressure_should_warn(level):
-        return None
-    signature = (level, snapshot.ts, snapshot.total_tokens)
-    instruction = context_meter_instruction(GuidanceState(level=level))
-    return signature, instruction + "\n"

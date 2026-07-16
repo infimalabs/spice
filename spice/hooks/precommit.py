@@ -57,6 +57,7 @@ from spice.studies import (
     links,
     localpaths,
     magicnums,
+    pythonunused,
     reachability,
     shape,
     taste,
@@ -254,6 +255,11 @@ def _builtin_pre_commit_steps(
             "symbol-reachability",
             "symbol reachability",
             lambda: _run_symbol_reachability_guard(repo_root, paths),
+        ),
+        PreCommitStep(
+            "python-unused",
+            "python unused",
+            lambda: _run_python_unused_guard(repo_root),
         ),
         PreCommitStep(
             "assertion-free-tests",
@@ -852,6 +858,18 @@ def _run_symbol_reachability_guard(
         )
 
 
+def _run_python_unused_guard(repo_root: Path) -> None:
+    findings = pythonunused.scan_python_unused_symbols(repo_root)
+    if findings:
+        board = pythonunused.render_python_unused_board(findings)
+        raise SpiceError(
+            f"{board}\n"
+            "python-unused: zero candidate-unused or test-only top-level symbols "
+            "are allowed; delete dead definitions, wire production references, "
+            "or record an exact dynamic-dispatch exemption"
+        )
+
+
 def _run_assertion_free_test_guard(repo_root: Path) -> None:
     debt_limit = resolve_policy(repo_root).debt.assertion_free_tests
     findings = testquality.scan_assertion_free_tests(
@@ -868,12 +886,6 @@ def _run_assertion_free_test_guard(repo_root: Path) -> None:
             "explicit drainable cleanup debt - add assertions or lower "
             "configured debt after cleanup"
         )
-
-
-def _coupling_key(
-    finding: testquality.PrivateInternalCouplingFinding,
-) -> tuple[str, str, str]:
-    return testquality.private_internal_coupling_key(finding)
 
 
 def _run_private_internal_coupling_guard(repo_root: Path) -> None:
@@ -912,6 +924,7 @@ QUALITY_GATE_GUARDS: dict[str, Callable[[Path], None]] = {
     "coupling": _run_private_internal_coupling_guard,
     "reachability": _run_reachability_guard,
     "symbol-reachability": _run_symbol_reachability_guard,
+    "python-unused": _run_python_unused_guard,
     "assertion-free": _run_assertion_free_test_guard,
 }
 

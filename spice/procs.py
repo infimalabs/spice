@@ -55,20 +55,6 @@ def terminate_process_group(
     )
 
 
-def terminate_process_group_id(
-    process_group_id: int,
-    *,
-    signum: int | None = None,
-) -> None:
-    if _is_windows():
-        _force_windows_process_tree(process_group_id)
-        return
-    try:
-        os.killpg(process_group_id, signal.SIGTERM if signum is None else signum)
-    except ProcessLookupError:
-        return
-
-
 def process_group_is_running(process_group_id: int | None) -> bool:
     if process_group_id is None:
         return False

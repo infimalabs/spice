@@ -38,7 +38,7 @@ from spice.mail.attachments import (
     write_inbox_attachments,
 )
 from spice.locking import bounded_exclusive_lock
-from spice.paths import STATE_DIRNAME, atomic_write_text, fsync_directory
+from spice.paths import STATE_DIRNAME, fsync_directory
 
 INBOX_DIRNAME = "inbox"
 INBOX_ARCHIVE_DIRNAME = "archive"
@@ -807,59 +807,6 @@ def notify_inbox_changed(repo_root: Path | None) -> None:
     notify_agent_side_channel(repo_root)
 
 
-def resend_inbox_item(
-    repo_root: Path,
-    *,
-    original_key: str,
-    original_text: str,
-    attempt: int,
-    messages_elapsed: int,
-) -> Path:
-    """Record another resend attempt on the original pending inbox item."""
-    original_path = inbox_dir(repo_root) / f"{original_key}.txt"
-    try:
-        current_text = original_path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        current_text = original_text
-    parsed = parse_inbox_payload(current_text)
-    new_priority = _escalate_resend_priority(parsed.priority, attempt=attempt)
-    attempts = (
-        *parsed.resend_attempts,
-        InboxResendAttempt(
-            attempt=max(0, int(attempt)),
-            at=_resend_attempt_timestamp(),
-            messages_elapsed=max(0, int(messages_elapsed)),
-        ),
-    )
-    composed = compose_inbox_text(
-        body=parsed.body,
-        priority=new_priority,
-        stop=parsed.is_stop,
-        controls=parsed.controls,
-        resend_attempts=attempts,
-    )
-    return replace_inbox_item_text(repo_root, original_path.name, composed)
-
-
-def replace_inbox_item_text(repo_root: Path, name: str, text: str) -> Path:
-    """Atomically replace an existing inbox item's text, preserving its name."""
-    if not valid_inbox_name(name):
-        raise RuntimeError("Inbox item name must be a direct child name, not a path")
-    directory = inbox_dir(repo_root)
-    directory.mkdir(parents=True, exist_ok=True)
-    target_path = directory / name
-    # The lock orders resend updates; the canonical writer supplies whole-file
-    # replacement and durability inside that arbitration contract.
-    with bounded_exclusive_lock(
-        directory / INBOX_PUBLISH_LOCK_NAME,
-        timeout_seconds=INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS,
-        action="replace inbox item",
-    ):
-        atomic_write_text(target_path, text)
-        notify_inbox_changed(repo_root)
-    return target_path
-
-
 @dataclass(frozen=True)
 class InboxPayload:
     priority: str | None
@@ -991,18 +938,6 @@ def normalize_inbox_controls(controls: Sequence[str] = ()) -> tuple[str, ...]:
 
 def inbox_control_readout_row(control: str) -> str:
     return INBOX_CONTROL_READOUT_ROWS[control]
-
-
-def _escalate_resend_priority(current: str | None, *, attempt: int) -> str:
-    if attempt >= 2:
-        return "critical"
-    if current and PRIORITY_RANK.get(current, 0) > PRIORITY_RANK["urgent"]:
-        return current
-    return "urgent"
-
-
-def _resend_attempt_timestamp() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _atomic_publish_inbox_item(tmp_path: Path, target_path: Path) -> Path:

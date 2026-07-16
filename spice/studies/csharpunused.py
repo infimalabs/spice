@@ -82,18 +82,6 @@ def collect_csharp_unused_entries(
     )
 
 
-def scan_csharp_unused_candidates(
-    paths: Sequence[Path],
-    *,
-    root: Path,
-) -> list[CSharpUnusedEntry]:
-    return [
-        entry
-        for entry in collect_csharp_unused_entries(paths, root=root)
-        if entry.status == STATUS_CANDIDATE_UNUSED
-    ]
-
-
 def csharp_unused_payload(entries: Sequence[CSharpUnusedEntry]) -> dict[str, Any]:
     counts = Counter(entry.status for entry in entries)
     return {

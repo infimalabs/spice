@@ -26,6 +26,7 @@ from spice.tasks import (
 
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
 @pytest.fixture
@@ -37,6 +38,7 @@ def task_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(repo)
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
     monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
+    monkeypatch.setenv(config.TASK_BACKEND_ENV, str(backend))
     config.set_backend(str(backend))
     try:
         yield repo
@@ -51,11 +53,58 @@ def test_task_list_help_shows_limit_filters_and_examples(capsys):
         parser.parse_args(["task", "list", "--help"])
 
     help_text = capsys.readouterr().out
+    assert "[--all | --project PROJECT]" in help_text
     assert "--limit N" in help_text
     assert "--project PROJECT" in help_text
     assert "--status {pending,waiting,completed,deleted}" in help_text
-    assert "spice task list --limit 20" in help_text
+    assert "Actor-route scope:" in help_text
+    assert "spice task list --status pending --limit 20" in help_text
+    assert "Explicit project scope:" in help_text
     assert "spice task list --project serve.ui --status pending --limit 20" in help_text
+    assert "Global scope:" in help_text
+    assert "spice task list --all --status pending" in help_text
+
+
+def test_task_list_scoped_empty_points_to_matching_global_and_project_rows(
+    task_repo, monkeypatch, capsys
+):
+    assert task_repo.is_dir()
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_B)
+    create.add(
+        "Peer global board row",
+        project="task.cli",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["row remains globally visible"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+
+    scoped_output = _task_list_through_cli(capsys, "--status", "pending")
+    global_output = _task_list_through_cli(capsys, "--all", "--status", "pending")
+    project_output = _task_list_through_cli(
+        capsys, "--project", "task.cli", "--status", "pending"
+    )
+
+    assert scoped_output.splitlines() == [
+        (
+            "scope actor-route filter ( "
+            f"project:{config.private_project(ACTOR_A)} or "
+            f"origin_thread.is:{ACTOR_A} )"
+        ),
+        (
+            "no tasks in scope; use --all for global rows or --project PROJECT "
+            "for one project"
+        ),
+    ]
+    assert global_output.splitlines()[0] == "scope global --all"
+    assert "Peer global board row" in global_output
+    assert project_output.splitlines()[0] == ("scope explicit-project project:task.cli")
+    assert "Peer global board row" in project_output
+
+
+def _task_list_through_cli(capsys, *options: str) -> str:
+    args = build_parser().parse_args(["task", "list", *options])
+    assert args.func(args) == 0
+    return capsys.readouterr().out.strip()
 
 
 def test_task_list_parse_error_points_to_limit_example(capsys):
@@ -597,7 +646,7 @@ def test_task_add_rejects_oops_system_project(task_repo):
         )
 
 
-def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
+def test_task_list_project_scope_filters_board_and_sorts_newest(monkeypatch):
     rows = [
         _row(
             "Serve UI oldest",
@@ -622,20 +671,17 @@ def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
     ]
     seen: dict[str, object] = {}
 
-    def fake_visible_rows(actor: str, filters: list[str]) -> list[dict[str, object]]:
-        seen["actor"] = actor
+    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
         seen["filters"] = filters
         return rows
 
-    monkeypatch.setattr("spice.tasks.tw.current_actor", lambda: "actor-a")
-    monkeypatch.setattr(task_cli.alloc, "visible_rows", fake_visible_rows)
+    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
 
     output = task_cli._list(
         argparse.Namespace(all=False, status=None, project="serve", limit=2)
     )
 
     assert seen == {
-        "actor": "actor-a",
         "filters": [
             "(",
             "status:pending",
@@ -649,8 +695,9 @@ def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
         ],
     }
     lines = output.splitlines()
-    assert "Serve API newest" in lines[0]
-    assert "Serve UI middle" in lines[1]
+    assert lines[0] == "scope explicit-project project:serve"
+    assert "Serve API newest" in lines[1]
+    assert "Serve UI middle" in lines[2]
     assert "Task newest ignored" not in output
     assert "Serve UI oldest" not in output
 
@@ -658,26 +705,34 @@ def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
 def test_task_list_status_filter_uses_visible_rows(monkeypatch):
     seen: dict[str, object] = {}
 
-    def fake_visible_rows(actor: str, filters: list[str]) -> list[dict[str, object]]:
+    def fake_visible_rows_with_scope(
+        actor: str, filters: list[str]
+    ) -> tuple[list[dict[str, object]], list[str]]:
         seen["actor"] = actor
         seen["filters"] = filters
-        return [
-            _row(
-                "Waiting task",
-                project="task.cli",
-                status="waiting",
-                incepted="20260612T000000000001Z",
-            )
-        ]
+        return (
+            [
+                _row(
+                    "Waiting task",
+                    project="task.cli",
+                    status="waiting",
+                    incepted="20260612T000000000001Z",
+                )
+            ],
+            ["project:task.cli"],
+        )
 
     monkeypatch.setattr("spice.tasks.tw.current_actor", lambda: "actor-a")
-    monkeypatch.setattr(task_cli.alloc, "visible_rows", fake_visible_rows)
+    monkeypatch.setattr(
+        task_cli.alloc, "visible_rows_with_scope", fake_visible_rows_with_scope
+    )
 
     output = task_cli._list(
         argparse.Namespace(all=False, status="waiting", project=None, limit=None)
     )
 
     assert seen == {"actor": "actor-a", "filters": ["+WAITING"]}
+    assert output.splitlines()[0] == "scope actor-route filter project:task.cli"
     assert "Waiting task" in output
 
 
@@ -716,6 +771,9 @@ def test_task_list_explicit_hidden_project_uses_raw_export(monkeypatch):
             ")",
         ]
     }
+    assert output.splitlines()[0] == (
+        f"scope explicit-project project:{config.OOPS_PROJECT}"
+    )
     assert "Hidden oops item" in output
 
 
@@ -754,6 +812,7 @@ def test_task_list_all_marks_completed_and_deleted_rows(monkeypatch):
     output = task_cli._list(
         argparse.Namespace(all=True, status=None, project=None, limit=None)
     )
+    assert output.splitlines()[0] == "scope global --all"
     live_line = next(line for line in output.splitlines() if "Live task" in line)
     completed_line = next(
         line for line in output.splitlines() if "Completed task" in line
