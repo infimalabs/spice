@@ -35,6 +35,10 @@ COMMAND_WORKING_STATE_TWO_PENDING = 2
 COMMAND_WORKING_STATE_SENTENCE_PERIODS = 1
 COMMAND_WORKING_STATE_INCEPTED = "00000001"
 COMMAND_WORKING_STATE_HANDLE = f"METER-{COMMAND_WORKING_STATE_INCEPTED}"
+# Watcher shutdown crosses two thread handoffs (server handler close, client
+# EOF); join returns the moment the thread exits, so this ceiling only bounds
+# genuinely stuck threads while tolerating a saturated parallel-suite host.
+SIDE_CHANNEL_SHUTDOWN_DEADLINE_S = 10.0
 
 
 @pytest.fixture(autouse=True)
@@ -963,7 +967,7 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
         )
         output = _eventually(lambda: stderr.getvalue(), contains="late steering")
 
-    thread.join(timeout=1.0)
+    thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "Inbox Steering" in output
     # The late item's full readout streams exactly once; any later suppressed
     # inject surfaces only the one-line pending count, not a second full readout.
@@ -1033,7 +1037,7 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
         thread.start()
         output = _eventually(lambda: stderr.getvalue(), contains="000000000002Z")
 
-    thread.join(timeout=1.0)
+    thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "Supervisor Feedback" in output
     assert notice in output
     assert output.count("000000000002Z") == 1
@@ -1067,7 +1071,7 @@ def test_side_channel_watch_keeps_supervisor_feedback_and_working_state(
         thread.start()
         output = _eventually(lambda: stderr.getvalue(), contains="Working state")
 
-    thread.join(timeout=1.0)
+    thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "Supervisor Feedback" in output
     assert notice in output
     assert output.count("batch add rejected") == 1
@@ -1095,7 +1099,7 @@ def test_side_channel_watch_streams_later_notice_to_stderr(tmp_path, monkeypatch
         )
         output = _eventually(lambda: stderr.getvalue(), contains="batch add rejected")
 
-    thread.join(timeout=1.0)
+    thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "Supervisor Feedback" in output
     assert notice in output
     assert output.count("batch add rejected") == 1
@@ -1139,7 +1143,7 @@ def test_side_channel_streams_to_each_connection_without_cross_suppression(
         )
 
     for thread in threads:
-        thread.join(timeout=1.0)
+        thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "multi connection steering" in out_a
     assert "multi connection steering" in out_b
 
@@ -1190,7 +1194,7 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
         )
         allow_registration.set()
         output = _eventually(lambda: stderr.getvalue(), contains="runner steering")
-        thread.join(timeout=2.0)
+        thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
 
     assert results == [0]
     assert "Inbox Steering" in output
@@ -1323,8 +1327,8 @@ def test_side_channel_watch_exits_when_parent_pid_exits_without_shell_trap(
             },
         )
         thread.start()
-        parent.wait(timeout=2.0)
-        thread.join(timeout=2.0)
+        parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+        thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
         alive = thread.is_alive()
 
     assert not alive
