@@ -32,6 +32,7 @@ from spice.agent.wrap import (
     post_tool_hook_inbox_state_path,
     side_channel_marker_path,
 )
+from spice.paths import atomic_write_text
 
 SOCKET_READ_BYTES = 8192
 LISTENER_ACCEPT_TIMEOUT_S = 0.1
@@ -232,11 +233,7 @@ class AgentSideChannelServer:
                 wake_writer.sendall(b"\0")
 
     def _write_socket_marker(self) -> None:
-        temp_path = self.socket_marker_path.with_name(
-            f".{self.socket_marker_path.name}.{os.getpid()}.tmp"
-        )
-        temp_path.write_text(str(self.socket_path), encoding="utf-8")
-        temp_path.replace(self.socket_marker_path)
+        atomic_write_text(self.socket_marker_path, str(self.socket_path))
 
     def _remove_socket_marker(self) -> None:
         try:

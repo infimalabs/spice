@@ -30,6 +30,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.gitprocess import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
+from spice.paths import atomic_write_text
 from spice.tasks import config, identity, wordingreview
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
@@ -661,7 +662,7 @@ def _git_state_path(repo_root: Path, name: str) -> Path:
 
 
 def _write_git_state(repo_root: Path, name: str, content: str) -> None:
-    _git_state_path(repo_root, name).write_text(content, encoding="utf-8")
+    atomic_write_text(_git_state_path(repo_root, name), content)
 
 
 def _snapshot_merge_state(repo_root: Path) -> dict[Path, bytes | None]:
@@ -673,6 +674,7 @@ def _snapshot_merge_state(repo_root: Path) -> dict[Path, bytes | None]:
 
 
 def _restore_merge_state(snapshot: dict[Path, bytes | None]) -> None:
+    """Restore Git-owned binary metadata exactly during transaction rollback."""
     for path, content in snapshot.items():
         if content is None:
             path.unlink(missing_ok=True)
