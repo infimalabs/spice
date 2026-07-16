@@ -23,6 +23,10 @@ from spice.studies import complexity
 FAST_DEADLINE_SECONDS = 0.1
 COMMAND_RETURN_BUDGET_SECONDS = 1.0
 PROCESS_EXIT_BUDGET_SECONDS = 1.0
+# The group-termination handshake starts two interpreters and writes a pid file
+# before its deadline may fire; under full-suite xdist load those spawns blow
+# far past FAST_DEADLINE_SECONDS, so that one test gets a generous deadline.
+SPAWN_HANDSHAKE_DEADLINE_SECONDS = 5.0
 
 
 @pytest.mark.parametrize(
@@ -83,7 +87,7 @@ def test_bounded_provider_terminates_process_group_and_reports_phase_input(
     with pytest.raises(ProcessDeadlineExceeded) as raised:
         run_bounded_process_group(
             [sys.executable, "-c", provider, str(child_pid_path)],
-            timeout_seconds=FAST_DEADLINE_SECONDS,
+            timeout_seconds=SPAWN_HANDSHAKE_DEADLINE_SECONDS,
             phase="briefing-complexity-current",
             input_label=f"repository={tmp_path} paths=hung.py",
             text=True,
