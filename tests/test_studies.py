@@ -1,5 +1,6 @@
 """Constitution mechanics: flex ratio, sticky state, magic-number verdicts."""
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -1114,6 +1115,41 @@ def test_mutation_board_flags_zero_constraint_tests():
     assert "pkg/sample.py | 0/1 | 1 | 0 | 0%" in board
     assert "- pkg/sample.py: tests/test_sample.py::test_add" in board
     assert "- pkg/sample.py: 0% < 100%" in board
+
+
+def test_write_mutation_ratchet_preserves_standing_invocation_policy(tmp_path):
+    ratchet = tmp_path / "mutation-ratchet.json"
+    standing = {
+        "surface": "spice dev doctor",
+        "targets": ["pkg/sample.py"],
+        "tests": ["tests/test_sample.py"],
+    }
+    ratchet.write_text(
+        json.dumps({"version": 1, "standing": standing, "modules": {}}),
+        encoding="utf-8",
+    )
+    report = mutations.ModuleMutationReport(
+        path="pkg/sample.py",
+        mutants=2,
+        killed=1,
+        survived=1,
+        timed_out=0,
+        results=(),
+    )
+
+    mutations.write_ratchet(ratchet, (report,))
+
+    payload = json.loads(ratchet.read_text(encoding="utf-8"))
+    assert payload["standing"] == standing
+    assert payload["modules"] == {
+        "pkg/sample.py": {
+            "score": 0.5,
+            "killed": 1,
+            "survived": 1,
+            "timed_out": 0,
+            "mutants": 2,
+        }
+    }
 
 
 def test_mutation_cli_resolves_ratchet_paths_from_repo_root(tmp_path, monkeypatch):

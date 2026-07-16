@@ -64,6 +64,32 @@ commit-message rules all bind this repository first. A harness that exempts its
 own tree from its standards cannot credibly ask target repositories to accept
 them.
 
+### Standing mutation ratchet
+
+This repository has one standing mutation invocation: `spice dev doctor` reads
+`tests/mutation-ratchet.json` and runs its declared cohort through the isolated
+disposable-checkout mutation engine. It is deliberately absent from pre-commit;
+ordinary commits stay fast, while an explicit whole-repository health check
+reports score regressions or newly unhandled zero-constraint tests.
+
+The committed cohort guards configuration precedence, immutable provenance,
+parse-error attribution, recursive merge behavior, and contextualized consumer
+errors through `spice/configlayer.py` and `tests/test_configlayer.py`. The
+baseline stores the target, test suite, mutation bound, timeout, score, and
+reviewed dispositions together so the doctor cannot silently run a different
+experiment.
+
+Mutation score is an aggregate behavioral pressure, not a demand that every AST
+rewrite receive a test. The baseline records equivalent mutants whose changed
+syntax cannot alter the declared invariant and low-information mutants that
+abort before pytest can attribute a killing node ID. Those classes keep their
+review reason in the baseline; they do not justify implementation-introspection
+tests. The retained system-layer parse-error test is likewise a public contract:
+its zero-constraint label comes from missing node-ID attribution for a suite-wide
+path error, not from missing assertions. The existing `spice study mutations`
+command remains an intentional diagnostic and baseline-refresh tool, but no
+second scheduled, release, or commit-gate surface invokes this standing cohort.
+
 ## Entry Ladder
 
 Spice Harness deliberately reveals one operating commitment at a time: **watch

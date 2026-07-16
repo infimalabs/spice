@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -199,6 +200,87 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
         "rtk": "ok" if health.active else "warn",
         "remaining_check": "env-name-ledger",
         "check_count": 23,
+    }
+
+
+def test_doctor_runs_committed_mutation_ratchet_through_study_engine(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    ratchet = repo / doctor.mutations.STANDING_MUTATION_RATCHET_PATH
+    ratchet.parent.mkdir(parents=True, exist_ok=True)
+    ratchet.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "modules": {"pkg/module.py": {"score": 0.5}},
+                "standing": {
+                    "surface": "spice dev doctor",
+                    "targets": ["pkg/module.py"],
+                    "tests": ["tests/test_module.py"],
+                    "maxMutantsPerModule": 4,
+                    "timeoutSeconds": 7,
+                    "equivalentMutants": [
+                        {
+                            "path": "pkg/module.py",
+                            "mutationIndex": 0,
+                            "reason": "equivalent fixture mutant",
+                        }
+                    ],
+                    "lowInformationMutants": [
+                        {
+                            "path": "pkg/module.py",
+                            "mutationIndex": 1,
+                            "reason": "fixture-wide error",
+                        }
+                    ],
+                    "retainedZeroConstraintTests": {
+                        "tests/test_module.py::test_public_contract": (
+                            "public fixture contract"
+                        )
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = {}
+
+    def run_mutation_study(paths, **kwargs):
+        calls["paths"] = paths
+        calls.update(kwargs)
+        return doctor.mutations.MutationStudy(
+            reports=(
+                doctor.mutations.ModuleMutationReport(
+                    path="pkg/module.py",
+                    mutants=4,
+                    killed=2,
+                    survived=2,
+                    timed_out=0,
+                    results=(),
+                    zero_constraint_tests=(
+                        "tests/test_module.py::test_public_contract",
+                    ),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(doctor.mutations, "run_mutation_study", run_mutation_study)
+
+    report = doctor.run_doctor(repo)
+    check = _check(report, "mutation-ratchet")
+
+    assert check.status == "ok"
+    assert check.command == "spice dev doctor"
+    assert "pkg/module.py=50%" in check.detail
+    assert "handled equivalent=1 low-information=1" in check.detail
+    assert calls == {
+        "paths": [Path("pkg/module.py")],
+        "root": repo,
+        "test_paths": [Path("tests/test_module.py")],
+        "max_mutants_per_module": 4,
+        "timeout_seconds": 7,
+        "ratchet_path": ratchet,
     }
 
 

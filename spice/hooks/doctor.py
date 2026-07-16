@@ -35,7 +35,15 @@ from spice.paths import (
 )
 from spice.policyconfig import resolve_policy
 from spice.toolprocess import run_tool_command
-from spice.studies import complexity, envpolicy, fileloc, magicnums, repodocs, shape
+from spice.studies import (
+    complexity,
+    envpolicy,
+    fileloc,
+    magicnums,
+    mutations,
+    repodocs,
+    shape,
+)
 from spice.studies.walk import staged_paths as staged_gate_paths
 from spice.studies.walk import tracked_paths
 
@@ -105,6 +113,9 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _env_policy_check(repo_root, paths, staged_paths),
         _env_name_ledger_check(repo_root, paths),
     ]
+    mutation_ratchet = _mutation_ratchet_check(repo_root)
+    if mutation_ratchet is not None:
+        checks.append(mutation_ratchet)
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
 
 
@@ -114,6 +125,68 @@ def _apply_safe_fixes(repo_root: Path) -> list[str]:
     # install_hooks_for_repo also materializes the `.spice/.gitignore` marker.
     rows = install_hooks_for_repo(repo_root)
     return [", ".join(rows)]
+
+
+def _mutation_ratchet_check(repo_root: Path) -> DoctorCheck | None:
+    ratchet_path = repo_root / mutations.STANDING_MUTATION_RATCHET_PATH
+    if not ratchet_path.is_file():
+        return None
+    try:
+        policy = mutations.load_standing_mutation_ratchet(ratchet_path)
+        study = mutations.run_mutation_study(
+            list(policy.targets),
+            root=repo_root,
+            test_paths=list(policy.test_paths),
+            max_mutants_per_module=policy.max_mutants_per_module,
+            timeout_seconds=policy.timeout_seconds,
+            ratchet_path=ratchet_path,
+        )
+    except SpiceError as exc:
+        return _fail(
+            "mutation-ratchet",
+            str(exc),
+            "spice dev doctor",
+        )
+    reported_paths = {report.path for report in study.reports}
+    missing_paths = [
+        path.as_posix()
+        for path in policy.targets
+        if path.as_posix() not in reported_paths
+    ]
+    zero_constraint_tests = {
+        test for report in study.reports for test in report.zero_constraint_tests
+    }
+    unhandled_zero_tests = sorted(
+        zero_constraint_tests - policy.retained_zero_constraint_tests.keys()
+    )
+    problems: list[str] = []
+    if missing_paths:
+        problems.append("missing reports: " + ", ".join(missing_paths))
+    if study.ratchet_regressions:
+        problems.append(
+            "score regressions: "
+            + ", ".join(
+                f"{item.path} {item.current_score:.0%} < {item.baseline_score:.0%}"
+                for item in study.ratchet_regressions
+            )
+        )
+    if unhandled_zero_tests:
+        problems.append(
+            "unhandled zero-constraint tests: " + ", ".join(unhandled_zero_tests)
+        )
+    if problems:
+        return _fail(
+            "mutation-ratchet",
+            "; ".join(problems),
+            "spice dev doctor",
+        )
+    scores = ", ".join(f"{report.path}={report.score:.0%}" for report in study.reports)
+    detail = (
+        f"{scores}; handled equivalent={policy.equivalent_mutant_count} "
+        f"low-information={policy.low_information_mutant_count}; "
+        f"retained zero-constraint={len(policy.retained_zero_constraint_tests)}"
+    )
+    return _ok("mutation-ratchet", detail, "spice dev doctor")
 
 
 def _binary_checks(repo_root: Path) -> list[DoctorCheck]:

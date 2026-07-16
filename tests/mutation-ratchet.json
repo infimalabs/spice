@@ -1,0 +1,40 @@
+{
+  "modules": {
+    "spice/configlayer.py": {
+      "killed": 13,
+      "mutants": 20,
+      "score": 0.65,
+      "survived": 7,
+      "timed_out": 0
+    }
+  },
+  "standing": {
+    "equivalentMutants": [
+      {
+        "mutationIndex": 10,
+        "path": "spice/configlayer.py",
+        "reason": "zip strictness is equivalent because parsed values and layers are appended together in the same loop"
+      }
+    ],
+    "lowInformationMutants": [
+      {
+        "mutationIndex": 11,
+        "path": "spice/configlayer.py",
+        "reason": "invalid Path multiplication aborts the suite before pytest can attribute the kill to an individual node ID"
+      }
+    ],
+    "maxMutantsPerModule": 20,
+    "retainedZeroConstraintTests": {
+      "tests/test_configlayer.py::test_parse_error_names_the_exact_layer_and_path[system]": "Retained as the public system-layer parse-error contract; the selected path-arithmetic crash is killed before node-ID attribution, so adding implementation-inspection assertions would create no behavioral constraint."
+    },
+    "surface": "spice dev doctor",
+    "targets": [
+      "spice/configlayer.py"
+    ],
+    "tests": [
+      "tests/test_configlayer.py"
+    ],
+    "timeoutSeconds": 30
+  },
+  "version": 1
+}
