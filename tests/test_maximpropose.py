@@ -22,6 +22,9 @@ from spice.agent.maximcli import (
     run_maxim_sources_cli,
 )
 from spice.agent.maxims import (
+    MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT,
+    MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT,
+    MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT,
     MAXIM_PROPOSAL_TASK_CREATION_SURFACE,
     MaximProposalDispositionCount,
     MaximProposalEvidence,
@@ -30,6 +33,7 @@ from spice.agent.maxims import (
     maxim_proposal_drafts,
     maxim_proposal_source_records,
     maxim_proposal_themes,
+    maxim_proposal_task_description,
 )
 from spice.cli.parser import build_parser
 from spice.mail.ackstate import (
@@ -44,10 +48,13 @@ from spice.tasks import alloc, config as task_config, identity, tw
 KEY_A = "20260703T020000000000Z"
 KEY_B = "20260703T020001000000Z"
 KEY_C = "20260703T020002000000Z"
+KEY_D = "20260703T020003000000Z"
 ARCHIVED_AT_OLDER = 100.0
 ARCHIVED_AT_NEWER = 200.0
 ARCHIVED_AT_NEWEST = 300.0
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+RENDER_FIXTURE_SOURCE_COUNT = 10
+RENDER_FIXTURE_EVIDENCE_COUNT = 14
 
 
 def _init_repo(path):
@@ -112,6 +119,20 @@ def test_maxim_proposal_source_records_preserve_ack_ledger_evidence_order(tmp_pa
             ),
         ],
         now=ARCHIVED_AT_NEWER,
+    )
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=KEY_C,
+                inbox_name=f"{KEY_C}.txt",
+                text="[MAXIM] Avoid fallback branches.\n",
+                ack_text=f"ACK {KEY_C}: maxim noted.",
+                ack_content="maxim noted.",
+                disposition=ACK_DISPOSITION_ACKED,
+            ),
+        ],
+        now=ARCHIVED_AT_NEWEST,
     )
 
     records = maxim_proposal_source_records(repo)
@@ -253,8 +274,8 @@ def test_maxim_proposal_themes_cluster_recurring_corrections_with_evidence(tmp_p
         repo,
         key=KEY_C,
         body="Preserve the prompt boundary.",
-        ack_text=f"ACK {KEY_C}: captured prompt boundary.",
-        ack_content="captured prompt boundary.",
+        ack_text=f"ACK {KEY_C}: fallback branches use a deterministic path.",
+        ack_content="fallback branches use a deterministic path.",
         disposition=ACK_DISPOSITION_ACKED,
         archived_at=ARCHIVED_AT_NEWEST,
     )
@@ -269,7 +290,7 @@ def test_maxim_proposal_themes_cluster_recurring_corrections_with_evidence(tmp_p
         "fallback",
         "path",
     )
-    assert themes[0].evidence_count == 2
+    assert themes[0].evidence_count == 6
     assert themes[0].source_keys == (KEY_B, KEY_A)
     assert themes[0].dispositions == (
         MaximProposalDispositionCount(disposition=ACK_DISPOSITION_ACKED, count=1),
@@ -283,6 +304,54 @@ def test_maxim_proposal_themes_cluster_recurring_corrections_with_evidence(tmp_p
         maxim_proposal_themes(maxim_proposal_source_records(repo), min_recurrence=3)
         == ()
     )
+
+
+def test_maxim_proposal_themes_require_cluster_wide_term_cohesion(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _record_ack_source(
+        repo,
+        key=KEY_A,
+        body="Align alpha bravo markers.",
+        ack_text=f"ACK {KEY_A}: captured.",
+        ack_content="captured.",
+        archived_at=600.0,
+    )
+    _record_ack_source(
+        repo,
+        key=KEY_B,
+        body="Align alpha bravo markers with charlie delta routing.",
+        ack_text=f"ACK {KEY_B}: captured.",
+        ack_content="captured.",
+        archived_at=500.0,
+    )
+    _record_ack_source(
+        repo,
+        key=KEY_C,
+        body="Keep charlie delta routing stable.",
+        ack_text=f"ACK {KEY_C}: captured.",
+        ack_content="captured.",
+        archived_at=400.0,
+    )
+    _record_ack_source(
+        repo,
+        key=KEY_D,
+        body="Preserve charlie delta routing clearly.",
+        ack_text=f"ACK {KEY_D}: captured.",
+        ack_content="captured.",
+        archived_at=300.0,
+    )
+
+    themes = maxim_proposal_themes(maxim_proposal_source_records(repo))
+
+    assert [theme.name for theme in themes] == [
+        "align/alpha/bravo/markers",
+        "charlie/delta/routing",
+    ]
+    assert [theme.evidence_count for theme in themes] == [6, 6]
+    assert [theme.source_keys for theme in themes] == [
+        (KEY_A, KEY_B),
+        (KEY_C, KEY_D),
+    ]
 
 
 def test_render_maxim_proposals_prints_valid_toml_stanza_with_evidence(tmp_path):
@@ -314,7 +383,8 @@ def test_render_maxim_proposals_prints_valid_toml_stanza_with_evidence(tmp_path)
     assert rendered.splitlines() == [
         "# maxim proposals: 1",
         "# theme = branches/deterministic/fallback/path",
-        "# evidence_count = 2",
+        "# evidence_count = 6",
+        "# source_key_count = 2",
         "# dispositions = acked=1,refused=1",
         f"# source_keys = {KEY_B},{KEY_A}",
         "# evidence 1 steering_text: Fallback branches hide the deterministic path.",
@@ -385,6 +455,127 @@ def test_maxim_proposal_drafts_drop_or_normalize_invalid_trigger_candidates(
     ].words == frozenset({"quiet route", "soft landing"})
 
 
+def test_maxim_proposal_draft_message_uses_ack_fields_as_provenance_only():
+    theme = MaximProposalTheme(
+        name="prompt/boundary",
+        recurring_terms=("prompt", "boundary"),
+        evidence_count=3,
+        source_keys=(KEY_A,),
+        dispositions=(
+            MaximProposalDispositionCount(
+                disposition=ACK_DISPOSITION_ACKED,
+                count=1,
+            ),
+        ),
+        evidence=(
+            MaximProposalEvidence(
+                field="steering_text",
+                text="The prompt boundary matters.",
+            ),
+            MaximProposalEvidence(
+                field="ack_text",
+                text=f"ACK {KEY_A}: Keep assistant wording out.",
+            ),
+            MaximProposalEvidence(
+                field="ack_content",
+                text="Keep assistant wording out.",
+            ),
+        ),
+    )
+
+    draft = maxim_proposal_drafts((theme,), existing_bags={})[0]
+
+    assert draft.message == (
+        "Keep prompt and boundary guidance broad, portable, and immediately "
+        "actionable across contexts."
+    )
+    assert draft.evidence == theme.evidence
+
+
+def test_maxim_proposal_rendering_caps_evidence_and_source_keys_independently():
+    source_keys = tuple(
+        f"source-{index}" for index in range(RENDER_FIXTURE_SOURCE_COUNT)
+    )
+    evidence = tuple(
+        MaximProposalEvidence(
+            field="steering_text",
+            text=(
+                "Keep bounded rendering readable. " + "context " * 100
+                if index == 0
+                else f"Keep bounded rendering readable example {index}."
+            ),
+        )
+        for index in range(RENDER_FIXTURE_EVIDENCE_COUNT)
+    )
+    theme = MaximProposalTheme(
+        name="bounded/rendering",
+        recurring_terms=("bounded", "rendering"),
+        evidence_count=RENDER_FIXTURE_EVIDENCE_COUNT,
+        source_keys=source_keys,
+        dispositions=(
+            MaximProposalDispositionCount(
+                disposition=ACK_DISPOSITION_ACKED,
+                count=7,
+            ),
+            MaximProposalDispositionCount(
+                disposition=ACK_DISPOSITION_REFUSED,
+                count=3,
+            ),
+        ),
+        evidence=evidence,
+    )
+
+    draft = maxim_proposal_drafts((theme,), existing_bags={})[0]
+    rendered = render_maxim_proposals((theme,), existing_bags={})
+    description = maxim_proposal_task_description(draft)
+    rendered_source_keys = ",".join(
+        source_keys[:MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT]
+    )
+    description_source_keys = ", ".join(
+        source_keys[:MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT]
+    )
+
+    assert draft.source_keys == source_keys
+    assert draft.evidence == evidence
+    assert draft.source_key_count == RENDER_FIXTURE_SOURCE_COUNT
+    assert f"# evidence_count = {RENDER_FIXTURE_EVIDENCE_COUNT}" in rendered
+    assert f"# source_keys = {rendered_source_keys}" in rendered
+    assert f"# source_key_count = {RENDER_FIXTURE_SOURCE_COUNT}" in rendered
+    assert (
+        "# source_keys omitted = "
+        f"{RENDER_FIXTURE_SOURCE_COUNT - MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT}"
+        in rendered
+    )
+    assert (
+        "# evidence omitted = "
+        f"{RENDER_FIXTURE_EVIDENCE_COUNT - MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT}"
+        in rendered
+    )
+    assert "# dispositions = acked=7,refused=3" in rendered
+    assert "chars omitted" in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= (
+        MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT + 100
+    )
+    assert f"- source_keys: {description_source_keys}" in description
+    assert f"- evidence_count: {RENDER_FIXTURE_EVIDENCE_COUNT}" in description
+    assert f"- source_key_count: {RENDER_FIXTURE_SOURCE_COUNT}" in description
+    assert (
+        "- source_keys_omitted: "
+        f"{RENDER_FIXTURE_SOURCE_COUNT - MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT}"
+        in description
+    )
+    assert (
+        "- evidence_omitted: "
+        f"{RENDER_FIXTURE_EVIDENCE_COUNT - MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT}"
+        in description
+    )
+    assert "- dispositions: acked=7,refused=3" in description
+    assert "chars omitted" in description
+    assert max(len(line) for line in description.splitlines()) <= (
+        MAXIM_PROPOSAL_EVIDENCE_TEXT_RENDER_LIMIT + 100
+    )
+
+
 def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
     tmp_path, monkeypatch, capsys
 ):
@@ -415,7 +606,8 @@ def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
     assert capsys.readouterr().out.splitlines() == [
         "# maxim proposals: 1",
         "# theme = branches/deterministic/fallback/path",
-        "# evidence_count = 2",
+        "# evidence_count = 6",
+        "# source_key_count = 2",
         "# dispositions = acked=2",
         f"# source_keys = {KEY_B},{KEY_A}",
         "# evidence 1 steering_text: Fallback branches hide the deterministic path.",
