@@ -1,5 +1,7 @@
 # Bounded coverage-subsumption study — 2026-07-16
 
+Status: research, 2026-07-16.
+
 ## Reproducible recording
 
 The development dependency set now declares `pytest-cov`. A fresh checkout can
