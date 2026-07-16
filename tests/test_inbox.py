@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.ackstate import (
     ACK_DISPOSITION_REFUSED,
     AckStateWrite,

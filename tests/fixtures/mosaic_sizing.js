@@ -10,6 +10,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function fixtureCardHeightPx(n, module, gap) {
+  return n * module - gap;
+}
+
+function fixtureInteriorSlackPx(n, module, gap, contentPx) {
+  return fixtureCardHeightPx(n, module, gap) - contentPx;
+}
+
 const EXPECTED_ROWS_FOR_1000PX = 17; // ceil((1000+12)/60)
 const EXPECTED_CARD_HEIGHT_N3 = 168; // 3*60 - 12
 const SLACK_SWEEP_MAX_CONTENT_PX = 400;
@@ -28,7 +36,7 @@ assert(context.mosaicRowsFor(48, 12, 60) === 2, "sub-module content still floors
 
 // Rendered height/width formulas.
 assert(
-  context.mosaicCardHeightPx(3, 60, 12) === EXPECTED_CARD_HEIGHT_N3,
+  fixtureCardHeightPx(3, 60, 12) === EXPECTED_CARD_HEIGHT_N3,
   "cardHeightPx = n*M - gap",
 );
 const edges = [0, 59, 118, 177, 236, 295, 354, 413, 472, 531, 590, 649, 708];
@@ -51,7 +59,7 @@ for (const module of [20, 40, 60]) {
   ) {
     const gap = 12;
     const n = context.mosaicRowsFor(contentPx, gap, module);
-    const slack = context.mosaicInteriorSlackPx(n, module, gap, contentPx);
+    const slack = fixtureInteriorSlackPx(n, module, gap, contentPx);
     assert(slack >= 0, "slack must never be negative: " + JSON.stringify({ module, contentPx, n, slack }));
     assert(
       slack < module,
@@ -79,7 +87,7 @@ for (const module of [20, 40, 60]) {
     for (let k = 1; k <= 6; k += 1) {
       const contentPx = chromePx + k * lineHeightPx;
       const n = context.mosaicRowsFor(contentPx, gapPx, module);
-      const slack = context.mosaicInteriorSlackPx(n, module, gapPx, contentPx);
+      const slack = fixtureInteriorSlackPx(n, module, gapPx, contentPx);
       const expectZero = (4 + k) % zeroSlackPeriod[lines] === 0;
       if (expectZero) {
         assert(

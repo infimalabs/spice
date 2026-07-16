@@ -21,6 +21,7 @@ from spice.policy import (
     FLEX_NUMERATOR,
     flex_limit,
 )
+from spice.sqliteconnection import sqlite_connection
 from spice.studies import cli as studies_cli
 from spice.studies import testquality
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
@@ -649,29 +650,27 @@ def _write_coverage_db(
     files: list[str],
     contexts: dict[str, dict[int, list[int]]],
 ) -> Path:
-    import sqlite3
-
     path = root / ".coverage"
-    con = sqlite3.connect(path)
-    con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
-    con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
-    con.execute(
-        "CREATE TABLE lines "
-        "(id INTEGER PRIMARY KEY, file_id INTEGER, context_id INTEGER, lineno INTEGER)"
-    )
-    for fid, fpath in enumerate(files, 1):
-        con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
-    line_id = 1
-    for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
-        con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
-        for file_index, lines in file_lines.items():
-            for lineno in lines:
-                con.execute(
-                    f"INSERT INTO lines VALUES ({line_id},{file_index + 1},{cid},{lineno})"
-                )
-                line_id += 1
-    con.commit()
-    con.close()
+    with sqlite_connection(path) as con:
+        con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
+        con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
+        con.execute(
+            "CREATE TABLE lines "
+            "(id INTEGER PRIMARY KEY, file_id INTEGER, context_id INTEGER, "
+            "lineno INTEGER)"
+        )
+        for fid, fpath in enumerate(files, 1):
+            con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
+        line_id = 1
+        for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
+            con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
+            for file_index, lines in file_lines.items():
+                for lineno in lines:
+                    con.execute(
+                        "INSERT INTO lines VALUES "
+                        f"({line_id},{file_index + 1},{cid},{lineno})"
+                    )
+                    line_id += 1
     return path
 
 
@@ -695,46 +694,43 @@ def _write_coverage_db_v7(
     contexts: dict[str, dict[int, list[int]]],
     arcs: dict[str, dict[int, list[tuple[int, int]]]] | None = None,
 ) -> Path:
-    import sqlite3
-
     path = root / ".coverage"
-    con = sqlite3.connect(path)
-    con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
-    con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
-    con.execute(
-        "CREATE TABLE line_bits (file_id INTEGER, context_id INTEGER, numbits BLOB)"
-    )
-    if arcs is not None:
+    with sqlite_connection(path) as con:
+        con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
+        con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
         con.execute(
-            "CREATE TABLE arc "
-            "(file_id INTEGER, context_id INTEGER, fromno INTEGER, tono INTEGER)"
+            "CREATE TABLE line_bits (file_id INTEGER, context_id INTEGER, numbits BLOB)"
         )
-    for fid, fpath in enumerate(files, 1):
-        con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
-    # Collect all context names; arc-only contexts may not appear in line coverage.
-    all_ctx_names = list(contexts.keys())
-    if arcs is not None:
-        for name in arcs:
-            if name not in contexts:
-                all_ctx_names.append(name)
-    for cid, ctx_name in enumerate(all_ctx_names, 1):
-        con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
-        if ctx_name in contexts:
-            for file_index, lines in contexts[ctx_name].items():
-                numbits = _nums_to_numbits(lines)
-                con.execute(
-                    "INSERT INTO line_bits VALUES (?, ?, ?)",
-                    (file_index + 1, cid, numbits),
-                )
         if arcs is not None:
-            for file_index, arc_list in arcs.get(ctx_name, {}).items():
-                for fromno, tono in arc_list:
+            con.execute(
+                "CREATE TABLE arc "
+                "(file_id INTEGER, context_id INTEGER, fromno INTEGER, tono INTEGER)"
+            )
+        for fid, fpath in enumerate(files, 1):
+            con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
+        # Collect all context names; arc-only contexts may not appear in line
+        # coverage.
+        all_ctx_names = list(contexts.keys())
+        if arcs is not None:
+            for name in arcs:
+                if name not in contexts:
+                    all_ctx_names.append(name)
+        for cid, ctx_name in enumerate(all_ctx_names, 1):
+            con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
+            if ctx_name in contexts:
+                for file_index, lines in contexts[ctx_name].items():
+                    numbits = _nums_to_numbits(lines)
                     con.execute(
-                        "INSERT INTO arc VALUES (?, ?, ?, ?)",
-                        (file_index + 1, cid, fromno, tono),
+                        "INSERT INTO line_bits VALUES (?, ?, ?)",
+                        (file_index + 1, cid, numbits),
                     )
-    con.commit()
-    con.close()
+            if arcs is not None:
+                for file_index, arc_list in arcs.get(ctx_name, {}).items():
+                    for fromno, tono in arc_list:
+                        con.execute(
+                            "INSERT INTO arc VALUES (?, ?, ?, ?)",
+                            (file_index + 1, cid, fromno, tono),
+                        )
     return path
 
 

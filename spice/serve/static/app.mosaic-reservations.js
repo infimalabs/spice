@@ -74,22 +74,3 @@ function mosaicReservationPriorPx(type, rootFontSizePx) {
     : null;
   return resolve ? resolve(rootFontSizePx) : null;
 }
-
-// Reserved row count for a card type at insert time, or null when the
-// type has no named prior and the caller must measure instead.
-function mosaicReservationRows(type, rootFontSizePx, gap, module) {
-  const priorPx = mosaicReservationPriorPx(type, rootFontSizePx);
-  return priorPx === null ? null : mosaicRowsFor(priorPx, gap, module);
-}
-
-// Resolution outcome: compares the reserved row count against the row
-// count once real content is measured. "shrink" and "exact" both pad in
-// place (zero movement, free); only "growth" requires a ripple -- rare
-// by construction when the prior is sized correctly.
-function mosaicReservationOutcome(reservedRows, resolvedRows) {
-  const delta = resolvedRows - reservedRows;
-  return {
-    kind: delta > 0 ? "growth" : delta < 0 ? "shrink" : "exact",
-    delta,
-  };
-}

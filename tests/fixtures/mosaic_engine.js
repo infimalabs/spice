@@ -14,6 +14,12 @@ function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function fixtureCardsOverlap(a, b) {
+  const tracksOverlap = a.t < b.t + b.span && b.t < a.t + a.span;
+  const rowsOverlap = a.b < b.b + b.n && b.b < a.b + a.n;
+  return tracksOverlap && rowsOverlap;
+}
+
 const TRACKS = 12;
 const LEGAL_BASE_SPANS = [2, 3, 4, 6, 12];
 const TALL_ROW_COUNT_THRESHOLD = 4;
@@ -103,7 +109,7 @@ function assertNoOverlaps(cards, seed) {
   for (let i = 0; i < cards.length; i += 1) {
     for (let j = i + 1; j < cards.length; j += 1) {
       assert(
-        !context.mosaicCardsOverlap(cards[i], cards[j]),
+        !fixtureCardsOverlap(cards[i], cards[j]),
         "cards " + i + " and " + j + " overlap in both axes (seed " + seed + ")",
       );
     }

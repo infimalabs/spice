@@ -2,23 +2,25 @@
 
 import io
 import json
-import sqlite3
 import subprocess
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
+from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
-from spice.mail.acks import (
+from spice.mail.ackarchive import (
     AckArchivalSummary,
     NackArchivalSummary,
-    ack_content_by_key,
     archive_ackd_inbox_items,
+    summarize_ack_archival,
+    summarize_nack_archival,
+)
+from spice.mail.ackgrammar import (
+    ack_content_by_key,
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
     extract_nack_segments_from_text,
     extract_task_batch_lines_from_text,
-    summarize_ack_archival,
-    summarize_nack_archival,
     split_ack_message,
     split_keyed_response,
 )
@@ -350,7 +352,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
     _init_repo(tmp_path)
     path = ack_state_database_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         connection.execute(
             """
             CREATE TABLE acked_inbox_items (
@@ -387,7 +389,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
     )
 
     records = ack_state_records(tmp_path)
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
@@ -528,6 +530,9 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     assert summary.unmatched == []
     assert summary.reasonless == []
     assert collect_acked_inbox_items(tmp_path) == []
+    assert [
+        record.key for record in records if record.disposition == ACK_DISPOSITION_ACKED
+    ] == []
     assert pending_inbox_count(tmp_path) == 0
     assert [(item.name, item.text, item.disposition) for item in refused] == [
         (name, text, ACK_DISPOSITION_REFUSED)

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
-from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
 from spice.paths import shared_attachment_root

@@ -1,4 +1,4 @@
-"""Ultra-fast extraction of ACK'd inbox keys from assistant messages.
+"""Grammar for keyed steering responses in assistant messages.
 
 An ACK in the harness idiom looks like:
 
@@ -15,53 +15,26 @@ acknowledgment's body. Callers that deduplicate yield a repeated key once.
 
 For callers that want the prose an ACK acknowledged, not just its keys,
 `extract_ack_segments_from_text` splits a message at each valid ACK marker and
-pairs every ACK's keys with the cleaned content attributed to it.
+pairs every ACK's keys with the cleaned content attributed to it. NACK is the
+same grammar with opposite sign; `split_keyed_response` walks both polarities
+in source order.
 
-Hot path notes:
-
-- Pre-filters JSONL lines with a substring check before JSON-parsing, so the
-  bulk of a transcript (huge tool-call payloads) is skipped without ever
-  touching `json.loads`.
-- Per-message pre-filters with `"ACK" in text` before scanning for ACK tokens.
-- Per-line timestamp normalization happens only when a window is requested
-  and the candidate already cleared the ACK pre-filter.
+Hot path note: every extractor pre-filters with a plain substring check
+(`ACK in text`) before scanning for tokens, so ACK-free text costs one scan.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
-from spice.errors import SpiceError
-from spice.mail.ackstate import (
-    ACK_DISPOSITION_ACKED,
-    ACK_DISPOSITION_REFUSED,
-    AckStateWrite,
-    ack_state_records,
-    record_acked_inbox_items,
-)
-from spice.mail.inbox import (
-    collect_inbox_items,
-    discard_inbox_items,
-    inbox_item_key,
-    inbox_item_key_aliases,
-    inbox_payload_items,
-    notify_inbox_changed,
-    parse_inbox_payload,
-)
+from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
 from spice import textcontext
 
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
 TASK_DIRECTIVE_TOKEN = "TASK"
-_MISSING_GIT_WORKTREE_ERROR = "not inside a git worktree"
-
-# Transcript lines start with `{"timestamp":"<iso>",...` — the timestamp can
-# be sliced out without JSON parsing for cheap window pre-filtering.
-_TS_PREFIX = '{"timestamp":"'
-_TS_PREFIX_LEN = len(_TS_PREFIX)
 
 # A valid ACK header runs from `ACK` through its consecutive key-like tokens.
 # Plain `ACK <key> prose` is body-bearing: the header ends at the key and the
@@ -111,11 +84,11 @@ def extract_ack_keys_from_text(text: str) -> Iterator[str]:
     """Yield inbox keys from ACK headers in `text`."""
     if ACK_TOKEN not in text:
         return
-    for ack_pos in _iter_ack_tokens(text):
-        parsed = _parse_ack_header(text, ack_pos)
+    for ack_pos in _iter_header_tokens(text, ACK_TOKEN):
+        parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
         if parsed is None:
             continue
-        _header_end, keys = parsed
+        _header_end, keys, _body_wrapper = parsed
         yield from keys
 
 
@@ -142,7 +115,7 @@ def split_ack_message(
     runs from that marker to the next (or end of text). A marker is the
     uppercase `ACK` token opening a recognizable header.
     """
-    bounds = _ack_marker_bounds(text)
+    bounds = _marker_bounds(text, ACK_TOKEN)
     return _split_keyed_message(
         text,
         bounds,
@@ -155,7 +128,7 @@ def split_nack_message(
     text: str, *, drop_task_directives: bool = True
 ) -> tuple[str, list[AckSegment]]:
     """Split `text` into its leading prose and ordered reason-bearing NACKs."""
-    bounds = _nack_marker_bounds(text)
+    bounds = _marker_bounds(text, NACK_TOKEN)
     return _split_keyed_message(
         text,
         bounds,
@@ -190,8 +163,8 @@ def split_keyed_response(
     with its disposition. Bodies stop at the next keyed marker of either kind.
     """
     tagged = sorted(
-        [(*b, ACK_DISPOSITION_ACKED) for b in _ack_marker_bounds(text)]
-        + [(*b, ACK_DISPOSITION_REFUSED) for b in _nack_marker_bounds(text)]
+        [(*b, ACK_DISPOSITION_ACKED) for b in _marker_bounds(text, ACK_TOKEN)]
+        + [(*b, ACK_DISPOSITION_REFUSED) for b in _marker_bounds(text, NACK_TOKEN)]
     )
     if not tagged:
         return (
@@ -282,336 +255,22 @@ def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
     return mapping
 
 
-def archive_ackd_inbox_items(
-    repo_root: str | Path | None,
-    ack_keys: Iterable[str],
-    *,
-    ack_text: str = "",
-    ack_content_by_key: Mapping[str, str] | None = None,
-) -> list[str]:
-    """Retire pending inbox items whose key appears in assistant ACK text.
-
-    The consumed steering text and durable attachment references are recorded
-    in `spiceacks.sqlite3`; the pending inbox file is only the input transport
-    and is discarded after the database write succeeds.
-    """
-    if repo_root is None:
-        return []
-    root = Path(repo_root)
-    acked_aliases: set[str] = set()
-    for key in ack_keys:
-        if key:
-            acked_aliases |= inbox_item_key_aliases(key)
-    if not acked_aliases:
-        return []
-    pending = collect_inbox_items(str(root))
-    to_retire = [
-        item for item in pending if inbox_item_key_aliases(item.name) & acked_aliases
-    ]
-    if not to_retire:
-        return []
-    record_acked_inbox_items(
-        repo_root,
-        [
-            AckStateWrite(
-                key=inbox_item_key(item.name),
-                inbox_name=item.name,
-                text=item.text,
-                attachments=_ack_state_attachments(item),
-                lineage=_ack_state_lineage(item),
-                ack_text=ack_text,
-                ack_content=_ack_content_for_item(item.name, ack_content_by_key),
-                disposition=ACK_DISPOSITION_ACKED,
-            )
-            for item in to_retire
-        ],
-    )
-    discard_inbox_items(inbox_payload_items(to_retire))
-    notify_inbox_changed(root)
-    return [inbox_item_key(item.name) for item in to_retire]
+def has_noop_ack_marker(text: str) -> bool:
+    """True when the message says ACK but names no valid inbox key."""
+    if ACK_TOKEN not in text:
+        return False
+    for ack_pos in _iter_header_tokens(text, ACK_TOKEN):
+        if _parse_keyed_header(text, ack_pos, ACK_TOKEN) is None and (
+            _looks_noop_ack_marker(text, ack_pos)
+        ):
+            return True
+    return False
 
 
-def archive_nackd_inbox_items(
-    repo_root: str | Path | None,
-    nack_keys: Iterable[str],
-    *,
-    nack_text: str = "",
-    nack_content_by_key: Mapping[str, str] | None = None,
-) -> list[str]:
-    """Refuse pending inbox items whose key appears in reason-bearing NACK text."""
-    if repo_root is None:
-        return []
-    root = Path(repo_root)
-    nacked_aliases: set[str] = set()
-    for key in nack_keys:
-        if key:
-            nacked_aliases |= inbox_item_key_aliases(key)
-    if not nacked_aliases:
-        return []
-    pending = collect_inbox_items(str(root))
-    to_refuse = [
-        item for item in pending if inbox_item_key_aliases(item.name) & nacked_aliases
-    ]
-    if not to_refuse:
-        return []
-    record_acked_inbox_items(
-        repo_root,
-        [
-            AckStateWrite(
-                key=inbox_item_key(item.name),
-                inbox_name=item.name,
-                text=item.text,
-                attachments=_ack_state_attachments(item),
-                lineage=_ack_state_lineage(item),
-                ack_text=nack_text,
-                ack_content=_ack_content_for_item(item.name, nack_content_by_key),
-                disposition=ACK_DISPOSITION_REFUSED,
-            )
-            for item in to_refuse
-        ],
-    )
-    discard_inbox_items(inbox_payload_items(to_refuse))
-    notify_inbox_changed(root)
-    return [inbox_item_key(item.name) for item in to_refuse]
-
-
-@dataclass(frozen=True)
-class AckArchivalSummary:
-    """Disposition of the ACK keys named by one assistant message.
-
-    `archived` are the inbox keys whose pending item this message retired.
-    `already_acked` are keys that matched durable ACK state but had no pending
-    item left to retire. `unmatched` are keys the message ACK'd that retired
-    nothing and have no prior ACK record. `noop` means the message used an ACK
-    marker but named no inbox key, so there was nothing to retire.
-    """
-
-    archived: list[str]
-    already_acked: list[str]
-    unmatched: list[str]
-    noop: bool = False
-
-
-@dataclass(frozen=True)
-class NackArchivalSummary:
-    """Disposition of the NACK keys named by one assistant message."""
-
-    refused: list[str]
-    already_refused: list[str]
-    already_acked: list[str]
-    unmatched: list[str]
-    reasonless: list[str]
-
-
-def summarize_ack_archival(
-    repo_root: str | Path | None, message_text: str
-) -> AckArchivalSummary:
-    """Archive inbox items ACK'd by one assistant message, reporting disposition.
-
-    Mirrors inline-task creation feedback: every key the message ACK'd is
-    accounted for, split into the items actually retired, the keys already
-    consumed by an earlier ACK, and the keys that matched no known item, so the
-    supervisor can tell the agent exactly which acknowledgments landed.
-    """
-    segments = extract_ack_segments_from_text(message_text)
-    requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
-    if not requested and _has_noop_ack_marker(message_text):
-        return AckArchivalSummary(
-            archived=[],
-            already_acked=[],
-            unmatched=[],
-            noop=True,
-        )
-    try:
-        already_acked_aliases = _consumed_state_aliases(
-            repo_root, disposition=ACK_DISPOSITION_ACKED
-        )
-        archived = archive_ackd_inbox_items(
-            repo_root,
-            requested,
-            ack_text=message_text,
-            ack_content_by_key=ack_content_by_key(segments),
-        )
-    except SpiceError as exc:
-        if _is_missing_git_worktree_error(exc):
-            return _empty_ack_archival_summary()
-        raise
-    archived_aliases: set[str] = set()
-    for key in archived:
-        archived_aliases |= inbox_item_key_aliases(key)
-    already_acked = [
-        key
-        for key in requested
-        if not (inbox_item_key_aliases(key) & archived_aliases)
-        and (inbox_item_key_aliases(key) & already_acked_aliases)
-    ]
-    already_acked_request_aliases: set[str] = set()
-    for key in already_acked:
-        already_acked_request_aliases |= inbox_item_key_aliases(key)
-    unmatched = [
-        key
-        for key in requested
-        if not (inbox_item_key_aliases(key) & archived_aliases)
-        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
-    ]
-    return AckArchivalSummary(
-        archived=archived,
-        already_acked=already_acked,
-        unmatched=unmatched,
-    )
-
-
-def summarize_nack_archival(
-    repo_root: str | Path | None, message_text: str
-) -> NackArchivalSummary:
-    """Archive inbox items NACK'd by one assistant message as refused."""
-    segments = extract_nack_segments_from_text(message_text)
-    reasonless = list(
-        dict.fromkeys(
-            key
-            for segment in segments
-            if not segment.content.strip()
-            for key in segment.keys
-        )
-    )
-    reasoned_segments = [segment for segment in segments if segment.content.strip()]
-    requested = list(
-        dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
-    )
-    try:
-        already_refused_aliases = _consumed_state_aliases(
-            repo_root, disposition=ACK_DISPOSITION_REFUSED
-        )
-        already_acked_aliases = _consumed_state_aliases(
-            repo_root, disposition=ACK_DISPOSITION_ACKED
-        )
-        refused = archive_nackd_inbox_items(
-            repo_root,
-            requested,
-            nack_text=message_text,
-            nack_content_by_key=ack_content_by_key(reasoned_segments),
-        )
-    except SpiceError as exc:
-        if _is_missing_git_worktree_error(exc):
-            return _empty_nack_archival_summary()
-        raise
-    refused_aliases: set[str] = set()
-    for key in refused:
-        refused_aliases |= inbox_item_key_aliases(key)
-    already_refused = [
-        key
-        for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and (inbox_item_key_aliases(key) & already_refused_aliases)
-    ]
-    already_refused_request_aliases: set[str] = set()
-    for key in already_refused:
-        already_refused_request_aliases |= inbox_item_key_aliases(key)
-    already_acked = [
-        key
-        for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
-        and (inbox_item_key_aliases(key) & already_acked_aliases)
-    ]
-    already_acked_request_aliases: set[str] = set()
-    for key in already_acked:
-        already_acked_request_aliases |= inbox_item_key_aliases(key)
-    unmatched = [
-        key
-        for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
-        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
-    ]
-    return NackArchivalSummary(
-        refused=refused,
-        already_refused=already_refused,
-        already_acked=already_acked,
-        unmatched=unmatched,
-        reasonless=reasonless,
-    )
-
-
-def _empty_ack_archival_summary() -> AckArchivalSummary:
-    return AckArchivalSummary(archived=[], already_acked=[], unmatched=[])
-
-
-def _empty_nack_archival_summary() -> NackArchivalSummary:
-    return NackArchivalSummary(
-        refused=[],
-        already_refused=[],
-        already_acked=[],
-        unmatched=[],
-        reasonless=[],
-    )
-
-
-def _is_missing_git_worktree_error(exc: SpiceError) -> bool:
-    return str(exc) == _MISSING_GIT_WORKTREE_ERROR
-
-
-def _consumed_state_aliases(
-    repo_root: str | Path | None, *, disposition: str | None = None
-) -> set[str]:
-    if repo_root is None:
-        return set()
-    aliases: set[str] = set()
-    for record in ack_state_records(repo_root):
-        if disposition is not None and record.disposition != disposition:
-            continue
-        aliases |= inbox_item_key_aliases(record.key)
-        aliases |= inbox_item_key_aliases(record.inbox_name)
-    return aliases
-
-
-def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
-    return tuple(
-        {
-            "path": str(attachment.path),
-            "name": attachment.name,
-            "content_type": attachment.content_type,
-            "size": attachment.size,
-        }
-        for attachment in item.attachments
-    )
-
-
-def _ack_state_lineage(item: Any) -> dict[str, Any]:
-    from spice.agent.identity import ambient_thread_id
-
-    payload = parse_inbox_payload(item.text)
-    attempts = [
-        {
-            "attempt": attempt.attempt,
-            "at": attempt.at,
-            "messages_elapsed": attempt.messages_elapsed,
-        }
-        for attempt in payload.resend_attempts
-    ]
-    lineage: dict[str, Any] = {}
-    thread_id = ambient_thread_id()
-    if thread_id:
-        lineage["thread_id"] = thread_id
-    if payload.resend_count or attempts:
-        lineage["resend_count"] = payload.resend_count
-        lineage["resend_attempts"] = attempts
-    return lineage
-
-
-def _ack_content_for_item(
-    inbox_name: str, content_by_key: Mapping[str, str] | None
-) -> str:
-    if not content_by_key:
-        return ""
-    for alias in inbox_item_key_aliases(inbox_name):
-        if alias in content_by_key:
-            return content_by_key[alias]
-    return ""
-
-
-def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
-    """Return `(marker_start, header_end, keys, body_wrapper)` per ACK marker.
+def _marker_bounds(
+    text: str, token: str
+) -> list[tuple[int, int, tuple[str, ...], str]]:
+    """Return `(marker_start, header_end, keys, body_wrapper)` per keyed marker.
 
     `marker_start` backs the position up over any markdown-emphasis wrapper the
     header opened with, so the leading `**` is excluded from the preamble.
@@ -619,50 +278,18 @@ def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]
     (`**ACK k: body**`), so the segment cleaner can strip the dangling run.
     """
     bounds: list[tuple[int, int, tuple[str, ...], str]] = []
-    for ack_pos in _iter_ack_tokens(text):
-        parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
+    for token_pos in _iter_header_tokens(text, token):
+        parsed = _parse_keyed_header(text, token_pos, token)
         if parsed is not None:
             header_end, keys, body_wrapper = parsed
-            marker_start, _wrapper = _emphasis_run_before(text, ack_pos)
-            bounds.append((marker_start, header_end, keys, body_wrapper))
-    return bounds
-
-
-def _has_noop_ack_marker(text: str) -> bool:
-    """True when the message says ACK but names no valid inbox key."""
-    if ACK_TOKEN not in text:
-        return False
-    for ack_pos in _iter_ack_tokens(text):
-        if _parse_ack_header(text, ack_pos) is None and _looks_noop_ack_marker(
-            text, ack_pos
-        ):
-            return True
-    return False
-
-
-def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
-    """Return `(marker_start, header_end, keys, body_wrapper)` per NACK marker."""
-    bounds: list[tuple[int, int, tuple[str, ...], str]] = []
-    for nack_pos in _iter_nack_tokens(text):
-        parsed = _parse_keyed_header(text, nack_pos, NACK_TOKEN)
-        if parsed is not None:
-            header_end, keys, body_wrapper = parsed
-            marker_start, _wrapper = _emphasis_run_before(text, nack_pos)
+            marker_start, _wrapper = _emphasis_run_before(text, token_pos)
             bounds.append((marker_start, header_end, keys, body_wrapper))
     return bounds
 
 
 def _keyed_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
     """Return every valid ACK/NACK marker bound in source order."""
-    return sorted((*_ack_marker_bounds(text), *_nack_marker_bounds(text)))
-
-
-def _iter_ack_tokens(text: str) -> Iterator[int]:
-    yield from _iter_header_tokens(text, ACK_TOKEN)
-
-
-def _iter_nack_tokens(text: str) -> Iterator[int]:
-    yield from _iter_header_tokens(text, NACK_TOKEN)
+    return sorted((*_marker_bounds(text, ACK_TOKEN), *_marker_bounds(text, NACK_TOKEN)))
 
 
 def _iter_header_tokens(text: str, token: str) -> Iterator[int]:
@@ -727,12 +354,6 @@ def _ack_token_is_quoted(text: str, ack_pos: int) -> bool:
         return True
     line_start = text.rfind("\n", 0, ack_pos) + 1
     return text[line_start:ack_pos].count("`") % 2 == 1
-
-
-def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | None:
-    """Validate an ACK header at `ack_pos`; return `(header_end, keys)` or None."""
-    parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
-    return None if parsed is None else (parsed[0], parsed[1])
 
 
 def _parse_keyed_header(

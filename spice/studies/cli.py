@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from spice.errors import SpiceError
@@ -23,6 +24,7 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     FILE_BYTE_LIMIT,
     FILE_LOC_LIMIT,
+    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
 )
 from spice.studies import (
     complexity,
@@ -42,7 +44,29 @@ from spice.studies import (
     taste,
     testquality,
 )
+from spice.studies.taskgen import (
+    StudyTaskCreationControls,
+    StudyTaskSpec,
+    create_study_tasks,
+)
 from spice.studies.walk import changed_paths, staged_paths, tracked_paths
+
+TASK_GENERATING_STUDY_ACTIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "reachability": (
+            "Create tagged decision tasks for each test-only reachability finding."
+        ),
+        "symbol-reachability": (
+            "Create tagged decision tasks for each test-only symbol finding."
+        ),
+        "assertion-free-tests": (
+            "Create tagged decision tasks for each assertion-free test."
+        ),
+        "private-internals": (
+            "Create tagged decision tasks for unmanaged private/internal coupling."
+        ),
+    }
+)
 
 
 def configure_study_parser(subparsers: Any) -> None:
@@ -252,11 +276,6 @@ def _configure_reachability_parser(actions: Any) -> None:
         help="Dotted module path to allow even if test-only (repeatable).",
     )
     reach.add_argument(
-        "--create-tasks",
-        action="store_true",
-        help="Create tagged decision tasks for each test-only reachability finding.",
-    )
-    reach.add_argument(
         "--limit",
         type=_positive_int_arg,
         default=None,
@@ -269,11 +288,6 @@ def _configure_symbol_reachability_parser(actions: Any) -> None:
         actions,
         "symbol-reachability",
         "Test-only symbols inside production-reachable modules.",
-    )
-    symbol.add_argument(
-        "--create-tasks",
-        action="store_true",
-        help="Create tagged decision tasks for each test-only symbol finding.",
     )
     symbol.add_argument(
         "--limit",
@@ -304,11 +318,6 @@ def _configure_assertion_free_parser(actions: Any) -> None:
         "Test functions that do not appear to assert behavior.",
     )
     assertion.add_argument(
-        "--create-tasks",
-        action="store_true",
-        help="Create tagged decision tasks for each assertion-free test.",
-    )
-    assertion.add_argument(
         "--limit",
         type=_positive_int_arg,
         default=None,
@@ -323,15 +332,37 @@ def _configure_private_internals_parser(actions: Any) -> None:
         "Tests coupled to private imports or internal assertion structures.",
     )
     private.add_argument(
-        "--create-tasks",
-        action="store_true",
-        help="Create tagged decision tasks for unmanaged private/internal coupling.",
-    )
-    private.add_argument(
         "--limit",
         type=_positive_int_arg,
         default=None,
         help="Number of offender findings to show.",
+    )
+
+
+def _add_task_creation_arguments(parser: Any, *, help_text: str) -> None:
+    parser.add_argument("--create-tasks", action="store_true", help=help_text)
+    parser.add_argument(
+        "--deferred",
+        action="store_true",
+        help="Create new finding tasks in the waiting state.",
+    )
+    parser.add_argument(
+        "--origin",
+        help="Provenance for new tasks, such as ack:<inbox-key> or task:<handle>.",
+    )
+
+
+def _study_task_creation_controls(
+    args: argparse.Namespace,
+) -> StudyTaskCreationControls:
+    if args.study_action not in TASK_GENERATING_STUDY_ACTIONS:
+        raise SpiceError(
+            f"study action does not declare task-generation controls: {args.study_action}"
+        )
+    return StudyTaskCreationControls(
+        deferred=bool(args.deferred),
+        origin=str(args.origin) if args.origin else None,
+        print_created=not bool(args.emit_json),
     )
 
 
@@ -393,6 +424,9 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     sub.add_argument("--staged", action="store_true", help="Scan staged files only.")
     sub.add_argument("--json", action="store_true", dest="emit_json")
     sub.set_defaults(func=handle_study)
+    task_creation_help = TASK_GENERATING_STUDY_ACTIONS.get(name)
+    if task_creation_help is not None:
+        _add_task_creation_arguments(sub, help_text=task_creation_help)
     return sub
 
 
@@ -680,12 +714,19 @@ def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
         _target_paths(args, root),
         root=root,
         allow_symbols=args.allow_symbols,
+        declaration_exemptions=JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
     )
     if args.emit_json:
         _print_study_json(
             args.study_action,
             findings=findings,
             allowSymbols=args.allow_symbols,
+            declarationExemptions=[
+                {"path": path, "symbol": symbol, "reason": reason}
+                for (path, symbol), reason in sorted(
+                    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS.items()
+                )
+            ],
             limit=args.limit,
         )
         return 0
@@ -796,7 +837,8 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_exhaust_tasks(
-            findings, print_created=not args.emit_json
+            findings,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -816,7 +858,8 @@ def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
     created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_symbol_reachability_tasks(
-            findings, print_created=not args.emit_json
+            findings,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -850,7 +893,8 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_assertion_free_tasks(
-            findings, print_created=not args.emit_json
+            findings,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -878,7 +922,9 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
     created_tasks: list[str] = []
     if (offenders or stale) and getattr(args, "create_tasks", False):
         created_tasks = _create_private_internal_tasks(
-            offenders, stale, print_created=not args.emit_json
+            offenders,
+            stale,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -901,122 +947,119 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
 def _create_exhaust_tasks(
     findings: list[reachability.ReachabilityFinding],
     *,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
-    from spice.tasks import create
-
-    handles: list[str] = []
-    for f in findings:
-        handle = create.add(
-            f"Exhaust decision: wire-in/delete-both {f.path}",
+    specs = [
+        StudyTaskSpec(
+            study="reachability",
+            finding_identity=(f.provider, f.kind, f.subject, f.path),
+            title=f"Exhaust decision: wire-in/delete-both {f.path}",
             project="tests.exhaust",
-            tags=["exhaust", "decision", "wire_in_delete_both"],
-            acceptance=[
+            tags=("exhaust", "decision", "wire_in_delete_both"),
+            acceptance=(
                 f"Resolve {f.provider} {f.kind} {f.subject} by either wiring it "
                 f"into a production entry point or deleting {f.path} along with "
                 "every test that imports it.",
                 f"Current test-only importers: "
                 f"{', '.join(f.only_test_imports) or 'unknown'}.",
-            ],
+            ),
         )
-        handles.append(handle)
-        if print_created:
-            print(f"  task created: {handle}")
-    return handles
+        for f in findings
+    ]
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_symbol_reachability_tasks(
     findings: list[reachability.SymbolReachabilityFinding],
     *,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
-    from spice.tasks import create
-
-    handles: list[str] = []
-    for f in findings:
-        handle = create.add(
-            f"Symbol reachability decision: wire-in/delete {f.module}.{f.symbol}",
+    specs = [
+        StudyTaskSpec(
+            study="symbol-reachability",
+            finding_identity=(f.provider, f.kind, f.module, f.symbol, f.module_path),
+            title=(
+                f"Symbol reachability decision: wire-in/delete {f.module}.{f.symbol}"
+            ),
             project="tests.exhaust",
-            tags=["exhaust", "symbol-reachability", "decision"],
-            acceptance=[
+            tags=("exhaust", "symbol-reachability", "decision"),
+            acceptance=(
                 f"Resolve {f.provider} {f.kind} {f.module}.{f.symbol} by wiring it "
                 "into production reachability, deleting the symbol and tests that "
                 "only import it, or documenting a reviewed allowlist when dynamic "
                 "production reachability cannot be made explicit.",
                 "Current test-only importers: "
                 f"{', '.join(f.only_test_imports) or 'unknown'}.",
-            ],
+            ),
         )
-        handles.append(handle)
-        if print_created:
-            print(f"  task created: {handle}")
-    return handles
+        for f in findings
+    ]
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_assertion_free_tasks(
     findings: list[testquality.AssertionFreeTestFinding],
     *,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
-    from spice.tasks import create
-
-    handles: list[str] = []
-    for f in findings:
-        handle = create.add(
-            f"Assertion decision: constrain/delete {f.path}:{f.test_name}",
+    specs = [
+        StudyTaskSpec(
+            study="assertion-free-tests",
+            finding_identity=(f.path, f.test_name),
+            title=f"Assertion decision: constrain/delete {f.path}:{f.test_name}",
             project="tests.quality",
-            tags=["test-quality", "assertion-free", "decision"],
-            acceptance=[
+            tags=("test-quality", "assertion-free", "decision"),
+            acceptance=(
                 f"Resolve assertion-free test {f.path}:{f.line} {f.test_name} by "
                 "adding an assertion that constrains behavior or deleting the test "
-                "if it carries no useful signal."
-            ],
+                "if it carries no useful signal.",
+            ),
         )
-        handles.append(handle)
-        if print_created:
-            print(f"  task created: {handle}")
-    return handles
+        for f in findings
+    ]
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_private_internal_tasks(
     offenders: list[testquality.PrivateInternalCouplingFinding],
     stale: list[testquality.InternalCouplingKey],
     *,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
-    from spice.tasks import create
-
-    handles: list[str] = []
-    for f in offenders:
-        handle = create.add(
-            f"Private coupling decision: resolve {f.path}:{f.test_name}",
+    specs = [
+        StudyTaskSpec(
+            study="private-internals",
+            finding_identity=(f.path, f.test_name, f.kind, f.target),
+            title=f"Private coupling decision: resolve {f.path}:{f.test_name}",
             project="tests.quality",
-            tags=["test-quality", "private-internals", "decision"],
-            acceptance=[
+            tags=("test-quality", "private-internals", "decision"),
+            acceptance=(
                 f"Resolve private/internal coupling {f.kind} {f.target} in "
                 f"{f.path}:{f.line} {f.test_name} by asserting through public "
                 "behavior, moving the seam into production API, or documenting a "
-                "reviewed policy exception."
-            ],
+                "reviewed policy exception.",
+            ),
         )
-        handles.append(handle)
-        if print_created:
-            print(f"  task created: {handle}")
-    for path, test_name, target in stale:
-        handle = create.add(
-            f"Private coupling cleanup: remove stale exception {path}:{test_name}",
+        for f in offenders
+    ]
+    specs.extend(
+        StudyTaskSpec(
+            study="private-internals-stale-exception",
+            finding_identity=(path, test_name, target),
+            title=(
+                f"Private coupling cleanup: remove stale exception {path}:{test_name}"
+            ),
             project="tests.quality",
-            tags=["test-quality", "private-internals", "cleanup"],
-            acceptance=[
+            tags=("test-quality", "private-internals", "cleanup"),
+            acceptance=(
                 f"Remove stale [tool.spice.policy] internal_couplings entry for "
                 f"{path} {test_name} {target}, or restore the reviewed coupling if "
-                "it is still required."
-            ],
+                "it is still required.",
+            ),
         )
-        handles.append(handle)
-        if print_created:
-            print(f"  task created: {handle}")
-    return handles
+        for path, test_name, target in stale
+    )
+    return create_study_tasks(specs, controls=controls)
 
 
 def _study_subsumption(args: argparse.Namespace, root: Path) -> int:

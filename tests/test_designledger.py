@@ -30,6 +30,17 @@ CANONICAL_FAMILIES = frozenset(
 # the ledger is canonical.
 ALLOWED_EXCEPTIONS: dict[str, str] = {}
 
+# Non-Markdown files are exceptional reviewed artifacts, never an open-ended
+# home for generated output. Each entry names the durable reason it belongs in
+# the design ledger; exact inventory comparison below makes every new data drop
+# fail until it receives the same explicit adjudication.
+REVIEWED_ARTIFACT_ALLOWLIST = {
+    "experimental/subsumption-cohorts-2026-07-16.tsv": (
+        "stable machine-readable cohort queue used by deferred adjudication task "
+        "SUBSUMP-1kDf7Hhb"
+    ),
+}
+
 STATUS_LINE = re.compile(
     r"^Status: (?P<family>[a-z][a-z ]*[a-z]), (?P<date>\d{4}-\d{2}-\d{2})\.(?: |$)"
 )
@@ -59,6 +70,19 @@ def test_readme_publishes_every_canonical_family():
     assert {family: f"`{family}`" in readme for family in CANONICAL_FAMILIES} == {
         family: True for family in CANONICAL_FAMILIES
     }
+
+
+def test_non_markdown_design_artifacts_match_reviewed_allowlist():
+    artifacts = {
+        _relative(path)
+        for path in DESIGN_ROOT.rglob("*")
+        if path.is_file() and path.suffix != ".md"
+    }
+
+    assert artifacts == set(REVIEWED_ARTIFACT_ALLOWLIST)
+    assert {
+        path for path, reason in REVIEWED_ARTIFACT_ALLOWLIST.items() if reason.strip()
+    } == set(REVIEWED_ARTIFACT_ALLOWLIST)
 
 
 @pytest.mark.parametrize("path", _record_paths(), ids=_relative)

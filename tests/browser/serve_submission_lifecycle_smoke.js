@@ -48,6 +48,7 @@ async function installSubmissionLifecycleSmokeHelpers(page) {
     submissionSmokeHeaderElements,
     submissionSmokeHeaderLayout,
     submissionSmokeHeaderSnapshot,
+    submissionSmokeCompletionMessageKey,
     submissionSmokeSnapshot,
     submissionSmokeSend,
     submissionSmokePushSubmission,
@@ -182,7 +183,7 @@ function submissionSmokeSnapshot(lane, key) {
   return {
     ...submissionSmokeHeaderSnapshot(lane),
     completionMessageKey: submission
-      ? laneSubmissionCompletionMessageKey(lane, submission)
+      ? submissionSmokeCompletionMessageKey(lane, submission)
       : "",
     disposition: submission ? submission.disposition : "",
     key: submission ? submission.key : "",
@@ -196,6 +197,12 @@ function submissionSmokeSnapshot(lane, key) {
     placeholder: Array.from(lane.shardTextareas.values())[0]?.placeholder || "",
     stage: submission ? submission.stage : "",
   };
+}
+
+function submissionSmokeCompletionMessageKey(lane, submission) {
+  const completed = (submission.stages || {}).completed || {};
+  const evidence = String(completed.evidence || "");
+  return evidence && lane.knownMessageKeys.has(evidence) ? evidence : "";
 }
 
 function submissionSmokeHeaderSnapshot(lane) {

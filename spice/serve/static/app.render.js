@@ -23,6 +23,10 @@ let globalTransientStatusIsError = false;
 let globalTransientStatusTimestamp = "";
 let globalActivityStatusText = "";
 
+/**
+ * @param {Object} lane
+ * @param {LaneChromePayload} payload
+ */
 function renderLaneChrome(lane, payload) {
   const staleTeamConfig = lanePayloadTeamConfigIsStale(lane, payload);
   applyLaneTargetIdentity(lane, payload);

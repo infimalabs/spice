@@ -25,6 +25,11 @@ function mosaicAckResolveLane() {
   return resolveIsolatedLane("mosaic-ack-resolution-smoke-team");
 }
 
+function mosaicAckReservationRows(type, rootFontSizePx, gap, module) {
+  const priorPx = mosaicReservationPriorPx(type, rootFontSizePx);
+  return priorPx === null ? null : mosaicRowsFor(priorPx, gap, module);
+}
+
 function mosaicAckBuildPlainItem(index, lines) {
   const html = Array.from({ length: lines }, (_, i) => "line " + (i + 1)).join("<br>");
   return {
@@ -137,7 +142,7 @@ function mosaicAckPendingReservationCheck() {
   const card = lane.mosaicCards.find((c) => c.key === "ack-card-1");
   const node = lane.mosaicPlaneEl.querySelector('article[data-message-key="ack-card-1"]');
   const geometry = lane.mosaicGeometry;
-  const reserveRows = mosaicReservationRows(
+  const reserveRows = mosaicAckReservationRows(
     "ack",
     mosaicRootFontSizePx(),
     geometry.gap,
@@ -382,7 +387,7 @@ async function mosaicAckCompleteImageResolutionCheck() {
   const image = node.querySelector(".message-image img");
   const card = lane.mosaicCards.find((c) => c.key === "ack-complete-image-35");
   const geometry = lane.mosaicGeometry;
-  const reservedRows = mosaicReservationRows(
+  const reservedRows = mosaicAckReservationRows(
     "image",
     mosaicRootFontSizePx(),
     geometry.gap,
@@ -472,6 +477,7 @@ async function installMosaicAckHelpers(page) {
         MOSAIC_ACK_ORDER_SECOND_BLOCK_END +
         ";",
       mosaicAckResolveLane,
+      mosaicAckReservationRows,
       mosaicAckBuildPlainItem,
       mosaicAckBuildCompleteImageItem,
       mosaicAckBuildAckItem,
@@ -584,7 +590,8 @@ async function waitForMosaicAckGlobals(page) {
     globals: [
       "renderMessagesIfChanged",
       "upsertKnownMessage",
-      "mosaicReservationRows",
+      "mosaicReservationPriorPx",
+      "mosaicRowsFor",
     ],
   });
 }

@@ -84,20 +84,6 @@ function laneSubmissionStageRank(stage) {
   return rank;
 }
 
-function latestLaneSubmission(lane) {
-  if (!(lane.submissionLifecycleByKey instanceof Map))
-    throw new Error("lane submission lifecycle map is required");
-  let latest = null;
-  for (const submission of lane.submissionLifecycleByKey.values()) latest = submission;
-  return latest;
-}
-
-function laneSubmissionCompletionMessageKey(lane, submission) {
-  const completed = (submission.stages || {}).completed || {};
-  const evidence = String(completed.evidence || "");
-  return evidence && lane.knownMessageKeys.has(evidence) ? evidence : "";
-}
-
 function reconcileLaneSubmissionMessages(lane, messages) {
   if (!(lane.submissionLifecycleByKey instanceof Map))
     throw new Error("lane submission lifecycle map is required");

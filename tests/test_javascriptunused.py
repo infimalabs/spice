@@ -11,6 +11,7 @@ from spice.studies.javascriptunused import (
     STATUS_TEST_ONLY,
     STATUS_USED,
     collect_javascript_unused_entries,
+    scan_javascript_unused_symbols,
 )
 
 
@@ -150,6 +151,50 @@ context.testedHelper(1, 2);
     assert candidate.reference_count == 1
     assert candidate.test_reference_count == 0
     assert tested.status != candidate.status
+
+
+def test_javascript_unused_exemptions_match_exact_path_and_symbol(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "first.js",
+        """
+function testedHelper() {
+  return 1;
+}
+""",
+    )
+    _write(
+        tmp_path / "second.js",
+        """
+function otherTestedHelper() {
+  return 2;
+}
+""",
+    )
+    _write(
+        tmp_path / "tests" / "fixtures" / "harness.js",
+        """
+context.testedHelper();
+context.otherTestedHelper();
+""",
+    )
+
+    findings = scan_javascript_unused_symbols(
+        [
+            Path("first.js"),
+            Path("second.js"),
+            Path("tests/fixtures/harness.js"),
+        ],
+        root=tmp_path,
+        declaration_exemptions={
+            ("first.js", "testedHelper"): "fixture exercises this declaration",
+        },
+    )
+
+    assert [(finding.path, finding.name) for finding in findings] == [
+        ("second.js", "otherTestedHelper")
+    ]
 
 
 def test_collect_javascript_unused_symbols_keeps_test_declared_helpers_used(

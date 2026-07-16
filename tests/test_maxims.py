@@ -22,7 +22,7 @@ from spice.agent.maxims import MaximVerdict
 from spice.cli import entry as cli_entry
 from spice.errors import SpiceError
 from spice.flexstate import git_state_path
-from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.inbox import (
     collect_inbox_items,
     compose_inbox_text,

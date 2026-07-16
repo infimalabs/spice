@@ -3,12 +3,12 @@
 import argparse
 import gzip
 import json
-import sqlite3
 import subprocess
 
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.sqliteconnection import sqlite_connection
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions import records
@@ -722,7 +722,7 @@ def test_epoch_millis_counts_whole_milliseconds():
 
 def _write_state_db(codex_home, thread_id, transcript) -> None:
     codex_home.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(codex_home / "state_5.sqlite") as connection:
+    with sqlite_connection(codex_home / "state_5.sqlite") as connection:
         connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT)")
         connection.execute(
             "INSERT INTO threads (id, rollout_path) VALUES (?, ?)",

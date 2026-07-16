@@ -89,28 +89,6 @@ function syncObserverNotice(errors) {
   notice.textContent = errors.join("; ");
 }
 
-// Targets carry statusLine and route facts in the same field names the lane
-// payload uses; the shim only fills the names renderLaneChrome reads.
-function targetPayloadShim(target) {
-  if (!target) return { statusLine: {} };
-  return {
-    targetIdentity: target.targetIdentity,
-    serveAgentIdentity: target.serveAgentIdentity,
-    taskFilters: target.taskFilters || [],
-    effectiveTaskFilters: target.effectiveTaskFilters || [],
-    taskFilterEntries: target.taskFilterEntries || [],
-    laneFilterVersion: target.laneFilterVersion || "",
-    teamIdentity: target.teamIdentity,
-    lifetime: target.lifetime || "",
-    renewalIntent: target.renewalIntent || {},
-    taskFilterInventory: target.taskFilterInventory || {},
-    laneMetrics: target.laneMetrics || {},
-    laneInfo: target.laneInfo || { summaryRows: [], members: [] },
-    privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
-    statusLine: target.statusLine || {},
-  };
-}
-
 function applyTaskFilterInventory(inventory) {
   const acceptedInventory = inventory || {};
   if (!taskFilterInventoryIsFresh(acceptedInventory)) return false;
@@ -181,9 +159,16 @@ function normalizedNonnegativeIntegerString(value) {
   return text.replace(/^0+(?=\d)/, "");
 }
 
+/**
+ * @param {Object} lane
+ * @param {LaneChromePayload=} target
+ * @returns {LaneChromePayload}
+ */
 function lanePayloadWithTargetPending(lane, target) {
-  const targetPayload = targetPayloadShim(target);
-  if (!lane.latestPayload) return targetPayload;
+  if (!lane.latestPayload) {
+    if (!target) throw new Error("initial lane chrome payload is required");
+    return target;
+  }
   const pending = targetFreshPendingIdentity(target);
   if (pending.count === null && pending.keys === null && !pending.revision)
     return lane.latestPayload;
@@ -227,7 +212,6 @@ function targetFreshPendingIdentity(target) {
   for (const value of [
     statusLine.pendingInboxCount,
     target && target.pendingInboxCount,
-    target && target.pendingCount,
   ]) {
     count = normalizedTargetChoiceCount(value);
     if (count !== null) break;

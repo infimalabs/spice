@@ -89,6 +89,22 @@ AGENT_COMMAND_AUDIT_TEXT_SUFFIXES = {
 AGENT_COMMAND_NON_COMMAND_WORDS = frozenset({"bootstrap", "from"})
 
 
+AGENT_PARSER_VERBS = {
+    "activation",
+    "ensure",
+    "import",
+    "post-tool-hook",
+    "reply",
+    "requeue-deadletter",
+    "run",
+    "show",
+    "supervise",
+}
+
+
+AGENT_INSPECTION_VERBS = {"show", "status"}
+
+
 def _agent_parser_verbs() -> set[str]:
     parser = build_parser()
     top_level = next(
@@ -140,7 +156,7 @@ def _agent_command_mentions(repo_root: Path):
                     yield relative, line_number, verb, line.strip()
 
 
-def test_agent_help_lists_show_and_status_commands():
+def test_agent_help_exposes_show_as_the_sole_inspection_command():
     parser = build_parser()
     subparsers = next(
         action
@@ -149,23 +165,18 @@ def test_agent_help_lists_show_and_status_commands():
     )
     help_text = subparsers.choices["agent"].format_help()
 
-    assert "show" in help_text
+    assert _agent_parser_verbs() == AGENT_PARSER_VERBS
     assert "Show the bound agent's state." in help_text
-    assert "status" in help_text
-    assert "Compatibility alias for agent show." in help_text
 
 
-def test_agent_show_and_status_parse_to_agent_handler():
+def test_agent_show_parses_to_agent_handler():
     show = build_parser().parse_args(["agent", "show"])
-    status = build_parser().parse_args(["agent", "status"])
 
     assert show.agent_action == "show"
     assert show.func == agent_cli.handle_agent
-    assert status.agent_action == "status"
-    assert status.func == agent_cli.handle_agent
 
 
-def test_agent_show_and_status_render_same_bound_agent_state(
+def test_agent_show_renders_bound_agent_state_through_real_parser(
     tmp_path, monkeypatch, capsys
 ):
     status = SimpleNamespace(
@@ -191,12 +202,8 @@ def test_agent_show_and_status_render_same_bound_agent_state(
     monkeypatch.setattr(lifecycle, "agent_status", fake_agent_status)
 
     show_args = build_parser().parse_args(["agent", "show"])
-    assert agent_cli.handle_agent(show_args) == 0
+    assert show_args.func(show_args) == 0
     show_output = capsys.readouterr().out
-
-    status_args = build_parser().parse_args(["agent", "status"])
-    assert agent_cli.handle_agent(status_args) == 0
-    status_output = capsys.readouterr().out
 
     expected = "\n".join(
         [
@@ -213,24 +220,27 @@ def test_agent_show_and_status_render_same_bound_agent_state(
         ]
     )
     assert show_output == expected
-    assert status_output == expected
-    assert calls == [tmp_path, tmp_path]
+    assert calls == [tmp_path]
 
 
 def test_agent_command_mentions_match_parser_surface():
     repo_root = Path(__file__).resolve().parents[1]
     parser_verbs = _agent_parser_verbs()
-    assert "show" in parser_verbs
-    assert "run" in parser_verbs
-    assert "post-tool-hook" in parser_verbs
+    mentions = list(_agent_command_mentions(repo_root))
 
     unsupported = [
         f"{path}:{line_number}: unsupported spice agent {verb!r}: {line}"
-        for path, line_number, verb, line in _agent_command_mentions(repo_root)
+        for path, line_number, verb, line in mentions
         if verb not in parser_verbs
     ]
+    inspection_verbs = {
+        verb
+        for _path, _line_number, verb, _line in mentions
+        if verb in AGENT_INSPECTION_VERBS
+    }
 
     assert unsupported == []
+    assert inspection_verbs == {"show"}
 
 
 def test_post_tool_hook_config_requires_driver_capability(tmp_path):

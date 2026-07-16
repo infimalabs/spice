@@ -14,6 +14,21 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function latestSubmission(targetLane) {
+  if (!(targetLane.submissionLifecycleByKey instanceof Map))
+    throw new Error("lane submission lifecycle map is required");
+  let latest = null;
+  for (const submission of targetLane.submissionLifecycleByKey.values())
+    latest = submission;
+  return latest;
+}
+
+function completionMessageKey(targetLane, submission) {
+  const completed = (submission.stages || {}).completed || {};
+  const evidence = String(completed.evidence || "");
+  return evidence && targetLane.knownMessageKeys.has(evidence) ? evidence : "";
+}
+
 function lane(id) {
   return {
     targetId: id,
@@ -63,11 +78,11 @@ context.applyLaneSubmissionLifecycle(
   }),
 );
 assert(
-  context.latestLaneSubmission(first).stage === "completed",
+  latestSubmission(first).stage === "completed",
   "lower-stage replay must preserve completed lifecycle",
 );
 assert(
-  context.latestLaneSubmission(sibling) === null,
+  latestSubmission(sibling) === null,
   "submission state must remain scoped to its fused member",
 );
 
@@ -98,11 +113,10 @@ const messages = [
 ];
 reconnect.knownMessageKeys = new Set(messages.map((message) => message.key));
 context.reconcileLaneSubmissionMessages(reconnect, messages);
-const reconnected = context.latestLaneSubmission(reconnect);
+const reconnected = latestSubmission(reconnect);
 assert(reconnected.stage === "completed", "reconnect messages must restore completion");
 assert(
-  context.laneSubmissionCompletionMessageKey(reconnect, reconnected) ===
-    "message-final-b",
+  completionMessageKey(reconnect, reconnected) === "message-final-b",
   "completed lifecycle must link to the matching final response",
 );
 
@@ -121,6 +135,6 @@ assert(
   "client lifecycle state must remain at its declared bound",
 );
 assert(
-  context.latestLaneSubmission(bounded).key === "key-54",
+  latestSubmission(bounded).key === "key-54",
   "client lifecycle bound must retain the newest submission",
 );

@@ -42,14 +42,18 @@ from spice.flexstate import FlexSliceClaim
 from spice.gitprocess import run_git_command
 from spice.pathmatch import matches_repo_path
 from spice.paths import find_tool
-from spice.toolprocess import run_tool_command
-from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
+from spice.policy import (
+    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
+    LEGITIMATE_INTERNAL_COUPLINGS,
+)
 from spice.policyconfig import resolve_policy
+from spice.toolprocess import run_tool_command
 from spice.configlayer import contextualize_config_error, effective_table
 from spice.studies import (
     complexity,
     envpolicy,
     fileloc,
+    javascriptunused,
     links,
     localpaths,
     magicnums,
@@ -67,6 +71,7 @@ from spice.studies.repodocs import (
 from spice.studies.walk import (
     partially_staged_paths,
     staged_paths,
+    tracked_paths,
 )
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
@@ -200,6 +205,11 @@ def _builtin_pre_commit_steps(
             "serve-web-typecheck",
             "serve web typecheck",
             lambda: _run_serve_web_typecheck_guard(repo_root),
+        ),
+        PreCommitStep(
+            "javascript-unused",
+            "javascript unused",
+            lambda: _run_javascript_unused_guard(repo_root),
         ),
         PreCommitStep(
             "python-typecheck",
@@ -794,6 +804,21 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
             magicnums.render_magic_board(
                 findings, baseline_ref=resolved.magic.baseline_ref
             )
+        )
+
+
+def _run_javascript_unused_guard(repo_root: Path) -> None:
+    findings = javascriptunused.scan_javascript_unused_symbols(
+        tracked_paths(repo_root),
+        root=repo_root,
+        declaration_exemptions=JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
+    )
+    if findings:
+        raise SpiceError(
+            javascriptunused.render_javascript_unused_board(findings)
+            + "\njavascript-unused: candidate-unused and test-only declarations "
+            "are actionable; wire them into production, move them into tests, or "
+            "name an exact (path, symbol) exemption with a reason"
         )
 
 
