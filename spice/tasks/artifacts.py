@@ -371,6 +371,7 @@ def _require_payload_integrity(path: Path, digest: str, artifact_id: str) -> Non
 
 
 def _copy_file_atomic(source: Path, target: Path) -> None:
+    """Durably stream a binary artifact outside the UTF-8 text/JSON seam."""
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
@@ -381,6 +382,7 @@ def _copy_file_atomic(source: Path, target: Path) -> None:
             out.flush()
             os.fsync(out.fileno())
         os.replace(tmp_name, target)
+        fsync_directory(target.parent)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)

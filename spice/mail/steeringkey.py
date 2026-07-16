@@ -16,9 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from spice.agent.paths import agent_worktree_state_dir
+from spice.locking import bounded_exclusive_lock
+from spice.paths import atomic_write_text
 from spice.tasks import identity
 
 STEERING_TOKEN_FILENAME = "steering-token"
+STEERING_TOKEN_LOCK_TIMEOUT_SECONDS = 1.0
 
 
 def _mint_token() -> str:
@@ -50,14 +53,19 @@ def steering_token(repo_root: Path | None) -> str:
     if existing:
         return existing
     try:
-        token = _mint_token()
+        with bounded_exclusive_lock(
+            path.with_name(f".{path.name}.lock"),
+            timeout_seconds=STEERING_TOKEN_LOCK_TIMEOUT_SECONDS,
+            action="mint steering token",
+        ):
+            try:
+                existing = path.read_text(encoding="utf-8").strip()
+            except OSError:
+                existing = ""
+            if existing:
+                return existing
+            token = _mint_token()
+            atomic_write_text(path, token + "\n")
+            return token
     except Exception:
         return ""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(token + "\n", encoding="utf-8")
-        tmp.replace(path)
-    except OSError:
-        pass
-    return token

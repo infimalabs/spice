@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.agent.paths import agent_state_dir
+from spice.paths import atomic_write_json
 
 RENEWAL_WIND_DOWN_TEXT = (
     "You are being replaced by a renewed worktree agent. "
@@ -58,10 +59,7 @@ def write_agent_renewal_request(
         "inboxKey": inbox_key,
         "createdAt": time.time(),
     }
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
-    tmp.replace(path)
-    return path
+    return atomic_write_json(path, payload, compact=True)
 
 
 def read_agent_renewal_request(repo_root: Path) -> dict[str, Any] | None:

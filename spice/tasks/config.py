@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,7 +19,7 @@ from spice import defaults
 from spice.errors import SpiceError
 from spice.gitprocess import run_git_command
 from spice.locking import bounded_exclusive_lock
-from spice.paths import shared_state_root
+from spice.paths import atomic_write_text, shared_state_root
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
@@ -390,35 +389,10 @@ def _bootstrap_lock():
         yield
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if path.read_text(encoding="utf-8") == text:
-            return
-    except OSError:
-        pass
-    # A per-call unique temp name: concurrent same-process writers (e.g. the
-    # serve team store and side-channel threads) would otherwise share one
-    # `{pid}.tmp` path and race os.replace into FileNotFoundError.
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp_name, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-
-
 def ensure_task_event_file(root: Path | None = None) -> Path:
     path = task_event_path(root)
     if not path.exists():
-        _atomic_write_text(path, "0 bootstrap\n")
+        atomic_write_text(path, "0 bootstrap\n", write_if_changed=True)
     return path
 
 
@@ -426,7 +400,7 @@ def mark_task_backend_changed(
     reason: str = "task", *, root: Path | None = None
 ) -> None:
     token = f"{time.time_ns()} {os.getpid()} {reason.strip() or 'task'}\n"
-    _atomic_write_text(task_event_path(root), token)
+    atomic_write_text(task_event_path(root), token, write_if_changed=True)
 
 
 def uda_schema() -> dict[str, dict[str, str]]:
@@ -461,7 +435,7 @@ def write_taskrc() -> None:
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")
         lines.extend(_report_lines())
-        _atomic_write_text(taskrc_path(), "\n".join(lines) + "\n")
+        atomic_write_text(taskrc_path(), "\n".join(lines) + "\n", write_if_changed=True)
 
 
 def _report_lines() -> list[str]:

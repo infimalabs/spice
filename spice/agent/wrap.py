@@ -54,6 +54,7 @@ from spice.agent.runwatch import (
     watch_agent_side_channel as watch_agent_side_channel,
     write_side_channel_chunk as write_side_channel_chunk,
 )
+from spice.paths import atomic_write_json
 from spice.agent.sidechannelnotify import (
     side_channel_marker_path as side_channel_marker_path,
 )
@@ -654,14 +655,11 @@ def write_working_state_state(
     if repo_root is None:
         return
     path = working_state_state_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps({"displayedAt": now, "key": list(key)}, separators=(",", ":"))
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        path,
+        {"displayedAt": now, "key": list(key)},
+        compact=True,
     )
-    tmp.replace(path)
 
 
 def _working_state_key_payload(value: Any) -> WorkingStateKey | None:
@@ -870,14 +868,11 @@ def write_context_warning_state(
     if repo_root is None:
         return
     path = context_warning_state_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps({"displayedAt": now, "key": list(key)}, separators=(",", ":"))
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        path,
+        {"displayedAt": now, "key": list(key)},
+        compact=True,
     )
-    tmp.replace(path)
 
 
 def read_cached_agent_context_meter(
@@ -906,21 +901,15 @@ def write_cached_agent_context_meter(
     repo_root: Path, thread_id: str, meter: ContextMeter, *, now: float
 ) -> None:
     path = context_meter_cache_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps(
-            {
-                "checkedAt": now,
-                "threadId": thread_id,
-                "meter": context_meter_cache_payload(meter),
-            },
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        path,
+        {
+            "checkedAt": now,
+            "threadId": thread_id,
+            "meter": context_meter_cache_payload(meter),
+        },
+        compact=True,
     )
-    tmp.replace(path)
 
 
 def _float_payload_value(value: Any) -> float | None:
