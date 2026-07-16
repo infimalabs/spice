@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Iterable, Iterator
 
 from spice.configlayer import config_string_list, effective_table
 from spice.gitprocess import run_git_command
+from spice.pathmatch import (
+    has_glob_magic,
+    matches_repo_path,
+    matches_repo_path_or_ancestor,
+    normalize_repo_path,
+)
 from spice.repocfg import read_pyproject
 
 _RENAME_STATUS_FIELDS = 3
@@ -58,11 +63,11 @@ def is_test_path(path: Path, repo_root: Path) -> bool:
     relative = _repo_relative_path(path, repo_root)
     if relative is None:
         return False
-    rel_posix = _normalized_git_path(relative)
+    rel_posix = normalize_repo_path(relative)
     if not rel_posix:
         return False
     return any(
-        _matches_test_path_pattern(rel_posix, pattern)
+        matches_repo_path_or_ancestor(rel_posix, pattern)
         for pattern in test_path_patterns(repo_root)
     )
 
@@ -95,14 +100,14 @@ def _string_testpaths(raw: str) -> list[str]:
 def _normalized_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     for pattern in patterns:
-        value = _normalized_policy_pattern(pattern).rstrip("/")
+        value = normalize_repo_path(pattern).rstrip("/")
         if value and value not in normalized:
             normalized.append(value)
     return tuple(normalized)
 
 
 def _existing_test_roots(repo_root: Path, pattern: str) -> list[Path]:
-    if _has_glob_magic(pattern):
+    if has_glob_magic(pattern):
         return sorted(path for path in repo_root.glob(pattern) if path.is_dir())
     root = repo_root / pattern
     return [root] if root.is_dir() else []
@@ -129,23 +134,6 @@ def _repo_relative_path(path: Path, repo_root: Path) -> Path | None:
         return None
 
 
-def _matches_test_path_pattern(rel_posix: str, pattern: str) -> bool:
-    if _has_glob_magic(pattern):
-        return any(
-            fnmatchcase(candidate, pattern) for candidate in _path_ancestors(rel_posix)
-        )
-    return rel_posix == pattern or rel_posix.startswith(pattern + "/")
-
-
-def _path_ancestors(rel_posix: str) -> Iterator[str]:
-    path = Path(rel_posix)
-    candidates = [path, *path.parents]
-    for candidate in candidates:
-        value = candidate.as_posix()
-        if value and value != ".":
-            yield value
-
-
 def is_excluded_path(
     path: Path,
     *,
@@ -167,32 +155,8 @@ def is_excluded_path(
     if policy_exclusions is None and repo_root is not None:
         policy_exclusions = policy_path_exclusions(repo_root)
     return any(
-        _matches_policy_exclusion(path, pattern)
-        for pattern in (policy_exclusions or ())
+        matches_repo_path(path, pattern) for pattern in (policy_exclusions or ())
     )
-
-
-def _matches_policy_exclusion(path: Path, pattern: str) -> bool:
-    normalized_path = _normalized_git_path(path)
-    normalized_pattern = _normalized_policy_pattern(pattern)
-    if not normalized_path or not normalized_pattern:
-        return False
-    if _has_glob_magic(normalized_pattern):
-        return fnmatchcase(normalized_path, normalized_pattern)
-    prefix = normalized_pattern.rstrip("/")
-    return normalized_path == prefix or normalized_path.startswith(prefix + "/")
-
-
-def _normalized_git_path(path: Path) -> str:
-    return path.as_posix().strip().removeprefix("./")
-
-
-def _normalized_policy_pattern(pattern: str) -> str:
-    return pattern.strip().replace("\\", "/").removeprefix("./")
-
-
-def _has_glob_magic(pattern: str) -> bool:
-    return any(char in pattern for char in "*?[")
 
 
 def iter_source_files(root: Path, *, suffixes: Iterable[str]) -> Iterator[Path]:

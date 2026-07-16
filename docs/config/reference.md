@@ -492,13 +492,20 @@ explicit cleanup debt.
 
 ### `[tool.spice.policy.scopes."<matcher>"]`
 
-Per-path numeric overrides. Glob keys match paths; non-glob keys match a path or
-subtree. Flat scope keys apply to every numeric bound; named sub-tables target
-`file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
-`commit_message_wrap`, or `repo_truth_doc_chars`. Settings accept
-`multiplier`, `min`, `max`, `unlimited = true`, and optional `flex`. A nested
-`magic.examine_threshold` overrides magic-number scanning. Most-specific
-match wins; exact/prefix matchers outrank globs.
+Repository path selectors normalize `\\` separators and a leading `./` before
+matching. Glob keys use case-sensitive whole-path `fnmatch` semantics, including
+`*` crossing separators; non-glob keys match a path or subtree. A leading
+`**/` matches files at the repository root and below it. Policy scopes add one
+named semantic over that shared contract: an internal `/**/` may consume zero
+directories, so `Docs/**/*.md` covers both `Docs/page.md` and
+`Docs/guides/page.md`.
+
+Flat scope keys apply to every numeric bound; named sub-tables target `file_loc`,
+`file_bytes`, `routine_ccn`, `routine_length`, `commit_message_wrap`, or
+`repo_truth_doc_chars`. Settings accept `multiplier`, `min`, `max`,
+`unlimited = true`, and optional `flex`. A nested `magic.examine_threshold`
+overrides magic-number scanning. Most-specific match wins; exact/prefix
+matchers outrank globs.
 
 ### `[tool.spice.policy.magic]`
 
@@ -517,7 +524,9 @@ Command-step tables accept:
 
 `label`, `mount`, `run`/`argv`, `when`, `formatter`, and `enabled`.
 `pre_commit` steps receive `SPICE_STAGED_PATHS`; mounted steps also receive
-`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`.
+`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `when` uses the shared
+repository path-selector contract above without the policy-scope-only internal
+`/**/` variant.
 
 Reachability provider tables accept:
 

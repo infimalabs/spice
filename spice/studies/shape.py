@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from fnmatch import fnmatch, fnmatchcase
+from fnmatch import fnmatch
 from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
 from spice.configlayer import config_string_list, effective_table
+from spice.pathmatch import matches_repo_path
 from spice.repocfg import read_pyproject
 from spice.studies.walk import configured_test_roots, is_test_path
 
@@ -72,28 +73,13 @@ def generated_path_patterns(repo_root: Path) -> tuple[str, ...]:
     )
 
 
-def _has_glob_magic(pattern: str) -> bool:
-    return any(char in pattern for char in "*?[")
-
-
 def is_generated_path(rel_posix: str, patterns: tuple[str, ...]) -> bool:
     """True when a repo-relative posix path is a declared generated path.
 
     A glob pattern matches by ``fnmatch``; a plain pattern matches the path
     itself or any path beneath it, so a directory entry exempts its subtree.
     """
-    for raw in patterns:
-        pattern = raw.strip().replace("\\", "/").removeprefix("./")
-        if not pattern:
-            continue
-        if _has_glob_magic(pattern):
-            if fnmatchcase(rel_posix, pattern):
-                return True
-            continue
-        prefix = pattern.rstrip("/")
-        if rel_posix == prefix or rel_posix.startswith(prefix + "/"):
-            return True
-    return False
+    return any(matches_repo_path(rel_posix, pattern) for pattern in patterns)
 
 
 def name_cluster_threshold(repo_root: Path) -> int:

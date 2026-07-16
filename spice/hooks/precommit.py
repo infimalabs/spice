@@ -28,7 +28,6 @@ import os
 import shlex
 import subprocess
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable, Protocol, TypeVar
 
@@ -40,8 +39,9 @@ from spice.cli.mounts import (
 )
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
-from spice.paths import find_tool
 from spice.gitprocess import run_git_command
+from spice.pathmatch import matches_repo_path
+from spice.paths import find_tool
 from spice.toolprocess import run_tool_command
 from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
@@ -540,14 +540,8 @@ def _matching_staged_paths(
     return tuple(
         path
         for path in staged
-        if any(_path_matches_when(path, pattern) for pattern in patterns)
+        if any(matches_repo_path(path, pattern) for pattern in patterns)
     )
-
-
-def _path_matches_when(path: Path, pattern: str) -> bool:
-    normalized_path = path.as_posix().strip().removeprefix("./")
-    normalized_pattern = pattern.strip().replace("\\", "/").removeprefix("./")
-    return fnmatchcase(normalized_path, normalized_pattern)
 
 
 def _run_shape_guards(repo_root: Path) -> None:
