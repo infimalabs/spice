@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
+import pytest
 
+from spice.agent.driver import DRIVER
+from spice.cli.parser import build_parser
 from spice.tasks import (
     claimstate,
+    config,
+    create,
     effort,
+    identity,
     render,
+    tw,
 )
 
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACK_ORIGIN = "ack:20260101T000000000000Z"
 
 
 SHOW_DEFAULT_CACHED_INPUT_TOKENS = 10
@@ -22,6 +31,75 @@ SHOW_DEFAULT_OUTPUT_TOKENS = 20
 
 
 SHOW_DEFAULT_REASONING_OUTPUT_TOKENS = 5
+
+
+@pytest.fixture
+def task_backend(tmp_path, monkeypatch):
+    if shutil.which("task") is None:
+        pytest.skip("Taskwarrior binary is required")
+    repo_root = Path(__file__).parents[1]
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo_root)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-task-show")
+    config.set_backend(str(backend))
+    try:
+        yield backend
+    finally:
+        config.set_backend(None)
+
+
+def test_task_show_cli_renders_lineage_and_creator_context(task_backend, capsys):
+    parent = create.add(
+        "Ack-origin task",
+        project="task.render",
+        origin=ACK_ORIGIN,
+        acceptance=["show renders acknowledgment provenance"],
+    )
+    child = create.add(
+        "Task-origin child",
+        project="task.render",
+        origin=f"task:{parent}",
+        acceptance=["show renders task provenance"],
+    )
+    child_row = identity.resolve(child)
+    tw.run(
+        [
+            identity.uuid_of(child_row),
+            "modify",
+            f"claim_by:{ACTOR_A}",
+            "claim_until:20000101T000000Z",
+            "start:now",
+        ]
+    )
+
+    parent_output = _show_through_cli(task_backend, parent, capsys)
+    child_output = _show_through_cli(task_backend, child, capsys)
+
+    assert f"origin {ACK_ORIGIN}" in parent_output
+    assert f"origin task:{parent}" in child_output
+    child_lines = child_output.splitlines()
+    origin_index = child_lines.index(f"origin task:{parent}")
+    assert child_lines[origin_index - 1] == "description "
+    assert child_lines[origin_index + 1] == "project task.render"
+    creator_index = next(
+        index
+        for index, line in enumerate(child_lines)
+        if line.startswith(f"creator_context {ACTOR_A} ")
+    )
+    assert child_lines[creator_index - 1].startswith("timing wait=")
+    assert child_lines[creator_index + 1] == "rehydrate:"
+    assert child_lines[creator_index + 2].startswith(
+        f"  creator context, run: spice session briefing {ACTOR_A} --start "
+    )
+
+
+def _show_through_cli(backend: Path, handle: str, capsys) -> str:
+    args = build_parser().parse_args(
+        ["task", "--backend", str(backend), "show", handle]
+    )
+    assert args.func(args) == 0
+    return capsys.readouterr().out
 
 
 def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
@@ -90,7 +168,7 @@ def test_task_show_hides_recovery_context_for_current_task(monkeypatch):
 
     assert lines[lines.index("claim_thread claim-thread") + 1] == "acceptance "
     assert (
-        lines[lines.index("origin origin-thread - /tmp/origin") + 1]
+        lines[lines.index("creator_context origin-thread - /tmp/origin") + 1]
         == 'next: spice task done TASK-test --validation "..."'
     )
 
