@@ -164,8 +164,22 @@ def test_all_study_generators_create_reusable_deferred_tasks_visible_by_project(
     quality_output = _run_waiting_list(study_task_backend, "tests.quality", capsys)
     assert [handle in exhaust_output for handle in handles[:2]] == [True, True]
     assert [handle in quality_output for handle in handles[2:]] == [True, True, True]
-    assert exhaust_output.count("tests.exhaust") == 2
-    assert quality_output.count("tests.quality") == 3
+    assert (
+        sum(
+            "tests.exhaust" in line
+            for line in exhaust_output.splitlines()
+            if not line.startswith("scope ")
+        )
+        == 2
+    )
+    assert (
+        sum(
+            "tests.quality" in line
+            for line in quality_output.splitlines()
+            if not line.startswith("scope ")
+        )
+        == 3
+    )
 
 
 def test_completed_study_finding_recurs_with_traceable_lineage(study_task_backend):
@@ -297,7 +311,6 @@ def _run_waiting_list(backend: Path, project: str, capsys) -> str:
             "--backend",
             str(backend),
             "list",
-            "--all",
             "--status",
             "waiting",
             "--project",
