@@ -260,19 +260,6 @@ class ResolvedPolicy:
             ),
         )
 
-    def complexity_for_path(self, path: Path) -> ComplexityPolicy:
-        ccn = self.bound_for_path("routine_ccn", self.limits.routine_ccn, path)
-        length = self.bound_for_path("routine_length", self.limits.routine_length, path)
-        return ComplexityPolicy(
-            max_ccn=ccn.limit,
-            ccn_flex_limit=ccn.flex_limit,
-            max_length=length.limit,
-            length_flex_limit=length.flex_limit,
-            hotspot_limit=self.complexity_hotspot_limit,
-            ccn_unlimited=ccn.unlimited,
-            length_unlimited=length.unlimited,
-        )
-
     def jittered_complexity_for_path(self, path: Path) -> ComplexityPolicy:
         ccn = self.jittered_bound_for_path("routine_ccn", self.limits.routine_ccn, path)
         length = self.jittered_bound_for_path(

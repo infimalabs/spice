@@ -2,6 +2,15 @@ import itertools
 import random
 
 from spice.serve.team.store import ServeTeamStore, TaskLifecycleSeriesPoint, TeamConfig
+from tests.test_teamstorehelpers import (
+    store_close_team,
+    store_merge_teams,
+    store_prune_zero_activity_closed_teams,
+    store_remove_agent,
+    store_reorder_team_agents,
+    store_split_team,
+    store_split_team_back,
+)
 
 _directive_seq = itertools.count()
 
@@ -332,7 +341,7 @@ def _apply_random_merge(
     destination_ids = tuple(
         team_id for team_id in open_team_ids if team_id != source_team_id
     )
-    store.merge_teams(source_team_id, rng.choice(destination_ids))
+    store_merge_teams(store, source_team_id, rng.choice(destination_ids))
 
 
 def _apply_random_split(
@@ -346,7 +355,8 @@ def _apply_random_split(
     source_members = members_by_team[source_team_id]
     split_count = rng.randint(1, len(source_members) - 1)
     selected_agents = set(rng.sample(source_members, split_count))
-    store.split_team(
+    store_split_team(
+        store,
         source_team_id,
         agent_ids=[
             agent_id for agent_id in source_members if agent_id in selected_agents
@@ -357,7 +367,7 @@ def _apply_random_split(
 def _apply_random_split_back(
     store: ServeTeamStore, rng: random.Random, _agents: tuple[str, ...]
 ) -> None:
-    store.split_team_back(rng.choice(_split_back_team_ids(store)))
+    store_split_team_back(store, rng.choice(_split_back_team_ids(store)))
 
 
 def _apply_random_remove(
@@ -368,19 +378,19 @@ def _apply_random_remove(
         _open_team_ids(store), members_by_team, minimum=1
     )
     team_id = rng.choice(team_ids)
-    store.remove_agent(team_id, rng.choice(members_by_team[team_id]))
+    store_remove_agent(store, team_id, rng.choice(members_by_team[team_id]))
 
 
 def _apply_random_close(
     store: ServeTeamStore, rng: random.Random, _agents: tuple[str, ...]
 ) -> None:
-    store.close_team(rng.choice(_open_team_ids(store)))
+    store_close_team(store, rng.choice(_open_team_ids(store)))
 
 
 def _apply_random_prune(
     store: ServeTeamStore, _rng: random.Random, _agents: tuple[str, ...]
 ) -> None:
-    store.prune_zero_activity_closed_teams()
+    store_prune_zero_activity_closed_teams(store)
 
 
 def _apply_random_reorder(
@@ -395,7 +405,7 @@ def _apply_random_reorder(
     rng.shuffle(ordered_agent_ids)
     if ordered_agent_ids == list(members_by_team[team_id]):
         ordered_agent_ids.reverse()
-    store.reorder_team_agents(team_id, ordered_agent_ids)
+    store_reorder_team_agents(store, team_id, ordered_agent_ids)
 
 
 METRIC_INVARIANT_OP_HANDLERS = {
@@ -434,7 +444,7 @@ def test_lane_metrics_drop_removed_member_counts(tmp_path):
     _seed_lane_metrics(store, "agent-a", acked=1, sends=2, tool_calls=3)
     store.assign_agent(team.team_id, "agent-b")
     _seed_lane_metrics(store, "agent-b", acked=4, sends=5, tool_calls=6)
-    store.remove_agent(team.team_id, "agent-a")
+    store_remove_agent(store, team.team_id, "agent-a")
 
     summary = store.lane_metric_summary("agent-b", bucket_count=12)
 
@@ -518,10 +528,10 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
         message_timestamps=[180],
     )
 
-    store.merge_teams(source.team_id, destination.team_id)
+    store_merge_teams(store, source.team_id, destination.team_id)
     destination_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
     moved_after = store.lane_metric_summary("agent-a", bucket_count=12, now=180)
-    store.merge_teams(source.team_id, destination.team_id)
+    store_merge_teams(store, source.team_id, destination.team_id)
     repeated_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
 
     assert store.team_state(source.team_id).status == "closed"
@@ -676,28 +686,28 @@ def test_team_historical_metric_summary_projects_membership_intervals(
     _seed_lane_metrics(store, "agent-b", message_timestamps=[60])
 
     set_time(120)
-    split = store.split_team(
-        team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
+    split = store_split_team(
+        store, team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
     )
     _seed_lane_metrics(store, "agent-a", message_timestamps=[180])
     _seed_lane_metrics(store, "agent-b", message_timestamps=[180])
 
     set_time(240)
-    store.merge_teams(split.team_id, team.team_id)
+    store_merge_teams(store, split.team_id, team.team_id)
     _seed_lane_metrics(store, "agent-a", message_timestamps=[300])
     _seed_lane_metrics(store, "agent-b", message_timestamps=[300])
 
     set_time(360)
-    store.split_team_back(team.team_id)
+    store_split_team_back(store, team.team_id)
     _seed_lane_metrics(store, "agent-a", message_timestamps=[420])
     _seed_lane_metrics(store, "agent-b", message_timestamps=[420])
 
     set_time(480)
-    store.remove_agent(team.team_id, "agent-b")
+    store_remove_agent(store, team.team_id, "agent-b")
     _seed_lane_metrics(store, "agent-b", message_timestamps=[540])
 
     set_time(600)
-    store.close_team(split.team_id)
+    store_close_team(store, split.team_id)
     _seed_lane_metrics(store, "agent-a", message_timestamps=[660])
 
     team_history = store.team_historical_metric_summary(
@@ -723,9 +733,9 @@ def test_split_team_back_moves_subgroup_metrics_back_to_restored_team(tmp_path):
     _seed_lane_metrics(store, "agent-b", acked=1, sends=2, tool_calls=3)
     _seed_lane_metrics(store, "agent-c", acked=4, sends=5, tool_calls=6)
 
-    store.merge_teams(source.team_id, destination.team_id)
+    store_merge_teams(store, source.team_id, destination.team_id)
     _seed_lane_metrics(store, "agent-a", acked=7, sends=8, tool_calls=9)
-    store.split_team_back(destination.team_id)
+    store_split_team_back(store, destination.team_id)
     restored_summary = store.lane_metric_summary("agent-a", bucket_count=12)
     destination_summary = store.lane_metric_summary("agent-c", bucket_count=12)
 
@@ -746,13 +756,13 @@ def test_zero_activity_prune_reaps_metric_only_but_keeps_config_teams(tmp_path):
     # correctly pruned; agent-a's counters live on the agent regardless.
     metric_team = store.create_team(team_id="team-metric", members=["agent-a"])
     _seed_lane_metrics(store, "agent-a", sends=1)
-    store.remove_agent(metric_team.team_id, "agent-a")
+    store_remove_agent(store, metric_team.team_id, "agent-a")
     config_team = store.create_team(
         team_id="team-config",
         members=["agent-b"],
         config=TeamConfig(task_filters=("serve.ui",)),
     )
-    store.remove_agent(config_team.team_id, "agent-b")
+    store_remove_agent(store, config_team.team_id, "agent-b")
 
     snapshot = store.team_snapshot()
     with store.connect() as connection:

@@ -48,12 +48,6 @@ class PhaseEffortWindow:
     def partial(self) -> bool:
         return bool(self.partial_markers)
 
-    @property
-    def wall_seconds(self) -> float | None:
-        if self.started_at is None or self.ended_at is None:
-            return None
-        return max(0.0, self.ended_at - self.started_at)
-
 
 @dataclass(frozen=True, slots=True)
 class PhaseEffortUsage:
@@ -107,11 +101,17 @@ class PhaseEffortUsage:
 
     @property
     def wall_seconds(self) -> float | None:
-        return self.window.wall_seconds
+        return phase_effort_wall_seconds(self.window)
 
     @property
     def partial(self) -> bool:
         return bool(self.partial_markers)
+
+
+def phase_effort_wall_seconds(window: PhaseEffortWindow) -> float | None:
+    if window.started_at is None or window.ended_at is None:
+        return None
+    return max(0.0, window.ended_at - window.started_at)
 
 
 @dataclass(frozen=True, slots=True)

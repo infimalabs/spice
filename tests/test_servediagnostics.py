@@ -11,6 +11,7 @@ from spice.serve.team.store import (
 )
 from spice.tasks import config as task_config
 from spice.tasks import lanes
+from tests.test_teamstorehelpers import store_remove_agent
 
 AGENT_A = "agent-a"
 ANCESTOR_THREAD = "ancestor-thread-a"
@@ -101,7 +102,7 @@ def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
 def test_team_diagnostics_prunes_zero_activity_closed_teams(tmp_path):
     store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
     unused = store.create_team(team_id="team-unused", members=[AGENT_A])
-    closed_revision = store.remove_agent(unused.team_id, AGENT_A)
+    closed_revision = store_remove_agent(store, unused.team_id, AGENT_A)
 
     payload = team_diagnostics_payload(store=store)
     text = render_team_diagnostics(payload)

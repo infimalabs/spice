@@ -41,6 +41,7 @@ from spice.serve.workroutes import (
     work_tree_task_drain_response_payload,
 )
 from spice.serve.worktree.target import WorktreeTarget
+from tests.test_teamstorehelpers import store_global_revision
 from tests.test_servehelpers import (
     ACTOR_A,
     ACTOR_B,
@@ -429,7 +430,7 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
         state,
         {
             "command": "setGlobalFastMode",
-            "expectedRevision": state.team_store.global_revision(),
+            "expectedRevision": store_global_revision(state.team_store),
             "fastMode": True,
         },
     )
