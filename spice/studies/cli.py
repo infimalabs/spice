@@ -486,8 +486,22 @@ def handle_study(args: argparse.Namespace) -> int:
     if isinstance(handler, SpiceExtensionEntryPoint):
         return _study_extension(handler, args, root)
     if isinstance(handler, TaskGeneratingStudyAction):
+        result = handler.generator(args, root)
         controls = _study_task_creation_controls(args)
-        return handler.handler(args, root, controls)
+        created_tasks = (
+            create_study_tasks(list(result.task_specs), controls=controls)
+            if args.create_tasks and result.task_specs
+            else []
+        )
+        if args.emit_json:
+            _print_study_json(
+                args.study_action,
+                **result.json_fields,
+                createdTasks=created_tasks,
+            )
+        else:
+            print(result.text_output)
+        return 1 if result.has_findings else 0
     return handler(args, root)
 
 
@@ -819,54 +833,38 @@ def _study_taste(args: argparse.Namespace, root: Path) -> int:
 def _study_reachability(
     args: argparse.Namespace,
     root: Path,
-    controls: StudyTaskCreationControls,
-) -> int:
+) -> TaskGeneratingStudyResult:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
-    created_tasks: list[str] = []
-    if findings and getattr(args, "create_tasks", False):
-        created_tasks = _create_exhaust_tasks(
-            findings,
-            controls=controls,
-        )
-    if args.emit_json:
-        _print_study_json(
-            args.study_action,
-            findings=findings,
-            createdTasks=created_tasks,
-            allowlist=args.allowlist,
-            limit=args.limit,
-        )
-        return 1 if findings else 0
-    print("\n".join(reachability.render_reachability_board(findings, limit=args.limit)))
-    return 1 if findings else 0
+    return TaskGeneratingStudyResult(
+        task_specs=_exhaust_task_specs(findings),
+        has_findings=bool(findings),
+        text_output="\n".join(
+            reachability.render_reachability_board(findings, limit=args.limit)
+        ),
+        json_fields={
+            "findings": findings,
+            "allowlist": args.allowlist,
+            "limit": args.limit,
+        },
+    )
 
 
 def _study_symbol_reachability(
     args: argparse.Namespace,
     root: Path,
-    controls: StudyTaskCreationControls,
-) -> int:
+) -> TaskGeneratingStudyResult:
     findings = reachability.scan_symbol_reachability(root)
-    created_tasks: list[str] = []
-    if findings and getattr(args, "create_tasks", False):
-        created_tasks = _create_symbol_reachability_tasks(
-            findings,
-            controls=controls,
-        )
-    if args.emit_json:
-        _print_study_json(
-            args.study_action,
-            findings=findings,
-            createdTasks=created_tasks,
-            limit=args.limit,
-        )
-        return 1 if findings else 0
-    print(
-        "\n".join(
+    return TaskGeneratingStudyResult(
+        task_specs=_symbol_reachability_task_specs(findings),
+        has_findings=bool(findings),
+        text_output="\n".join(
             reachability.render_symbol_reachability_board(findings, limit=args.limit)
-        )
+        ),
+        json_fields={
+            "findings": findings,
+            "limit": args.limit,
+        },
     )
-    return 1 if findings else 0
 
 
 def _study_python_unused(args: argparse.Namespace, root: Path) -> int:
@@ -881,34 +879,22 @@ def _study_python_unused(args: argparse.Namespace, root: Path) -> int:
 def _study_assertion_free_tests(
     args: argparse.Namespace,
     root: Path,
-    controls: StudyTaskCreationControls,
-) -> int:
+) -> TaskGeneratingStudyResult:
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(root), root=root
     )
-    created_tasks: list[str] = []
-    if findings and getattr(args, "create_tasks", False):
-        created_tasks = _create_assertion_free_tasks(
-            findings,
-            controls=controls,
-        )
-    if args.emit_json:
-        _print_study_json(
-            args.study_action,
-            findings=findings,
-            createdTasks=created_tasks,
-            limit=args.limit,
-        )
-        return 1 if findings else 0
-    print(testquality.render_assertion_free_board(findings, limit=args.limit))
-    return 1 if findings else 0
+    return TaskGeneratingStudyResult(
+        task_specs=_assertion_free_task_specs(findings),
+        has_findings=bool(findings),
+        text_output=testquality.render_assertion_free_board(findings, limit=args.limit),
+        json_fields={"findings": findings, "limit": args.limit},
+    )
 
 
 def _study_private_internals(
     args: argparse.Namespace,
     root: Path,
-    controls: StudyTaskCreationControls,
-) -> int:
+) -> TaskGeneratingStudyResult:
     from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 
     findings = testquality.scan_private_internal_coupling(
@@ -919,37 +905,25 @@ def _study_private_internals(
         repo_root=root,
         built_in_couplings=LEGITIMATE_INTERNAL_COUPLINGS,
     )
-    created_tasks: list[str] = []
-    if (offenders or stale) and getattr(args, "create_tasks", False):
-        created_tasks = _create_private_internal_tasks(
-            offenders,
-            stale,
-            controls=controls,
-        )
-    if args.emit_json:
-        _print_study_json(
-            args.study_action,
-            offenders=offenders,
-            stale=stale,
-            createdTasks=created_tasks,
-            limit=args.limit,
-        )
-        return 1 if offenders or stale else 0
-    print(
-        testquality.render_unmanaged_private_internal_board(
+    return TaskGeneratingStudyResult(
+        task_specs=_private_internal_task_specs(offenders, stale),
+        has_findings=bool(offenders or stale),
+        text_output=testquality.render_unmanaged_private_internal_board(
             offenders[: args.limit] if args.limit is not None else offenders,
             stale,
-        )
+        ),
+        json_fields={
+            "offenders": offenders,
+            "stale": stale,
+            "limit": args.limit,
+        },
     )
-    return 1 if offenders or stale else 0
 
 
-def _create_exhaust_tasks(
+def _exhaust_task_specs(
     findings: list[reachability.ReachabilityFinding],
-    *,
-    controls: StudyTaskCreationControls,
-) -> list[str]:
-    specs = [
+) -> tuple[StudyTaskSpec, ...]:
+    return tuple(
         StudyTaskSpec(
             study="reachability",
             finding_identity=(f.provider, f.kind, f.subject, f.path),
@@ -965,16 +939,13 @@ def _create_exhaust_tasks(
             ),
         )
         for f in findings
-    ]
-    return create_study_tasks(specs, controls=controls)
+    )
 
 
-def _create_symbol_reachability_tasks(
+def _symbol_reachability_task_specs(
     findings: list[reachability.SymbolReachabilityFinding],
-    *,
-    controls: StudyTaskCreationControls,
-) -> list[str]:
-    specs = [
+) -> tuple[StudyTaskSpec, ...]:
+    return tuple(
         StudyTaskSpec(
             study="symbol-reachability",
             finding_identity=(f.provider, f.kind, f.module, f.symbol, f.module_path),
@@ -993,16 +964,13 @@ def _create_symbol_reachability_tasks(
             ),
         )
         for f in findings
-    ]
-    return create_study_tasks(specs, controls=controls)
+    )
 
 
-def _create_assertion_free_tasks(
+def _assertion_free_task_specs(
     findings: list[testquality.AssertionFreeTestFinding],
-    *,
-    controls: StudyTaskCreationControls,
-) -> list[str]:
-    specs = [
+) -> tuple[StudyTaskSpec, ...]:
+    return tuple(
         StudyTaskSpec(
             study="assertion-free-tests",
             finding_identity=(f.path, f.test_name),
@@ -1016,16 +984,13 @@ def _create_assertion_free_tasks(
             ),
         )
         for f in findings
-    ]
-    return create_study_tasks(specs, controls=controls)
+    )
 
 
-def _create_private_internal_tasks(
+def _private_internal_task_specs(
     offenders: list[testquality.PrivateInternalCouplingFinding],
     stale: list[testquality.InternalCouplingKey],
-    *,
-    controls: StudyTaskCreationControls,
-) -> list[str]:
+) -> tuple[StudyTaskSpec, ...]:
     specs = [
         StudyTaskSpec(
             study="private-internals",
@@ -1059,7 +1024,7 @@ def _create_private_internal_tasks(
         )
         for path, test_name, target in stale
     )
-    return create_study_tasks(specs, controls=controls)
+    return tuple(specs)
 
 
 def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
@@ -1141,8 +1106,26 @@ def _json_ready(value: object) -> object:
 
 
 StudyHandler = Callable[[argparse.Namespace, Path], int]
-TaskGeneratingStudyHandler = Callable[
-    [argparse.Namespace, Path, StudyTaskCreationControls], int
+
+
+@dataclass(frozen=True)
+class TaskGeneratingStudyResult:
+    task_specs: tuple[StudyTaskSpec, ...]
+    has_findings: bool
+    text_output: str
+    json_fields: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if self.has_findings != bool(self.task_specs):
+            raise ValueError(
+                "task-generating study findings and task specs must be coextensive"
+            )
+        if "createdTasks" in self.json_fields:
+            raise ValueError("central study dispatch owns createdTasks")
+
+
+TaskGeneratingStudyGenerator = Callable[
+    [argparse.Namespace, Path], TaskGeneratingStudyResult
 ]
 
 
@@ -1150,7 +1133,7 @@ TaskGeneratingStudyHandler = Callable[
 class TaskGeneratingStudyAction:
     configure_parser: Callable[[Any], None]
     create_tasks_help: str
-    handler: TaskGeneratingStudyHandler
+    generator: TaskGeneratingStudyGenerator
 
 
 _STUDY_ACTIONS: dict[str, StudyHandler] = {
@@ -1181,21 +1164,21 @@ TASK_GENERATING_STUDY_ACTIONS: Mapping[str, TaskGeneratingStudyAction] = (
                     "Create tagged decision tasks for each test-only reachability "
                     "finding."
                 ),
-                handler=_study_reachability,
+                generator=_study_reachability,
             ),
             "symbol-reachability": TaskGeneratingStudyAction(
                 configure_parser=_configure_symbol_reachability_parser,
                 create_tasks_help=(
                     "Create tagged decision tasks for each test-only symbol finding."
                 ),
-                handler=_study_symbol_reachability,
+                generator=_study_symbol_reachability,
             ),
             "assertion-free-tests": TaskGeneratingStudyAction(
                 configure_parser=_configure_assertion_free_parser,
                 create_tasks_help=(
                     "Create tagged decision tasks for each assertion-free test."
                 ),
-                handler=_study_assertion_free_tests,
+                generator=_study_assertion_free_tests,
             ),
             "private-internals": TaskGeneratingStudyAction(
                 configure_parser=_configure_private_internals_parser,
@@ -1203,7 +1186,7 @@ TASK_GENERATING_STUDY_ACTIONS: Mapping[str, TaskGeneratingStudyAction] = (
                     "Create tagged decision tasks for unmanaged private/internal "
                     "coupling."
                 ),
-                handler=_study_private_internals,
+                generator=_study_private_internals,
             ),
         }
     )
