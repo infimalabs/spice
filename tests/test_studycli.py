@@ -76,6 +76,7 @@ def test_general_purpose_study_flags_cover_reference_surface():
 
 def test_task_generating_studies_share_deferred_origin_flags():
     parser = build_parser()
+    actions = tuple(studies_cli.TASK_GENERATING_STUDY_ACTIONS)
     commands = [
         [
             "study",
@@ -85,24 +86,21 @@ def test_task_generating_studies_share_deferred_origin_flags():
             "--origin",
             "ack:20260101T000000000000Z",
         ]
-        for action in (
-            "reachability",
-            "symbol-reachability",
-            "assertion-free-tests",
-            "private-internals",
-        )
+        for action in actions
     ]
 
     parsed = [parser.parse_args(command) for command in commands]
+    controls = [studies_cli._study_task_creation_controls(args) for args in parsed]
 
-    assert [args.create_tasks for args in parsed] == [True, True, True, True]
-    assert [args.deferred for args in parsed] == [True, True, True, True]
-    assert [args.origin for args in parsed] == [
-        "ack:20260101T000000000000Z",
-        "ack:20260101T000000000000Z",
-        "ack:20260101T000000000000Z",
-        "ack:20260101T000000000000Z",
-    ]
+    assert tuple(args.study_action for args in parsed) == actions
+    assert all(args.create_tasks for args in parsed)
+    assert controls == [
+        studies_cli.StudyTaskCreationControls(
+            deferred=True,
+            origin="ack:20260101T000000000000Z",
+            print_created=True,
+        )
+    ] * len(actions)
 
 
 def test_taste_cli_renders_exact_inclusive_inflection_suggestions(
@@ -342,7 +340,9 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
     assert payload["findings"][0]["test_name"] == "test_without_assertion"
     assert created[0].project == "tests.quality"
     assert options == {
-        "deferred": True,
-        "origin": "ack:20260101T000000000000Z",
-        "print_created": False,
+        "controls": studies_cli.StudyTaskCreationControls(
+            deferred=True,
+            origin="ack:20260101T000000000000Z",
+            print_created=False,
+        )
     }

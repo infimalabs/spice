@@ -24,12 +24,19 @@ class StudyTaskSpec:
     acceptance: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class StudyTaskCreationControls:
+    """Required scheduling, provenance, and rendering controls for one run."""
+
+    deferred: bool
+    origin: str | None
+    print_created: bool
+
+
 def create_study_tasks(
     specs: list[StudyTaskSpec],
     *,
-    deferred: bool = False,
-    origin: str | None = None,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
     """Create or reuse actionable tasks for normalized study findings."""
     handles: list[str] = []
@@ -41,7 +48,7 @@ def create_study_tasks(
         if existing:
             handle = identity.render_handle(existing[0])
             handles.append(handle)
-            if print_created:
+            if controls.print_created:
                 print(f"  task reused: {handle}")
             continue
 
@@ -52,8 +59,8 @@ def create_study_tasks(
             project=spec.project,
             tags=[*spec.tags, finding_tag],
             acceptance=list(spec.acceptance),
-            deferred=deferred,
-            origin=origin,
+            deferred=controls.deferred,
+            origin=controls.origin,
         )
         handles.append(handle)
         created_row = identity.resolve(handle)
@@ -64,7 +71,7 @@ def create_study_tasks(
                 identity.uuid_of(created_row),
                 f"study finding recurred after completed task {previous_handle}",
             )
-        if print_created:
+        if controls.print_created:
             print(f"  task created: {handle}")
     return handles
 
