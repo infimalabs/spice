@@ -29,13 +29,6 @@ def thread_actor_id(thread_id: str) -> str:
     return f"{THREAD_ACTOR_PREFIX}{thread}"
 
 
-def actor_value(actor_id: str) -> str:
-    actor = normalized_id(actor_id, "actor_id")
-    if actor.startswith((TARGET_ACTOR_PREFIX, THREAD_ACTOR_PREFIX)):
-        return normalized_id(actor.split(":", 1)[1], "actor_id")
-    return actor
-
-
 def thread_id_for_actor(actor_id: str) -> str:
     actor = normalized_id(actor_id, "actor_id")
     if actor.startswith(THREAD_ACTOR_PREFIX):

@@ -332,6 +332,7 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
+    monkeypatch.setattr(precommit, "_run_python_unused_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )
@@ -772,6 +773,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_python_unused_guard",
+        lambda repo_root: record("python unused"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_assertion_free_test_guard",
         lambda repo_root: record("assertion-free tests"),
     )
@@ -813,6 +819,7 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
+    monkeypatch.setattr(precommit, "_run_python_unused_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )
@@ -850,6 +857,7 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
+    monkeypatch.setattr(precommit, "_run_python_unused_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )

@@ -47,8 +47,8 @@ from spice.pathmatch import matches_repo_path
 from spice.toolprocess import run_tool_command
 from spice.studies.reachabilitypython import (
     _SymbolRef,
+    _collect_production_and_test_symbol_refs,
     _collect_symbol_definitions,
-    _collect_symbol_refs,
     _find_importers,
     _module_to_path,
     _walk_imports,
@@ -526,13 +526,8 @@ def _scan_python_symbol_reachability(
         if (path := _module_to_path(module, pkg_root, package)) is not None
     ]
     test_paths = _python_test_paths(test_roots)
-    prod_refs, _prod_importers = _collect_symbol_refs(
+    analysis = _collect_production_and_test_symbol_refs(
         prod_paths,
-        definitions,
-        pkg_root=pkg_root,
-        package=package,
-    )
-    test_refs, test_importers = _collect_symbol_refs(
         test_paths,
         definitions,
         pkg_root=pkg_root,
@@ -542,7 +537,8 @@ def _scan_python_symbol_reachability(
     allowset = {*SYMBOL_REACHABILITY_ALLOWLIST, *allowlist}
     findings: list[SymbolReachabilityFinding] = []
     for ref in sorted(
-        test_refs - prod_refs, key=lambda item: (item.module, item.symbol)
+        analysis.test_refs - analysis.production_refs,
+        key=lambda item: (item.module, item.symbol),
     ):
         definition = definitions.get(ref)
         if definition is None:
@@ -555,7 +551,7 @@ def _scan_python_symbol_reachability(
                 module_path=str(definition.module_path.relative_to(repo_root)),
                 symbol=ref.symbol,
                 kind=definition.kind,
-                only_test_imports=sorted(test_importers.get(ref, set())),
+                only_test_imports=sorted(analysis.test_importers.get(ref, set())),
             )
         )
     return findings

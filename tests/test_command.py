@@ -23,7 +23,6 @@ from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
 from spice.mail import readout as inbox_readout
-from spice.sessions.meter import ActiveContextSnapshot, ContextMeter
 
 COMMAND_WORKING_STATE_ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 COMMAND_WORKING_STATE_NOW = 1_767_225_600.0
@@ -877,12 +876,6 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
         compose_inbox_text(body="payload steering", priority=None, stop=False),
     )
     monkeypatch.setattr(
-        sidechannel,
-        "agent_context_meter",
-        lambda _repo: _pressure_context_meter(),
-        raising=False,
-    )
-    monkeypatch.setattr(
         wrap,
         "collect_working_state_snapshot",
         lambda _repo: wrap.WorkingStateSnapshot(
@@ -909,12 +902,6 @@ def test_post_tool_hook_payload_keeps_inbox_without_context_pressure(
         tmp_path,
         "20260101T000000000008Z.txt",
         compose_inbox_text(body="post-tool steering", priority=None, stop=False),
-    )
-    monkeypatch.setattr(
-        sidechannel,
-        "agent_context_meter",
-        lambda _repo: _pressure_context_meter(),
-        raising=False,
     )
 
     payload = sidechannel.render_post_tool_hook_payload(tmp_path)
@@ -1358,31 +1345,3 @@ def _contains(value, needle: str) -> bool:
     if isinstance(value, str):
         return needle in value
     return any(needle in item for item in value)
-
-
-def _pressure_context_meter() -> ContextMeter:
-    snapshot = ActiveContextSnapshot(
-        source_file="rollout.jsonl",
-        ts="2026-01-01T00:00:00.000Z",
-        input_tokens=80_000,
-        cached_input_tokens=0,
-        output_tokens=0,
-        reasoning_output_tokens=0,
-        total_tokens=80_000,
-        model_context_window=100_000,
-        cumulative_total_tokens=80_000,
-    )
-    return ContextMeter(
-        source_files=("rollout.jsonl",),
-        latest_snapshot=snapshot,
-        snapshot_count=1,
-        compaction_count=0,
-        latest_compaction_ts=None,
-        snapshots_since_compaction=1,
-        pre_compaction_min_tokens=None,
-        pre_compaction_median_tokens=None,
-        pre_compaction_max_tokens=None,
-        pre_compaction_min_percent=None,
-        pre_compaction_median_percent=None,
-        pre_compaction_max_percent=None,
-    )

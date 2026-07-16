@@ -154,7 +154,7 @@ class AgentDriver:
         return raw
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Per-turn token usage for the context meter, or None for other lines.
+        """Per-turn token usage for phase-effort accounting, or None otherwise.
 
         Returns the `ActiveContextSnapshot` field bag (every key but
         `source_file`/`ts`). The built-in driver reads Codex `token_count`

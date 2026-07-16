@@ -29,7 +29,6 @@ Hot path notes:
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +51,6 @@ from spice.mail.inbox import (
     notify_inbox_changed,
     parse_inbox_payload,
 )
-from spice.sessions.util import first_text, normalize_timestamp
 from spice import textcontext
 
 ACK_TOKEN = "ACK"
@@ -737,12 +735,6 @@ def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | 
     return None if parsed is None else (parsed[0], parsed[1])
 
 
-def _parse_nack_header(text: str, nack_pos: int) -> tuple[int, tuple[str, ...]] | None:
-    """Validate a NACK header at `nack_pos`; return `(header_end, keys)` or None."""
-    parsed = _parse_keyed_header(text, nack_pos, NACK_TOKEN)
-    return None if parsed is None else (parsed[0], parsed[1])
-
-
 def _parse_keyed_header(
     text: str, token_pos: int, token: str
 ) -> tuple[int, tuple[str, ...], str] | None:
@@ -790,13 +782,6 @@ def _parse_keyed_header(
     if text[header_end] not in _ACK_BODY_SPACE_CHARS:
         return None
     return header_end, keys, body_wrapper
-
-
-def is_message_less_keyed_header(header: str) -> bool:
-    """True when a body-less ACK header carries only keys and filler words."""
-    if not _header_keys(header):
-        return False
-    return _header_remainder_is_filler(header)
 
 
 def _next_header_key(
@@ -864,43 +849,6 @@ def _consume_ack_header_separator(
             body_start += 1
         return body_start, True
     return header_end, False
-
-
-def _header_remainder_is_filler(header: str) -> bool:
-    index = 0
-    while index < len(header):
-        key_end = _ack_key_end(header, index, len(header))
-        if key_end is not None:
-            index = key_end
-            continue
-        char = header[index]
-        if char in _ACK_HEADER_WRAPPER_CHARS + _ACK_HEADER_SEPARATOR_CHARS:
-            index += 1
-            continue
-        if char.isalpha():
-            word_end = index + 1
-            while word_end < len(header) and header[word_end].isalpha():
-                word_end += 1
-            if header[index:word_end].lower() not in _ACK_HEADER_FILLER_WORDS:
-                return False
-            index = word_end
-            continue
-        return False
-    return True
-
-
-def _header_keys(header: str) -> tuple[str, ...]:
-    keys: list[str] = []
-    cursor = 0
-    limit = len(header)
-    while cursor < limit:
-        key_end = _ack_key_end(header, cursor, limit)
-        if key_end is not None:
-            keys.append(header[cursor:key_end])
-            cursor = key_end
-            continue
-        cursor += 1
-    return tuple(keys)
 
 
 def _ack_key_end(text: str, start: int, limit: int) -> int | None:
@@ -1061,262 +1009,3 @@ def _is_indented_code_line(line: str) -> bool:
 
 def _is_rendered_source_context_line(line: str) -> bool:
     return _SOURCE_CONTEXT_LINE_RE.match(line) is not None
-
-
-def iter_assistant_ack_keys(
-    files: Iterable[Path],
-    *,
-    start_ts: str | None = None,
-    end_ts: str | None = None,
-    turn_ids: Iterable[str] | None = None,
-    repo_root: str | Path | None = None,
-) -> Iterator[str]:
-    """Walk JSONL transcripts and emit ACK'd keys in source order.
-
-    `start_ts`/`end_ts` are compared against the per-event timestamp after
-    normalization. `turn_ids` filters to assistant messages produced inside
-    the listed turns. Both are optional; omitting them is fastest.
-    """
-    if _ack_state_is_authoritative(repo_root, start_ts, end_ts, turn_ids):
-        yield from iter_ack_state_keys(repo_root)
-        return
-    for text in iter_assistant_message_texts(
-        files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
-    ):
-        yield from extract_ack_keys_from_text(text)
-
-
-def iter_assistant_ack_segments(
-    files: Iterable[Path],
-    *,
-    start_ts: str | None = None,
-    end_ts: str | None = None,
-    turn_ids: Iterable[str] | None = None,
-    repo_root: str | Path | None = None,
-) -> Iterator[AckSegment]:
-    """Walk JSONL transcripts and emit ACK segments in source order."""
-    if _ack_state_is_authoritative(repo_root, start_ts, end_ts, turn_ids):
-        yield from iter_ack_state_segments(repo_root)
-        return
-    for text in iter_assistant_message_texts(
-        files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
-    ):
-        yield from extract_ack_segments_from_text(text)
-
-
-def iter_ack_state_keys(repo_root: str | Path | None) -> Iterator[str]:
-    """Yield ACK'd inbox keys from durable ACK state in archive order."""
-    if repo_root is None:
-        return
-    for record in _ack_state_records_in_archive_order(repo_root):
-        if record.disposition != ACK_DISPOSITION_ACKED:
-            continue
-        if record.key:
-            yield record.key
-
-
-def iter_ack_state_segments(repo_root: str | Path | None) -> Iterator[AckSegment]:
-    """Yield ACK segments from durable ACK state when ACK content was recorded."""
-    if repo_root is None:
-        return
-    for record in _ack_state_records_in_archive_order(repo_root):
-        if record.disposition != ACK_DISPOSITION_ACKED:
-            continue
-        if record.key:
-            yield AckSegment(keys=(record.key,), content=record.ack_content)
-
-
-def _ack_state_is_authoritative(
-    repo_root: str | Path | None,
-    start_ts: str | None,
-    end_ts: str | None,
-    turn_ids: Iterable[str] | None,
-) -> bool:
-    return repo_root is not None and not (start_ts or end_ts or turn_ids)
-
-
-def _ack_state_records_in_archive_order(repo_root: str | Path):
-    return sorted(
-        ack_state_records(repo_root),
-        key=lambda record: (record.archived_at, record.key),
-    )
-
-
-def iter_assistant_message_texts(
-    files: Iterable[Path],
-    *,
-    start_ts: str | None = None,
-    end_ts: str | None = None,
-    turn_ids: Iterable[str] | None = None,
-) -> Iterator[str]:
-    """Yield the text of each in-window assistant message across `files`.
-
-    Shared spine for the key and segment extractors: it owns the cheap JSONL
-    pre-filtering, time-window short-circuit, and turn tracking, leaving the
-    callers to interpret the text however they need.
-    """
-    turn_filter: set[str] | None = set(turn_ids) if turn_ids else None
-    for path in files:
-        yield from _iter_path_message_texts(
-            path,
-            turn_filter=turn_filter,
-            start_ts=start_ts,
-            end_ts=end_ts,
-        )
-
-
-_WINDOW_STOP = "stop"
-_WINDOW_SKIP = "skip"
-_WINDOW_PROCESS = "process"
-
-
-def _iter_path_message_texts(
-    path: Path,
-    *,
-    turn_filter: set[str] | None,
-    start_ts: str | None,
-    end_ts: str | None,
-) -> Iterator[str]:
-    current_turn_id: str | None = None
-    with path.open() as handle:
-        for line in handle:
-            action = _window_prescan(
-                line,
-                start_ts=start_ts,
-                end_ts=end_ts,
-                turn_filter=turn_filter,
-            )
-            if action is _WINDOW_STOP:
-                return
-            if action is _WINDOW_SKIP:
-                continue
-            if not _line_might_carry_ack(line, turn_filter=turn_filter):
-                continue
-            obj = _safe_loads(line)
-            if obj is None:
-                continue
-            payload = obj.get("payload") or {}
-            if obj.get("type") == "event_msg":
-                current_turn_id = _next_turn_id(payload, current_turn_id)
-                continue
-            text = _emit_text_if_in_window(
-                obj,
-                payload,
-                current_turn_id=current_turn_id,
-                turn_filter=turn_filter,
-                start_ts=start_ts,
-                end_ts=end_ts,
-            )
-            if text:
-                yield text
-
-
-def _window_prescan(
-    line: str,
-    *,
-    start_ts: str | None,
-    end_ts: str | None,
-    turn_filter: set[str] | None,
-) -> str:
-    """Decide what to do with a raw JSONL line before any JSON parsing.
-
-    Returns one of the `_WINDOW_*` sentinels: STOP terminates the whole walk
-    (the file is time-ordered, nothing past end_ts can match); SKIP discards
-    the line; PROCESS falls through to the normal pipeline.
-    """
-    if not (start_ts or end_ts):
-        return _WINDOW_PROCESS
-    raw_ts = _raw_timestamp(line)
-    if raw_ts is None:
-        return _WINDOW_PROCESS
-    if end_ts and raw_ts > end_ts:
-        return _WINDOW_STOP
-    if start_ts and raw_ts < start_ts:
-        if turn_filter is None:
-            return _WINDOW_SKIP
-        if '"task_started"' in line or '"task_complete"' in line:
-            return _WINDOW_PROCESS
-        return _WINDOW_SKIP
-    return _WINDOW_PROCESS
-
-
-def _emit_text_if_in_window(
-    obj: dict[str, Any],
-    payload: dict[str, Any],
-    *,
-    current_turn_id: str | None,
-    turn_filter: set[str] | None,
-    start_ts: str | None,
-    end_ts: str | None,
-) -> str | None:
-    """Return assistant text for a parsed record only if it clears all filters."""
-    if not _is_assistant_message(obj, payload):
-        return None
-    if turn_filter is not None and current_turn_id not in turn_filter:
-        return None
-    if not _ts_within_window(obj.get("timestamp"), start_ts, end_ts):
-        return None
-    return first_text(payload.get("content"))
-
-
-def _raw_timestamp(line: str) -> str | None:
-    """Slice the timestamp out of a transcript line without parsing JSON.
-
-    Returns None for lines that don't have the expected `{"timestamp":"...",`
-    prefix (e.g. the session-meta header at the top of a transcript).
-    """
-    if not line.startswith(_TS_PREFIX):
-        return None
-    end = line.find('"', _TS_PREFIX_LEN)
-    if end <= _TS_PREFIX_LEN:
-        return None
-    return line[_TS_PREFIX_LEN:end]
-
-
-def _line_might_carry_ack(line: str, *, turn_filter: set[str] | None) -> bool:
-    if "ACK" in line:
-        return True
-    if turn_filter is None:
-        return False
-    return '"task_started"' in line or '"task_complete"' in line
-
-
-def _safe_loads(line: str) -> dict[str, Any] | None:
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return obj if isinstance(obj, dict) else None
-
-
-def _next_turn_id(payload: dict[str, Any], current: str | None) -> str | None:
-    inner = payload.get("type")
-    if inner == "task_started":
-        next_id = payload.get("turn_id")
-        return next_id if isinstance(next_id, str) else None
-    if inner == "task_complete":
-        return None
-    return current
-
-
-def _is_assistant_message(obj: dict[str, Any], payload: dict[str, Any]) -> bool:
-    return (
-        obj.get("type") == "response_item"
-        and payload.get("type") == "message"
-        and payload.get("role") == "assistant"
-    )
-
-
-def _ts_within_window(raw_ts: Any, start_ts: str | None, end_ts: str | None) -> bool:
-    if not start_ts and not end_ts:
-        return True
-    if not isinstance(raw_ts, str):
-        return False
-    normalized = normalize_timestamp(raw_ts)
-    if normalized is None:
-        return False
-    if start_ts and normalized < start_ts:
-        return False
-    if end_ts and normalized > end_ts:
-        return False
-    return True

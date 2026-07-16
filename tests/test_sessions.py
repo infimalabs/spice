@@ -11,13 +11,6 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
-from spice.sessions.meter import (
-    ActiveContextSnapshot,
-    active_context_percent,
-    collect_latest_context_meter,
-    context_pressure_level,
-    context_pressure_should_warn,
-)
 from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
@@ -42,39 +35,6 @@ CODEX_HOME_ENV = "CODEX_HOME"  # env-policy: allow
 THREAD_DASHED = "11111111-2222-3333-4444-555555555555"
 THREAD_CANONICAL = "11111111222233334444555555555555"
 GZIP_SESSION_TOTAL_TOKENS = 115
-
-
-def test_pressure_levels_at_documented_thresholds():
-    assert context_pressure_level(74.9) == "green"
-    assert context_pressure_level(75.0) == "yellow"
-    assert context_pressure_level(85.0) == "orange"
-    assert context_pressure_level(90.0) == "red"
-    assert context_pressure_level(None) == "unknown"
-
-
-def test_pressure_warns_from_yellow_up():
-    assert context_pressure_should_warn("yellow") is True
-    assert context_pressure_should_warn("orange") is True
-    assert context_pressure_should_warn("red") is True
-    assert context_pressure_should_warn("green") is False
-
-
-QUARTER_PERCENT = 25.0
-
-
-def test_active_context_percent_uses_window():
-    snapshot = ActiveContextSnapshot(
-        source_file="rollout.jsonl",
-        ts="2026-01-01T00:00:00.000Z",
-        input_tokens=40_000,
-        cached_input_tokens=0,
-        output_tokens=10_000,
-        reasoning_output_tokens=0,
-        total_tokens=50_000,
-        model_context_window=200_000,
-        cumulative_total_tokens=50_000,
-    )
-    assert active_context_percent(snapshot) == QUARTER_PERCENT
 
 
 def test_normalize_timestamp_zulu_milliseconds():
@@ -211,8 +171,6 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
         ]
     )
     handle_session(args)
-    meter = collect_latest_context_meter([transcript])
-
     output = capsys.readouterr().out
     assert "files=session.jsonl.gz turns=1" in output
     assert _section_headers(output) == [
@@ -224,9 +182,6 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
         "Inbox",
     ]
     assert "Latest Final\n  compressed done" in output
-    assert meter.snapshot_count == 1
-    assert meter.latest_snapshot is not None
-    assert meter.latest_snapshot.total_tokens == GZIP_SESSION_TOTAL_TOKENS
 
 
 def test_session_briefing_excludes_non_human_transcript_messages(tmp_path, monkeypatch):
@@ -450,7 +405,7 @@ def test_session_thread_resolves_claude_transcript_by_driver_owner(
     assert "latest_final=claude done" in summary
 
 
-def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monkeypatch):
+def test_session_records_parse_claude_transcript_owner(tmp_path, monkeypatch):
     claude_home = tmp_path / "claude"
     transcript = (
         claude_home / "projects" / "-private-tmp-spice-sup" / f"{THREAD_DASHED}.jsonl"
@@ -459,16 +414,11 @@ def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monke
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
 
     turns = records.collect_turns([transcript])
-    meter = collect_latest_context_meter([transcript])
-
     assert [message.text for message in turns[0].user_messages] == [
         "investigate claude"
     ]
     assert turns[0].user_messages[0].shape is records.MessageShape.HUMAN
     assert turns[0].final_answers == ["claude done"]
-    assert meter.snapshot_count == 1
-    assert meter.latest_snapshot is not None
-    assert meter.latest_snapshot.total_tokens == 1000 + 250 + 75
 
 
 SKILL_MANTRA_PREAMBLE = (

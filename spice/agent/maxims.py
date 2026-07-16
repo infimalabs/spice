@@ -960,24 +960,6 @@ def evaluate_maxim(
     )
 
 
-def maxim_agrees(
-    maxim: str,
-    statement: str,
-    *,
-    template: str = DEFAULT_PROMPT_TEMPLATE,
-    backend: JudgeBackend = judge_cli_backend,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
-) -> bool:
-    """Return whether ``statement`` agrees with ``maxim``."""
-    return evaluate_maxim(
-        maxim,
-        statement,
-        template=template,
-        backend=backend,
-        max_attempts=max_attempts,
-    ).agrees
-
-
 def evaluate_maxim_any_violation(
     maxim: str,
     statement: str,
@@ -1033,11 +1015,6 @@ def configured_maxim(name: str, *, repo_root: Path | None = None) -> str:
         known = ", ".join(maxim_names(repo_root))
         raise SpiceError(f"unknown maxim {name!r}; configured maxims are: {known}")
     return bags[bag_name].message
-
-
-def builtin_maxim_names() -> list[str]:
-    """Return every built-in/configured name that resolves a maxim."""
-    return maxim_names()
 
 
 def builtin_maxim(name: str) -> str:

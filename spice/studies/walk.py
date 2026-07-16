@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable
 
 from spice.configlayer import config_string_list, effective_table
 from spice.gitprocess import run_git_command
@@ -157,20 +157,6 @@ def is_excluded_path(
     return any(
         matches_repo_path(path, pattern) for pattern in (policy_exclusions or ())
     )
-
-
-def iter_source_files(root: Path, *, suffixes: Iterable[str]) -> Iterator[Path]:
-    suffix_set = frozenset(suffixes)
-    exclusions = policy_path_exclusions(root)
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix not in suffix_set:
-            continue
-        rel_path = path.relative_to(root)
-        if is_excluded_path(rel_path, policy_exclusions=exclusions):
-            continue
-        yield path
 
 
 def staged_paths(

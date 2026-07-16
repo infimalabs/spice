@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -14,14 +14,6 @@ def normalize_timestamp(raw: str | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     dt = dt.astimezone(UTC)
-    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def offset_timestamp(ts: str, *, milliseconds: int = 0, seconds: int = 0) -> str:
-    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    dt = dt.astimezone(UTC) + timedelta(milliseconds=milliseconds, seconds=seconds)
     return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
@@ -71,12 +63,6 @@ def int_or_none(value: Any) -> int | None:
 def int_or_zero(value: Any) -> int:
     parsed = int_or_none(value)
     return parsed if parsed is not None else 0
-
-
-def safe_percent(numerator: int | float, denominator: int | float) -> float | None:
-    if not denominator:
-        return None
-    return numerator / denominator * 100
 
 
 def dedupe_paths(paths: Iterable[Path]) -> list[Path]:

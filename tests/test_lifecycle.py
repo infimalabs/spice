@@ -477,12 +477,6 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     assert (primary_worktree_dir / "thread-id").read_text(encoding="utf-8") == (
         f"{thread_id}\n"
     )
-    assert wrap.context_meter_cache_path(repo) == (
-        primary_thread_dir / "context-meter.json"
-    )
-    assert wrap.context_warning_state_path(repo) == (
-        primary_thread_dir / "context-warning.json"
-    )
     assert renewal.renewal_request_path(repo) == primary_thread_dir / "renew.json"
     assert repo / ".spice" not in primary_thread_dir.parents
     assert linked / ".spice" not in linked_worktree_dir.parents

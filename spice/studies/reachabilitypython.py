@@ -13,6 +13,7 @@ class _SymbolDefinition:
     module_path: Path
     symbol: str
     kind: str
+    line: int
     return_class: tuple[str, str] | None = None
 
 
@@ -20,6 +21,15 @@ class _SymbolDefinition:
 class _SymbolRef:
     module: str
     symbol: str
+
+
+@dataclass(frozen=True)
+class _SymbolReferenceAnalysis:
+    """One fixed-point reference result shared by Python symbol studies."""
+
+    production_refs: set[_SymbolRef]
+    test_refs: set[_SymbolRef]
+    test_importers: dict[_SymbolRef, set[str]]
 
 
 def _walk_imports(
@@ -163,19 +173,50 @@ def _collect_symbol_definitions(
                     path,
                     node.name,
                     "function",
+                    node.lineno,
                     _local_return_class(node.returns, module, local_classes),
                 )
             elif isinstance(node, ast.ClassDef):
                 ref = _SymbolRef(module, node.name)
-                definitions[ref] = _SymbolDefinition(module, path, node.name, "class")
+                definitions[ref] = _SymbolDefinition(
+                    module, path, node.name, "class", node.lineno
+                )
                 for child in node.body:
                     if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
                         symbol = f"{node.name}.{child.name}"
                         method_ref = _SymbolRef(module, symbol)
                         definitions[method_ref] = _SymbolDefinition(
-                            module, path, symbol, "method"
+                            module, path, symbol, "method", child.lineno
                         )
     return definitions
+
+
+def _collect_production_and_test_symbol_refs(
+    production_paths: list[Path],
+    test_paths: list[Path],
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    *,
+    pkg_root: Path,
+    package: str,
+) -> _SymbolReferenceAnalysis:
+    """Run the same fixed-point collector over production and test inputs."""
+    production_refs, _production_importers = _collect_symbol_refs(
+        production_paths,
+        definitions,
+        pkg_root=pkg_root,
+        package=package,
+    )
+    test_refs, test_importers = _collect_symbol_refs(
+        test_paths,
+        definitions,
+        pkg_root=pkg_root,
+        package=package,
+    )
+    return _SymbolReferenceAnalysis(
+        production_refs=production_refs,
+        test_refs=test_refs,
+        test_importers=test_importers,
+    )
 
 
 def _local_return_class(

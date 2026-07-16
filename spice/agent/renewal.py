@@ -9,12 +9,10 @@ at the ancestor thread so lane continuity survives the succession.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import Any
 
 from spice.agent.paths import agent_state_dir
-from spice.paths import atomic_write_json
 
 RENEWAL_WIND_DOWN_TEXT = (
     "You are being replaced by a renewed worktree agent. "
@@ -40,41 +38,12 @@ def renewal_request_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "renew.json"
 
 
-def write_agent_renewal_request(
-    repo_root: Path,
-    *,
-    target_thread_id: str,
-    text: str,
-    no_say: bool,
-    fast_mode: bool = False,
-    inbox_key: str = "",
-) -> Path:
-    path = renewal_request_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "targetThreadId": target_thread_id,
-        "text": text,
-        "noSay": no_say,
-        "fastMode": fast_mode,
-        "inboxKey": inbox_key,
-        "createdAt": time.time(),
-    }
-    return atomic_write_json(path, payload, compact=True)
-
-
 def read_agent_renewal_request(repo_root: Path) -> dict[str, Any] | None:
     try:
         loaded = json.loads(renewal_request_path(repo_root).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
     return loaded if isinstance(loaded, dict) else None
-
-
-def clear_agent_renewal_request(repo_root: Path) -> None:
-    try:
-        renewal_request_path(repo_root).unlink()
-    except FileNotFoundError:
-        return
 
 
 def renewal_target_thread_id(request: dict[str, Any]) -> str:

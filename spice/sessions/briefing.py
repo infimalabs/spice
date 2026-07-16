@@ -766,20 +766,6 @@ def _latest_event_is_compaction(
     return latest_compaction >= latest_turn
 
 
-def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
-    """The current working set: most-recently-touched first, count attached.
-
-    Recency outranks raw frequency — the file an agent touched last is the
-    file it was working on, however many times an older file was edited.
-    """
-    return [
-        (candidate.label, candidate.count)
-        for candidate in sort_rehydration_candidates(
-            collect_file_touch_candidates(turns)
-        )
-    ]
-
-
 def _build_sweep_windows(
     *,
     turns: tuple[TurnRecord, ...],
