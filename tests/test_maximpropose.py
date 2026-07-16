@@ -596,7 +596,17 @@ def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
     assert alloc.visible_ready_rows(tw.current_actor()) == []
 
     assert normal_list.func(normal_list) == 0
-    assert capsys.readouterr().out.strip() == "no tasks"
+    assert capsys.readouterr().out.splitlines() == [
+        (
+            "scope actor-route filter ( "
+            f"project:{task_config.private_project(ACTOR)} or "
+            f"origin_thread.is:{ACTOR} )"
+        ),
+        (
+            "no tasks in scope; use --all for global rows or --project PROJECT "
+            "for one project"
+        ),
+    ]
     assert hidden_list.func(hidden_list) == 0
     assert "Triage maxim proposal: fallbacks" in capsys.readouterr().out
     assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.packaged_maxim_bags()
