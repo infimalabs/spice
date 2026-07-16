@@ -83,11 +83,15 @@ function mosaicSizingMeasureContentPx(lane, lines) {
   return px;
 }
 
+function mosaicSizingInteriorSlackPx(n, module, gap, contentPx) {
+  return n * module - gap - contentPx;
+}
+
 function mosaicSizingSpotCheck(lane, scenario, k) {
   const geometry = mosaicGeometry(16, scenario.width);
   const contentPx = mosaicSizingMeasureContentPx(lane, k);
   const n = mosaicRowsFor(contentPx, geometry.gap, geometry.M);
-  const slack = mosaicInteriorSlackPx(n, geometry.M, geometry.gap, contentPx);
+  const slack = mosaicSizingInteriorSlackPx(n, geometry.M, geometry.gap, contentPx);
   return { label: scenario.label, k, n, module: geometry.M, slack, contentPx };
 }
 
@@ -129,6 +133,7 @@ async function installMosaicSizingHelpers(page) {
       mosaicSizingBuildItem,
       mosaicSizingMeasureChrome,
       mosaicSizingMeasureContentPx,
+      mosaicSizingInteriorSlackPx,
       mosaicSizingSpotCheck,
       mosaicSizingCollectSpotChecks,
       mosaicSizingProbe,
@@ -208,7 +213,6 @@ async function waitForMosaicSizingGlobals(page) {
       "renderMessage",
       "mosaicGeometry",
       "mosaicRowsFor",
-      "mosaicInteriorSlackPx",
     ],
   });
 }

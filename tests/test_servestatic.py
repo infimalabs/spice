@@ -679,7 +679,6 @@ def test_static_submission_lifecycle_uses_current_keyed_event_shape():
 
     assert "function applyLaneSubmissionLifecycle(lane, rawSubmission)" in submissions
     assert "function reconcileLaneSubmissionMessages(lane, messages)" in submissions
-    assert "function latestLaneSubmission(lane)" in submissions
     assert '["lane.submission", handleLaneSubmissionPush]' in live_bus
     assert "applyLaneSubmissionLifecycle(lane, result.submission);" in stream
     before_menu_start = composer.index("function composerPrimaryHeaderBeforeMenu(")

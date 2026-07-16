@@ -119,12 +119,3 @@ function mosaicInsert(cards, rowFloor, candidates, trackCount) {
 function mosaicTracksOverlap(a, b) {
   return a.t < b.t + b.span && b.t < a.t + a.span;
 }
-
-function mosaicRowsOverlap(a, b) {
-  return a.b < b.b + b.n && b.b < a.b + a.n;
-}
-
-// Structural invariant: no two cards overlap in both axes.
-function mosaicCardsOverlap(a, b) {
-  return mosaicTracksOverlap(a, b) && mosaicRowsOverlap(a, b);
-}

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from spice.studies.walk import is_excluded_path, is_test_path
 
@@ -93,14 +93,32 @@ def scan_javascript_unused_symbols(
     *,
     root: Path,
     allow_symbols: Iterable[str] = (),
+    declaration_exemptions: Mapping[tuple[str, str], str] | None = None,
 ) -> list[JavaScriptUnusedEntry]:
+    exemptions = _validated_declaration_exemptions(declaration_exemptions or {})
     return [
         entry
         for entry in collect_javascript_unused_entries(
             paths, root=root, allow_symbols=allow_symbols
         )
         if entry.status in _FINDING_STATUSES
+        and (entry.path, entry.name) not in exemptions
     ]
+
+
+def _validated_declaration_exemptions(
+    exemptions: Mapping[tuple[str, str], str],
+) -> frozenset[tuple[str, str]]:
+    validated: set[tuple[str, str]] = set()
+    for key, raw_reason in exemptions.items():
+        if len(key) != 2 or not all(str(part).strip() for part in key):
+            raise ValueError("javascript-unused exemption keys must be (path, symbol)")
+        if not str(raw_reason).strip():
+            raise ValueError(
+                "javascript-unused exemption reasons must name why the declaration stays"
+            )
+        validated.add((Path(key[0]).as_posix(), key[1]))
+    return frozenset(validated)
 
 
 def render_javascript_unused_board(
