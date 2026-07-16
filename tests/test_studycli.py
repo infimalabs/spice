@@ -14,6 +14,8 @@ from tests.test_extensionhelpers import (
     build_fixture_distribution,
 )
 
+SUBSUMPTION_RENDER_LIMIT = 10
+
 
 def test_general_purpose_study_flags_cover_reference_surface():
     parser = build_parser()
@@ -45,6 +47,19 @@ def test_general_purpose_study_flags_cover_reference_surface():
         ["study", "shape", "--json"],
         ["study", "markdown-links", "--json"],
         ["study", "subsumption", "coverage.db", "--json"],
+        [
+            "study",
+            "subsumption",
+            "--record",
+            "--package",
+            "spice",
+            "--retain-coverage",
+            "coverage.db",
+            "--pytest-arg=-q",
+            "--limit",
+            str(SUBSUMPTION_RENDER_LIMIT),
+            "--json",
+        ],
     ]
 
     parsed = [parser.parse_args(command) for command in commands]
@@ -53,6 +68,10 @@ def test_general_purpose_study_flags_cover_reference_surface():
     assert parsed[1].baseline_ref == "HEAD"
     assert parsed[7].allow_symbols == ["Keep"]
     assert parsed[10].create_tasks is True
+    assert parsed[-1].record is True
+    assert parsed[-1].retain_coverage == Path("coverage.db")
+    assert parsed[-1].pytest_arg == ["-q"]
+    assert parsed[-1].limit == SUBSUMPTION_RENDER_LIMIT
 
 
 def test_taste_cli_renders_exact_inclusive_inflection_suggestions(

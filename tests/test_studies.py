@@ -1,6 +1,7 @@
 """Constitution mechanics: flex ratio, sticky state, magic-number verdicts."""
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ from spice.studies import cli as studies_cli
 from spice.studies import testquality
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
-from spice.studies.subsumption import scan_subsumption
+from spice.studies.subsumption import record_subsumption, scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.testquality import (
     render_assertion_free_board,
@@ -515,6 +516,113 @@ def test_subsumption_identifies_fully_subsumed_test(tmp_path):
     assert report.findings[0].covered_lines == 3
 
 
+def test_subsumption_equal_features_retain_deterministic_representative(tmp_path):
+    db = _write_coverage_db(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_z": {0: [1, 2, 3]},
+            "test_a": {0: [1, 2, 3]},
+            "test_m": {0: [1, 2, 3]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert [(finding.test, finding.subsumed_by) for finding in report.findings] == [
+        ("test_m", "test_a"),
+        ("test_z", "test_a"),
+    ]
+    assert len(report.cohorts) == 1
+    assert report.cohorts[0].relation == "equal-feature"
+    assert report.cohorts[0].representative == "test_a"
+    assert report.cohorts[0].candidates == ("test_m", "test_z")
+
+
+def test_subsumption_reports_analyzed_excluded_and_context_free_denominators(
+    tmp_path,
+):
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py", "tests/test_foo.py"],
+        contexts={
+            "test_analyzed": {0: [1, 2]},
+            "test_excluded": {1: [1, 2]},
+            "": {0: [3]},
+        },
+    )
+
+    report = scan_subsumption(db, package_prefix="spice")
+
+    assert report.tests_scanned == 1
+    assert report.source_files_scanned == 1
+    assert report.coverage_contexts == 2
+    assert report.excluded_test_contexts == 1
+    assert report.context_free_contexts == 1
+
+
+def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    original = {
+        "tracked.txt": "tracked\n",
+        "staged.txt": "staged\n",
+        "untracked.txt": "untracked\n",
+    }
+    for name, content in original.items():
+        (root / name).write_text(content, encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def fake_run(command, *, policy, operation, cwd, env, capture_output, check):
+        coverage_path = Path(env["COVERAGE_FILE"])
+        junit_arg = next(arg for arg in command if arg.startswith("--junitxml="))
+        junit_path = Path(junit_arg.split("=", 1)[1])
+        generated = _write_coverage_db_v7(
+            coverage_path.parent,
+            files=["spice/foo.py"],
+            contexts={
+                "test_a": {0: [1, 2]},
+                "test_b": {0: [1, 2, 3]},
+            },
+        )
+        generated.replace(coverage_path)
+        junit_path.write_text(
+            '<testsuites tests="2"><testsuite tests="2" /></testsuites>',
+            encoding="utf-8",
+        )
+        observed.update(
+            command=tuple(command),
+            cwd=cwd,
+            coverage_path=coverage_path,
+            check=check,
+            policy=policy,
+            operation=operation,
+            capture_output=capture_output,
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("spice.studies.subsumption.run_tool_command", fake_run)
+
+    report = record_subsumption(root, package="spice", package_prefix="spice")
+
+    assert report.suite_tests == 2
+    assert report.tests_scanned == 2
+    assert report.coverage_artifact is None
+    assert observed["cwd"] == root
+    assert observed["check"] is False
+    assert observed["policy"] == "coverage"
+    assert observed["operation"] == "record subsumption coverage"
+    assert observed["capture_output"] is False
+    assert "--cov-context=test" in observed["command"]
+    assert "--cov-branch" in observed["command"]
+    assert str(observed["coverage_path"]).startswith(tempfile.gettempdir())
+    assert {
+        path.name: path.read_text(encoding="utf-8") for path in root.iterdir()
+    } == original
+
+
 def test_subsumption_no_findings_when_tests_are_disjoint(tmp_path):
     db = _write_coverage_db(
         tmp_path,
@@ -746,6 +854,8 @@ def test_subsumption_arc_only_detects_subsumed_test(tmp_path):
     assert report.findings[0].test == "test_a"
     assert report.findings[0].subsumed_by == "test_b"
     assert report.findings[0].covered_lines == 0  # no line coverage, only arcs
+    assert report.findings[0].covered_arcs == 1
+    assert report.findings[0].covered_features == 1
 
 
 def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
