@@ -229,7 +229,13 @@ def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
     )
 
 
-def test_already_contextualized_error_keeps_detail_with_distinct_cause(tmp_path):
+def test_already_contextualized_error_keeps_detail_with_distinct_cause(
+    tmp_path, monkeypatch
+):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(configlayer.paths, "runtime_spice_source", lambda: system_root)
+    _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
     original = SpiceError(
         f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
     )
@@ -240,6 +246,9 @@ def test_already_contextualized_error_keeps_detail_with_distinct_cause(tmp_path)
         outcome = (str(raised), raised.__cause__)
 
     assert outcome == (str(original), original)
+    partial = SpiceError("source=repository without a path")
+    contextualized = configlayer.contextualize_config_error(tmp_path, partial, "serve")
+    assert str(contextualized) == "serve: source=repository without a path"
 
 
 def _write(path: Path, content: str) -> None:

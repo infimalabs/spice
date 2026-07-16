@@ -15,8 +15,10 @@ import ast
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from spice.errors import SpiceError
@@ -27,6 +29,7 @@ from spice.studies.walk import is_excluded_path, is_test_path
 from spice.toolprocess import run_tool_command
 
 MUTATION_RATCHET_VERSION = 1
+STANDING_MUTATION_RATCHET_PATH = Path("tests/mutation-ratchet.json")
 DEFAULT_MAX_MUTANTS_PER_MODULE = 20
 DEFAULT_MUTATION_TIMEOUT_SECONDS = 30
 _FAILED_NODEID_RE = re.compile(r"(tests/[^\s:]+\.py::[^\s]+)")
@@ -75,6 +78,17 @@ class MutationStudy:
     reports: tuple[ModuleMutationReport, ...]
     ratchet_regressions: tuple[RatchetRegression, ...] = ()
     recovered_roots: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StandingMutationRatchet:
+    targets: tuple[Path, ...]
+    test_paths: tuple[Path, ...]
+    max_mutants_per_module: int
+    timeout_seconds: int
+    equivalent_mutant_count: int
+    low_information_mutant_count: int
+    retained_zero_constraint_tests: Mapping[str, str]
 
 
 def changed_python_paths(root: Path, *, baseline_ref: str = "HEAD") -> list[Path]:
@@ -135,6 +149,7 @@ def run_mutation_study(
 
 
 def write_ratchet(path: Path, reports: tuple[ModuleMutationReport, ...]) -> Path:
+    standing = _existing_standing_ratchet(path)
     payload = {
         "version": MUTATION_RATCHET_VERSION,
         "modules": {
@@ -148,9 +163,126 @@ def write_ratchet(path: Path, reports: tuple[ModuleMutationReport, ...]) -> Path
             for report in reports
         },
     }
+    if standing is not None:
+        payload["standing"] = standing
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
+
+
+def load_standing_mutation_ratchet(path: Path) -> StandingMutationRatchet:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SpiceError(f"invalid standing mutation ratchet {path}: {exc}") from exc
+    if (
+        not isinstance(loaded, dict)
+        or loaded.get("version") != MUTATION_RATCHET_VERSION
+    ):
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: version must be "
+            f"{MUTATION_RATCHET_VERSION}"
+        )
+    standing = loaded.get("standing")
+    if not isinstance(standing, dict):
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: standing policy is required"
+        )
+    surface = str(standing.get("surface") or "")
+    if surface != "spice dev doctor":
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: surface must be "
+            "'spice dev doctor'"
+        )
+    return StandingMutationRatchet(
+        targets=_standing_paths(path, standing, "targets"),
+        test_paths=_standing_paths(path, standing, "tests"),
+        max_mutants_per_module=_standing_positive_int(
+            path, standing, "maxMutantsPerModule"
+        ),
+        timeout_seconds=_standing_positive_int(path, standing, "timeoutSeconds"),
+        equivalent_mutant_count=_standing_handling_count(
+            path, standing, "equivalentMutants"
+        ),
+        low_information_mutant_count=_standing_handling_count(
+            path, standing, "lowInformationMutants"
+        ),
+        retained_zero_constraint_tests=MappingProxyType(
+            _standing_reason_map(path, standing, "retainedZeroConstraintTests")
+        ),
+    )
+
+
+def _existing_standing_ratchet(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    standing = loaded.get("standing") if isinstance(loaded, dict) else None
+    return dict(standing) if isinstance(standing, dict) else None
+
+
+def _standing_paths(
+    path: Path, standing: dict[str, object], field: str
+) -> tuple[Path, ...]:
+    raw = standing.get(field)
+    values = tuple(Path(str(value)) for value in raw) if isinstance(raw, list) else ()
+    if not values or any(
+        value.is_absolute() or not value.as_posix() for value in values
+    ):
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: {field} must contain "
+            "relative paths"
+        )
+    return values
+
+
+def _standing_positive_int(path: Path, standing: dict[str, object], field: str) -> int:
+    raw = standing.get(field)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: {field} must be positive"
+        )
+    return raw
+
+
+def _standing_handling_count(
+    path: Path, standing: dict[str, object], field: str
+) -> int:
+    raw = standing.get(field)
+    records = raw if isinstance(raw, list) else []
+    if not records or any(
+        not isinstance(record, dict)
+        or not str(record.get("path") or "")
+        or isinstance(record.get("mutationIndex"), bool)
+        or not isinstance(record.get("mutationIndex"), int)
+        or not str(record.get("reason") or "")
+        for record in records
+    ):
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: {field} must record "
+            "path, mutationIndex, and reason"
+        )
+    return len(records)
+
+
+def _standing_reason_map(
+    path: Path, standing: dict[str, object], field: str
+) -> dict[str, str]:
+    raw = standing.get(field)
+    reasons = (
+        {str(key): str(value) for key, value in raw.items()}
+        if isinstance(raw, dict)
+        else {}
+    )
+    if not reasons or any(not key or not reason for key, reason in reasons.items()):
+        raise SpiceError(
+            f"invalid standing mutation ratchet {path}: {field} must map "
+            "test node IDs to reasons"
+        )
+    return reasons
 
 
 def render_mutation_board(study: MutationStudy) -> str:
