@@ -1,6 +1,6 @@
 # Quest Hardware Public Demo
 
-Status: decision recorded.
+Status: decision, 2026-06-23.
 
 ## Question
 

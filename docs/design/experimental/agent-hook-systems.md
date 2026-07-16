@@ -1,7 +1,7 @@
 # Agent Hook Systems: two mechanisms, both live
 
-Status: investigative map, 2026-07-06. Deliverable for WIRING-1kBMc8BV. Grounded
-in this checkout's code (paths/line refs verified in-tree), not recalled.
+Status: research, 2026-07-06. Investigative map; deliverable for WIRING-1kBMc8BV.
+Grounded in this checkout's code (paths/line refs verified in-tree), not recalled.
 
 The operator's question was: "we write hooks... but is the agent hook under the
 worktree Git dir, and is it actually being used?" Answer: there are **two

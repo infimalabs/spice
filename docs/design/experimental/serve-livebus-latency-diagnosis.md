@@ -1,7 +1,7 @@
 # Serve Live-Bus Latency Diagnosis
 
-Status: re-measured against the current implementation with an isolated
-runtime trace, 2026-07-13.
+Status: research, 2026-07-13. Re-measured against the current implementation
+with an isolated runtime trace.
 
 ## Task-card follow-up: replaced inodes and fused focus broke live delivery
 

@@ -1,6 +1,6 @@
 # Unbounded Wait Surface Audit
 
-Status: implementation audit, 2026-07-12. Deliverable for
+Status: implemented contract, 2026-07-15. Deliverable for
 `RELIABI-1kCzDltf`. Call sites are named by stable `path::qualified.function#call`
 anchors -- file plus the enclosing function and the blocking call -- so the
 matrix survives line drift: only a genuinely new blocking surface, not an
@@ -66,7 +66,7 @@ sites are inventoried below.
 | `spice/serve/livebus.py::LiveBusSession._teardown#join; spice/serve/livebus.py::LiveBusSession._subscribe_completion_loop#get; spice/serve/livebus.py::LiveBusSession._send_followup_loop#get; spice/serve/livebus.py::LiveBusSession._metrics_loop#get` | Subscribe, follow-up, and metric workers block on queues until close sends sentinels; every cleanup join has the watcher join timeout. | Lifetime-bound workers with bounded cleanup |
 | `spice/serve/livebus.py::_wait_for_change#wait`; bounded native loops in `spice/serve/livebus.py::_wait_for_change_kqueue` and `spice/serve/livebus.py::_wait_for_change_watchfiles` | The kqueue and watchfiles waits use bounded native wakeups and observe the subscription stop event; activation is signaled after the native watch is armed, and callers impose the named activation deadline above. | Bounded |
 | `spice/serve/websocket.py::WebSocketConnection.read_json; spice/serve/websocket.py::WebSocketConnection.read_text; spice/serve/websocket.py::WebSocketConnection.encode_text_frame; spice/serve/websocket.py::WebSocketConnection.send_frame; spice/serve/websocket.py::WebSocketConnection.ping; spice/serve/websocket.py::WebSocketConnection.set_read_timeout; spice/serve/websocket.py::WebSocketConnection.close; spice/serve/websocket.py::WebSocketConnection._read_frame`; timeout and read at `spice/serve/livebus.py::LiveBusSession.run` | WebSocket reads are blocking by design after a connection is accepted, but LiveBus applies a read timeout so silent peers are reaped. | Bounded |
-| `spice/serve/livebus.py::LiveBusSession.__init__#Lock`; acquisition and write at `spice/serve/livebus.py::LiveBusSession._send` | The per-session send mutex is held across the WebSocket write. One stalled peer write can therefore retain every later outbound frame for that session; telemetry records lock wait and hold duration but does not impose a deadline. | Actionable diagnosis: `LIVEBUS-1kCzHL0m` |
+| `spice/serve/livebus.py::LiveBusSession.__init__#Lock`; acquisition and write at `spice/serve/livebus.py::LiveBusSession._send` | The per-session send mutex is held across the WebSocket write; the frame is encoded before the lock is taken, so the critical section is the bare socket write. One stalled peer write can still retain later outbound frames for that session; telemetry records lock wait and hold duration but does not impose a deadline. | Lifetime invariant, diagnosed under `LIVEBUS-1kCzHL0m`: measured total lock waits stayed at or below 0.02 ms and holds at or below 1.65 ms (`docs/design/experimental/serve-livebus-latency-diagnosis.md`), rejecting the send lock as a bottleneck; intentionally unbounded mutex acquisition |
 | `spice/agent/sidechannel.py::AgentSideChannelServer.__init__#Lock`; `spice/agent/sidechannelnotify.py::<module>#Lock`; `spice/serve/app.py::ServeState.__init__#Lock`; `spice/serve/livebus.py::<module>#field; spice/serve/livebus.py::LiveBusSession.__init__#Lock`; `spice/serve/messages.py::<module>#field`; `spice/serve/submissions.py::SubmissionLifecycleTracker.__init__#Lock`; `spice/serve/team/store.py::<module>#Lock`; `spice/serve/websocket.py::<module>#field` | In-process mutexes protect short critical sections. Side-channel notification I/O is outside its notice mutex; these LiveBus telemetry, background-dirty, subscription-state, and read-chain sections perform no network or child-process waits while held. | Lifetime invariant documented by code shape; intentionally unbounded mutex acquisition |
 | `spice/agent/maxims.py::evaluate_maxim_any_violation#result` | Both parallel maxim judges have bounded command attempts; collecting their futures can wait only for those configured attempt bounds. | Bounded |
 
@@ -86,12 +86,16 @@ foreground child command, supervised agent, server, ACK watcher, socket stream,
 or sentinel-driven worker. They already have an external cancellation owner and
 should not receive arbitrary wall-clock caps.
 
-The remaining surface without such an owner is assigned to one concrete task. Agent side-channel handshakes and helper probes, session rehydration providers, task backend coordination, and synchronous tool runners were bounded under `RELIABI-1kCzJcnr`, `RELIABI-1kCzJgmj`, `RELIABI-1kCzJljJ`, and `RELIABI-1kCzJtSj`:
-
-- `RELIABI-1kCzJpcb` — serve watcher activation and speech workers;
-
-That remaining task requires deterministic stalled-process and
-watcher-activation coverage for the serve worker paths named by this audit.
+Every surface that lacked such an owner is now bounded. Agent side-channel
+handshakes and helper probes, session rehydration providers, task backend
+coordination, and synchronous tool runners were bounded under
+`RELIABI-1kCzJcnr`, `RELIABI-1kCzJgmj`, `RELIABI-1kCzJljJ`, and
+`RELIABI-1kCzJtSj`; serve watcher activation, initial-payload release, and
+payload futures were bounded under `RELIABI-1kCzJpcb` with deterministic
+stalled-process and watcher-activation coverage. The LiveBus per-session send
+mutex was diagnosed rather than capped: `LIVEBUS-1kCzHL0m` measured the lock
+as effectively uncontended, so it remains an intentionally unbounded
+in-process mutex alongside the other short-critical-section locks above.
 
 `tests/test_waitsurfaceaudit.py` AST-scans the production tree and requires every
 direct subprocess, process wait, thread join, event/future wait, queue wait,

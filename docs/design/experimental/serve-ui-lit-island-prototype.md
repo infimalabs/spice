@@ -1,6 +1,6 @@
 # Serve UI Lit Island Prototype
 
-Status: closed and decommissioned, 2026-06-22.
+Status: prototype result, 2026-06-22. Closed and decommissioned.
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # Serve Actor-Lineage Metric Prototype
 
-Status: prototype, no production migration, 2026-06-21.
+Status: prototype result, 2026-06-21. No production migration.
 
 ## Question
 

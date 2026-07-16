@@ -7,9 +7,7 @@ import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-AUDIT_PATH = (
-    PROJECT_ROOT / "docs" / "design" / "experimental" / "unbounded-wait-audit.md"
-)
+AUDIT_PATH = PROJECT_ROOT / "docs" / "design" / "accepted" / "unbounded-wait-audit.md"
 DIRECT_BLOCKING_CALLS = {
     "fcntl.flock",
     "select.select",

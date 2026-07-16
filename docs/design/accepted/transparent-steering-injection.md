@@ -1,6 +1,6 @@
 # Transparent Steering Injection
 
-Status: implemented contract.
+Status: implemented contract, 2026-06-13.
 
 ## Contract
 
