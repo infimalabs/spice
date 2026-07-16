@@ -63,11 +63,7 @@ function applyTargetsPayload(payload) {
   renderFilterPills();
   for (const lane of laneStates.values()) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
-    else
-      renderLaneChrome(
-        lane,
-        lanePayloadWithTargetPending(lane, targetById.get(lane.targetId)),
-      );
+    else renderLaneChrome(lane, targetById.get(lane.targetId));
   }
   if (spiceMenuEl) renderSpiceMenuIfAvailable();
 }
@@ -157,95 +153,6 @@ function normalizedNonnegativeIntegerString(value) {
   const text = String(value || "");
   if (!/^\d+$/.test(text)) return "";
   return text.replace(/^0+(?=\d)/, "");
-}
-
-/**
- * @param {Object} lane
- * @param {LaneChromePayload=} target
- * @returns {LaneChromePayload}
- */
-function lanePayloadWithTargetPending(lane, target) {
-  if (!lane.latestPayload) {
-    if (!target) throw new Error("initial lane chrome payload is required");
-    return target;
-  }
-  const pending = targetFreshPendingIdentity(target);
-  if (pending.count === null && pending.keys === null && !pending.revision)
-    return lane.latestPayload;
-  if (targetPendingIdentityIsStaleForPayload(pending, lane.latestPayload))
-    return lane.latestPayload;
-  const pendingFields = pendingIdentityFields(pending);
-  const statusLine = {
-    ...(lane.latestPayload.statusLine || {}),
-    ...pendingFields,
-  };
-  lane.latestPayload = {
-    ...lane.latestPayload,
-    ...pendingFields,
-    statusLine,
-  };
-  return lane.latestPayload;
-}
-
-function targetPendingIdentityIsStaleForPayload(identity, payload) {
-  const incomingVersion = Math.max(0, Number(identity.version) || 0);
-  const currentVersion = payloadPendingIdentityVersion(payload);
-  return (
-    incomingVersion > 0 &&
-    currentVersion > 0 &&
-    incomingVersion < currentVersion
-  );
-}
-
-function payloadPendingIdentityVersion(payload) {
-  const statusLine = (payload && payload.statusLine) || {};
-  const payloadVersion = payload && payload.pendingInboxVersion;
-  return Math.max(
-    0,
-    Number(statusLine.pendingInboxVersion || payloadVersion) || 0,
-  );
-}
-
-function targetFreshPendingIdentity(target) {
-  const statusLine = (target && target.statusLine) || {};
-  let count = null;
-  for (const value of [
-    statusLine.pendingInboxCount,
-    target && target.pendingInboxCount,
-  ]) {
-    count = normalizedTargetChoiceCount(value);
-    if (count !== null) break;
-  }
-  const sourceWithKeys = Array.isArray(statusLine.pendingInboxKeys)
-    ? statusLine
-    : target || {};
-  const keys = Array.isArray(sourceWithKeys.pendingInboxKeys)
-    ? sourceWithKeys.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
-    : null;
-  const sourceWithVersion =
-    statusLine.pendingInboxVersion !== undefined ? statusLine : target || {};
-  const revision = String(sourceWithKeys.pendingInboxRevision || "");
-  const version = Math.max(0, Number(sourceWithVersion.pendingInboxVersion) || 0);
-  if ((count !== null || keys !== null || revision) && !version)
-    throw new Error("pending identity version is required");
-  return {
-    count,
-    keys,
-    revision,
-    version,
-  };
-}
-
-function pendingIdentityFields(identity) {
-  const fields = {};
-  if (identity.count !== null) {
-    fields.pendingInboxCount = identity.count;
-    fields.pendingInboxLabel = String(identity.count);
-  }
-  if (identity.keys !== null) fields.pendingInboxKeys = identity.keys;
-  if (identity.revision) fields.pendingInboxRevision = identity.revision;
-  if (identity.version) fields.pendingInboxVersion = identity.version;
-  return fields;
 }
 
 // ---- team snapshot reconciliation ---------------------------------------------
