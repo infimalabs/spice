@@ -1,20 +1,17 @@
-"""Completed-task sizing report built from structured task signals."""
+"""Evidence-backed completed-task sizing report."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
-from spice.gitprocess import run_git_command
-from spice.tasks import claimstate, config, identity, tw
+from spice.tasks import claimstate, effort, identity, tw
 
 MINUTE_SECONDS = 60
 HOUR_SECONDS = 60 * MINUTE_SECONDS
 ELAPSED_SMALL_SECONDS = 15 * MINUTE_SECONDS
 ELAPSED_MEDIUM_SECONDS = HOUR_SECONDS
 ELAPSED_LARGE_SECONDS = 3 * HOUR_SECONDS
-COMMAND_MEDIUM_MAX = 3
 DEPENDENCY_COMPLEXITY_MIN = 3
 SCORE_SMALL_MAX = 1
 SCORE_MEDIUM_MAX = 3
@@ -22,32 +19,28 @@ SCORE_LARGE_MAX = 5
 
 
 @dataclass(frozen=True)
-class TaskLifecycleEvent:
-    kind: str
-    ts: float
-
-
-@dataclass(frozen=True)
 class SizingComponent:
     name: str
-    points: int
+    points: int | None
     detail: str
 
 
 @dataclass(frozen=True)
-class _CommitSignal:
-    count: int
-    source: str
+class SizingEvidence:
+    name: str
+    status: str
+    detail: str
 
 
 @dataclass(frozen=True)
 class TaskSizing:
     handle: str
-    label: str
-    score: int
+    label: str | None
+    score: int | None
     title: str
     project: str
     components: tuple[SizingComponent, ...]
+    evidence: tuple[SizingEvidence, ...]
 
 
 def completed_task_sizing_report(
@@ -64,7 +57,8 @@ def completed_task_sizing_rows(
     limit: int | None = None,
     project: str | None = None,
     rows: list[dict[str, Any]] | None = None,
-    events_by_task: dict[str, tuple[TaskLifecycleEvent, ...]] | None = None,
+    effort_windows_by_task: dict[str, tuple[effort.PhaseEffortWindow, ...]]
+    | None = None,
 ) -> list[TaskSizing]:
     selected_rows = tw.export(["status:completed"]) if rows is None else rows
     if project:
@@ -72,11 +66,11 @@ def completed_task_sizing_rows(
     selected_rows = sorted(selected_rows, key=_completed_sort_key, reverse=True)
     if limit is not None:
         selected_rows = selected_rows[:limit]
-    events = events_by_task
-    if events is None:
-        events = _events_by_task_id([_uuid(row) for row in selected_rows])
+    windows = effort_windows_by_task
+    if windows is None:
+        windows = _effort_windows_by_task(selected_rows)
     return [
-        size_completed_task(row, events=events.get(_uuid(row), ()))
+        size_completed_task(row, windows=windows.get(_uuid(row), ()))
         for row in selected_rows
     ]
 
@@ -84,119 +78,78 @@ def completed_task_sizing_rows(
 def size_completed_task(
     row: dict[str, Any],
     *,
-    events: tuple[TaskLifecycleEvent, ...] = (),
+    windows: tuple[effort.PhaseEffortWindow, ...] = (),
 ) -> TaskSizing:
     components = (
-        _elapsed_component(row, events),
-        _command_component(row),
-        _validation_component(row),
+        _elapsed_component(windows),
         _review_component(row),
-        _blocked_component(row),
         _metadata_component(row),
     )
-    score = sum(component.points for component in components)
+    available = all(component.points is not None for component in components)
+    score = (
+        sum(
+            component.points for component in components if component.points is not None
+        )
+        if available
+        else None
+    )
     return TaskSizing(
         handle=identity.render_handle(row),
-        label=_size_label(score),
+        label=_size_label(score) if score is not None else None,
         score=score,
         title=str(row.get("description") or ""),
         project=str(row.get("project") or ""),
         components=components,
+        evidence=(_validation_evidence(row),),
     )
 
 
 def render_task_sizing(report: TaskSizing) -> str:
-    components = " ".join(
-        f"{component.name}=+{component.points}({component.detail})"
-        for component in report.components
-    )
+    components = " ".join(_render_component(item) for item in report.components)
+    evidence = " ".join(_render_evidence(item) for item in report.evidence)
+    label = report.label if report.label is not None else "unavailable"
+    score = str(report.score) if report.score is not None else "unavailable"
     return (
-        f"{report.handle} size={report.label} size_score={report.score} "
-        f"project={report.project or '-'} {components} title={report.title}"
+        f"{report.handle} size={label} size_score={score} "
+        f"project={report.project or '-'} {components} {evidence} title={report.title}"
     )
 
 
-def _events_by_task_id(
-    task_ids: list[str],
-) -> dict[str, tuple[TaskLifecycleEvent, ...]]:
-    ids = [task_id for task_id in task_ids if task_id]
-    if not ids:
-        return {}
-    from spice.serve.team.store import ServeTeamStore
+def _render_component(component: SizingComponent) -> str:
+    if component.points is None:
+        return f"{component.name}=unavailable({component.detail})"
+    return f"{component.name}=+{component.points}({component.detail})"
 
-    placeholders = ", ".join("?" for _item in ids)
-    with ServeTeamStore().connect() as connection:
-        rows = connection.execute(
-            "SELECT task_id, kind, ts FROM task_events "
-            f"WHERE task_id IN ({placeholders}) ORDER BY ts, rowid",
-            ids,
-        ).fetchall()
-    by_task: dict[str, list[TaskLifecycleEvent]] = {}
-    for row in rows:
-        by_task.setdefault(str(row["task_id"]), []).append(
-            TaskLifecycleEvent(kind=str(row["kind"]), ts=float(row["ts"]))
-        )
-    return {task_id: tuple(events) for task_id, events in by_task.items()}
+
+def _render_evidence(item: SizingEvidence) -> str:
+    return f"{item.name}={item.status}({item.detail})"
+
+
+def _effort_windows_by_task(
+    rows: list[dict[str, Any]],
+) -> dict[str, tuple[effort.PhaseEffortWindow, ...]]:
+    grouped: dict[str, list[effort.PhaseEffortWindow]] = {}
+    for window in effort.phase_effort_windows_for_tasks(rows):
+        grouped.setdefault(window.task_id, []).append(window)
+    return {task_id: tuple(windows) for task_id, windows in grouped.items()}
 
 
 def _elapsed_component(
-    row: dict[str, Any], events: tuple[TaskLifecycleEvent, ...]
+    windows: tuple[effort.PhaseEffortWindow, ...],
 ) -> SizingComponent:
-    event_seconds = _event_active_seconds(events)
-    if event_seconds is not None:
-        return SizingComponent(
-            "elapsed",
-            _elapsed_points(event_seconds),
-            f"task_events:{int(event_seconds)}s",
-        )
-    field_seconds = _row_elapsed_seconds(row)
-    if field_seconds is not None:
-        return SizingComponent(
-            "elapsed",
-            _elapsed_points(field_seconds),
-            f"task_fields_entry_end:{int(field_seconds)}s",
-        )
-    return SizingComponent("elapsed", 0, "no_structured_elapsed_signal")
-
-
-def _event_active_seconds(events: tuple[TaskLifecycleEvent, ...]) -> float | None:
-    total = 0.0
-    active_start: float | None = None
-    for event in events:
-        if event.kind == "claim":
-            active_start = event.ts
-            continue
-        if active_start is None:
-            continue
-        if event.kind in {"phaseAdvance", "review", "complete"}:
-            total += max(0.0, event.ts - active_start)
-            active_start = None
-    return total if total > 0 else None
-
-
-def _row_elapsed_seconds(row: dict[str, Any]) -> float | None:
-    start = _parse_task_time(str(row.get("entry") or ""))
-    end = _parse_task_time(str(row.get("end") or ""))
-    if start is None or end is None:
-        return None
-    return max(0.0, (end - start).total_seconds())
-
-
-def _parse_task_time(raw: str) -> datetime | None:
-    value = raw.strip()
-    if not value:
-        return None
-    for fmt in (
-        "%Y%m%dT%H%M%S%fZ",
-        "%Y%m%dT%H%M%SZ",
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%SZ",
-    ):
-        try:
-            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
-        except ValueError:
-            pass
-    return None
+    if not windows:
+        return SizingComponent("elapsed", None, "no_phase_effort_windows")
+    seconds = 0.0
+    for window in windows:
+        wall_seconds = effort.phase_effort_wall_seconds(window)
+        if wall_seconds is None:
+            return SizingComponent("elapsed", None, "incomplete_phase_effort_window")
+        seconds += wall_seconds
+    return SizingComponent(
+        "elapsed",
+        _elapsed_points(seconds),
+        f"phase_effort_windows:{int(seconds)}s",
+    )
 
 
 def _elapsed_points(seconds: float) -> int:
@@ -209,98 +162,15 @@ def _elapsed_points(seconds: float) -> int:
     return 3
 
 
-def _command_component(row: dict[str, Any]) -> SizingComponent:
-    signal = _commit_signal(row)
-    if signal is None:
-        return SizingComponent("commands", 0, "no_structured_command_signal")
-    count = signal.count
-    if count <= 1:
-        points = 0
-    elif count <= COMMAND_MEDIUM_MAX:
-        points = 1
-    else:
-        points = 2
-    return SizingComponent("commands", points, f"git_commits:{count}:{signal.source}")
-
-
-def _commit_signal(row: dict[str, Any]) -> _CommitSignal | None:
-    signal = _commit_signal_from(
-        row,
-        before_key="done_upstream_head",
-        after_key="done_head",
-        source="done_upstream_head..done_head",
-    )
-    if signal is None:
-        return None
-    if signal.count == 0 and _has_review_metadata(row):
-        return None
-    return signal
-
-
-def _commit_signal_from(
-    row: dict[str, Any],
-    *,
-    before_key: str,
-    after_key: str,
-    source: str,
-) -> _CommitSignal | None:
-    before = str(row.get(before_key) or "")
-    after = str(row.get(after_key) or "")
-    if not before or not after:
-        return None
-    count = _git_rev_count(before, after)
-    if count is None:
-        return None
-    return _CommitSignal(count=count, source=source)
-
-
-def _git_rev_count(before: str, after: str) -> int | None:
-    result = run_git_command(
-        ["git", "rev-list", "--count", f"{before}..{after}"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    try:
-        return int(result.stdout.strip() or "0")
-    except ValueError:
-        return None
-
-
-def _has_review_metadata(row: dict[str, Any]) -> bool:
-    return any(
-        str(row.get(key) or "").strip()
-        for key in ("review_author", "review_by", "review_at", "review_finding")
-    )
-
-
-def _validation_component(row: dict[str, Any]) -> SizingComponent:
-    tags = [str(tag) for tag in row.get("tags") or []]
-    gate_tags = sorted(tag for tag in tags if tag.startswith("gate:"))
-    if gate_tags:
-        return SizingComponent("validation", 1, f"quality_gates:{','.join(gate_tags)}")
-    return SizingComponent("validation", 0, "no_structured_validation_signal")
-
-
 def _review_component(row: dict[str, Any]) -> SizingComponent:
+    if "review" not in claimstate.phases_of(row):
+        return SizingComponent("review", 0, "phase:not_required")
     finding = str(row.get("review_finding") or "").strip().casefold()
-    if finding and finding != "clean":
-        return SizingComponent("review", 2, f"review_finding:{finding}")
-    return SizingComponent("review", 0, f"review_finding:{finding or 'clean'}")
-
-
-def _blocked_component(row: dict[str, Any]) -> SizingComponent:
-    signals: list[str] = []
-    status = str(row.get("status") or "").casefold()
-    if status in {"blocked", "stale", "waiting"}:
-        signals.append(f"status:{status}")
-    if config.is_hidden_project(str(row.get("project") or "")):
-        signals.append(f"project:{config.OOPS_PROJECT}")
-    if not signals:
-        return SizingComponent("blocked", 0, "no_structured_blocker_signal")
-    return SizingComponent("blocked", 2, ",".join(signals))
+    if not finding:
+        return SizingComponent("review", None, "no_review_finding")
+    if finding == "clean":
+        return SizingComponent("review", 0, "review_finding:clean")
+    return SizingComponent("review", 2, "review_finding:non_clean")
 
 
 def _metadata_component(row: dict[str, Any]) -> SizingComponent:
@@ -317,6 +187,12 @@ def _metadata_component(row: dict[str, Any]) -> SizingComponent:
     if not details:
         details.append("flow:default")
     return SizingComponent("metadata", points, ",".join(details))
+
+
+def _validation_evidence(row: dict[str, Any]) -> SizingEvidence:
+    if str(row.get("validation") or "").strip():
+        return SizingEvidence("validation", "recorded", "completion_validation")
+    return SizingEvidence("validation", "unavailable", "no_completion_validation")
 
 
 def _size_label(score: int) -> str:

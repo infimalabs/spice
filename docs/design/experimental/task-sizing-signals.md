@@ -4,6 +4,8 @@ Status: recommendation, 2026-06-26.
 
 ## Recommendation
 
+Evidence boundary revised 2026-07-16.
+
 Do not let task-sizing signals change allocator ranking, priority, due dates, or
 claim selection yet. Spice should first add an observational completed-task size
 report that labels past work and exposes the raw signals that produced the
@@ -13,14 +15,21 @@ Use the report to calibrate heuristics over real completed tasks. Only after the
 team trusts the labels should Spice consider task creation hints or allocator
 weighting.
 
+The only current consumer is the operator reading `spice task sizing`. A
+repository-wide consumer audit found no allocator, quality-gate, task-creation,
+or automation dependency on the score. Therefore the report must not expand
+lifecycle metadata to improve coverage. It renders `size=unavailable` whenever
+one of its scored observations is unavailable, and keeps non-quantitative
+completion evidence separate from the score.
+
 Initial size labels should be descriptive, not normative:
 
 | Score | Label | Meaning |
 | --- | --- | --- |
-| 0-1 | S | Narrow task; one local surface; focused validation. |
-| 2-3 | M | Normal task; several files or one meaningful behavior path. |
-| 4-5 | L | Broad task; shared behavior, full-suite/browser validation, or review churn. |
-| 6+ | XL | Split candidate; multiple surfaces, blocking, or repeated review changes. |
+| 0-1 | S | Low observed active-time, review, and coordination signal. |
+| 2-3 | M | Moderate observed active-time, review, or coordination signal. |
+| 4-5 | L | High observed active-time, review, or coordination signal. |
+| 6+ | XL | Very high combined signal; inspect the raw components. |
 
 The score is for reporting completed work. It should not be treated as a promise
 that future work with the same label will take the same time.
@@ -38,7 +47,9 @@ what it measured and how confident it is.
 ### Elapsed Time
 
 Measure phase wall time from claim to `task done`, and review time from review
-claim to `task review`.
+claim to `task review`, through the existing phase-effort window API. Do not
+fall back to task `entry..end`: that span begins at task creation and includes
+allocator wait, so it is not active work.
 
 Useful:
 
@@ -56,18 +67,17 @@ Risk:
 
 Heuristic contribution:
 
-- implementation phase under 15 minutes: `+0`;
+- total complete phase-effort windows under 15 minutes: `+0`;
 - 15-60 minutes: `+1`;
 - 1-3 hours: `+2`;
-- more than 3 hours: `+3`;
-- add `+1` when review phase takes more than 30 active minutes and records
-  substantive analysis rather than queue wait alone.
+- more than 3 hours: `+3`.
 
 ### Command And Test Volume
 
-Session artifacts already expose command counts in briefings, and validation
-text names focused test commands. A sizing report can count shell commands,
-patches, commits, and validation categories.
+Session artifacts expose command counts in briefings, and validation text often
+names focused test commands. Those facts make command and test volume tempting
+sizing inputs, but the completed-task report has no stable structured join to
+them.
 
 Useful:
 
@@ -82,18 +92,26 @@ Risk:
 - a single command can run a long suite;
 - low command count can still hide a hard design decision.
 
-Heuristic contribution:
+Current evidence boundary:
 
-- 0-20 commands and one patch/commit: `+0`;
-- 21-80 commands or two to three patches/commits: `+1`;
-- more than 80 commands or more than three patches/commits: `+2`;
-- add `+1` for full-suite, browser, networked, or external-system validation.
+- completion `validation` is canonical but free-form; report only whether it
+  was recorded, without assigning points or inferring suite complexity;
+- `done_upstream_head..done_head` is a publication range, and review completion
+  overwrites it with the review publication boundary; it therefore cannot
+  stand in for implementation commands, patches, or commits;
+- `gate:*` tags bind live completion checks; they do not record the validation
+  work performed by the task.
+
+Command volume and validation complexity are excluded from the score until a
+concrete consumer justifies a truthful structured boundary. No new boundary is
+justified for the operator-only report.
 
 ### Review Churn
 
-Review churn is one of the strongest signals that a task was undersized or
-ambiguous. Count review findings, dependent follow-ups spawned from review, and
-the number of review cycles before clean completion.
+Review churn can indicate that a task was undersized or ambiguous. The current
+report has only the canonical final `review_finding`, so it scores that outcome
+and does not claim to count review cycles, dependent follow-ups, or conflict
+repairs.
 
 Useful:
 
@@ -108,9 +126,11 @@ Risk:
 
 Heuristic contribution:
 
-- clean review first pass: `+0`;
-- one changes review or one review-spawned follow-up: `+2`;
-- repeated changes reviews or conflict repair after task done: `+3`.
+- canonical `review_finding=clean`: `+0`;
+- canonical non-clean review finding: `+2`;
+- a task whose flow has no review phase: `+0` with `phase:not_required`;
+- a required review with no finding: unavailable, so the whole size is
+  unavailable.
 
 ### Blocked, Stale, And Oops States
 
@@ -132,11 +152,9 @@ Risk:
 - stale claims can be caused by an agent crash or renewal rather than task
   scope.
 
-Heuristic contribution:
-
-- any blocked state, stale claim, or task-specific oops: `+2`;
-- repeated blocker of the same type: mark `split_or_clarify=true` instead of
-  only increasing the score.
+Completed task rows do not retain a canonical blocker history, and a completed
+`.oops` task is itself a tooling record rather than proof that another task was
+blocked. This dimension is excluded from the quantitative report.
 
 ### Task Metadata
 
@@ -144,12 +162,8 @@ Task metadata gives useful priors but should not dominate the observed signals.
 
 Useful:
 
-- project stem is a good prior: docs/design tasks are usually different from
-  serve UI or lifecycle shellhook tasks;
-- priority is urgency, not size;
 - dependency count and flow shape indicate coordination cost;
-- acceptance text can be scanned for required validations such as browser,
-  full-suite, migration, or release checks.
+- priority and project remain visible context but are not size inputs.
 
 Risk:
 
@@ -160,9 +174,7 @@ Risk:
 Heuristic contribution:
 
 - dependency count above two: `+1`;
-- `verify` phase or explicit browser/full-suite/release validation: `+1`;
-- acceptance contains "research", "prototype", or "design": no automatic score
-  change, but report as an artifact class.
+- a canonical `verify` phase: `+1`.
 
 ## Initial Heuristic
 
@@ -170,20 +182,23 @@ For each completed task, calculate:
 
 ```text
 size_score =
-  elapsed_bucket
-  + command_volume_bucket
-  + validation_complexity
+  complete_phase_effort_elapsed_bucket
   + review_churn
-  + blocked_or_oops
   + dependency_or_flow_complexity
 ```
+
+The score and label are emitted only when every scored component is available.
+A complete phase-effort window of zero seconds is measured `+0`; a missing or
+partial window is `unavailable`. This distinction also applies to canonical
+review evidence.
 
 Then map the score to `S`, `M`, `L`, or `XL`.
 
 The report should print raw components next to the label:
 
 ```text
-TASK-... size=L score=4 elapsed=+1 commands=+1 validation=+1 review=+1
+TASK-... size=M size_score=2 elapsed=+1 review=+0 metadata=+1 \
+  validation=recorded(completion_validation)
 ```
 
 This keeps the label debuggable. If a label looks wrong, the team can see which
@@ -201,6 +216,8 @@ component caused it and tune that component.
 
 ## Follow-Ups
 
-- `METRICS-20260626T060642088454Z`: implement a completed-task sizing report
-  that reads task lifecycle metadata and session summaries, prints raw signal
-  components, and labels completed tasks without changing allocator behavior.
+- `METRICS-20260626T060642088454Z`: the original completed-task sizing report,
+  which printed raw signal components without changing allocator behavior.
+- `SIZING-1kDStBkZ`: remove unsupported quantitative dimensions, delegate
+  active-time interpretation to the phase-effort API, and distinguish missing
+  evidence from measured zero without adding lifecycle metadata.
