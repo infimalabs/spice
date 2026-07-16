@@ -155,6 +155,10 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     move into the named public project, which is how a deferred hidden-board
     task (.oops) enters the active public queue. Identity rides on the
     project string alone, so the project move is the whole promotion.
+
+    Waking also starts the priority SLA clock that deferred creation
+    suspended: a row with no due gets one from the ordinary due-calculation
+    seam, while a row that already carries a due keeps it exactly.
     """
     if not handles:
         raise SpiceError("task wake requires at least one handle")
@@ -173,17 +177,38 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
 
-    mods = ["wait:"]
+    from spice.tasks import create
+
+    base_mods = ["wait:"]
     if target is not None:
-        mods.append(f"project:{target}")
-    tw.run([*(identity.uuid_of(row) for row in rows), "modify", *mods])
+        base_mods.append(f"project:{target}")
+    mods_by_uuid: dict[str, tuple[str, ...]] = {}
+    for row in rows:
+        # Waking starts the SLA clock deferred creation suspended, through
+        # the same due-calculation seam ordinary creation uses; a due already
+        # on the row is an exact deadline and stays untouched.
+        due_mods = (
+            []
+            if str(row.get("due") or "")
+            else create.sla_due_args(None, str(row.get("priority") or ""))
+        )
+        mods_by_uuid[identity.uuid_of(row)] = (*base_mods, *due_mods)
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for uuid, mods in mods_by_uuid.items():
+        groups.setdefault(mods, []).append(uuid)
+    for mods, uuids in groups.items():
+        tw.run([*uuids, "modify", *mods])
     fresh = [identity.render_handle(row) for row in rows]
+    row_mods = [" ".join(mods_by_uuid[identity.uuid_of(row)]) for row in rows]
     actor = tw.current_actor()
     if target is None:
         projects = tuple(
             dict.fromkeys(str(row.get("project") or "").strip() for row in rows)
         )
-        woke_lines = [f"woke {handle}: wait:" for handle in fresh]
+        woke_lines = [
+            f"woke {handle}: {mods}"
+            for handle, mods in zip(fresh, row_mods, strict=True)
+        ]
     else:
         projects = (target,)
         # The handle prefix tracks the project, so promotion renames the
@@ -193,8 +218,8 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
             for row in rows
         ]
         woke_lines = [
-            f"promoted {old} -> {new}: wait: project:{target}"
-            for old, new in zip(fresh, promoted, strict=True)
+            f"promoted {old} -> {new}: {mods}"
+            for old, new, mods in zip(fresh, promoted, row_mods, strict=True)
         ]
     route_feedback = [
         _subscribe_woken_project(project, actor) for project in projects if project

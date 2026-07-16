@@ -254,7 +254,13 @@ def _require_steer_lifetime(actor: str, *, action: str) -> None:
         )
 
 
-def _due_args(due: str | None, mapped_priority: str, *, auto_due: bool) -> list[str]:
+def sla_due_args(
+    due: str | None, mapped_priority: str, *, auto_due: bool = True
+) -> list[str]:
+    """The one due-calculation seam: an explicit due is exact, otherwise the
+    priority SLA clock starts now. Deferred creation suspends the clock by
+    passing auto_due=False; wake restarts it through this same seam, so the
+    SLA measures time on the allocator, not time spent deferred."""
     if due:
         return [f"due:{due}"]
     if auto_due and mapped_priority in config.SLA_DUE_SECONDS:
@@ -292,7 +298,13 @@ def _build_add_args(
     ]
     if mapped_priority:
         args.append(f"priority:{mapped_priority}")
-    args.extend(_due_args(due, mapped_priority, auto_due=auto_due))
+    # Deferral suspends the implicit SLA clock: a deferred row consumes no
+    # SLA while waiting, and wake starts the clock through the same seam.
+    args.extend(
+        sla_due_args(
+            due, mapped_priority, auto_due=auto_due and wait != config.OOPS_WAIT
+        )
+    )
     if wait:
         args.append(f"wait:{wait}")
     if scheduled:
