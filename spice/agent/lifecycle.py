@@ -58,6 +58,7 @@ from spice.config import (
 )
 from spice.errors import SpiceError
 from spice.locking import bounded_exclusive_lock
+from spice.paths import atomic_write_json, atomic_write_text
 from spice.procs import (
     popen_new_process_group_kwargs,
     process_group_is_running,
@@ -898,7 +899,7 @@ def materialize_worktree_skill(repo_root: Path) -> Path | None:
                 return target
             if git_tracks_relative_path(repo_root, WORKTREE_SKILL_RELATIVE_PATH):
                 return target
-        target.write_text(content, encoding="utf-8")
+        atomic_write_text(target, content, write_if_changed=True)
     except OSError:
         return target if target.is_file() else None
     return target
@@ -915,8 +916,9 @@ def materialize_worktree_skill_gitignore(repo_root: Path) -> Path | None:
                 repo_root, WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH
             ):
                 return target
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(WORKTREE_SKILL_GITIGNORE_CONTENT, encoding="utf-8")
+        atomic_write_text(
+            target, WORKTREE_SKILL_GITIGNORE_CONTENT, write_if_changed=True
+        )
     except OSError:
         return target if target.is_file() else None
     return target
@@ -970,10 +972,7 @@ def write_agent_state(repo_root: Path, state: dict[str, Any]) -> None:
         path = agent_thread_state_dir(repo_root, thread_id) / AGENT_STATE_FILE
     else:
         path = agent_state_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    atomic_write_json(path, state)
     if thread_id:
         write_agent_thread_pointer(repo_root, thread_id)
 

@@ -41,14 +41,16 @@ from spice.serve.directivestats import (
     DirectiveStatsStoreMixin,
     DirectiveTotals as DirectiveTotals,
 )
-from spice.serve.team.metrics import (
+from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
+    TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
+)
+from spice.serve.team.metrics import (
     MetricSeriesPoint as MetricSeriesPoint,
     TaskDistributionSeriesPoint as TaskDistributionSeriesPoint,
     TaskLifecycleSeriesPoint as TaskLifecycleSeriesPoint,
     TaskStallState as TaskStallState,
-    TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
     TeamMetricStoreMixin,
 )
 from spice.serve.team.models import (
@@ -254,10 +256,6 @@ class ServeTeamStore(
         row = connection.execute("SELECT MAX(revision) AS r FROM events").fetchone()
         return int(row["r"] or 0)
 
-    def global_revision(self) -> int:
-        with self.connect() as connection:
-            return self._current_revision_locked(connection)
-
     def apply_team_command(
         self,
         *,
@@ -281,10 +279,6 @@ class ServeTeamStore(
                 "stale team command: expected revision "
                 f"{expected_revision}, current revision {current_revision}"
             )
-
-    def prune_zero_activity_closed_teams(self) -> tuple[str, ...]:
-        with self.connect() as connection:
-            return self._prune_zero_activity_closed_teams_locked(connection)
 
     def _prune_zero_activity_closed_teams_locked(
         self, connection: sqlite3.Connection
@@ -468,10 +462,6 @@ class ServeTeamStore(
         )
         return self._team_state_locked(connection, shell_team_id)
 
-    def close_team(self, team_id: str) -> int:
-        with self.connect() as connection:
-            return self._close_team_locked(connection, team_id)
-
     def _close_team_locked(self, connection: sqlite3.Connection, team_id: str) -> int:
         self._require_team(connection, team_id)
         connection.execute(
@@ -597,14 +587,6 @@ class ServeTeamStore(
             )
             self._record_event(connection, "closeEmptyTeam", team_id, {})
 
-    def remove_agent(
-        self, team_id: str, agent_id: str, aliases: Iterable[str] = ()
-    ) -> int:
-        with self.connect() as connection:
-            return self._remove_agent_locked(
-                connection, team_id, agent_id, aliases=aliases
-            )
-
     def _remove_agent_locked(
         self,
         connection: sqlite3.Connection,
@@ -634,23 +616,6 @@ class ServeTeamStore(
         )
         replacement = self._ensure_open_team_locked(connection)
         return replacement.revision if replacement else revision
-
-    def split_team(
-        self,
-        source_team_id: str,
-        *,
-        agent_ids: Iterable[str],
-        new_team_id: str | None = None,
-        config: TeamConfig | None = None,
-    ) -> TeamState:
-        with self.connect() as connection:
-            return self._split_team_locked(
-                connection,
-                source_team_id,
-                agent_ids=agent_ids,
-                new_team_id=new_team_id,
-                config=config,
-            )
 
     def _split_team_locked(
         self,
@@ -687,10 +652,6 @@ class ServeTeamStore(
             {"newTeamId": created.team_id, "agents": agent_list},
         )
         return self._team_state_locked(connection, created.team_id)
-
-    def split_team_back(self, source_team_id: str) -> TeamState:
-        with self.connect() as connection:
-            return self._split_team_back_locked(connection, source_team_id)
 
     def _split_team_back_locked(
         self, connection: sqlite3.Connection, source_team_id: str
@@ -732,12 +693,6 @@ class ServeTeamStore(
             ),
         )
         return self._team_state_locked(connection, child_team_id)
-
-    def merge_teams(self, source_team_id: str, destination_team_id: str) -> int:
-        with self.connect() as connection:
-            return self._merge_teams_locked(
-                connection, source_team_id, destination_team_id
-            )
 
     def _merge_teams_locked(
         self,
@@ -786,10 +741,6 @@ class ServeTeamStore(
                 agent_ids=agent_ids,
             )
         return revision
-
-    def reorder_team_agents(self, team_id: str, agent_ids: Iterable[str]) -> int:
-        with self.connect() as connection:
-            return self._reorder_team_agents_locked(connection, team_id, agent_ids)
 
     def _reorder_team_agents_locked(
         self,

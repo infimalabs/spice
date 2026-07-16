@@ -323,20 +323,49 @@ def _configure_subsumption_parser(actions: Any) -> None:
     sub_parser = actions.add_parser(
         "subsumption",
         help=(
-            "Subsumed tests: tests covering no unique line vs. another test."
-            " Requires a .coverage file recorded with --cov-context=test."
+            "Coverage-containment candidates for bounded review; record "
+            "checkout-safe per-test branch coverage or scan an existing database."
         ),
     )
     sub_parser.add_argument(
         "coverage_file",
+        nargs="?",
         type=Path,
-        help=".coverage SQLite file; generate with: pytest --cov=<pkg> --cov-context=test",
+        help="Existing branch-aware per-test coverage SQLite file.",
+    )
+    sub_parser.add_argument(
+        "--record",
+        action="store_true",
+        help=(
+            "Run pytest with declared pytest-cov support and a disposable explicit "
+            "coverage path before scanning."
+        ),
+    )
+    sub_parser.add_argument(
+        "--retain-coverage",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Explicit output path to retain the recorded coverage database.",
+    )
+    sub_parser.add_argument(
+        "--pytest-arg",
+        action="append",
+        default=[],
+        metavar="ARG",
+        help="Additional pytest argument for --record; repeat as needed.",
     )
     sub_parser.add_argument(
         "--package",
         metavar="PREFIX",
-        default=None,
-        help="Only consider source files under this package prefix.",
+        default="spice",
+        help="Coverage source and source-file filter for --record; default: spice.",
+    )
+    sub_parser.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=25,
+        help="Maximum candidate rows rendered in text mode; default: 25.",
     )
     sub_parser.add_argument("--json", action="store_true", dest="emit_json")
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
@@ -966,14 +995,35 @@ def _create_private_internal_tasks(
 
 
 def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
-    report = subsumption.scan_subsumption(
-        args.coverage_file,
-        package_prefix=args.package,
-    )
+    if args.record:
+        if args.coverage_file is not None:
+            raise SpiceError(
+                "pass either an existing coverage_file or --record, not both"
+            )
+        report = subsumption.record_subsumption(
+            root,
+            package=args.package,
+            package_prefix=args.package,
+            coverage_output=args.retain_coverage,
+            pytest_args=tuple(args.pytest_arg),
+        )
+    else:
+        if args.coverage_file is None:
+            raise SpiceError(
+                "provide a coverage_file or use --record; reproducible setup: "
+                "uv sync --group dev && uv run spice study subsumption "
+                "--record --package spice"
+            )
+        if args.retain_coverage is not None or args.pytest_arg:
+            raise SpiceError("--retain-coverage and --pytest-arg require --record")
+        report = subsumption.scan_subsumption(
+            args.coverage_file,
+            package_prefix=args.package,
+        )
     if args.emit_json:
         _print_study_json(args.study_action, report=report)
         return 1 if report.findings else 0
-    print("\n".join(subsumption.render_subsumption_board(report)))
+    print("\n".join(subsumption.render_subsumption_board(report, limit=args.limit)))
     return 1 if report.findings else 0
 
 

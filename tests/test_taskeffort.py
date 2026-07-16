@@ -90,7 +90,7 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
             window.effort,
             window.started_at,
             window.ended_at,
-            window.wall_seconds,
+            effort.phase_effort_wall_seconds(window),
             window.partial_markers,
         )
         for window in windows
@@ -190,7 +190,7 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
             window.effort,
             window.started_at,
             window.ended_at,
-            window.wall_seconds,
+            effort.phase_effort_wall_seconds(window),
             window.partial_markers,
         )
         for window in windows

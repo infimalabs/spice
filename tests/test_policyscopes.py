@@ -77,16 +77,21 @@ def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
 
     resolved = resolve_policy(tmp_path)
     file_shape = resolved.file_shape_for_path(Path("wide/page.md"))
-    routine = resolved.complexity_for_path(Path("wide/app.py"))
+    routine_ccn = resolved.bound_for_path(
+        "routine_ccn", resolved.limits.routine_ccn, Path("wide/app.py")
+    )
+    routine_length = resolved.bound_for_path(
+        "routine_length", resolved.limits.routine_length, Path("wide/app.py")
+    )
 
     assert file_shape.line_limit == WIDE_FILE_LOC
     assert file_shape.line_flex_limit == WIDE_FILE_LOC_FLEX
     assert file_shape.byte_limit == WIDE_FILE_BYTES
     assert file_shape.byte_flex_limit == WIDE_FILE_BYTES_FLEX
-    assert routine.max_ccn == WIDE_ROUTINE_CCN
-    assert routine.ccn_flex_limit == WIDE_ROUTINE_CCN_FLEX
-    assert routine.max_length == WIDE_ROUTINE_LENGTH
-    assert routine.length_flex_limit == WIDE_ROUTINE_LENGTH_FLEX
+    assert routine_ccn.limit == WIDE_ROUTINE_CCN
+    assert routine_ccn.flex_limit == WIDE_ROUTINE_CCN_FLEX
+    assert routine_length.limit == WIDE_ROUTINE_LENGTH
+    assert routine_length.flex_limit == WIDE_ROUTINE_LENGTH_FLEX
     assert (
         resolved.bound_for_path(
             "repo_truth_doc_chars",
@@ -138,10 +143,16 @@ def test_policy_scopes_unlimited_marks_each_bound_exempt(tmp_path):
 
     resolved = resolve_policy(tmp_path)
     file_shape = resolved.file_shape_for_path(Path("generated/output.py"))
-    routine = resolved.complexity_for_path(Path("generated/output.py"))
+    routine_ccn = resolved.bound_for_path(
+        "routine_ccn", resolved.limits.routine_ccn, Path("generated/output.py")
+    )
+    routine_length = resolved.bound_for_path(
+        "routine_length", resolved.limits.routine_length, Path("generated/output.py")
+    )
 
     assert file_shape.unlimited
-    assert routine.unlimited
+    assert routine_ccn.unlimited
+    assert routine_length.unlimited
 
 
 def test_policy_scopes_most_specific_match_wins_per_bound(tmp_path):

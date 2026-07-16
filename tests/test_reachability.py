@@ -361,6 +361,75 @@ def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
     assert flagged == {"ServeTeamStore.test_only_method"}
 
 
+def test_symbol_reachability_uses_fixed_point_for_production_and_test_roots(
+    tmp_path,
+):
+    _write_fixed_point_reference_repo(tmp_path)
+
+    findings = scan_symbol_reachability(tmp_path)
+
+    assert [
+        (
+            finding.provider,
+            finding.module,
+            finding.symbol,
+            finding.kind,
+            finding.module_path,
+            finding.only_test_imports,
+        )
+        for finding in findings
+    ] == [
+        (
+            "python",
+            "spice.reference_matrix",
+            "Service.test_annotated_assignment",
+            "method",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+        (
+            "python",
+            "spice.reference_matrix",
+            "Service.test_call_result",
+            "method",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+        (
+            "python",
+            "spice.reference_matrix",
+            "Service.test_constructor_result",
+            "method",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+        (
+            "python",
+            "spice.reference_matrix",
+            "Service.test_direct_assignment",
+            "method",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+        (
+            "python",
+            "spice.reference_matrix",
+            "Service.test_parameter_annotation",
+            "method",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+        (
+            "python",
+            "spice.reference_matrix",
+            "test_import_reference",
+            "function",
+            "spice/reference_matrix.py",
+            ["test_reference_matrix.py"],
+        ),
+    ]
+
+
 def test_symbol_reachability_allowlist_exempts_qualified_symbol(tmp_path):
     _write_symbol_reachability_repo(tmp_path)
 
@@ -562,5 +631,78 @@ def _write_symbol_reachability_repo(root: Path) -> None:
         "    LiveHandler.handle_one_request\n"
         "    LiveThing().shared_method()\n"
         "    LiveThing().planted_dead_method_abc()\n",
+        encoding="utf-8",
+    )
+
+
+def _write_fixed_point_reference_repo(root: Path) -> None:
+    (root / "spice" / "cli").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "spice" / "reference_matrix.py").write_text(
+        "def prod_import_reference():\n"
+        "    return 'production import'\n\n"
+        "def test_import_reference():\n"
+        "    return 'test import'\n\n"
+        "class Service:\n"
+        "    def prod_direct_assignment(self):\n"
+        "        return 'production direct assignment'\n\n"
+        "    def test_direct_assignment(self):\n"
+        "        return 'test direct assignment'\n\n"
+        "    def prod_annotated_assignment(self):\n"
+        "        return 'production annotated assignment'\n\n"
+        "    def test_annotated_assignment(self):\n"
+        "        return 'test annotated assignment'\n\n"
+        "    def prod_constructor_result(self):\n"
+        "        return 'production constructor result'\n\n"
+        "    def test_constructor_result(self):\n"
+        "        return 'test constructor result'\n\n"
+        "    def prod_call_result(self):\n"
+        "        return 'production call result'\n\n"
+        "    def test_call_result(self):\n"
+        "        return 'test call result'\n\n"
+        "    def prod_parameter_annotation(self):\n"
+        "        return 'production parameter annotation'\n\n"
+        "    def test_parameter_annotation(self):\n"
+        "        return 'test parameter annotation'\n\n"
+        "def make_service() -> Service:\n"
+        "    return Service()\n",
+        encoding="utf-8",
+    )
+    (root / "spice" / "cli" / "entry.py").write_text(
+        "from spice.reference_matrix import (\n"
+        "    Service,\n"
+        "    make_service,\n"
+        "    prod_import_reference,\n"
+        ")\n\n"
+        "prod_import_reference()\n"
+        "prod_seed = Service()\n"
+        "prod_direct = prod_seed\n"
+        "prod_direct.prod_direct_assignment()\n"
+        "prod_annotated: Service = prod_seed\n"
+        "prod_annotated.prod_annotated_assignment()\n"
+        "Service().prod_constructor_result()\n"
+        "prod_from_call = make_service()\n"
+        "prod_from_call.prod_call_result()\n\n"
+        "def consume_prod(service: Service):\n"
+        "    return service.prod_parameter_annotation()\n",
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_reference_matrix.py").write_text(
+        "from spice.reference_matrix import (\n"
+        "    Service,\n"
+        "    make_service,\n"
+        "    test_import_reference,\n"
+        ")\n\n"
+        "test_import_reference()\n"
+        "test_seed = Service()\n"
+        "test_direct = test_seed\n"
+        "test_direct.test_direct_assignment()\n"
+        "test_annotated: Service = test_seed\n"
+        "test_annotated.test_annotated_assignment()\n"
+        "Service().test_constructor_result()\n"
+        "test_from_call = make_service()\n"
+        "test_from_call.test_call_result()\n\n"
+        "def consume_test(service: Service):\n"
+        "    return service.test_parameter_annotation()\n",
         encoding="utf-8",
     )

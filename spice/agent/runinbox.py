@@ -11,7 +11,7 @@ from typing import Any, TextIO
 
 from spice.agent.paths import agent_state_dir
 from spice.agent.sidechannelnotify import consume_side_channel_notices
-from spice.paths import STATE_DIRNAME
+from spice.paths import STATE_DIRNAME, atomic_write_json
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 InboxSignature = tuple[tuple[str, int, int], ...]
@@ -236,27 +236,19 @@ def write_inbox_display_state(
     displayed_signature_by_key: dict[str, tuple[int, int]],
     signature: InboxSignature,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps(
-            {
-                "displayedAtByKey": displayed_at_by_key,
-                "displayedSignatureByKey": {
-                    key: list(row_signature)
-                    for key, row_signature in displayed_signature_by_key.items()
-                },
-                "signature": [
-                    [name, mtime_ns, size] for name, mtime_ns, size in signature
-                ],
+    atomic_write_json(
+        path,
+        {
+            "displayedAtByKey": displayed_at_by_key,
+            "displayedSignatureByKey": {
+                key: list(row_signature)
+                for key, row_signature in displayed_signature_by_key.items()
             },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+            "signature": [[name, mtime_ns, size] for name, mtime_ns, size in signature],
+        },
+        compact=True,
+        sort_keys=True,
     )
-    tmp.replace(path)
 
 
 def inbox_signature_from_payload(value: Any) -> InboxSignature | None:

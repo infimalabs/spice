@@ -156,11 +156,6 @@ class SubmissionLifecycleTracker:
                 events.append(lifecycle.event_payload("completed"))
             return events
 
-    def tracked_keys(self) -> tuple[tuple[str, str], ...]:
-        """Return retained target/key pairs in oldest-to-newest acceptance order."""
-        with self._lock:
-            return tuple(self._items)
-
     def _active_for_target(self, target_id: str) -> list[SubmissionLifecycle]:
         return [
             item

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from spice.errors import SpiceError
-from spice.serve.team.metrics import (
+from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
 )

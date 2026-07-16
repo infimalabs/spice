@@ -70,11 +70,20 @@ def test_submission_tracker_caps_mixed_lifecycle_states(monkeypatch) -> None:
     tracker.accept(target_id="lane", key="accepted-new", evidence="new")
     tracker.accept(target_id="lane", key="newest", evidence="newest")
 
-    assert tracker.tracked_keys() == (
-        ("lane", "received-middle"),
-        ("lane", "accepted-new"),
-        ("lane", "newest"),
+    retained = [
+        tracker.accept(target_id="lane", key=key, evidence="replacement")
+        for key in ("received-middle", "accepted-new", "newest")
+    ]
+    reaccepted = tracker.accept(
+        target_id="lane", key="completed-old", evidence="reaccepted"
     )
+
+    assert [event["stages"]["accepted"]["evidence"] for event in retained] == [
+        "middle",
+        "new",
+        "newest",
+    ]
+    assert reaccepted["stages"]["accepted"]["evidence"] == "reaccepted"
 
 
 @pytest.mark.parametrize("lane_state", ["running", "idle"])

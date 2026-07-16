@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any
@@ -114,43 +116,91 @@ def find_tool(name: str) -> str | None:
     return shutil.which(name, path=own_bin) or shutil.which(name)
 
 
-def atomic_write_text(path: Path, text: str) -> Path:
-    """Durably write `text` through a same-directory fsync + rename."""
+def atomic_write_text(path: Path, text: str, *, write_if_changed: bool = False) -> Path:
+    """Durably replace ``path`` with UTF-8 ``text``.
+
+    Each invocation owns a unique same-directory temporary file. Concurrent
+    writers therefore produce one complete value; without caller-supplied
+    arbitration, the last successful replacement intentionally wins.
+
+    Existing target permissions are retained across replacement. New files use
+    ``mkstemp``'s private permissions. ``write_if_changed`` avoids replacement
+    entirely when the existing bytes already match, preserving its inode and
+    metadata.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    encoded = text.encode("utf-8")
+    if write_if_changed:
+        try:
+            if path.read_bytes() == encoded:
+                return path
+        except OSError:
+            pass
+
+    existing_mode: int | None
     try:
-        with tmp.open("w", encoding="utf-8") as handle:
+        existing_mode = path.stat().st_mode & 0o7777
+    except OSError:
+        existing_mode = None
+
+    descriptor, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    tmp = Path(tmp_name)
+    try:
+        if existing_mode is not None:
+            os.fchmod(descriptor, existing_mode)
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = -1
+        with handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        fsync_directory(path.parent)
     finally:
+        if descriptor >= 0:
+            os.close(descriptor)
         with contextlib.suppress(FileNotFoundError):
             tmp.unlink()
     return path
 
 
-def atomic_write_json(path: Path, payload: Any, *, compact: bool = False) -> Path:
+def atomic_write_json(
+    path: Path,
+    payload: Any,
+    *,
+    compact: bool = False,
+    sort_keys: bool | None = None,
+    write_if_changed: bool = False,
+) -> Path:
+    ordered = not compact if sort_keys is None else sort_keys
     if compact:
-        text = json.dumps(payload, separators=(",", ":")) + "\n"
+        text = json.dumps(payload, separators=(",", ":"), sort_keys=ordered) + "\n"
     else:
-        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    return atomic_write_text(path, text)
+        text = json.dumps(payload, indent=2, sort_keys=ordered) + "\n"
+    return atomic_write_text(path, text, write_if_changed=write_if_changed)
 
 
 def fsync_directory(directory: Path) -> None:
-    try:
-        descriptor = os.open(directory, os.O_RDONLY)
-    except OSError:
+    """Sync directory metadata, except for explicit unsupported-platform errors."""
+    if os.name == "nt":
+        # Windows does not expose a portable directory-fsync contract.
         return
     try:
-        with contextlib.suppress(OSError):
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError as exc:
+        if exc.errno in {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP}:
+            return
+        raise
+    try:
+        try:
             os.fsync(descriptor)
+        except OSError as exc:
+            if exc.errno not in {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP}:
+                raise
     finally:
         os.close(descriptor)
 

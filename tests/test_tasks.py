@@ -19,6 +19,7 @@ from spice.serve.team.store import (
 )
 from spice.serve.team.ids import thread_actor_id
 from spice.tasks import alloc, claimstate, config, create, identity, ops, render, tw
+from tests.test_teamstorehelpers import store_global_revision
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -465,12 +466,12 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     output = ops.wake([handle])
     team_config = store.team_config(team.team_id)
 
-    assert store.global_revision() > before
+    assert store_global_revision(store) > before
     assert f"woke {handle}: wait:" in output
     assert "route_filter=added:task.unit:auto:create" in output
     assert team_config.task_filters == ("task.unit",)
@@ -493,12 +494,12 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
         acceptance=["drain wake subscribes delayed work"],
     )
     assert store.team_config(team.team_id).task_filters == ()
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     output = ops.wake([handle])
     team_config = store.team_config(team.team_id)
 
-    assert store.global_revision() > before
+    assert store_global_revision(store) > before
     assert "route_filter=added:task.unit:auto:create" in output
     assert team_config.task_filters == ("task.unit",)
     assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
@@ -519,11 +520,11 @@ def test_steer_wake_keeps_preparation_only_boundary(task_repo):
         wait=config.OOPS_WAIT,
         acceptance=["steer wake remains preparation only"],
     )
-    before = store.global_revision()
+    before = store_global_revision(store)
 
     output = ops.wake([handle])
 
-    assert store.global_revision() == before
+    assert store_global_revision(store) == before
     assert "route_filter=skipped:task.unit:lifetime:Steer" in output
     assert store.team_config(team.team_id).task_filters == ()
 

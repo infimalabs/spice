@@ -1,8 +1,14 @@
-"""Agent-sourced lane metric storage and summaries."""
+"""Agent-sourced lane metric storage: the locked SQL ownership boundary.
+
+The mixin owns the database: every SQL statement for lane metrics lives here
+as a locked accessor. The semantics layered on top live with their seams --
+membership-interval reconstruction in spice.serve.team.membership, and bucket
+construction, lane summaries, and sparkline rendering in
+spice.serve.team.history.
+"""
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import sqlite3
@@ -16,29 +22,32 @@ from typing import Iterable, Mapping, Protocol
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.team.filters import shell_settings_from_json
+from spice.serve.team.history import (
+    METRIC_BUCKET_SECONDS,
+    LaneMetricSummary,
+    TeamHistoricalMetricSummary,
+    empty_lane_metric_summary,
+    historical_agent_ids,
+    historical_metric_buckets,
+    lane_metric_summary_from_buckets,
+    metric_bucket_start,
+    metric_sparkline,
+)
+from spice.serve.team.membership import (
+    event_agent_id,
+    event_payload,
+    membership_intervals_from_events,
+)
 from spice.serve.team.schema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
 )
 
-METRIC_BUCKET_SECONDS = 60
-# Cap high-growth historical metric payloads before callers allocate sparkline
-# or series buckets for accidental unbounded ranges.
-TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
 METRIC_HISTORY_RETENTION_DAYS_ENV = (
     "SPICE_METRIC_HISTORY_RETENTION_DAYS"  # env-policy: allow
 )
 TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
 _SECONDS_PER_DAY = 24 * 60 * 60
-
-
-@dataclass(frozen=True)
-class LaneMetricSummary:
-    agent_ids: tuple[str, ...]
-    acked: int
-    sends: int
-    tool_calls: int
-    sparkline: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -76,22 +85,6 @@ class TaskStallState:
     idle_seconds: int
     threshold_seconds: int
     stuck: bool
-
-
-@dataclass(frozen=True)
-class TeamHistoricalMetricSummary:
-    team_id: str
-    agent_ids: tuple[str, ...]
-    messages: int
-    sparkline: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class _MembershipInterval:
-    team_id: str
-    agent_id: str
-    start: float
-    end: float
 
 
 @dataclass(frozen=True)
@@ -160,16 +153,16 @@ class TeamMetricStoreMixin:
         tool_calls = _nonnegative_int(tool_calls)
         now = time.time()
         message_buckets = Counter(
-            _metric_bucket_start(timestamp) for timestamp in message_timestamps
+            metric_bucket_start(timestamp) for timestamp in message_timestamps
         )
         tool_call_buckets = Counter(
-            _metric_bucket_start(timestamp) for timestamp in tool_call_timestamps
+            metric_bucket_start(timestamp) for timestamp in tool_call_timestamps
         )
         recorded_tool_calls = sum(tool_call_buckets.values())
         if recorded_tool_calls > tool_calls:
             raise SpiceError("tool_call_timestamps cannot exceed tool_calls")
         if tool_calls > recorded_tool_calls:
-            tool_call_buckets[_metric_bucket_start(now)] += (
+            tool_call_buckets[metric_bucket_start(now)] += (
                 tool_calls - recorded_tool_calls
             )
         if tool_calls == 0 and not message_buckets:
@@ -335,13 +328,7 @@ class TeamMetricStoreMixin:
         since_latest_renewal: bool = False,
     ) -> LaneMetricSummary:
         if not str(agent_id or "").strip():
-            return LaneMetricSummary(
-                agent_ids=(),
-                acked=0,
-                sends=0,
-                tool_calls=0,
-                sparkline=tuple(0 for _ in range(max(0, bucket_count))),
-            )
+            return empty_lane_metric_summary(bucket_count)
         agent_id = _normalized_id(agent_id, "agent_id")
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
@@ -392,18 +379,20 @@ class TeamMetricStoreMixin:
         with self.connect() as connection:
             intervals = [
                 interval
-                for interval in _membership_intervals_from_events(
-                    connection, end_time=summary_time
+                for interval in membership_intervals_from_events(
+                    _team_event_rows_locked(connection), end_time=summary_time
                 )
                 if interval.team_id == team_id
             ]
-            agent_ids = _historical_agent_ids(intervals)
-            buckets = _historical_metric_buckets(connection, intervals, agent_ids)
+            agent_ids = historical_agent_ids(intervals)
+            buckets = historical_metric_buckets(
+                _agent_message_bucket_rows_locked(connection, agent_ids), intervals
+            )
         return TeamHistoricalMetricSummary(
             team_id=team_id,
             agent_ids=agent_ids,
             messages=sum(buckets.values()),
-            sparkline=_metric_sparkline(
+            sparkline=metric_sparkline(
                 buckets.items(),
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
@@ -428,8 +417,8 @@ class TeamMetricStoreMixin:
         if not ids:
             return ()
         bucket_seconds = max(1, int(bucket_seconds))
-        floor = _metric_bucket_start(start, bucket_seconds)
-        ceiling = _metric_bucket_start(end, bucket_seconds)
+        floor = metric_bucket_start(start, bucket_seconds)
+        ceiling = metric_bucket_start(end, bucket_seconds)
         placeholders = ",".join("?" for _ in ids)
         with self.connect() as connection:
             rows = connection.execute(
@@ -518,8 +507,8 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         start_time = max(0.0, float(start))
         end_time = max(start_time, float(end))
-        start_bucket = _metric_bucket_start(start_time, bucket_seconds)
-        end_bucket = _metric_bucket_start(end_time, bucket_seconds)
+        start_bucket = metric_bucket_start(start_time, bucket_seconds)
+        end_bucket = metric_bucket_start(end_time, bucket_seconds)
         filters = ["ts <= ?"]
         params: list[object] = [end_time]
         if agents:
@@ -539,7 +528,7 @@ class TeamMetricStoreMixin:
         task_states: dict[str, tuple[str, str]] = {}
         events_by_bucket: dict[int, list[sqlite3.Row]] = {}
         for row in rows:
-            event_bucket = _metric_bucket_start(float(row["ts"] or 0.0), bucket_seconds)
+            event_bucket = metric_bucket_start(float(row["ts"] or 0.0), bucket_seconds)
             if event_bucket < start_bucket:
                 _apply_task_distribution_event(task_states, row)
             else:
@@ -729,13 +718,7 @@ class TeamMetricStoreMixin:
         start_time_by_agent: Mapping[str, float] | None = None,
     ) -> LaneMetricSummary:
         if not agent_ids:
-            return LaneMetricSummary(
-                agent_ids=(),
-                acked=0,
-                sends=0,
-                tool_calls=0,
-                sparkline=tuple(0 for _ in range(max(0, bucket_count))),
-            )
+            return empty_lane_metric_summary(bucket_count)
         start_times = _metric_start_times(agent_ids, start_time_by_agent)
         # sends/acked are the membership-derived directive totals (acked <= sends
         # by construction); tool_calls is the per-agent activity counter.
@@ -745,8 +728,8 @@ class TeamMetricStoreMixin:
         lifetime_tool_calls = _lifetime_tool_calls_locked(connection, agent_ids)
         # Only buckets inside the sparkline window contribute, so bound the read
         # there instead of scanning the agent's whole (unbounded) bucket history
-        # on every render. Mirror _metric_sparkline's window start exactly.
-        window_floor = _metric_bucket_start(now, bucket_seconds) - (
+        # on every render. Mirror metric_sparkline's window start exactly.
+        window_floor = metric_bucket_start(now, bucket_seconds) - (
             (bucket_count - 1) * bucket_seconds
         )
         message_buckets, window_tool_calls = _lane_activity_buckets_locked(
@@ -755,7 +738,7 @@ class TeamMetricStoreMixin:
             window_floor=window_floor,
             start_time_by_agent=start_times,
         )
-        return _lane_metric_summary_from_buckets(
+        return lane_metric_summary_from_buckets(
             agent_ids,
             message_buckets.items(),
             acked=directives.acked,
@@ -925,7 +908,7 @@ def _activity_bucket_times_by_agent_locked(
     if not claims:
         return {}
     agent_ids = tuple(dict.fromkeys(claim.agent_id for claim in claims))
-    query_floor = min(_metric_bucket_start(claim.claimed_at) for claim in claims)
+    query_floor = min(metric_bucket_start(claim.claimed_at) for claim in claims)
     rows = connection.execute(
         "SELECT agent_id, bucket_start FROM agent_metric_buckets "
         f"WHERE agent_id IN ({_placeholders(agent_ids)}) "
@@ -949,7 +932,7 @@ def _task_stall_state(
     now: float,
     threshold_seconds: int,
 ) -> TaskStallState:
-    activity_floor = _metric_bucket_start(claim.claimed_at)
+    activity_floor = metric_bucket_start(claim.claimed_at)
     last_activity = max(
         (timestamp for timestamp in activity_times if timestamp >= activity_floor),
         default=0.0,
@@ -973,230 +956,22 @@ def _nonnegative_int(value: int) -> int:
     return max(0, int(value or 0))
 
 
-def _membership_intervals_from_events(
-    connection: sqlite3.Connection, *, end_time: float
-) -> list[_MembershipInterval]:
-    open_memberships: dict[str, tuple[str, float]] = {}
-    intervals: list[_MembershipInterval] = []
-    rows = connection.execute(
+def _team_event_rows_locked(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    return connection.execute(
         "SELECT ts, kind, team_id, payload FROM events ORDER BY revision"
     ).fetchall()
-    for row in rows:
-        timestamp = float(row["ts"] or 0.0)
-        if timestamp > end_time:
-            continue
-        team_id = str(row["team_id"] or "")
-        kind = str(row["kind"] or "")
-        payload = _event_payload(row)
-        if kind == "createTeam":
-            for agent_id in _event_agent_ids(payload, "members"):
-                _move_membership(
-                    open_memberships, intervals, agent_id, team_id, timestamp
-                )
-        elif kind == "assignAgent":
-            _move_membership(
-                open_memberships,
-                intervals,
-                _event_agent_id(payload, "agentId"),
-                team_id,
-                timestamp,
-            )
-        elif kind == "removeAgent":
-            _close_membership(
-                open_memberships,
-                intervals,
-                _event_agent_id(payload, "agentId"),
-                team_id,
-                timestamp,
-            )
-        elif kind == "closeTeam":
-            _close_team_memberships(open_memberships, intervals, team_id, timestamp)
-        elif kind == "mergeTeams":
-            source_team_id = _event_team_id(payload, "sourceTeamId")
-            for agent_id in _event_agent_ids(payload, "agents"):
-                _move_membership_from_team(
-                    open_memberships,
-                    intervals,
-                    agent_id,
-                    source_team_id,
-                    team_id,
-                    timestamp,
-                )
-        elif kind == "splitTeam":
-            new_team_id = _event_team_id(payload, "newTeamId")
-            for agent_id in _event_agent_ids(payload, "agents"):
-                _move_membership_from_team(
-                    open_memberships,
-                    intervals,
-                    agent_id,
-                    team_id,
-                    new_team_id,
-                    timestamp,
-                )
-        elif kind == "splitTeamBack":
-            restored_team_id = _event_team_id(payload, "restoredTeamId")
-            for agent_id in _event_agent_ids(payload, "agents"):
-                _move_membership_from_team(
-                    open_memberships,
-                    intervals,
-                    agent_id,
-                    team_id,
-                    restored_team_id,
-                    timestamp,
-                )
-    for agent_id, (team_id, start) in open_memberships.items():
-        intervals.append(
-            _MembershipInterval(
-                team_id=team_id,
-                agent_id=agent_id,
-                start=start,
-                end=end_time,
-            )
-        )
-    return intervals
 
 
-def _event_payload(row: sqlite3.Row) -> dict[str, object]:
-    payload = json.loads(str(row["payload"] or "{}"))
-    if not isinstance(payload, dict):
-        raise SpiceError("team event payload must be a JSON object")
-    return payload
-
-
-def _event_agent_id(payload: dict[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise SpiceError(f"team event payload {key} must be a non-empty string")
-    return value
-
-
-def _event_team_id(payload: dict[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise SpiceError(f"team event payload {key} must be a non-empty string")
-    return value
-
-
-def _event_agent_ids(payload: dict[str, object], key: str) -> list[str]:
-    value = payload.get(key)
-    if not isinstance(value, list) or not all(
-        isinstance(agent_id, str) and agent_id for agent_id in value
-    ):
-        raise SpiceError(f"team event payload {key} must be a list of agent ids")
-    return [str(agent_id) for agent_id in value]
-
-
-def _move_membership(
-    open_memberships: dict[str, tuple[str, float]],
-    intervals: list[_MembershipInterval],
-    agent_id: str,
-    team_id: str,
-    timestamp: float,
-) -> None:
-    current = open_memberships.pop(agent_id, None)
-    if current is not None:
-        current_team_id, started_at = current
-        intervals.append(
-            _MembershipInterval(
-                team_id=current_team_id,
-                agent_id=agent_id,
-                start=started_at,
-                end=timestamp,
-            )
-        )
-    open_memberships[agent_id] = (team_id, timestamp)
-
-
-def _move_membership_from_team(
-    open_memberships: dict[str, tuple[str, float]],
-    intervals: list[_MembershipInterval],
-    agent_id: str,
-    source_team_id: str,
-    destination_team_id: str,
-    timestamp: float,
-) -> None:
-    _close_membership(open_memberships, intervals, agent_id, source_team_id, timestamp)
-    open_memberships[agent_id] = (destination_team_id, timestamp)
-
-
-def _close_membership(
-    open_memberships: dict[str, tuple[str, float]],
-    intervals: list[_MembershipInterval],
-    agent_id: str,
-    team_id: str,
-    timestamp: float,
-) -> None:
-    current = open_memberships.pop(agent_id, None)
-    if current is None or current[0] != team_id:
-        raise SpiceError(
-            f"cannot reconstruct team metric interval for {agent_id} in {team_id}"
-        )
-    intervals.append(
-        _MembershipInterval(
-            team_id=team_id,
-            agent_id=agent_id,
-            start=current[1],
-            end=timestamp,
-        )
-    )
-
-
-def _close_team_memberships(
-    open_memberships: dict[str, tuple[str, float]],
-    intervals: list[_MembershipInterval],
-    team_id: str,
-    timestamp: float,
-) -> None:
-    for agent_id, (current_team_id, started_at) in tuple(open_memberships.items()):
-        if current_team_id != team_id:
-            continue
-        intervals.append(
-            _MembershipInterval(
-                team_id=team_id,
-                agent_id=agent_id,
-                start=started_at,
-                end=timestamp,
-            )
-        )
-        del open_memberships[agent_id]
-
-
-def _historical_agent_ids(
-    intervals: list[_MembershipInterval],
-) -> tuple[str, ...]:
-    ordered = sorted(
-        intervals, key=lambda interval: (interval.start, interval.agent_id)
-    )
-    return tuple(dict.fromkeys(interval.agent_id for interval in ordered))
-
-
-def _historical_metric_buckets(
-    connection: sqlite3.Connection,
-    intervals: list[_MembershipInterval],
-    agent_ids: tuple[str, ...],
-) -> Counter[int]:
+def _agent_message_bucket_rows_locked(
+    connection: sqlite3.Connection, agent_ids: tuple[str, ...]
+) -> list[sqlite3.Row]:
     if not agent_ids:
-        return Counter()
-    intervals_by_agent: dict[str, list[_MembershipInterval]] = {}
-    for interval in intervals:
-        intervals_by_agent.setdefault(interval.agent_id, []).append(interval)
-    placeholders = ",".join("?" for _agent_id in agent_ids)
-    rows = connection.execute(
+        return []
+    return connection.execute(
         "SELECT agent_id, bucket_start, messages FROM agent_metric_buckets "
-        f"WHERE agent_id IN ({placeholders}) ORDER BY bucket_start",
+        f"WHERE agent_id IN ({_placeholders(agent_ids)}) ORDER BY bucket_start",
         agent_ids,
     ).fetchall()
-    buckets: Counter[int] = Counter()
-    for row in rows:
-        agent_id = str(row["agent_id"])
-        bucket_start = int(row["bucket_start"])
-        messages = int(row["messages"] or 0)
-        if any(
-            interval.start <= bucket_start < interval.end
-            for interval in intervals_by_agent[agent_id]
-        ):
-            buckets[bucket_start] += messages
-    return buckets
 
 
 def _latest_renewal_start_times_locked(
@@ -1211,8 +986,8 @@ def _latest_renewal_start_times_locked(
     ).fetchall()
     start_times: dict[str, float] = {}
     for row in rows:
-        payload = _event_payload(row)
-        successor = _event_agent_id(payload, "successor")
+        payload = event_payload(row)
+        successor = event_agent_id(payload, "successor")
         if successor not in wanted:
             continue
         start_times[successor] = max(
@@ -1305,57 +1080,3 @@ def _lifetime_lane_activity_buckets_locked(
         message_buckets[int(row["bucket_start"])] += int(row["messages"] or 0)
         tool_calls += int(row["tool_calls"] or 0)
     return message_buckets, tool_calls
-
-
-def _metric_bucket_start(
-    timestamp: float, bucket_seconds: int = METRIC_BUCKET_SECONDS
-) -> int:
-    raw = max(0, int(float(timestamp)))
-    bucket_seconds = max(1, int(bucket_seconds))
-    return raw - (raw % bucket_seconds)
-
-
-def _metric_sparkline(
-    rows: Iterable[tuple[int, int]],
-    *,
-    bucket_count: int,
-    bucket_seconds: int,
-    now: float,
-) -> tuple[int, ...]:
-    values = [0] * bucket_count
-    bucket_rows = [(bucket, count) for bucket, count in rows if count > 0]
-    if not bucket_rows:
-        return tuple(values)
-    latest = _metric_bucket_start(now, bucket_seconds)
-    start = latest - ((bucket_count - 1) * bucket_seconds)
-    for bucket, count in bucket_rows:
-        index = (bucket - start) // bucket_seconds
-        if index < 0:
-            continue
-        values[min(index, bucket_count - 1)] += count
-    return tuple(values)
-
-
-def _lane_metric_summary_from_buckets(
-    agent_ids: tuple[str, ...],
-    bucket_rows: Iterable[tuple[int, int]],
-    *,
-    acked: int,
-    sends: int,
-    tool_calls: int,
-    bucket_count: int,
-    bucket_seconds: int,
-    now: float,
-) -> LaneMetricSummary:
-    return LaneMetricSummary(
-        agent_ids=agent_ids,
-        acked=acked,
-        sends=sends,
-        tool_calls=tool_calls,
-        sparkline=_metric_sparkline(
-            ((int(bucket), int(count)) for bucket, count in bucket_rows),
-            bucket_count=bucket_count,
-            bucket_seconds=bucket_seconds,
-            now=now,
-        ),
-    )

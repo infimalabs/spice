@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.paths import fsync_directory, shared_attachment_root
+from spice.paths import atomic_write_json, fsync_directory, shared_attachment_root
 
 INBOX_ATTACHMENT_DIR_SUFFIX = ".attachments"
 INBOX_ATTACHMENT_MANIFEST = "manifest.json"
@@ -128,6 +128,7 @@ def write_inbox_attachments(
     *,
     repo_root: Path,
 ) -> tuple[InboxAttachment, ...]:
+    """Publish a complete attachment directory as one specialized transaction."""
     if not attachments:
         return ()
     final_dir = inbox_attachment_dir(item_path)
@@ -206,18 +207,13 @@ def _store_shared_attachment_bytes(
         _write_bytes_atomic(attachment_path, data)
     metadata_path = attachment_dir / DURABLE_ATTACHMENT_METADATA
     if not metadata_path.exists():
-        _write_text_atomic(
+        atomic_write_json(
             metadata_path,
-            json.dumps(
-                {
-                    "sha256": digest,
-                    "filename": stored_name,
-                    "size": len(data),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+            {
+                "sha256": digest,
+                "filename": stored_name,
+                "size": len(data),
+            },
         )
     fsync_directory(attachment_dir)
     fsync_directory(attachment_dir.parent)
@@ -322,6 +318,7 @@ def _write_bytes_fsynced(path: Path, data: bytes) -> None:
 
 
 def _write_text_fsynced(path: Path, text: str) -> None:
+    """Stage a manifest inside a not-yet-published directory transaction."""
     with path.open("w", encoding="utf-8") as handle:
         handle.write(text)
         handle.flush()
@@ -329,21 +326,12 @@ def _write_text_fsynced(path: Path, text: str) -> None:
 
 
 def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Durably publish binary payloads that cannot use the UTF-8 text seam."""
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
         _write_bytes_fsynced(tmp, data)
         os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            tmp.unlink()
-        raise
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        _write_text_fsynced(tmp, text)
-        os.replace(tmp, path)
+        fsync_directory(path.parent)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             tmp.unlink()

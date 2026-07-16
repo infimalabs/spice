@@ -75,11 +75,6 @@ class Node:
     content_col: int = 0
     slug: str = ""
 
-    def store_description_line(self, line: str) -> None:
-        """Store one line relative to this node's content column."""
-        stored = dedent_content(line, self.content_col)
-        self.desc.append(unescape_prose(stored))
-
     def description(self) -> str:
         return "\n".join(collapse_blank_runs(self.desc))
 

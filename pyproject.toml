@@ -67,6 +67,7 @@ namespaces = true
 dev = [
     "pyright>=1.1",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "pytest-xdist>=3.6",
 ]
 
@@ -109,6 +110,7 @@ env_names = [
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
+    "COVERAGE_FILE",
     "CODEX_HOME",
     "CODEX_SESSION_TURN_ID",
     "CODEX_THREAD_ID",

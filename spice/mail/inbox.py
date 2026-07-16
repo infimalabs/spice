@@ -38,7 +38,7 @@ from spice.mail.attachments import (
     write_inbox_attachments,
 )
 from spice.locking import bounded_exclusive_lock
-from spice.paths import STATE_DIRNAME, fsync_directory
+from spice.paths import STATE_DIRNAME, atomic_write_text, fsync_directory
 
 INBOX_DIRNAME = "inbox"
 INBOX_ARCHIVE_DIRNAME = "archive"
@@ -848,23 +848,15 @@ def replace_inbox_item_text(repo_root: Path, name: str, text: str) -> Path:
     directory = inbox_dir(repo_root)
     directory.mkdir(parents=True, exist_ok=True)
     target_path = directory / name
-    tmp_path = directory / f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    try:
-        with bounded_exclusive_lock(
-            directory / INBOX_PUBLISH_LOCK_NAME,
-            timeout_seconds=INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS,
-            action="replace inbox item",
-        ):
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                handle.write(text)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp_path, target_path)
-            fsync_directory(directory)
-            notify_inbox_changed(repo_root)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            tmp_path.unlink()
+    # The lock orders resend updates; the canonical writer supplies whole-file
+    # replacement and durability inside that arbitration contract.
+    with bounded_exclusive_lock(
+        directory / INBOX_PUBLISH_LOCK_NAME,
+        timeout_seconds=INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS,
+        action="replace inbox item",
+    ):
+        atomic_write_text(target_path, text)
+        notify_inbox_changed(repo_root)
     return target_path
 
 
@@ -1014,6 +1006,7 @@ def _resend_attempt_timestamp() -> str:
 
 
 def _atomic_publish_inbox_item(tmp_path: Path, target_path: Path) -> Path:
+    """Publish without overwrite; generic last-writer-wins replacement cannot."""
     candidate = target_path
     for index in range(1, INBOX_COLLISION_MAX):
         try:
