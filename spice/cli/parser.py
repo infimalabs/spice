@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from spice.cli.recovery import RecoveringArgumentParser, set_recovery
+from spice.version import runtime_version
 
 # The reserved verb set: mounted repo commands may not shadow these, and the
 # mount dispatcher short-circuits on them without reading any configuration.
@@ -62,6 +63,13 @@ def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentPar
         help=(
             "Run from a registered git worktree selected by branch, basename, or path."
         ),
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {runtime_version()}",
+        help="Show the installed Spice runtime version and exit.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
