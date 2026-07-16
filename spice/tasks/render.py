@@ -89,6 +89,7 @@ def _base_show_lines(
         f"handle {rendered}",
         f"title {_f(row, 'description')}",
         f"description {_f(row, 'task_description')}",
+        f"origin {_f(row, 'origin') or '-'}",
         f"project {_f(row, 'project')}",
         f"phase {_f(row, 'phase')} (i={_f(row, 'phase_i')})",
         f"flow {flow}",
@@ -123,7 +124,7 @@ def _base_show_lines(
                 f"due={_f(row, 'due') or '-'} until={_f(row, 'until') or '-'}"
             ),
             (
-                f"origin {_f(row, 'origin_thread') or '-'} "
+                f"creator_context {_f(row, 'origin_thread') or '-'} "
                 f"{_f(row, 'origin_branch') or '-'} {_f(row, 'origin_worktree') or '-'}"
             ),
         ]
@@ -144,14 +145,8 @@ def _is_sentinel_thread(thread: str) -> bool:
     )
 
 
-def _rehydrate_label(label: str) -> str:
-    return "creator context" if label == "origin" else f"{label} context"
-
-
 def _sentinel_rehydrate_line(label: str) -> str:
-    return (
-        f"  {_rehydrate_label(label)}: unavailable (sentinel thread has no transcript)"
-    )
+    return f"  {label} context: unavailable (sentinel thread has no transcript)"
 
 
 def _incepted_context_window(row: dict[str, Any]) -> tuple[str, str] | None:
@@ -167,12 +162,12 @@ def _iso_for_render(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _origin_rehydrate_lines(row: dict[str, Any]) -> list[str]:
+def _creator_rehydrate_lines(row: dict[str, Any]) -> list[str]:
     thread = _f(row, "origin_thread")
     if not thread:
         return []
     if _is_sentinel_thread(thread):
-        return [_sentinel_rehydrate_line("origin")]
+        return [_sentinel_rehydrate_line("creator")]
     window = _incepted_context_window(row)
     if window is None:
         return [f"  creator context, run: {_briefing_command(thread)}"]
@@ -206,7 +201,7 @@ def _claim_rehydrate_lines(row: dict[str, Any]) -> list[str]:
 
 
 def _rehydrate_lines(row: dict[str, Any]) -> list[str]:
-    lines = [*_origin_rehydrate_lines(row), *_claim_rehydrate_lines(row)]
+    lines = [*_creator_rehydrate_lines(row), *_claim_rehydrate_lines(row)]
     if not lines:
         return []
     return ["rehydrate:", *lines]
