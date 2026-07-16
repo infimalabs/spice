@@ -1099,7 +1099,7 @@ def import_agent(
     The counterpart to :func:`bind_ambient_agent_activation` for an agent spice
     does not spawn: it writes the same worktree binding activation writes, but
     for a thread id the operator supplies (dashed or dashless) rather than the
-    ambient environment. `agent show`, serve lanes, and task attribution then
+    ambient environment. `spice agent show`, serve lanes, and task attribution then
     recognize the tree as driven by that agent. The binding owns no process, so
     it reads back idle -- spice tracks the agent without supervising it.
 
