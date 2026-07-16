@@ -1,11 +1,9 @@
-"""Completed-task sizing report signals."""
+"""Completed-task sizing report evidence."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from spice.cli.parser import build_parser
-from spice.tasks import config, sizing
+from spice.tasks import effort, sizing
 
 
 def test_task_sizing_cli_parser_accepts_limit_and_project():
@@ -18,130 +16,136 @@ def test_task_sizing_cli_parser_accepts_limit_and_project():
     assert args.limit == 5
 
 
-def test_task_sizing_scores_elapsed_events_and_metadata_shape():
+def test_task_sizing_scores_complete_phase_effort_review_and_metadata():
     row = _completed_row(
-        title="Event sized task",
+        title="Effort sized task",
         uuid="task-1",
         flow=("todo", "verify", "review"),
     )
-    events = (
-        sizing.TaskLifecycleEvent("claim", 0),
-        sizing.TaskLifecycleEvent("phaseAdvance", 1_200),
-        sizing.TaskLifecycleEvent("claim", 1_800),
-        sizing.TaskLifecycleEvent("review", 2_400),
+    windows = (
+        _window("task-1", phase="todo", phase_index=0, start=0, end=1_200),
+        _window("task-1", phase="verify", phase_index=1, start=1_800, end=2_400),
     )
 
-    report = sizing.size_completed_task(row, events=events)
+    report = sizing.size_completed_task(row, windows=windows)
     components = _components(report)
 
     assert report.label == "M"
     assert report.score == 2
     assert components["elapsed"] == sizing.SizingComponent(
-        "elapsed", 1, "task_events:1800s"
+        "elapsed", 1, "phase_effort_windows:1800s"
+    )
+    assert components["review"] == sizing.SizingComponent(
+        "review", 0, "review_finding:clean"
     )
     assert components["metadata"] == sizing.SizingComponent(
         "metadata", 1, "phase:verify"
     )
 
 
-def test_task_sizing_validation_uses_structured_signal_absence():
+def test_task_sizing_keeps_completion_validation_as_unscored_evidence():
     row = _completed_row(
         title="Former validation prose false positive",
         uuid="task-2",
         validation="Full browser suite deliberately not run; focused unit only.",
         acceptance="Do not require browser or full-suite validation here.",
     )
-    events = (
-        sizing.TaskLifecycleEvent("claim", 0),
-        sizing.TaskLifecycleEvent("complete", 60),
-    )
+    windows = (_window("task-2", start=0, end=60),)
 
-    report = sizing.size_completed_task(row, events=events)
-    components = _components(report)
+    report = sizing.size_completed_task(row, windows=windows)
 
     assert report.label == "S"
     assert report.score == 0
-    assert components["validation"] == sizing.SizingComponent(
-        "validation", 0, "no_structured_validation_signal"
+    assert tuple(component.name for component in report.components) == (
+        "elapsed",
+        "review",
+        "metadata",
+    )
+    assert report.evidence == (
+        sizing.SizingEvidence("validation", "recorded", "completion_validation"),
     )
 
 
-def test_task_sizing_command_signal_uses_done_upstream_range(monkeypatch):
-    calls: list[str] = []
-
-    def fake_run(args, **_kwargs):
-        calls.append(args[-1])
-        if args[-1] == "impl-base..impl-done":
-            return SimpleNamespace(returncode=0, stdout="3\n")
-        if args[-1] == "review-claim..impl-done":
-            return SimpleNamespace(returncode=0, stdout="0\n")
-        return SimpleNamespace(returncode=1, stdout="")
-
-    monkeypatch.setattr(sizing, "run_git_command", fake_run)
-    row = _completed_row(
-        title="Review claim overwrote implementation range",
-        uuid="task-commands",
-        claim_head="review-claim",
-        done_head="impl-done",
-        done_upstream_head="impl-base",
-        review_author="author-agent",
+def test_task_sizing_distinguishes_unavailable_evidence_from_measured_zero():
+    unavailable_row = _completed_row(
+        title="Missing evidence",
+        uuid="task-missing",
+        validation="",
+        review_finding="",
+    )
+    measured_row = _completed_row(
+        title="Measured zero",
+        uuid="task-zero",
+        validation="",
+        flow=("todo",),
+        review_finding="",
     )
 
-    report = sizing.size_completed_task(row)
-    components = _components(report)
+    unavailable = sizing.size_completed_task(unavailable_row)
+    measured = sizing.size_completed_task(
+        measured_row,
+        windows=(_window("task-zero", start=10, end=10),),
+    )
 
-    assert calls == ["impl-base..impl-done"]
-    assert components["commands"] == sizing.SizingComponent(
-        "commands", 1, "git_commits:3:done_upstream_head..done_head"
+    assert unavailable.label is None
+    assert unavailable.score is None
+    assert _components(unavailable)["elapsed"] == sizing.SizingComponent(
+        "elapsed", None, "no_phase_effort_windows"
+    )
+    assert _components(unavailable)["review"] == sizing.SizingComponent(
+        "review", None, "no_review_finding"
+    )
+    assert measured.label == "S"
+    assert measured.score == 0
+    assert _components(measured)["elapsed"] == sizing.SizingComponent(
+        "elapsed", 0, "phase_effort_windows:0s"
+    )
+    assert _components(measured)["review"] == sizing.SizingComponent(
+        "review", 0, "phase:not_required"
+    )
+    assert sizing.render_task_sizing(unavailable).startswith(
+        "UNIT-20260626T061545678415Z size=unavailable size_score=unavailable"
+    )
+    assert "elapsed=+0(phase_effort_windows:0s)" in sizing.render_task_sizing(measured)
+
+
+def test_task_sizing_marks_incomplete_phase_effort_unavailable():
+    row = _completed_row(title="Partial effort", uuid="task-partial")
+    windows = (
+        _window(
+            "task-partial",
+            start=20,
+            end=None,
+            markers=(effort.PARTIAL_MISSING_END,),
+        ),
+    )
+
+    report = sizing.size_completed_task(row, windows=windows)
+
+    assert report.score is None
+    assert _components(report)["elapsed"] == sizing.SizingComponent(
+        "elapsed", None, "incomplete_phase_effort_window"
     )
 
 
-def test_task_sizing_command_signal_suppresses_review_claim_zero(monkeypatch):
-    calls: list[str] = []
-
-    def fake_run(args, **_kwargs):
-        calls.append(args[-1])
-        return SimpleNamespace(returncode=0, stdout="0\n")
-
-    monkeypatch.setattr(sizing, "run_git_command", fake_run)
-    row = _completed_row(
-        title="Ambiguous reviewed task",
-        uuid="task-review-zero",
-        claim_head="review-claim",
-        done_head="review-done",
-        done_upstream_head="review-base",
-        review_by="reviewer-agent",
-        review_finding="clean",
-    )
-
-    report = sizing.size_completed_task(row)
-    components = _components(report)
-
-    assert calls == ["review-base..review-done"]
-    assert components["commands"] == sizing.SizingComponent(
-        "commands", 0, "no_structured_command_signal"
-    )
-
-
-def test_task_sizing_rows_filter_and_render_raw_components():
+def test_task_sizing_rows_filter_and_render_raw_evidence():
     row = _completed_row(
         title="Rendered sizing task",
         uuid="task-3",
         incepted="20260626T061545678415Z",
         project="task.metrics",
         flow=("todo", "verify", "review"),
+        validation="focused sizing tests passed",
     )
-    events = {
+    windows = {
         "task-3": (
-            sizing.TaskLifecycleEvent("claim", 0),
-            sizing.TaskLifecycleEvent("phaseAdvance", 1_200),
-            sizing.TaskLifecycleEvent("claim", 1_800),
-            sizing.TaskLifecycleEvent("review", 2_400),
+            _window("task-3", phase="todo", phase_index=0, start=0, end=1_200),
+            _window("task-3", phase="verify", phase_index=1, start=1_800, end=2_400),
         )
     }
 
     reports = sizing.completed_task_sizing_rows(
-        project="task", rows=[row], events_by_task=events
+        project="task", rows=[row], effort_windows_by_task=windows
     )
     output = sizing.render_task_sizing(reports[0])
 
@@ -149,42 +153,27 @@ def test_task_sizing_rows_filter_and_render_raw_components():
     assert output.startswith(
         "METRICS-20260626T061545678415Z size=M size_score=2 project=task.metrics "
     )
-    assert "elapsed=+1(task_events:1800s)" in output
-    assert "validation=+0(no_structured_validation_signal)" in output
+    assert "elapsed=+1(phase_effort_windows:1800s)" in output
+    assert "review=+0(review_finding:clean)" in output
     assert "metadata=+1(phase:verify)" in output
-
-
-def test_task_sizing_classifies_oops_and_maxim_by_project_stem_alone():
-    # Rows carry no identity tags and no UDA: the blocker signal rides the
-    # hidden project stem alone. A .oops.<kind> descendant and a .maxim_proposal
-    # row both fold to the shared project:.oops signal.
-    oops_row = _completed_row(
-        title="Completed triage",
-        uuid="task-oops-kind",
-        project=".oops.correctness",
-    )
-    maxim_row = _completed_row(
-        title="Completed proposal",
-        uuid="task-maxim",
-        project=config.MAXIM_PROPOSAL_PROJECT,
-    )
-
-    oops_blocked = _components(sizing.size_completed_task(oops_row))["blocked"]
-    maxim_blocked = _components(sizing.size_completed_task(maxim_row))["blocked"]
-
-    assert oops_blocked == sizing.SizingComponent("blocked", 2, "project:.oops")
-    assert maxim_blocked == sizing.SizingComponent("blocked", 2, "project:.oops")
+    assert "validation=recorded(completion_validation)" in output
 
 
 def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
     row = _completed_row(
         title="Newest task",
+        uuid="task-cli",
         project="task.metrics",
         incepted="20260626T060000000002Z",
         end="20260626T061000Z",
+        validation="focused sizing tests passed",
     )
     monkeypatch.setattr(sizing.tw, "export", lambda filters: [row])
-    monkeypatch.setattr(sizing, "_events_by_task_id", lambda _ids: {})
+    monkeypatch.setattr(
+        sizing,
+        "_effort_windows_by_task",
+        lambda _rows: {"task-cli": (_window("task-cli", start=0, end=60),)},
+    )
 
     args = build_parser().parse_args(
         ["task", "sizing", "--project", "task", "--limit", "1"]
@@ -193,12 +182,39 @@ def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
     assert args.func(args) == 0
     output = capsys.readouterr().out
     assert "METRICS-20260626T060000000002Z" in output
-    assert "size_score=" in output
-    assert "validation=+0(no_structured_validation_signal)" in output
+    assert "size_score=0" in output
+    assert "validation=recorded(completion_validation)" in output
 
 
 def _components(report: sizing.TaskSizing) -> dict[str, sizing.SizingComponent]:
     return {component.name: component for component in report.components}
+
+
+def _window(
+    task_id: str,
+    *,
+    phase: str = "todo",
+    phase_index: int = 0,
+    start: float | None,
+    end: float | None,
+    markers: tuple[str, ...] = (),
+) -> effort.PhaseEffortWindow:
+    return effort.PhaseEffortWindow(
+        task_id=task_id,
+        handle="UNIT-1kTest",
+        title="Sizing fixture",
+        phase=phase,
+        phase_index=phase_index,
+        actor_id="agent-a",
+        thread_id="thread-a",
+        team_id="team-a",
+        driver="codex",
+        model="gpt",
+        effort="high",
+        started_at=start,
+        ended_at=end,
+        partial_markers=markers,
+    )
 
 
 def _completed_row(
@@ -209,17 +225,11 @@ def _completed_row(
     incepted: str = "20260626T061545678415Z",
     entry: str = "20260626T060000Z",
     end: str = "20260626T060100Z",
-    validation: str = "",
+    validation: str = "focused tests passed",
     review_finding: str = "clean",
-    tags: list[str] | None = None,
     depends: list[str] | None = None,
     flow: tuple[str, ...] = ("todo", "review"),
     acceptance: str = "",
-    claim_head: str = "",
-    done_head: str = "",
-    done_upstream_head: str = "",
-    review_author: str = "",
-    review_by: str = "",
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "uuid": uuid or f"uuid-{incepted}",
@@ -231,14 +241,8 @@ def _completed_row(
         "end": end,
         "validation": validation,
         "review_finding": review_finding,
-        "tags": tags or [],
         "depends": depends or [],
         "acceptance": acceptance,
-        "claim_head": claim_head,
-        "done_head": done_head,
-        "done_upstream_head": done_upstream_head,
-        "review_author": review_author,
-        "review_by": review_by,
     }
     for index, phase in enumerate(flow):
         row[f"phase_{index}"] = phase

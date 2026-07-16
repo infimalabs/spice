@@ -54,7 +54,7 @@ def _configure_task_read_parsers(actions: Any) -> None:
 
     sizing = actions.add_parser(
         "sizing",
-        help="Report observational size labels for completed tasks.",
+        help="Report evidence-backed size labels for completed tasks.",
         recovery_examples=(
             "spice task sizing --limit 20",
             "spice task sizing --project serve.ui",
