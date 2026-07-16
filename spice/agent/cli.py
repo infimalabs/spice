@@ -183,10 +183,12 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
     retire its keys. One command handles ACK and NACK segments in a single pass;
     each key's reason is its segment body, not a separate flag.
     """
-    from spice.mail.acks import (
-        ack_content_by_key,
+    from spice.mail.ackarchive import (
         archive_ackd_inbox_items,
         archive_nackd_inbox_items,
+    )
+    from spice.mail.ackgrammar import (
+        ack_content_by_key,
         extract_ack_segments_from_text,
         extract_nack_segments_from_text,
     )

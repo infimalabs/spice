@@ -10,18 +10,19 @@ from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.feedback import supervisor_feedback_line
-from spice.mail.acks import (
+from spice.mail.ackarchive import (
     AckArchivalSummary,
     NackArchivalSummary,
-    ack_content_by_key,
     archive_ackd_inbox_items,
+    summarize_ack_archival,
+    summarize_nack_archival,
+)
+from spice.mail.ackgrammar import (
+    ack_content_by_key,
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
     extract_nack_segments_from_text,
     extract_task_batch_lines_from_text,
-    iter_ack_state_keys,
-    summarize_ack_archival,
-    summarize_nack_archival,
     split_ack_message,
     split_keyed_response,
 )
@@ -539,7 +540,9 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     assert summary.unmatched == []
     assert summary.reasonless == []
     assert collect_acked_inbox_items(tmp_path) == []
-    assert list(iter_ack_state_keys(tmp_path)) == []
+    assert [
+        record.key for record in records if record.disposition == ACK_DISPOSITION_ACKED
+    ] == []
     assert pending_inbox_count(tmp_path) == 0
     assert [(item.name, item.text, item.disposition) for item in refused] == [
         (name, text, ACK_DISPOSITION_REFUSED)
