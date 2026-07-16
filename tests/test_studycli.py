@@ -103,6 +103,54 @@ def test_task_generating_studies_share_deferred_origin_flags():
     ] * len(actions)
 
 
+def test_task_generator_registry_drives_parser_and_dispatch_controls(
+    tmp_path, monkeypatch
+):
+    seen = {}
+
+    def recording_handler(action):
+        def handler(args, root, controls):
+            seen[action] = (args.study_action, root, controls)
+            return 0
+
+        return handler
+
+    registry = {
+        action: studies_cli.TaskGeneratingStudyAction(
+            configure_parser=entry.configure_parser,
+            create_tasks_help=entry.create_tasks_help,
+            handler=recording_handler(action),
+        )
+        for action, entry in studies_cli.TASK_GENERATING_STUDY_ACTIONS.items()
+    }
+    monkeypatch.setattr(studies_cli, "TASK_GENERATING_STUDY_ACTIONS", registry)
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    parser = build_parser()
+
+    for action in registry:
+        args = parser.parse_args(
+            [
+                "study",
+                action,
+                "--create-tasks",
+                "--deferred",
+                "--origin",
+                "ack:20260101T000000000000Z",
+                "--json",
+            ]
+        )
+        assert args.func(args) == 0
+
+    expected_controls = studies_cli.StudyTaskCreationControls(
+        deferred=True,
+        origin="ack:20260101T000000000000Z",
+        print_created=False,
+    )
+    assert seen == {
+        action: (action, tmp_path, expected_controls) for action in registry
+    }
+
+
 def test_taste_cli_renders_exact_inclusive_inflection_suggestions(
     tmp_path, monkeypatch, capsys
 ):

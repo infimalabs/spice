@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -50,23 +50,6 @@ from spice.studies.taskgen import (
 )
 from spice.studies.walk import changed_paths, staged_paths, tracked_paths
 
-TASK_GENERATING_STUDY_ACTIONS: Mapping[str, str] = MappingProxyType(
-    {
-        "reachability": (
-            "Create tagged decision tasks for each test-only reachability finding."
-        ),
-        "symbol-reachability": (
-            "Create tagged decision tasks for each test-only symbol finding."
-        ),
-        "assertion-free-tests": (
-            "Create tagged decision tasks for each assertion-free test."
-        ),
-        "private-internals": (
-            "Create tagged decision tasks for unmanaged private/internal coupling."
-        ),
-    }
-)
-
 
 def configure_study_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
@@ -83,11 +66,8 @@ def configure_study_parser(subparsers: Any) -> None:
     _configure_env_parser(actions)
     _add_study_action(actions, "taste", "Configured prose wording suggestions.")
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
-    _configure_reachability_parser(actions)
-    _configure_symbol_reachability_parser(actions)
     _configure_subsumption_parser(actions)
-    _configure_assertion_free_parser(actions)
-    _configure_private_internals_parser(actions)
+    _configure_task_generating_study_parsers(actions)
     _configure_extension_study_parsers(actions)
 
 
@@ -339,10 +319,6 @@ def _add_task_creation_arguments(parser: Any, *, help_text: str) -> None:
 def _study_task_creation_controls(
     args: argparse.Namespace,
 ) -> StudyTaskCreationControls:
-    if args.study_action not in TASK_GENERATING_STUDY_ACTIONS:
-        raise SpiceError(
-            f"study action does not declare task-generation controls: {args.study_action}"
-        )
     return StudyTaskCreationControls(
         deferred=bool(args.deferred),
         origin=str(args.origin) if args.origin else None,
@@ -408,10 +384,15 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     sub.add_argument("--staged", action="store_true", help="Scan staged files only.")
     sub.add_argument("--json", action="store_true", dest="emit_json")
     sub.set_defaults(func=handle_study)
-    task_creation_help = TASK_GENERATING_STUDY_ACTIONS.get(name)
-    if task_creation_help is not None:
-        _add_task_creation_arguments(sub, help_text=task_creation_help)
+    task_generation = TASK_GENERATING_STUDY_ACTIONS.get(name)
+    if task_generation is not None:
+        _add_task_creation_arguments(sub, help_text=task_generation.create_tasks_help)
     return sub
+
+
+def _configure_task_generating_study_parsers(actions: Any) -> None:
+    for action in TASK_GENERATING_STUDY_ACTIONS.values():
+        action.configure_parser(actions)
 
 
 def _configure_extension_study_parsers(actions: Any) -> None:
@@ -488,6 +469,9 @@ def handle_study(args: argparse.Namespace) -> int:
         raise SpiceError(f"unknown study action {args.study_action!r}")
     if isinstance(handler, SpiceExtensionEntryPoint):
         return _study_extension(handler, args, root)
+    if isinstance(handler, TaskGeneratingStudyAction):
+        controls = _study_task_creation_controls(args)
+        return handler.handler(args, root, controls)
     return handler(args, root)
 
 
@@ -816,13 +800,17 @@ def _study_taste(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
-def _study_reachability(args: argparse.Namespace, root: Path) -> int:
+def _study_reachability(
+    args: argparse.Namespace,
+    root: Path,
+    controls: StudyTaskCreationControls,
+) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
     created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_exhaust_tasks(
             findings,
-            controls=_study_task_creation_controls(args),
+            controls=controls,
         )
     if args.emit_json:
         _print_study_json(
@@ -837,13 +825,17 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
-def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
+def _study_symbol_reachability(
+    args: argparse.Namespace,
+    root: Path,
+    controls: StudyTaskCreationControls,
+) -> int:
     findings = reachability.scan_symbol_reachability(root)
     created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_symbol_reachability_tasks(
             findings,
-            controls=_study_task_creation_controls(args),
+            controls=controls,
         )
     if args.emit_json:
         _print_study_json(
@@ -861,7 +853,11 @@ def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
-def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
+def _study_assertion_free_tests(
+    args: argparse.Namespace,
+    root: Path,
+    controls: StudyTaskCreationControls,
+) -> int:
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(root), root=root
     )
@@ -869,7 +865,7 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_assertion_free_tasks(
             findings,
-            controls=_study_task_creation_controls(args),
+            controls=controls,
         )
     if args.emit_json:
         _print_study_json(
@@ -883,7 +879,11 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
-def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
+def _study_private_internals(
+    args: argparse.Namespace,
+    root: Path,
+    controls: StudyTaskCreationControls,
+) -> int:
     from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 
     findings = testquality.scan_private_internal_coupling(
@@ -899,7 +899,7 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
         created_tasks = _create_private_internal_tasks(
             offenders,
             stale,
-            controls=_study_task_creation_controls(args),
+            controls=controls,
         )
     if args.emit_json:
         _print_study_json(
@@ -1116,24 +1116,16 @@ def _json_ready(value: object) -> object:
 
 
 StudyHandler = Callable[[argparse.Namespace, Path], int]
+TaskGeneratingStudyHandler = Callable[
+    [argparse.Namespace, Path, StudyTaskCreationControls], int
+]
 
 
-def _extension_study_entry_points() -> tuple[SpiceExtensionEntryPoint, ...]:
-    return extension_entry_points(
-        SPICE_STUDY_ENTRY_POINT_GROUP,
-        built_in_names=_STUDY_ACTIONS,
-    )
-
-
-def extension_study_actions() -> tuple[SpiceExtensionEntryPoint, ...]:
-    return _extension_study_entry_points()
-
-
-def _study_action_registry() -> dict[str, StudyHandler | SpiceExtensionEntryPoint]:
-    return merge_builtin_and_extension_entry_points(
-        SPICE_STUDY_ENTRY_POINT_GROUP,
-        _STUDY_ACTIONS,
-    )
+@dataclass(frozen=True)
+class TaskGeneratingStudyAction:
+    configure_parser: Callable[[Any], None]
+    create_tasks_help: str
+    handler: TaskGeneratingStudyHandler
 
 
 _STUDY_ACTIONS: dict[str, StudyHandler] = {
@@ -1150,9 +1142,68 @@ _STUDY_ACTIONS: dict[str, StudyHandler] = {
     "env-policy": _study_env_policy,
     "env-name-ledger": _study_env_name_ledger,
     "taste": _study_taste,
-    "reachability": _study_reachability,
-    "symbol-reachability": _study_symbol_reachability,
-    "assertion-free-tests": _study_assertion_free_tests,
-    "private-internals": _study_private_internals,
     "subsumption": _study_subsumption,
 }
+
+
+TASK_GENERATING_STUDY_ACTIONS: Mapping[str, TaskGeneratingStudyAction] = (
+    MappingProxyType(
+        {
+            "reachability": TaskGeneratingStudyAction(
+                configure_parser=_configure_reachability_parser,
+                create_tasks_help=(
+                    "Create tagged decision tasks for each test-only reachability "
+                    "finding."
+                ),
+                handler=_study_reachability,
+            ),
+            "symbol-reachability": TaskGeneratingStudyAction(
+                configure_parser=_configure_symbol_reachability_parser,
+                create_tasks_help=(
+                    "Create tagged decision tasks for each test-only symbol finding."
+                ),
+                handler=_study_symbol_reachability,
+            ),
+            "assertion-free-tests": TaskGeneratingStudyAction(
+                configure_parser=_configure_assertion_free_parser,
+                create_tasks_help=(
+                    "Create tagged decision tasks for each assertion-free test."
+                ),
+                handler=_study_assertion_free_tests,
+            ),
+            "private-internals": TaskGeneratingStudyAction(
+                configure_parser=_configure_private_internals_parser,
+                create_tasks_help=(
+                    "Create tagged decision tasks for unmanaged private/internal "
+                    "coupling."
+                ),
+                handler=_study_private_internals,
+            ),
+        }
+    )
+)
+
+
+StudyAction = StudyHandler | TaskGeneratingStudyAction
+
+
+def _built_in_study_actions() -> dict[str, StudyAction]:
+    return {**_STUDY_ACTIONS, **TASK_GENERATING_STUDY_ACTIONS}
+
+
+def _extension_study_entry_points() -> tuple[SpiceExtensionEntryPoint, ...]:
+    return extension_entry_points(
+        SPICE_STUDY_ENTRY_POINT_GROUP,
+        built_in_names=_built_in_study_actions(),
+    )
+
+
+def extension_study_actions() -> tuple[SpiceExtensionEntryPoint, ...]:
+    return _extension_study_entry_points()
+
+
+def _study_action_registry() -> dict[str, StudyAction | SpiceExtensionEntryPoint]:
+    return merge_builtin_and_extension_entry_points(
+        SPICE_STUDY_ENTRY_POINT_GROUP,
+        _built_in_study_actions(),
+    )
