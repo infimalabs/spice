@@ -112,6 +112,8 @@ def stale_rows() -> list[dict[str, Any]]:
     now = tw.now_iso()
     out: list[dict[str, Any]] = []
     for r in tw.export(["+ACTIVE"]):
+        if not _is_open_task(r):
+            continue
         until = str(r.get("claim_until") or "")
         if until and until < now:
             out.append(r)
@@ -121,6 +123,17 @@ def stale_rows() -> list[dict[str, Any]]:
 def _is_stale_claim(row: dict[str, Any], now: str) -> bool:
     until = str(row.get("claim_until") or "")
     return bool(until) and until < now
+
+
+def _is_open_task(row: dict[str, Any]) -> bool:
+    """Whether an exported row can still participate in allocation.
+
+    Bare ``+ACTIVE`` exports in this module are intentional because Taskwarrior's
+    ``status:pending`` filter hides future-wait claims. Deleted rows retain
+    their historical start/claim metadata, though, so every bare export needs
+    this explicit lifecycle guard.
+    """
+    return str(row.get("status") or "") in ("pending", "waiting")
 
 
 def _scope_filter(
@@ -174,7 +187,11 @@ def visible_active_rows(actor: str) -> list[dict[str, Any]]:
     # Bare +ACTIVE: claims preserve wait, and status:pending filters out
     # future-wait rows, which would hide claimed deferred tasks.
     rows = visible_rows(actor, ["+ACTIVE"])
-    return [r for r in rows if not is_hidden(r) and str(r.get("claim_by") or "")]
+    return [
+        r
+        for r in rows
+        if _is_open_task(r) and not is_hidden(r) and str(r.get("claim_by") or "")
+    ]
 
 
 def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
@@ -277,7 +294,7 @@ def _claim_first(
 
 def next_task() -> dict[str, Any] | None:
     actor = tw.current_actor()
-    active_rows = tw.export(["+ACTIVE"])
+    active_rows = [r for r in tw.export(["+ACTIVE"]) if _is_open_task(r)]
     own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     if own_active:
         return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
@@ -286,13 +303,17 @@ def next_task() -> dict[str, Any] | None:
     overrides = actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
     include_origin = _route_includes_origin(route)
-    scoped_active = tw.export(
-        [
-            "+ACTIVE",
-            *_scope_filter(actor, lane_filter, include_origin=include_origin),
-        ],
-        overrides=overrides,
-    )
+    scoped_active = [
+        r
+        for r in tw.export(
+            [
+                "+ACTIVE",
+                *_scope_filter(actor, lane_filter, include_origin=include_origin),
+            ],
+            overrides=overrides,
+        )
+        if _is_open_task(r)
+    ]
     repair_candidates = _unclaimed_actionable(scoped_active)
     if repair_candidates:
         repaired = _claim_first(
