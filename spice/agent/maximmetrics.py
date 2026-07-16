@@ -10,6 +10,7 @@ from typing import Iterable
 
 from spice.errors import SpiceError
 from spice.paths import shared_state_path
+from spice.sqliteconnection import sqlite_connection
 
 MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
@@ -132,9 +133,8 @@ def record_maxim_metric_events(
     if not rows:
         return []
     path = maxim_metrics_database_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
     ids: list[int] = []
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path, ensure_parent=True) as connection:
         _ensure_schema(connection)
         for row in rows:
             cursor = connection.execute(
@@ -157,7 +157,7 @@ def maxim_metric_records(repo_root: str | Path) -> list[MaximMetricRecord]:
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         _ensure_schema(connection)
         rows = connection.execute(
             """
@@ -174,7 +174,7 @@ def maxim_metric_counts(repo_root: str | Path) -> list[MaximMetricCounts]:
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         _ensure_schema(connection)
         rows = connection.execute(
             """
@@ -221,7 +221,7 @@ def maxim_recurrence_inputs(repo_root: str | Path) -> list[MaximRecurrenceInput]
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         _ensure_schema(connection)
         rows = connection.execute(
             """

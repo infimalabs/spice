@@ -22,12 +22,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import shlex
 import subprocess
 import sys
 import uuid
-from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, overload
@@ -41,6 +39,7 @@ from spice.extensions import (
     merge_builtin_and_extension_entry_points,
 )
 from spice.paths import atomic_write_json
+from spice.sqliteconnection import sqlite_connection
 
 CommandTextRewriter = Callable[[str], str | None]
 DRIVER_ENTRY_POINT_GROUP = SPICE_DRIVER_ENTRY_POINT_GROUP
@@ -367,7 +366,7 @@ class CodexDriver(AgentDriver):
         state_db_path = self.state_db_path()
         error = SystemExit(f"Missing {self.name} state database: {state_db_path}")
         if state_db_path.exists():
-            with closing(sqlite3.connect(state_db_path)) as conn:
+            with sqlite_connection(state_db_path) as conn:
                 row = conn.execute(
                     "SELECT rollout_path FROM threads "
                     "WHERE replace(lower(id), '-', '') = ?",
