@@ -11,13 +11,18 @@ import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import cast
 
 from spice import defaults, policy
-from spice.errors import SpiceError
 from spice.configlayer import contextualize_config_error, effective_table
+from spice.errors import SpiceError
+from spice.pathmatch import (
+    PathSpecificity,
+    matches_repo_scope,
+    normalize_repo_path,
+    path_specificity,
+)
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
@@ -106,7 +111,7 @@ class ScopeMagic:
 class PolicyScope:
     matcher: str
     settings_by_bound: Mapping[str, ScopeSettings]
-    specificity: tuple[int, int, int, int, int]
+    specificity: PathSpecificity
     magic: ScopeMagic | None = None
     extensions: tuple[str, ...] = ()
     stem_pattern: re.Pattern[str] | None = None
@@ -658,7 +663,7 @@ def _scopes(
     table = _subtable(raw_policy, "scopes")
     scopes: list[PolicyScope] = list(_markdown_depth_scopes(markdown_depth_budget))
     for raw_matcher, raw_scope in table.items():
-        matcher = str(raw_matcher).strip().replace("\\", "/").removeprefix("./")
+        matcher = normalize_repo_path(str(raw_matcher))
         if not matcher:
             raise SpiceError("[tool.spice.policy.scopes] scope keys must be non-empty")
         context = _scope_context(matcher)
@@ -670,7 +675,7 @@ def _scopes(
             PolicyScope(
                 matcher=matcher,
                 settings_by_bound=settings_by_bound,
-                specificity=_scope_specificity(matcher, priority=1),
+                specificity=path_specificity(matcher, priority=1),
                 magic=_scope_magic(scope_table, context),
             )
         )
@@ -724,7 +729,7 @@ def _markdown_depth_scope(
     return PolicyScope(
         matcher=matcher,
         settings_by_bound={"repo_truth_doc_chars": settings},
-        specificity=_scope_specificity(matcher, priority=0),
+        specificity=path_specificity(matcher, priority=0),
         extensions=selector.extensions,
         stem_pattern=selector.stem_pattern,
         skip_single_letter_stems=True,
@@ -885,19 +890,9 @@ def _global_flex_for_bound(flex: PolicyFlex, bound: str, base: int) -> int:
 
 
 def _scope_matches(scope: PolicyScope, path: Path) -> bool:
-    return _matcher_matches(scope.matcher, path) and _scope_selector_matches(
+    return matches_repo_scope(path, scope.matcher) and _scope_selector_matches(
         scope, path
     )
-
-
-def _matcher_matches(matcher: str, path: Path) -> bool:
-    normalized_path = path.as_posix().replace("\\", "/").removeprefix("./")
-    if _has_glob(matcher):
-        return any(
-            fnmatchcase(normalized_path, variant)
-            for variant in _glob_zero_directory_variants(matcher)
-        )
-    return normalized_path == matcher or normalized_path.startswith(matcher + "/")
 
 
 def _scope_selector_matches(scope: PolicyScope, path: Path) -> bool:
@@ -921,34 +916,6 @@ def _markdown_selector_matches(path: Path, selector: PolicyMarkdownDepthBudget) 
     if selector.stem_pattern is not None:
         return selector.stem_pattern.fullmatch(path.stem) is not None
     return True
-
-
-def _glob_zero_directory_variants(matcher: str) -> tuple[str, ...]:
-    variants = [matcher]
-    index = 0
-    while index < len(variants):
-        current = variants[index]
-        index += 1
-        marker = "/**/"
-        if marker not in current:
-            continue
-        shortened = current.replace(marker, "/", 1)
-        if shortened not in variants:
-            variants.append(shortened)
-    return tuple(variants)
-
-
-def _scope_specificity(
-    matcher: str, *, priority: int
-) -> tuple[int, int, int, int, int]:
-    exactish = 0 if _has_glob(matcher) else 1
-    literal_chars = sum(1 for char in matcher if char not in "*?[]!")
-    segments = len([segment for segment in matcher.split("/") if segment])
-    return (priority, exactish, literal_chars, segments, len(matcher))
-
-
-def _has_glob(value: str) -> bool:
-    return any(char in value for char in "*?[")
 
 
 def _scope_context(matcher: str) -> str:

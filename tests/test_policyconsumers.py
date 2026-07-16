@@ -106,6 +106,32 @@ def test_generated_paths_directory_exempts_file_shape_subtree(tmp_path):
     assert [finding.path for finding in findings] == [source_path.as_posix()]
 
 
+def test_generated_double_star_pattern_matches_shape_and_file_shape(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'package_roots = ["pkg"]\n'
+        'generated_paths = ["**/*_pb2.py"]\n',
+        encoding="utf-8",
+    )
+    generated_path = Path("pkg") / "proto" / "thing_pb2.py"
+    (tmp_path / generated_path).parent.mkdir(parents=True)
+    (tmp_path / generated_path).write_text("DESCRIPTOR = None\n" * 20, encoding="utf-8")
+    patterns = shape.generated_path_patterns(tmp_path)
+
+    findings = scan_loc_violations(
+        [generated_path],
+        root=tmp_path,
+        limit=10,
+        flex_limit_value=10,
+        byte_limit=100,
+        byte_flex_limit_value=100,
+        generated_patterns=patterns,
+    )
+
+    assert findings == []
+    assert shape.path_shape_errors(tmp_path) == []
+
+
 def test_configured_magic_c_grammar_suffix_is_scanned(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[tool.spice.policy.languages]\nmagic = [".wat"]\nc_grammar = [".wat"]\n',

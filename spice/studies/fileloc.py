@@ -13,7 +13,6 @@ file back at or under its base limit, so a latch first recorded in one
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 
@@ -35,6 +34,7 @@ from spice.policy import (
     FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     FILE_SHAPE_SOURCE_SUFFIXES,
 )
+from spice.pathmatch import matches_repo_path
 from spice.studies.walk import is_excluded_path, staged_renames
 
 FILE_LOC_VERSION = 1
@@ -157,28 +157,6 @@ def _repo_path(path: Path) -> Path:
     return normalized
 
 
-def _has_glob_magic(pattern: str) -> bool:
-    return any(char in pattern for char in "*?[")
-
-
-def _matches_generated_pattern(path: Path, generated_patterns: tuple[str, ...]) -> bool:
-    rel_posix = _repo_path(path).as_posix()
-    for raw_pattern in generated_patterns:
-        pattern = raw_pattern.strip().replace("\\", "/").removeprefix("./")
-        if not pattern:
-            continue
-        if not _has_glob_magic(pattern):
-            prefix = pattern.rstrip("/")
-            if rel_posix == prefix or rel_posix.startswith(prefix + "/"):
-                return True
-            continue
-        if fnmatchcase(rel_posix, pattern):
-            return True
-        if pattern.startswith("**/") and fnmatchcase(rel_posix, pattern[3:]):
-            return True
-    return False
-
-
 def _is_file_shape_candidate(
     path: Path,
     *,
@@ -198,7 +176,7 @@ def _is_file_shape_candidate(
             lockfile_suffixes=lockfile_suffixes,
             lockfile_names=lockfile_names,
         )
-        or _matches_generated_pattern(rel_path, generated_patterns)
+        or any(matches_repo_path(rel_path, pattern) for pattern in generated_patterns)
         or is_excluded_path(rel_path, repo_root=root)
     ):
         return False

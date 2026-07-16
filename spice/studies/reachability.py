@@ -38,13 +38,13 @@ import json
 import os
 import shlex
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from spice.errors import SpiceError
-from spice.toolprocess import run_tool_command
 from spice.configlayer import effective_table
+from spice.errors import SpiceError
+from spice.pathmatch import matches_repo_path
+from spice.toolprocess import run_tool_command
 from spice.studies.reachabilitypython import (
     _SymbolRef,
     _collect_symbol_definitions,
@@ -325,15 +325,9 @@ def _provider_staged_paths(
     matches = tuple(
         path
         for path in staged_paths
-        if any(_path_matches_when(path, pattern) for pattern in when)
+        if any(matches_repo_path(path, pattern) for pattern in when)
     )
     return matches or None
-
-
-def _path_matches_when(path: Path, pattern: str) -> bool:
-    normalized_path = path.as_posix().strip().removeprefix("./")
-    normalized_pattern = pattern.strip().replace("\\", "/").removeprefix("./")
-    return fnmatchcase(normalized_path, normalized_pattern)
 
 
 def _scan_command_reachability_provider(
