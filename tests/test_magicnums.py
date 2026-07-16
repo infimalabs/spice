@@ -102,7 +102,8 @@ def test_magic_numbers_guard_applies_scoped_threshold_and_global_fallback(tmp_pa
         "[tool.spice.policy.magic]\n"
         "examine_threshold = 10\n"
         "\n"
-        '[tool.spice.policy.scopes."src/high/**"]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["src/high/**"] }\n'
         "magic.examine_threshold = 100\n",
     )
     _write_repo_file(

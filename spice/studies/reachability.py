@@ -43,7 +43,7 @@ from typing import Any, Callable, Sequence
 
 from spice.configlayer import effective_table
 from spice.errors import SpiceError
-from spice.pathmatch import matches_repo_path
+from spice.scopes import SCOPES_KEY, STUDY_PROVIDER_SCOPES, ScopeContext, ScopeSelector
 from spice.toolprocess import run_tool_command
 from spice.studies.reachabilitypython import (
     _SymbolRef,
@@ -92,6 +92,7 @@ SYMBOL_REACHABILITY_ALLOWLIST: tuple[str, ...] = (
 
 PYTHON_PROVIDER = "python"
 REACHABILITY_PROVIDERS_KEY = "reachability_providers"
+REACHABILITY_PROVIDER_KEYS = frozenset({"name", "run", SCOPES_KEY})
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
 
 # Both reachability gates share one provider seam; a finding's ``kind`` routes it
@@ -238,6 +239,7 @@ def _configured_reachability_providers(
         context = f"{REACHABILITY_PROVIDERS_KEY}[{index}]"
         if not isinstance(raw, dict):
             raise SpiceError(f"[tool.spice.policy] {context} must be a provider table")
+        _validate_provider_keys(raw, context=context)
         command = _command_provider_from_table(raw, context=context)
         if command.name in seen_names:
             raise SpiceError(
@@ -245,8 +247,8 @@ def _configured_reachability_providers(
                 f"name {command.name!r}"
             )
         seen_names.add(command.name)
-        when = _when_patterns_from_table(raw, context=context)
-        provider_paths = _provider_staged_paths(normalized_staged, when)
+        selector = STUDY_PROVIDER_SCOPES.parse(raw.get(SCOPES_KEY))
+        provider_paths = _provider_staged_paths(normalized_staged, selector)
         if provider_paths is None:
             continue
         command_provider = _CommandReachabilityProvider(
@@ -293,18 +295,13 @@ def _provider_run_argv(raw: Any, *, context: str) -> tuple[str, ...]:
     return argv
 
 
-def _when_patterns_from_table(raw: dict[str, Any], *, context: str) -> tuple[str, ...]:
-    if "when" not in raw:
-        return ()
-    when = raw["when"]
-    if not isinstance(when, list):
-        raise SpiceError(f"{context}: when must be a non-empty glob list")
-    patterns = tuple(
-        item.strip() for item in when if isinstance(item, str) and item.strip()
-    )
-    if len(patterns) != len(when) or not patterns:
-        raise SpiceError(f"{context}: when must be a non-empty glob list")
-    return patterns
+def _validate_provider_keys(raw: dict[str, Any], *, context: str) -> None:
+    unknown = tuple(sorted(set(raw) - REACHABILITY_PROVIDER_KEYS))
+    if unknown:
+        expected = ", ".join(sorted(REACHABILITY_PROVIDER_KEYS))
+        raise SpiceError(
+            f"{context}: unknown key(s): {', '.join(unknown)}; expected {expected}"
+        )
 
 
 def _relative_staged_paths(
@@ -324,16 +321,14 @@ def _relative_staged_paths(
 
 
 def _provider_staged_paths(
-    staged_paths: tuple[Path, ...] | None, when: tuple[str, ...]
+    staged_paths: tuple[Path, ...] | None, selector: ScopeSelector
 ) -> tuple[Path, ...] | None:
     if staged_paths is None:
         return ()
-    if not when:
+    if not selector.constrained_axes:
         return staged_paths
     matches = tuple(
-        path
-        for path in staged_paths
-        if any(matches_repo_path(path, pattern) for pattern in when)
+        path for path in staged_paths if selector.matches(ScopeContext(path=path))
     )
     return matches or None
 

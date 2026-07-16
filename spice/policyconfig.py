@@ -17,12 +17,7 @@ from typing import cast
 from spice import defaults, policy
 from spice.configlayer import contextualize_config_error, effective_table
 from spice.errors import SpiceError
-from spice.pathmatch import (
-    PathSpecificity,
-    matches_repo_scope,
-    normalize_repo_path,
-    path_specificity,
-)
+from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
@@ -94,7 +89,7 @@ class PolicyEnvAccess:
 
 
 @dataclass(frozen=True)
-class ScopeSettings:
+class RuleSettings:
     multiplier: float = 1.0
     minimum: int | None = None
     maximum: int | None = None
@@ -103,19 +98,18 @@ class ScopeSettings:
 
 
 @dataclass(frozen=True)
-class ScopeMagic:
+class RuleMagic:
     examine_threshold: int
 
 
 @dataclass(frozen=True)
-class PolicyScope:
-    matcher: str
-    settings_by_bound: Mapping[str, ScopeSettings]
-    specificity: PathSpecificity
-    magic: ScopeMagic | None = None
-    extensions: tuple[str, ...] = ()
+class PolicyRule:
+    selector: ScopeSelector
+    settings_by_bound: Mapping[str, RuleSettings]
+    magic: RuleMagic | None = None
     stem_pattern: re.Pattern[str] | None = None
     skip_single_letter_stems: bool = False
+    priority: int = 1
 
 
 @dataclass(frozen=True)
@@ -180,7 +174,7 @@ class ResolvedPolicy:
     env_access: PolicyEnvAccess
     commit_message: PolicyCommitMessage
     taste: PolicyTaste
-    scopes: tuple[PolicyScope, ...] = ()
+    rules: tuple[PolicyRule, ...] = ()
     flex_actor_id: str = ""
 
     @property
@@ -203,13 +197,13 @@ class ResolvedPolicy:
         )
 
     def bound_for_path(self, bound: str, base: int, path: Path) -> ScopedBound:
-        scope = self._scope_for_bound(bound, path)
-        if scope is None:
+        rule = self._rule_for_bound(bound, path)
+        if rule is None:
             return ScopedBound(
                 limit=base,
                 flex_limit=_global_flex_for_bound(self.flex, bound, base),
             )
-        settings = scope.settings_by_bound[bound]
+        settings = rule.settings_by_bound[bound]
         if settings.unlimited or settings.multiplier == 0:
             return ScopedBound(limit=base, flex_limit=base, unlimited=True)
         limit = max(1, int(base * settings.multiplier))
@@ -284,36 +278,44 @@ class ResolvedPolicy:
         return _markdown_selector_matches(path, self.markdown_depth_budget)
 
     def magic_for_path(self, path: Path) -> PolicyMagic:
-        scope = self._scope_for_magic(path)
-        if scope is None or scope.magic is None:
+        rule = self._rule_for_magic(path)
+        if rule is None or rule.magic is None:
             return self.magic
         return PolicyMagic(
-            examine_threshold=scope.magic.examine_threshold,
+            examine_threshold=rule.magic.examine_threshold,
             baseline_ref=self.magic.baseline_ref,
         )
 
     def magic_examine_threshold_for_path(self, path: Path) -> int:
         return self.magic_for_path(path).examine_threshold
 
-    def _scope_for_bound(self, bound: str, path: Path) -> PolicyScope | None:
+    def _rule_for_bound(self, bound: str, path: Path) -> PolicyRule | None:
         matches = [
-            scope
-            for scope in self.scopes
-            if bound in scope.settings_by_bound and _scope_matches(scope, path)
+            rule
+            for rule in self.rules
+            if bound in rule.settings_by_bound and _rule_matches(rule, path)
         ]
         if not matches:
             return None
-        return max(matches, key=lambda scope: (scope.specificity, scope.matcher))
+        context = ScopeContext(path=path)
+        return max(
+            matches,
+            key=lambda rule: (rule.priority, rule.selector.specificity(context)),
+        )
 
-    def _scope_for_magic(self, path: Path) -> PolicyScope | None:
+    def _rule_for_magic(self, path: Path) -> PolicyRule | None:
         matches = [
-            scope
-            for scope in self.scopes
-            if scope.magic is not None and _scope_matches(scope, path)
+            rule
+            for rule in self.rules
+            if rule.magic is not None and _rule_matches(rule, path)
         ]
         if not matches:
             return None
-        return max(matches, key=lambda scope: (scope.specificity, scope.matcher))
+        context = ScopeContext(path=path)
+        return max(
+            matches,
+            key=lambda rule: (rule.priority, rule.selector.specificity(context)),
+        )
 
 
 def resolve_policy(repo_root: Path) -> ResolvedPolicy:
@@ -423,7 +425,7 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
         env_access=_env_access(raw_policy),
         commit_message=_commit_message(raw_policy, limits),
         taste=_taste(raw_policy),
-        scopes=_scopes(raw_policy, markdown_depth_budget),
+        rules=_rules(raw_policy, markdown_depth_budget),
         flex_actor_id=_worktree_flex_actor_id(repo_root),
     )
 
@@ -505,10 +507,11 @@ SCOPED_BOUND_KEYS = (
     "commit_message_wrap",
     "repo_truth_doc_chars",
 )
-SCOPE_SETTING_KEYS = ("multiplier", "min", "max", "unlimited", "flex")
+POLICY_RULES_KEY = "rules"
+RULE_SETTING_KEYS = ("multiplier", "min", "max", "unlimited", "flex")
 MARKDOWN_DEPTH_BUDGET_KEYS = ("extensions", "stem_pattern")
-SCOPE_NESTED_KEYS = ("magic",)
-SCOPE_MAGIC_KEYS = ("examine_threshold",)
+RULE_NESTED_KEYS = ("magic",)
+RULE_MAGIC_KEYS = ("examine_threshold",)
 
 
 def _languages(raw_policy: Mapping[str, object]) -> PolicyLanguages:
@@ -643,119 +646,127 @@ def _markdown_depth_budget(
     )
 
 
-def _scopes(
+def _rules(
     raw_policy: Mapping[str, object],
     markdown_depth_budget: PolicyMarkdownDepthBudget,
-) -> tuple[PolicyScope, ...]:
-    table = _subtable(raw_policy, "scopes")
-    scopes: list[PolicyScope] = list(_markdown_depth_scopes(markdown_depth_budget))
-    for raw_matcher, raw_scope in table.items():
-        matcher = normalize_repo_path(str(raw_matcher))
-        if not matcher:
-            raise SpiceError("[tool.spice.policy.scopes] scope keys must be non-empty")
-        context = _scope_context(matcher)
-        if not isinstance(raw_scope, dict):
-            raise SpiceError(f"{context} must be a table")
-        scope_table = cast(Mapping[str, object], raw_scope)
-        settings_by_bound = _scope_settings_by_bound(scope_table, context)
-        scopes.append(
-            PolicyScope(
-                matcher=matcher,
-                settings_by_bound=settings_by_bound,
-                specificity=path_specificity(matcher, priority=1),
-                magic=_scope_magic(scope_table, context),
+) -> tuple[PolicyRule, ...]:
+    raw_rules = raw_policy.get(POLICY_RULES_KEY, [])
+    if not isinstance(raw_rules, list):
+        raise SpiceError("[tool.spice.policy] rules must be a list")
+
+    rules: list[PolicyRule] = list(_markdown_depth_rules(markdown_depth_budget))
+    seen_selectors: set[ScopeSelector] = set()
+    for index, raw_rule in enumerate(raw_rules, start=1):
+        context = f"[tool.spice.policy.rules][{index}]"
+        if not isinstance(raw_rule, dict):
+            raise SpiceError(f"{context} must be a rule table")
+        rule_table = cast(Mapping[str, object], raw_rule)
+        selector = POLICY_RULE_SCOPES.parse(rule_table.get(SCOPES_KEY))
+        if selector in seen_selectors:
+            raise SpiceError(f"{context} duplicates an earlier scopes selector")
+        seen_selectors.add(selector)
+        payload = {key: value for key, value in rule_table.items() if key != SCOPES_KEY}
+        rules.append(
+            PolicyRule(
+                selector=selector,
+                settings_by_bound=_rule_settings_by_bound(payload, context),
+                magic=_rule_magic(payload, context),
             )
         )
-    return tuple(scopes)
+    return tuple(rules)
 
 
-def _markdown_depth_scopes(
-    selector: PolicyMarkdownDepthBudget,
-) -> tuple[PolicyScope, ...]:
-    scopes: list[PolicyScope] = []
-    if not selector.extensions:
+def _markdown_depth_rules(
+    dataset: PolicyMarkdownDepthBudget,
+) -> tuple[PolicyRule, ...]:
+    rules: list[PolicyRule] = []
+    if not dataset.extensions:
         return ()
     bounded_depth_count = (
         policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET
         // policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET
     )
-    for extension in selector.extensions:
+    for extension in dataset.extensions:
         for depth in range(bounded_depth_count):
             budget = policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET * (depth + 1)
-            matcher = _markdown_depth_matcher(depth, extension)
-            scopes.append(
-                _markdown_depth_scope(
+            matcher = _markdown_depth_matcher(depth)
+            rules.append(
+                _markdown_depth_rule(
                     matcher,
-                    selector,
-                    _fixed_scope_settings(budget),
+                    extension,
+                    dataset,
+                    _fixed_rule_settings(budget),
                 )
             )
-        scopes.append(
-            _markdown_depth_scope(
-                _markdown_unbounded_depth_matcher(bounded_depth_count, extension),
-                selector,
-                ScopeSettings(unlimited=True),
+        rules.append(
+            _markdown_depth_rule(
+                _markdown_unbounded_depth_matcher(bounded_depth_count),
+                extension,
+                dataset,
+                RuleSettings(unlimited=True),
             )
         )
-    return tuple(scopes)
+    return tuple(rules)
 
 
-def _fixed_scope_settings(limit: int) -> ScopeSettings:
-    return ScopeSettings(
+def _fixed_rule_settings(limit: int) -> RuleSettings:
+    return RuleSettings(
         multiplier=1.0,
         minimum=limit,
         maximum=limit,
     )
 
 
-def _markdown_depth_scope(
+def _markdown_depth_rule(
     matcher: str,
-    selector: PolicyMarkdownDepthBudget,
-    settings: ScopeSettings,
-) -> PolicyScope:
-    return PolicyScope(
-        matcher=matcher,
+    extension: str,
+    dataset: PolicyMarkdownDepthBudget,
+    settings: RuleSettings,
+) -> PolicyRule:
+    selector = POLICY_RULE_SCOPES.normalize(
+        ScopeSelector(paths=(matcher,), extensions=(extension,))
+    )
+    return PolicyRule(
+        selector=selector,
         settings_by_bound={"repo_truth_doc_chars": settings},
-        specificity=path_specificity(matcher, priority=0),
-        extensions=selector.extensions,
-        stem_pattern=selector.stem_pattern,
+        stem_pattern=dataset.stem_pattern,
         skip_single_letter_stems=True,
+        priority=0,
     )
 
 
-def _markdown_depth_matcher(depth: int, extension: str) -> str:
-    name = f"*{extension}"
+def _markdown_depth_matcher(depth: int) -> str:
     if depth == 0:
-        return name
-    return f"{'/'.join('*' for _ in range(depth))}/{name}"
+        return "*"
+    return "/".join("*" for _ in range(depth + 1))
 
 
-def _markdown_unbounded_depth_matcher(depth: int, extension: str) -> str:
-    return f"{'/'.join('*' for _ in range(depth))}/**/*{extension}"
+def _markdown_unbounded_depth_matcher(depth: int) -> str:
+    return "/".join("*" for _ in range(depth + 1))
 
 
-def _scope_settings_by_bound(
+def _rule_settings_by_bound(
     table: Mapping[str, object], context: str
-) -> Mapping[str, ScopeSettings]:
+) -> Mapping[str, RuleSettings]:
     unknown = sorted(
         key
         for key in table
-        if key not in SCOPE_SETTING_KEYS
+        if key not in RULE_SETTING_KEYS
         and key not in SCOPED_BOUND_KEYS
-        and key not in SCOPE_NESTED_KEYS
+        and key not in RULE_NESTED_KEYS
     )
     if unknown:
         expected = ", ".join(
-            (*SCOPE_SETTING_KEYS, *SCOPED_BOUND_KEYS, *SCOPE_NESTED_KEYS)
+            (*RULE_SETTING_KEYS, *SCOPED_BOUND_KEYS, *RULE_NESTED_KEYS)
         )
         listed = ", ".join(unknown)
         raise SpiceError(f"{context} unknown key(s): {listed}; expected {expected}")
 
-    settings_by_bound: dict[str, ScopeSettings] = {}
-    flat_keys_present = any(key in table for key in SCOPE_SETTING_KEYS)
+    settings_by_bound: dict[str, RuleSettings] = {}
+    flat_keys_present = any(key in table for key in RULE_SETTING_KEYS)
     if flat_keys_present:
-        flat_settings = _scope_settings(
-            {key: table[key] for key in SCOPE_SETTING_KEYS if key in table},
+        flat_settings = _rule_settings(
+            {key: table[key] for key in RULE_SETTING_KEYS if key in table},
             context,
         )
         settings_by_bound.update({bound: flat_settings for bound in SCOPED_BOUND_KEYS})
@@ -767,13 +778,13 @@ def _scope_settings_by_bound(
         bound_context = f"{context} {bound}"
         if not isinstance(raw, dict):
             raise SpiceError(f"{bound_context} must be a table")
-        settings_by_bound[bound] = _scope_settings(
+        settings_by_bound[bound] = _rule_settings(
             cast(Mapping[str, object], raw), bound_context
         )
     return settings_by_bound
 
 
-def _scope_magic(table: Mapping[str, object], context: str) -> ScopeMagic | None:
+def _rule_magic(table: Mapping[str, object], context: str) -> RuleMagic | None:
     raw = table.get("magic")
     if raw is None:
         return None
@@ -781,37 +792,54 @@ def _scope_magic(table: Mapping[str, object], context: str) -> ScopeMagic | None
     if not isinstance(raw, dict):
         raise SpiceError(f"{magic_context} must be a table")
     magic_table = cast(Mapping[str, object], raw)
-    unknown = sorted(key for key in magic_table if key not in SCOPE_MAGIC_KEYS)
+    unknown = sorted(key for key in magic_table if key not in RULE_MAGIC_KEYS)
     if unknown:
         listed = ", ".join(unknown)
-        expected = ", ".join(SCOPE_MAGIC_KEYS)
+        expected = ", ".join(RULE_MAGIC_KEYS)
         raise SpiceError(
             f"{magic_context} unknown key(s): {listed}; expected {expected}"
         )
-    return ScopeMagic(
+    return RuleMagic(
         examine_threshold=_required_positive_int(
             magic_table, "examine_threshold", magic_context
         )
     )
 
 
-def _scope_settings(table: Mapping[str, object], context: str) -> ScopeSettings:
-    unknown = sorted(key for key in table if key not in SCOPE_SETTING_KEYS)
+def _rule_settings(table: Mapping[str, object], context: str) -> RuleSettings:
+    unknown = sorted(key for key in table if key not in RULE_SETTING_KEYS)
     if unknown:
         listed = ", ".join(unknown)
-        expected = ", ".join(SCOPE_SETTING_KEYS)
+        expected = ", ".join(RULE_SETTING_KEYS)
         raise SpiceError(f"{context} unknown key(s): {listed}; expected {expected}")
     minimum = _optional_positive_int(table, "min", context)
     maximum = _optional_positive_int(table, "max", context)
     if minimum is not None and maximum is not None and minimum > maximum:
         raise SpiceError(f"{context} min must be <= max")
-    return ScopeSettings(
-        multiplier=_scope_multiplier(table, context),
+    return RuleSettings(
+        multiplier=_rule_multiplier(table, context),
         minimum=minimum,
         maximum=maximum,
-        unlimited=_scope_unlimited(table, context),
+        unlimited=_rule_unlimited(table, context),
         flex_ratio=_optional_ratio(table, "flex", context),
     )
+
+
+def _rule_multiplier(table: Mapping[str, object], context: str) -> float:
+    raw = table.get("multiplier", 1.0)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
+    value = float(raw)
+    if value < 0.0:
+        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
+    return value
+
+
+def _rule_unlimited(table: Mapping[str, object], context: str) -> bool:
+    raw = table.get("unlimited", False)
+    if not isinstance(raw, bool):
+        raise SpiceError(f"{context} unlimited must be true or false")
+    return raw
 
 
 def _optional_positive_int(
@@ -829,23 +857,6 @@ def _optional_positive_int(
 
 def _required_positive_int(table: Mapping[str, object], key: str, context: str) -> int:
     return _positive_int(table, key, 0, context)
-
-
-def _scope_multiplier(table: Mapping[str, object], context: str) -> float:
-    raw = table.get("multiplier", 1.0)
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
-    value = float(raw)
-    if value < 0.0:
-        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
-    return value
-
-
-def _scope_unlimited(table: Mapping[str, object], context: str) -> bool:
-    raw = table.get("unlimited", False)
-    if not isinstance(raw, bool):
-        raise SpiceError(f"{context} unlimited must be true or false")
-    return raw
 
 
 def _optional_ratio(
@@ -876,21 +887,16 @@ def _global_flex_for_bound(flex: PolicyFlex, bound: str, base: int) -> int:
             return int(base * flex.ratio)
 
 
-def _scope_matches(scope: PolicyScope, path: Path) -> bool:
-    return matches_repo_scope(path, scope.matcher) and _scope_selector_matches(
-        scope, path
+def _rule_matches(rule: PolicyRule, path: Path) -> bool:
+    return rule.selector.matches(ScopeContext(path=path)) and _rule_payload_matches(
+        rule, path
     )
 
 
-def _scope_selector_matches(scope: PolicyScope, path: Path) -> bool:
-    if scope.extensions and path.suffix not in scope.extensions:
+def _rule_payload_matches(rule: PolicyRule, path: Path) -> bool:
+    if rule.skip_single_letter_stems and len(path.stem) <= 1:
         return False
-    if scope.skip_single_letter_stems and len(path.stem) <= 1:
-        return False
-    if (
-        scope.stem_pattern is not None
-        and scope.stem_pattern.fullmatch(path.stem) is None
-    ):
+    if rule.stem_pattern is not None and rule.stem_pattern.fullmatch(path.stem) is None:
         return False
     return True
 
@@ -903,10 +909,6 @@ def _markdown_selector_matches(path: Path, selector: PolicyMarkdownDepthBudget) 
     if selector.stem_pattern is not None:
         return selector.stem_pattern.fullmatch(path.stem) is not None
     return True
-
-
-def _scope_context(matcher: str) -> str:
-    return f'[tool.spice.policy.scopes."{matcher}"]'
 
 
 def _subtable(raw_policy: Mapping[str, object], key: str) -> Mapping[str, object]:

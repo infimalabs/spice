@@ -170,6 +170,7 @@ def test_reachability_uses_all_configured_test_roots_for_modules_and_symbols(
 
 def test_reachability_config_provider_reports_module_finding(tmp_path):
     provider = tmp_path / "lua_provider.py"
+    staged_record = tmp_path / "provider-staged-paths.txt"
     payload = json.dumps(
         [
             {
@@ -180,18 +181,31 @@ def test_reachability_config_provider_reports_module_finding(tmp_path):
             }
         ]
     )
-    provider.write_text(f"print({payload!r})\n", encoding="utf-8")
+    provider.write_text(
+        "import os\n"
+        f"open({str(staged_record)!r}, 'w', encoding='utf-8').write("
+        "os.environ['SPICE_STAGED_PATHS'])\n"  # env-policy: allow
+        f"print({payload!r})\n",
+        encoding="utf-8",
+    )
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy]\n"
         "reachability_providers = [\n"
         '  { name = "lua", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
-        'when = ["src/*.lua"] },\n'
+        'scopes = { paths = ["src/*.lua", "lib"] } },\n'
         "]\n",
         encoding="utf-8",
     )
 
-    findings = scan_reachability(tmp_path, staged_paths=[Path("src/dead_scene.lua")])
+    findings = scan_reachability(
+        tmp_path,
+        staged_paths=[
+            Path("src/dead_scene.lua"),
+            Path("docs/readme.md"),
+            Path("lib/runtime.lua"),
+        ],
+    )
 
     assert [
         (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
@@ -204,6 +218,9 @@ def test_reachability_config_provider_reports_module_finding(tmp_path):
             ["tests/dead_scene_spec.lua"],
         )
     ]
+    assert staged_record.read_text(encoding="utf-8") == (
+        "src/dead_scene.lua\nlib/runtime.lua"
+    )
 
 
 def test_symbol_reachability_config_provider_reports_symbol_finding(tmp_path):
@@ -224,7 +241,7 @@ def test_symbol_reachability_config_provider_reports_symbol_finding(tmp_path):
         "reachability_providers = [\n"
         '  { name = "lua", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
-        'when = ["src/*.lua"] },\n'
+        'scopes = { paths = ["src/*.lua"] } },\n'
         "]\n",
         encoding="utf-8",
     )

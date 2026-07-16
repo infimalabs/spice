@@ -443,13 +443,18 @@ def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
         "[tool.spice.policy.limits]\n"
         "repo_truth_doc_chars = 20\n"
         "\n"
-        '[tool.spice.policy.scopes."docs/**".repo_truth_doc_chars]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["docs/**"] }\n'
+        "[tool.spice.policy.rules.repo_truth_doc_chars]\n"
         "max = 5\n"
         "\n"
-        '[tool.spice.policy.scopes."wide/**".repo_truth_doc_chars]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["wide/**"] }\n'
+        "[tool.spice.policy.rules.repo_truth_doc_chars]\n"
         "multiplier = 2.0\n"
         "\n"
-        '[tool.spice.policy.scopes."skip/**"]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["skip/**"] }\n'
         "unlimited = true\n",
         encoding="utf-8",
     )
@@ -670,7 +675,7 @@ def test_reachability_guard_fails_on_configured_module_provider_finding(tmp_path
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
-        'when = ["web/**/*.js"] },\n'
+        'scopes = { paths = ["web/**/*.js"] } },\n'
         "]\n",
         encoding="utf-8",
     )
@@ -710,7 +715,7 @@ def test_reachability_guard_reports_configured_debt_when_exceeded(tmp_path):
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
-        'when = ["web/**/*.js"] },\n'
+        'scopes = { paths = ["web/**/*.js"] } },\n'
         "]\n"
         "\n"
         "[tool.spice.policy.debt]\n"
@@ -747,7 +752,7 @@ def test_symbol_reachability_guard_fails_on_configured_symbol_provider_finding(
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
-        'when = ["web/**/*.js"] },\n'
+        'scopes = { paths = ["web/**/*.js"] } },\n'
         "]\n",
         encoding="utf-8",
     )

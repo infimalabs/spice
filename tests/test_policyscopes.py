@@ -1,4 +1,4 @@
-"""Tracked policy scopes for per-path breathing bounds."""
+"""Tracked policy rules with universal applicability selectors."""
 
 from pathlib import Path
 import subprocess
@@ -55,7 +55,7 @@ def repo_truth_doc_violations(repo: Path) -> list[str]:
     return render_repo_truth_doc_lines(repo_truth_doc_findings(repo))
 
 
-def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
+def test_policy_rules_apply_flat_settings_to_all_numeric_bounds(tmp_path):
     _write_pyproject(
         tmp_path,
         f"""
@@ -69,7 +69,8 @@ def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
         [tool.spice.policy.flex]
         ratio = 1.5
 
-        [tool.spice.policy.scopes."wide/**"]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["wide/**"] }}
         multiplier = 2.0
         flex = 2.0
         """,
@@ -102,7 +103,7 @@ def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
     )
 
 
-def test_policy_scopes_named_bound_overrides_flat_settings_and_clamps(tmp_path):
+def test_policy_rules_named_bound_overrides_flat_settings_and_clamps(tmp_path):
     _write_pyproject(
         tmp_path,
         f"""
@@ -113,10 +114,11 @@ def test_policy_scopes_named_bound_overrides_flat_settings_and_clamps(tmp_path):
         [tool.spice.policy.flex]
         ratio = 2.0
 
-        [tool.spice.policy.scopes."docs/**"]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["docs/**"] }}
         multiplier = 2.0
 
-        [tool.spice.policy.scopes."docs/**".file_loc]
+        [tool.spice.policy.rules.file_loc]
         multiplier = 3.0
         max = {CLAMPED_FILE_LOC}
         flex = 1.5
@@ -132,11 +134,12 @@ def test_policy_scopes_named_bound_overrides_flat_settings_and_clamps(tmp_path):
     assert file_shape.byte_flex_limit == WIDE_FILE_BYTES_FLEX
 
 
-def test_policy_scopes_unlimited_marks_each_bound_exempt(tmp_path):
+def test_policy_rules_unlimited_marks_each_bound_exempt(tmp_path):
     _write_pyproject(
         tmp_path,
         """
-        [tool.spice.policy.scopes."generated/**"]
+        [[tool.spice.policy.rules]]
+        scopes = { paths = ["generated/**"] }
         unlimited = true
         """,
     )
@@ -155,7 +158,7 @@ def test_policy_scopes_unlimited_marks_each_bound_exempt(tmp_path):
     assert routine_length.unlimited
 
 
-def test_policy_scopes_most_specific_match_wins_per_bound(tmp_path):
+def test_policy_rules_most_specific_selector_wins_per_bound(tmp_path):
     _write_pyproject(
         tmp_path,
         f"""
@@ -166,10 +169,14 @@ def test_policy_scopes_most_specific_match_wins_per_bound(tmp_path):
         [tool.spice.policy.flex]
         ratio = 1.0
 
-        [tool.spice.policy.scopes."src/**"]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["src/**"] }}
         multiplier = 2.0
 
-        [tool.spice.policy.scopes."src/legacy/**".file_loc]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["src/legacy/**"] }}
+
+        [tool.spice.policy.rules.file_loc]
         multiplier = 3.0
         """,
     )
@@ -184,14 +191,17 @@ def test_policy_scopes_most_specific_match_wins_per_bound(tmp_path):
     assert specific.byte_limit == WIDE_FILE_BYTES
 
 
-def test_policy_scopes_double_star_matches_immediate_and_nested_children(tmp_path):
+def test_policy_rule_combines_canonical_subtree_and_extension_axes(tmp_path):
     _write_pyproject(
         tmp_path,
         f"""
         [tool.spice.policy.limits]
         file_loc = {BASE_FILE_LOC}
 
-        [tool.spice.policy.scopes."Docs/**/*.md".file_loc]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["Docs"], extensions = [".md"] }}
+
+        [tool.spice.policy.rules.file_loc]
         multiplier = 2.0
         """,
     )
@@ -206,16 +216,20 @@ def test_policy_scopes_double_star_matches_immediate_and_nested_children(tmp_pat
         resolved.file_shape_for_path(Path("Docs/guides/page.md")).line_limit
         == DOUBLE_STAR_FILE_LOC
     )
+    assert (
+        resolved.file_shape_for_path(Path("Docs/page.txt")).line_limit == BASE_FILE_LOC
+    )
 
 
-def test_policy_scopes_apply_magic_threshold_by_path(tmp_path):
+def test_policy_rules_apply_magic_threshold_by_path(tmp_path):
     _write_pyproject(
         tmp_path,
         f"""
         [tool.spice.policy.magic]
         examine_threshold = {BASE_MAGIC_THRESHOLD}
 
-        [tool.spice.policy.scopes."**/*.cs"]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["**/*.cs"] }}
         magic.examine_threshold = {SCOPED_MAGIC_THRESHOLD}
         """,
     )
@@ -233,33 +247,37 @@ def test_policy_scopes_apply_magic_threshold_by_path(tmp_path):
     assert resolved.magic.examine_threshold == BASE_MAGIC_THRESHOLD
 
 
-def test_policy_scopes_invalid_magic_threshold_names_the_scope(tmp_path):
+def test_policy_rule_invalid_magic_threshold_names_the_rule(tmp_path):
     _write_pyproject(
         tmp_path,
         """
-        [tool.spice.policy.scopes."**/*.cs".magic]
+        [[tool.spice.policy.rules]]
+        scopes = { paths = ["**/*.cs"] }
+
+        [tool.spice.policy.rules.magic]
         examine_threshold = 0
         """,
     )
 
     with pytest.raises(
         SpiceError,
-        match=r'policy\.scopes\."\*\*/\*\.cs": magic examine_threshold',
+        match=r"policy\.rules.*\[1\] magic examine_threshold",
     ):
         resolve_policy(tmp_path)
 
 
-def test_policy_scopes_invalid_config_names_the_scope(tmp_path):
+def test_policy_rule_invalid_payload_names_the_rule(tmp_path):
     _write_pyproject(
         tmp_path,
         """
-        [tool.spice.policy.scopes."src/**"]
+        [[tool.spice.policy.rules]]
+        scopes = { paths = ["src/**"] }
         flex = 0.5
         """,
     )
 
     with pytest.raises(
-        SpiceError, match=r'policy\.scopes\."src/\*\*": flex must be a number >= 1\.0'
+        SpiceError, match=r"policy\.rules.*\[1\] flex must be a number >= 1\.0"
     ):
         resolve_policy(tmp_path)
 
@@ -338,7 +356,7 @@ def test_markdown_depth_budget_selector_gates_extension_regex_and_short_stems(
     assert single_letter.limit == BASE_REPO_DOC_CHARS
 
 
-def test_markdown_depth_budget_explicit_scope_replaces_default_for_subtree(
+def test_markdown_depth_budget_explicit_rule_replaces_default_for_subtree(
     tmp_path,
 ):
     _write_pyproject(
@@ -347,7 +365,10 @@ def test_markdown_depth_budget_explicit_scope_replaces_default_for_subtree(
         [tool.spice.policy.limits]
         repo_truth_doc_chars = {BASE_REPO_DOC_CHARS}
 
-        [tool.spice.policy.scopes."docs/**".repo_truth_doc_chars]
+        [[tool.spice.policy.rules]]
+        scopes = {{ paths = ["docs/**"] }}
+
+        [tool.spice.policy.rules.repo_truth_doc_chars]
         min = {CUSTOM_SCOPE_DOC_BUDGET}
         max = {CUSTOM_SCOPE_DOC_BUDGET}
         flex = 1.0
@@ -376,7 +397,9 @@ def test_file_shape_guard_applies_scoped_bounds_and_sticky(tmp_path):
         "[tool.spice.policy.flex]\n"
         "ratio = 1.0\n"
         "\n"
-        '[tool.spice.policy.scopes."src/**".file_loc]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["src/**"] }\n'
+        "[tool.spice.policy.rules.file_loc]\n"
         "multiplier = 2.0\n"
         "flex = 1.25\n",
     )
@@ -402,7 +425,8 @@ def test_file_shape_scope_unlimited_exempts_generated_tree(tmp_path):
         "[tool.spice.policy.flex]\n"
         "ratio = 1.0\n"
         "\n"
-        '[tool.spice.policy.scopes."generated/**"]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["generated/**"] }\n'
         "unlimited = true\n",
     )
     output_path = Path("generated/output.py")
@@ -427,7 +451,9 @@ def test_complexity_guard_applies_scoped_bounds_and_sticky(tmp_path, monkeypatch
         "[tool.spice.policy.flex]\n"
         "ratio = 1.0\n"
         "\n"
-        '[tool.spice.policy.scopes."src/legacy/**".routine_ccn]\n'
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["src/legacy/**"] }\n'
+        "[tool.spice.policy.rules.routine_ccn]\n"
         "multiplier = 2.0\n"
         "flex = 1.25\n",
     )
