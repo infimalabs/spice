@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.errors import SpiceError
 from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim
 from spice.hooks import precommit
@@ -836,6 +837,55 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
     assert rows == [
         "cs:src/main.cs",
         "always:docs/readme.md|pyproject.toml|src/main.cs",
+    ]
+
+
+def test_policy_pre_commit_combined_scopes_select_layered_agent_context(
+    tmp_path, monkeypatch
+):
+    repo = _git_init(tmp_path / "repo")
+    recorder = _write_staged_paths_recorder(tmp_path)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.agent]\n"
+        'model = "GPT-COMBINED"\n'
+        "\n"
+        "[tool.spice.policy]\n"
+        "pre_commit = [\n"
+        '  { label = "combined", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'combined')}, "
+        'scopes = { paths = ["docs/**", "src/**"], '
+        'drivers = ["claude", "CODEX"], '
+        'models = ["other", "gpt-combined"] } },\n'
+        '  { label = "all-paths", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'all-paths')}, "
+        'scopes = { drivers = ["codex"], models = ["gpt-combined"] } },\n'
+        '  { label = "all-drivers", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'all-drivers')}, "
+        'scopes = { paths = ["src/**"], models = ["gpt-combined"] } },\n'
+        '  { label = "all-models", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'all-models')}, "
+        'scopes = { paths = ["src/**"], drivers = ["codex"] } },\n'
+        '  { label = "all-contexts", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'all-contexts')} }},\n"
+        "]\n",
+    )
+    _write_repo_file(repo, "spice.toml", '[agent]\ndriver = "codex"\n')
+    _write_repo_file(repo, "src/main.py", "answer = 42\n")
+    _git(repo, "add", ".")
+    _patch_pre_commit_builtin_noops(monkeypatch)
+
+    assert precommit.handle_pre_commit(repo) == 0
+
+    rows = (tmp_path / "staged-paths.txt").read_text(encoding="utf-8").splitlines()
+    assert rows == [
+        "combined:src/main.py",
+        "all-paths:pyproject.toml|spice.toml|src/main.py",
+        "all-drivers:src/main.py",
+        "all-models:src/main.py",
+        "all-contexts:pyproject.toml|spice.toml|src/main.py",
     ]
 
 

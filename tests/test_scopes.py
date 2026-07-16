@@ -41,6 +41,12 @@ from spice.scopes import (
             ScopeSelector(phases=("pre-commit-success",)),
         ),
         (
+            PRE_COMMIT_STEP_SCOPES,
+            {"models": [" GPT-5.5 ", "gpt-5.5"]},
+            ScopeContext(model="GPT-5.5"),
+            ScopeSelector(models=("gpt-5.5",)),
+        ),
+        (
             POLICY_RULE_SCOPES,
             {"extensions": [".PY", ".py"]},
             ScopeContext(path="spice/scopes.py"),
@@ -81,15 +87,20 @@ def test_path_axis_has_identical_semantics_across_all_path_consumers():
 
 
 def test_driver_axis_has_identical_semantics_across_all_driver_consumers():
-    consumers = (WRAPPER_SCOPES, WRAPPER_ROUTE_SCOPES, MAXIM_SCOPES)
+    consumers = (
+        PRE_COMMIT_STEP_SCOPES,
+        WRAPPER_SCOPES,
+        WRAPPER_ROUTE_SCOPES,
+        MAXIM_SCOPES,
+    )
     context = ScopeContext(driver="codex")
     selectors = tuple(
         consumer.parse({"drivers": ["codex", "claude"]}) for consumer in consumers
     )
     evaluations = tuple(selector.evaluate(context) for selector in selectors)
 
-    assert selectors == (ScopeSelector(drivers=("claude", "codex")),) * 3
-    assert evaluations == (evaluations[0],) * 3
+    assert selectors == (ScopeSelector(drivers=("claude", "codex")),) * 4
+    assert evaluations == (evaluations[0],) * 4
 
 
 def test_scope_axes_compose_or_within_and_and_across_with_one_explanation():
@@ -117,22 +128,31 @@ def test_scope_axes_compose_or_within_and_and_across_with_one_explanation():
     )
 
 
-def test_pre_commit_paths_and_phases_compose_through_the_same_and_rule():
+def test_pre_commit_paths_drivers_models_and_phases_compose_deterministically():
     selector = PRE_COMMIT_STEP_SCOPES.parse(
         {
             "paths": ["docs/**", "spice/**"],
+            "drivers": ["codex", "claude"],
+            "models": ["GPT-5.5", "gpt-5.4"],
             "phases": ["pre_commit", "pre_commit_success"],
         }
     )
 
     evaluation = selector.evaluate(
-        ScopeContext(path="spice/scopes.py", phase="pre-commit-success")
+        ScopeContext(
+            path="spice/scopes.py",
+            driver="CODEX",
+            model="gpt-5.5",
+            phase="pre-commit-success",
+        )
     )
 
     assert evaluation.matched is True
     assert evaluation.explanation == (
         "scopes match=true: paths any-of [docs/**, spice/**] "
-        "actual=spice/scopes.py match=true; phases any-of "
+        "actual=spice/scopes.py match=true; drivers any-of [claude, codex] "
+        "actual=codex match=true; models any-of [gpt-5.4, gpt-5.5] "
+        "actual=gpt-5.5 match=true; phases any-of "
         "[pre-commit, pre-commit-success] actual=pre-commit-success match=true"
     )
 
@@ -142,6 +162,7 @@ def test_absent_axes_are_unconstrained():
     context = ScopeContext(
         path="any/file.txt",
         driver="codex",
+        model="gpt-5.5",
         phase="pre-commit",
         extension=".txt",
     )
@@ -176,6 +197,7 @@ def test_specificity_prefers_more_axes_then_the_canonical_path_rule():
         (".py",),
         (),
         (),
+        (),
     )
 
 
@@ -197,7 +219,13 @@ def test_consumer_inventory_derives_every_admitted_axis_from_live_users():
             "pre-commit-step",
         ),
         ScopeAxis.EXTENSIONS: ("policy-rule",),
-        ScopeAxis.DRIVERS: ("wrapper", "wrapper-route", "maxim"),
+        ScopeAxis.DRIVERS: (
+            "pre-commit-step",
+            "wrapper",
+            "wrapper-route",
+            "maxim",
+        ),
+        ScopeAxis.MODELS: ("pre-commit-step",),
         ScopeAxis.PHASES: ("pre-commit-step",),
     }
     assert NON_SELECTOR_CONCEPTS == {
@@ -219,7 +247,7 @@ def test_inventoried_payload_and_dataset_concepts_use_canonical_rejection(concep
 
     assert str(exc_info.value) == (
         "scopes for consumer 'pre-commit-step' "
-        f"(supported axes: paths, phases): unsupported axes: {concept}"
+        f"(supported axes: paths, drivers, models, phases): unsupported axes: {concept}"
     )
 
 

@@ -222,7 +222,9 @@ across both surfaces:
 
 Every `pre_commit` command step — mount or raw — additionally gets
 `SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by
-`scopes.paths`; `scopes.phases` selects the pre-commit or success hook phase).
+`scopes.paths`; `scopes.drivers` and `scopes.models` select the effective
+configured worktree agent; `scopes.phases` selects the pre-commit or success
+hook phase). Each omitted axis is unconstrained.
 The guarantee is representational: the env says what the command is (a mount,
 or not) rather than where it was triggered from.
 
