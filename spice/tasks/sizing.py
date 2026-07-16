@@ -141,6 +141,8 @@ def _elapsed_component(
         return SizingComponent("elapsed", None, "no_phase_effort_windows")
     seconds = 0.0
     for window in windows:
+        if window.partial:
+            return SizingComponent("elapsed", None, "partial_phase_effort_window")
         wall_seconds = effort.phase_effort_wall_seconds(window)
         if wall_seconds is None:
             return SizingComponent("elapsed", None, "incomplete_phase_effort_window")
