@@ -449,6 +449,118 @@ def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
         ops.done(handle, validation=["late owner attempt"])
 
 
+def test_allocator_open_statuses_are_pending_and_waiting():
+    statuses = ("pending", "waiting", "deleted", "completed")
+
+    open_statuses = [
+        status for status in statuses if alloc._is_open_task({"status": status})
+    ]
+
+    assert open_statuses == ["pending", "waiting"]
+
+
+def test_task_next_routes_to_live_work_after_deleted_current_claim(
+    task_repo, monkeypatch
+):
+    deleted_handle = create.add(
+        "Deleted current claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    ready_handle = create.add(
+        "Live work after deleted claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    ops.claim(deleted_handle)
+    ops.delete(deleted_handle, reason="duplicate", force_claimed=True)
+
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == ready_handle
+    assert str((assigned or {}).get("status") or "") == "pending"
+
+
+def test_task_next_routes_around_deleted_unowned_active_row(task_repo, monkeypatch):
+    handle = create.add(
+        "Deleted unowned active row",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="high",
+    )
+    ready_handle = create.add(
+        "Live work after deleted repair candidate",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="low",
+    )
+    uuid = identity.uuid_of(identity.resolve(handle))
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    ops.claim(handle)
+    ops.delete(handle, reason="duplicate", force_claimed=True)
+    tw.run([uuid, "modify", "claim_by:"])
+
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == ready_handle
+    deleted = tw.export([uuid])[0]
+    assert deleted["status"] == "deleted"
+    assert str(deleted.get("claim_by") or "") == ""
+
+
+def test_task_next_takes_over_open_stale_claim_ahead_of_deleted_history(
+    task_repo, monkeypatch
+):
+    deleted_handle = create.add(
+        "Deleted stale peer claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="high",
+    )
+    open_handle = create.add(
+        "Open stale peer claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="low",
+    )
+    deleted_uuid = identity.uuid_of(identity.resolve(deleted_handle))
+    open_uuid = identity.uuid_of(identity.resolve(open_handle))
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(deleted_handle)
+    tw.run([deleted_uuid, "modify", "claim_until:2020-01-01T00:00:00.000000Z"])
+    ops.delete(deleted_handle, reason="duplicate", force_claimed=True)
+
+    open_peer = "cccccccccccccccccccccccccccccccc"
+    monkeypatch.setenv(DRIVER.thread_id_env, open_peer)
+    ops.claim(open_handle)
+    tw.run([open_uuid, "modify", "claim_until:2020-01-01T00:00:00.000000Z"])
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == open_handle
+    assert (assigned or {}).get("claim_by") == ACTOR_A
+    deleted = tw.export([deleted_uuid])[0]
+    assert deleted["status"] == "deleted"
+    assert deleted["claim_by"] == PEER_ACTOR
+
+
 def test_task_next_prefers_ready_work_over_stale_takeover(task_repo, monkeypatch):
     stale_handle = create.add(
         "Stale claim",
