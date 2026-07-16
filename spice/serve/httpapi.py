@@ -21,9 +21,10 @@ from spice.paths import shared_attachment_root
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, resolve_thread_transcript
 from spice.serve.payload import identity
-from spice.serve.team.metrics import (
+from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
+    metric_bucket_start,
 )
 from spice.serve.workroutes import resolve_worktree_for_request
 from spice.serve.worktree.target import WorktreeTarget
@@ -141,7 +142,7 @@ def team_historical_metrics_response_payload(
         bucket_seconds=bucket_seconds,
         now=summary_time,
     )
-    window_end = _metric_bucket_start(summary_time, bucket_seconds)
+    window_end = metric_bucket_start(summary_time, bucket_seconds)
     window_start = window_end - ((len(summary.sparkline) - 1) * bucket_seconds)
     series = [
         {"bucketStart": window_start + (index * bucket_seconds), "messages": count}
@@ -177,7 +178,7 @@ def task_burndown_metrics_response_payload(
     if raw_start is None:
         bucket_count = _query_int(query, "bucketCount", TASK_BURNDOWN_BUCKET_COUNT)
         bucket_count = min(bucket_count, TASK_BURNDOWN_MAX_BUCKET_COUNT)
-        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_end = metric_bucket_start(end_time, bucket_seconds)
         window_start = max(0, window_end - ((bucket_count - 1) * bucket_seconds))
     else:
         bucket_count = _metric_bucket_count_for_range(
@@ -189,8 +190,8 @@ def task_burndown_metrics_response_payload(
             raise SpiceError(
                 f"task burndown range exceeds {TASK_BURNDOWN_MAX_BUCKET_COUNT} buckets"
             )
-        window_start = _metric_bucket_start(raw_start, bucket_seconds)
-        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_start = metric_bucket_start(raw_start, bucket_seconds)
+        window_end = metric_bucket_start(end_time, bucket_seconds)
     agent_ids = _query_values(query, "agentId")
     team_ids = _query_values(query, "teamId")
     series = state.team_store.task_lifecycle_series(
@@ -238,7 +239,7 @@ def task_distribution_metrics_response_payload(
     if raw_start is None:
         bucket_count = _query_int(query, "bucketCount", TASK_DISTRIBUTION_BUCKET_COUNT)
         bucket_count = min(bucket_count, TASK_DISTRIBUTION_MAX_BUCKET_COUNT)
-        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_end = metric_bucket_start(end_time, bucket_seconds)
         window_start = max(0, window_end - ((bucket_count - 1) * bucket_seconds))
     else:
         bucket_count = _metric_bucket_count_for_range(
@@ -251,8 +252,8 @@ def task_distribution_metrics_response_payload(
                 "task distribution range exceeds "
                 f"{TASK_DISTRIBUTION_MAX_BUCKET_COUNT} buckets"
             )
-        window_start = _metric_bucket_start(raw_start, bucket_seconds)
-        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_start = metric_bucket_start(raw_start, bucket_seconds)
+        window_end = metric_bucket_start(end_time, bucket_seconds)
     agent_ids = _query_values(query, "agentId")
     team_ids = _query_values(query, "teamId")
     series = state.team_store.task_distribution_series(
@@ -671,16 +672,11 @@ def _query_values(query: dict[str, list[str]], key: str) -> tuple[str, ...]:
 def _metric_bucket_count_for_range(
     start: float, end: float, bucket_seconds: int
 ) -> int:
-    start_bucket = _metric_bucket_start(start, bucket_seconds)
-    end_bucket = _metric_bucket_start(end, bucket_seconds)
+    start_bucket = metric_bucket_start(start, bucket_seconds)
+    end_bucket = metric_bucket_start(end, bucket_seconds)
     if end_bucket < start_bucket:
         return 1
     return ((end_bucket - start_bucket) // bucket_seconds) + 1
-
-
-def _metric_bucket_start(timestamp: float, bucket_seconds: int) -> int:
-    raw = max(0, int(float(timestamp)))
-    return raw - (raw % max(1, int(bucket_seconds)))
 
 
 def _resolve_worktree_image_path(repo_root: Path, raw: str) -> Path | None:

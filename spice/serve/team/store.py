@@ -40,14 +40,16 @@ from spice.serve.directivestats import (
     DirectiveStatsStoreMixin,
     DirectiveTotals as DirectiveTotals,
 )
-from spice.serve.team.metrics import (
+from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
+    TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
+)
+from spice.serve.team.metrics import (
     MetricSeriesPoint as MetricSeriesPoint,
     TaskDistributionSeriesPoint as TaskDistributionSeriesPoint,
     TaskLifecycleSeriesPoint as TaskLifecycleSeriesPoint,
     TaskStallState as TaskStallState,
-    TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
     TeamMetricStoreMixin,
 )
 from spice.serve.team.models import (
