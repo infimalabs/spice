@@ -63,29 +63,6 @@ def _status(*, thread_id: str = "", running: bool = False):
 AGENT_COMMAND_MENTION_RE = re.compile(r"\bspice\s+agent\s+([a-z][a-z0-9-]*)\b")
 
 
-AGENT_COMMAND_AUDIT_ROOTS = (
-    "README.md",
-    "docs",
-    "spice",
-    "tests",
-)
-
-
-AGENT_COMMAND_AUDIT_OPTIONAL_ROOTS = (".agents/skills/spice/SKILL.md",)
-
-
-AGENT_COMMAND_AUDIT_TEXT_SUFFIXES = {
-    "",
-    ".css",
-    ".js",
-    ".md",
-    ".py",
-    ".sh",
-    ".toml",
-    ".txt",
-}
-
-
 AGENT_COMMAND_NON_COMMAND_WORDS = frozenset({"bootstrap", "from"})
 
 
@@ -121,33 +98,32 @@ def _agent_parser_verbs() -> set[str]:
     return set(agent_actions.choices)
 
 
-def _agent_command_audit_paths(repo_root: Path) -> list[Path]:
-    paths: list[Path] = []
-    for relative in AGENT_COMMAND_AUDIT_ROOTS:
-        root = repo_root / relative
-        if root.is_file():
-            if _agent_command_audit_text_path(root):
-                paths.append(root)
-        elif root.is_dir():
-            paths.extend(
-                path
-                for path in root.rglob("*")
-                if path.is_file() and _agent_command_audit_text_path(path)
-            )
-    for relative in AGENT_COMMAND_AUDIT_OPTIONAL_ROOTS:
+def _agent_command_audit_sources(repo_root: Path) -> list[tuple[Path, str]]:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    sources: list[tuple[Path, str]] = []
+    for relative in (name for name in tracked.split("\0") if name):
         path = repo_root / relative
-        if path.is_file():
-            paths.append(path)
-    return sorted(set(paths))
-
-
-def _agent_command_audit_text_path(path: Path) -> bool:
-    return path.suffix in AGENT_COMMAND_AUDIT_TEXT_SUFFIXES
+        if not path.is_file():
+            continue
+        raw = path.read_bytes()
+        if b"\0" in raw:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        sources.append((path, text))
+    return sources
 
 
 def _agent_command_mentions(repo_root: Path):
-    for path in _agent_command_audit_paths(repo_root):
-        text = path.read_text(encoding="utf-8", errors="replace")
+    for path, text in _agent_command_audit_sources(repo_root):
         relative = path.relative_to(repo_root).as_posix()
         for line_number, line in enumerate(text.splitlines(), start=1):
             for match in AGENT_COMMAND_MENTION_RE.finditer(line):
@@ -241,6 +217,23 @@ def test_agent_command_mentions_match_parser_surface():
 
     assert unsupported == []
     assert inspection_verbs == {"show"}
+
+
+def test_agent_command_inventory_includes_tracked_doctrine_config_and_fixtures():
+    repo_root = Path(__file__).resolve().parents[1]
+    audited = {
+        path.relative_to(repo_root).as_posix()
+        for path, _text in _agent_command_audit_sources(repo_root)
+    }
+
+    assert {
+        "AGENTS.md",
+        "CONFIG.md",
+        "STABILITY.md",
+        "pyproject.toml",
+        "tests/fixtures/composer_accepted_draft_clear.js",
+        "tests/fixtures/session/README.md",
+    } <= audited
 
 
 def test_post_tool_hook_config_requires_driver_capability(tmp_path):
