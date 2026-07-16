@@ -7,13 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from spice.studies.walk import is_excluded_path
+from spice.studies.walk import is_excluded_path, is_test_path
 
 STATUS_CANDIDATE_UNUSED = "candidate-unused"
 STATUS_RETAINED = "retained"
+STATUS_TEST_ONLY = "test-only"
 STATUS_USED = "used"
 
+_FINDING_STATUSES = frozenset({STATUS_CANDIDATE_UNUSED, STATUS_TEST_ONLY})
 _IDENTIFIER_NODE_TYPES = frozenset({"identifier", "shorthand_property_identifier"})
+# Test harnesses reach production symbols through a sandbox namespace
+# (context.symbol), so test-side references must also match property access.
+_TEST_REFERENCE_NODE_TYPES = _IDENTIFIER_NODE_TYPES | {"property_identifier"}
 _TOP_LEVEL_DECLARATION_TYPES = frozenset(
     {
         "class_declaration",
@@ -35,6 +40,7 @@ class JavaScriptUnusedEntry:
     status: str
     reason: str
     reference_count: int
+    test_reference_count: int
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,7 @@ class _ParsedJavaScriptFile:
     relative_path: str
     source: bytes
     root: Any
+    is_test: bool
 
 
 def collect_javascript_unused_entries(
@@ -51,7 +58,7 @@ def collect_javascript_unused_entries(
     allow_symbols: Iterable[str] = (),
 ) -> list[JavaScriptUnusedEntry]:
     parsed_files = _parse_javascript_files(paths, root=root)
-    identifier_counts = _identifier_counts(parsed_files)
+    production_counts, test_counts = _reference_counts(parsed_files)
     retained_symbols = frozenset(allow_symbols)
     entries: list[JavaScriptUnusedEntry] = []
     for parsed_file in parsed_files:
@@ -61,7 +68,8 @@ def collect_javascript_unused_entries(
                     _variable_entries(
                         parsed_file,
                         node,
-                        identifier_counts=identifier_counts,
+                        production_counts=production_counts,
+                        test_counts=test_counts,
                         retained_symbols=retained_symbols,
                     )
                 )
@@ -69,7 +77,8 @@ def collect_javascript_unused_entries(
             entry = _declaration_entry(
                 parsed_file,
                 node,
-                identifier_counts=identifier_counts,
+                production_counts=production_counts,
+                test_counts=test_counts,
                 retained_symbols=retained_symbols,
             )
             if entry is not None:
@@ -90,7 +99,7 @@ def scan_javascript_unused_symbols(
         for entry in collect_javascript_unused_entries(
             paths, root=root, allow_symbols=allow_symbols
         )
-        if entry.status == STATUS_CANDIDATE_UNUSED
+        if entry.status in _FINDING_STATUSES
     ]
 
 
@@ -101,16 +110,23 @@ def render_javascript_unused_board(
 ) -> str:
     shown = list(findings)[:limit] if limit is not None else list(findings)
     if not shown:
-        return "javascript-unused: no unused top-level symbols found"
+        return "javascript-unused: no candidate-unused or test-only top-level symbols found"
+    candidate_count = sum(
+        1 for finding in findings if finding.status == STATUS_CANDIDATE_UNUSED
+    )
+    test_only_count = sum(
+        1 for finding in findings if finding.status == STATUS_TEST_ONLY
+    )
     suffix = f" (showing {len(shown)})" if limit and len(findings) > len(shown) else ""
     rows = [
-        f"javascript-unused: {len(findings)} candidate-unused top-level symbol(s) "
-        f"found{suffix}"
+        f"javascript-unused: {candidate_count} candidate-unused and "
+        f"{test_only_count} test-only top-level symbol(s) found{suffix}"
     ]
     for finding in shown:
         rows.append(
             f"  {finding.path}:{finding.line} {finding.kind} {finding.name} "
-            f"refs={finding.reference_count} reason={finding.reason}"
+            f"status={finding.status} refs={finding.reference_count} "
+            f"test_refs={finding.test_reference_count} reason={finding.reason}"
         )
     return "\n".join(rows)
 
@@ -144,18 +160,26 @@ def _parse_javascript_files(
                 relative_path=rel_path.as_posix(),
                 source=parsed.source,
                 root=parsed.root,
+                is_test=is_test_path(rel_path, root),
             )
         )
     return parsed_files
 
 
-def _identifier_counts(parsed_files: Sequence[_ParsedJavaScriptFile]) -> Counter[str]:
-    counts: Counter[str] = Counter()
+def _reference_counts(
+    parsed_files: Sequence[_ParsedJavaScriptFile],
+) -> tuple[Counter[str], Counter[str]]:
+    production_counts: Counter[str] = Counter()
+    test_counts: Counter[str] = Counter()
     for parsed_file in parsed_files:
+        if parsed_file.is_test:
+            counts, node_types = test_counts, _TEST_REFERENCE_NODE_TYPES
+        else:
+            counts, node_types = production_counts, _IDENTIFIER_NODE_TYPES
         for node in _walk(parsed_file.root):
-            if node.type in _IDENTIFIER_NODE_TYPES:
+            if node.type in node_types:
                 counts[_node_text(parsed_file.source, node)] += 1
-    return counts
+    return production_counts, test_counts
 
 
 def _walk(node: Any) -> Iterable[Any]:
@@ -204,13 +228,22 @@ def _variable_kind(source: bytes, node: Any) -> str:
 
 def _entry_status(
     name: str,
-    reference_count: int,
+    *,
+    production_references: int,
+    test_references: int,
     retained_symbols: frozenset[str],
+    declared_in_test: bool,
 ) -> tuple[str, str]:
     if name in retained_symbols:
         return STATUS_RETAINED, "intentional_global_allowlist"
-    if reference_count > 1:
+    if declared_in_test:
+        if production_references + test_references > 1:
+            return STATUS_USED, "identifier_referenced_outside_declaration"
+        return STATUS_CANDIDATE_UNUSED, "no_references_outside_declaration"
+    if production_references > 1:
         return STATUS_USED, "identifier_referenced_outside_declaration"
+    if test_references > 0:
+        return STATUS_TEST_ONLY, "references_only_in_tests"
     return STATUS_CANDIDATE_UNUSED, "no_references_outside_declaration"
 
 
@@ -220,11 +253,20 @@ def _symbol_entry(
     line: int,
     kind: str,
     name: str,
-    identifier_counts: Counter[str],
+    production_counts: Counter[str],
+    test_counts: Counter[str],
     retained_symbols: frozenset[str],
+    declared_in_test: bool,
 ) -> JavaScriptUnusedEntry:
-    reference_count = identifier_counts[name]
-    status, reason = _entry_status(name, reference_count, retained_symbols)
+    production_references = production_counts[name]
+    test_references = test_counts[name]
+    status, reason = _entry_status(
+        name,
+        production_references=production_references,
+        test_references=test_references,
+        retained_symbols=retained_symbols,
+        declared_in_test=declared_in_test,
+    )
     return JavaScriptUnusedEntry(
         path=path,
         line=line,
@@ -232,7 +274,8 @@ def _symbol_entry(
         name=name,
         status=status,
         reason=reason,
-        reference_count=reference_count,
+        reference_count=production_references,
+        test_reference_count=test_references,
     )
 
 
@@ -240,7 +283,8 @@ def _variable_entries(
     parsed_file: _ParsedJavaScriptFile,
     node: Any,
     *,
-    identifier_counts: Counter[str],
+    production_counts: Counter[str],
+    test_counts: Counter[str],
     retained_symbols: frozenset[str],
 ) -> list[JavaScriptUnusedEntry]:
     entries: list[JavaScriptUnusedEntry] = []
@@ -257,8 +301,10 @@ def _variable_entries(
                 line=_node_line(child),
                 kind=kind,
                 name=name,
-                identifier_counts=identifier_counts,
+                production_counts=production_counts,
+                test_counts=test_counts,
                 retained_symbols=retained_symbols,
+                declared_in_test=parsed_file.is_test,
             )
         )
     return entries
@@ -268,7 +314,8 @@ def _declaration_entry(
     parsed_file: _ParsedJavaScriptFile,
     node: Any,
     *,
-    identifier_counts: Counter[str],
+    production_counts: Counter[str],
+    test_counts: Counter[str],
     retained_symbols: frozenset[str],
 ) -> JavaScriptUnusedEntry | None:
     if node.type in _VARIABLE_DECLARATION_TYPES:
@@ -282,6 +329,8 @@ def _declaration_entry(
         line=_node_line(node),
         kind=kind,
         name=name,
-        identifier_counts=identifier_counts,
+        production_counts=production_counts,
+        test_counts=test_counts,
         retained_symbols=retained_symbols,
+        declared_in_test=parsed_file.is_test,
     )

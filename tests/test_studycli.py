@@ -181,7 +181,18 @@ def test_javascript_unused_cli_json_payload(tmp_path, monkeypatch, capsys):
                 status="candidate-unused",
                 reason="no_references_outside_declaration",
                 reference_count=1,
-            )
+                test_reference_count=0,
+            ),
+            JavaScriptUnusedEntry(
+                path="entry.js",
+                line=5,
+                kind="function",
+                name="testedHelper",
+                status="test-only",
+                reason="references_only_in_tests",
+                reference_count=1,
+                test_reference_count=2,
+            ),
         ],
     )
     args = build_parser().parse_args(["study", "javascript-unused", "--json"])
@@ -190,6 +201,10 @@ def test_javascript_unused_cli_json_payload(tmp_path, monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["artifactKind"] == "spice.study.javascript-unused"
     assert payload["findings"][0]["name"] == "candidateHelper"
+    assert payload["findings"][0]["status"] == "candidate-unused"
+    assert payload["findings"][1]["name"] == "testedHelper"
+    assert payload["findings"][1]["status"] == "test-only"
+    assert payload["findings"][1]["test_reference_count"] == 2
 
 
 def test_markdown_links_cli_renders_clean_board(tmp_path, monkeypatch, capsys):
