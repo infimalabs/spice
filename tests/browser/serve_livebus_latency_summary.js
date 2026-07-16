@@ -6,7 +6,7 @@
 // consistent. Run it to regenerate the diagnosis tables or to verify a table
 // value was not transcribed by hand:
 //
-//   node tests/browser/serve_livebus_latency_summary.js [path/to/traces.json]
+//   node tests/browser/serve_livebus_latency_summary.js path/to/traces.json
 //
 // Exit 0 with the derived tables on stdout when every check holds; exit 1 with
 // the failing checks on stderr otherwise. The output is a pure function of the
@@ -15,16 +15,6 @@
 
 const fs = require("fs");
 const path = require("path");
-
-const defaultArtifact = path.join(
-  __dirname,
-  "..",
-  "..",
-  "docs",
-  "design",
-  "experimental",
-  "serve-livebus-latency-traces.json",
-);
 
 function loadArtifact(artifactPath) {
   const raw = fs.readFileSync(artifactPath, "utf8");
@@ -167,9 +157,14 @@ function reportSubmit(submit) {
 }
 
 function main() {
-  const artifactPath = process.argv[2]
-    ? path.resolve(process.argv[2])
-    : defaultArtifact;
+  if (!process.argv[2]) {
+    process.stderr.write(
+      "usage: node tests/browser/serve_livebus_latency_summary.js " +
+        "path/to/traces.json\n",
+    );
+    process.exit(2);
+  }
+  const artifactPath = path.resolve(process.argv[2]);
   const report = loadArtifact(artifactPath);
   const meta = report.meta || {};
   const lines = [];
