@@ -14,6 +14,12 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function fixtureCardsOverlap(a, b) {
+  const tracksOverlap = a.t < b.t + b.span && b.t < a.t + a.span;
+  const rowsOverlap = a.b < b.b + b.n && b.b < a.b + a.n;
+  return tracksOverlap && rowsOverlap;
+}
+
 const TRACKS = 12;
 
 function card(creationIndex, t, span, n, frozen, b = 0) {
@@ -257,7 +263,7 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   for (let i = 0; i < replayed.length; i += 1) {
     for (let j = i + 1; j < replayed.length; j += 1) {
       assert(
-        !context.mosaicCardsOverlap(replayed[i], replayed[j]),
+        !fixtureCardsOverlap(replayed[i], replayed[j]),
         "no two replayed cards may overlap in both axes after a ripple, cards " + i + " and " + j,
       );
     }

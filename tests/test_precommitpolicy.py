@@ -32,6 +32,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "formatters",
     "local paths",
     "serve web typecheck",
+    "javascript unused",
     "env policy",
     "env name ledger",
     "file shape",
@@ -53,6 +54,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "local-paths",
     "taste",
     "serve-web-typecheck",
+    "javascript-unused",
     "python-typecheck",
     "env-policy",
     "env-name-ledger",
@@ -507,6 +509,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "repo docs",
         "local paths",
         "serve web typecheck",
+        "javascript unused",
         "env policy",
         "env name ledger",
         "file shape",
@@ -865,6 +868,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_javascript_unused_guard",
+        lambda repo_root: record("javascript unused"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_local_path_guard",
         lambda repo_root, paths: record("local paths"),
     )
@@ -932,6 +940,9 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         precommit, "_run_serve_web_typecheck_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_javascript_unused_guard", lambda repo_root: None
     )
     monkeypatch.setattr(
         precommit, "_run_local_path_guard", lambda repo_root, paths: None

@@ -172,7 +172,7 @@ def test_javascript_unused_cli_json_payload(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         studies_cli.javascriptunused,
         "scan_javascript_unused_symbols",
-        lambda paths, *, root, allow_symbols: [
+        lambda paths, *, root, allow_symbols, declaration_exemptions: [
             JavaScriptUnusedEntry(
                 path="entry.js",
                 line=1,
@@ -200,6 +200,17 @@ def test_javascript_unused_cli_json_payload(tmp_path, monkeypatch, capsys):
     assert args.func(args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["artifactKind"] == "spice.study.javascript-unused"
+    assert payload["declarationExemptions"] == [
+        {
+            "path": "spice/serve/static/app.mosaic-event-log.js",
+            "reason": (
+                "shared browser replay oracle that exercises the production "
+                "event-log branch implementation without duplicating that "
+                "algorithm into tests"
+            ),
+            "symbol": "mosaicReplayEventLog",
+        }
+    ]
     assert payload["findings"][0]["name"] == "candidateHelper"
     assert payload["findings"][0]["status"] == "candidate-unused"
     assert payload["findings"][1]["name"] == "testedHelper"

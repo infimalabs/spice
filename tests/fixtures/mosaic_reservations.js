@@ -18,6 +18,19 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function fixtureReservationRows(type, rootFontSizePx, gap, module) {
+  const priorPx = context.mosaicReservationPriorPx(type, rootFontSizePx);
+  return priorPx === null ? null : context.mosaicRowsFor(priorPx, gap, module);
+}
+
+function fixtureReservationOutcome(reservedRows, resolvedRows) {
+  const delta = resolvedRows - reservedRows;
+  return {
+    kind: delta > 0 ? "growth" : delta < 0 ? "shrink" : "exact",
+    delta,
+  };
+}
+
 const DEFAULT_ROOT_FONT_PX = 16;
 const RESCALED_ROOT_FONT_PX = 20;
 const WIDE_CONTAINER_PX = 1200; // L>=3, the common wide-lane case
@@ -37,7 +50,7 @@ assert(
   "an unknown card type must have no reservation",
 );
 assert(
-  context.mosaicReservationRows("bogus-type", DEFAULT_ROOT_FONT_PX, 12, 60) === null,
+  fixtureReservationRows("bogus-type", DEFAULT_ROOT_FONT_PX, 12, 60) === null,
   "an unknown card type must have no reserved row count either",
 );
 
@@ -57,7 +70,7 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
       ["image", 8.75],
       ["imageLarge", 15.75],
     ]) {
-      const reservedRows = context.mosaicReservationRows(
+      const reservedRows = fixtureReservationRows(
         type,
         rootFontSizePx,
         gap,
@@ -135,14 +148,14 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
 // outcome -- applying a ripple is app.mosaic-wet-frozen.js's concern.
 {
   assert(
-    context.mosaicReservationOutcome(3, 2).kind === "shrink",
+    fixtureReservationOutcome(3, 2).kind === "shrink",
     "resolving smaller than reserved must classify as shrink",
   );
   assert(
-    context.mosaicReservationOutcome(3, 3).kind === "exact",
+    fixtureReservationOutcome(3, 3).kind === "exact",
     "resolving to exactly the reservation must classify as exact",
   );
-  const growth = context.mosaicReservationOutcome(2, 3);
+  const growth = fixtureReservationOutcome(2, 3);
   assert(growth.kind === "growth", "resolving larger than reserved must classify as growth");
   assert(growth.delta === 1, "growth delta must be resolvedRows - reservedRows");
 }
@@ -157,7 +170,7 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
 for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
   const geometry = context.mosaicGeometry(rootFontSizePx, WIDE_CONTAINER_PX);
   const { gap, M: module } = geometry;
-  const reservedRows = context.mosaicReservationRows(
+  const reservedRows = fixtureReservationRows(
     "ack",
     rootFontSizePx,
     gap,
@@ -171,7 +184,7 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
   for (const lines of sampleLineCounts) {
     const contentPx = chromePx + lines * lineHeightPx;
     const resolvedRows = context.mosaicRowsFor(contentPx, gap, module);
-    const outcome = context.mosaicReservationOutcome(reservedRows, resolvedRows);
+    const outcome = fixtureReservationOutcome(reservedRows, resolvedRows);
     if (outcome.kind === "growth") growthCount += 1;
   }
   assert(

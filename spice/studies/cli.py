@@ -23,6 +23,7 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     FILE_BYTE_LIMIT,
     FILE_LOC_LIMIT,
+    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
 )
 from spice.studies import (
     complexity,
@@ -635,12 +636,19 @@ def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
         _target_paths(args, root),
         root=root,
         allow_symbols=args.allow_symbols,
+        declaration_exemptions=JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
     )
     if args.emit_json:
         _print_study_json(
             args.study_action,
             findings=findings,
             allowSymbols=args.allow_symbols,
+            declarationExemptions=[
+                {"path": path, "symbol": symbol, "reason": reason}
+                for (path, symbol), reason in sorted(
+                    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS.items()
+                )
+            ],
             limit=args.limit,
         )
         return 0

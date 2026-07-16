@@ -96,6 +96,20 @@ REACHABILITY_TEST_ONLY_LIMIT = defaults.integer(
 # with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
 ASSERTION_FREE_TEST_LIMIT = defaults.integer("policy", "debt", "assertion_free_tests")
 
+# JavaScript globals intentionally retained for browser validation must name the
+# exact production declaration and why test ownership would sever the behavior
+# under test. Symbol-name-only allowlists are too broad: the same name in a
+# different file remains actionable.
+JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS: dict[tuple[str, str], str] = {
+    (
+        "spice/serve/static/app.mosaic-event-log.js",
+        "mosaicReplayEventLog",
+    ): (
+        "shared browser replay oracle that exercises the production event-log "
+        "branch implementation without duplicating that algorithm into tests"
+    ),
+}
+
 # Product-shipped private-internals exceptions. Repo-specific exceptions belong
 # in tracked `[tool.spice.policy].internal_couplings`, where they are visible to
 # every clone and stale entries fail the gate.

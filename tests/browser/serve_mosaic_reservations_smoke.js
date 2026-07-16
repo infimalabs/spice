@@ -8,6 +8,11 @@ function mosaicReservationsResolveLane() {
   return resolveIsolatedLane("mosaic-reservations-smoke-team");
 }
 
+function mosaicReservationsRows(type, rootFontSizePx, gap, module) {
+  const priorPx = mosaicReservationPriorPx(type, rootFontSizePx);
+  return priorPx === null ? null : mosaicRowsFor(priorPx, gap, module);
+}
+
 function mosaicReservationsBuildAckItem(key, ackKey) {
   return {
     ack_count: 1,
@@ -51,7 +56,7 @@ function mosaicReservationsMeasurePendingAck() {
   const skeleton = node.querySelector(".ack-quote--pending");
   const rootFontSizePx = mosaicRootFontSizePx();
   const geometry = lane.mosaicGeometry;
-  const reservedRows = mosaicReservationRows(
+  const reservedRows = mosaicReservationsRows(
     "ack",
     rootFontSizePx,
     geometry.gap,
@@ -215,6 +220,7 @@ async function installMosaicReservationsHelpers(page) {
   await page.addScriptTag({
     content: [
       mosaicReservationsResolveLane,
+      mosaicReservationsRows,
       mosaicReservationsRenderSingle,
       mosaicReservationsBuildAckItem,
       mosaicReservationsMeasurePendingAck,
@@ -233,7 +239,7 @@ async function waitForMosaicReservationsGlobals(page) {
     globals: [
       "renderMessagesIfChanged",
       "mosaicReservationPriorPx",
-      "mosaicReservationRows",
+      "mosaicRowsFor",
       "mosaicWetReplay",
       "mosaicResolveFrozenResize",
     ],
