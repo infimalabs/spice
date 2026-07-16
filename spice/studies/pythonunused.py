@@ -300,3 +300,7 @@ def _collect_python_module_command(
         path = _module_to_path(module, pkg_root, package)
         if path is not None:
             root_paths.add(path)
+            if path.name == "__init__.py":
+                package_main = path.with_name("__main__.py")
+                if package_main.is_file():
+                    root_paths.add(package_main)
