@@ -1,8 +1,12 @@
 """Mutation testing study: changed-file behavioral constraint measurement.
 
-The runner is intentionally small and incremental. It mutates selected Python
-source files one mutant at a time, runs pytest, restores the original file, and
-reports per-module scores plus tests that did not kill any selected mutant.
+The runner is intentionally small and incremental. It seeds a disposable
+scratch checkout from the caller's effective worktree content, mutates selected
+Python source files there one mutant at a time, runs pytest inside the scratch
+root, and reports per-module scores plus tests that did not kill any selected
+mutant. The caller's checkout is never written: Spice imports and operates its
+own source concurrently with a self-study, so mutants must never be observable
+outside the scratch root.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from typing import Any
 from spice.errors import SpiceError
 from spice.gitprocess import run_git_command
 from spice.procs import ProcessDeadlineExceeded, run_bounded_process_group
+from spice.studies.scratch import scratch_checkout
 from spice.studies.walk import is_excluded_path, is_test_path
 from spice.toolprocess import run_tool_command
 
@@ -69,6 +74,7 @@ class RatchetRegression:
 class MutationStudy:
     reports: tuple[ModuleMutationReport, ...]
     ratchet_regressions: tuple[RatchetRegression, ...] = ()
+    recovered_roots: tuple[str, ...] = ()
 
 
 def changed_python_paths(root: Path, *, baseline_ref: str = "HEAD") -> list[Path]:
@@ -101,21 +107,31 @@ def run_mutation_study(
     targets = [path for path in paths if _is_mutation_target(path, root=root)]
     if not targets:
         return MutationStudy(reports=())
-    _ensure_baseline_tests_pass(root, test_paths, timeout_seconds=timeout_seconds)
-    collected_tests = _collect_test_nodeids(root, test_paths)
-    reports = tuple(
-        _run_module_mutations(
-            path,
-            root=root,
-            test_paths=test_paths,
-            collected_tests=collected_tests,
-            max_mutants=max_mutants_per_module,
-            timeout_seconds=timeout_seconds,
+    # Every mutant executes inside a disposable scratch checkout seeded from
+    # the caller's effective content; the caller's files stay byte-identical
+    # through success, survivors, timeouts, baseline failure, and interrupts.
+    with scratch_checkout(root) as (scratch_root, recovery):
+        _ensure_baseline_tests_pass(
+            scratch_root, test_paths, timeout_seconds=timeout_seconds
         )
-        for path in targets
-    )
+        collected_tests = _collect_test_nodeids(scratch_root, test_paths)
+        reports = tuple(
+            _run_module_mutations(
+                path,
+                root=scratch_root,
+                test_paths=test_paths,
+                collected_tests=collected_tests,
+                max_mutants=max_mutants_per_module,
+                timeout_seconds=timeout_seconds,
+            )
+            for path in targets
+        )
     regressions = _ratchet_regressions(reports, ratchet_path)
-    return MutationStudy(reports=reports, ratchet_regressions=tuple(regressions))
+    return MutationStudy(
+        reports=reports,
+        ratchet_regressions=tuple(regressions),
+        recovered_roots=recovery.removed,
+    )
 
 
 def write_ratchet(path: Path, reports: tuple[ModuleMutationReport, ...]) -> Path:
@@ -167,6 +183,11 @@ def render_mutation_board(study: MutationStudy) -> str:
                 f"- {regression.path}: {regression.current_score:.0%} "
                 f"< {regression.baseline_score:.0%}"
             )
+    if study.recovered_roots:
+        lines.append("")
+        lines.append("recovered abandoned scratch roots")
+        for name in study.recovered_roots:
+            lines.append(f"- {name}")
     return "\n".join(lines)
 
 

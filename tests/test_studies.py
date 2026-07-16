@@ -930,6 +930,9 @@ def test_changed_python_paths_skips_configured_test_roots(tmp_path, monkeypatch)
 
 
 def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkeypatch):
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True, text=True
+    )
     source = tmp_path / "pkg" / "sample.py"
     source.parent.mkdir()
     source.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -944,7 +947,10 @@ def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkey
                 stderr="",
             )
         if "pytest" in command:
-            if "return a - b" in source.read_text(encoding="utf-8"):
+            # Mutants apply inside the scratch checkout pytest runs from,
+            # never in the caller's file.
+            scratch_source = Path(kwargs["cwd"]) / "pkg" / "sample.py"
+            if "return a - b" in scratch_source.read_text(encoding="utf-8"):
                 return subprocess.CompletedProcess(
                     command,
                     1,
