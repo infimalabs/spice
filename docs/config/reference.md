@@ -39,7 +39,7 @@ individual axes from earlier layers.
 Configurable entries express applicability with one inline selector:
 
 ```toml
-scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"] }
+scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"], models = ["gpt-5.5"] }
 ```
 
 Values within one axis are alternatives (OR), different axes are simultaneous
@@ -55,14 +55,19 @@ The initial admitted axes are grounded in current applicability consumers:
 | Axis | Current applicability consumers | Value contract |
 | --- | --- | --- |
 | `paths` | Policy rules, study providers, pre-commit command steps | Repository-relative PATHPOL glob-or-subtree selectors |
-| `drivers` | Wrappers, wrapper routes, maxim bags | Registered agent driver names |
+| `drivers` | Wrappers, wrapper routes, maxim bags, pre-commit command steps | Registered agent driver names |
+| `models` | Pre-commit command steps | Normalized effective worktree model identifiers |
 | `phases` | Pre-commit command steps | `pre-commit` or `pre-commit-success` |
 | `extensions` | Policy rules | File suffixes beginning with `.` |
 
 Command heads and flags remain wrapper-routing payload. Language families and
 test/generated roles remain classification datasets. Task phases remain live
-allocator routing state. The four configuration-layer names remain precedence
-metadata. None is accepted as a `scopes` axis.
+allocator routing state. `scopes.models` filters an entry against the effective
+configured worktree model; it never chooses a launch model. The `agent.model`
+and `tasks.phase_models.<driver>.<phase>.model` keys remain launch payload. The
+four configuration-layer names remain precedence metadata. None of those
+payload, dataset, routing, or layering concepts is accepted as a new `scopes`
+axis.
 
 The `pyproject` scope alone uses the `tool.spice` prefix:
 
@@ -559,8 +564,10 @@ Command-step tables accept:
 `pre_commit` steps receive `SPICE_STAGED_PATHS`; mounted steps also receive
 `SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `scopes.paths` narrows the
 staged-path set with the universal PATHPOL contract, while `scopes.phases`
-selects `pre-commit` or `pre-commit-success`; the axes compose through the
-universal AND rule.
+selects `pre-commit` or `pre-commit-success`. `scopes.drivers` and
+`scopes.models` select the effective configured worktree driver and model. All
+four axes compose through the universal AND rule; omitting any axis means all
+values on that axis.
 
 Reachability provider tables accept:
 
@@ -642,6 +649,11 @@ and looks it up in this table for the active driver. A phase with no entry
 `--model`/`--effort` flag, then the effective `agent` table in `worktree`,
 `repository`, `pyproject`, and `system` precedence order, then the driver's
 shipped default.
+
+These `model` values are launch payload selected by live task-phase routing;
+they are not applicability selectors. A `scopes.models` entry filters a
+consumer that declares model applicability and does not participate in lane or
+task allocation.
 
 ## `[tool.spice.serve]`
 

@@ -37,6 +37,8 @@ from spice.cli.mounts import (
     mount_command_path,
     mounted_commands,
 )
+from spice.config import AGENT_DRIVER_KEY, AGENT_MODEL_KEY, effective_agent_config
+from spice.configlayer import contextualize_config_error, effective_table
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.gitprocess import run_git_command
@@ -47,7 +49,6 @@ from spice.policy import (
 )
 from spice.policyconfig import resolve_policy
 from spice.toolprocess import run_tool_command
-from spice.configlayer import contextualize_config_error, effective_table
 from spice.scopes import (
     PRE_COMMIT_STEP_SCOPES,
     SCOPES_KEY,
@@ -386,6 +387,7 @@ def _configured_command_steps(
         return []
     if not isinstance(raw_steps, list):
         raise SpiceError(f"[tool.spice.policy] {config_key} must be a list")
+    agent_config = effective_agent_config(repo_root)
     steps: list[PreCommitStep] = []
     for index, raw in enumerate(raw_steps, start=1):
         context = f"{config_key}[{index}]"
@@ -405,7 +407,13 @@ def _configured_command_steps(
                 f"[tool.spice.policy] {config_key} entries must be mounted command "
                 "names or { label = ..., run = [...] } tables"
             )
-        paths = _scoped_staged_paths(scope, staged, phase=phase)
+        paths = _scoped_staged_paths(
+            scope,
+            staged,
+            driver=agent_config[AGENT_DRIVER_KEY],
+            model=agent_config[AGENT_MODEL_KEY],
+            phase=phase,
+        )
         if paths is None:
             continue
         command = CommandStep(
@@ -553,15 +561,33 @@ def _normalize_step_key(raw: Any) -> str:
 
 
 def _scoped_staged_paths(
-    scope: ScopeSelector, staged: list[Path], *, phase: str
+    scope: ScopeSelector,
+    staged: list[Path],
+    *,
+    driver: str,
+    model: str,
+    phase: str,
 ) -> tuple[Path, ...] | None:
-    phase_scope = ScopeSelector(phases=scope.phases)
-    if not phase_scope.matches(ScopeContext(phase=phase)):
+    entry_scope = ScopeSelector(
+        drivers=scope.drivers,
+        models=scope.models,
+        phases=scope.phases,
+    )
+    if not entry_scope.matches(ScopeContext(driver=driver, model=model, phase=phase)):
         return None
     if not scope.paths:
         return tuple(staged)
     paths = tuple(
-        path for path in staged if scope.matches(ScopeContext(path=path, phase=phase))
+        path
+        for path in staged
+        if scope.matches(
+            ScopeContext(
+                path=path,
+                driver=driver,
+                model=model,
+                phase=phase,
+            )
+        )
     )
     return paths or None
 

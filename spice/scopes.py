@@ -8,7 +8,8 @@ one diagnostic owns malformed, unknown, and unsupported axes.
 The initial axes come from live entry-applicability consumers:
 
 * paths: policy rules, study providers, and pre-commit command steps;
-* drivers: wrappers, wrapper routes, and maxim bags;
+* drivers: wrappers, wrapper routes, maxim bags, and pre-commit command steps;
+* models: pre-commit command steps selected for the effective agent model;
 * phases: pre-commit command steps before or after the built-in gate;
 * extensions: policy rules that apply only to selected file suffixes.
 
@@ -40,6 +41,7 @@ SCOPES_KEY = "scopes"
 class ScopeAxis(StrEnum):
     PATHS = "paths"
     DRIVERS = "drivers"
+    MODELS = "models"
     PHASES = "phases"
     EXTENSIONS = "extensions"
 
@@ -48,6 +50,7 @@ SCOPE_AXIS_ORDER = (
     ScopeAxis.PATHS,
     ScopeAxis.EXTENSIONS,
     ScopeAxis.DRIVERS,
+    ScopeAxis.MODELS,
     ScopeAxis.PHASES,
 )
 PRE_COMMIT_SCOPE_PHASES = ("pre-commit", "pre-commit-success")
@@ -80,7 +83,15 @@ POLICY_RULE_SCOPES = ScopeConsumer(
 )
 STUDY_PROVIDER_SCOPES = ScopeConsumer("study-provider", frozenset({ScopeAxis.PATHS}))
 PRE_COMMIT_STEP_SCOPES = ScopeConsumer(
-    "pre-commit-step", frozenset({ScopeAxis.PATHS, ScopeAxis.PHASES})
+    "pre-commit-step",
+    frozenset(
+        {
+            ScopeAxis.PATHS,
+            ScopeAxis.DRIVERS,
+            ScopeAxis.MODELS,
+            ScopeAxis.PHASES,
+        }
+    ),
 )
 WRAPPER_SCOPES = ScopeConsumer("wrapper", frozenset({ScopeAxis.DRIVERS}))
 WRAPPER_ROUTE_SCOPES = ScopeConsumer("wrapper-route", frozenset({ScopeAxis.DRIVERS}))
@@ -130,6 +141,7 @@ NON_SELECTOR_CONCEPTS: Mapping[str, str] = MappingProxyType(
 class ScopeSelector:
     paths: tuple[str, ...] = ()
     drivers: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
     phases: tuple[str, ...] = ()
     extensions: tuple[str, ...] = ()
 
@@ -157,6 +169,7 @@ class ScopeSelector:
 class ScopeContext:
     path: str | PurePath | None = None
     driver: str | None = None
+    model: str | None = None
     phase: str | None = None
     extension: str | None = None
 
@@ -169,6 +182,7 @@ class ScopeSpecificity:
     path: tuple[bool, PathSpecificity, int]
     extension: tuple[bool, int]
     driver: tuple[bool, int]
+    model: tuple[bool, int]
     phase: tuple[bool, int]
     normalized_values: tuple[tuple[str, ...], ...]
 
@@ -233,6 +247,7 @@ def _normalize_scope_selector(
     return ScopeSelector(
         paths=_normalize_paths(selector.paths, consumer),
         drivers=_normalize_drivers(selector.drivers, consumer),
+        models=_normalize_models(selector.models),
         phases=_normalize_phases(selector.phases, consumer),
         extensions=_normalize_extensions(selector.extensions, consumer),
     )
@@ -282,6 +297,7 @@ def _scope_selector_specificity(
         ),
         extension=_axis_narrowness(selector.extensions),
         driver=_axis_narrowness(selector.drivers),
+        model=_axis_narrowness(selector.models),
         phase=_axis_narrowness(selector.phases),
         normalized_values=tuple(selector.values_for(axis) for axis in SCOPE_AXIS_ORDER),
     )
@@ -331,7 +347,7 @@ def _normalize_drivers(
     from spice.agent.driver import driver_scope_choices
 
     known = frozenset(driver_scope_choices())
-    normalized = tuple(sorted({value.strip().casefold() for value in values}))
+    normalized = tuple(sorted({_normalize_identity(value) for value in values}))
     unknown = tuple(value for value in normalized if value not in known)
     if unknown:
         raise _scope_error(
@@ -340,6 +356,10 @@ def _normalize_drivers(
             f"{', '.join(unknown)}; expected one of: {', '.join(sorted(known))}",
         )
     return normalized
+
+
+def _normalize_models(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(sorted({_normalize_identity(value) for value in values}))
 
 
 def _normalize_phases(
@@ -391,10 +411,16 @@ def _normalize_context(context: ScopeContext) -> ScopeContext:
         extension = PurePosixPath(path).suffix.casefold()
     return ScopeContext(
         path=path,
-        driver=(context.driver or "").strip().casefold(),
+        driver=_normalize_identity(context.driver or ""),
+        model=_normalize_identity(context.model or ""),
         phase=(context.phase or "").strip().casefold().replace("_", "-"),
         extension=extension,
     )
+
+
+def _normalize_identity(value: str) -> str:
+    """Normalize configured and runtime driver/model identities identically."""
+    return value.strip().casefold()
 
 
 def _axis_matches(
