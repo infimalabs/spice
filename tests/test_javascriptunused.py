@@ -8,6 +8,7 @@ from spice.studies import cli as studies_cli
 from spice.studies.javascriptunused import (
     STATUS_CANDIDATE_UNUSED,
     STATUS_RETAINED,
+    STATUS_TEST_ONLY,
     STATUS_USED,
     collect_javascript_unused_entries,
 )
@@ -110,6 +111,76 @@ usedHelper();
     assert by_name["retainedExport"].reason == "intentional_global_allowlist"
 
 
+def test_collect_javascript_unused_symbols_classifies_test_only_references(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "app.helpers.js",
+        """
+function testedHelper() {
+  return 1;
+}
+
+function candidateHelper() {
+  return 2;
+}
+""",
+    )
+    _write(
+        tmp_path / "tests" / "fixtures" / "harness.js",
+        """
+context.testedHelper(1, 2);
+""",
+    )
+
+    entries = collect_javascript_unused_entries(
+        [Path("app.helpers.js"), Path("tests/fixtures/harness.js")],
+        root=tmp_path,
+    )
+    by_name = _entries_by_name(entries)
+
+    tested = by_name["testedHelper"]
+    candidate = by_name["candidateHelper"]
+    assert tested.status == STATUS_TEST_ONLY
+    assert tested.reason == "references_only_in_tests"
+    assert tested.reference_count == 1
+    assert tested.test_reference_count == 1
+    assert candidate.status == STATUS_CANDIDATE_UNUSED
+    assert candidate.reason == "no_references_outside_declaration"
+    assert candidate.reference_count == 1
+    assert candidate.test_reference_count == 0
+    assert tested.status != candidate.status
+
+
+def test_collect_javascript_unused_symbols_keeps_test_declared_helpers_used(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "tests" / "fixtures" / "harness.js",
+        """
+function fixtureHelper() {
+  return 1;
+}
+
+function fixtureCandidate() {
+  return 2;
+}
+
+fixtureHelper();
+""",
+    )
+
+    entries = collect_javascript_unused_entries(
+        [Path("tests/fixtures/harness.js")],
+        root=tmp_path,
+    )
+    by_name = _entries_by_name(entries)
+
+    assert by_name["fixtureHelper"].status == STATUS_USED
+    assert by_name["fixtureCandidate"].status == STATUS_CANDIDATE_UNUSED
+    assert by_name["fixtureCandidate"].reason == "no_references_outside_declaration"
+
+
 def test_javascript_unused_study_cli_reports_candidates(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -124,6 +195,10 @@ function candidateHelper() {
   return 2;
 }
 
+function testedHelper() {
+  return 3;
+}
+
 const retainedExport = {};
 """,
     )
@@ -131,6 +206,12 @@ const retainedExport = {};
         tmp_path / "consumer.js",
         """
 usedHelper();
+""",
+    )
+    _write(
+        tmp_path / "tests" / "fixtures" / "harness.js",
+        """
+context.testedHelper();
 """,
     )
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
@@ -142,10 +223,21 @@ usedHelper();
             "retainedExport",
             "entry.js",
             "consumer.js",
+            "tests/fixtures/harness.js",
         ]
     )
 
     assert args.func(args) == 0
     output = capsys.readouterr().out
-    assert "javascript-unused: 1 candidate-unused top-level symbol(s) found" in output
-    assert "entry.js:6 function candidateHelper" in output
+    assert (
+        "javascript-unused: 1 candidate-unused and 1 test-only "
+        "top-level symbol(s) found"
+    ) in output
+    assert (
+        "entry.js:6 function candidateHelper status=candidate-unused "
+        "refs=1 test_refs=0 reason=no_references_outside_declaration"
+    ) in output
+    assert (
+        "entry.js:10 function testedHelper status=test-only "
+        "refs=1 test_refs=1 reason=references_only_in_tests"
+    ) in output
