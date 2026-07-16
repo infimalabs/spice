@@ -1,10 +1,10 @@
 // Deterministic summarizer + consistency checker for the live-bus latency
-// traces. It reads the archived probe artifact and RE-DERIVES every value the
-// diagnosis document publishes -- render rates, per-stage quantiles, per-pass
-// send-lock intervals (including maxima), and the real-send submit-path stages
-// -- directly from the JSON, then asserts each derived value is internally
-// consistent. Run it to regenerate the diagnosis tables or to verify a table
-// value was not transcribed by hand:
+// traces. It reads an explicitly supplied generated probe capture and
+// RE-DERIVES every value the diagnosis document publishes -- render rates,
+// per-stage quantiles, per-pass send-lock intervals (including maxima), and the
+// real-send submit-path stages -- directly from the JSON, then asserts each
+// derived value is internally consistent. Run it to regenerate the diagnosis
+// tables or to verify a table value was not transcribed by hand:
 //
 //   node tests/browser/serve_livebus_latency_summary.js path/to/traces.json
 //
@@ -22,7 +22,7 @@ function loadArtifact(artifactPath) {
 }
 
 // Round to two decimals the same way the probe does, so re-derived values are
-// byte-identical to the archived ones rather than merely close.
+// byte-identical to the probe-produced ones rather than merely close.
 function round2(value) {
   if (!Number.isFinite(value)) return null;
   return Math.round(value * 100) / 100;
