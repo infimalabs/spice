@@ -169,13 +169,15 @@ def effective_route_filter_args(actor: str, route: dict[str, Any] | None) -> lis
 
 
 def visible_rows(actor: str, filters: list[str]) -> list[dict[str, Any]]:
+    return visible_rows_with_scope(actor, filters)[0]
+
+
+def visible_rows_with_scope(
+    actor: str, filters: list[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
     route = lanes.team_route_for_actor(actor)
-    return tw.export(
-        [
-            *filters,
-            *effective_route_filter_args(actor, route),
-        ]
-    )
+    scope = effective_route_filter_args(actor, route)
+    return tw.export([*filters, *scope]), scope
 
 
 def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
