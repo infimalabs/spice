@@ -1,9 +1,9 @@
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from spice.errors import SpiceError
+from spice.sqliteconnection import sqlite_connection
 from spice.tasks import config as task_config
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
@@ -356,25 +356,23 @@ def test_create_team_rebuilds_a_database_with_a_drifted_schema(tmp_path):
     # (surfacing as a 500 -- "It keeps failing") until the store learned to
     # rebuild a database whose shape drifted from the current TEAM_SCHEMA.
     db_path = tmp_path / "teams.sqlite3"
-    stale = sqlite3.connect(db_path)
-    stale.executescript(
-        """
-        CREATE TABLE teams (
-            team_id TEXT PRIMARY KEY,
-            status TEXT NOT NULL DEFAULT 'open',
-            created_at REAL NOT NULL,
-            revision INTEGER NOT NULL,
-            config_revision INTEGER NOT NULL DEFAULT 0,
-            lifetime TEXT NOT NULL,
-            speech_mode TEXT NOT NULL,
-            selected_view TEXT NOT NULL,
-            task_filters TEXT NOT NULL DEFAULT '[]',
-            shell_settings TEXT NOT NULL DEFAULT '{}'
-        );
-        """
-    )
-    stale.commit()
-    stale.close()
+    with sqlite_connection(db_path) as stale:
+        stale.executescript(
+            """
+            CREATE TABLE teams (
+                team_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at REAL NOT NULL,
+                revision INTEGER NOT NULL,
+                config_revision INTEGER NOT NULL DEFAULT 0,
+                lifetime TEXT NOT NULL,
+                speech_mode TEXT NOT NULL,
+                selected_view TEXT NOT NULL,
+                task_filters TEXT NOT NULL DEFAULT '[]',
+                shell_settings TEXT NOT NULL DEFAULT '{}'
+            );
+            """
+        )
 
     store = ServeTeamStore(path=db_path)
     service = TeamCommandService(store)
@@ -385,9 +383,10 @@ def test_create_team_rebuilds_a_database_with_a_drifted_schema(tmp_path):
     created_id = created.snapshot.teams[0].team_id
     open_ids = {team.team_id for team in store.team_snapshot().teams}
     assert created_id in open_ids
-    rebuilt_columns = {
-        row[1] for row in sqlite3.connect(db_path).execute("PRAGMA table_info(teams)")
-    }
+    with sqlite_connection(db_path) as connection:
+        rebuilt_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(teams)")
+        }
     assert rebuilt_columns == {
         "team_id",
         "status",

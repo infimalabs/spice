@@ -23,6 +23,7 @@ from threading import Lock
 from typing import Any, Callable, Iterable, Iterator
 
 from spice.errors import SpiceError
+from spice.sqliteconnection import sqlite_connection
 from spice.serve.team.filters import (
     TeamFilterStoreMixin,
     config_from_row,
@@ -132,14 +133,10 @@ class ServeTeamStore(
         with self._init_lock:
             if self.path in self._initialized_paths:
                 return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            connection = sqlite3.connect(self.path)
-            try:
-                connection.execute("PRAGMA journal_mode = WAL")
+            with sqlite_connection(
+                self.path, wal=True, ensure_parent=True
+            ) as connection:
                 self._sync_schema_locked(connection)
-                connection.commit()
-            finally:
-                connection.close()
             self._initialized_paths.add(self.path)
 
     def _sync_schema_locked(self, connection: sqlite3.Connection) -> None:

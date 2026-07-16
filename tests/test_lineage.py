@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 FIRST_SESSION_BUCKET = 60
 FIRST_RENEWAL_TS = 120
@@ -13,21 +14,21 @@ SERIES_END_TS = 360
 
 
 def test_actor_lineage_projection_derives_lineage_and_per_session_views():
-    connection = _prototype_connection()
-    _seed_actor_lineage_fixture(connection)
+    with closing(_prototype_connection()) as connection:
+        _seed_actor_lineage_fixture(connection)
 
-    lineage_points = _lineage_activity(
-        connection,
-        lineage_id="lineage-a",
-        start=0,
-        end=SERIES_END_TS,
-    )
-    per_session_start, per_session_points = _per_session_activity(
-        connection,
-        actor_id="actor-current",
-        start=0,
-        end=SERIES_END_TS,
-    )
+        lineage_points = _lineage_activity(
+            connection,
+            lineage_id="lineage-a",
+            start=0,
+            end=SERIES_END_TS,
+        )
+        per_session_start, per_session_points = _per_session_activity(
+            connection,
+            actor_id="actor-current",
+            start=0,
+            end=SERIES_END_TS,
+        )
 
     assert lineage_points == [
         {"bucketStart": FIRST_SESSION_BUCKET, "messages": 1},

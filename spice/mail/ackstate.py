@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from spice.paths import shared_state_path
+from spice.sqliteconnection import sqlite_connection
 
 ACK_STATE_DATABASE_FILENAME = "spiceacks.sqlite3"
 # Mirrors the default task backend's `data` subdirectory. Unlike task/team
@@ -102,8 +103,7 @@ def record_acked_inbox_items(
     if not rows:
         return []
     path = ack_state_database_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path, ensure_parent=True) as connection:
         _ensure_schema(connection)
         connection.executemany(
             """
@@ -130,7 +130,7 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
     path = ack_state_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         _ensure_schema(connection)
         rows = connection.execute(
             """

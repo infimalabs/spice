@@ -20,6 +20,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.sqliteconnection import sqlite_connection
+
 
 @dataclass(frozen=True)
 class SubsumptionFinding:
@@ -47,12 +49,9 @@ def scan_subsumption(
             "generate with: pytest --cov=<package> --cov-context=test --cov-branch"
         )
 
-    con = sqlite3.connect(coverage_path)
-    try:
+    with sqlite_connection(coverage_path) as con:
         test_coverage = _read_coverage_db(con, package_prefix=package_prefix)
         test_arcs = _load_per_test_arcs(con, package_prefix=package_prefix)
-    finally:
-        con.close()
 
     findings = _find_subsumed(test_coverage, test_arcs)
 
