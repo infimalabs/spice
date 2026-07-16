@@ -5,11 +5,11 @@
  * plain browser scripts; this file gives `tsc --checkJs` one place to learn the
  * payload shapes crossing the Python/JavaScript boundary.
  *
- * @typedef {Object} ServeTarget
- * @property {string} id
+ * @typedef {Object} LaneChromePayload
+ * @property {string=} id
  * @property {string=} displayName
  * @property {string=} branch
- * @property {TargetIdentity} targetIdentity
+ * @property {TargetIdentity=} targetIdentity
  * @property {ServeAgentIdentity=} serveAgentIdentity
  * @property {string[]=} taskFilters
  * @property {string[]=} effectiveTaskFilters
@@ -19,8 +19,11 @@
  * @property {Object.<string, number>=} laneMetrics
  * @property {LaneInfo=} laneInfo
  * @property {number=} privateTaskCount
- * @property {TeamIdentity} teamIdentity
+ * @property {TeamIdentity=} teamIdentity
  * @property {string=} lifetime
+ * @property {Object=} renewalIntent
+ * @property {number=} pendingInboxCount
+ * @property {string=} pendingInboxLabel
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
  * @property {number=} pendingInboxVersion
@@ -129,6 +132,7 @@
  * @property {string=} agentVisualStatus
  * @property {string=} activityStatus
  * @property {number=} pendingInboxCount
+ * @property {string=} pendingInboxLabel
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
  * @property {number=} pendingInboxVersion

@@ -13,6 +13,51 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+const canonicalTarget = {
+  id: "initial-lane",
+  targetIdentity: { targetId: "initial-lane" },
+  serveAgentIdentity: { actorId: "agent-a" },
+  taskFilters: ["serve.ui"],
+  effectiveTaskFilters: ["serve"],
+  taskFilterEntries: [{ project: "serve.ui", source: "team" }],
+  laneFilterVersion: "filters-1",
+  teamIdentity: { state: "member", teamId: "team-a" },
+  lifetime: "Drive",
+  renewalIntent: { requested: true },
+  taskFilterInventory: { revision: "inventory-1" },
+  laneMetrics: { tasks: 3 },
+  laneInfo: { summaryRows: [{ key: "thread", value: "thread-a" }], members: [] },
+  privateTaskCount: 4,
+  statusLine: { agentProcessStatus: "running" },
+};
+const initialPayload = context.lanePayloadWithTargetPending(
+  { latestPayload: null },
+  canonicalTarget,
+);
+assert(
+  initialPayload === canonicalTarget,
+  "initial lane chrome receives the canonical target payload directly",
+);
+assert(
+  [
+    initialPayload.targetIdentity,
+    initialPayload.serveAgentIdentity,
+    initialPayload.taskFilters,
+    initialPayload.effectiveTaskFilters,
+    initialPayload.taskFilterEntries,
+    initialPayload.teamIdentity,
+    initialPayload.laneMetrics,
+    initialPayload.laneInfo,
+    initialPayload.statusLine,
+  ].every(Boolean),
+  "direct initial payload preserves every structured chrome field",
+);
+assert(initialPayload.lifetime === "Drive", "direct payload preserves lifetime");
+assert(
+  initialPayload.privateTaskCount === 4,
+  "direct payload preserves private task count",
+);
+
 const lane = {
   latestPayload: {
     pendingInboxCount: 1,
