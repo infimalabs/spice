@@ -260,11 +260,10 @@ def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
 
 
 def _active_claims_for(actor: str) -> list[dict[str, Any]]:
-    return [
-        r
-        for r in tw.export(["status:pending", "+ACTIVE"])
-        if str(r.get("claim_by") or "") == actor
-    ]
+    # Bare +ACTIVE: a claimed deferred task keeps its wait, and the
+    # status:pending filter synthesizes `waiting` for future-wait rows, which
+    # would hide the claim from its own owner.
+    return [r for r in tw.export(["+ACTIVE"]) if str(r.get("claim_by") or "") == actor]
 
 
 def has_active_claim() -> bool:
@@ -379,14 +378,19 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
     A single locked write means a crash can never leave an active-but-
     unclaimed row (which would be stranded: skipped by `next` yet resumable by
     no one). Idempotent — re-claiming (including a steal of an already-active
-    row) just rewrites the owner and refreshes the deadline."""
+    row) just rewrites the owner and refreshes the deadline.
+
+    Claim is a pure ownership-and-lease operation: it never touches `wait`,
+    `scheduled`, `due`, `until`, or any other scheduling field, so deferral
+    survives phase work. Only explicit wake or scheduling edits change timing.
+    """
     filters = (
         ["(", "status:pending", "or", "status:waiting", ")", "-ACTIVE"]
         if guard_unclaimed
         else []
     )
     try:
-        tw.run([uuid, *filters, "modify", *claim_meta(actor), "wait:", "start:now"])
+        tw.run([uuid, *filters, "modify", *claim_meta(actor), "start:now"])
     except SpiceError:
         if guard_unclaimed:
             return False
@@ -473,7 +477,6 @@ def renew_claim(
         tw.run(
             [
                 uuid,
-                "status:pending",
                 "+ACTIVE",
                 f"claim_by.is:{resolved_actor}",
                 f"claim_worktree.is:{config.repo_root()}",

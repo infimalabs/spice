@@ -634,7 +634,20 @@ def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
         argparse.Namespace(all=False, status=None, project="serve", limit=2)
     )
 
-    assert seen == {"actor": "actor-a", "filters": ["status:pending"]}
+    assert seen == {
+        "actor": "actor-a",
+        "filters": [
+            "(",
+            "status:pending",
+            "or",
+            "(",
+            "status:waiting",
+            "and",
+            "+ACTIVE",
+            ")",
+            ")",
+        ],
+    }
     lines = output.splitlines()
     assert "Serve API newest" in lines[0]
     assert "Serve UI middle" in lines[1]
@@ -690,7 +703,19 @@ def test_task_list_explicit_hidden_project_uses_raw_export(monkeypatch):
         )
     )
 
-    assert seen == {"filters": ["status:pending"]}
+    assert seen == {
+        "filters": [
+            "(",
+            "status:pending",
+            "or",
+            "(",
+            "status:waiting",
+            "and",
+            "+ACTIVE",
+            ")",
+            ")",
+        ]
+    }
     assert "Hidden oops item" in output
 
 

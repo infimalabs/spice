@@ -502,9 +502,11 @@ def render_status() -> str:
     review_rows = [r for r in ready_rows if _f(r, "phase") == "review"]
     non_review_ready_rows = [r for r in ready_rows if _f(r, "phase") != "review"]
     blocked_count = _visible_count(actor, ["status:pending", "+BLOCKED"])
+    # -ACTIVE: a claimed deferred task keeps its wait and would otherwise be
+    # double-counted as both active and waiting.
     waiting_count = sum(
         1
-        for r in alloc.visible_rows(actor, ["status:waiting"])
+        for r in alloc.visible_rows(actor, ["status:waiting", "-ACTIVE"])
         if not alloc.is_hidden(r)
     )
     stale_count = sum(1 for r in active_rows if _is_stale_claim(r, now))
