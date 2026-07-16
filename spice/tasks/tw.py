@@ -103,9 +103,22 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def future_iso(seconds: int) -> str:
-    when = datetime.now(UTC) + timedelta(seconds=seconds)
-    return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
+TW_DATETIME_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+def canonical_utc(when: datetime) -> str:
+    """Render an aware datetime in Taskwarrior's canonical compact UTC form.
+
+    Taskwarrior parses extended ISO timestamps carrying fractional seconds as
+    local time, shifting the stored instant by the process UTC offset. The
+    compact export form is read back as UTC in every timezone, so generated
+    Taskwarrior dates must cross the process boundary in this shape.
+    """
+    return when.astimezone(UTC).strftime(TW_DATETIME_FORMAT)
+
+
+def future_utc(seconds: int) -> str:
+    return canonical_utc(datetime.now(UTC) + timedelta(seconds=seconds))
 
 
 def canonical_actor(actor: str) -> str:

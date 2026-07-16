@@ -153,6 +153,7 @@ env_names = [
     "FAKEENV_THIRD_THREAD_ID",
     "FAKEENV_THIRD_TURN_ID",
     "FAKEENV_TLS",
+    "TZ",
     "UV_PUBLISH_TOKEN",
     "VIRTUAL_ENV",
     "FAKEENV_X",

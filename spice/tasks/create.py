@@ -258,7 +258,7 @@ def _due_args(due: str | None, mapped_priority: str, *, auto_due: bool) -> list[
     if due:
         return [f"due:{due}"]
     if auto_due and mapped_priority in config.SLA_DUE_SECONDS:
-        return [f"due:{tw.future_iso(config.SLA_DUE_SECONDS[mapped_priority])}"]
+        return [f"due:{tw.future_utc(config.SLA_DUE_SECONDS[mapped_priority])}"]
     return []
 
 
