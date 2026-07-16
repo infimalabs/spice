@@ -51,6 +51,13 @@ coverage for them.
 The stable identity, relation, candidate count, and representative for every
 cohort are recorded in
 [`subsumption-cohorts-2026-07-16.tsv`](subsumption-cohorts-2026-07-16.tsv).
+That TSV is intentionally retained as the reviewed artifact rather than as raw
+coverage output: its stable cohort identifiers and complete 239-cohort queue are
+the machine-readable contract used by deferred adjudication task
+`SUBSUMP-1kDf7Hhb`, and the bounded prose review below cannot substitute for
+that queue. The disposable coverage database remains outside the repository and
+the command above regenerates the analysis source from which this reviewed
+manifest was produced.
 
 ## Bounded adjudication
 

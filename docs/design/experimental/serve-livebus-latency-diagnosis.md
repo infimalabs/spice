@@ -66,7 +66,14 @@ after return; both used ~30 ms signature computation, ~394 ms payload compute,
 near-zero socket transit, and 4–5 ms browser apply/render. A four-lane follow-up
 probe rendered 4/4 baseline cards, 1/1 single-focus card, and 4/4 cards after
 repeated replacements, versus 4/4, 0/1, and 2/4 before the kqueue fix. The
-machine-readable samples are in `serve-task-card-latency-trace.json`.
+durable evidence is the reviewed stage summary above; the generated JSON capture
+is deliberately not retained as a design artifact. Regenerate a current capture
+against an intentionally disposable bound serve fixture with:
+
+```console
+node tests/browser/serve_task_card_live_smoke.js \
+  > /tmp/serve-task-card-latency-trace.json
+```
 
 This note began as a static, structure-only diagnosis. It has now been exercised
 under a deterministic load harness with per-stage instrumentation, and the
@@ -125,10 +132,12 @@ worktree or agent is touched (`meta.isolation` records this in the trace).
 
 Reproduction:
 
-```
+```console
 PROBE_LANES=8 PROBE_ROUNDS=5 PROBE_SUBMITS=5 \
-  node tests/browser/serve_livebus_latency_probe.js > traces.json
-node tests/browser/serve_livebus_latency_summary.js traces.json
+  node tests/browser/serve_livebus_latency_probe.js \
+  > /tmp/serve-livebus-latency-traces.json
+node tests/browser/serve_livebus_latency_summary.js \
+  /tmp/serve-livebus-latency-traces.json
 ```
 
 - **Fixture.** 8 seeded worktrees, subscribed as 8 live lanes, on localhost
@@ -165,11 +174,14 @@ node tests/browser/serve_livebus_latency_summary.js traces.json
   - **Pass S — real submit.** One real scratch-backed `lane.send` per submit
     while all 8 lanes stay active; no stubbed transport.
 
-Raw metrics are archived verbatim in `serve-livebus-latency-traces.json` beside
-this doc. Every table value below is re-derived from that JSON by
+Raw probe metrics are generated output and are deliberately kept outside the
+design tree rather than archived beside this record. Every durable table value
+below was derived from the probe capture by
 `serve_livebus_latency_summary.js`, which also asserts each `send_lock` total is
-the sum/maximum of its kinds; a value that the summarizer does not print did not
-come from the measurement.
+the sum/maximum of its kinds. The checked-in probe and summarizer commands above
+regenerate and validate a current capture without making raw output repository
+truth; a value that the summarizer does not print did not come from the
+measurement.
 
 ## Measured results
 
