@@ -59,6 +59,69 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
     )
 
 
+@pytest.mark.parametrize(
+    ("driver_name", "route_head", "route_command", "direct_name", "direct_arg"),
+    (
+        ("codex", "scan", "scanner", "codex-only", "codex"),
+        ("claude", "view", "viewer", "claude-only", "claude"),
+    ),
+)
+def test_wrapper_group_direct_and_match_route_scopes_share_driver_selection(
+    tmp_path,
+    monkeypatch,
+    driver_name,
+    route_head,
+    route_command,
+    direct_name,
+    direct_arg,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.agent]\n"
+        'wrappers = ["tools"]\n'
+        "\n"
+        "[tool.spice.wrappers.tools]\n"
+        'scopes = { drivers = ["CODEX", "claude"] }\n'
+        "\n"
+        "[tool.spice.wrappers.tools.toolbox]\n"
+        'argv = ["toolbox"]\n'
+        'scopes = { drivers = ["claude", "codex"] }\n'
+        "match = [\n"
+        '  { head = "scan", argv = ["scanner"], '
+        'scopes = { drivers = ["codex"] } },\n'
+        '  { head = "view", argv = ["viewer"], '
+        'scopes = { drivers = ["claude"] } },\n'
+        "]\n"
+        "\n"
+        "[tool.spice.wrappers.tools.codex-only]\n"
+        'argv = ["runner", "codex"]\n'
+        'scopes = { drivers = ["codex"] }\n'
+        "\n"
+        "[tool.spice.wrappers.tools.claude-only]\n"
+        'argv = ["runner", "claude"]\n'
+        'scopes = { drivers = ["claude"] }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+
+    lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == [
+        "",
+        "toolbox() {",
+        f'  if [ "${{1-}}" = {route_head} ]; then',
+        "    shift",
+        f'    command {route_command} "$@"',
+        "    return",
+        "  fi",
+        '  command toolbox "$@"',
+        "}",
+        "",
+        f"{direct_name}() {{",
+        f'  runner {direct_arg} "$@"',
+        "}",
+    ]
+
+
 def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
     tmp_path,
 ):

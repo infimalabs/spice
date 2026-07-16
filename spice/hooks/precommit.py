@@ -40,7 +40,6 @@ from spice.cli.mounts import (
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.gitprocess import run_git_command
-from spice.pathmatch import matches_repo_path
 from spice.paths import find_tool
 from spice.policy import (
     JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
@@ -49,6 +48,12 @@ from spice.policy import (
 from spice.policyconfig import resolve_policy
 from spice.toolprocess import run_tool_command
 from spice.configlayer import contextualize_config_error, effective_table
+from spice.scopes import (
+    PRE_COMMIT_STEP_SCOPES,
+    SCOPES_KEY,
+    ScopeContext,
+    ScopeSelector,
+)
 from spice.studies import (
     complexity,
     envpolicy,
@@ -75,6 +80,9 @@ from spice.studies.walk import (
 )
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
+COMMAND_STEP_KEYS = frozenset(
+    {"label", "mount", "run", "argv", SCOPES_KEY, "formatter", "enabled"}
+)
 
 
 @dataclass(frozen=True)
@@ -169,6 +177,7 @@ def post_success_pre_commit_steps(
         paths,
         config_key="pre_commit_success",
         key_prefix="post-success",
+        phase="pre-commit-success",
     )
 
 
@@ -360,6 +369,7 @@ def _extension_pre_commit_steps(
         staged,
         config_key="pre_commit",
         key_prefix="extension",
+        phase="pre-commit",
     )
 
 
@@ -369,6 +379,7 @@ def _configured_command_steps(
     *,
     config_key: str,
     key_prefix: str,
+    phase: str,
 ) -> list[PreCommitStep]:
     raw_steps = effective_table(repo_root, "policy").get(config_key)
     if raw_steps is None:
@@ -378,19 +389,24 @@ def _configured_command_steps(
     steps: list[PreCommitStep] = []
     for index, raw in enumerate(raw_steps, start=1):
         context = f"{config_key}[{index}]"
-        when: tuple[str, ...] = ()
+        scope = ScopeSelector()
         if isinstance(raw, str):
             command = _mounted_command_step(repo_root, raw)
         elif isinstance(raw, dict):
+            extra = sorted(set(raw) - COMMAND_STEP_KEYS)
+            if extra:
+                raise SpiceError(f"{context}: unsupported keys: {', '.join(extra)}")
+            if raw.get("enabled") is False:
+                continue
             command = _command_step_from_table(repo_root, raw, context=context)
-            when = _when_patterns_from_table(raw, context=context)
+            scope = PRE_COMMIT_STEP_SCOPES.parse(raw.get(SCOPES_KEY))
         else:
             raise SpiceError(
                 f"[tool.spice.policy] {config_key} entries must be mounted command "
                 "names or { label = ..., run = [...] } tables"
             )
-        paths = _matching_staged_paths(staged, when) if when else tuple(staged)
-        if when and not paths:
+        paths = _scoped_staged_paths(scope, staged, phase=phase)
+        if paths is None:
             continue
         command = CommandStep(
             label=command.label,
@@ -536,28 +552,18 @@ def _normalize_step_key(raw: Any) -> str:
     return str(raw).strip().lower().replace("_", "-").replace(" ", "-")
 
 
-def _when_patterns_from_table(raw: dict[str, Any], *, context: str) -> tuple[str, ...]:
-    if "when" not in raw:
-        return ()
-    when = raw["when"]
-    if not isinstance(when, list):
-        raise SpiceError(f"{context}: when must be a non-empty glob list")
-    patterns = tuple(
-        item.strip() for item in when if isinstance(item, str) and item.strip()
+def _scoped_staged_paths(
+    scope: ScopeSelector, staged: list[Path], *, phase: str
+) -> tuple[Path, ...] | None:
+    phase_scope = ScopeSelector(phases=scope.phases)
+    if not phase_scope.matches(ScopeContext(phase=phase)):
+        return None
+    if not scope.paths:
+        return tuple(staged)
+    paths = tuple(
+        path for path in staged if scope.matches(ScopeContext(path=path, phase=phase))
     )
-    if len(patterns) != len(when) or not patterns:
-        raise SpiceError(f"{context}: when must be a non-empty glob list")
-    return patterns
-
-
-def _matching_staged_paths(
-    staged: list[Path], patterns: tuple[str, ...]
-) -> tuple[Path, ...]:
-    return tuple(
-        path
-        for path in staged
-        if any(matches_repo_path(path, pattern) for pattern in patterns)
-    )
+    return paths or None
 
 
 def _run_shape_guards(repo_root: Path) -> None:
