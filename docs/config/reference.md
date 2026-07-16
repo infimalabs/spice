@@ -30,6 +30,39 @@ and `key = []` explicitly clears an inherited list. A later scalar can replace
 an earlier table and a later table can replace an earlier scalar. Named wrapper
 groups are the one table-level atomic boundary: defining
 `[wrappers.<group>]` in a later scope replaces that whole inherited group.
+Every inline `scopes = { ... }` selector is also one atomic leaf: a later
+configuration layer replaces the complete selector instead of inheriting
+individual axes from earlier layers.
+
+### Universal applicability selectors
+
+Configurable entries express applicability with one inline selector:
+
+```toml
+scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"] }
+```
+
+Values within one axis are alternatives (OR), different axes are simultaneous
+requirements (AND), and absent axes are unconstrained. Normalization,
+validation, specificity, matching, and explanations come from the shared
+selector model; `paths` uses the canonical repository path matcher. Each
+consumer declares the axes it can evaluate, and a malformed or unsupported
+axis produces the same diagnostic naming that consumer and its supported set.
+An empty `scopes = {}` leaf explicitly clears inherited applicability.
+
+The initial admitted axes are grounded in current applicability consumers:
+
+| Axis | Current applicability consumers | Value contract |
+| --- | --- | --- |
+| `paths` | Policy rules, study providers, pre-commit command steps | Repository-relative PATHPOL glob-or-subtree selectors |
+| `drivers` | Wrappers, wrapper routes, maxim bags | Registered agent driver names |
+| `phases` | Pre-commit command steps | `pre-commit` or `pre-commit-success` |
+| `extensions` | Policy rules | File suffixes beginning with `.` |
+
+Command heads and flags remain wrapper-routing payload. Language families and
+test/generated roles remain classification datasets. Task phases remain live
+allocator routing state. The four configuration-layer names remain precedence
+metadata. None is accepted as a `scopes` axis.
 
 The `pyproject` scope alone uses the `tool.spice` prefix:
 
