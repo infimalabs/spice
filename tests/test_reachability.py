@@ -483,9 +483,11 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     _write_reachability_repo(tmp_path, "from spice import onlytest\n")
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
     created_paths: list[str] = []
+    options: dict[str, object] = {}
 
     def create_tasks(findings, **kwargs):
         created_paths.extend(f.path for f in findings)
+        options.update(kwargs)
         return ["created"]
 
     monkeypatch.setattr(
@@ -493,40 +495,44 @@ def test_study_reachability_cli_create_tasks_passes_findings(
         "_create_exhaust_tasks",
         create_tasks,
     )
-    args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
+    args = build_parser().parse_args(
+        [
+            "study",
+            "reachability",
+            "--create-tasks",
+            "--deferred",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
 
     assert args.func(args) == 1
 
     output = capsys.readouterr().out
     assert "reachability: 1 test-only finding(s)" in output
     assert created_paths == ["spice/onlytest.py"]
+    assert options == {
+        "deferred": True,
+        "origin": "ack:20260101T000000000000Z",
+        "print_created": True,
+    }
 
 
 def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
     monkeypatch, capsys
 ):
-    from spice.tasks import create
+    created = []
+    options: dict[str, object] = {}
 
-    created: list[dict[str, object]] = []
+    def fake_create(specs, **kwargs):
+        created.extend(specs)
+        options.update(kwargs)
+        handles = [f"EXHAUST-{index}" for index in range(1, len(specs) + 1)]
+        for handle in handles:
+            print(f"  task created: {handle}")
+        return handles
 
-    def fake_add(
-        title: str,
-        *,
-        project: str,
-        tags: list[str],
-        acceptance: list[str],
-    ) -> str:
-        created.append(
-            {
-                "title": title,
-                "project": project,
-                "tags": tags,
-                "acceptance": acceptance,
-            }
-        )
-        return f"EXHAUST-{len(created)}"
-
-    monkeypatch.setattr(create, "add", fake_add)
+    monkeypatch.setattr(studies_cli, "create_study_tasks", fake_create)
 
     studies_cli._create_exhaust_tasks(
         [
@@ -544,29 +550,44 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
     )
 
     assert created == [
-        {
-            "title": "Exhaust decision: wire-in/delete-both spice/onlytest.py",
-            "project": "tests.exhaust",
-            "tags": ["exhaust", "decision", "wire_in_delete_both"],
-            "acceptance": [
+        studies_cli.StudyTaskSpec(
+            study="reachability",
+            finding_identity=(
+                "python",
+                "module",
+                "spice.onlytest",
+                "spice/onlytest.py",
+            ),
+            title="Exhaust decision: wire-in/delete-both spice/onlytest.py",
+            project="tests.exhaust",
+            tags=("exhaust", "decision", "wire_in_delete_both"),
+            acceptance=(
                 "Resolve python module spice.onlytest by either wiring it into "
                 "a production entry point or deleting spice/onlytest.py along "
                 "with every test that imports it.",
                 "Current test-only importers: tests/test_only.py.",
-            ],
-        },
-        {
-            "title": "Exhaust decision: wire-in/delete-both spice/empty.py",
-            "project": "tests.exhaust",
-            "tags": ["exhaust", "decision", "wire_in_delete_both"],
-            "acceptance": [
+            ),
+        ),
+        studies_cli.StudyTaskSpec(
+            study="reachability",
+            finding_identity=(
+                "python",
+                "module",
+                "spice.empty",
+                "spice/empty.py",
+            ),
+            title="Exhaust decision: wire-in/delete-both spice/empty.py",
+            project="tests.exhaust",
+            tags=("exhaust", "decision", "wire_in_delete_both"),
+            acceptance=(
                 "Resolve python module spice.empty by either wiring it into a "
                 "production entry point or deleting spice/empty.py along with "
                 "every test that imports it.",
                 "Current test-only importers: unknown.",
-            ],
-        },
+            ),
+        ),
     ]
+    assert options == {"deferred": False, "origin": None, "print_created": True}
     assert capsys.readouterr().out == (
         "  task created: EXHAUST-1\n  task created: EXHAUST-2\n"
     )

@@ -74,6 +74,37 @@ def test_general_purpose_study_flags_cover_reference_surface():
     assert parsed[-1].limit == SUBSUMPTION_RENDER_LIMIT
 
 
+def test_task_generating_studies_share_deferred_origin_flags():
+    parser = build_parser()
+    commands = [
+        [
+            "study",
+            action,
+            "--create-tasks",
+            "--deferred",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+        for action in (
+            "reachability",
+            "symbol-reachability",
+            "assertion-free-tests",
+            "private-internals",
+        )
+    ]
+
+    parsed = [parser.parse_args(command) for command in commands]
+
+    assert [args.create_tasks for args in parsed] == [True, True, True, True]
+    assert [args.deferred for args in parsed] == [True, True, True, True]
+    assert [args.origin for args in parsed] == [
+        "ack:20260101T000000000000Z",
+        "ack:20260101T000000000000Z",
+        "ack:20260101T000000000000Z",
+        "ack:20260101T000000000000Z",
+    ]
+
+
 def test_taste_cli_renders_exact_inclusive_inflection_suggestions(
     tmp_path, monkeypatch, capsys
 ):
@@ -279,34 +310,29 @@ def test_markdown_links_cli_renders_finding_board(tmp_path, monkeypatch, capsys)
 
 
 def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
-    from spice.tasks import create
-
     path = tmp_path / "tests" / "test_quality.py"
     path.parent.mkdir()
     path.write_text("def test_without_assertion():\n    value = 1\n", encoding="utf-8")
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
-    created: list[dict[str, object]] = []
+    created = []
+    options: dict[str, object] = {}
 
-    def fake_add(
-        title: str,
-        *,
-        project: str,
-        tags: list[str],
-        acceptance: list[str],
-    ) -> str:
-        created.append(
-            {
-                "title": title,
-                "project": project,
-                "tags": tags,
-                "acceptance": acceptance,
-            }
-        )
-        return f"QUALITY-{len(created)}"
+    def fake_create(specs, **kwargs):
+        created.extend(specs)
+        options.update(kwargs)
+        return ["QUALITY-1"]
 
-    monkeypatch.setattr(create, "add", fake_add)
+    monkeypatch.setattr(studies_cli, "create_study_tasks", fake_create)
     args = build_parser().parse_args(
-        ["study", "assertion-free-tests", "--json", "--create-tasks"]
+        [
+            "study",
+            "assertion-free-tests",
+            "--json",
+            "--create-tasks",
+            "--deferred",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
     )
 
     assert args.func(args) == 1
@@ -314,4 +340,9 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
     assert payload["artifactKind"] == "spice.study.assertion-free-tests"
     assert payload["createdTasks"] == ["QUALITY-1"]
     assert payload["findings"][0]["test_name"] == "test_without_assertion"
-    assert created[0]["project"] == "tests.quality"
+    assert created[0].project == "tests.quality"
+    assert options == {
+        "deferred": True,
+        "origin": "ack:20260101T000000000000Z",
+        "print_created": False,
+    }
