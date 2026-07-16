@@ -512,9 +512,11 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     assert "reachability: 1 test-only finding(s)" in output
     assert created_paths == ["spice/onlytest.py"]
     assert options == {
-        "deferred": True,
-        "origin": "ack:20260101T000000000000Z",
-        "print_created": True,
+        "controls": studies_cli.StudyTaskCreationControls(
+            deferred=True,
+            origin="ack:20260101T000000000000Z",
+            print_created=True,
+        )
     }
 
 
@@ -546,7 +548,12 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
                 path="spice/empty.py",
                 only_test_imports=[],
             ),
-        ]
+        ],
+        controls=studies_cli.StudyTaskCreationControls(
+            deferred=False,
+            origin=None,
+            print_created=True,
+        ),
     )
 
     assert created == [
@@ -587,7 +594,13 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
             ),
         ),
     ]
-    assert options == {"deferred": False, "origin": None, "print_created": True}
+    assert options == {
+        "controls": studies_cli.StudyTaskCreationControls(
+            deferred=False,
+            origin=None,
+            print_created=True,
+        )
+    }
     assert capsys.readouterr().out == (
         "  task created: EXHAUST-1\n  task created: EXHAUST-2\n"
     )

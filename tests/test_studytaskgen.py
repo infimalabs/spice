@@ -15,7 +15,11 @@ from spice.studies.reachability import (
     ReachabilityFinding,
     SymbolReachabilityFinding,
 )
-from spice.studies.taskgen import StudyTaskSpec, create_study_tasks
+from spice.studies.taskgen import (
+    StudyTaskCreationControls,
+    StudyTaskSpec,
+    create_study_tasks,
+)
 from spice.studies.testquality import (
     AssertionFreeTestFinding,
     PrivateInternalCouplingFinding,
@@ -24,12 +28,7 @@ from spice.tasks import claimstate, config, create, identity, tw
 
 ACTOR = "abababababababababababababababab"
 ACK_ORIGIN = "ack:20260101T000000000000Z"
-STUDY_ACTIONS = (
-    "reachability",
-    "symbol-reachability",
-    "assertion-free-tests",
-    "private-internals",
-)
+STUDY_ACTIONS = tuple(studies_cli.TASK_GENERATING_STUDY_ACTIONS)
 MODULE_FINDING = ReachabilityFinding(
     subject="spice.onlytest",
     path="spice/onlytest.py",
@@ -171,12 +170,17 @@ def test_all_study_generators_create_reusable_deferred_tasks_visible_by_project(
 
 def test_completed_study_finding_recurs_with_traceable_lineage(study_task_backend):
     spec = _task_spec("Recurring study finding", ("path.py", "symbol"))
-    first = create_study_tasks([spec], origin=ACK_ORIGIN, print_created=False)[0]
+    controls = StudyTaskCreationControls(
+        deferred=False,
+        origin=ACK_ORIGIN,
+        print_created=False,
+    )
+    first = create_study_tasks([spec], controls=controls)[0]
     first_row = identity.resolve(first)
     tw.run([identity.uuid_of(first_row), "done"])
     completed_row = identity.resolve(first)
 
-    second = create_study_tasks([spec], origin=ACK_ORIGIN, print_created=False)[0]
+    second = create_study_tasks([spec], controls=controls)[0]
     second_row = identity.resolve(second)
     notes = [
         str(annotation.get("description") or "")
@@ -201,7 +205,11 @@ def test_immediate_study_task_inherits_active_claim_origin(study_task_backend):
 
     child = create_study_tasks(
         [_task_spec("Immediate inherited finding", ("module.py", "finding"))],
-        print_created=False,
+        controls=StudyTaskCreationControls(
+            deferred=False,
+            origin=None,
+            print_created=False,
+        ),
     )[0]
     child_row = identity.resolve(child)
 

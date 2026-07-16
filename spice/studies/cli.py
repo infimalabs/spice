@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from spice.errors import SpiceError
@@ -42,8 +43,29 @@ from spice.studies import (
     taste,
     testquality,
 )
-from spice.studies.taskgen import StudyTaskSpec, create_study_tasks
+from spice.studies.taskgen import (
+    StudyTaskCreationControls,
+    StudyTaskSpec,
+    create_study_tasks,
+)
 from spice.studies.walk import changed_paths, staged_paths, tracked_paths
+
+TASK_GENERATING_STUDY_ACTIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "reachability": (
+            "Create tagged decision tasks for each test-only reachability finding."
+        ),
+        "symbol-reachability": (
+            "Create tagged decision tasks for each test-only symbol finding."
+        ),
+        "assertion-free-tests": (
+            "Create tagged decision tasks for each assertion-free test."
+        ),
+        "private-internals": (
+            "Create tagged decision tasks for unmanaged private/internal coupling."
+        ),
+    }
+)
 
 
 def configure_study_parser(subparsers: Any) -> None:
@@ -251,12 +273,6 @@ def _configure_reachability_parser(actions: Any) -> None:
         default=[],
         help="Dotted module path to allow even if test-only (repeatable).",
     )
-    _add_task_creation_arguments(
-        reach,
-        help_text=(
-            "Create tagged decision tasks for each test-only reachability finding."
-        ),
-    )
     reach.add_argument(
         "--limit",
         type=_positive_int_arg,
@@ -270,10 +286,6 @@ def _configure_symbol_reachability_parser(actions: Any) -> None:
         actions,
         "symbol-reachability",
         "Test-only symbols inside production-reachable modules.",
-    )
-    _add_task_creation_arguments(
-        symbol,
-        help_text="Create tagged decision tasks for each test-only symbol finding.",
     )
     symbol.add_argument(
         "--limit",
@@ -289,10 +301,6 @@ def _configure_assertion_free_parser(actions: Any) -> None:
         "assertion-free-tests",
         "Test functions that do not appear to assert behavior.",
     )
-    _add_task_creation_arguments(
-        assertion,
-        help_text="Create tagged decision tasks for each assertion-free test.",
-    )
     assertion.add_argument(
         "--limit",
         type=_positive_int_arg,
@@ -306,12 +314,6 @@ def _configure_private_internals_parser(actions: Any) -> None:
         actions,
         "private-internals",
         "Tests coupled to private imports or internal assertion structures.",
-    )
-    _add_task_creation_arguments(
-        private,
-        help_text=(
-            "Create tagged decision tasks for unmanaged private/internal coupling."
-        ),
     )
     private.add_argument(
         "--limit",
@@ -331,6 +333,20 @@ def _add_task_creation_arguments(parser: Any, *, help_text: str) -> None:
     parser.add_argument(
         "--origin",
         help="Provenance for new tasks, such as ack:<inbox-key> or task:<handle>.",
+    )
+
+
+def _study_task_creation_controls(
+    args: argparse.Namespace,
+) -> StudyTaskCreationControls:
+    if args.study_action not in TASK_GENERATING_STUDY_ACTIONS:
+        raise SpiceError(
+            f"study action does not declare task-generation controls: {args.study_action}"
+        )
+    return StudyTaskCreationControls(
+        deferred=bool(args.deferred),
+        origin=str(args.origin) if args.origin else None,
+        print_created=not bool(args.emit_json),
     )
 
 
@@ -392,6 +408,9 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     sub.add_argument("--staged", action="store_true", help="Scan staged files only.")
     sub.add_argument("--json", action="store_true", dest="emit_json")
     sub.set_defaults(func=handle_study)
+    task_creation_help = TASK_GENERATING_STUDY_ACTIONS.get(name)
+    if task_creation_help is not None:
+        _add_task_creation_arguments(sub, help_text=task_creation_help)
     return sub
 
 
@@ -803,9 +822,7 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_exhaust_tasks(
             findings,
-            deferred=args.deferred,
-            origin=args.origin,
-            print_created=not args.emit_json,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -826,9 +843,7 @@ def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_symbol_reachability_tasks(
             findings,
-            deferred=args.deferred,
-            origin=args.origin,
-            print_created=not args.emit_json,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -854,9 +869,7 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     if findings and getattr(args, "create_tasks", False):
         created_tasks = _create_assertion_free_tasks(
             findings,
-            deferred=args.deferred,
-            origin=args.origin,
-            print_created=not args.emit_json,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -886,9 +899,7 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
         created_tasks = _create_private_internal_tasks(
             offenders,
             stale,
-            deferred=args.deferred,
-            origin=args.origin,
-            print_created=not args.emit_json,
+            controls=_study_task_creation_controls(args),
         )
     if args.emit_json:
         _print_study_json(
@@ -911,9 +922,7 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
 def _create_exhaust_tasks(
     findings: list[reachability.ReachabilityFinding],
     *,
-    deferred: bool = False,
-    origin: str | None = None,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
     specs = [
         StudyTaskSpec(
@@ -932,17 +941,13 @@ def _create_exhaust_tasks(
         )
         for f in findings
     ]
-    return create_study_tasks(
-        specs, deferred=deferred, origin=origin, print_created=print_created
-    )
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_symbol_reachability_tasks(
     findings: list[reachability.SymbolReachabilityFinding],
     *,
-    deferred: bool = False,
-    origin: str | None = None,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
     specs = [
         StudyTaskSpec(
@@ -964,17 +969,13 @@ def _create_symbol_reachability_tasks(
         )
         for f in findings
     ]
-    return create_study_tasks(
-        specs, deferred=deferred, origin=origin, print_created=print_created
-    )
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_assertion_free_tasks(
     findings: list[testquality.AssertionFreeTestFinding],
     *,
-    deferred: bool = False,
-    origin: str | None = None,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
     specs = [
         StudyTaskSpec(
@@ -991,18 +992,14 @@ def _create_assertion_free_tasks(
         )
         for f in findings
     ]
-    return create_study_tasks(
-        specs, deferred=deferred, origin=origin, print_created=print_created
-    )
+    return create_study_tasks(specs, controls=controls)
 
 
 def _create_private_internal_tasks(
     offenders: list[testquality.PrivateInternalCouplingFinding],
     stale: list[testquality.InternalCouplingKey],
     *,
-    deferred: bool = False,
-    origin: str | None = None,
-    print_created: bool = True,
+    controls: StudyTaskCreationControls,
 ) -> list[str]:
     specs = [
         StudyTaskSpec(
@@ -1037,9 +1034,7 @@ def _create_private_internal_tasks(
         )
         for path, test_name, target in stale
     )
-    return create_study_tasks(
-        specs, deferred=deferred, origin=origin, print_created=print_created
-    )
+    return create_study_tasks(specs, controls=controls)
 
 
 def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
