@@ -176,3 +176,63 @@ assert(
   lifetimeCalls.at(-1).configRevision === freshConfigRevision,
   "fresh revision reaches controls",
 );
+
+const direct = lane();
+const directMetrics = { completed: 7 };
+const directInfo = {
+  summaryRows: [{ key: "thread", value: "thread-direct" }],
+  members: [],
+};
+const directRenewal = { requested: true };
+context.renderLaneChrome(direct, {
+  targetIdentity: {
+    targetId: "target-direct",
+    worktreeName: "direct-tree",
+    branch: "direct-branch",
+    driver: { name: "codex", model: "gpt-direct", effort: "high" },
+    agent: { state: "configured", name: "agent-direct" },
+    thread: { state: "bound", threadId: "thread-direct" },
+  },
+  taskFilters: ["serve.direct"],
+  effectiveTaskFilters: ["serve"],
+  laneFilterVersion: "direct-filter-version",
+  teamIdentity: {
+    state: "member",
+    teamId: "team-direct",
+    teamRevision: 8,
+    configRevision: 20,
+  },
+  lifetime: "Drive",
+  renewalIntent: directRenewal,
+  laneMetrics: directMetrics,
+  laneInfo: directInfo,
+  privateTaskCount: 4,
+  statusLine: {
+    agentProcessStatus: "running",
+    pendingInboxCount: 2,
+    pendingInboxKeys: ["direct-a", "direct-b"],
+    pendingInboxRevision: "direct-revision",
+    pendingInboxVersion: 30,
+  },
+});
+
+assert(direct.branchName === "direct-branch", "direct identity reaches chrome");
+assert(direct.agentName === "agent-direct", "direct agent identity reaches chrome");
+assert(direct.teamId === "team-direct", "direct team identity reaches chrome");
+assert(
+  direct.taskFilters.join(",") === "serve.direct",
+  "direct filters reach chrome",
+);
+assert(
+  direct.effectiveTaskFilters.join(",") === "serve",
+  "direct effective filters reach chrome",
+);
+assert(direct.lifetime === "Drive", "direct lifetime reaches chrome");
+assert(direct.renewalIntent === directRenewal, "direct renewal intent reaches chrome");
+assert(direct.laneMetrics === directMetrics, "direct metrics reach chrome");
+assert(direct.laneInfo === directInfo, "direct info reaches chrome");
+assert(direct.privateTaskCount === 4, "direct private count reaches chrome");
+assert(
+  statusWrites.at(-1).pendingInboxCount === 2,
+  "direct status line reaches chrome",
+);

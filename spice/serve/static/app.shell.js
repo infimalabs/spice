@@ -253,7 +253,9 @@ function lanePaneState() {
 
 function createLaneState(targetId, hint = null, options = {}) {
   const emptyTeam = Boolean(options.emptyTeam);
-  const target = targetById.get(targetId) || {};
+  /** @type {LaneChromePayload | undefined} */
+  const target = emptyTeam ? {} : targetById.get(targetId);
+  if (!target) throw new Error("lane target payload is required: " + targetId);
   const targetIdentity = target.targetIdentity || {};
   const serveAgentIdentity = target.serveAgentIdentity || {};
   const teamIdentity = target.teamIdentity || { state: "none" };
@@ -289,7 +291,7 @@ function createLaneState(targetId, hint = null, options = {}) {
   else {
     syncComposerShards(lane, [lane]);
     syncLaneEffectiveControls(lane);
-    renderLaneChrome(lane, targetPayloadShim(target));
+    renderLaneChrome(lane, target);
   }
   return lane;
 }
