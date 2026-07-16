@@ -1,7 +1,7 @@
 # Agent Content Surface Map
 
-Status: investigative map, 2026-07-06. Prerequisite artifact for PRESENT-1kBMbq1z;
-not a decision, not a proposal to change anything yet.
+Status: research, 2026-07-06. Investigative map; prerequisite artifact for
+PRESENT-1kBMbq1z; not a decision, not a proposal to change anything yet.
 
 ## Method
 

@@ -1,6 +1,6 @@
 # Auto-Compacting Before the Driver Ceiling
 
-Status: implemented, 2026-07-06. Deliverable for COMPACT-1kBNMhg4.
+Status: implemented contract, 2026-07-15. Deliverable for COMPACT-1kBNMhg4.
 
 ## The problem
 
@@ -32,11 +32,15 @@ despite pressure reading past 100% in spice's own metering.
 
 `spice/agent/driver.py`:
 - `CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"`
-- `CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = 140_000` — comfortably under the 200K
-  standard-tier ceiling the pressure meter already targets, so compaction
-  fires before that reported pressure reads 100%.
+- `CLAUDE_AUTO_COMPACT_WINDOW_TOKENS` — read from layered config as
+  `agent.claude.auto_compact_window_tokens`; the packaged default in
+  `spice/spice.toml` is `200000`, capping the 1M overflow tier back down to
+  the 200K standard-tier window the pressure meter already targets, so a
+  long-running lane compacts at that tier ceiling instead of running toward
+  the real one.
 - `claude_auto_compact_environment(repo_root, *, base_env)` returns
-  `{CLAUDE_AUTO_COMPACT_WINDOW_ENV: "140000"}` only when the worktree's
+  `{CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(CLAUDE_AUTO_COMPACT_WINDOW_TOKENS)}`
+  only when the worktree's
   configured driver is Claude, and only when the variable is not already
   present in `base_env` — an explicit override (operator- or
   parent-process-set) always wins; this only ever supplies a default.
@@ -51,5 +55,7 @@ function.
 
 Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` explicitly in the operator's own shell
 or launch environment before starting the agent to use a different value (or
-Claude Code's own `auto` setting) instead of spice's 140K default — spice's
-own addition backs off entirely once that variable is already set.
+Claude Code's own `auto` setting) instead of spice's configured default —
+spice's own addition backs off entirely once that variable is already set.
+The default itself moves through layered config as
+`agent.claude.auto_compact_window_tokens`.

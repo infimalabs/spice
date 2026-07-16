@@ -1,6 +1,6 @@
 # Should a plan-phase claim block implementation commits?
 
-Status: decision proposal, 2026-07-06. Deliverable for PLAN-1kBMj5zd. A decision to
+Status: recommendation, 2026-07-06. Deliverable for PLAN-1kBMj5zd. A decision to
 evaluate, not yet approved; do not weaken the existing done-time gate on the strength
 of this doc alone.
 

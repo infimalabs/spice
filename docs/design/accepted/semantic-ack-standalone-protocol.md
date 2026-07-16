@@ -1,6 +1,6 @@
 # Semantic ACK Standalone Protocol
 
-Status: decision recorded.
+Status: decision, 2026-06-23.
 
 ## Decision
 

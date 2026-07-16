@@ -1,6 +1,6 @@
 # Power Suit, Not Weighted Blanket: A Native-Harness Critique
 
-Status: critique, 2026-07-06. Deliverable for PRESENT-1kBMcWYz. Capture-first —
+Status: research, 2026-07-06. Critique; deliverable for PRESENT-1kBMcWYz. Capture-first —
 this is observation, not a fix; it feeds STEERIN-1kBMc2Gk, WIRING-1kBMc8BV,
 PRESENT-1kBMcRQG, and PRESENT-1kBMbq1z (already captured this session).
 
