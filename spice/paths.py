@@ -152,10 +152,10 @@ def atomic_write_text(path: Path, text: str, *, write_if_changed: bool = False) 
     try:
         if existing_mode is not None:
             os.fchmod(descriptor, existing_mode)
-        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        handle = os.fdopen(descriptor, "wb")
         descriptor = -1
         with handle:
-            handle.write(text)
+            handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)

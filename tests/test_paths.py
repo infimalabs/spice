@@ -38,6 +38,22 @@ def test_atomic_write_text_creates_parent_and_round_trips_unicode(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == NEW_STATE_FILE_MODE
 
 
+def test_atomic_write_text_matching_utf8_bytes_preserve_inode(tmp_path):
+    path = tmp_path / "state.txt"
+    text = "first line\njalapeño 🌶️\n"
+
+    atomic_write_text(path, text, write_if_changed=True)
+    before = path.stat()
+    atomic_write_text(path, text, write_if_changed=True)
+    after = path.stat()
+
+    assert path.read_bytes() == text.encode("utf-8")
+    assert (after.st_ino, after.st_mtime_ns) == (
+        before.st_ino,
+        before.st_mtime_ns,
+    )
+
+
 def test_atomic_write_json_supports_pretty_compact_and_matching_content(tmp_path):
     pretty = tmp_path / "pretty.json"
     compact = tmp_path / "compact.json"
