@@ -30,6 +30,7 @@ EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
     "spice/toolprocess.py:run_parent_lifetime_command:run",
 }
 EXPECTED_TOOL_POLICY_CALLERS = {
+    "coverage": {"spice/studies/subsumption.py:record_subsumption:capture=false"},
     "extension": {
         "spice/hooks/doctor.py:_spice_package_source_for_python:capture=true",
         "spice/hooks/precommit.py:_run_policy_command_step:capture=true",

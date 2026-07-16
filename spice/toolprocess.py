@@ -9,6 +9,7 @@ from typing import Any, Literal
 from spice.procs import run_bounded_process_group
 
 ToolPolicy = Literal[
+    "coverage",
     "extension",
     "hook",
     "release",
@@ -16,6 +17,7 @@ ToolPolicy = Literal[
     "typecheck",
 ]
 
+COVERAGE_TOOL_TIMEOUT_SECONDS = 600.0
 EXTENSION_TOOL_TIMEOUT_SECONDS = 120.0
 HOOK_TOOL_TIMEOUT_SECONDS = 300.0
 RELEASE_TOOL_TIMEOUT_SECONDS = 300.0
@@ -23,6 +25,7 @@ STUDY_TOOL_TIMEOUT_SECONDS = 120.0
 TYPECHECK_TOOL_TIMEOUT_SECONDS = 300.0
 
 TOOL_POLICY_TIMEOUT_SECONDS: dict[ToolPolicy, float] = {
+    "coverage": COVERAGE_TOOL_TIMEOUT_SECONDS,
     "extension": EXTENSION_TOOL_TIMEOUT_SECONDS,
     "hook": HOOK_TOOL_TIMEOUT_SECONDS,
     "release": RELEASE_TOOL_TIMEOUT_SECONDS,
