@@ -113,6 +113,46 @@ def test_python_unused_classifies_top_level_symbols_and_runtime_bindings(tmp_pat
     ]
 
 
+def test_python_unused_configured_package_module_uses_main_execution_root(tmp_path):
+    _write_python_unused_repo(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + "package = ['python', '-m', 'spice.commandpkg']\n",
+        encoding="utf-8",
+    )
+    package = tmp_path / "spice" / "commandpkg"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "PACKAGE_NAME = 'commandpkg'\n", encoding="utf-8"
+    )
+    (package / "__main__.py").write_text(
+        "from spice.live import package_command_handler\n\npackage_command_handler()\n",
+        encoding="utf-8",
+    )
+    live = tmp_path / "spice" / "live.py"
+    live.write_text(
+        live.read_text(encoding="utf-8") + "\ndef package_command_handler():\n"
+        "    return 'package-command'\n",
+        encoding="utf-8",
+    )
+
+    entries = collect_python_unused_entries(tmp_path)
+    package_handler = next(
+        entry for entry in entries if entry.symbol == "package_command_handler"
+    )
+
+    assert (
+        package_handler.status,
+        package_handler.reason,
+        package_handler.path,
+    ) == (
+        STATUS_USED,
+        REASON_PRODUCTION_REFERENCE,
+        "spice/live.py",
+    )
+
+
 def test_study_python_unused_cli_reports_both_verdicts(tmp_path, monkeypatch, capsys):
     _write_python_unused_repo(tmp_path)
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
