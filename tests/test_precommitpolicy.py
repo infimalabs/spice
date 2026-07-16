@@ -577,11 +577,13 @@ def test_policy_pre_commit_success_extensions_run_after_gate_passes(
         "[tool.spice.policy]\n"
         "pre_commit = [\n"
         '  { label = "assets", '
-        f"run = {_argv_toml(sys.executable, str(recorder), 'assets')} }},\n"
+        f"run = {_argv_toml(sys.executable, str(recorder), 'assets')}, "
+        'scopes = { phases = ["pre-commit"] } },\n'
         "]\n"
         "pre_commit_success = [\n"
         '  { label = "success", '
-        f"run = {_argv_toml(sys.executable, str(recorder), 'success')} }},\n"
+        f"run = {_argv_toml(sys.executable, str(recorder), 'success')}, "
+        'scopes = { phases = ["pre-commit-success"] } },\n'
         "]\n",
         encoding="utf-8",
     )
@@ -815,10 +817,10 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
         "pre_commit = [\n"
         '  { label = "cs", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'cs')}, "
-        'when = ["*.cs"] },\n'
+        'scopes = { paths = ["*.cs"], phases = ["pre-commit"] } },\n'
         '  { label = "lua", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'lua')}, "
-        'when = ["*.lua"] },\n'
+        'scopes = { paths = ["*.lua"], phases = ["pre-commit"] } },\n'
         '  { label = "always", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'always')} }},\n"
         "]\n",

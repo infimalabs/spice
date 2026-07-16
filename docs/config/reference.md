@@ -309,7 +309,7 @@ with `[tool.spice.agent] wrappers = [...]`.
 | --- | --- |
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
-| `selector = { drivers = ["codex"], argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Individual `match` routes accept the same `drivers` scope. |
+| `selector = { scopes = { drivers = ["codex"] }, argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Wrapper groups and individual `match` routes accept the same `scopes.drivers` selector. |
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
 group supplies only the finite post-selection command-shape transformations:
@@ -555,11 +555,12 @@ never emits a trailer the commit-msg gate then rejects.
 
 Command-step tables accept:
 
-`label`, `mount`, `run`/`argv`, `when`, `formatter`, and `enabled`.
+`label`, `mount`, `run`/`argv`, `scopes`, `formatter`, and `enabled`.
 `pre_commit` steps receive `SPICE_STAGED_PATHS`; mounted steps also receive
-`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `when` uses the shared
-repository path-selector contract above without the policy-scope-only internal
-`/**/` variant.
+`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `scopes.paths` narrows the
+staged-path set with the universal PATHPOL contract, while `scopes.phases`
+selects `pre-commit` or `pre-commit-success`; the axes compose through the
+universal AND rule.
 
 Reachability provider tables accept:
 

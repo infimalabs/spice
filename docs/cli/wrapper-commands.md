@@ -137,13 +137,14 @@ duplicate selectors fail during wrapper generation.
 
 Wrapper entries may also be direct argv wrappers with an `argv = [...]` list;
 spice shell-quotes each argv word while building
-`SPICE_SHELL_HOOK_WRAPPERS`. A direct wrapper or an individual `match` route
-may set `drivers = ["codex", "claude"]`; spice validates those names against
-the known driver names and renders only entries matching the active worktree
-driver. Prefer stable repository-owned commands over hook-private environment
-variables. For example, a repository can opt into a local code-generation
-wrapper by selecting its own extension group alongside `common`, without
-implying that `codegen` belongs to the generic default:
+`SPICE_SHELL_HOOK_WRAPPERS`. A wrapper group, direct wrapper, or individual
+`match` route may set `scopes = { drivers = ["codex", "claude"] }`; the
+universal scope parser validates and normalizes those names, and only entries
+matching the active worktree driver render. Prefer stable repository-owned
+commands over hook-private environment variables. For example, a repository
+can opt into a local code-generation wrapper by selecting its own extension
+group alongside `common`, without implying that `codegen` belongs to the
+generic default:
 
 ```toml
 [tool.spice.agent]
@@ -220,9 +221,10 @@ across both surfaces:
   get the mount signals; it runs with its argv as written.
 
 Every `pre_commit` command step — mount or raw — additionally gets
-`SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by `when`). The
-guarantee is representational: the env says what the command is (a mount, or
-not) rather than where it was triggered from.
+`SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by
+`scopes.paths`; `scopes.phases` selects the pre-commit or success hook phase).
+The guarantee is representational: the env says what the command is (a mount,
+or not) rather than where it was triggered from.
 
 ## Choosing A Surface
 

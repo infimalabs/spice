@@ -17,6 +17,13 @@ from spice.extensions import (
     SpiceExtensionEntryPoint,
     extension_entry_points,
 )
+from spice.scopes import (
+    SCOPES_KEY,
+    WRAPPER_ROUTE_SCOPES,
+    WRAPPER_SCOPES,
+    ScopeContext,
+    ScopeSelector,
+)
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
@@ -314,9 +321,15 @@ def render_agent_wrapper_group_lines(
     driver_name: str,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
+    context = ScopeContext(driver=driver_name)
+    group_scope = WRAPPER_SCOPES.parse(group.get(SCOPES_KEY))
+    if not group_scope.matches(context):
+        return []
     lines: list[str] = []
     for raw_wrapper, raw_entry in group.items():
         wrapper = str(raw_wrapper).strip()
+        if wrapper == SCOPES_KEY:
+            continue
         if raw_entry is False:
             continue
         if isinstance(raw_entry, Mapping):
@@ -372,7 +385,7 @@ def render_agent_direct_wrapper_lines(
 ) -> list[str]:
     config_path = f"tool.spice.wrappers.{group_name}.{selector}"
     require_shell_function_name(selector, label=f"{config_path} command")
-    extra = sorted(set(entry) - {"argv", "drivers", "match"})
+    extra = sorted(set(entry) - {"argv", SCOPES_KEY, "match"})
     if extra:
         raise SpiceError(
             f"spice shell hook: {config_path} has unsupported keys: {', '.join(extra)}"
@@ -381,10 +394,7 @@ def render_agent_direct_wrapper_lines(
         entry.get("argv"),
         label=f"{config_path}.argv",
     )
-    drivers = configured_wrapper_drivers(
-        entry.get("drivers"),
-        label=f"{config_path}.drivers",
-    )
+    scope = WRAPPER_SCOPES.parse(entry.get(SCOPES_KEY))
     routes = agent_wrapper_match_routes(entry.get("match"), config_path=config_path)
     if selector == RTK_CANONICAL_EXECUTABLE:
         command_words = resolved_rtk_command_words(command_words, rtk_executable)
@@ -394,13 +404,14 @@ def render_agent_direct_wrapper_lines(
             )
             for route in routes
         )
-    active_routes = tuple(route for route in routes if driver_name in route.drivers)
+    context = ScopeContext(driver=driver_name)
+    active_routes = tuple(route for route in routes if route.scope.matches(context))
     if not routes and selector == command_words[0]:
         raise SpiceError(
             "spice shell hook: wrapper "
             f"{selector!r} cannot intercept itself in {config_path}.argv"
         )
-    if driver_name not in drivers:
+    if not scope.matches(context):
         return []
     if routes and not active_routes and selector == command_words[0]:
         return []
@@ -433,7 +444,7 @@ class WrapperMatchRoute(NamedTuple):
     head: str | None
     flags: tuple[str, ...]
     argv: tuple[str, ...]
-    drivers: frozenset[str]
+    scope: ScopeSelector
 
 
 def render_agent_match_wrapper_lines(
@@ -499,7 +510,7 @@ def agent_wrapper_match_routes(
 def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     if not isinstance(raw, Mapping):
         raise SpiceError(f"spice shell hook: {label} must be a table")
-    extra = sorted(set(raw) - {"head", "flags", "argv", "drivers"})
+    extra = sorted(set(raw) - {"head", "flags", "argv", SCOPES_KEY})
     if extra:
         raise SpiceError(
             f"spice shell hook: {label} has unsupported keys: {', '.join(extra)}"
@@ -519,36 +530,13 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
         for word in flags:
             match_route_word(word, label=f"{label}.flags")
     argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
-    drivers = configured_wrapper_drivers(
-        raw.get("drivers"),
-        label=f"{label}.drivers",
-    )
+    scope = WRAPPER_ROUTE_SCOPES.parse(raw.get(SCOPES_KEY))
     return WrapperMatchRoute(
         head=head,
         flags=tuple(flags),
         argv=tuple(argv),
-        drivers=drivers,
+        scope=scope,
     )
-
-
-def configured_wrapper_drivers(raw: object, *, label: str) -> frozenset[str]:
-    known = known_wrapper_driver_names()
-    if raw is None:
-        return known
-    configured: list[str] = []
-    for raw_driver in config_string_list(raw, label=label):
-        driver = raw_driver.casefold()
-        if driver not in known:
-            expected = ", ".join(sorted(known))
-            raise SpiceError(
-                f"spice shell hook: {label} must be known agent drivers; "
-                f"got {raw_driver!r}; expected one of: {expected}"
-            )
-        if driver not in configured:
-            configured.append(driver)
-    if not configured:
-        raise SpiceError(f"spice shell hook: {label} must be non-empty")
-    return frozenset(configured)
 
 
 def active_wrapper_driver_name(repo_root: Path) -> str:
