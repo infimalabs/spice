@@ -2,13 +2,13 @@
 
 import io
 import json
-import sqlite3
 import subprocess
 from pathlib import Path
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail.attachments import prepare_inbox_attachments
+from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.acks import (
     AckArchivalSummary,
@@ -361,7 +361,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
     _init_repo(tmp_path)
     path = ack_state_database_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         connection.execute(
             """
             CREATE TABLE acked_inbox_items (
@@ -398,7 +398,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
     )
 
     records = ack_state_records(tmp_path)
-    with sqlite3.connect(path) as connection:
+    with sqlite_connection(path) as connection:
         columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(acked_inbox_items)")

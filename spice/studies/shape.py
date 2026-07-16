@@ -33,7 +33,7 @@ GENERIC_SPLIT_RES = (
     re.compile(r"part\d+\.py$", re.IGNORECASE),
     re.compile(r"\d+\.py$"),
 )
-ALLOWED_NON_SHAPE_FILES = frozenset({"__main__.py", "py.typed"})
+ALLOWED_NON_SHAPE_FILES = frozenset({"__main__.py", "conftest.py", "py.typed"})
 # Four or more sibling modules sharing a long prefix or suffix are a package
 # wearing an affix as a disguise. Repos may tune the threshold, with 3 as the
 # minimum allowed value, but there is no flex headroom: unlike file size, a name
