@@ -39,7 +39,7 @@ individual axes from earlier layers.
 Configurable entries express applicability with one inline selector:
 
 ```toml
-scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"] }
+scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"], models = ["gpt-5.5"] }
 ```
 
 Values within one axis are alternatives (OR), different axes are simultaneous
@@ -55,14 +55,34 @@ The initial admitted axes are grounded in current applicability consumers:
 | Axis | Current applicability consumers | Value contract |
 | --- | --- | --- |
 | `paths` | Policy rules, study providers, pre-commit command steps | Repository-relative PATHPOL glob-or-subtree selectors |
-| `drivers` | Wrappers, wrapper routes, maxim bags | Registered agent driver names |
+| `drivers` | Wrappers, wrapper routes, maxim bags, pre-commit command steps | Registered agent driver names |
+| `models` | Pre-commit command steps | Normalized effective worktree model identifiers |
 | `phases` | Pre-commit command steps | `pre-commit` or `pre-commit-success` |
 | `extensions` | Policy rules | File suffixes beginning with `.` |
 
 Command heads and flags remain wrapper-routing payload. Language families and
 test/generated roles remain classification datasets. Task phases remain live
-allocator routing state. The four configuration-layer names remain precedence
-metadata. None is accepted as a `scopes` axis.
+allocator routing state. `scopes.models` filters an entry against the effective
+configured worktree model; it never chooses a launch model. The `agent.model`
+and `tasks.phase_models.<driver>.<phase>.model` keys remain launch payload. The
+four configuration-layer names remain precedence metadata. None of those
+payload, dataset, routing, or layering concepts is accepted as a new `scopes`
+axis.
+
+Lane and task routing use similarly named fields, but they are live control
+plane predicates rather than configurable entry applicability:
+
+| Runtime field or vocabulary | Classification | Why it is not `scopes` |
+| --- | --- | --- |
+| Team `members` (`agent_id` / `team_id`) | Live team membership | Membership records which worktree-bound actors currently form a lane; it changes through compose, split, merge, and renewal events. |
+| `lifetime = Steer | Drive | Drain` | Lifetime lens | The selected lifetime reinterprets durable route state: manual pins, all stored subscriptions, or every assignable stem. It does not select configuration entries. |
+| `task_filter_entries`, route `filter` / `manual`, and `project:<stem>` / `phase:<phase>` / `+tag` terms | Allocator project filters | These are Taskwarrior query predicates derived from current team state and task projects. They control queue visibility, not whether a configuration entry applies. |
+| Private `project:agent.<actor>.task` and `origin_thread.is:<actor>` terms | Origin visibility | These terms preserve an actor's private work and provenance visibility across Drive/Drain routing. They are computed per actor and task row. |
+| Task-row `phase` | Allocator lifecycle state | This phase advances as work is done; only the separately named pre-commit command-step phase is configuration applicability. |
+
+Configuration may still contain payload that initializes or influences those
+runtime models, such as `serve.default_lifetime`. That does not turn the live
+membership, lifetime, filter, origin, or task-phase fields into selector axes.
 
 The `pyproject` scope alone uses the `tool.spice` prefix:
 
@@ -309,7 +329,7 @@ with `[tool.spice.agent] wrappers = [...]`.
 | --- | --- |
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
-| `selector = { drivers = ["codex"], argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Individual `match` routes accept the same `drivers` scope. |
+| `selector = { scopes = { drivers = ["codex"] }, argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Wrapper groups and individual `match` routes accept the same `scopes.drivers` selector. |
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
 group supplies only the finite post-selection command-shape transformations:
@@ -567,10 +587,14 @@ never emits a trailer the commit-msg gate then rejects.
 
 Command-step tables accept:
 
-`label`, `mount`, `run`/`argv`, `when`, `formatter`, and `enabled`.
+`label`, `mount`, `run`/`argv`, `scopes`, `formatter`, and `enabled`.
 `pre_commit` steps receive `SPICE_STAGED_PATHS`; mounted steps also receive
-`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `when` uses the shared
-repository path-selector contract above.
+`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `scopes.paths` narrows the
+staged-path set with the universal PATHPOL contract, while `scopes.phases`
+selects `pre-commit` or `pre-commit-success`. `scopes.drivers` and
+`scopes.models` select the effective configured worktree driver and model. All
+four axes compose through the universal AND rule; omitting any axis means all
+values on that axis.
 
 Reachability provider tables accept `name`, `run`, and optional
 `scopes = { paths = [...] }`. `name` must not be `python`. During staged scans,
@@ -602,11 +626,21 @@ Maxim bags extend or replace the live prose conscience.
 | --- | --- | --- |
 | `words` | required for new bags; inherited for built-ins | Alphabetic trigger words or phrases. |
 | `message` | required for new bags; inherited for built-ins | The maxim text published to the agent as steering on a match; when adjudication is enabled it is sent to the judge first and published only on a violation verdict. |
-| `drivers` | all shipped drivers | Driver allowlist; cite `spice maxim report` evidence before narrowing. |
+| `scopes` | `{}` (unconstrained) | Universal applicability selector. Maxim bags support the shared `drivers` axis; cite `spice maxim report` evidence before narrowing it. |
+
+```toml
+[tool.spice.maxims.routes]
+words = ["quiet route"]
+message = "Respond to the real event instead."
+scopes = { drivers = ["codex"] }
+```
 
 Bag names are case-folded. Trigger phrases are normalized to lowercase words.
 Configured bags merge with built-ins, so a repo can tune existing bags or add
-new curated near-universal preferences.
+new curated near-universal preferences. An absent `scopes` leaf applies to all
+drivers. The displaced per-bag `drivers` key is unsupported; maxim driver
+selection uses the same normalization, validation, matching, and explanation
+contract as every other `scopes.drivers` consumer.
 
 Watchdog reminders are deduped by content-derived reminder key within one
 compaction epoch. A later compaction can make the same key eligible to publish
@@ -653,6 +687,11 @@ and looks it up in this table for the active driver. A phase with no entry
 `--model`/`--effort` flag, then the effective `agent` table in `worktree`,
 `repository`, `pyproject`, and `system` precedence order, then the driver's
 shipped default.
+
+These `model` values are launch payload selected by live task-phase routing;
+they are not applicability selectors. A `scopes.models` entry filters a
+consumer that declares model applicability and does not participate in lane or
+task allocation.
 
 ## `[tool.spice.serve]`
 

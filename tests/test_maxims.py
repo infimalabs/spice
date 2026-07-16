@@ -17,7 +17,7 @@ import pytest
 
 from spice import config
 from spice.agent import maximcli, maxims, watchdog
-from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, driver_choices
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.maxims import MaximVerdict
 from spice.cli import entry as cli_entry
 from spice.errors import SpiceError
@@ -29,6 +29,7 @@ from spice.mail.inbox import (
     inbox_item_key,
     write_inbox_item,
 )
+from spice.scopes import MAXIM_SCOPES, ScopeSelector
 
 MAXIM_CORPUS_RECALL_FLOOR = 1.0
 MAXIM_CORPUS_FALSE_POSITIVE_RATE_CEILING = 0.0
@@ -612,16 +613,15 @@ words = ["detour"]
     )[0]
 
     assert bag.words == frozenset({"detour"})
-    assert bag.drivers == _all_driver_names()
+    assert bag.scopes == ScopeSelector()
     assert hit.name == "fallbacks"
     assert hit.message == bag.message
 
 
-def test_builtin_maxim_bags_default_to_all_driver_scopes():
-    expected = _all_driver_names()
-
-    assert expected == frozenset({"claude", "codex"})
-    assert all(bag.drivers == expected for bag in maxims.resolved_maxim_bags().values())
+def test_builtin_maxim_bags_default_to_unconstrained_scopes():
+    assert all(
+        bag.scopes == ScopeSelector() for bag in maxims.resolved_maxim_bags().values()
+    )
 
 
 def test_repo_config_declares_maxim_driver_scope(tmp_path):
@@ -632,14 +632,14 @@ def test_repo_config_declares_maxim_driver_scope(tmp_path):
 [tool.spice.maxims.routes]
 words = ["quiet route"]
 message = "DO NOT take the quiet route."
-drivers = ["Codex", "codex"]
+scopes = { drivers = ["Codex", "codex"] }
 """,
     )
 
     bag = maxims.resolved_maxim_bags(repo)["routes"]
     hits = maxims.triggered_maxims(["This quiet route drifts."], repo_root=repo)
 
-    assert bag.drivers == frozenset({"codex"})
+    assert bag.scopes == MAXIM_SCOPES.parse({"drivers": ["codex"]})
     assert hits == [bag]
     assert maxims.triggered_maxims(
         ["This quiet route drifts."],
@@ -664,7 +664,7 @@ def test_watchdog_filters_maxim_bags_by_active_driver(tmp_path, monkeypatch):
 [tool.spice.maxims.codexonly]
 words = ["codex route"]
 message = "CODEX only reminder."
-drivers = ["codex"]
+scopes = { drivers = ["codex"] }
 
 [tool.spice.maxims.shared]
 words = ["shared route"]
@@ -705,11 +705,11 @@ def test_repo_config_rejects_unknown_maxim_driver_scope(tmp_path):
 [tool.spice.maxims.routes]
 words = ["quiet route"]
 message = "DO NOT take the quiet route."
-drivers = ["codex", "ghost"]
+scopes = { drivers = ["codex", "ghost"] }
 """,
     )
 
-    with pytest.raises(SpiceError, match="known agent drivers"):
+    with pytest.raises(SpiceError, match="axis 'drivers' has unknown values: ghost"):
         maxims.resolved_maxim_bags(repo)
 
 
@@ -795,12 +795,12 @@ def test_watchdog_scopes_and_worktree_disable_compose_for_operator_behavior(
 [tool.spice.maxims.codexonly]
 words = ["codex route"]
 message = "CODEX scoped reminder."
-drivers = ["codex"]
+scopes = { drivers = ["codex"] }
 
 [tool.spice.maxims.claudeonly]
 words = ["claude route"]
 message = "CLAUDE scoped reminder."
-drivers = ["claude"]
+scopes = { drivers = ["claude"] }
 
 [tool.spice.maxims.shared]
 words = ["shared route"]
@@ -1049,10 +1049,6 @@ words = ["beta"]
 message = "SECOND reminder."
 """,
     )
-
-
-def _all_driver_names() -> frozenset[str]:
-    return frozenset(driver_choices())
 
 
 def _make_every_maxim_violate(monkeypatch) -> None:

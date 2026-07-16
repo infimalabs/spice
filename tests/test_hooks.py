@@ -102,7 +102,8 @@ def test_policy_formatter_extensions_restage_rewritten_staged_paths(
         "pre_commit = [\n"
         '  { label = "cs formatter", '
         f"run = {_argv_toml(sys.executable, str(formatter))}, "
-        'formatter = true, when = ["*.cs"] },\n'
+        'formatter = true, scopes = { paths = ["*.cs"], '
+        'phases = ["pre-commit"] } },\n'
         "]\n",
     )
     _write_repo_file(repo, "src/main.cs", "class Program{}\n")
@@ -127,7 +128,7 @@ def test_policy_pre_commit_extensions_wait_for_staging_guard(tmp_path, monkeypat
         "pre_commit = [\n"
         '  { label = "cs", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'cs')}, "
-        'when = ["*.cs"] },\n'
+        'scopes = { paths = ["*.cs"], phases = ["pre-commit"] } },\n'
         "]\n",
     )
     _write_repo_file(repo, "src/main.cs", "class Program {}\n")
