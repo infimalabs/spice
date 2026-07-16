@@ -9,10 +9,12 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.serve.payload import metric
-from spice.serve.team.metrics import (
+from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
-    MetricSeriesPoint,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
+)
+from spice.serve.team.metrics import (
+    MetricSeriesPoint,
     TaskDistributionSeriesPoint,
     TaskLifecycleSeriesPoint,
     TaskStallState,
