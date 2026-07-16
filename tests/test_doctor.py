@@ -402,7 +402,10 @@ def test_doctor_reports_file_loc_standing_debt_as_info_with_scopes_and_excludes(
         [tool.spice.policy.flex]
         ratio = 1.0
 
-        [tool.spice.policy.scopes."legacy/**".file_loc]
+        [[tool.spice.policy.rules]]
+        scopes = { paths = ["legacy/**"] }
+
+        [tool.spice.policy.rules.file_loc]
         multiplier = 10.0
         """,
         encoding="utf-8",
@@ -456,7 +459,10 @@ def test_doctor_complexity_uses_staged_scan_with_scoped_bounds(
         [tool.spice.policy.flex]
         ratio = 1.0
 
-        [tool.spice.policy.scopes."legacy/**".routine_ccn]
+        [[tool.spice.policy.rules]]
+        scopes = { paths = ["legacy/**"] }
+
+        [tool.spice.policy.rules.routine_ccn]
         multiplier = 2.0
         """,
         encoding="utf-8",

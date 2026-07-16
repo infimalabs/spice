@@ -419,6 +419,11 @@ override the tracked defaults for that one run.
 
 The policy table extends the constitution. Defaults come from `spice/policy.py`.
 
+`exclude`, `generated_paths`, `test_paths`, language suffix families, and
+generated-file patterns are domain datasets rather than entry selectors.
+Path-bearing datasets retain those names and delegate path evaluation to the
+shared PATHPOL matchers.
+
 | Key | Meaning |
 | --- | --- |
 | `package_roots` | Python namespace-package roots; derived from packaging metadata when unset. |
@@ -436,7 +441,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `pre_commit` | Extra gate steps that run after built-in pre-commit gates. |
 | `pre_commit_success` | Success-only steps that run after the gate passes. |
 | `pre_commit_builtins` | Per gate-only pre-commit built-in overrides for `plan-phase`, `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `javascript-unused`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `python-unused`, `assertion-free-tests`, and `private-internals`. |
-| `limits`, `flex`, `scopes` | Base bounds, sticky headroom, and per-path overrides. |
+| `limits`, `flex`, `rules` | Base bounds, sticky headroom, and applicability-selected overrides. |
 | `languages`, `lockfiles`, `file_shape`, `env_access` | Suffix/pattern families for grammar-aware gates. |
 | `complexity`, `taste`, `magic`, `debt`, `commit_message` | Gate-specific knobs. |
 | `markdown_depth_budget` | Generated repo-doc character scopes for markdown. |
@@ -534,7 +539,8 @@ built-in entry remains active.
 Generated `repo_truth_doc_chars` scopes for tracked markdown: repo root gets
 `10000` chars, one nested directory `20000`, two nested directories `30000`,
 and deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to
-`[]` to replace generated scopes with explicit `[tool.spice.policy.scopes]`.
+`[]` to replace generated rules with explicit `[[tool.spice.policy.rules]]`
+entries.
 `stem_pattern` optionally full-matches file stems; binary files are skipped.
 
 ### `[tool.spice.policy.debt]`
@@ -543,22 +549,28 @@ Allowed-finding counters, not size limits. Defaults are `0` for
 `reachability_test_only` and `assertion_free_tests`; non-zero values are
 explicit cleanup debt.
 
-### `[tool.spice.policy.scopes."<matcher>"]`
+### `[[tool.spice.policy.rules]]`
 
-Repository path selectors normalize `\\` separators and a leading `./` before
-matching. Glob keys use case-sensitive whole-path `fnmatch` semantics, including
-`*` crossing separators; non-glob keys match a path or subtree. A leading
-`**/` matches files at the repository root and below it. Policy scopes add one
-named semantic over that shared contract: an internal `/**/` may consume zero
-directories, so `Docs/**/*.md` covers both `Docs/page.md` and
-`Docs/guides/page.md`.
+Each policy rule is one payload with an inline universal selector:
 
-Flat scope keys apply to every numeric bound; named sub-tables target `file_loc`,
-`file_bytes`, `routine_ccn`, `routine_length`, `commit_message_wrap`, or
-`repo_truth_doc_chars`. Settings accept `multiplier`, `min`, `max`,
-`unlimited = true`, and optional `flex`. A nested `magic.examine_threshold`
-overrides magic-number scanning. Most-specific match wins; exact/prefix
-matchers outrank globs.
+```toml
+[[tool.spice.policy.rules]]
+scopes = { paths = ["Docs"], extensions = [".md"] }
+
+[tool.spice.policy.rules.repo_truth_doc_chars]
+min = 20000
+flex = 1.25
+```
+
+`paths` uses the canonical PATHPOL glob-or-subtree contract without a
+policy-only matcher variant; `extensions` composes with it through the universal
+AND-across rule. Flat rule keys apply to every numeric bound; named sub-tables
+target `file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
+`commit_message_wrap`, or `repo_truth_doc_chars`. Settings accept `multiplier`,
+`min`, `max`, `unlimited = true`, and optional `flex`. A nested
+`magic.examine_threshold` overrides magic-number scanning. Universal selector
+specificity chooses the winning applicable rule; repository-authored rules
+outrank generated markdown-depth rules.
 
 ### `[tool.spice.policy.magic]`
 
@@ -584,11 +596,12 @@ selects `pre-commit` or `pre-commit-success`. `scopes.drivers` and
 four axes compose through the universal AND rule; omitting any axis means all
 values on that axis.
 
-Reachability provider tables accept:
-
-`name`, `run`, and optional `when`. `name` must not be `python`. Providers
-write JSON findings with `kind`, `subject`, `path`, and `imported_by`; `kind`
-routes whole-file findings to `reachability` and symbol findings to
+Reachability provider tables accept `name`, `run`, and optional
+`scopes = { paths = [...] }`. `name` must not be `python`. During staged scans,
+the universal selector both decides applicability and narrows
+`SPICE_STAGED_PATHS`; full scans run every configured provider. Providers write
+JSON findings with `kind`, `subject`, `path`, and `imported_by`; `kind` routes
+whole-file findings to `reachability` and symbol findings to
 `symbol-reachability`.
 
 `internal_couplings` entries accept `path`, `test`, and `target`; all are

@@ -7,7 +7,6 @@ from spice.pathmatch import (
     has_glob_magic,
     matches_repo_path,
     matches_repo_path_or_ancestor,
-    matches_repo_scope,
     normalize_repo_path,
     path_specificity,
 )
@@ -27,18 +26,6 @@ from spice.pathmatch import (
 )
 def test_repo_path_matcher_positive_truth_table(path, pattern):
     assert matches_repo_path(path, pattern)
-
-
-@pytest.mark.parametrize(
-    ("path", "pattern"),
-    (
-        ("Docs/page.md", "Docs/**/*.md"),
-        ("Docs/guides/page.md", "Docs/**/*.md"),
-        ("src/pkg/app.py", "src/**/pkg/**/app.py"),
-    ),
-)
-def test_repo_scope_allows_zero_directory_recursive_segments(path, pattern):
-    assert matches_repo_scope(path, pattern)
 
 
 def test_repo_path_or_ancestor_includes_glob_selected_tree():
