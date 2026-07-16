@@ -43,11 +43,8 @@ from spice.agent.maximmetrics import (
     record_maxim_metric_events,
 )
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
-from spice.mail.acks import (
-    extract_task_batch_lines_from_text,
-    summarize_ack_archival,
-    summarize_nack_archival,
-)
+from spice.mail.ackarchive import summarize_ack_archival, summarize_nack_archival
+from spice.mail.ackgrammar import extract_task_batch_lines_from_text
 from spice.mail.inbox import (
     discard_inbox_items,
     notify_inbox_changed,
@@ -307,7 +304,7 @@ def _annotate_active_task_with_acks(
     archived_keys: list[str],
     log_handle: TextIO,
 ) -> None:
-    from spice.mail.acks import ack_content_by_key, extract_ack_segments_from_text
+    from spice.mail.ackgrammar import ack_content_by_key, extract_ack_segments_from_text
     from spice.mail.inbox import (
         AUTOMATED_GUIDANCE_PRIORITIES,
         inbox_item_key_aliases,
@@ -435,7 +432,7 @@ def _inline_task_default_origin(message_text: str) -> str | None:
     origin= fields in the batch line win; a message that ACKs nothing
     provides no default and the batch's own origin requirement applies.
     """
-    from spice.mail.acks import extract_ack_keys_from_text
+    from spice.mail.ackgrammar import extract_ack_keys_from_text
 
     keys = list(extract_ack_keys_from_text(message_text))
     return f"ack:{keys[0]}" if keys else None

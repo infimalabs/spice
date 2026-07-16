@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from spice.cli.parser import build_parser
-from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,

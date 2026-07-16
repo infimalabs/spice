@@ -14,7 +14,7 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.agent.lifecycle import utc_now
-from spice.mail.acks import archive_ackd_inbox_items, archive_nackd_inbox_items
+from spice.mail.ackarchive import archive_ackd_inbox_items, archive_nackd_inbox_items
 from spice.mail.inbox import (
     compose_inbox_text,
     inbox_dir,

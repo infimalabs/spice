@@ -27,7 +27,7 @@ from spice.agent.driver import (
 from spice.agent.identity import canonical_thread_id
 from spice.mail.feedback import SupervisorFeedback, parse_supervisor_feedback_line
 from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
-from spice.mail.acks import split_keyed_response
+from spice.mail.ackgrammar import split_keyed_response
 from spice.mail.watch import (
     extract_assistant_text,
     strip_app_directive_lines,

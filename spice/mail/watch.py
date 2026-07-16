@@ -5,8 +5,8 @@ to EOF of the receiving agent's transcript JSONL and counts *user-facing*
 assistant messages (each `response_item` with `payload.type=='message'` and
 `role=='assistant'` is one prose block in the operator's UI). After three such
 messages elapse without `ACK <our-key>: …` matching the canonical detector in
-`spice.mail.acks`, the watcher records another resend attempt on the pending
-inbox item and escalates its priority — the receiving agent sees the same key
+`spice.mail.ackgrammar`, the watcher records another resend attempt on the
+pending inbox item and escalates its priority — the receiving agent sees the same key
 again on its next mailbox peek with resend lineage attached. The cycle repeats
 until our key is ACK'd or the operator interrupts.
 """
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from spice.agent.driver import AgentDriver, driver_for
-from spice.mail.acks import (
+from spice.mail.ackgrammar import (
     extract_ack_segments_from_text,
     extract_nack_segments_from_text,
 )
