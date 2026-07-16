@@ -12,6 +12,7 @@ from typing import Any
 
 from spice import paths
 from spice.errors import SpiceError
+from spice.scopes import SCOPES_KEY
 
 SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
@@ -234,7 +235,9 @@ def _merge_mapping(
     for key, value in incoming.items():
         path = (*prefix, key)
         previous = destination.get(key)
-        if isinstance(value, Mapping) and prefix == ("wrappers",):
+        if isinstance(value, Mapping) and (
+            key == SCOPES_KEY or prefix == ("wrappers",)
+        ):
             _forget_sources(sources, path)
             replacement: dict[str, Any] = {}
             destination[key] = replacement
