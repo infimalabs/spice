@@ -76,13 +76,16 @@ def _configure_task_read_parsers(actions: Any) -> None:
 
     ls = actions.add_parser(
         "list",
-        help="List tasks.",
+        help="List tasks in the actor route, an explicit project, or globally.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  spice task list --limit 20\n"
-            "  spice task list --project serve.ui --status pending --limit 20\n"
-            "  spice task list --project serve --status waiting"
+            "  Actor-route scope:\n"
+            "    spice task list --status pending --limit 20\n"
+            "  Explicit project scope:\n"
+            "    spice task list --project serve.ui --status pending --limit 20\n"
+            "  Global scope:\n"
+            "    spice task list --all --status pending"
         ),
         recovery_examples=(
             "spice task list --limit 20",
@@ -90,10 +93,14 @@ def _configure_task_read_parsers(actions: Any) -> None:
             "spice task list --all",
         ),
     )
-    ls.add_argument(
+    list_scope = ls.add_mutually_exclusive_group()
+    list_scope.add_argument(
         "--all",
         action="store_true",
-        help="Include all task rows unless --status narrows the result.",
+        help=(
+            "Use global scope instead of the actor route; include every status "
+            "unless --status narrows the result."
+        ),
     )
     ls.add_argument(
         "--limit",
@@ -101,19 +108,23 @@ def _configure_task_read_parsers(actions: Any) -> None:
         metavar="N",
         help="Show at most N tasks, newest first.",
     )
-    ls.add_argument(
+    list_scope.add_argument(
         "--project",
         type=_project_filter,
         metavar="PROJECT",
         help=(
-            "Filter by board project stem or exact project, for example "
-            "serve or serve.ui. A leading project: prefix is accepted."
+            "Use an explicit board project scope instead of the actor route. "
+            "Accepts a stem or exact project such as serve or serve.ui; a "
+            "leading project: prefix is accepted."
         ),
     )
     ls.add_argument(
         "--status",
         choices=_TASK_LIST_STATUSES,
-        help="Filter by Taskwarrior status.",
+        help=(
+            "Filter by Taskwarrior status inside the selected scope; use with "
+            "--all to filter the global board."
+        ),
     )
     ls.set_defaults(func=handle)
 
@@ -791,17 +802,24 @@ def _list(args: argparse.Namespace) -> str:
 
     filters = _list_status_filters(args)
     project = getattr(args, "project", None)
-    explicit_hidden = bool(project and config.is_hidden_project(project))
-    if args.all:
-        rows = tw.export(filters)
-    elif explicit_hidden:
+    if project:
         rows = tw.export(filters or ["status:pending"])
+        scope = "explicit-project"
+        scope_detail = f"project:{project}"
+    elif args.all:
+        rows = tw.export(filters)
+        scope = "global"
+        scope_detail = ""
     else:
-        rows = alloc.visible_rows(tw.current_actor(), filters or ["status:pending"])
+        rows, scope_filter = alloc.visible_rows_with_scope(
+            tw.current_actor(), filters or ["status:pending"]
+        )
         rows = [r for r in rows if not alloc.is_hidden(r)]
+        scope = "actor-route"
+        scope_detail = " ".join(scope_filter)
     rows = _apply_list_project_filter(rows, project)
     rows = _apply_list_limit(rows, getattr(args, "limit", None))
-    return render.render_list(rows)
+    return render.render_task_list(rows, scope=scope, detail=scope_detail)
 
 
 def _list_status_filters(args: argparse.Namespace) -> list[str]:
