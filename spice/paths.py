@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import json
 import os
 import shutil
@@ -17,6 +18,39 @@ from spice.gitprocess import run_git_command
 
 STATE_DIRNAME = ".spice"
 SHARED_ATTACHMENT_DIR = Path("attachments")
+
+# Layout of a total state-backend scratch root: one shared subtree standing in
+# for the repository-shared root, one keyed subtree per worktree, and the task
+# store's default home when nothing more specific claims it.
+STATE_BACKEND_SHARED_DIR = "shared"
+STATE_BACKEND_WORKTREES_DIR = "worktrees"
+STATE_BACKEND_TASK_DIR = "task"
+# Enough hex digits that distinct worktree paths sharing a basename cannot
+# collide in practice, short enough to keep the keyed directory readable.
+WORKTREE_BACKEND_KEY_DIGEST_CHARS = 12
+
+_state_backend_override: Path | None = None
+
+
+def set_state_backend(root: str | None) -> None:
+    """Redirect every managed-state root under ``root``; ``None`` restores git.
+
+    Process-wide by design: a scratch-backed process (``spice serve
+    --backend``) must never resolve managed state into a live git dir, no
+    matter which module asks.
+    """
+    global _state_backend_override
+    _state_backend_override = (
+        Path(root).expanduser().resolve() if root is not None else None
+    )
+
+
+def _worktree_backend_key(repo_root: Path) -> str:
+    # Never consults git: scratch-backed processes may point at roots that are
+    # not worktrees at all. The resolved path is the identity.
+    resolved = Path(repo_root).resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+    return f"{resolved.name}-{digest[:WORKTREE_BACKEND_KEY_DIGEST_CHARS]}"
 
 
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
@@ -77,11 +111,19 @@ def git_dir(root: Path) -> Path:
 
 def shared_state_root(repo_root: Path) -> Path:
     """Canonical repository-shared managed-state root."""
+    if _state_backend_override is not None:
+        return _state_backend_override / STATE_BACKEND_SHARED_DIR
     return git_common_dir(repo_root) / STATE_DIRNAME
 
 
 def worktree_state_root(repo_root: Path) -> Path:
     """Canonical lane-local managed-state root for one worktree."""
+    if _state_backend_override is not None:
+        return (
+            _state_backend_override
+            / STATE_BACKEND_WORKTREES_DIR
+            / _worktree_backend_key(repo_root)
+        )
     return git_dir(repo_root) / STATE_DIRNAME
 
 

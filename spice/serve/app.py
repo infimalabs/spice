@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, all_drivers
 from spice.agent.lifecycle import agent_state_path as agent_state_path
 from spice.errors import SpiceError
-from spice.paths import repo_root_from_cwd
+from spice.paths import STATE_BACKEND_TASK_DIR, repo_root_from_cwd, set_state_backend
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, message, metric
 from spice.serve.agentapi import (
@@ -197,6 +197,30 @@ class ServeState:
                 del self.rollout_cursors[key]
 
 
+def apply_serve_backends(args: argparse.Namespace) -> None:
+    """Apply --backend / --task-backend scratch overrides before state resolves.
+
+    --backend redirects every managed-state root, task store included, under
+    one scratch path. An explicit --task-backend wins for the task store alone
+    because the specific override is applied after the total one.
+    """
+    backend = getattr(args, "backend", None)
+    if backend is not None:
+        path = Path(backend).expanduser()
+        if not path.is_absolute():
+            raise SpiceError("spice serve --backend requires an absolute scratch path")
+        set_state_backend(str(path))
+        task_config.set_backend(str(path / STATE_BACKEND_TASK_DIR))
+    task_backend = getattr(args, "task_backend", None)
+    if task_backend is not None:
+        path = Path(task_backend).expanduser()
+        if not path.is_absolute():
+            raise SpiceError(
+                "spice serve --task-backend requires an absolute scratch path"
+            )
+        task_config.set_backend(str(path))
+
+
 def run_serve(args: argparse.Namespace) -> int:
     # The operator server is never an agent and never a single-driver lane; a
     # leaked ambient thread id or driver override would make every worktree
@@ -204,14 +228,7 @@ def run_serve(args: argparse.Namespace) -> int:
     for driver in all_drivers():
         os.environ.pop(driver.thread_id_env, None)  # env-policy: allow
     os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)  # env-policy: allow
-    backend = getattr(args, "task_backend", None)
-    if backend is not None:
-        path = Path(backend).expanduser()
-        if not path.is_absolute():
-            raise SpiceError(
-                "spice serve --task-backend requires an absolute scratch path"
-            )
-        task_config.set_backend(str(path))
+    apply_serve_backends(args)
     auth_token = _serve_auth_token(args)
     _guard_exposed_bind(
         args.host,
