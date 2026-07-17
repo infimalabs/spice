@@ -17,6 +17,9 @@ from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_database_path
 from spice.mail.inbox import collect_inbox_items, inbox_dir
 from spice.serve.app import apply_serve_backends
+from spice.serve.httpapi import lane_watch_paths_for_target
+from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config as task_config
 
 SESSION_THREAD_ID = "1kTestThread"
@@ -115,6 +118,47 @@ def test_backend_isolates_operator_inbox_reads_and_writes(tmp_path, scratch_over
     assert [(item.name, item.text) for item in restored] == [
         ("20260101T000000000000Z.txt", "live steering stays put\n")
     ]
+
+
+def test_backend_isolates_serve_watcher_and_payload_paths(tmp_path, scratch_overrides):
+    live = tmp_path / "live"
+    live_inbox = inbox_dir(live)
+    live_inbox.mkdir(parents=True)
+    (live_inbox / "20260101T000000000000Z.txt").write_text(
+        "live steering stays put\n", encoding="utf-8"
+    )
+    before = _tree_snapshot(live)
+
+    apply_serve_backends(_serve_args(tmp_path / "scratch", None))
+    target = WorktreeTarget(id="lane", repo_root=live, name="live", branch="main")
+    watch_paths = lane_watch_paths_for_target(None, target, None, None)
+    scratch = (tmp_path / "scratch").resolve()
+    assert len(watch_paths) >= 2
+    for path in watch_paths:
+        assert path.is_relative_to(scratch), path
+    scratch_inbox = inbox_dir(live)
+    assert scratch_inbox.is_dir()
+    (scratch_inbox / "20260102T000000000000Z.txt").write_text(
+        "scratch steering\n", encoding="utf-8"
+    )
+    payload = pending_inbox_identity_payload(live)
+    assert payload["pendingInboxKeys"] == ["20260102T000000000000Z"]
+    assert payload["pendingInboxCount"] == 1
+    assert payload["pendingInboxVersion"] > 0
+
+    paths.set_state_backend(None)
+    task_config.set_backend(None)
+    assert _tree_snapshot(live) == before
+    live_payload = pending_inbox_identity_payload(live)
+    assert live_payload["pendingInboxKeys"] == ["20260101T000000000000Z"]
+
+
+def _tree_snapshot(root: Path) -> dict[Path, bytes | None]:
+    """Files with their bytes plus bare directories: a stray mkdir shows up."""
+    return {
+        item.relative_to(root): (item.read_bytes() if item.is_file() else None)
+        for item in sorted(root.rglob("*"))
+    }
 
 
 def test_live_state_stays_byte_identical_under_backend_writes(
