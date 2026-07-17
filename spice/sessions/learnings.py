@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from spice.agent.maxims import JudgeBackend, evaluate_maxim, judge_cli_backend
 from spice.errors import SpiceError
-from spice.paths import atomic_write_text, state_dir
+from spice.paths import atomic_write_text, worktree_runtime_state_root
 from spice.sessions import slices as session_slices
 from spice.sessions.records import CompactionRecord, TurnRecord
 from spice.sessions.slices import SliceRecord
@@ -169,7 +169,11 @@ class _LearningMessage:
 
 def learning_store_path(repo_root: str | Path, project_stem: str) -> Path:
     stem = _validated_project_stem(project_stem)
-    return state_dir(Path(repo_root)) / LEARNINGS_DIRNAME / f"{stem}.jsonl"
+    return (
+        worktree_runtime_state_root(Path(repo_root))
+        / LEARNINGS_DIRNAME
+        / f"{stem}.jsonl"
+    )
 
 
 def load_learning_records(
