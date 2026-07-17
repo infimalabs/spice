@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from spice.tasks import config
 
@@ -54,8 +55,13 @@ def operations_db_path() -> str:
     return str(config.data_dir() / OPERATIONS_DB_FILENAME)
 
 
+def operations_db_uri() -> str:
+    """Percent-encoded read-only SQLite URI for the resolved operations DB."""
+    return f"{Path(operations_db_path()).resolve().as_uri()}?mode=ro"
+
+
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{operations_db_path()}?mode=ro", uri=True)
+    return sqlite3.connect(operations_db_uri(), uri=True)
 
 
 def task_version(uuid: str) -> int:
