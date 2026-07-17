@@ -35,6 +35,11 @@ TASK_CAPTURE_ACK_EXAMPLE = "ACK <key>: captured the request."
 TASK_CAPTURE_LINE_EXAMPLE = "TASK title=... | project=<stem.child> [| acceptance=...]"
 TASK_CAPTURE_PLAN_HINT = "omitted acceptance with no flow starts in plan"
 TASK_CAPTURE_ORIGIN_HINT = "the captured task inherits origin=ack:<key> from your ACK"
+PHASE_OWNERSHIP = (
+    "phase ownership: this advance released your claim. Finish only the phase "
+    "you hold; spice task next may assign any eligible work and does not "
+    "guarantee this task's next phase."
+)
 
 
 @pytest.fixture
@@ -71,6 +76,7 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
 
     done_output = ops.done(handle, validation=["guidance checked"])
 
+    assert PHASE_OWNERSHIP in done_output.splitlines()
     assert (
         "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment; "
         "self-review only if next assigns it"
@@ -89,6 +95,29 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     assert (
         f"next: YOU ARE NOT DONE. Run spice task next; {KEEP_DRAINING}" in review_output
     )
+
+
+def test_plan_phase_advance_makes_allocator_ownership_explicit(task_repo):
+    assert task_repo.is_dir()
+    handle = create.add(
+        "Plan before implementation ownership",
+        project="task.guidance",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        flow=["plan", "todo", "review"],
+        acceptance=["plan has an execution-grade contract"],
+    )
+    ops.claim(handle)
+
+    done_output = ops.done(handle, validation=["plan contract complete"])
+    row = identity.resolve(handle)
+
+    assert done_output.splitlines()[:2] == [
+        f"advanced {handle} -> todo",
+        PHASE_OWNERSHIP,
+    ]
+    assert row["phase"] == "todo"
+    assert str(row.get("claim_by") or "") == ""
 
 
 def test_steer_task_done_and_review_outputs_make_continuation_explicit(
