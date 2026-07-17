@@ -74,6 +74,7 @@ from spice.agent.shellhook import (
     BASH_HOOK_NAME,
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
+    rtk_rewrite_yield_selectors,
 )
 from spice.errors import SpiceError
 
@@ -389,7 +390,27 @@ def _rtk_rewrite_frontend_with_environment(
     )
     if rewritten is None:
         return None
-    return remap_rewrite_frontend(rewritten, rtk_executable)
+    remapped = remap_rewrite_frontend(rewritten, rtk_executable)
+    if _rewrite_shadows_repository_wrapper(
+        remapped, repo_root=repo_root, rtk_executable=rtk_executable
+    ):
+        return None
+    return remapped
+
+
+def _rewrite_shadows_repository_wrapper(
+    command_text: str, *, repo_root: Path | None, rtk_executable: str
+) -> bool:
+    """True when RTK claimed a word a repository wrapper expands away from RTK."""
+    if repo_root is None:
+        return False
+    try:
+        words = shlex.split(command_text)
+    except ValueError:
+        return False
+    if len(words) < 2 or words[0] not in {RTK_CANONICAL_EXECUTABLE, rtk_executable}:
+        return False
+    return words[1] in rtk_rewrite_yield_selectors(repo_root)
 
 
 def rtk_rewrite_command_text(

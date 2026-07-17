@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 from spice.config import configured_agent_driver, configured_rtk_executable
-from spice.configlayer import contextualize_config_error, effective_table
+from spice.configlayer import (
+    SYSTEM_SOURCE,
+    contextualize_config_error,
+    effective_table,
+    load_config,
+)
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_WRAPPER_ENTRY_POINT_GROUP,
@@ -257,6 +262,60 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
             )
         )
     return lines
+
+
+def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
+    """Wrapper words the agent-run RTK rewrite must leave to the shell.
+
+    A repository-declared direct wrapper whose argv head is not RTK claims
+    its selector word: the pre-shell rewrite substitutes command text before
+    any wrapper function exists, so an RTK claim on such a word would shadow
+    the repository's expansion. Packaged wrappers stay rewritable — they are
+    designed around RTK. Configuration errors yield the empty set here; the
+    shell hook rendering surfaces them loudly.
+    """
+    try:
+        return _rtk_rewrite_yield_selectors(repo_root)
+    except SpiceError:
+        return frozenset()
+
+
+def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
+    agent_settings = effective_table(repo_root, "agent")
+    if AGENT_WRAPPERS_KEY not in agent_settings:
+        return frozenset()
+    ordered_groups = config_string_list(
+        agent_settings.get(AGENT_WRAPPERS_KEY),
+        label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
+    )
+    layered = load_config(repo_root)
+    definitions = effective_table(repo_root, "wrappers")
+    context = ScopeContext(driver=active_wrapper_driver_name(repo_root))
+    rtk_words = {RTK_CANONICAL_EXECUTABLE, configured_rtk_executable(repo_root)}
+    selectors: set[str] = set()
+    for group_name in ordered_groups:
+        raw_group = definitions.get(group_name)
+        if not isinstance(raw_group, Mapping):
+            continue
+        if not WRAPPER_SCOPES.parse(raw_group.get(SCOPES_KEY)).matches(context):
+            continue
+        for raw_wrapper, raw_entry in raw_group.items():
+            wrapper = str(raw_wrapper).strip()
+            if wrapper == SCOPES_KEY or not isinstance(raw_entry, Mapping):
+                continue
+            source = layered.source_for(("wrappers", group_name, wrapper))
+            if source is None or source.name == SYSTEM_SOURCE:
+                continue
+            if not WRAPPER_SCOPES.parse(raw_entry.get(SCOPES_KEY)).matches(context):
+                continue
+            command_words = command_words_from_config(
+                raw_entry.get("argv"),
+                label=f"tool.spice.wrappers.{group_name}.{wrapper}.argv",
+            )
+            if command_words[0] in rtk_words:
+                continue
+            selectors.add(wrapper)
+    return frozenset(selectors)
 
 
 def configured_agent_wrapper_definitions(
