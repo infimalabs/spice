@@ -96,6 +96,9 @@ enabled = true
 [tool.spice.wrappers.spice-dev.pre-commit]
 argv = ["spice", "dev", "pre-commit"]
 
+[tool.spice.wrappers.spice-dev.pytest]
+argv = ["python", "-m", "pytest"]
+
 # The "common" group is inherited from the layered global default. It owns all
 # grep and RTK behavior, including driver-scoped extended-regexp defaults. The
 # repository-local spice-dev group contains only this checkout's development
