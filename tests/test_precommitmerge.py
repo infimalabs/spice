@@ -73,7 +73,7 @@ def test_conflicted_discarded_merge_recipe_restarts_the_merge(tmp_path: Path) ->
 
     diagnostic = precommit._merge_integrity_diagnostic(repo)
     assert "The discarded merge is conflicted; restart it:" in diagnostic
-    assert "git checkout HEAD -- story.txt" in diagnostic
+    assert "git --literal-pathspecs checkout HEAD -- story.txt" in diagnostic
     _run_recipe(repo, diagnostic)
 
     assert _git(repo, "rev-parse", "MERGE_HEAD") == peer
@@ -91,6 +91,46 @@ def test_conflicted_discarded_merge_recipe_restarts_the_merge(tmp_path: Path) ->
 
     assert _git(repo, "show", "-s", "--format=%P", "HEAD") == f"{head} {peer}"
     assert _git(repo, "show", "HEAD:story.txt") == "combined resolution"
+
+
+def test_modify_delete_recipe_restarts_with_head_absent_path(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _git(repo, "switch", "-c", "peer")
+    _write(repo / "story.txt", "peer integrated content\n")
+    _git(repo, "add", "story.txt")
+    _git(repo, "commit", "--no-verify", "-m", "peer modifies story")
+    peer = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "switch", "main")
+    _git(repo, "rm", "story.txt")
+    _git(repo, "commit", "--no-verify", "-m", "main deletes story")
+    head = _git(repo, "rev-parse", "HEAD")
+    _run(repo, "merge", "--no-ff", peer, check=False)
+    _git(repo, "read-tree", "HEAD")
+    _write(repo / "unrelated.txt", "unrelated work survives\n")
+
+    diagnostic = precommit._merge_integrity_diagnostic(repo)
+    assert "The discarded merge is conflicted; restart it:" in diagnostic
+    assert "git --literal-pathspecs clean -f -d -x -- story.txt" in diagnostic
+    completed = _run_recipe(repo, diagnostic)
+    assert completed.returncode == 0
+
+    assert _git(repo, "rev-parse", "MERGE_HEAD") == peer
+    stages = _git(repo, "ls-files", "--unmerged")
+    assert [line.split("\t")[1] for line in stages.splitlines()] == [
+        "story.txt",
+        "story.txt",
+    ]
+    assert (repo / "unrelated.txt").read_text(encoding="utf-8") == (
+        "unrelated work survives\n"
+    )
+    _write(repo / "story.txt", "combined restored content\n")
+    _git(repo, "add", "story.txt")
+
+    precommit._run_merge_integrity_guard(repo)
+    _git(repo, "commit", "--no-verify", "-m", "recovered modify-delete merge")
+
+    assert _git(repo, "show", "-s", "--format=%P", "HEAD") == f"{head} {peer}"
+    assert _git(repo, "show", "HEAD:story.txt") == "combined restored content"
 
 
 def _run_recipe(repo: Path, diagnostic: str) -> subprocess.CompletedProcess[str]:
