@@ -168,6 +168,7 @@ class ClaimRenewalResult:
     handle: str = ""
     claim_until: str = ""
     detail: str = ""
+    uuid: str = ""
 
 
 CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error"})
@@ -504,6 +505,7 @@ def renew_claim(
         "renewed",
         handle=identity.render_handle(fresh),
         claim_until=str(fresh.get("claim_until") or ""),
+        uuid=identity.uuid_of(fresh),
     )
 
 
