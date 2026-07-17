@@ -14,7 +14,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Lock
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, all_drivers
@@ -102,27 +102,32 @@ TASK_BACKEND_LIVE_LANE_ERROR = (
 )
 
 
-def _task_backend_live_lane_refusal() -> tuple[dict[str, Any], HTTPStatus]:
-    return (
-        {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR},
-        HTTPStatus.METHOD_NOT_ALLOWED,
-    )
+def _live_lane_mutation_payload(
+    mutate: Callable[[], tuple[dict[str, Any], HTTPStatus]],
+) -> tuple[dict[str, Any], HTTPStatus]:
+    """Apply one live-lane mutation only when task state is live as well."""
+    if task_config.backend_override() is not None:
+        return (
+            {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR},
+            HTTPStatus.METHOD_NOT_ALLOWED,
+        )
+    return mutate()
 
 
 def _live_bus_send_payload(
     state: ServeState, target: WorktreeTarget, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    if task_config.backend_override() is not None:
-        return _task_backend_live_lane_refusal()
-    return work_tree_send_accepted_response_payload(state, target, payload)
+    return _live_lane_mutation_payload(
+        lambda: work_tree_send_accepted_response_payload(state, target, payload)
+    )
 
 
 def _live_bus_task_drain_payload(
     state: ServeState, target: WorktreeTarget, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    if task_config.backend_override() is not None:
-        return _task_backend_live_lane_refusal()
-    return work_tree_task_drain_response_payload(state, target, payload)
+    return _live_lane_mutation_payload(
+        lambda: work_tree_task_drain_response_payload(state, target, payload)
+    )
 
 
 class ServeState:
@@ -741,20 +746,26 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         action = route[1]
         if action == "send":
-            payload, status = work_tree_send_response_payload(
-                self.state, target, self._read_payload()
+            request_payload = self._read_payload()
+            payload, status = _live_lane_mutation_payload(
+                lambda: work_tree_send_response_payload(
+                    self.state, target, request_payload
+                )
             )
             self._send_json(payload, status)
             return
         if action == "agent/ensure":
             self._read_payload()
-            payload, status = agent_ensure_response_payload(
-                target,
-                fast_mode=bool(self.state.team_store.global_fast_mode_enabled()),
+            payload, status = _live_lane_mutation_payload(
+                lambda: agent_ensure_response_payload(
+                    target,
+                    fast_mode=bool(self.state.team_store.global_fast_mode_enabled()),
+                )
             )
             self._send_json(payload, status)
             return
         if action == "say":
+            # Speech renders request text only; it does not steer, spawn, or wake a lane.
             self._post_say(target)
             return
         self.send_error(HTTPStatus.NOT_FOUND)
