@@ -279,7 +279,7 @@ def test_task_depends_repoints_an_edge_in_one_invocation(task_repo):
     assert _depends_annotations(row) == [f"depends: {new}"]
 
 
-def test_task_depends_applies_removals_before_additions(task_repo):
+def test_task_depends_keeps_an_edge_dropped_and_readded_in_one_call(task_repo):
     handle = create.add(
         "Plan whose edge is dropped and re-added at once",
         project="task.unit",
@@ -294,6 +294,62 @@ def test_task_depends_applies_removals_before_additions(task_repo):
     dep_uuid = identity.uuid_of(identity.resolve(dep))
 
     result = ops.depends(handle, [dep], not_after=[dep])
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert row["depends"] == [dep_uuid]
+    assert _depends_annotations(row) == [f"depends: {dep}"]
+
+
+def test_task_depends_repoints_multiple_edges_in_one_invocation(task_repo):
+    handle = create.add(
+        "Plan whose two edges move together",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    old_edges = [
+        create.add(
+            f"Superseded dependency {index}",
+            project="task.unit",
+            origin="ack:20260101T000000000000Z",
+        )
+        for index in range(2)
+    ]
+    new_edges = [
+        create.add(
+            f"Replacement dependency {index}",
+            project="task.unit",
+            origin="ack:20260101T000000000000Z",
+        )
+        for index in range(2)
+    ]
+    ops.depends(handle, old_edges)
+    new_uuids = sorted(identity.uuid_of(identity.resolve(edge)) for edge in new_edges)
+
+    result = ops.depends(handle, new_edges, not_after=old_edges)
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert sorted(row["depends"]) == new_uuids
+    assert sorted(_depends_annotations(row)) == sorted(
+        f"depends: {edge}" for edge in new_edges
+    )
+
+
+def test_task_depends_repeated_after_handle_lands_one_annotation(task_repo):
+    handle = create.add(
+        "Plan given the same dependency twice",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    dep = create.add(
+        "Dependency named twice in one call",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    dep_uuid = identity.uuid_of(identity.resolve(dep))
+
+    result = ops.depends(handle, [dep, dep])
 
     row = identity.resolve(handle)
     assert result == handle

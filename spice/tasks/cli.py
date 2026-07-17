@@ -421,8 +421,8 @@ def _configure_depends_parser(actions: Any) -> None:
         default=[],
         metavar="dependency",
         help=(
-            "Prerequisite task handle(s) to remove; removals apply before "
-            "additions so one invocation can re-point an edge."
+            "Prerequisite task handle(s) to remove; removals and additions "
+            "land as one atomic change so one invocation can re-point an edge."
         ),
     )
     depends.set_defaults(func=handle)
