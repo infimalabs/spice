@@ -204,9 +204,9 @@ def test_live_state_stays_byte_identical_under_backend_writes(
     assert after == before
 
 
-@pytest.mark.parametrize("backend_kind", ["task", "total"])
+@pytest.mark.parametrize("backend_kind", ["task", "total", "environment"])
 def test_http_send_with_scratch_backend_preserves_live_inbox(
-    tmp_path, scratch_overrides, backend_kind
+    tmp_path, monkeypatch, scratch_overrides, backend_kind
 ):
     repo = _repo(tmp_path)
     target = _target(repo)
@@ -220,6 +220,8 @@ def test_http_send_with_scratch_backend_preserves_live_inbox(
     scratch = tmp_path / "scratch"
     if backend_kind == "total":
         apply_serve_backends(_serve_args(scratch, None))
+    elif backend_kind == "environment":
+        monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(scratch / "task"))
     else:
         apply_serve_backends(_serve_args(None, scratch / "task"))
 
@@ -233,6 +235,36 @@ def test_http_send_with_scratch_backend_preserves_live_inbox(
     task_config.set_backend(None)
     assert status == HTTPStatus.METHOD_NOT_ALLOWED
     assert payload == {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR}
+    assert _inbox_snapshot(repo) == before
+
+
+def test_live_bus_with_environment_backend_preserves_live_inbox(
+    tmp_path, monkeypatch, scratch_overrides
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    write_inbox_item(
+        repo,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="live seed", priority=None, stop=False),
+    )
+    before = _inbox_snapshot(repo)
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(tmp_path / "environment-task"))
+
+    send_result = serve_app._live_bus_send_payload(
+        state, target, {"text": "must remain scratch-only"}
+    )
+    drain_result = serve_app._live_bus_task_drain_payload(
+        state, target, {"replaceTaskFilters": True}
+    )
+
+    refusal = (
+        {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR},
+        HTTPStatus.METHOD_NOT_ALLOWED,
+    )
+    assert send_result == refusal
+    assert drain_result == refusal
     assert _inbox_snapshot(repo) == before
 
 

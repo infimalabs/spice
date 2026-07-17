@@ -64,6 +64,17 @@ def test_task_backend_absolute_override_is_backend_root(tmp_path, monkeypatch):
         config.set_backend(None)
 
 
+def test_task_backend_environment_selector_is_reported_as_override(
+    tmp_path, monkeypatch
+):
+    backend = tmp_path / "environment-backend"
+    monkeypatch.setenv(config.TASK_BACKEND_ENV, str(backend))
+    config.set_backend(None)
+
+    assert config.backend_override() == str(backend)
+    assert config.backend_root() == backend.resolve()
+
+
 def test_manual_project_depth_defaults_require_child_and_cap_three(
     tmp_path, monkeypatch
 ):
