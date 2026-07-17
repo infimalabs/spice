@@ -917,34 +917,51 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
     rendered = identity.render_handle(row)
-    # Removals run before additions so a single invocation can re-point an
-    # edge without tripping Taskwarrior's cycle check on the transient state.
-    if not_after:
-        existing = set(_dependency_uuids(row))
-        annotations = _annotation_descriptions(row)
-        for dep in dict.fromkeys(not_after):
-            dep_row = identity.resolve(dep)
-            dep_uuid = identity.uuid_of(dep_row)
-            rendered_dep = identity.render_handle(dep_row)
-            if dep_uuid not in existing:
-                raise SpiceError(f"{rendered} does not depend on {rendered_dep}")
-            tw.run([uuid, "modify", f"depends:-{dep_uuid}"])
-            note = f"depends: {rendered_dep}"
-            if note in annotations:
-                denotate(uuid, note)
-    for dep in after:
+    existing = set(_dependency_uuids(row))
+    annotations = _annotation_descriptions(row)
+    additions: list[tuple[str, str]] = []
+    for dep in dict.fromkeys(after):
         dep_row = identity.resolve(dep)
         dep_uuid = identity.uuid_of(dep_row)
         if dep_uuid == uuid:
             raise SpiceError("a task cannot depend on itself")
+        additions.append((dep_uuid, identity.render_handle(dep_row)))
+    added = {dep_uuid for dep_uuid, _ in additions}
+    removals: list[tuple[str, str]] = []
+    for dep in dict.fromkeys(not_after):
+        dep_row = identity.resolve(dep)
+        dep_uuid = identity.uuid_of(dep_row)
+        rendered_dep = identity.render_handle(dep_row)
+        if dep_uuid not in existing:
+            raise SpiceError(f"{rendered} does not depend on {rendered_dep}")
+        # An edge both removed and re-added keeps its final state either
+        # way; the addition alone asserts it.
+        if dep_uuid not in added:
+            removals.append((dep_uuid, rendered_dep))
+    changes = [f"depends:-{dep_uuid}" for dep_uuid, _ in removals]
+    changes += [f"depends:{dep_uuid}" for dep_uuid, _ in additions]
+    if changes:
+        # One modify carries every edge change: Taskwarrior validates the
+        # final dependency set and applies or refuses the batch wholesale,
+        # so a refused re-point cannot strand the task with edges removed
+        # but not re-added.
         try:
-            tw.run([uuid, "modify", f"depends:{dep_uuid}"])
+            tw.run([uuid, "modify", *changes])
         except SpiceError as exc:
-            raise SpiceError(
-                f"could not add dependency on {identity.render_handle(dep_row)} "
-                "(would it create a cycle?)"
-            ) from exc
-        annotate(uuid, f"depends: {identity.render_handle(dep_row)}")
+            targets = ", ".join(rendered_dep for _, rendered_dep in additions)
+            if targets:
+                raise SpiceError(
+                    f"could not add dependency on {targets} (would it create a cycle?)"
+                ) from exc
+            raise
+    for _, rendered_dep in removals:
+        marker = f"depends: {rendered_dep}"
+        if marker in annotations:
+            denotate(uuid, marker)
+    for _, rendered_dep in additions:
+        marker = f"depends: {rendered_dep}"
+        if marker not in annotations:
+            annotate(uuid, marker)
     return rendered
 
 
