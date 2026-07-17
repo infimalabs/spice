@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from spice.errors import SpiceError
 from spice.paths import git_common_dir
 from spice.serve.team.store import team_database_path
 from spice.serve.team.schema import TEAM_DATABASE_FILENAME
-from spice.tasks import config, render
+from spice.tasks import config, render, tw
 
 
 def test_ensure_task_event_file_preserves_existing_event(tmp_path):
@@ -324,6 +325,53 @@ def test_design_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
     ) == ["design", "plan", "todo", "verify", "review"]
     assert "design" in config.uda_schema()["phase"]["values"]
     assert "design" in config.task_project_validation_catalog()["approvedPhases"]
+
+
+@pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
+def test_backend_path_with_taskrc_comment_characters_survives(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    backend = tmp_path / "back end#42?x%y"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(config.TASK_BACKEND_ENV, str(backend))
+    config.set_backend(str(backend))
+    try:
+        tw.run(["add", "comment-character backend probe"])
+        located = tw.run(["_get", "rc.data.location"]).stdout.strip()
+
+        assert config.backend_root() == backend
+        assert located == str(config.data_dir())
+        assert (config.data_dir() / "taskchampion.sqlite3").is_file()
+        assert [row["description"] for row in tw.export()] == [
+            "comment-character backend probe"
+        ]
+        assert sorted(entry.name for entry in tmp_path.iterdir()) == [
+            "back end#42?x%y",
+            "repo",
+        ]
+    finally:
+        config.set_backend(None)
+
+
+@pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
+def test_ordinary_backend_data_location_semantics_match_taskrc(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    backend = tmp_path / "ordinary-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(config.TASK_BACKEND_ENV, str(backend))
+    config.set_backend(str(backend))
+    try:
+        taskrc = config.bootstrap()
+        data_line = taskrc.read_text(encoding="utf-8").splitlines()[0]
+        located = tw.run(["_get", "rc.data.location"]).stdout.strip()
+
+        assert data_line == f"data.location={config.data_dir()}"
+        assert f"data.location={located}" == data_line
+    finally:
+        config.set_backend(None)
 
 
 def _init_repo(path: Path) -> Path:

@@ -70,6 +70,7 @@ def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
     assert timeout.message == (
         f"Taskwarrior modify mutation timed out after "
         f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: task rc:{tmp_path / 'taskrc'} "
+        f"rc.data.location={tmp_path / 'data'} "
         "rc.confirmation=no rc.bulk=0 rc.verbose=nothing task-uuid modify "
         "phase:review claim_by:"
     )
