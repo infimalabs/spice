@@ -712,6 +712,20 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
 
 
+def test_repo_spice_dev_wrapper_routes_pytest_through_python_module():
+    repo = Path(__file__).resolve().parents[1]
+
+    rendered = shellhook.render_agent_wrapper_lines(repo)
+
+    pytest_start = rendered.index("pytest() {") - 1
+    assert rendered[pytest_start : pytest_start + 4] == [
+        "",
+        "pytest() {",
+        '  python -m pytest "$@"',
+        "}",
+    ]
+
+
 def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
