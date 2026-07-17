@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 import re
 import subprocess
@@ -46,6 +48,7 @@ SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
 SPEND_LIMIT_RESET_EPOCH = 1784280000
+STORM_DEATH_EPOCH = 1784269388  # 2026-07-17T06:23:08Z, the final storm launch death
 
 
 @pytest.fixture(autouse=True)
@@ -858,6 +861,102 @@ def test_record_launch_outcome_keeps_bounded_journal(tmp_path):
     assert len(outcomes) == lifecycle.LAUNCH_OUTCOMES_LIMIT
     assert outcomes[-1] == {"exit_code": lifecycle.LAUNCH_OUTCOMES_LIMIT + 2}
     assert outcomes[0] == {"exit_code": 3}
+
+
+def _launch_death_stamp(epoch: float) -> str:
+    return (
+        datetime.fromtimestamp(epoch, tz=UTC)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _rapid_death(ended_epoch: float, **extra) -> dict:
+    return {
+        "lifetime_seconds": 0.751,
+        "exit_code": 0,
+        "ended_at": _launch_death_stamp(ended_epoch),
+        **extra,
+    }
+
+
+def test_launch_refusal_opens_after_consecutive_rapid_deaths(tmp_path):
+    probe = STORM_DEATH_EPOCH + 1.0
+    for index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD - 1):
+        lifecycle.record_launch_outcome(
+            tmp_path, _rapid_death(STORM_DEATH_EPOCH - 9 + index)
+        )
+
+    assert lifecycle.launch_refusal(tmp_path, now=probe) is None
+
+    lifecycle.record_launch_outcome(tmp_path, _rapid_death(STORM_DEATH_EPOCH))
+
+    assert lifecycle.launch_refusal(tmp_path, now=probe) == {
+        "consecutive_rapid_deaths": lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD,
+        "hold_until_epoch": int(
+            STORM_DEATH_EPOCH + lifecycle.RAPID_DEATH_REFUSAL_WINDOW_SECONDS
+        ),
+    }
+
+    lifecycle.record_launch_outcome(
+        tmp_path,
+        {
+            "lifetime_seconds": 300.0,
+            "exit_code": 0,
+            "ended_at": _launch_death_stamp(STORM_DEATH_EPOCH + 60),
+        },
+    )
+
+    assert lifecycle.launch_refusal(tmp_path, now=probe) is None
+
+
+def test_launch_refusal_window_expiry_yields_to_reset_epoch(tmp_path):
+    for index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD):
+        lifecycle.record_launch_outcome(
+            tmp_path, _rapid_death(STORM_DEATH_EPOCH - 18 + 9 * index)
+        )
+    expired = float(
+        STORM_DEATH_EPOCH + lifecycle.RAPID_DEATH_REFUSAL_WINDOW_SECONDS + 1
+    )
+
+    assert lifecycle.launch_refusal(tmp_path, now=expired) is None
+
+    lifecycle.record_launch_outcome(
+        tmp_path,
+        _rapid_death(STORM_DEATH_EPOCH, reset_epoch=SPEND_LIMIT_RESET_EPOCH),
+    )
+
+    assert lifecycle.launch_refusal(tmp_path, now=expired) == {
+        "consecutive_rapid_deaths": lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1,
+        "hold_until_epoch": SPEND_LIMIT_RESET_EPOCH,
+        "reset_epoch": SPEND_LIMIT_RESET_EPOCH,
+    }
+    assert (
+        lifecycle.launch_refusal(tmp_path, now=float(SPEND_LIMIT_RESET_EPOCH)) is None
+    )
+
+
+def test_ensure_agent_automatic_refuses_while_explicit_start_is_granted(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: _status())
+    for index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD):
+        lifecycle.record_launch_outcome(tmp_path, _rapid_death(time.time() - index))
+    journal = lifecycle.read_launch_outcomes(tmp_path)
+
+    with pytest.raises(lifecycle.AgentRestartRefusedError) as excinfo:
+        lifecycle.ensure_agent(tmp_path, dry_run=True, automatic=True)
+
+    assert (
+        excinfo.value.refusal["consecutive_rapid_deaths"]
+        == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+
+    explicit = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert explicit.action == "would-start"
+    assert lifecycle.read_launch_outcomes(tmp_path) == journal
 
 
 def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):

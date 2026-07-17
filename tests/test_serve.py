@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.agent import lifecycle
 from spice.cli.parser import build_parser
 from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.inbox import (
@@ -521,6 +522,121 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "20260102T000000000003Z.txt"
     ]
+
+
+def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
+    tmp_path, monkeypatch
+):
+    # Replays the 2026-07-17 spend-limit storm: every launch survives startup
+    # and dies in under a second, pending operator items keep re-triggering
+    # the ensure, and only the journal-backed refusal stops the loop.
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    write_inbox_item(
+        repo,
+        "20260717T062038000001Z.txt",
+        compose_inbox_text(body="operator broadcast", priority=None, stop=False),
+    )
+    write_inbox_item(
+        repo,
+        "20260717T062038000002Z.txt",
+        compose_inbox_text(body="operator follow-up", priority=None, stop=False),
+    )
+    launches = 0
+
+    def fake_start_agent(repo_root, **_kwargs):
+        nonlocal launches
+        launches += 1
+        lifecycle.record_launch_outcome(
+            repo_root,
+            {
+                "lifetime_seconds": 0.751,
+                "exit_code": 0,
+                "ended_at": lifecycle.utc_now(),
+            },
+        )
+        return repo_root / "launch.log"
+
+    monkeypatch.setattr(lifecycle, "start_agent", fake_start_agent)
+    monkeypatch.setattr(lifecycle, "ensure_origin_head", lambda *_args: None)
+
+    payloads = [
+        agentapi.ensure_agent_for_pending_inbox(
+            target, attempt_cache={}, retry_seconds=0.0
+        )
+        for _ in range(6)
+    ]
+
+    assert launches == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    assert [payload["action"] for payload in payloads[:3]] == [
+        "start",
+        "start",
+        "start",
+    ]
+    refused = payloads[3]
+    assert refused["failure"] == lifecycle.AGENT_FAILURE_RESTART_REFUSED
+    assert (
+        refused["restartRefusal"]["consecutive_rapid_deaths"]
+        == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+    assert refused["deadletteredInboxKeys"] == [
+        "20260717T062038000001Z",
+        "20260717T062038000002Z",
+    ]
+    assert refused["pendingInboxCount"] == 0
+    assert payloads[4:] == [None, None]
+    assert pending_inbox_count(repo) == 0
+    # Deadletter listings read newest-first, like the archive preview.
+    assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
+        "20260717T062038000002Z.txt",
+        "20260717T062038000001Z.txt",
+    ]
+
+    # A fresh operator send is an explicit action: exactly one new attempt,
+    # journal intact — and its rapid death re-arms the refusal.
+    write_inbox_item(
+        repo,
+        "20260717T063000000001Z.txt",
+        compose_inbox_text(body="operator retry", priority=None, stop=False),
+    )
+    granted = agentapi.ensure_agent_for_pending_inbox(
+        target, attempt_cache={}, retry_seconds=0.0, automatic=False
+    )
+    reopened = agentapi.ensure_agent_for_pending_inbox(
+        target, attempt_cache={}, retry_seconds=0.0
+    )
+
+    assert granted["action"] == "start"
+    assert launches == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
+    assert reopened["failure"] == lifecycle.AGENT_FAILURE_RESTART_REFUSED
+    assert reopened["deadletteredInboxKeys"] == ["20260717T063000000001Z"]
+    assert pending_inbox_count(repo) == 0
+    outcomes = lifecycle.read_launch_outcomes(repo)
+    assert len(outcomes) == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
+
+
+def test_agent_status_payload_surfaces_restart_refusal(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    for _ in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD):
+        lifecycle.record_launch_outcome(
+            repo,
+            {
+                "lifetime_seconds": 0.751,
+                "exit_code": 0,
+                "ended_at": lifecycle.utc_now(),
+            },
+        )
+
+    payload = agentapi.agent_status_payload(target)
+
+    assert (
+        payload["restartRefusal"]["consecutive_rapid_deaths"]
+        == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+    assert payload["launchable"] is True
 
 
 def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkeypatch):

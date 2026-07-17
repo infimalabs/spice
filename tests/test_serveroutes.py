@@ -13,7 +13,6 @@ from spice.agent.renewal import (
 )
 from spice.mail.inbox import (
     INBOX_CONTROL_DRAIN_QUEUE,
-    INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
@@ -245,6 +244,8 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
             "target": target,
             "fast_mode": True,
             "force_new": True,
+            # An operator-requested renewal send is explicit steering.
+            "automatic": False,
         }
     ]
     assert state.team_store.current_team_for_agent(ACTOR_A) is None
@@ -387,7 +388,9 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
 
     assert payload["pendingInboxCount"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
-    assert ensure_calls == [{"target": target, "fast_mode": False, "force_new": False}]
+    assert ensure_calls == [
+        {"target": target, "fast_mode": False, "force_new": False, "automatic": True}
+    ]
     assert state.pending_agent_ensure_attempts[target.id] > 0
 
 
@@ -443,8 +446,18 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
     assert payload_a["agentEnsure"]["threadId"] == THREAD_A
     assert payload_b["agentEnsure"]["threadId"] == THREAD_B
     assert ensure_calls == [
-        {"target": target_a.id, "fast_mode": True, "force_new": False},
-        {"target": target_b.id, "fast_mode": True, "force_new": False},
+        {
+            "target": target_a.id,
+            "fast_mode": True,
+            "force_new": False,
+            "automatic": True,
+        },
+        {
+            "target": target_b.id,
+            "fast_mode": True,
+            "force_new": False,
+            "automatic": True,
+        },
     ]
 
 
@@ -474,15 +487,11 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     payload = message.messages_payload_for_worktree(state, target, limit=5)
 
-    assert ensure_calls == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
+    assert ensure_calls == 1
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
     assert (
         payload["agentEnsure"]["deadletterRequeueCommand"]
         == "spice agent requeue-deadletter 20260101T000000000001Z"
-    )
-    assert (
-        payload["agentEnsure"]["creditFailureThreshold"]
-        == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
     )
     assert payload["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxCount"] == 0

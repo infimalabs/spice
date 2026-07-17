@@ -5,18 +5,20 @@ from __future__ import annotations
 import subprocess
 import time
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Sequence
 
 from spice.agent.driver import driver_for
 from spice.agent.lifecycle import (
     AGENT_FAILURE_OUT_OF_CREDITS,
+    AGENT_FAILURE_RESTART_REFUSED,
     AgentOutOfCreditsError,
+    AgentRestartRefusedError,
     agent_binding_error,
     agent_status,
     ensure_agent,
+    launch_refusal,
 )
 from spice.mail.inbox import (
-    INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
     deadletter_inbox_item,
     inbox_item_key,
     inbox_request_priority,
@@ -50,6 +52,7 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
         if binding_error
         else ("bound" if status.thread_id else "unbound"),
         "bindingError": binding_error,
+        "restartRefusal": launch_refusal(target.repo_root) or {},
     }
 
 
@@ -58,6 +61,7 @@ def agent_ensure_response_payload(
     *,
     force_new: bool = False,
     fast_mode: bool = False,
+    automatic: bool = False,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = ensure_agent(
@@ -65,6 +69,17 @@ def agent_ensure_response_payload(
             force_new=force_new,
             fast_mode=fast_mode,
             supervise_stdout=True,
+            automatic=automatic,
+        )
+    except AgentRestartRefusedError as exc:
+        return (
+            {
+                "ok": False,
+                "failure": AGENT_FAILURE_RESTART_REFUSED,
+                "error": f"Could not ensure agent: {exc}",
+                "restartRefusal": exc.refusal,
+            },
+            HTTPStatus.TOO_MANY_REQUESTS,
         )
     except AgentOutOfCreditsError as exc:
         return (
@@ -147,6 +162,9 @@ def sent_steering_response_payload(
         retry_seconds=0.0,
         fast_mode=fast_mode,
         force_new=force_new,
+        # A fresh operator send is an explicit action: it grants exactly one
+        # launch attempt even while automatic restarts are refused.
+        automatic=False,
     )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
@@ -166,6 +184,7 @@ def ensure_agent_for_pending_inbox(
     retry_seconds: float = PENDING_AGENT_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
     force_new: bool = False,
+    automatic: bool = True,
 ) -> dict[str, Any] | None:
     """Start an idle agent when its inbox has pending steering.
 
@@ -185,14 +204,42 @@ def ensure_agent_for_pending_inbox(
         return None
     trigger_key = inbox_item_key(operator_items[0].name)
     payload, _status = agent_ensure_response_payload(
-        target, fast_mode=fast_mode, force_new=force_new
+        target, fast_mode=fast_mode, force_new=force_new, automatic=automatic
     )
+    if payload.get("failure") == AGENT_FAILURE_RESTART_REFUSED:
+        return deadletter_refused_ensure_payload(target, payload, operator_items)
     if payload.get("ok") is False:
         return deadletter_failed_agent_ensure_payload(
             target,
             payload,
             trigger_key=trigger_key,
         )
+    return payload
+
+
+def deadletter_refused_ensure_payload(
+    target: WorktreeTarget,
+    payload: dict[str, Any],
+    operator_items: Sequence[Any],
+) -> dict[str, Any]:
+    """Park every pending operator item once automatic restarts are refused.
+
+    The pending items are the wake condition: any left behind re-trigger the
+    ensure on the next status pass, which is exactly the reinvocation storm
+    the refusal exists to stop.
+    """
+    parked = [
+        key
+        for item in operator_items
+        if (key := deadletter_inbox_item(target.repo_root, inbox_item_key(item.name)))
+    ]
+    if parked:
+        payload["deadletteredInboxKeys"] = parked
+        payload["deadletteredInboxKey"] = parked[0]
+        payload["deadletterRequeueCommand"] = (
+            f"spice agent requeue-deadletter {parked[0]}"
+        )
+        payload.update(pending_inbox_identity_payload(target.repo_root))
     return payload
 
 
@@ -203,8 +250,6 @@ def deadletter_failed_agent_ensure_payload(
     trigger_key: str,
 ) -> dict[str, Any]:
     """Park the operator item that caused a failed automatic ensure."""
-    if payload.get("failure") == AGENT_FAILURE_OUT_OF_CREDITS:
-        payload["creditFailureThreshold"] = INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
     deadlettered = deadletter_inbox_item(target.repo_root, trigger_key)
     if deadlettered:
         payload["deadletteredInboxKey"] = deadlettered

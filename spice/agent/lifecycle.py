@@ -92,16 +92,31 @@ SUPERVISOR_ENVIRONMENT_SCRUB_NAMES = (
 STARTUP_GRACE_SECONDS = 0.25
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
 LAUNCH_OUTCOMES_LIMIT = 32
+# A supervised launch that dies this young never did real work; healthy
+# sessions run for minutes, the 2026-07-17 spend-limit storm's launches died
+# in 0.75-3s.
+RAPID_DEATH_LIFETIME_SECONDS = 60.0
+RAPID_DEATH_REFUSAL_THRESHOLD = 3
+RAPID_DEATH_REFUSAL_WINDOW_SECONDS = 30 * 60
 STARTUP_SESSION_ID_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_ID_POLL_SECONDS = 0.05
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
 STARTUP_LOG_HEAD_BYTES = 4096
 STARTUP_LOG_TAIL_BYTES = 4096
 AGENT_FAILURE_OUT_OF_CREDITS = "out-of-credits"
+AGENT_FAILURE_RESTART_REFUSED = "restart-refused"
 
 
 class AgentOutOfCreditsError(SpiceError):
     """Agent driver reported a credit/usage-limit startup failure."""
+
+
+class AgentRestartRefusedError(SpiceError):
+    """Automatic restart refused: recent supervised launches keep dying young."""
+
+    def __init__(self, message: str, *, refusal: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.refusal = refusal
 
 
 @dataclass(frozen=True)
@@ -232,6 +247,7 @@ def ensure_agent(
     agent_bin: str = "",
     fast_mode: bool = False,
     supervise_stdout: bool = True,
+    automatic: bool = False,
 ) -> AgentEnsureResult:
     resolved_root = repo_root.resolve()
     with agent_ensure_lock(resolved_root):
@@ -247,6 +263,21 @@ def ensure_agent(
                 prompt=prompt,
                 log_path=status.log_path,
             )
+        # Only automatic wake paths honor the refusal; an explicit operator
+        # start is itself the grant of exactly one new attempt, and the
+        # journal it leaves behind re-arms the refusal if that attempt also
+        # dies young.
+        if automatic:
+            refusal = launch_refusal(resolved_root)
+            if refusal is not None:
+                raise AgentRestartRefusedError(
+                    "automatic restart refused: "
+                    f"{refusal['consecutive_rapid_deaths']} consecutive launches "
+                    f"died within {RAPID_DEATH_LIFETIME_SECONDS:g}s; "
+                    f"holding until epoch {refusal['hold_until_epoch']} "
+                    "unless an operator starts the agent explicitly",
+                    refusal=refusal,
+                )
         resume_thread_id = "" if force_new else status.thread_id
         service_tier = driver.default_service_tier if fast_mode else ""
         phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
@@ -897,6 +928,65 @@ def read_launch_outcomes(repo_root: Path) -> list[dict[str, Any]]:
     if not isinstance(loaded, list):
         return []
     return [entry for entry in loaded if isinstance(entry, dict)]
+
+
+def launch_refusal(
+    repo_root: Path, *, now: float | None = None
+) -> dict[str, Any] | None:
+    """Why automatic restarts are refused right now, or None when they may run.
+
+    Message-agnostic by design: only how long launches lived and the recorded
+    rate-limit reset horizon matter — never the failure text or classified
+    kind. The trailing run of journal outcomes that each died under
+    RAPID_DEATH_LIFETIME_SECONDS is the signal; once it reaches
+    RAPID_DEATH_REFUSAL_THRESHOLD, automatic ensures hold off until
+    RAPID_DEATH_REFUSAL_WINDOW_SECONDS pass the newest death — or until the
+    largest recorded reset epoch, when the account itself named the retry
+    horizon.
+    """
+    clock = time.time() if now is None else now
+    rapid: list[dict[str, Any]] = []
+    for outcome in reversed(read_launch_outcomes(repo_root)):
+        lifetime = outcome.get("lifetime_seconds")
+        if not isinstance(lifetime, (int, float)):
+            break
+        if float(lifetime) >= RAPID_DEATH_LIFETIME_SECONDS:
+            break
+        rapid.append(outcome)
+    if len(rapid) < RAPID_DEATH_REFUSAL_THRESHOLD:
+        return None
+    newest_death = max(
+        (_epoch_seconds(outcome.get("ended_at")) for outcome in rapid), default=0.0
+    )
+    reset_epoch = max(
+        (
+            int(outcome["reset_epoch"])
+            for outcome in rapid
+            if isinstance(outcome.get("reset_epoch"), int)
+        ),
+        default=0,
+    )
+    hold_until = max(
+        newest_death + RAPID_DEATH_REFUSAL_WINDOW_SECONDS, float(reset_epoch)
+    )
+    if clock >= hold_until:
+        return None
+    refusal: dict[str, Any] = {
+        "consecutive_rapid_deaths": len(rapid),
+        "hold_until_epoch": int(hold_until),
+    }
+    if reset_epoch:
+        refusal["reset_epoch"] = reset_epoch
+    return refusal
+
+
+def _epoch_seconds(stamp: Any) -> float:
+    if not isinstance(stamp, str) or not stamp:
+        return 0.0
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def record_launch_outcome(repo_root: Path, outcome: dict[str, Any]) -> None:
