@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -20,10 +21,10 @@ pytestmark = pytest.mark.skipif(
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
-@pytest.fixture
-def task_repo(tmp_path, monkeypatch):
+@pytest.fixture(params=["task-backend", "task backend ?%"])
+def task_repo(tmp_path, monkeypatch, request):
     repo = _init_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
+    backend = tmp_path / request.param
     monkeypatch.chdir(repo)
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
     monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
@@ -32,6 +33,55 @@ def task_repo(tmp_path, monkeypatch):
         yield repo
     finally:
         config.set_backend(None)
+
+
+def test_read_only_connector_encodes_every_uri_reserved_path_character(
+    tmp_path, monkeypatch
+):
+    data_dir = tmp_path / "task data ?#%"
+    data_dir.mkdir()
+    database = data_dir / opslog.OPERATIONS_DB_FILENAME
+    uuid = "11111111-1111-1111-1111-111111111111"
+    con = sqlite3.connect(database)
+    try:
+        con.execute("CREATE TABLE operations (id INTEGER, uuid TEXT, data TEXT)")
+        con.executemany(
+            "INSERT INTO operations VALUES (?, ?, ?)",
+            [
+                (
+                    1,
+                    uuid,
+                    json.dumps({"Update": {"property": "claim_by", "value": ACTOR_A}}),
+                ),
+                (
+                    2,
+                    uuid,
+                    json.dumps(
+                        {
+                            "Update": {
+                                "property": "acceptance",
+                                "old_value": "old",
+                                "value": "new",
+                                "timestamp": "now",
+                            }
+                        }
+                    ),
+                ),
+            ],
+        )
+        con.commit()
+    finally:
+        con.close()
+    monkeypatch.setattr(config, "data_dir", lambda: data_dir)
+
+    baseline = opslog.claim_baseline_id(uuid, ACTOR_A)
+    cursor, mutations = opslog.contract_mutations_since(uuid, baseline)
+
+    assert opslog.operations_db_uri() == f"{database.resolve().as_uri()}?mode=ro"
+    assert opslog.task_version(uuid) == 2
+    assert baseline == 1
+    assert cursor == 2
+    assert mutations == [opslog.ContractMutation("acceptance", "old", "new", "now")]
 
 
 def test_contract_mutations_track_edits_exactly(task_repo):
@@ -164,7 +214,7 @@ def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
     uuid = identity.uuid_of(identity.resolve(handle))
 
     shown = _shown_version(handle)
-    con = sqlite3.connect(f"file:{opslog.operations_db_path()}?mode=ro", uri=True)
+    con = sqlite3.connect(opslog.operations_db_uri(), uri=True)
     try:
         tail = con.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)

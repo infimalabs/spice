@@ -59,15 +59,20 @@ def operations_db_path() -> str:
     return str(config.data_dir() / OPERATIONS_DB_FILENAME)
 
 
+def operations_db_uri() -> str:
+    """Percent-encoded read-only SQLite URI for the resolved operations DB."""
+    return f"{Path(operations_db_path()).resolve().as_uri()}?mode=ro"
+
+
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     """Open and verify the one supported TaskChampion operations-log shape."""
-    path = Path(operations_db_path())
+    path = Path(operations_db_path()).resolve()
     if not path.is_file():
         raise _schema_error(path, "database file is missing")
     connection: sqlite3.Connection | None = None
     try:
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        connection = sqlite3.connect(operations_db_uri(), uri=True)
         table = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
             ("operations",),
