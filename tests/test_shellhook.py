@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 import tomllib
 from pathlib import Path
@@ -322,6 +323,80 @@ def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_p
 
     assert module == ["zsh", "-c", "python -m pytest -q"]
     assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
+
+
+def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
+    tmp_path, monkeypatch
+):
+    if shutil.which("zsh") is None:
+        pytest.skip("zsh is required for the end-to-end child shell")
+    rtk = _write_fake_rewriting_rtk(tmp_path)
+    _write_rtk_config(tmp_path, str(rtk))
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "spice-dev"],
+        groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+    )
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(tmp_path / ".venv")],
+        check=True,
+    )
+    (tmp_path / "test_probe.py").write_text(
+        "import sys\n\n\ndef test_probe():\n"
+        "    print(f'probe-executable={sys.executable}')\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # The bare worktree venv carries no pytest; the child borrows this
+    # interpreter's site-packages while sys.executable stays the venv's.
+    monkeypatch.setenv("PYTHONPATH", sysconfig.get_paths()["purelib"])
+    for name in (
+        shellhook.ZDOTDIR_ENV,
+        shellhook.BASH_ENV_ENV,
+        shellhook.HISTFILE_ENV,
+        shellhook.ZSH_COMPDUMP_ENV,
+        shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
+        shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV,
+        shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    steering = shellhook.apply_shell_steering_environment(
+        tmp_path,
+        base_env=dict(os.environ),  # env-policy: allow
+    )
+    for name, value in steering.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(tmp_path)
+    stdout_path = tmp_path / "child-stdout.txt"
+    executed: list[list[str]] = []
+
+    def spawning_recorder(command, **kwargs):
+        executed.append(list(command))
+        with stdout_path.open("w", encoding="utf-8") as sink:
+            return subprocess.Popen(
+                command, stdout=sink, stderr=subprocess.STDOUT, **kwargs
+            )
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["zsh", "-c", "pytest -s test_probe.py"],
+        popen_factory=spawning_recorder,
+        stderr=io.StringIO(),
+    )
+    control = wrap.build_agent_run_command(
+        ["zsh", "-c", "rg -n needle"], repo_root=tmp_path, rewrite_rtk=True
+    )
+
+    output = stdout_path.read_text(encoding="utf-8")
+    venv_python = tmp_path.resolve() / ".venv" / "bin" / "python"
+    assert exit_code == 0
+    assert "1 passed" in output
+    assert f"probe-executable={venv_python}" in output
+    assert executed == [["zsh", "-c", "pytest -s test_probe.py"]]
+    assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
+    assert executed[0][2] != control[2]
 
 
 def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
@@ -1145,7 +1220,7 @@ def _write_fake_rewriting_rtk(repo: Path) -> Path:
         "#!/bin/sh\n"
         "shift 2\n"
         'case "$*" in\n'
-        '"pytest -q" | "python -m pytest -q") echo "rtk pytest -q"; exit 3 ;;\n'
+        '"pytest"* | "python -m pytest"*) echo "rtk pytest"; exit 3 ;;\n'
         '"rg -n needle") echo "rtk grep -n needle"; exit 3 ;;\n'
         "esac\n"
         "exit 1\n",
