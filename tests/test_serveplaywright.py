@@ -195,6 +195,26 @@ def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     assert "lane.pending ack triggered an unexpected refresh" in smoke
 
 
+def test_serve_composer_pending_send_smoke_covers_lock_and_restore() -> None:
+    smoke = (ROOT / "browser" / "serve_composer_pending_send_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert (
+        'appearance: shard.classList.contains("composer-shard--pending-send")' in smoke
+    )
+    assert 'composerState: textarea.disabled ? "locked" : "editable"' in smoke
+    assert "expectEqual(result.afterSecondSubmit.sendCount, 1" in smoke
+    assert 'expectEqual(result.successSettled.text, ""' in smoke
+    assert "expectEqual(result.failureSettled.text, config.failureText" in smoke
+    assert "grouped.commandPending.payloads.length" in smoke
+    assert 'grouped.commandSettled.otherQuoteState, "retained"' in smoke
+    assert "grouped.buttonPayloads.length" in smoke
+    assert 'waitForComposerState(textarea, "editable")' in smoke
+    assert "new MutationObserver(" in smoke
+
+
 def test_watch_frame_smokes_authenticate_subscription_generation() -> None:
     watch_smokes = {
         path.name: source

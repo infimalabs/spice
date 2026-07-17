@@ -370,6 +370,15 @@
   resize: none;
   width: 100%;
 }
+.composer-shard--pending-send textarea {
+  cursor: progress;
+  opacity: 0.52;
+}
+.composer-shard--pending-send .composer-attachments,
+.composer-shard--pending-send .composer-band-header,
+.composer-shard--pending-send .composer-driver-icon {
+  opacity: 0.52;
+}
 .composer-band--primary textarea {
   padding-bottom: 28px;
   padding-right: 32px;

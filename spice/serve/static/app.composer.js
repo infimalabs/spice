@@ -18,7 +18,39 @@ function syncComposerShards(lane, members) {
     return shard;
   });
   syncComposerShardOrder(lane.shardsEl, shards);
+  syncComposerPendingSendState(lane);
   syncLanePaneMetrics(lane);
+}
+
+function syncComposerPendingSendState(lane) {
+  const host = laneGroupHost(lane);
+  let anyPending = false;
+  for (const member of laneGroupMemberLanes(host)) {
+    const pending = Math.max(0, Number(member.pendingSubmissionCount) || 0) > 0;
+    const shard = composerShardElementForTarget(host, member.targetId);
+    if (!shard) continue;
+    anyPending = anyPending || pending;
+    shard.classList.toggle("composer-shard--pending-send", pending);
+    shard.setAttribute("aria-busy", pending ? "true" : "false");
+    for (const control of shard.querySelectorAll("textarea, button, input"))
+      syncComposerPendingControl(control, pending);
+  }
+  host.formEl.classList.toggle("lane-composer--pending-send", anyPending);
+  host.formEl.setAttribute("aria-busy", anyPending ? "true" : "false");
+  syncComposerPendingControl(host.submitEl, anyPending);
+}
+
+function syncComposerPendingControl(control, pending) {
+  if (pending) {
+    if (control.dataset.composerPendingWasDisabled === undefined)
+      control.dataset.composerPendingWasDisabled = control.disabled ? "true" : "false";
+    control.disabled = true;
+    return;
+  }
+  const previous = control.dataset.composerPendingWasDisabled;
+  if (previous === undefined) return;
+  control.disabled = previous === "true";
+  delete control.dataset.composerPendingWasDisabled;
 }
 
 function composerShardElementForTarget(lane, targetId) {
@@ -367,28 +399,8 @@ function resetLaneComposerDraft(lane, targetId) {
   if (host.quoteDrafts.delete(targetId)) renderComposerQuoteBands(host);
 }
 
-function clearAcceptedComposerDrafts(lane, targetId, acceptedText) {
-  const host = laneGroupHost(lane);
-  resetLaneComposerDraft(host, targetId);
-  const normalizedAccepted = normalizeComposerSubmittedText(acceptedText);
-  if (!normalizedAccepted) return;
-  let quotesChanged = false;
-  for (const [draftTargetId, textarea] of host.shardTextareas) {
-    if (draftTargetId === targetId) continue;
-    const draftText = laneComposerSubmissionText(
-      host,
-      draftTargetId,
-      textarea.value,
-    );
-    if (normalizeComposerSubmittedText(draftText) !== normalizedAccepted) continue;
-    textarea.value = "";
-    if (host.quoteDrafts.delete(draftTargetId)) quotesChanged = true;
-  }
-  if (quotesChanged) renderComposerQuoteBands(host);
-}
-
-function normalizeComposerSubmittedText(text) {
-  return String(text || "").trim();
+function clearAcceptedComposerDrafts(lane, targetId) {
+  resetLaneComposerDraft(laneGroupHost(lane), targetId);
 }
 
 function composerAttachmentStrip(lane, targetId) {

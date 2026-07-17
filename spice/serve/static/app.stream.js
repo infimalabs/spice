@@ -771,11 +771,7 @@ function applyLaneSendResult(
     setLaneTransientStatus(sourceLane, result.error || "send failed");
     return;
   }
-  clearAcceptedComposerDrafts(
-    sourceLane,
-    lane.targetId,
-    result.requestText || payload.text,
-  );
+  clearAcceptedComposerDrafts(sourceLane, lane.targetId);
   focusAfterComposerReset(options.focusAfterReset);
   finishLanePendingSubmission(lane, {
     accepted: true,
