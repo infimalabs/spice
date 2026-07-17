@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 
+from spice import paths
 from spice.errors import SpiceError
 from spice.sessions import learnings, records
 from spice.sessions.learnings import (
@@ -54,6 +55,55 @@ def test_missing_learning_store_reads_empty_and_path_is_per_stem(tmp_path):
 
     assert path == tmp_path / ".spice" / "learnings" / "session.learnings.jsonl"
     assert load_learning_records(tmp_path, "session.learnings") == []
+
+
+def test_total_state_backend_isolates_learning_store_from_live_records(tmp_path):
+    repo = tmp_path / "repo"
+    live_path = repo / ".spice" / "learnings" / "session.learnings.jsonl"
+    live_path.parent.mkdir(parents=True)
+    live_path.write_bytes(b"not scratch learning JSON\n")
+    backend = tmp_path / "backend"
+
+    paths.set_state_backend(str(backend))
+    try:
+        assert load_learning_records(repo, "session.learnings") == []
+        confirm_learning_candidates(
+            repo,
+            "session.learnings",
+            [_candidate("Keep scratch learnings out of the live worktree.")],
+            now=FIRST_CONFIRMATION_AT,
+        )
+
+        scratch_path = learning_store_path(repo, "session.learnings")
+        assert scratch_path == (
+            paths.worktree_runtime_state_root(repo)
+            / "learnings"
+            / "session.learnings.jsonl"
+        )
+        assert scratch_path.is_file()
+        assert live_path.read_bytes() == b"not scratch learning JSON\n"
+    finally:
+        paths.set_state_backend(None)
+
+
+def test_total_state_backend_does_not_create_live_learning_state(tmp_path):
+    repo = tmp_path / "fresh-repo"
+    repo.mkdir()
+    backend = tmp_path / "backend"
+
+    paths.set_state_backend(str(backend))
+    try:
+        confirm_learning_candidates(
+            repo,
+            "session.learnings",
+            [_candidate("Write new learning state only to scratch storage.")],
+            now=FIRST_CONFIRMATION_AT,
+        )
+
+        assert learning_store_path(repo, "session.learnings").is_file()
+        assert not (repo / ".spice").exists()
+    finally:
+        paths.set_state_backend(None)
 
 
 @pytest.mark.parametrize("stem", ["", "../escape", "session/learnings"])
