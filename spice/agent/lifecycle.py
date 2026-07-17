@@ -561,6 +561,7 @@ def _renew_supervised_claim(
     thread_id: str,
     log_path: Path,
     reported: dict[str, str],
+    contract_cursors: dict[str, int],
 ) -> None:
     """Best-effort claim TTL renewal for the agent this supervisor owns."""
     if not thread_id:
@@ -571,6 +572,9 @@ def _renew_supervised_claim(
     result = claimstate.renew_claim(actor=thread_id)
     if result.renewed:
         reported.pop("claim_renewal", None)
+        _notice_contract_mutations(
+            repo_root, thread_id, result, contract_cursors, log_path
+        )
         return
     if result.reason in CLAIM_RENEWAL_QUIET_REASONS:
         return
@@ -596,6 +600,41 @@ def _renew_supervised_claim(
         )
 
 
+def _notice_contract_mutations(
+    repo_root: Path,
+    thread_id: str,
+    result: Any,
+    contract_cursors: dict[str, int],
+    log_path: Path,
+) -> None:
+    """One renewal-cadence notice naming claimed-task contract fields that moved."""
+    from spice.agent.watchdog import publish_supervisor_feedback
+    from spice.tasks import opslog
+
+    uuid = str(getattr(result, "uuid", "") or "")
+    if not uuid:
+        return
+    if uuid not in contract_cursors:
+        contract_cursors.clear()
+        contract_cursors[uuid] = opslog.claim_baseline_id(uuid, thread_id)
+    cursor, mutations = opslog.contract_mutations_since(uuid, contract_cursors[uuid])
+    contract_cursors[uuid] = cursor
+    if not mutations:
+        return
+    notice = opslog.render_notice(mutations)
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(f"spice claim contract changed: {result.handle} {notice}\n")
+        log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "claim.contract-changed",
+            handle=result.handle,
+            fields=",".join(item.property for item in mutations),
+            detail=notice,
+        )
+
+
 def _watch_supervised_lane(
     repo_root: Path,
     thread_id: str,
@@ -605,13 +644,16 @@ def _watch_supervised_lane(
 ) -> None:
     next_renewal = time.monotonic()
     reported: dict[str, str] = {}
+    contract_cursors: dict[str, int] = {}
     while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
         if process.poll() is not None:
             return
         now = time.monotonic()
         try:
             if now >= next_renewal:
-                _renew_supervised_claim(repo_root, thread_id, log_path, reported)
+                _renew_supervised_claim(
+                    repo_root, thread_id, log_path, reported, contract_cursors
+                )
                 next_renewal = now + SUPERVISOR_CLAIM_RENEWAL_SECONDS
             _flag_uncaptured_lane(repo_root, thread_id, log_path)
         except Exception:  # best-effort watch: never take down the supervisor

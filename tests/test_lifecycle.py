@@ -734,7 +734,7 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "_renew_supervised_claim",
-        lambda repo_root, thread_id, log_path, _reported: renewals.append(
+        lambda repo_root, thread_id, log_path, _reported, _cursors: renewals.append(
             (repo_root, thread_id, log_path)
         ),
     )
@@ -768,7 +768,7 @@ def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
     monkeypatch.setattr(claimstate, "renew_claim", fake_renew_claim)
 
     lifecycle._renew_supervised_claim(
-        tmp_path, "thread-a", tmp_path / "supervisor.log", {}
+        tmp_path, "thread-a", tmp_path / "supervisor.log", {}, {}
     )
 
     assert calls == [{"handle": None, "actor": "thread-a"}]
@@ -788,7 +788,7 @@ def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monke
         lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
     )
 
-    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, {})
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, {}, {})
 
     assert feedback == []
     assert not log_path.exists()
@@ -817,8 +817,8 @@ def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
         lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
     )
 
-    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
-    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
 
     log_text = log_path.read_text(encoding="utf-8")
     assert log_text.count(f"reason={result.reason}") == 1
@@ -848,8 +848,8 @@ def test_supervisor_claim_renewal_reports_backend_failure(tmp_path, monkeypatch)
         lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
     )
 
-    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
-    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
 
     assert log_path.read_text(encoding="utf-8") == (
         "spice claim renewal failed: "
