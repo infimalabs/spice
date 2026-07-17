@@ -334,6 +334,10 @@ def set_backend(selector: str | None) -> None:
     _backend_override = (selector or "").strip() or None
 
 
+def backend_override() -> str | None:
+    return _backend_override
+
+
 def _selector() -> str:
     if _backend_override is not None:
         return _backend_override

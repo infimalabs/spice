@@ -23,7 +23,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi, web as serve_web
+from spice.serve import agentapi, app as serve_app, web as serve_web
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import (
     team_command_response_payload,
@@ -634,6 +634,46 @@ def _route_test_livebus_callbacks(target, calls, messages_payload):
         lane_watch_paths=lambda *_args: (),
         lane_signature=lambda *_args: (),
     )
+
+
+def test_livebus_mutation_adapters_preserve_live_routes_without_override(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    monkeypatch.setattr(
+        serve_app,
+        "work_tree_send_accepted_response_payload",
+        lambda _state, _target, payload: (
+            calls.append(("send", payload)) or {"ok": True, "key": "inbox-key"},
+            HTTPStatus.OK,
+        ),
+    )
+    monkeypatch.setattr(
+        serve_app,
+        "work_tree_task_drain_response_payload",
+        lambda _state, _target, payload: (
+            calls.append(("taskDrain", payload)) or {"ok": True, "route": {}},
+            HTTPStatus.OK,
+        ),
+    )
+
+    send_result = serve_app._live_bus_send_payload(
+        state, target, {"text": "keep draining"}
+    )
+    drain_result = serve_app._live_bus_task_drain_payload(
+        state, target, {"replaceTaskFilters": True}
+    )
+
+    assert send_result == ({"ok": True, "key": "inbox-key"}, HTTPStatus.OK)
+    assert drain_result == ({"ok": True, "route": {}}, HTTPStatus.OK)
+    assert calls == [
+        ("send", {"text": "keep draining"}),
+        ("taskDrain", {"replaceTaskFilters": True}),
+    ]
 
 
 def test_livebus_routes_send_task_drain_team_command_and_history_requests():
