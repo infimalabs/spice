@@ -55,6 +55,12 @@ class ContractMutation:
     timestamp: str
 
 
+@dataclass(frozen=True)
+class _OperationsLogConnection:
+    path: Path
+    connection: sqlite3.Connection
+
+
 def operations_db_path() -> Path:
     """Resolve the TaskChampion operations database for one connection attempt."""
     return (config.data_dir() / OPERATIONS_DB_FILENAME).resolve()
@@ -66,7 +72,7 @@ def operations_db_uri(path: Path) -> str:
 
 
 @contextmanager
-def _connect() -> Iterator[sqlite3.Connection]:
+def _connect() -> Iterator[_OperationsLogConnection]:
     """Open and verify the one supported TaskChampion operations-log shape."""
     path = operations_db_path()
     if not path.is_file():
@@ -90,7 +96,7 @@ def _connect() -> Iterator[sqlite3.Connection]:
             raise _schema_error(
                 path, f"operations table is missing columns: {', '.join(missing)}"
             )
-        yield connection
+        yield _OperationsLogConnection(path=path, connection=connection)
     except sqlite3.Error as exc:
         raise _schema_error(path, f"SQLite read failed: {exc}") from exc
     finally:
@@ -113,8 +119,8 @@ def task_version(uuid: str) -> int:
     task's tail id is a cheap monotonic version — any edit lands a strictly
     higher id. One indexed MAX read; 0 only before the first recorded write.
     """
-    with _connect() as con:
-        row = con.execute(
+    with _connect() as log:
+        row = log.connection.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)
         ).fetchone()
         return int(row[0]) if row is not None and row[0] is not None else 0
@@ -126,8 +132,8 @@ def claim_baseline_id(uuid: str, actor: str) -> int:
     Baselining at the claim write means edits landed between claim time and
     the first cadence check are still reported, without persisting a cursor.
     """
-    with _connect() as con:
-        row = con.execute(
+    with _connect() as log:
+        row = log.connection.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?"
             " AND json_extract(data, '$.Update.property') = 'claim_by'"
             " AND json_extract(data, '$.Update.value') = ?",
@@ -135,7 +141,7 @@ def claim_baseline_id(uuid: str, actor: str) -> int:
         ).fetchone()
         if row is not None and row[0] is not None:
             return int(row[0])
-        tail = con.execute("SELECT MAX(id) FROM operations").fetchone()
+        tail = log.connection.execute("SELECT MAX(id) FROM operations").fetchone()
         return int(tail[0]) if tail is not None and tail[0] is not None else 0
 
 
@@ -149,15 +155,15 @@ def contract_mutations_since(
     """
     cursor = after_id
     mutations: list[ContractMutation] = []
-    with _connect() as con:
-        rows = con.execute(
+    with _connect() as log:
+        rows = log.connection.execute(
             "SELECT id, data FROM operations WHERE uuid = ? AND id > ? ORDER BY id",
             (uuid, after_id),
         ).fetchall()
     for op_id, data in rows:
+        operation = _decode_operation(log.path, int(op_id), data)
         cursor = int(op_id)
-        operation = json.loads(data)
-        update = operation.get("Update") if isinstance(operation, dict) else None
+        update = operation.get("Update")
         if not isinstance(update, dict):
             continue
         prop = str(update.get("property") or "")
@@ -172,6 +178,28 @@ def contract_mutations_since(
             )
         )
     return cursor, mutations
+
+
+def _decode_operation(path: Path, operation_id: int, data: object) -> dict[str, object]:
+    """Decode one supported TaskChampion operation or reject its exact row."""
+    if not isinstance(data, str):
+        raise _schema_error(
+            path,
+            f"operation {operation_id} data is {type(data).__name__}, not JSON text",
+        )
+    try:
+        operation = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise _schema_error(
+            path,
+            f"operation {operation_id} data is not valid JSON: {exc.msg}",
+        ) from exc
+    if not isinstance(operation, dict):
+        raise _schema_error(
+            path,
+            f"operation {operation_id} data is not a JSON object",
+        )
+    return operation
 
 
 def render_notice(mutations: list[ContractMutation]) -> str:
