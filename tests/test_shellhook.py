@@ -253,7 +253,9 @@ def test_canonical_and_resolved_rtk_direct_inputs_preserve_their_identity(
     assert outputs == inputs
 
 
-def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(tmp_path):
+def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
+    tmp_path, monkeypatch
+):
     rtk = _write_fake_rewriting_rtk(tmp_path)
     _write_rtk_config(tmp_path, str(rtk))
     _write_agent_wrapper_config(
@@ -261,6 +263,12 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(tmp_p
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
     )
+    ambient_env = shellhook.apply_shell_steering_environment(
+        tmp_path,
+        base_env=dict(os.environ),  # env-policy: allow
+    )
+    for name, value in ambient_env.items():
+        monkeypatch.setenv(name, value)
     executed: list[list[str]] = []
     environments: list[dict[str, str] | None] = []
 
@@ -286,10 +294,12 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(tmp_p
     assert {
         "exit_code": exit_code,
         "executed": executed,
+        "wrappers": wrappers,
         "pytest_wrapper_rendered": 'pytest() {\n  python -m pytest "$@"\n}' in wrappers,
     } == {
         "exit_code": 0,
         "executed": [["zsh", "-c", "pytest -q"]],
+        "wrappers": ambient_env[shellhook.SHELL_HOOK_WRAPPERS_ENV],
         "pytest_wrapper_rendered": True,
     }
 
