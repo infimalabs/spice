@@ -248,6 +248,14 @@ path = "tests/test_boundedwaits.py"
 test = "test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall"
 target = "_worktree_dirty"
 
+# _close_quietly is the bytecode purge's descriptor-teardown boundary; its
+# contract is that a failing close produces no observable effect at all, so
+# the EBADF double-close probe is inherently white-box.
+[[tool.spice.policy.internal_couplings]]
+path = "tests/test_gitsyncbytecode.py"
+test = "test_close_quietly_contains_descriptor_teardown_failure"
+target = "_close_quietly"
+
 [tool.spice.serve]
 brand = "spice"
 

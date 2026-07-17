@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.errors import SpiceError
 from spice.tasks import gitsync
 from tests.test_taskgitsync import (
     ACTOR_A,
@@ -287,6 +288,149 @@ def test_conflict_materialization_completes_when_cache_cleanup_is_denied(
         "stages": [("1", "pkg/mod.py"), ("3", "pkg/mod.py")],
         "kept_artifacts": 1,
     }
+
+
+def _install_diff_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_read = gitsync._read
+
+    def read_with_injected_diff_failure(root: Path, *args: str) -> str:
+        if args and args[0] == "diff":
+            raise SpiceError("injected: cleanup diff unavailable")
+        return real_read(root, *args)
+
+    monkeypatch.setattr(gitsync, "_read", read_with_injected_diff_failure)
+
+
+def test_head_advance_completes_when_cleanup_diff_discovery_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+    old_head = _git_out(repo, "rev-parse", "HEAD")
+    (repo / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+    _run(repo, "git", "commit", "-am", "advance module")
+    new_head = _git_out(repo, "rev-parse", "HEAD")
+    _run(repo, "git", "reset", "--hard", old_head)
+    _install_diff_read_failure(monkeypatch)
+
+    gitsync._materialize_and_update_head(
+        repo,
+        new_head=new_head,
+        expected_head=old_head,
+        label="TASK-1k98v0WX",
+        action="advance branch for discovery fault probe",
+    )
+
+    assert {
+        "head": _git_out(repo, "rev-parse", "HEAD"),
+        "clean": _git_out(repo, "status", "--porcelain"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+    } == {
+        "head": new_head,
+        "clean": "",
+        "module": NEW_MODULE_SOURCE,
+    }
+
+
+def test_conflict_materialization_completes_when_diff_discovery_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+    agent_head = _git_out(repo, "rev-parse", "HEAD")
+    (repo / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+    _run(repo, "git", "commit", "-am", "upstream module change")
+    upstream_head = _git_out(repo, "rev-parse", "HEAD")
+    merged_tree = _git_out(repo, "rev-parse", f"{upstream_head}^{{tree}}")
+    base_blob = _git_out(repo, "rev-parse", f"{agent_head}:pkg/mod.py")
+    _run(repo, "git", "reset", "--hard", agent_head)
+    _install_diff_read_failure(monkeypatch)
+
+    gitsync._materialize_merge_conflict(
+        repo,
+        merged_tree=merged_tree,
+        conflict_records=[f"100644 {base_blob} 1\tpkg/mod.py"],
+        agent_head=agent_head,
+        upstream_head=upstream_head,
+        message="discovery fault probe merge",
+    )
+
+    merge_head = repo / _git_out(repo, "rev-parse", "--git-path", "MERGE_HEAD")
+    unmerged = [
+        line.split() for line in _git_out(repo, "ls-files", "--unmerged").splitlines()
+    ]
+    assert {
+        "merge_head": merge_head.read_text(encoding="utf-8"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+        "stages": [(entry[2], entry[3]) for entry in unmerged],
+    } == {
+        "merge_head": f"{upstream_head}\n",
+        "module": NEW_MODULE_SOURCE,
+        "stages": [("1", "pkg/mod.py")],
+    }
+
+
+def test_prepare_for_claim_reports_unknown_scope_when_diff_discovery_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+
+    def rewrite_module(peer: Path) -> None:
+        (peer / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+
+    _peer_pushes(tmp_path, rewrite_module)
+    _install_diff_read_failure(monkeypatch)
+
+    result = gitsync.prepare_for_claim(repo)
+
+    guidance = f"stale bytecode kept for {gitsync.BYTECODE_SCOPE_UNKNOWN}"
+    assert {
+        "head": _git_out(repo, "rev-parse", "HEAD"),
+        "clean": _git_out(repo, "status", "--porcelain"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+        "guidance": sum(guidance in note for note in result.notes),
+    } == {
+        "head": _git_out(repo, "rev-parse", "origin/main"),
+        "clean": "",
+        "module": NEW_MODULE_SOURCE,
+        "guidance": 1,
+    }
+
+
+def test_fast_forward_reports_every_candidate_when_root_open_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+
+    def rewrite_module(peer: Path) -> None:
+        (peer / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+
+    _peer_pushes(tmp_path, rewrite_module)
+
+    def deny_root_open(repo_root: Path, directory_flags: int) -> int:
+        raise PermissionError(13, "Permission denied", str(repo_root))
+
+    monkeypatch.setattr(gitsync, "_open_worktree_root", deny_root_open)
+    cache = repo / "pkg" / "__pycache__"
+
+    result = gitsync.fast_forward_if_safe(repo_root=repo)
+
+    assert {
+        "head": _git_out(repo, "rev-parse", "HEAD"),
+        "clean": _git_out(repo, "status", "--porcelain"),
+        "guidance": sum(
+            "stale bytecode kept for pkg/mod.py" in note for note in result.notes
+        ),
+        "kept_artifacts": len(sorted(cache.glob("mod.*"))),
+    } == {
+        "head": _git_out(repo, "rev-parse", "origin/main"),
+        "clean": "",
+        "guidance": 1,
+        "kept_artifacts": 1,
+    }
+
+
+def test_close_quietly_contains_descriptor_teardown_failure(tmp_path: Path) -> None:
+    fd = os.open(tmp_path, os.O_RDONLY)
+    assert (gitsync._close_quietly(fd), gitsync._close_quietly(fd)) == (None, None)
 
 
 def _git_out(repo: Path, *args: str) -> str:

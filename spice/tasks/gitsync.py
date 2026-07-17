@@ -708,46 +708,72 @@ def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> list[str]
     lists drops its compiled artifacts, and directories that would survive
     only because of that bytecode are pruned.
 
-    Cleanup is strictly best-effort and never raises: the surrounding Git
-    transaction must stay coherent even when artifacts are undeletable.
-    Sources whose compiled artifacts may survive an operating-system refusal
-    are returned so callers with a reporting channel can surface manual
-    cleanup guidance; skipping unsupported platforms stays silent because
-    nothing was orphaned by this process's action there.
+    Cleanup is strictly best-effort and never raises: diff discovery,
+    repository descriptor open, per-source traversal, and descriptor teardown
+    failures are all contained here so the surrounding Git transaction stays
+    coherent even when cleanup is impossible. Sources whose compiled
+    artifacts may survive are returned so callers with a reporting channel
+    can surface manual cleanup guidance; when discovery itself fails the
+    report names the unknown scope instead of a source list. Skipping
+    platforms without descriptor-relative cleanup stays silent because that
+    is a permanent capability gap, not a failed cleanup of these sources.
     """
     if not before or not after or before == after:
         return []
-    listing = _read(
-        repo_root, "diff", "--name-only", "--no-renames", "-z", before, after
-    )
+    try:
+        listing = _read(
+            repo_root, "diff", "--name-only", "--no-renames", "-z", before, after
+        )
+    except (OSError, ValueError, subprocess.SubprocessError, SpiceError):
+        return [BYTECODE_SCOPE_UNKNOWN]
     if not _supports_safe_bytecode_purge():
+        return []
+    candidates: list[tuple[str, Path]] = []
+    for name in listing.split("\0"):
+        if not name.endswith(".py"):
+            continue
+        source = Path(name)
+        if source.is_absolute() or any(
+            part in {"", ".", ".."} for part in source.parts
+        ):
+            continue
+        candidates.append((name, source))
+    if not candidates:
         return []
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        root_fd = os.open(repo_root.resolve(), directory_flags)
+        root_fd = _open_worktree_root(repo_root, directory_flags)
     except OSError:
-        return []
+        return [name for name, _ in candidates]
     blocked: list[str] = []
     try:
-        for name in listing.split("\0"):
-            if not name.endswith(".py"):
-                continue
-            source = Path(name)
-            if source.is_absolute() or any(
-                part in {"", ".", ".."} for part in source.parts
-            ):
-                continue
+        for name, source in candidates:
             if _purge_source_bytecode(root_fd, source, directory_flags):
                 blocked.append(name)
     finally:
-        os.close(root_fd)
+        _close_quietly(root_fd)
     return blocked
+
+
+def _open_worktree_root(repo_root: Path, directory_flags: int) -> int:
+    return os.open(repo_root.resolve(), directory_flags)
+
+
+def _close_quietly(fd: int) -> None:
+    """Best-effort descriptor close: teardown cannot break the purge contract."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+BYTECODE_SCOPE_UNKNOWN = "unidentified modules (cleanup diff unavailable)"
 
 
 def _bytecode_cleanup_note(blocked: list[str]) -> str:
     listed = ", ".join(sorted(blocked))
     return (
-        f"stale bytecode kept for {listed}: the filesystem refused cleanup; "
+        f"stale bytecode kept for {listed}: automatic cleanup was interrupted; "
         "remove the matching __pycache__ entries manually"
     )
 
@@ -820,7 +846,7 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
         except OSError:
             blocked = True
         finally:
-            os.close(cache_fd)
+            _close_quietly(cache_fd)
 
         try:
             os.rmdir("__pycache__", dir_fd=current_fd)
@@ -835,7 +861,7 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
         return blocked
     finally:
         for parent_fd in reversed(parent_fds):
-            os.close(parent_fd)
+            _close_quietly(parent_fd)
 
 
 def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
