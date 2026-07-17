@@ -238,6 +238,71 @@ def test_resolve_wording_review_rejects_inactive_task(task_repo):
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
 
 
+def test_resolve_wording_from_claimed_plan_parent_clears_child_marker(task_repo):
+    parent = _clean_plan_parent()
+    child = _suspect_unclaimed_child("Adopting connected child")
+    ops.depends(parent, [child])
+    ops.claim(parent)
+
+    output = wordingreview.resolve_wording_review(
+        child,
+        reason="child wording rewritten during parent planning",
+    )
+
+    child_row = identity.resolve(child)
+    parent_row = identity.resolve(parent)
+    annotations = [
+        str(item.get("description") or "")
+        for item in child_row.get("annotations") or []
+    ]
+    assert output == f"resolved wording review for {child}"
+    assert str(child_row.get(config.TASK_WORDING_REVIEW_UDA) or "") == ""
+    assert (
+        "wording review resolved: child wording rewritten during parent planning"
+        in annotations
+    )
+    assert parent_row["claim_by"] == ACTOR_A
+    assert str(parent_row.get("start") or "") != ""
+    assert parent_row["phase"] == "plan"
+    assert str(child_row.get("claim_by") or "") == ""
+    assert str(child_row.get("start") or "") == ""
+
+
+def test_resolve_wording_from_parent_requires_direct_dependency(task_repo):
+    parent = _clean_plan_parent()
+    child = _suspect_unclaimed_child("Adopting unconnected child")
+    ops.claim(parent)
+
+    with pytest.raises(SpiceError, match="resolve wording review requires a claim"):
+        wordingreview.resolve_wording_review(
+            child,
+            reason="parent lacks the dependency edge",
+        )
+
+    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
+
+
+def test_resolve_wording_from_parent_requires_plan_phase_parent(task_repo):
+    parent = create.add(
+        "Concrete implementation parent",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["parent implements the change directly"],
+    )
+    child = _suspect_unclaimed_child("Adopting implementation child")
+    ops.depends(parent, [child])
+    ops.claim(parent)
+
+    with pytest.raises(SpiceError, match="resolve wording review requires a claim"):
+        wordingreview.resolve_wording_review(
+            child,
+            reason="parent phase is not plan",
+        )
+
+    assert identity.resolve(parent)["phase"] == "todo"
+    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
+
+
 def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):
     handle = create.add(
         "Edit gains suspect acceptance",
@@ -290,6 +355,29 @@ def _plan_task_with_accepted_child() -> str:
     )
     ops.depends(handle, [child])
     return handle
+
+
+def _clean_plan_parent() -> str:
+    return create.add(
+        "Plan parent bookend",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+        acceptance=["parent bookend acceptance exists"],
+    )
+
+
+def _suspect_unclaimed_child(title: str) -> str:
+    child = create.add(
+        title,
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["child node has acceptance"],
+    )
+    row = identity.resolve(child)
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert str(row.get("claim_by") or "") == ""
+    return child
 
 
 def _init_repo(path: Path) -> Path:
