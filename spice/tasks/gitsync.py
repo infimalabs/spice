@@ -226,8 +226,10 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
             "current baseline cleanly; resolve local git state first"
         )
     after = _read(root, "rev-parse", "HEAD")
-    _purge_stale_bytecode(root, before, after)
+    blocked = _purge_stale_bytecode(root, before, after)
     notes = ["updated working tree to the current baseline"] if after != before else []
+    if blocked:
+        notes.append(_bytecode_cleanup_note(blocked))
     return SyncResult(notes=notes)
 
 
@@ -262,11 +264,13 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     if _run(root, "merge", "--ff-only", baseline).returncode != 0:
         return SyncResult(notes=["skipped:diverged"])
     after = _read(root, "rev-parse", "HEAD")
-    _purge_stale_bytecode(root, before, after)
-    note = (
+    blocked = _purge_stale_bytecode(root, before, after)
+    notes = [
         "updated working tree to the current baseline" if after != before else "current"
-    )
-    return SyncResult(notes=[note])
+    ]
+    if blocked:
+        notes.append(_bytecode_cleanup_note(blocked))
+    return SyncResult(notes=notes)
 
 
 def integrate_and_publish(
@@ -601,7 +605,9 @@ def _materialize_merge_conflict(
 
     MERGE_HEAD is written last. Until then every failure rolls the index and
     working tree back to ``agent_head``; after it exists, the marker blobs,
-    higher index stages, and both parents are all present.
+    higher index stages, and both parents are all present. Bytecode cleanup
+    after each tree move is best-effort and never raises, so an undeletable
+    cache cannot interrupt installing or rolling back the merge state.
     """
     if not merged_tree or not conflict_records:
         raise SpiceError("conflicted merge-tree result was incomplete")
@@ -690,7 +696,7 @@ def _tree_of(repo_root: Path, ref: str) -> str:
     return _read(repo_root, "rev-parse", f"{ref}^{{tree}}")
 
 
-def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> None:
+def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> list[str]:
     """Delete bytecode orphaned by a tree move from ``before`` to ``after``.
 
     Tree moves (``read-tree --reset -u``, ``merge --ff-only``) rewrite tracked
@@ -701,19 +707,27 @@ def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> None:
     between the move's endpoints is the whole truth: every ``.py`` path it
     lists drops its compiled artifacts, and directories that would survive
     only because of that bytecode are pruned.
+
+    Cleanup is strictly best-effort and never raises: the surrounding Git
+    transaction must stay coherent even when artifacts are undeletable.
+    Sources whose compiled artifacts may survive an operating-system refusal
+    are returned so callers with a reporting channel can surface manual
+    cleanup guidance; skipping unsupported platforms stays silent because
+    nothing was orphaned by this process's action there.
     """
     if not before or not after or before == after:
-        return
+        return []
     listing = _read(
         repo_root, "diff", "--name-only", "--no-renames", "-z", before, after
     )
     if not _supports_safe_bytecode_purge():
-        return
+        return []
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
         root_fd = os.open(repo_root.resolve(), directory_flags)
     except OSError:
-        return
+        return []
+    blocked: list[str] = []
     try:
         for name in listing.split("\0"):
             if not name.endswith(".py"):
@@ -723,9 +737,19 @@ def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> None:
                 part in {"", ".", ".."} for part in source.parts
             ):
                 continue
-            _purge_source_bytecode(root_fd, source, directory_flags)
+            if _purge_source_bytecode(root_fd, source, directory_flags):
+                blocked.append(name)
     finally:
         os.close(root_fd)
+    return blocked
+
+
+def _bytecode_cleanup_note(blocked: list[str]) -> str:
+    listed = ", ".join(sorted(blocked))
+    return (
+        f"stale bytecode kept for {listed}: the filesystem refused cleanup; "
+        "remove the matching __pycache__ entries manually"
+    )
 
 
 def _supports_safe_bytecode_purge() -> bool:
@@ -740,7 +764,7 @@ def _supports_safe_bytecode_purge() -> bool:
     )
 
 
-def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> None:
+def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> bool:
     """Purge one source's cache through no-follow directory descriptors.
 
     Every lookup below the already-open worktree root is relative to a trusted
@@ -748,6 +772,10 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
     by a symlink therefore stops cleanup instead of redirecting an unlink.
     ``unlinkat`` removes a matching entry itself and never follows a final
     symlink.
+
+    Never raises. Returns True when compiled artifacts may survive because
+    the operating system refused a step (permissions, symlink refusal);
+    returns False when cleanup completed or there was nothing to clean.
     """
     parent_parts = source.parent.parts
     parent_fds: list[int] = []
@@ -760,8 +788,10 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
                     directory_flags,
                     dir_fd=current_fd,
                 )
+            except (FileNotFoundError, NotADirectoryError):
+                return False
             except OSError:
-                return
+                return True
             parent_fds.append(current_fd)
         try:
             cache_fd = os.open(
@@ -769,8 +799,11 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
                 directory_flags,
                 dir_fd=current_fd,
             )
+        except (FileNotFoundError, NotADirectoryError):
+            return False
         except OSError:
-            return
+            return True
+        blocked = False
         try:
             prefix = f"{source.stem}."
             with os.scandir(cache_fd) as entries:
@@ -782,19 +815,24 @@ def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> 
                     os.unlink(compiled_name, dir_fd=cache_fd)
                 except FileNotFoundError:
                     continue
+                except OSError:
+                    blocked = True
+        except OSError:
+            blocked = True
         finally:
             os.close(cache_fd)
 
         try:
             os.rmdir("__pycache__", dir_fd=current_fd)
         except OSError:
-            return
+            return blocked
         for index in range(len(parent_parts) - 1, -1, -1):
             parent_fd = root_fd if index == 0 else parent_fds[index - 1]
             try:
                 os.rmdir(parent_parts[index], dir_fd=parent_fd)
             except OSError:
                 break
+        return blocked
     finally:
         for parent_fd in reversed(parent_fds):
             os.close(parent_fd)
@@ -859,7 +897,9 @@ def _materialize_and_update_head(
     branch compare-and-swap. If that ref transaction fails, read-tree restores
     the actual current HEAD without invoking another ref hook. Thus command
     success has the target tree and parent record together, while every
-    handled failure returns to a clean pre-transaction commit.
+    handled failure returns to a clean pre-transaction commit. Bytecode
+    cleanup along the way is best-effort and never raises, so an undeletable
+    cache cannot strand the transaction between those two outcomes.
     """
     current_ref = _read(repo_root, "symbolic-ref", "--quiet", "HEAD")
     if not current_ref:

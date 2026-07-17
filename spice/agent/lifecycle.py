@@ -572,9 +572,16 @@ def _renew_supervised_claim(
     result = claimstate.renew_claim(actor=thread_id)
     if result.renewed:
         reported.pop("claim_renewal", None)
-        _notice_contract_mutations(
-            repo_root, thread_id, result, contract_cursors, log_path
-        )
+        try:
+            _notice_contract_mutations(
+                repo_root, thread_id, result, contract_cursors, log_path
+            )
+        except SpiceError as exc:
+            _report_contract_watch_error(
+                repo_root, result, log_path, reported, detail=str(exc)
+            )
+        else:
+            reported.pop("contract_watch", None)
         return
     if result.reason in CLAIM_RENEWAL_QUIET_REASONS:
         return
@@ -632,6 +639,34 @@ def _notice_contract_mutations(
             handle=result.handle,
             fields=",".join(item.property for item in mutations),
             detail=notice,
+        )
+
+
+def _report_contract_watch_error(
+    repo_root: Path,
+    result: Any,
+    log_path: Path,
+    reported: dict[str, str],
+    *,
+    detail: str,
+) -> None:
+    """Publish one feedback item per distinct operations-log watch failure."""
+    from spice.agent.watchdog import publish_supervisor_feedback
+
+    if reported.get("contract_watch") == detail:
+        return
+    reported["contract_watch"] = detail
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(
+            f"spice claim contract watch failed: {result.handle or '-'} {detail}\n"
+        )
+        log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "claim.contract-watch-error",
+            handle=result.handle,
+            detail=detail,
         )
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
+from spice.errors import SpiceError
 from spice.tasks import (
     claimstate,
     config,
@@ -153,6 +154,46 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     )
     assert "--start 2026-06-12T06:53:25.463000Z" in output
     assert "--end 2026-06-12T07:03:25.463000Z" in output
+
+
+def test_task_show_keeps_fields_when_version_is_unavailable(monkeypatch):
+    row = _row(
+        "Unsupported operations log",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "The task remains inspectable",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "acceptance": "Every field still renders",
+        }
+    )
+    reason = (
+        "unsupported TaskChampion operations log at /tmp/taskchampion.sqlite3: "
+        "operations table is missing"
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
+
+    def unavailable_version(_uuid):
+        raise SpiceError(reason)
+
+    monkeypatch.setattr(render.opslog, "task_version", unavailable_version)
+
+    output = render.render_show("TASK-test")
+
+    assert "title Unsupported operations log" in output
+    assert "description The task remains inspectable" in output
+    assert "project task.render" in output
+    assert "status pending" in output
+    assert f"version unavailable ({reason})" in output
+    assert "acceptance Every field still renders" in output
 
 
 def test_task_show_hides_recovery_context_for_current_task(monkeypatch):
