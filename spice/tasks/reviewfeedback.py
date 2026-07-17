@@ -152,10 +152,11 @@ def _feedback_body(
             "",
             _blockquote(note_text),
             "",
-            "\N{SMILING FACE WITH SMILING EYES} Internalize this as guidance -- "
-            "any follow-ups it raises are already on the board, so there is "
-            "nothing to capture or act on now. Just keep working your current "
-            "task; do not re-file what the system already filed.",
+            "\N{SMILING FACE WITH SMILING EYES} Verbalize any noteworthy lessons "
+            "and internalize this as guidance—any follow-ups it raises are already "
+            "on the board, so there is nothing to capture or act on now! Keep "
+            "working your current task; do not re-file what the system already "
+            "filed.",
         ]
     )
 
