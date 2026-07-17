@@ -169,6 +169,130 @@ def test_tree_move_does_not_follow_cache_directory_symlink(tmp_path: Path) -> No
     assert _file_bytes(external_cache) == before
 
 
+@pytest.mark.parametrize(
+    "tree_move",
+    [gitsync.prepare_for_claim, gitsync.fast_forward_if_safe],
+    ids=["prepare-for-claim", "fast-forward-if-safe"],
+)
+def test_tree_move_survives_denied_cache_cleanup_and_reports_it(
+    tmp_path: Path, tree_move: TreeMove
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+
+    def rewrite_module(peer: Path) -> None:
+        (peer / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+
+    _peer_pushes(tmp_path, rewrite_module)
+    cache = repo / "pkg" / "__pycache__"
+    cache.chmod(0o500)
+    try:
+        result = tree_move(repo_root=repo)
+    finally:
+        cache.chmod(0o755)
+
+    assert {
+        "head": _git_out(repo, "rev-parse", "HEAD"),
+        "clean": _git_out(repo, "status", "--porcelain"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+        "guidance": sum(
+            "stale bytecode kept for pkg/mod.py" in note for note in result.notes
+        ),
+        "kept_artifacts": len(sorted(cache.glob("mod.*"))),
+    } == {
+        "head": _git_out(repo, "rev-parse", "origin/main"),
+        "clean": "",
+        "module": NEW_MODULE_SOURCE,
+        "guidance": 1,
+        "kept_artifacts": 1,
+    }
+
+
+def test_head_advance_completes_when_cache_cleanup_is_denied(tmp_path: Path) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+    old_head = _git_out(repo, "rev-parse", "HEAD")
+    (repo / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+    _run(repo, "git", "commit", "-am", "advance module")
+    new_head = _git_out(repo, "rev-parse", "HEAD")
+    _run(repo, "git", "reset", "--hard", old_head)
+    cache = repo / "pkg" / "__pycache__"
+    cache.chmod(0o500)
+    try:
+        gitsync._materialize_and_update_head(
+            repo,
+            new_head=new_head,
+            expected_head=old_head,
+            label="TASK-1k98v0WX",
+            action="advance branch for fault probe",
+        )
+    finally:
+        cache.chmod(0o755)
+
+    assert {
+        "head": _git_out(repo, "rev-parse", "HEAD"),
+        "clean": _git_out(repo, "status", "--porcelain"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+        "kept_artifacts": len(sorted(cache.glob("mod.*"))),
+    } == {
+        "head": new_head,
+        "clean": "",
+        "module": NEW_MODULE_SOURCE,
+        "kept_artifacts": 1,
+    }
+
+
+def test_conflict_materialization_completes_when_cache_cleanup_is_denied(
+    tmp_path: Path,
+) -> None:
+    repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
+    agent_head = _git_out(repo, "rev-parse", "HEAD")
+    (repo / "pkg" / "mod.py").write_text(NEW_MODULE_SOURCE, encoding="utf-8")
+    _run(repo, "git", "commit", "-am", "upstream module change")
+    upstream_head = _git_out(repo, "rev-parse", "HEAD")
+    merged_tree = _git_out(repo, "rev-parse", f"{upstream_head}^{{tree}}")
+    base_blob = _git_out(repo, "rev-parse", f"{agent_head}:pkg/mod.py")
+    theirs_blob = _git_out(repo, "rev-parse", f"{upstream_head}:pkg/mod.py")
+    _run(repo, "git", "reset", "--hard", agent_head)
+    cache = repo / "pkg" / "__pycache__"
+    cache.chmod(0o500)
+    try:
+        gitsync._materialize_merge_conflict(
+            repo,
+            merged_tree=merged_tree,
+            conflict_records=[
+                f"100644 {base_blob} 1\tpkg/mod.py",
+                f"100644 {theirs_blob} 3\tpkg/mod.py",
+            ],
+            agent_head=agent_head,
+            upstream_head=upstream_head,
+            message="fault probe merge",
+        )
+    finally:
+        cache.chmod(0o755)
+
+    merge_head = repo / _git_out(repo, "rev-parse", "--git-path", "MERGE_HEAD")
+    orig_head = repo / _git_out(repo, "rev-parse", "--git-path", "ORIG_HEAD")
+    unmerged = [
+        line.split() for line in _git_out(repo, "ls-files", "--unmerged").splitlines()
+    ]
+    assert {
+        "merge_head": merge_head.read_text(encoding="utf-8"),
+        "orig_head": orig_head.read_text(encoding="utf-8"),
+        "module": (repo / "pkg" / "mod.py").read_text(encoding="utf-8"),
+        "stages": [(entry[2], entry[3]) for entry in unmerged],
+        "kept_artifacts": len(sorted(cache.glob("mod.*"))),
+    } == {
+        "merge_head": f"{upstream_head}\n",
+        "orig_head": f"{agent_head}\n",
+        "module": NEW_MODULE_SOURCE,
+        "stages": [("1", "pkg/mod.py"), ("3", "pkg/mod.py")],
+        "kept_artifacts": 1,
+    }
+
+
+def _git_out(repo: Path, *args: str) -> str:
+    return _run(repo, "git", *args).stdout.strip()
+
+
 def _file_bytes(root: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(root): path.read_bytes()
