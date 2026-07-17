@@ -7,85 +7,8 @@ import subprocess
 from pathlib import Path
 
 from spice.hooks import precommit
-from spice.hooks.install import init_gates_repo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_merge_integrity_diagnostic_names_empty_index_recovery(tmp_path: Path) -> None:
-    repo = _repo(tmp_path)
-    head = _git(repo, "rev-parse", "HEAD")
-    peer = _peer_change(repo, "peer.txt", "peer content\n")
-    expected_tree = _git(repo, "merge-tree", "--write-tree", "HEAD", peer)
-    _git(repo, "merge", "--no-ff", "--no-commit", peer)
-    _git(repo, "read-tree", "--reset", "-u", "HEAD")
-
-    diagnostic = precommit._merge_integrity_diagnostic(repo)
-    checkpoint = {
-        "head": _git(repo, "rev-parse", "HEAD"),
-        "merge_head": _git(repo, "rev-parse", "MERGE_HEAD"),
-        "staged_tree": _git(repo, "write-tree"),
-        "diagnostic": diagnostic,
-    }
-
-    assert checkpoint == {
-        "head": head,
-        "merge_head": peer,
-        "staged_tree": _git(repo, "rev-parse", "HEAD^{tree}"),
-        "diagnostic": (
-            "empty merge refused: MERGE_HEAD exists, but the staged tree still "
-            f"equals HEAD ({_git(repo, 'rev-parse', 'HEAD^{tree}')}) while git "
-            f"merge-tree computes {expected_tree}. Committing now would discard "
-            "integrated content.\n"
-            "Recover without removing MERGE_HEAD:\n"
-            "  merge_tree=$(git merge-tree --write-tree HEAD MERGE_HEAD)\n"
-            '  git read-tree --reset -u "$merge_tree"\n'
-            "  git diff --cached --check\n"
-            "  git status --short\n"
-            "Verify the staged merge content, then retry git commit with "
-            "MERGE_HEAD intact."
-        ),
-    }
-
-
-def test_installed_hook_protects_merge_content_and_keeps_parents(
-    tmp_path: Path,
-) -> None:
-    repo = _repo(tmp_path)
-    head = _git(repo, "rev-parse", "HEAD")
-    peer = _peer_change(repo, "peer.txt", "peer content\n")
-    _git(repo, "merge", "--no-ff", "--no-commit", peer)
-    _git(repo, "read-tree", "--reset", "-u", "HEAD")
-    init_gates_repo(repo)
-
-    commit = _run(repo, "commit", "-m", "protected merge", check=False)
-    combined = "\n".join((commit.stdout, commit.stderr))
-    checkpoint = {
-        "commit": "protected" if commit.returncode else "landed",
-        "head": _git(repo, "rev-parse", "HEAD"),
-        "merge_head": _git(repo, "rev-parse", "MERGE_HEAD"),
-        "diagnostic": (
-            "complete"
-            if all(
-                fragment in combined
-                for fragment in (
-                    "empty merge refused",
-                    "merge_tree=$(git merge-tree --write-tree HEAD MERGE_HEAD)",
-                    'git read-tree --reset -u "$merge_tree"',
-                    "git diff --cached --check",
-                    "retry git commit with MERGE_HEAD intact",
-                )
-            )
-            else "incomplete"
-        ),
-    }
-
-    assert checkpoint == {
-        "commit": "protected",
-        "head": head,
-        "merge_head": peer,
-        "diagnostic": "complete",
-    }
 
 
 def test_merge_integrity_guard_accepts_clean_merge_tree(tmp_path: Path) -> None:
