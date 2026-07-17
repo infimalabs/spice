@@ -70,7 +70,7 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     assert _git(repo, "status", "--porcelain") == ""
     message = _git(repo, "log", "-1", "--format=%B", merge_head)
     assert message == (
-        "todo(task.unit): Publish task work TASK-1k98v0WX\n\n"
+        "task: Publish task work TASK-1k98v0WX\n\n"
         "Task-Key: 1k98v0WX\n"
         "Task-Phase: todo\n"
         "Task-Project: task.unit\n"
@@ -542,7 +542,7 @@ def test_merge_message_omits_task_description_body():
     )
 
     assert message == (
-        "todo(serve.ui): Fix image labels TASK-1k98xkpR\n\n"
+        "serve: Fix image labels TASK-1k98xkpR\n\n"
         "Task-Key: 1k98xkpR\n"
         "Task-Phase: todo\n"
         "Task-Project: serve.ui\n"
@@ -570,9 +570,29 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
     )
 
     assert message == (
-        "todo(task): TASK-1k98PQrs\n\n"
+        "task: TASK-1k98PQrs\n\n"
         "Task-Key: 1k98PQrs\n"
         "Task-Phase: todo\n"
         "Task-Project: task\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_merge_message_appends_non_todo_phase_after_three_segment_project():
+    message = gitsync._compose_message(
+        "SCOPES-1k98xkpR",
+        {
+            "title": "Review combined selectors",
+            "actor": ACTOR_A,
+            "phase": "review",
+            "project": "lifecycle.config.scopes",
+        },
+    )
+
+    assert message == (
+        "lifecycle: Review combined selectors SCOPES-1k98xkpR (review)\n\n"
+        "Task-Key: 1k98xkpR\n"
+        "Task-Phase: review\n"
+        "Task-Project: lifecycle.config.scopes\n"
         f"Task-Session: {ACTOR_A}"
     )
