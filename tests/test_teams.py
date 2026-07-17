@@ -566,6 +566,107 @@ def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     assert renewal.successor_identity["threadId"] == "agent-b-renewed"
 
 
+def _completed_handoff_with_successor_assign(store: ServeTeamStore):
+    # The live sequence that deadlocked renewal on 2026-07-17: a completed
+    # handoff followed by the successor's own startup assign carrying the
+    # predecessor id as an alias.
+    team = store.create_team(members=["thread:agent-a"])
+    _record_identity(store, "thread:agent-a", thread_id="agent-a")
+    store.record_pending_renewal(
+        agent_id="thread:agent-a", ancestor_thread_id="agent-a"
+    )
+    store.record_started_renewal(
+        predecessor_agent_id="thread:agent-a",
+        successor_agent_id="thread:agent-a-renewed",
+        ancestor_thread_id="agent-a",
+    )
+    _record_identity(store, "thread:agent-a-renewed", thread_id="agent-a-renewed")
+    store.assign_agent(
+        team.team_id, "thread:agent-a-renewed", aliases=["thread:agent-a"]
+    )
+    return team
+
+
+def test_renewal_request_reopens_after_successor_assign_with_alias(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    _completed_handoff_with_successor_assign(store)
+
+    requested = store.set_agent_renewal_request(
+        "thread:agent-a-renewed", requested=True
+    )
+
+    assert requested is not None
+    assert requested.state == "requested"
+    stored = store.renewal_state_for_agent("thread:agent-a-renewed")
+    assert stored is not None
+    assert stored.agent_id == "thread:agent-a-renewed"
+    assert stored.state == "requested"
+
+
+def test_renewal_intent_payload_actionable_after_successor_assign(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = _completed_handoff_with_successor_assign(store)
+
+    members = store.team_state(team.team_id).to_payload()["members"]
+    fresh = {m["agentId"]: m["renewalIntent"] for m in members}[
+        "thread:agent-a-renewed"
+    ]
+    assert fresh["requested"] is False
+    assert fresh["state"] == ""
+
+    store.set_agent_renewal_request("thread:agent-a-renewed", requested=True)
+    members = store.team_state(team.team_id).to_payload()["members"]
+    toggled = {m["agentId"]: m["renewalIntent"] for m in members}[
+        "thread:agent-a-renewed"
+    ]
+    assert toggled["requested"] is True
+    assert toggled["state"] == "requested"
+
+
+def test_stale_self_keyed_started_row_self_heals_on_next_request(tmp_path):
+    # Shape observed in live stores written before the assign-rewrite guard:
+    # a started row re-keyed onto the live agent, listing itself as successor.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["thread:agent-a"])
+    _record_identity(store, "thread:agent-a", thread_id="agent-a")
+    with store.connect() as connection:
+        connection.execute(
+            "INSERT INTO renewals (agent_id, team_id, state, "
+            "ancestor_thread_id, successor_agent_id, successor_thread_id, "
+            "team_slot, predecessor_identity, successor_identity, revision) "
+            "VALUES (?, ?, 'started', 'agent-zero', ?, 'agent-a', 0, "
+            "'{}', '{}', 167)",
+            ("thread:agent-a", team.team_id, "thread:agent-a"),
+        )
+
+    assert store.renewal_state_for_agent("thread:agent-a") is None
+    assert store.agent_renewal_active("thread:agent-a") is False
+
+    fresh = store.set_agent_renewal_request("thread:agent-a", requested=True)
+
+    assert fresh is not None
+    assert fresh.state == "requested"
+    reread = store.renewal_state_for_agent("thread:agent-a")
+    assert reread is not None
+    assert reread.state == "requested"
+    assert reread.successor_agent_id == ""
+
+
+def test_started_transition_facts_survive_successor_assign(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    _completed_handoff_with_successor_assign(store)
+
+    with store.connect() as connection:
+        kinds = [
+            str(row["kind"])
+            for row in connection.execute(
+                "SELECT kind FROM events ORDER BY revision"
+            ).fetchall()
+        ]
+    assert "renewalPending" in kinds
+    assert "renewalStarted" in kinds
+
+
 def test_driver_switch_successor_replaces_prior_thread_membership(tmp_path):
     # The bug that produced a seventh member: a team's membership sits under an
     # earlier THREAD of a target (the placeholder was rewritten to a thread on

@@ -904,8 +904,9 @@ class ServeTeamStore(
                 member_ids,
             ).fetchall()
             renewal_by_agent = {
-                str(renewal["agent_id"]): renewal_state_from_row(renewal)
+                str(renewal["agent_id"]): state
                 for renewal in renewal_rows
+                if (state := renewal_state_from_row(renewal)) is not None
             }
         split_back_subgroup = self._latest_restorable_subgroup_locked(
             connection, team_id

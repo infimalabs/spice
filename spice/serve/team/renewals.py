@@ -156,9 +156,19 @@ class TeamRenewalStoreMixin:
         team_id: str,
     ) -> None:
         old_row = connection.execute(
-            "SELECT agent_id FROM renewals WHERE agent_id = ?", (old_agent_id,)
+            "SELECT agent_id, state FROM renewals WHERE agent_id = ?",
+            (old_agent_id,),
         ).fetchone()
         if old_row is None:
+            return
+        if str(old_row["state"]) == RENEWAL_STATE_STARTED:
+            # A started row documents a finished predecessor->successor
+            # transition. Re-keying it onto the successor would leave the
+            # live agent permanently mid-renewal and silently refuse every
+            # future renewal request for that lane.
+            connection.execute(
+                "DELETE FROM renewals WHERE agent_id = ?", (old_agent_id,)
+            )
             return
         new_row = connection.execute(
             "SELECT agent_id FROM renewals WHERE agent_id = ?", (new_agent_id,)
@@ -604,7 +614,16 @@ def _renewal_identity_from_json(raw: str) -> dict[str, Any]:
     return dict(loaded) if isinstance(loaded, dict) else {}
 
 
-def renewal_state_from_row(row: sqlite3.Row) -> TeamRenewalState:
+def renewal_state_from_row(row: sqlite3.Row) -> TeamRenewalState | None:
+    if str(row["state"]) == RENEWAL_STATE_STARTED and str(
+        row["successor_agent_id"]
+    ) == str(row["agent_id"]):
+        # A started row keyed to its own successor records a transition that
+        # already completed -- the row's agent IS the successor -- so no
+        # renewal is in flight. Stores written before the rewrite guard above
+        # hold this shape; hiding it lets the next request's INSERT OR
+        # REPLACE consume the stale row instead of deadlocking on it.
+        return None
     return TeamRenewalState(
         agent_id=str(row["agent_id"]),
         team_id=str(row["team_id"]),
