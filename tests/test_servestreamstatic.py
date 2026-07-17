@@ -701,11 +701,7 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "error");' in (send_payload_body)
     assert "options = {}," in result_body
     assert (
-        "clearAcceptedComposerDrafts(\n"
-        "    sourceLane,\n"
-        "    lane.targetId,\n"
-        "    result.requestText || payload.text,\n"
-        "  );\n"
+        "clearAcceptedComposerDrafts(sourceLane, lane.targetId);\n"
         "  focusAfterComposerReset(options.focusAfterReset);"
     ) in result_body
     assert (

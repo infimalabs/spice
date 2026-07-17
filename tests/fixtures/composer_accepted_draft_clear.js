@@ -53,29 +53,28 @@ const host = {
   ]),
 };
 
-context.clearAcceptedComposerDrafts(host, "agent-a", "Send this");
+context.clearAcceptedComposerDrafts(host, "agent-a");
 
 assert(host.shardTextareas.get("agent-a").value === "", "origin draft clears");
-assert(host.shardTextareas.get("agent-b").value === "", "duplicate draft clears");
+assert(
+  host.shardTextareas.get("agent-b").value === "Send this",
+  "other agent duplicate draft remains",
+);
 assert(
   host.shardTextareas.get("agent-c").value === "Keep this",
   "unrelated draft remains",
 );
 assert(
-  host.shardTextareas.get("agent-d").value === "",
-  "duplicate text with attachment clears",
+  host.shardTextareas.get("agent-d").value === "Send this",
+  "other agent draft with attachment remains",
 );
 assert(
   host.shardAttachments.get("agent-d").length === 1,
   "non-origin attachment remains",
 );
 
-context.clearAcceptedComposerDrafts(
-  host,
-  "agent-a",
-  "> quoted duplicate\n\nSend this with context",
-);
+context.clearAcceptedComposerDrafts(host, "agent-a");
 
-assert(!host.quoteDrafts.has("agent-e"), "duplicate quote draft clears");
+assert(host.quoteDrafts.has("agent-e"), "other agent duplicate quote draft remains");
 assert(host.quoteDrafts.has("agent-f"), "unrelated quote draft remains");
-assert(context.quoteBandRenderCount === 1, "quote bands rerender after quote clear");
+assert(context.quoteBandRenderCount === 0, "other agent quote bands remain mounted");

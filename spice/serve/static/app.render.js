@@ -390,6 +390,7 @@ function beginLanePendingSubmission(lane) {
   lane.optimisticPendingInboxCount = lanePendingDisplayCount(lane) + 1;
   renderLaneViewShell(laneGroupHost(lane));
   syncComposerPlaceholders(laneGroupHost(lane));
+  syncPendingSubmissionComposerState(lane);
 }
 
 function finishLanePendingSubmission(lane, options = {}) {
@@ -423,6 +424,12 @@ function finishLanePendingSubmission(lane, options = {}) {
   }
   renderLaneViewShell(laneGroupHost(lane));
   syncComposerPlaceholders(laneGroupHost(lane));
+  syncPendingSubmissionComposerState(lane);
+}
+
+function syncPendingSubmissionComposerState(lane) {
+  if (typeof syncComposerPendingSendState === "function")
+    syncComposerPendingSendState(laneGroupHost(lane));
 }
 
 function syncLaneBackendPending(lane, payload) {

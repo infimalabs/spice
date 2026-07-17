@@ -4,6 +4,7 @@
 const releaseSafe = [
   { path: "serve_composer_accent_smoke.js" },
   { path: "serve_composer_menu_order_smoke.js" },
+  { path: "serve_composer_pending_send_smoke.js" },
   { path: "serve_composer_reorder_smoke.js" },
   { path: "serve_composer_typing_latency_smoke.js", serial: true },
   { path: "serve_fresh_startup_import_shell_smoke.js" },
