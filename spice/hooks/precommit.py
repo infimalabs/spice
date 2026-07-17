@@ -3,18 +3,20 @@
 Steps run in order, collecting every failure before raising, so one commit
 attempt reports the whole picture:
 
-1. repo shape — namespace packages, path shape, no generic split names;
-2. staging — partially staged files are rejected (the fully-staged rule);
-3. formatters — staged Python must satisfy `ruff format --check` and
+1. merge integrity — a merge commit cannot discard a different computed merge
+   tree through an index that still equals the first parent;
+2. repo shape — namespace packages, path shape, no generic split names;
+3. staging — partially staged files are rejected (the fully-staged rule);
+4. formatters — staged Python must satisfy `ruff format --check` and
    `ruff check`;
-4. local paths — no committed absolute macOS user path literals;
-5. serve web typecheck — static browser JavaScript must pass TypeScript
+5. local paths — no committed absolute macOS user path literals;
+6. serve web typecheck — static browser JavaScript must pass TypeScript
    `checkJs`;
-6. python typecheck — the project's own package roots must pass `pyright`;
-7. env policy — undeclared environment literals (and, when
+7. python typecheck — the project's own package roots must pass `pyright`;
+8. env policy — undeclared environment literals (and, when
    `env_access_gate` is on, undeclared env-access sites);
-8. env name ledger — exact manifest accounting for literal env names;
-9. shape pressure — file LOC/bytes, routine complexity, magic-number
+9. env name ledger — exact manifest accounting for literal env names;
+10. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
 Flex + sticky latches self-heal in-scan: every gate run drops any file,
@@ -187,6 +189,11 @@ def _builtin_pre_commit_steps(
 ) -> list[PreCommitStep]:
     return [
         PreCommitStep(
+            "merge-integrity",
+            "merge integrity",
+            lambda: _run_merge_integrity_guard(repo_root),
+        ),
+        PreCommitStep(
             "plan-phase",
             "plan phase",
             lambda: _run_plan_phase_mutation_guard(repo_root),
@@ -282,6 +289,74 @@ def _builtin_pre_commit_steps(
             lambda: _run_private_internal_coupling_guard(repo_root),
         ),
     ]
+
+
+def _run_merge_integrity_guard(repo_root: Path) -> None:
+    diagnostic = _merge_integrity_diagnostic(repo_root)
+    if diagnostic is not None:
+        raise SpiceError(diagnostic)
+
+
+def _merge_integrity_diagnostic(repo_root: Path) -> str | None:
+    merge_head_path = Path(
+        _git_stdout(repo_root, "rev-parse", "--git-path", "MERGE_HEAD")
+    )
+    if not merge_head_path.is_absolute():
+        merge_head_path = repo_root / merge_head_path
+    if not merge_head_path.is_file():
+        return None
+
+    staged_tree = _git_stdout(repo_root, "write-tree")
+    head_tree = _git_stdout(repo_root, "rev-parse", "HEAD^{tree}")
+    if staged_tree != head_tree:
+        return None
+
+    expected = run_git_command(
+        ["git", "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        check=False,
+    )
+    expected_lines = expected.stdout.splitlines()
+    expected_tree = expected_lines[0].strip() if expected_lines else ""
+    if not expected_tree:
+        detail = "\n".join(
+            part.strip() for part in (expected.stdout, expected.stderr) if part.strip()
+        )
+        message = (
+            "cannot verify merge integrity: "
+            "git merge-tree --write-tree HEAD MERGE_HEAD produced no tree"
+        )
+        if detail:
+            message += f"\n{detail}"
+        return message
+    if expected_tree == head_tree:
+        return None
+
+    return (
+        "empty merge refused: MERGE_HEAD exists, but the staged tree still "
+        f"equals HEAD ({head_tree}) while git merge-tree computes "
+        f"{expected_tree}. Committing now would discard integrated content.\n"
+        "Recover without removing MERGE_HEAD:\n"
+        "  merge_tree=$(git merge-tree --write-tree HEAD MERGE_HEAD)\n"
+        '  git read-tree --reset -u "$merge_tree"\n'
+        "  git diff --cached --check\n"
+        "  git status --short\n"
+        "Verify the staged merge content, then retry git commit with "
+        "MERGE_HEAD intact."
+    )
+
+
+def _git_stdout(repo_root: Path, *args: str) -> str:
+    result = run_git_command(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        check=True,
+    )
+    return result.stdout.strip()
 
 
 def _run_plan_phase_mutation_guard(repo_root: Path) -> None:

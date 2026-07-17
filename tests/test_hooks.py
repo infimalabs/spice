@@ -712,6 +712,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
         with events.open("a", encoding="utf-8") as handle:
             handle.write(label + "\n")
 
+    monkeypatch.setattr(
+        precommit,
+        "_run_merge_integrity_guard",
+        lambda repo_root: record("merge integrity"),
+    )
     monkeypatch.setattr(precommit, "staged_paths", lambda repo_root: [])
     monkeypatch.setattr(
         precommit, "_run_shape_guards", lambda repo_root: record("repo shape")
@@ -794,6 +799,7 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     monkeypatch.setattr(
         precommit, "staged_paths", lambda repo_root: [Path("sample.md")]
     )
+    monkeypatch.setattr(precommit, "_run_merge_integrity_guard", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_staging_guard", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
@@ -827,6 +833,7 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
 
 
 def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
+    monkeypatch.setattr(precommit, "_run_merge_integrity_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_plan_phase_mutation_guard", lambda repo_root: None
     )
