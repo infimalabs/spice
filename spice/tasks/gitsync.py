@@ -1105,19 +1105,21 @@ def _capture(
 def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     """Build a terse merge message from task facts.
 
-    The subject is a freeform, lossy projection of the task — ``<phase>
-    (<project>): <title> <handle>`` — with an empty free-text body. The
-    sorted ``Task-*`` trailers (git-trailer parseable) are the canonical
-    record, with ``Task-Key`` carrying the stable incepted key. The agent
-    never reads this; it lives on the shared baseline for review.
+    The subject is a freeform, lossy projection of the task — ``<project-stem>:
+    <title> <handle>`` for the implied todo phase, with `` (<phase>)`` appended
+    for every other phase — and an empty free-text body. The sorted ``Task-*``
+    trailers (git-trailer parseable) are the canonical record, with
+    ``Task-Key`` carrying the stable incepted key. The agent never reads this;
+    it lives on the shared baseline for review.
     """
     meta = meta or {}
     project = (meta.get("project") or "").strip()
     phase = (meta.get("phase") or "").strip()
     title = (meta.get("title") or "").strip()
-    prefix = f"{phase}({project}): " if phase or project else ""
+    prefix = f"{config.project_stem(project)}: " if project else ""
     subject = " ".join(part for part in (title, label) if part)
-    lines = [f"{prefix}{subject}"]
+    phase_suffix = f" ({phase})" if phase and phase.casefold() != "todo" else ""
+    lines = [f"{prefix}{subject}{phase_suffix}"]
 
     try:
         incepted: str | None = identity.incepted_of_handle(label)
