@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 
 from spice.agent import lifecycle, watchdog
 from spice.agent.driver import DRIVER
-from spice.tasks import claimstate, config, create, identity, ops, opslog, tw
+from spice.tasks import claimstate, config, create, identity, ops, opslog, render, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -126,6 +127,32 @@ def test_supervisor_notice_names_changed_fields_and_renotices(task_repo, monkeyp
         "acceptance: initial criterion -> sharpened criterion\n"
         f"spice claim contract changed: {handle} priority: L -> H\n"
     )
+
+
+def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
+    handle = _claimed_task(priority="L")
+    uuid = identity.uuid_of(identity.resolve(handle))
+
+    shown = _shown_version(handle)
+    con = sqlite3.connect(f"file:{opslog.operations_db_path()}?mode=ro", uri=True)
+    try:
+        tail = con.execute(
+            "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert shown == int(tail)
+    assert shown > 0
+
+    ops.edit(handle, acceptance=["sharpened criterion"])
+    assert _shown_version(handle) > shown
+
+
+def _shown_version(handle: str) -> int:
+    for line in render.render_show(handle).splitlines():
+        if line.startswith("version "):
+            return int(line.split()[1])
+    raise AssertionError("version row missing from task show output")
 
 
 def test_render_notice_compacts_long_values():

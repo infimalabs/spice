@@ -18,6 +18,7 @@ from spice.tasks import (
     identity,
     lanes,
     ops,
+    opslog,
     tw,
 )
 
@@ -125,6 +126,7 @@ def _base_show_lines(
         f"urgency {_f(row, 'urgency')}",
         f"tags {' '.join('+' + t for t in row.get('tags') or [])}",
         f"status {_f(row, 'status')}",
+        f"version {opslog.task_version(identity.uuid_of(row))}",
         f"claim {_f(row, 'claim_by') or '-'} until {_f(row, 'claim_until') or '-'}",
         f"claim_thread {_f(row, 'claim_thread') or '-'}",
     ]
