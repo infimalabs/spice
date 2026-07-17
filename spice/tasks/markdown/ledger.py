@@ -235,7 +235,12 @@ def _load_family(handle: str) -> Doc:
     target = identity.resolve(handle)
     target_slug = str(target.get(config.TASKDOC_ID_UDA) or "")
     if not target_slug:
-        raise SpiceError(f"{identity.render_handle(target)} is not in a task document")
+        rendered = identity.render_handle(target)
+        raise SpiceError(
+            f"{rendered} is not in a task document; spice task ledger exports "
+            "task-document families; inspect ordinary board tasks with "
+            f"`spice task show {rendered}`"
+        )
     project = str(target.get("project") or "")
     origin = str(target.get("origin") or "")
     rows = load_family_rows(project, origin)
