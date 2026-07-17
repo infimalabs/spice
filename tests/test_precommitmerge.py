@@ -42,6 +42,70 @@ def test_merge_integrity_guard_accepts_resolved_conflict_tree(tmp_path: Path) ->
     assert _git(repo, "show", "HEAD:story.txt") == "combined resolution"
 
 
+def test_clean_discarded_merge_recipe_restores_staged_content(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    peer = _peer_change(repo, "peer.txt", "peer content\n")
+    _git(repo, "merge", "--no-ff", "--no-commit", peer)
+    _git(repo, "read-tree", "HEAD")
+
+    diagnostic = precommit._merge_integrity_diagnostic(repo)
+    assert "Recover without removing MERGE_HEAD:" in diagnostic
+    completed = _run_recipe(repo, diagnostic)
+    assert completed.returncode == 0
+
+    precommit._run_merge_integrity_guard(repo)
+    _git(repo, "commit", "--no-verify", "-m", "recovered clean merge")
+
+    assert _git(repo, "show", "-s", "--format=%P", "HEAD") == f"{head} {peer}"
+    assert _git(repo, "show", "HEAD:peer.txt") == "peer content"
+
+
+def test_conflicted_discarded_merge_recipe_restarts_the_merge(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    peer = _peer_change(repo, "story.txt", "peer resolution\n")
+    _write(repo / "story.txt", "main resolution\n")
+    _git(repo, "add", "story.txt")
+    _git(repo, "commit", "--no-verify", "-m", "main change")
+    head = _git(repo, "rev-parse", "HEAD")
+    _run(repo, "merge", "--no-ff", peer, check=False)
+    _git(repo, "read-tree", "HEAD")
+
+    diagnostic = precommit._merge_integrity_diagnostic(repo)
+    assert "The discarded merge is conflicted; restart it:" in diagnostic
+    assert "git checkout HEAD -- story.txt" in diagnostic
+    _run_recipe(repo, diagnostic)
+
+    assert _git(repo, "rev-parse", "MERGE_HEAD") == peer
+    stages = _git(repo, "ls-files", "--unmerged")
+    assert [line.split("\t")[1] for line in stages.splitlines()] == [
+        "story.txt",
+        "story.txt",
+        "story.txt",
+    ]
+    _write(repo / "story.txt", "combined resolution\n")
+    _git(repo, "add", "story.txt")
+
+    precommit._run_merge_integrity_guard(repo)
+    _git(repo, "commit", "--no-verify", "-m", "recovered conflicted merge")
+
+    assert _git(repo, "show", "-s", "--format=%P", "HEAD") == f"{head} {peer}"
+    assert _git(repo, "show", "HEAD:story.txt") == "combined resolution"
+
+
+def _run_recipe(repo: Path, diagnostic: str) -> subprocess.CompletedProcess[str]:
+    """Execute the diagnostic's printed recovery lines exactly as printed."""
+    recipe = "\n".join(
+        line.strip() for line in diagnostic.splitlines() if line.startswith("  ")
+    )
+    return subprocess.run(
+        ["bash", "-c", recipe],
+        capture_output=True,
+        cwd=repo,
+        text=True,
+    )
+
+
 def test_merge_integrity_guard_accepts_ordinary_commit(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     _write(repo / "ordinary.txt", "ordinary change\n")
