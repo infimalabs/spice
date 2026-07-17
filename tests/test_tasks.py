@@ -183,7 +183,7 @@ def _depends_annotations(row: dict) -> list[str]:
     ]
 
 
-def test_task_undepends_drops_one_edge_and_leaves_the_other(task_repo):
+def test_task_depends_not_after_drops_one_edge_and_leaves_the_other(task_repo):
     handle = create.add(
         "Plan with two dependency edges",
         project="task.unit",
@@ -202,7 +202,7 @@ def test_task_undepends_drops_one_edge_and_leaves_the_other(task_repo):
     ops.depends(handle, [keep, drop])
     keep_uuid = identity.uuid_of(identity.resolve(keep))
 
-    result = ops.undepends(handle, [drop])
+    result = ops.depends(handle, [], not_after=[drop])
 
     row = identity.resolve(handle)
     assert result == handle
@@ -210,7 +210,9 @@ def test_task_undepends_drops_one_edge_and_leaves_the_other(task_repo):
     assert _depends_annotations(row) == [f"depends: {keep}"]
 
 
-def test_task_undepends_clears_dangling_edge_after_dependency_deleted(task_repo):
+def test_task_depends_not_after_clears_dangling_edge_after_dependency_deleted(
+    task_repo,
+):
     handle = create.add(
         "Plan pointing at a doomed dependency",
         project="task.unit",
@@ -226,7 +228,7 @@ def test_task_undepends_clears_dangling_edge_after_dependency_deleted(task_repo)
     ops.delete(doomed, "no longer needed")
     assert identity.resolve(handle)["depends"] == [doomed_uuid]
 
-    result = ops.undepends(handle, [doomed])
+    result = ops.depends(handle, [], not_after=[doomed])
 
     row = identity.resolve(handle)
     assert result == handle
@@ -234,7 +236,7 @@ def test_task_undepends_clears_dangling_edge_after_dependency_deleted(task_repo)
     assert _depends_annotations(row) == []
 
 
-def test_task_undepends_rejects_an_absent_edge(task_repo):
+def test_task_depends_not_after_rejects_an_absent_edge(task_repo):
     handle = create.add(
         "Plan with no such edge",
         project="task.unit",
@@ -247,7 +249,56 @@ def test_task_undepends_rejects_an_absent_edge(task_repo):
     )
 
     with pytest.raises(SpiceError, match="does not depend on"):
-        ops.undepends(handle, [other])
+        ops.depends(handle, [], not_after=[other])
+
+
+def test_task_depends_repoints_an_edge_in_one_invocation(task_repo):
+    handle = create.add(
+        "Plan whose edge moves",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    old = create.add(
+        "Superseded dependency",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    new = create.add(
+        "Replacement dependency",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [old])
+    new_uuid = identity.uuid_of(identity.resolve(new))
+
+    result = ops.depends(handle, [new], not_after=[old])
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert row["depends"] == [new_uuid]
+    assert _depends_annotations(row) == [f"depends: {new}"]
+
+
+def test_task_depends_applies_removals_before_additions(task_repo):
+    handle = create.add(
+        "Plan whose edge is dropped and re-added at once",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    dep = create.add(
+        "Dependency removed and restored in one call",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [dep])
+    dep_uuid = identity.uuid_of(identity.resolve(dep))
+
+    result = ops.depends(handle, [dep], not_after=[dep])
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert row["depends"] == [dep_uuid]
+    assert _depends_annotations(row) == [f"depends: {dep}"]
 
 
 def test_task_delete_allows_unclaimed_task(task_repo):

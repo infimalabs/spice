@@ -40,10 +40,44 @@ def reword(handle: str | None, *, reason: str) -> str:
     handle_text = identity.render_handle(row)
     claimstate._require_pending(row, "reword")
     actor = tw.current_actor()
-    claimstate._require_owner(row, actor, "reword")
+    _require_resolution_authority(row, actor)
     if not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "").strip():
         raise SpiceError(f"{handle_text} has no suspect-wording review marker")
     uuid = identity.uuid_of(row)
     tw.run([uuid, "modify", f"{config.TASK_WORDING_REVIEW_UDA}:"])
     claimstate.annotate(uuid, f"wording review resolved: {reason}")
     return f"reworded {handle_text}"
+
+
+def _require_resolution_authority(row: dict[str, Any], actor: str) -> None:
+    """Row owner, or holder of a plan parent directly depending on the row.
+
+    Plan phase owns child board state, and the parent's claim blocks claiming
+    the child, so the parent holder must be able to resolve an unclaimed
+    child's marker in place without touching either claim.
+    """
+    from spice.tasks import claimstate
+
+    unclaimed = not str(row.get("claim_by") or "") and not bool(row.get("start"))
+    if unclaimed and _connected_plan_parent(row, actor) is not None:
+        return
+    claimstate._require_owner(row, actor, "reword")
+
+
+def _connected_plan_parent(row: dict[str, Any], actor: str) -> dict[str, Any] | None:
+    from spice.tasks import claimstate
+
+    child_uuid = identity.uuid_of(row)
+    for parent in claimstate._active_claims_for(actor):
+        if str(parent.get("phase") or "") != "plan":
+            continue
+        if child_uuid in _dependency_uuids(parent):
+            return parent
+    return None
+
+
+def _dependency_uuids(row: dict[str, Any]) -> list[str]:
+    raw = row.get("depends") or []
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    return [str(item) for item in raw if str(item)]

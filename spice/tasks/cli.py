@@ -305,7 +305,6 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_note_parser(actions)
     _configure_reword_parser(actions)
     _configure_depends_parser(actions)
-    _configure_undepends_parser(actions)
     _configure_wake_parser(actions)
     _configure_claim_parser(actions)
     _configure_reclaim_parser(actions)
@@ -384,63 +383,49 @@ def _configure_reword_parser(actions: Any) -> None:
 def _configure_depends_parser(actions: Any) -> None:
     depends = actions.add_parser(
         "depends",
-        help="Add native dependency edges.",
+        help="Add and remove native dependency edges.",
         usage=(
-            "spice task depends [-h] <handle> --after <dependency> [<dependency> ...]"
+            "spice task depends [-h] <handle> [--after <dependency> ...] "
+            "[--not-after <dependency> ...]"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=("Example:\n  spice task depends CLI-1k4Q5gJw --after SERVE-1k4Q5gh8"),
+        epilog=(
+            "Examples:\n"
+            "  spice task depends CLI-1k4Q5gJw --after SERVE-1k4Q5gh8\n"
+            "  spice task depends CLI-1k4Q5gJw --not-after SERVE-1k4Q5gh8\n"
+            "  spice task depends CLI-1k4Q5gJw --after NEW-1k4Q5gh8 "
+            "--not-after OLD-1k4Q5gh8"
+        ),
         recovery_examples=("spice task depends TASK-1k4Q5gJw --after SERVE-1k4Q5gh8",),
     )
     depends.add_argument(
         "handle",
         metavar="handle",
-        help="Task that should wait for the dependency handle(s).",
+        help="Task whose dependency edges change.",
     )
     depends.add_argument(
         "--after",
         action="extend",
         nargs="+",
-        required=True,
+        default=[],
         metavar="dependency",
         help=(
-            "Prerequisite task handle(s); repeat --after or pass multiple "
-            "handles after one flag."
-        ),
-    )
-    depends.set_defaults(func=handle)
-
-
-def _configure_undepends_parser(actions: Any) -> None:
-    undepends = actions.add_parser(
-        "undepends",
-        help="Remove native dependency edges; the inverse of depends.",
-        usage=(
-            "spice task undepends [-h] <handle> --after <dependency> [<dependency> ...]"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=("Example:\n  spice task undepends CLI-1k4Q5gJw --after SERVE-1k4Q5gh8"),
-        recovery_examples=(
-            "spice task undepends TASK-1k4Q5gJw --after SERVE-1k4Q5gh8",
-        ),
-    )
-    undepends.add_argument(
-        "handle",
-        metavar="handle",
-        help="Task whose dependency edge(s) should be dropped.",
-    )
-    undepends.add_argument(
-        "--after",
-        action="extend",
-        nargs="+",
-        required=True,
-        metavar="dependency",
-        help=(
-            "Prerequisite task handle(s) to remove; repeat --after or pass "
+            "Prerequisite task handle(s) to add; repeat --after or pass "
             "multiple handles after one flag."
         ),
     )
-    undepends.set_defaults(func=handle)
+    depends.add_argument(
+        "--not-after",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="dependency",
+        help=(
+            "Prerequisite task handle(s) to remove; removals apply before "
+            "additions so one invocation can re-point an edge."
+        ),
+    )
+    depends.set_defaults(func=handle)
 
 
 def _configure_wake_parser(actions: Any) -> None:
@@ -953,8 +938,7 @@ _DISPATCH = {
         a.handle,
         reason=a.reason,
     ),
-    "depends": lambda a: ops.depends(a.handle, list(a.after)),
-    "undepends": lambda a: ops.undepends(a.handle, list(a.after)),
+    "depends": lambda a: _depends(a),
     "wake": lambda a: ops.wake(list(a.handles), into=a.into),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "reclaim": lambda a: _reclaim(a),
@@ -1001,6 +985,14 @@ def _artifact(args: argparse.Namespace) -> str:
             apply=args.apply,
         )
     raise SpiceError(f"unknown task artifact action {action!r}")
+
+
+def _depends(args: argparse.Namespace) -> str:
+    after = list(args.after)
+    not_after = list(args.not_after)
+    if not after and not not_after:
+        raise SpiceError("task depends requires --after and/or --not-after")
+    return ops.depends(args.handle, after, not_after=not_after)
 
 
 def _reclaim(args: argparse.Namespace) -> str:

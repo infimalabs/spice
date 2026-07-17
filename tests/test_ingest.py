@@ -584,6 +584,27 @@ def test_ledger_refuses_invalid_containment_metadata(task_repo, parent, message)
     assert str(error.value) == message
 
 
+def test_ledger_refusal_routes_plain_board_task_to_show(task_repo):
+    assert task_repo.is_dir()
+    board_task = create.add(
+        "Plain board task",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["board inspection fixture"],
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    with pytest.raises(SpiceError) as error:
+        export_ledger(board_task)
+
+    assert str(error.value) == (
+        f"{board_task} is not in a task document; spice task ledger exports "
+        "task-document families; inspect ordinary board tasks with "
+        f"`spice task show {board_task}`"
+    )
+
+
 @pytest.mark.parametrize(
     "source",
     (
