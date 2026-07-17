@@ -211,6 +211,11 @@ def test_task_depends_after_accumulates_all_edges(task_repo, capsys, repeated_fl
     assert set(row.get("depends", [])) == {
         identity.uuid_of(identity.resolve(child)) for child in children
     }
+    assert sorted(
+        line.split()[1]
+        for line in render.render_show(parent).splitlines()
+        if line.startswith("  after ")
+    ) == sorted(children)
 
 
 def test_task_wake_parser_accepts_multiple_handles():

@@ -35,7 +35,6 @@ from spice.tasks.claimstate import (
     _require_single_active_slot,
     _task_continuation_contract,
     annotate,
-    denotate,
     do_claim,
     phase_index,
     phases_of,
@@ -918,7 +917,6 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
     uuid = identity.uuid_of(row)
     rendered = identity.render_handle(row)
     existing = set(_dependency_uuids(row))
-    annotations = _annotation_descriptions(row)
     additions: list[tuple[str, str]] = []
     for dep in dict.fromkeys(after):
         dep_row = identity.resolve(dep)
@@ -954,26 +952,7 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
                     f"could not add dependency on {targets} (would it create a cycle?)"
                 ) from exc
             raise
-    for _, rendered_dep in removals:
-        marker = f"depends: {rendered_dep}"
-        if marker in annotations:
-            denotate(uuid, marker)
-    for _, rendered_dep in additions:
-        marker = f"depends: {rendered_dep}"
-        if marker not in annotations:
-            annotate(uuid, marker)
     return rendered
-
-
-def _annotation_descriptions(row: dict[str, Any]) -> set[str]:
-    annotations = row.get("annotations") or []
-    if not isinstance(annotations, list):
-        return set()
-    return {
-        str(item.get("description") or "")
-        for item in annotations
-        if isinstance(item, dict)
-    }
 
 
 def _dependency_uuids(row: dict[str, Any]) -> list[str]:

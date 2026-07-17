@@ -175,12 +175,12 @@ def test_task_edit_acceptance_rejects_completed_task(task_repo):
         ops.edit(handle, acceptance=["late criterion"])
 
 
-def _depends_annotations(row: dict) -> list[str]:
-    return [
-        str(item.get("description") or "")
-        for item in row.get("annotations") or []
-        if str(item.get("description") or "").startswith("depends:")
-    ]
+def _rendered_dependency_handles(handle: str) -> list[str]:
+    return sorted(
+        line.split()[1]
+        for line in render.render_show(handle).splitlines()
+        if line.startswith("  after ")
+    )
 
 
 def test_task_depends_not_after_drops_one_edge_and_leaves_the_other(task_repo):
@@ -207,7 +207,7 @@ def test_task_depends_not_after_drops_one_edge_and_leaves_the_other(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert row["depends"] == [keep_uuid]
-    assert _depends_annotations(row) == [f"depends: {keep}"]
+    assert _rendered_dependency_handles(handle) == [keep]
 
 
 def test_task_depends_not_after_clears_dangling_edge_after_dependency_deleted(
@@ -233,7 +233,6 @@ def test_task_depends_not_after_clears_dangling_edge_after_dependency_deleted(
     row = identity.resolve(handle)
     assert result == handle
     assert row.get("depends", []) == []
-    assert _depends_annotations(row) == []
 
 
 def test_task_depends_not_after_rejects_an_absent_edge(task_repo):
@@ -276,7 +275,7 @@ def test_task_depends_repoints_an_edge_in_one_invocation(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert row["depends"] == [new_uuid]
-    assert _depends_annotations(row) == [f"depends: {new}"]
+    assert _rendered_dependency_handles(handle) == [new]
 
 
 def test_task_depends_keeps_an_edge_dropped_and_readded_in_one_call(task_repo):
@@ -298,7 +297,6 @@ def test_task_depends_keeps_an_edge_dropped_and_readded_in_one_call(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert row["depends"] == [dep_uuid]
-    assert _depends_annotations(row) == [f"depends: {dep}"]
 
 
 def test_task_depends_repoints_multiple_edges_in_one_invocation(task_repo):
@@ -331,12 +329,10 @@ def test_task_depends_repoints_multiple_edges_in_one_invocation(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert sorted(row["depends"]) == new_uuids
-    assert sorted(_depends_annotations(row)) == sorted(
-        f"depends: {edge}" for edge in new_edges
-    )
+    assert _rendered_dependency_handles(handle) == sorted(new_edges)
 
 
-def test_task_depends_repeated_after_handle_lands_one_annotation(task_repo):
+def test_task_depends_repeated_after_handle_lands_one_native_edge(task_repo):
     handle = create.add(
         "Plan given the same dependency twice",
         project="task.unit",
@@ -354,7 +350,6 @@ def test_task_depends_repeated_after_handle_lands_one_annotation(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert row["depends"] == [dep_uuid]
-    assert _depends_annotations(row) == [f"depends: {dep}"]
 
 
 def test_task_delete_allows_unclaimed_task(task_repo):
