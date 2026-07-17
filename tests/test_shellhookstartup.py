@@ -496,6 +496,64 @@ def test_agent_shell_targets_worktree_python_without_shadowing_global_spice(
     ]
 
 
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_agent_shell_routes_pytest_arguments_through_worktree_python(
+    tmp_path, shell_name
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["spice-dev"],
+        groups={
+            "spice-dev": {
+                "pytest": {"argv": ["python", "-m", "pytest"]},
+            }
+        },
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    operator_bin = tmp_path / "operator-bin"
+    operator_bin.mkdir()
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    executables = {
+        venv_bin / "python": "worktree-python",
+        operator_bin / "pytest": "global-pytest",
+    }
+    for path, label in executables.items():
+        path.write_text(
+            f"#!/bin/sh\nprintf '{label}:%s\\n' \"$*\"\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+    base_env = {
+        "HOME": str(home),
+        "PATH": str(operator_bin)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
+    }
+    env = shellhook.apply_shell_steering_environment(tmp_path, base_env=base_env)
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    if shell_name == "zsh":
+        env[shellhook.ZDOTDIR_ENV] = str(static_hook_dir)
+    else:
+        env[shellhook.BASH_ENV_ENV] = str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+
+    completed = subprocess.run(
+        [shell, "-c", "pytest -q tests/unit --maxfail=1"],
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+
+    assert completed.stdout.splitlines() == [
+        "worktree-python:-m pytest -q tests/unit --maxfail=1"
+    ]
+
+
 def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_path):
     bash = shutil.which("bash")
     if bash is None:
