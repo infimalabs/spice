@@ -76,6 +76,7 @@ sites are inventoried below.
 | `spice/release.py::wait_for_pypi#urlopen` | PyPI lookup passes a 20-second URL timeout. | Bounded |
 | `spice/tasks/gitsync.py::_run` | Git fetch/push use a 30-second subprocess timeout, disable terminal prompts, and configure a five-second SSH connect timeout. | Bounded for network operations |
 | `spice/agent/sidechannel.py`, `sidechannelnotify.py`, `wrap.py` | Unix-domain connect and hello operations have explicit deadlines; established streams intentionally retain stop/parent/peer lifetime cancellation. | Mixed: Bounded handshake and lifetime-bound stream |
+| `spice/tasks/opslog.py::_connect#connect` | Read-only URI connect (`mode=ro`) to the local TaskChampion operations database using Python's finite default timeout; every caller (`task_version`, `claim_baseline_id`, `contract_mutations_since`) runs indexed point queries and closes the connection in a `finally` block. | Bounded |
 | `spice/sqliteconnection.py::sqlite_connection#connect`; `spice/serve/team/store.py::ServeTeamStore.connect#connect`; team/directive/filter/metric store `connect()` callers | SQLite connect and lock waits use Python's finite default timeout; short-lived stores (ACK state, maxim metrics, subsumption coverage, driver transcript lookup, team schema init) route through the shared deterministic-close owner, and the team store also sets an explicit busy timeout. They can delay callers but are not indefinite. | Bounded |
 
 ## Result
