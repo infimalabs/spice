@@ -38,6 +38,13 @@ def _f(row: dict[str, Any], key: str) -> str:
     return "" if value is None else str(value)
 
 
+def _task_version_text(row: dict[str, Any]) -> str:
+    try:
+        return str(opslog.task_version(identity.uuid_of(row)))
+    except SpiceError as exc:
+        return f"unavailable ({exc})"
+
+
 def render_row(row: dict[str, Any]) -> str:
     handle = identity.render_handle(row)
     bits = [handle, f"[{_list_state_label(row)}]"]
@@ -126,7 +133,7 @@ def _base_show_lines(
         f"urgency {_f(row, 'urgency')}",
         f"tags {' '.join('+' + t for t in row.get('tags') or [])}",
         f"status {_f(row, 'status')}",
-        f"version {opslog.task_version(identity.uuid_of(row))}",
+        f"version {_task_version_text(row)}",
         f"claim {_f(row, 'claim_by') or '-'} until {_f(row, 'claim_until') or '-'}",
         f"claim_thread {_f(row, 'claim_thread') or '-'}",
     ]

@@ -867,6 +867,49 @@ def test_supervisor_claim_renewal_reports_backend_failure(tmp_path, monkeypatch)
     ]
 
 
+def test_supervisor_claim_contract_watch_reports_one_actionable_error(
+    tmp_path, monkeypatch
+):
+    feedback: list[tuple[str, dict[str, object]]] = []
+    log_path = tmp_path / "supervisor.log"
+    reported: dict[str, str] = {}
+    result = claimstate.ClaimRenewalResult(
+        True,
+        "renewed",
+        handle="TASK-watch",
+        uuid="11111111-1111-1111-1111-111111111111",
+    )
+    detail = (
+        "unsupported TaskChampion operations log at /tmp/taskchampion.sqlite3: "
+        "operations table is missing"
+    )
+    monkeypatch.setattr(claimstate, "renew_claim", lambda **_kwargs: result)
+
+    def schema_failure(*_args, **_kwargs):
+        raise SpiceError(detail)
+
+    monkeypatch.setattr(lifecycle, "_notice_contract_mutations", schema_failure)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
+    )
+
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported, {})
+
+    assert log_path.read_text(encoding="utf-8") == (
+        f"spice claim contract watch failed: TASK-watch {detail}\n"
+    )
+    assert feedback == [
+        (
+            "claim.contract-watch-error",
+            {"handle": "TASK-watch", "detail": detail},
+        )
+    ]
+    assert reported == {"contract_watch": detail}
+
+
 def test_require_supervisor_started_accepts_thread_settled_log_path(
     tmp_path, monkeypatch
 ):
