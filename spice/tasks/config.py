@@ -335,7 +335,8 @@ def set_backend(selector: str | None) -> None:
 
 
 def backend_override() -> str | None:
-    return _backend_override
+    """Return the effective explicit or environment-selected backend."""
+    return _selector() or None
 
 
 def _selector() -> str:
