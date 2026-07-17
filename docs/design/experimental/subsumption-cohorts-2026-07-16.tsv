@@ -6,6 +6,7 @@
 # suite_without_analyzed_context=828
 # findings=316
 # cohorts=239
+# refreshed_at=2026-07-17 representatives renamed upstream now carry their current test node ids; status=historical marks a representative deleted upstream with no successor (cohort_ids unchanged)
 status	cohort_id	relation	candidate_count	representative
 deferred	strict-subset-8503b6fa0c13	strict-subset	31	tests/test_taskdocfuzz.py::test_seeded_fuzz_documents_stay_deterministic_acyclic_and_round_trip
 adjudicated	strict-subset-6b1cb7dcac79	strict-subset	5	tests/test_sessionbriefinginvariants.py::test_supervised_fixture_outputs_exclude_skill_mantra_text
@@ -14,7 +15,7 @@ deferred	strict-subset-889ef6eb1da8	strict-subset	4	tests/test_lifecycle.py::tes
 deferred	strict-subset-cd72075f59b2	strict-subset	3	tests/test_acktasks.py::test_supervised_marker_examples_do_not_emit_feedback_or_tasks
 deferred	strict-subset-7f1703c9468b	strict-subset	3	tests/test_hooks.py::test_file_shape_guard_excludes_generated_lockfiles_but_keeps_source_pressure
 deferred	strict-subset-b7b2d748085d	strict-subset	3	tests/test_servemessages.py::test_append_only_read_reports_cross_boundary_image_pair_removal
-deferred	equal-feature-f462a1c5cf6e	equal-feature	2	tests/test_maxims.py::test_builtin_maxim_bags_default_to_all_driver_scopes
+deferred	equal-feature-f462a1c5cf6e	equal-feature	2	tests/test_maxims.py::test_builtin_maxim_bags_default_to_unconstrained_scopes
 deferred	strict-subset-4c43619d0343	strict-subset	2	tests/test_acktasks.py::test_supervised_ack_creates_inline_task_and_archives_inbox
 deferred	strict-subset-02816fbb61da	strict-subset	2	tests/test_agentcli.py::test_post_tool_hook_response_renders_pending_steering
 deferred	strict-subset-e6e57135f9d7	strict-subset	2	tests/test_command.py::test_side_channel_watch_streams_later_inbox_to_stderr
@@ -61,7 +62,7 @@ deferred	equal-feature-a91b34c4e53c	equal-feature	1	tests/test_shellhook.py::tes
 deferred	equal-feature-caa6209c9c0e	equal-feature	1	tests/test_taskbatch.py::test_add_batch_deferred_field_creates_waiting_task
 deferred	strict-subset-872655cd38c6	strict-subset	1	tests/test_acks.py::test_backticked_key_with_colon_body
 deferred	strict-subset-d369d1a194d1	strict-subset	1	tests/test_acks.py::test_bold_wrapped_ack_header_leaves_no_stray_markers
-deferred	strict-subset-10da56dbac31	strict-subset	1	tests/test_acks.py::test_resend_lineage_end_to_end_contract
+historical	strict-subset-10da56dbac31	strict-subset	1	tests/test_acks.py::test_resend_lineage_end_to_end_contract
 deferred	strict-subset-378249301144	strict-subset	1	tests/test_acks.py::test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias
 deferred	strict-subset-448f6ecaaf86	strict-subset	1	tests/test_acks.py::test_supervised_nack_reports_refused_key
 deferred	strict-subset-c99725de95e9	strict-subset	1	tests/test_acktasks.py::test_supervised_ack_missing_acceptance_routes_inline_task_to_plan
@@ -198,7 +199,7 @@ deferred	strict-subset-8cc0c0155e48	strict-subset	1	tests/test_studycli.py::test
 deferred	strict-subset-b368179df791	strict-subset	1	tests/test_submissions.py::test_submission_lifecycle_follows_real_watcher_events[idle]
 deferred	strict-subset-0bd29bd01be8	strict-subset	1	tests/test_submissions.py::test_submission_lifecycle_follows_real_watcher_events[running]
 deferred	strict-subset-3148f274de2c	strict-subset	1	tests/test_taskcli.py::test_task_add_missing_acceptance_honors_explicit_flow
-deferred	strict-subset-95ba513199a8	strict-subset	1	tests/test_taskcli.py::test_task_resolve_wording_clears_active_claim_marker
+deferred	strict-subset-95ba513199a8	strict-subset	1	tests/test_taskcli.py::test_task_reword_clears_active_claim_marker
 deferred	strict-subset-9e11e7365131	strict-subset	1	tests/test_taskcli.py::test_task_review_then_marks_spawned_followup_as_cli_creation_surface
 deferred	strict-subset-15f831aa3054	strict-subset	1	tests/test_taskcli.py::test_task_depends_not_after_cli_drops_edge
 deferred	strict-subset-0fe7fa6b0ccb	strict-subset	1	tests/test_taskclishow.py::test_task_show_prints_merge_aware_diff_command_for_task_merge
@@ -207,7 +208,7 @@ deferred	strict-subset-77551982d388	strict-subset	1	tests/test_taskcoordinationd
 deferred	strict-subset-acb51fb98974	strict-subset	1	tests/test_taskdeferred.py::test_deferred_plan_to_todo_advancement_preserves_scheduling
 deferred	strict-subset-e9e82b39a80c	strict-subset	1	tests/test_taskdeferred.py::test_reclaim_and_renewal_preserve_scheduling
 deferred	strict-subset-b86fb5b72a08	strict-subset	1	tests/test_taskdeferred.py::test_unclaim_preserves_scheduling
-deferred	strict-subset-6f6fec1768fc	strict-subset	1	tests/test_taskdocdialect.py::test_description_storage_normalizes_columns_tabs_and_blank_runs
+deferred	strict-subset-6f6fec1768fc	strict-subset	1	tests/test_taskdocdialect.py::test_description_normalization_handles_columns_tabs_and_blank_runs
 deferred	strict-subset-890d1874e8fd	strict-subset	1	tests/test_taskdoclaws.py::test_apply_ledger_convergence_fixed_point_and_steady_reentrancy[named-tree]
 deferred	strict-subset-4118390f58bc	strict-subset	1	tests/test_taskdocledger.py::test_export_round_trips_to_the_same_graph[ordered_sequence]
 deferred	strict-subset-769ada330d9a	strict-subset	1	tests/test_taskdocrefusals.py::test_document_refusal_fires_exact_sentence_before_any_write[ambiguous-after]
