@@ -129,6 +129,36 @@ def test_supervisor_notice_names_changed_fields_and_renotices(task_repo, monkeyp
     )
 
 
+def test_supervisor_notice_reports_one_claimed_project_move(task_repo, monkeypatch):
+    handle = _claimed_task(priority="L")
+    calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: calls.append((kind, fields)),
+    )
+    log_path = task_repo / "supervisor.log"
+    cursors: dict[str, int] = {}
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+
+    ops.edit(handle, project="serve.unit")
+    moved_handle = identity.render_handle(identity.resolve(handle))
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+
+    assert [(kind, fields["fields"], fields["detail"]) for kind, fields in calls] == [
+        (
+            "claim.contract-changed",
+            "project",
+            "project: task.unit -> serve.unit",
+        )
+    ]
+    assert log_path.read_text(encoding="utf-8") == (
+        f"spice claim contract changed: {moved_handle} "
+        "project: task.unit -> serve.unit\n"
+    )
+
+
 def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
     handle = _claimed_task(priority="L")
     uuid = identity.uuid_of(identity.resolve(handle))

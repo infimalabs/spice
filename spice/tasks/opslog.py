@@ -30,6 +30,7 @@ CONTRACT_PROPERTIES = frozenset(
         "task_description",
         "acceptance",
         "priority",
+        "project",
         "phase",
         "depends",
         "review_finding",
