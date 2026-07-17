@@ -96,6 +96,33 @@ SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
 SERVE_AUTH_COOKIE_NAME = "spice_serve_auth"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536
 HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
+TASK_BACKEND_LIVE_LANE_ERROR = (
+    "live lane mutations are unavailable while the spice serve "
+    "--task-backend override is active"
+)
+
+
+def _task_backend_live_lane_refusal() -> tuple[dict[str, Any], HTTPStatus]:
+    return (
+        {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR},
+        HTTPStatus.METHOD_NOT_ALLOWED,
+    )
+
+
+def _live_bus_send_payload(
+    state: ServeState, target: WorktreeTarget, payload: dict[str, Any]
+) -> tuple[dict[str, Any], HTTPStatus]:
+    if task_config.backend_override() is not None:
+        return _task_backend_live_lane_refusal()
+    return work_tree_send_accepted_response_payload(state, target, payload)
+
+
+def _live_bus_task_drain_payload(
+    state: ServeState, target: WorktreeTarget, payload: dict[str, Any]
+) -> tuple[dict[str, Any], HTTPStatus]:
+    if task_config.backend_override() is not None:
+        return _task_backend_live_lane_refusal()
+    return work_tree_task_drain_response_payload(state, target, payload)
 
 
 class ServeState:
@@ -801,11 +828,11 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 messages_payload=lambda target, **kwargs: (
                     message.messages_payload_for_worktree(state, target, **kwargs)
                 ),
-                send_payload=lambda target, payload: (
-                    work_tree_send_accepted_response_payload(state, target, payload)
+                send_payload=lambda target, payload: _live_bus_send_payload(
+                    state, target, payload
                 ),
-                task_drain_payload=lambda target, payload: (
-                    work_tree_task_drain_response_payload(state, target, payload)
+                task_drain_payload=lambda target, payload: _live_bus_task_drain_payload(
+                    state, target, payload
                 ),
                 team_snapshot_payload=lambda since_revision: (
                     team_snapshot_response_payload(state, since_revision=since_revision)

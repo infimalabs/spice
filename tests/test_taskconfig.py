@@ -58,6 +58,7 @@ def test_task_backend_absolute_override_is_backend_root(tmp_path, monkeypatch):
     config.set_backend(str(backend))
 
     try:
+        assert config.backend_override() == str(backend)
         assert config.backend_root() == backend.resolve()
     finally:
         config.set_backend(None)
