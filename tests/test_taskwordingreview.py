@@ -45,7 +45,7 @@ def test_plan_phase_done_blocks_suspect_wording_marker(task_repo):
     message = str(exc_info.value)
     assert "task done blocked" in message
     assert "still requires suspect-wording self-correction" in message
-    assert "spice task resolve-wording" in message
+    assert "spice task reword" in message
     assert row["phase"] == "plan"
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert not str(row.get("validation") or "")
@@ -165,16 +165,16 @@ def test_task_show_renders_suspect_wording_policy_and_clear_step(task_repo):
     assert "wording_review required" in shown
     assert "suspect wording automatically prepended plan" in shown
     assert "matched wording remains in annotations" in shown
-    assert f'spice task resolve-wording {handle} --reason "..."' in shown
+    assert f'spice task reword {handle} --reason "..."' in shown
     assert "suspect wording:" in shown
     assert "self-correction required" in shown
 
 
-def test_resolve_wording_review_clears_marker_and_allows_plan_done(task_repo):
+def test_reword_clears_marker_and_allows_plan_done(task_repo):
     handle = _suspect_plan_task_with_accepted_child()
     ops.claim(handle)
 
-    output = wordingreview.resolve_wording_review(
+    output = wordingreview.reword(
         handle,
         reason="split into accepted child tasks",
     )
@@ -183,7 +183,7 @@ def test_resolve_wording_review_clears_marker_and_allows_plan_done(task_repo):
         str(item.get("description") or "") for item in resolved.get("annotations") or []
     ]
 
-    assert output == f"resolved wording review for {handle}"
+    assert output == f"reworded {handle}"
     assert not str(resolved.get(config.TASK_WORDING_REVIEW_UDA) or "")
     assert any(item.startswith("suspect wording:") for item in annotations)
     assert "wording review resolved: split into accepted child tasks" in annotations
@@ -209,13 +209,13 @@ def test_plan_phase_done_non_suspect_task_is_unaffected(task_repo):
     assert not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "")
 
 
-def test_resolve_wording_review_rejects_non_owner(task_repo, monkeypatch):
+def test_reword_rejects_non_owner(task_repo, monkeypatch):
     handle = _suspect_plan_task_with_accepted_child()
     ops.claim(handle)
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
 
     with pytest.raises(SpiceError, match=f"task claimed by {ACTOR_A}"):
-        wordingreview.resolve_wording_review(handle, reason="peer cannot clear marker")
+        wordingreview.reword(handle, reason="peer cannot clear marker")
 
     row = identity.resolve(handle)
     annotations = [
@@ -225,11 +225,11 @@ def test_resolve_wording_review_rejects_non_owner(task_repo, monkeypatch):
     assert not any(item.startswith("wording review resolved:") for item in annotations)
 
 
-def test_resolve_wording_review_rejects_inactive_task(task_repo):
+def test_reword_rejects_inactive_task(task_repo):
     handle = _suspect_plan_task_with_accepted_child()
 
-    with pytest.raises(SpiceError, match="resolve wording review requires a claim"):
-        wordingreview.resolve_wording_review(
+    with pytest.raises(SpiceError, match="reword requires a claim"):
+        wordingreview.reword(
             handle,
             reason="inactive task cannot clear marker",
         )
@@ -238,13 +238,13 @@ def test_resolve_wording_review_rejects_inactive_task(task_repo):
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
 
 
-def test_resolve_wording_from_claimed_plan_parent_clears_child_marker(task_repo):
+def test_reword_from_claimed_plan_parent_clears_child_marker(task_repo):
     parent = _clean_plan_parent()
     child = _suspect_unclaimed_child("Adopting connected child")
     ops.depends(parent, [child])
     ops.claim(parent)
 
-    output = wordingreview.resolve_wording_review(
+    output = wordingreview.reword(
         child,
         reason="child wording rewritten during parent planning",
     )
@@ -255,7 +255,7 @@ def test_resolve_wording_from_claimed_plan_parent_clears_child_marker(task_repo)
         str(item.get("description") or "")
         for item in child_row.get("annotations") or []
     ]
-    assert output == f"resolved wording review for {child}"
+    assert output == f"reworded {child}"
     assert str(child_row.get(config.TASK_WORDING_REVIEW_UDA) or "") == ""
     assert (
         "wording review resolved: child wording rewritten during parent planning"
@@ -266,6 +266,41 @@ def test_resolve_wording_from_claimed_plan_parent_clears_child_marker(task_repo)
     assert parent_row["phase"] == "plan"
     assert str(child_row.get("claim_by") or "") == ""
     assert str(child_row.get("start") or "") == ""
+
+
+def test_reword_from_parent_requires_direct_dependency(task_repo):
+    parent = _clean_plan_parent()
+    child = _suspect_unclaimed_child("Adopting unconnected child")
+    ops.claim(parent)
+
+    with pytest.raises(SpiceError, match="reword requires a claim"):
+        wordingreview.reword(
+            child,
+            reason="parent lacks the dependency edge",
+        )
+
+    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
+
+
+def test_reword_from_parent_requires_plan_phase_parent(task_repo):
+    parent = create.add(
+        "Concrete implementation parent",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["parent implements the change directly"],
+    )
+    child = _suspect_unclaimed_child("Adopting implementation child")
+    ops.depends(parent, [child])
+    ops.claim(parent)
+
+    with pytest.raises(SpiceError, match="reword requires a claim"):
+        wordingreview.reword(
+            child,
+            reason="parent phase is not plan",
+        )
+
+    assert identity.resolve(parent)["phase"] == "todo"
+    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
 
 
 def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):

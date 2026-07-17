@@ -440,7 +440,7 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
     )
 
 
-def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
+def test_task_reword_clears_active_claim_marker(task_repo, capsys):
     handle = create.add(
         "Adopting CLI resolve",
         project="task.unit",
@@ -459,7 +459,7 @@ def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
         build_parser().parse_args(
             [
                 "task",
-                "resolve-wording",
+                "reword",
                 "--reason",
                 "accepted child board exists",
             ]
@@ -471,7 +471,7 @@ def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
     row = identity.resolve(handle)
     annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
 
-    assert f"resolved wording review for {handle}" in output
+    assert f"reworded {handle}" in output
     assert not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "")
     assert any(item.startswith("suspect wording:") for item in annotations)
     assert "wording review resolved: accepted child board exists" in annotations
