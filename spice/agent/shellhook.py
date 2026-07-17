@@ -64,6 +64,12 @@ SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 RTK_CANONICAL_EXECUTABLE = "rtk"
 
 
+class _SelectedAgentWrapperGroup(NamedTuple):
+    name: str
+    group: Mapping[str, object]
+    from_extension: bool
+
+
 def apply_shell_steering_environment(
     repo_root: Path,
     *,
@@ -215,47 +221,15 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 
 
 def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
-    agent_settings = effective_table(repo_root, "agent")
     driver_name = active_wrapper_driver_name(repo_root)
     rtk_executable = configured_rtk_executable(repo_root)
-    definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
-    extension_entries = entry_point_agent_wrapper_entries(
-        configured_sources=configured_sources
-    )
-    if AGENT_WRAPPERS_KEY in agent_settings:
-        ordered_groups = config_string_list(
-            agent_settings.get(AGENT_WRAPPERS_KEY),
-            label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
-        )
-    else:
-        raise SpiceError(
-            f"spice shell hook: effective agent configuration requires "
-            f"{AGENT_WRAPPERS_KEY}"
-        )
-    if not ordered_groups:
-        return []
     lines: list[str] = []
     seen_selectors: dict[str, str] = {}
-    for group_name in ordered_groups:
-        require_config_name(
-            group_name,
-            label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY} group",
-        )
-        raw_group = definitions.get(group_name)
-        if raw_group is None and group_name in extension_entries:
-            raw_group = entry_point_wrapper_group_from_entry(
-                extension_entries[group_name]
-            )
-        if raw_group is False:
-            continue
-        if not isinstance(raw_group, dict):
-            raise SpiceError(
-                f"spice shell hook: missing tool.spice.wrappers.{group_name}"
-            )
+    for selected in _selected_agent_wrapper_groups(repo_root):
         lines.extend(
             render_agent_wrapper_group_lines(
-                group_name=group_name,
-                group=raw_group,
+                group_name=selected.name,
+                group=selected.group,
                 seen_selectors=seen_selectors,
                 driver_name=driver_name,
                 rtk_executable=rtk_executable,
@@ -267,12 +241,12 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
     """Wrapper words the agent-run RTK rewrite must leave to the shell.
 
-    A repository-declared direct wrapper whose argv head is not RTK claims
-    its selector word: the pre-shell rewrite substitutes command text before
-    any wrapper function exists, so an RTK claim on such a word would shadow
-    the repository's expansion. Packaged wrappers stay rewritable — they are
-    designed around RTK. Configuration errors yield the empty set here; the
-    shell hook rendering surfaces them loudly.
+    A selected non-system direct wrapper whose argv head is not RTK claims its
+    selector word: the pre-shell rewrite substitutes command text before any
+    wrapper function exists, so an RTK claim on such a word would shadow the
+    configured or extension-provided expansion. Installed system wrappers stay
+    rewritable because they are designed around RTK. Configuration errors
+    yield the empty set here; shell-hook rendering surfaces them loudly.
     """
     try:
         return _rtk_rewrite_yield_selectors(repo_root)
@@ -281,31 +255,23 @@ def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
 
 
 def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
-    agent_settings = effective_table(repo_root, "agent")
-    if AGENT_WRAPPERS_KEY not in agent_settings:
-        return frozenset()
-    ordered_groups = config_string_list(
-        agent_settings.get(AGENT_WRAPPERS_KEY),
-        label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
-    )
     layered = load_config(repo_root)
-    definitions = effective_table(repo_root, "wrappers")
     context = ScopeContext(driver=active_wrapper_driver_name(repo_root))
     rtk_words = {RTK_CANONICAL_EXECUTABLE, configured_rtk_executable(repo_root)}
     selectors: set[str] = set()
-    for group_name in ordered_groups:
-        raw_group = definitions.get(group_name)
-        if not isinstance(raw_group, Mapping):
-            continue
+    for selected in _selected_agent_wrapper_groups(repo_root):
+        group_name = selected.name
+        raw_group = selected.group
         if not WRAPPER_SCOPES.parse(raw_group.get(SCOPES_KEY)).matches(context):
             continue
         for raw_wrapper, raw_entry in raw_group.items():
             wrapper = str(raw_wrapper).strip()
             if wrapper == SCOPES_KEY or not isinstance(raw_entry, Mapping):
                 continue
-            source = layered.source_for(("wrappers", group_name, wrapper))
-            if source is None or source.name == SYSTEM_SOURCE:
-                continue
+            if not selected.from_extension:
+                source = layered.source_for(("wrappers", group_name, wrapper))
+                if source is None or source.name == SYSTEM_SOURCE:
+                    continue
             if not WRAPPER_SCOPES.parse(raw_entry.get(SCOPES_KEY)).matches(context):
                 continue
             command_words = command_words_from_config(
@@ -316,6 +282,52 @@ def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
                 continue
             selectors.add(wrapper)
     return frozenset(selectors)
+
+
+def _selected_agent_wrapper_groups(
+    repo_root: Path,
+) -> tuple[_SelectedAgentWrapperGroup, ...]:
+    """Resolve the ordered wrapper-group universe for every shell consumer."""
+    agent_settings = effective_table(repo_root, "agent")
+    if AGENT_WRAPPERS_KEY not in agent_settings:
+        raise SpiceError(
+            f"spice shell hook: effective agent configuration requires "
+            f"{AGENT_WRAPPERS_KEY}"
+        )
+    ordered_groups = config_string_list(
+        agent_settings.get(AGENT_WRAPPERS_KEY),
+        label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
+    )
+    definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
+    extension_entries = entry_point_agent_wrapper_entries(
+        configured_sources=configured_sources
+    )
+    selected: list[_SelectedAgentWrapperGroup] = []
+    for group_name in ordered_groups:
+        require_config_name(
+            group_name,
+            label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY} group",
+        )
+        raw_group = definitions.get(group_name)
+        from_extension = raw_group is None and group_name in extension_entries
+        if from_extension:
+            raw_group = entry_point_wrapper_group_from_entry(
+                extension_entries[group_name]
+            )
+        if raw_group is False:
+            continue
+        if not isinstance(raw_group, Mapping):
+            raise SpiceError(
+                f"spice shell hook: missing tool.spice.wrappers.{group_name}"
+            )
+        selected.append(
+            _SelectedAgentWrapperGroup(
+                name=group_name,
+                group=raw_group,
+                from_extension=from_extension,
+            )
+        )
+    return tuple(selected)
 
 
 def configured_agent_wrapper_definitions(
