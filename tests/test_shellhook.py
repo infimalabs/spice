@@ -695,7 +695,15 @@ def test_wrapper_find_route_sends_unsupported_primaries_to_native_find(
         assert sentinel in native.stdout
         assert routed_output(args) == native.stdout
 
-    assert routed_output([]) == f"rtk:find {fixture}\n"
+    kept_cases = [
+        [],
+        ["-name", "*.txt"],
+        ["-type", "d"],
+        ["-maxdepth", "1", "-iname", "*.TXT"],
+    ]
+    for args in kept_cases:
+        joined = " ".join(["find", str(fixture), *args])
+        assert routed_output(args) == f"rtk:{joined}\n"
 
 
 def test_agent_environment_does_not_inject_worktree_spice_pythonpath(
@@ -1107,6 +1115,7 @@ def _builtin_common_wrapper_lines(
         '  if [ "${1-}" = find ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
+        "        -name|-iname|-type|-maxdepth) ;;",
         "        -*|'('|')'|'!')",
         "          shift",
         '          command find "$@"',
