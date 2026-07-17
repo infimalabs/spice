@@ -54,6 +54,23 @@ def _connect() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{operations_db_path()}?mode=ro", uri=True)
 
 
+def task_version(uuid: str) -> int:
+    """Tail operations id for the task: the highest operations.id recorded for it.
+
+    TaskChampion appends per-property operations for every mutation, so a
+    task's tail id is a cheap monotonic version — any edit lands a strictly
+    higher id. One indexed MAX read; 0 only before the first recorded write.
+    """
+    con = _connect()
+    try:
+        row = con.execute(
+            "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)
+        ).fetchone()
+        return int(row[0]) if row is not None and row[0] is not None else 0
+    finally:
+        con.close()
+
+
 def claim_baseline_id(uuid: str, actor: str) -> int:
     """Operations id of the actor's claim_by write on the task; log tail otherwise.
 

@@ -33,6 +33,18 @@ SHOW_DEFAULT_OUTPUT_TOKENS = 20
 SHOW_DEFAULT_REASONING_OUTPUT_TOKENS = 5
 
 
+SHOW_STUBBED_TASK_VERSION = 7
+
+
+@pytest.fixture(autouse=True)
+def stubbed_task_version(monkeypatch):
+    # Version-value correctness against the real operations log is proven in
+    # test_taskopslog.py; rendering tests only need a deterministic row.
+    monkeypatch.setattr(
+        render.opslog, "task_version", lambda _uuid: SHOW_STUBBED_TASK_VERSION
+    )
+
+
 @pytest.fixture
 def task_backend(tmp_path, monkeypatch):
     if shutil.which("task") is None:
@@ -131,6 +143,10 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
 
     output = render.render_show("TASK-test")
 
+    lines = output.splitlines()
+    assert lines[lines.index("status pending") + 1] == (
+        f"version {SHOW_STUBBED_TASK_VERSION}"
+    )
     assert (
         "rehydrate:\n  creator context, run: spice session briefing origin-thread"
         in (output)
@@ -767,6 +783,7 @@ def _row(
         "priority": "M",
         "incepted": incepted,
         "entry": incepted,
+        "uuid": "11111111-1111-1111-1111-111111111111",
     }
 
 
