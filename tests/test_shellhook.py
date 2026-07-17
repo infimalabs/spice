@@ -669,7 +669,7 @@ def test_wrapper_find_route_sends_unsupported_primaries_to_native_find(
     def routed_output(args: list[str]) -> str:
         words = " ".join(shlex.quote(word) for word in ["find", str(fixture), *args])
         completed = subprocess.run(
-            [zsh, "-c", f"source {shlex.quote(str(wrappers))}; rtk {words}"],
+            [zsh, "-f", "-c", f"source {shlex.quote(str(wrappers))}; rtk {words}"],
             capture_output=True,
             text=True,
             env=env,
