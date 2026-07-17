@@ -350,6 +350,28 @@ def test_agent_wrapper_lines_rejects_match_route_lacking_flag_entries(tmp_path):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
+def test_agent_wrapper_lines_rejects_keep_without_flags(tmp_path):
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match='[{ head = "scan", keep = ["-name"], argv = ["viewer"] }]',
+    )
+
+    with pytest.raises(SpiceError, match=r"match\[0\].keep requires flags"):
+        shellhook.render_agent_wrapper_lines(tmp_path)
+
+
+def test_agent_wrapper_lines_rejects_empty_keep_list(tmp_path):
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match='[{ flags = ["-raw"], keep = [], argv = ["viewer"] }]',
+    )
+
+    with pytest.raises(SpiceError, match=r"match\[0\].keep has no entries"):
+        shellhook.render_agent_wrapper_lines(tmp_path)
+
+
 def test_agent_wrapper_lines_rejects_multiword_match_flag(tmp_path):
     _write_match_wrapper_config(
         tmp_path,

@@ -1,5 +1,6 @@
 """Agent wrapper routing and shell steering contracts."""
 
+import getpass
 import io
 import json
 import os
@@ -634,6 +635,77 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     assert "wrap:grep needle /dev/null" in lines
 
 
+def test_wrapper_find_route_sends_unsupported_primaries_to_native_find(
+    tmp_path, monkeypatch
+):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    wrappers = tmp_path / "wrappers.zsh"
+    wrappers.write_text(
+        "\n".join(shellhook.render_agent_wrapper_lines(tmp_path)) + "\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    rtk_bin = bin_dir / "rtk"
+    rtk_bin.write_text("#!/bin/sh\nprintf 'rtk:%s\\n' \"$*\"\n", encoding="utf-8")
+    rtk_bin.chmod(0o755)
+    env = dict(os.environ)  # env-policy: allow
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")  # env-policy: allow
+    fixture = tmp_path / "fixture"
+    (fixture / "sub").mkdir(parents=True)
+    (fixture / "sub" / "needle.txt").write_text("needle\n", encoding="utf-8")
+    (fixture / "big.bin").write_bytes(b"\0" * 30_000)
+    (fixture / "empty.txt").touch()
+    old = fixture / "old.txt"
+    old.write_text("old\n", encoding="utf-8")
+    os.utime(old, (1_000_000_000, 1_000_000_000))
+
+    def routed_output(args: list[str]) -> str:
+        words = " ".join(shlex.quote(word) for word in ["find", str(fixture), *args])
+        completed = subprocess.run(
+            [zsh, "-c", f"source {shlex.quote(str(wrappers))}; rtk {words}"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        return completed.stdout
+
+    cases = [
+        ("big.bin", ["-size", "+24k"]),
+        ("big.bin", ["-not", "-name", "*.txt"]),
+        ("needle.txt", ["-mtime", "-1"]),
+        ("needle.txt", ["-path", "*sub*"]),
+        ("needle.txt", ["-user", getpass.getuser()]),
+        ("needle.txt", ["-newer", str(old)]),
+        ("empty.txt", ["-empty"]),
+        ("needle.txt", ["-regex", ".*needle.*"]),
+        ("needle.txt", ["-perm", "-200"]),
+    ]
+    for sentinel, args in cases:
+        native = subprocess.run(
+            ["find", str(fixture), *args], capture_output=True, text=True, check=True
+        )
+        assert sentinel in native.stdout
+        assert routed_output(args) == native.stdout
+
+    kept_cases = [
+        [],
+        ["-name", "*.txt"],
+        ["-type", "d"],
+        ["-maxdepth", "1", "-iname", "*.TXT"],
+    ]
+    for args in kept_cases:
+        joined = " ".join(["find", str(fixture), *args])
+        assert routed_output(args) == f"rtk:{joined}\n"
+
+
 def test_agent_environment_does_not_inject_worktree_spice_pythonpath(
     tmp_path, monkeypatch
 ):
@@ -1057,7 +1129,8 @@ def _builtin_common_wrapper_lines(
         '  if [ "${1-}" = find ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
-        "        -print|-print0|-prune|-exec|-execdir|-delete|'('|')'|'!'|-o|-a)",
+        "        -name|-iname|-type|-maxdepth) ;;",
+        "        -*|'('|')'|'!')",
         "          shift",
         '          command find "$@"',
         "          return",

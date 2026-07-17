@@ -35,7 +35,13 @@ executable = "rtk"
 argv = ["rtk"]
 match = [
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*"], argv = ["rg"] },
-  { head = "find", flags = ["-print", "-print0", "-prune", "-exec", "-execdir", "-delete", "(", ")", "!", "-o", "-a"], argv = ["find"] },
+  # rtk find executes only the verified-safe primaries -name, -iname, -type,
+  # and -maxdepth (alone or combined) correctly; every other primary either
+  # refuses (exit 1) or silently binds the directory operand as the pattern
+  # and returns wrong results (exit 0). The keep list holds the verified-safe
+  # primaries on rtk compaction; any other dash-word or operator routes to
+  # native find.
+  { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
   { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },
 ]

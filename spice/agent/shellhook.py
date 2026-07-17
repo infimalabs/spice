@@ -443,6 +443,7 @@ def resolved_rtk_command_words(
 class WrapperMatchRoute(NamedTuple):
     head: str | None
     flags: tuple[str, ...]
+    keep: tuple[str, ...]
     argv: tuple[str, ...]
     scope: ScopeSelector
 
@@ -473,9 +474,11 @@ def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
             "  fi",
         ]
     pattern = "|".join(match_route_pattern(flag) for flag in route.flags)
+    keep = "|".join(match_route_pattern(word) for word in route.keep)
     scan = [
         'for _spice_word in "$@"; do',
         '  case "$_spice_word" in',
+        *([f"    {keep}) ;;"] if keep else []),
         f"    {pattern})",
         *(["      shift"] if route.head is not None else []),
         f'      command {argv} "$@"',
@@ -510,7 +513,7 @@ def agent_wrapper_match_routes(
 def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     if not isinstance(raw, Mapping):
         raise SpiceError(f"spice shell hook: {label} must be a table")
-    extra = sorted(set(raw) - {"head", "flags", "argv", SCOPES_KEY})
+    extra = sorted(set(raw) - {"head", "flags", "keep", "argv", SCOPES_KEY})
     if extra:
         raise SpiceError(
             f"spice shell hook: {label} has unsupported keys: {', '.join(extra)}"
@@ -529,11 +532,24 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
             raise SpiceError(f"spice shell hook: {label}.flags has no entries")
         for word in flags:
             match_route_word(word, label=f"{label}.flags")
+    if raw.get("keep") is None:
+        keep: list[str] = []
+    else:
+        # Keep words are exempted from the flags patterns and stay on the
+        # wrapped command; without flags there is nothing to exempt from.
+        if not flags:
+            raise SpiceError(f"spice shell hook: {label}.keep requires flags")
+        keep = config_string_list(raw.get("keep"), label=f"{label}.keep")
+        if not keep:
+            raise SpiceError(f"spice shell hook: {label}.keep has no entries")
+        for word in keep:
+            match_route_word(word, label=f"{label}.keep")
     argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
     scope = WRAPPER_ROUTE_SCOPES.parse(raw.get(SCOPES_KEY))
     return WrapperMatchRoute(
         head=head,
         flags=tuple(flags),
+        keep=tuple(keep),
         argv=tuple(argv),
         scope=scope,
     )
