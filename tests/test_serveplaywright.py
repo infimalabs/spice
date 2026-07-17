@@ -109,6 +109,19 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "New team" not in smoke
 
 
+def test_serve_composer_menu_order_smoke_renders_renewal_first() -> None:
+    smoke = (ROOT / "browser" / "serve_composer_menu_order_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "composerPrimaryMenuActions(lane, member" in smoke
+    assert 'band.querySelectorAll(".composer-band-menu-action")' in smoke
+    assert '"Renew this agent",\n  "Create new team",\n  "Leave all teams",' in smoke
+    assert "assert.deepStrictEqual(result.labels, expectedLabels);" in smoke
+
+
 def test_serve_lane_reload_smoke_asserts_server_shell_persistence() -> None:
     smoke = (ROOT / "browser" / "serve_lane_reload_smoke.js").read_text(
         encoding="utf-8"

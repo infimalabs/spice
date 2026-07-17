@@ -214,7 +214,7 @@ function composerPrimaryMenuActions(lane, member, label) {
   renew.onClick = (requested) =>
     toggleComposerAgentRenewalIntent(lane, member, requested);
 
-  return [create, leave, renew];
+  return [renew, create, leave];
 }
 
 function composerBandMenuAction(label, detail) {
