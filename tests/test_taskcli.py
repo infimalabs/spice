@@ -322,6 +322,42 @@ def test_task_delete_parser_accepts_force_claimed():
     assert args.force_claimed is True
 
 
+def test_task_edit_rewrites_description_composed_with_priority(task_repo, capsys):
+    handle = create.add(
+        "Refresh my description",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        description="sketch that predates the landed mechanism",
+        priority="low",
+    )
+    new_text = "landed mechanism recorded; sketch rewritten in place"
+
+    args = build_parser().parse_args(
+        ["task", "edit", handle, "--description", new_text, "--priority", "high"]
+    )
+    assert args.func(args) == 0
+
+    row = identity.resolve(handle)
+    assert str(row.get("task_description")) == new_text
+    assert row["priority"] == "H"
+
+    show = build_parser().parse_args(["task", "show", handle])
+    capsys.readouterr()
+    assert show.func(show) == 0
+    assert f"description {new_text}" in capsys.readouterr().out
+
+
+def test_task_edit_help_documents_description(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["task", "edit", "--help"])
+
+    help_text = capsys.readouterr().out
+    assert "--description DESCRIPTION" in help_text
+    assert "Replace the task description body." in help_text
+
+
 def test_task_add_help_documents_every_repeatable_batch_field(capsys):
     with pytest.raises(SystemExit) as exc_info:
         build_parser().parse_args(["task", "add", "--help"])

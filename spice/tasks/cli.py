@@ -494,12 +494,17 @@ def _configure_unclaim_parser(actions: Any) -> None:
 def _configure_edit_parser(actions: Any) -> None:
     edit = actions.add_parser(
         "edit",
-        help="Change a task's priority, project, and/or acceptance in place.",
+        help="Change a task's priority, project, description, and/or acceptance"
+        " in place.",
         recovery_examples=("spice task edit TASK-1k4Q5gJw --priority high",),
     )
     edit.add_argument("handle")
     edit.add_argument("--priority", help="high/medium/low/none or H/M/L.")
     edit.add_argument("--project", help="Reassign to an assignable dotted project.")
+    edit.add_argument(
+        "--description",
+        help="Replace the task description body.",
+    )
     edit.add_argument(
         "--acceptance",
         action="append",
@@ -944,7 +949,11 @@ _DISPATCH = {
     "reclaim": lambda a: _reclaim(a),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(
-        a.handle, priority=a.priority, project=a.project, acceptance=a.acceptance
+        a.handle,
+        priority=a.priority,
+        project=a.project,
+        description=a.description,
+        acceptance=a.acceptance,
     ),
     "delete": lambda a: ops.delete(a.handle, a.reason, force_claimed=a.force_claimed),
     "capture": lambda a: ops.capture(
