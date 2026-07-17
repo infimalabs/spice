@@ -95,6 +95,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
             "target": target,
             "fast_mode": True,
             "force_new": True,
+            "automatic": False,
         }
     ]
     assert send_records == [
@@ -166,6 +167,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
             "target": target,
             "fast_mode": False,
             "force_new": True,
+            "automatic": True,
         }
     ]
     assert state.team_store.current_team_for_agent(ACTOR_A) is None
@@ -236,6 +238,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
             "target": target,
             "fast_mode": False,
             "force_new": True,
+            "automatic": True,
         }
     ]
     assert state.team_store.current_team_for_agent(ACTOR_A) is None
