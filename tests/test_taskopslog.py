@@ -56,6 +56,11 @@ def test_read_only_connector_encodes_every_uri_reserved_path_character(
                 (
                     2,
                     uuid,
+                    json.dumps({"Create": {"uuid": uuid}}),
+                ),
+                (
+                    3,
+                    uuid,
                     json.dumps(
                         {
                             "Update": {
@@ -80,9 +85,9 @@ def test_read_only_connector_encodes_every_uri_reserved_path_character(
     assert opslog.operations_db_uri(database.resolve()) == (
         f"{database.resolve().as_uri()}?mode=ro"
     )
-    assert opslog.task_version(uuid) == 2
+    assert opslog.task_version(uuid) == 3
     assert baseline == 1
-    assert cursor == 2
+    assert cursor == 3
     assert mutations == [opslog.ContractMutation("acceptance", "old", "new", "now")]
 
 

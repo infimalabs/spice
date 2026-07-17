@@ -161,10 +161,9 @@ def contract_mutations_since(
             (uuid, after_id),
         ).fetchall()
     for op_id, data in rows:
-        operation = _decode_operation(log.path, int(op_id), data)
+        update = _decode_update(log.path, int(op_id), data)
         cursor = int(op_id)
-        update = operation.get("Update")
-        if not isinstance(update, dict):
+        if update is None:
             continue
         prop = str(update.get("property") or "")
         if prop not in CONTRACT_PROPERTIES:
@@ -180,8 +179,10 @@ def contract_mutations_since(
     return cursor, mutations
 
 
-def _decode_operation(path: Path, operation_id: int, data: object) -> dict[str, object]:
-    """Decode one supported TaskChampion operation or reject its exact row."""
+def _decode_update(
+    path: Path, operation_id: int, data: object
+) -> dict[str, object] | None:
+    """Decode one Update object; return None for a valid non-Update operation."""
     if not isinstance(data, str):
         raise _schema_error(
             path,
@@ -199,7 +200,16 @@ def _decode_operation(path: Path, operation_id: int, data: object) -> dict[str, 
             path,
             f"operation {operation_id} data is not a JSON object",
         )
-    return operation
+    if "Update" not in operation:
+        return None
+    update = operation["Update"]
+    if not isinstance(update, dict):
+        raise _schema_error(
+            path,
+            f"operation {operation_id} Update is {type(update).__name__}, "
+            "not a JSON object",
+        )
+    return update
 
 
 def render_notice(mutations: list[ContractMutation]) -> str:
