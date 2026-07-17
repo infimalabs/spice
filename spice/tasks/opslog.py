@@ -18,13 +18,16 @@ from spice.tasks import config
 
 OPERATIONS_DB_FILENAME = "taskchampion.sqlite3"
 
-# Operator/reviewer-meaningful fields only. Claim bookkeeping (claim_*,
-# start, modified) mutates on every renewal and must never trigger a notice;
-# annotations (annotation_<ts>) and dep_<uuid> markers shadow fields already
-# covered here (notes are chatty, depends carries the aggregate edge list).
+# Operator/reviewer-meaningful fields only. description is the Taskwarrior
+# native property carrying the task title; task_description carries the
+# description body. Claim bookkeeping (claim_*, start, modified) mutates on
+# every renewal and must never trigger a notice; annotations (annotation_<ts>)
+# and dep_<uuid> markers shadow fields already covered here (notes are chatty,
+# depends carries the aggregate edge list).
 CONTRACT_PROPERTIES = frozenset(
     {
         "description",
+        "task_description",
         "acceptance",
         "priority",
         "phase",

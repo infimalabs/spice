@@ -237,23 +237,32 @@ def edit(
     *,
     priority: str | None = None,
     project: str | None = None,
+    description: str | None = None,
     acceptance: list[str] | None = None,
 ) -> str:
-    """Change an existing task's priority, project, and/or acceptance in place.
+    """Change a task's priority, project, description, and/or acceptance in place.
 
     Avoids the delete-and-recreate detour for a simple priority bump, a
-    project move, or a plan task gaining its bookend acceptance: resolve the
-    task and apply whichever fields were supplied in one modify. At least one
-    field is required. Acceptance replaces the prior value wholesale, joined
-    the same way creation writes it, and the new text passes the same
-    suspect-wording scan creation runs — a match sets the review marker so a
+    project move, a description that outlived its implementation, or a plan
+    task gaining its bookend acceptance: resolve the task and apply whichever
+    fields were supplied in one modify. At least one field is required.
+    Description and acceptance replace the prior value wholesale — acceptance
+    joined the same way creation writes it — and the new text passes the same
+    suspect-wording scan creation runs; a match sets the review marker so a
     plan task still self-corrects before advancing.
     """
     from spice.tasks import create
     from spice.tasks.wording import detect_task_creation_wording
 
-    if priority is None and project is None and acceptance is None:
-        raise SpiceError("task edit needs --priority, --project, and/or --acceptance")
+    if (
+        priority is None
+        and project is None
+        and description is None
+        and acceptance is None
+    ):
+        raise SpiceError(
+            "task edit needs --priority, --project, --description, and/or --acceptance"
+        )
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
     mods: list[str] = []
@@ -263,14 +272,25 @@ def edit(
     if project is not None:
         resolved_project = config.validate_manual_creation_project(project)
         mods.append(f"project:{resolved_project}")
-    wording_matches: tuple = ()
+    body = ""
+    if description is not None:
+        _require_pending(row, "edit description for")
+        body = create._task_description(description)
+        if not body:
+            raise SpiceError("task edit --description needs non-empty text")
+        mods.append(f"task_description:{body}")
+    items: list[str] = []
     if acceptance is not None:
         _require_pending(row, "edit acceptance for")
         items = [item.strip() for item in acceptance if item.strip()]
         if not items:
             raise SpiceError("task edit --acceptance needs at least one entry")
         mods.append(f"acceptance:{' | '.join(items)}")
-        wording_matches = detect_task_creation_wording(title="", acceptance=items)
+    wording_matches: tuple = ()
+    if body or items:
+        wording_matches = detect_task_creation_wording(
+            title="", description=body or None, acceptance=items
+        )
         if wording_matches:
             mods.append(
                 f"{config.TASK_WORDING_REVIEW_UDA}:{create.TASK_WORDING_REVIEW_MARKER}"
