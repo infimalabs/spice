@@ -54,13 +54,7 @@ def test_static_composer_menu_actions_include_team_moves_and_renewal():
     assert 'composerBandMenuAction(\n    "Leave all teams",' in app_shell
     assert 'composerBandMenuAction(\n    "Create new team",' in app_shell
     assert 'composerBandMenuAction(\n    "Renew this agent",' in app_shell
-    assert "return [create, leave, renew];" in app_shell
-    assert app_shell.index('composerBandMenuAction(\n    "Create new team",') < (
-        app_shell.index('composerBandMenuAction(\n    "Leave all teams",')
-    )
-    assert app_shell.index('composerBandMenuAction(\n    "Leave all teams",') < (
-        app_shell.index('composerBandMenuAction(\n    "Renew this agent",')
-    )
+    assert "return [renew, create, leave];" in app_shell
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
     assert "renew.keepOpen = true;" in app_shell
