@@ -7,13 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
+from spice.serve.app import (
+    DEFAULT_SERVE_HOST,
+    DEFAULT_SERVE_PORT,
+    apply_serve_backends,
+    run_serve,
+)
 from spice.serve.browser.artifacts import serve_browser_artifact_path
 from spice.serve.diagnostics import (
     render_team_diagnostics,
     team_diagnostics_payload,
 )
-from spice.tasks import config as task_config
 
 
 def configure_serve_parser(subparsers: Any) -> None:
@@ -60,6 +64,15 @@ def configure_serve_parser(subparsers: Any) -> None:
             "Watch PATH and stop the server when it appears, disappears, or "
             "its content changes. PATH is never created; only the final path "
             "component may be missing (the parent directory must exist)."
+        ),
+    )
+    parser.add_argument(
+        "--backend",
+        metavar="PATH",
+        help=(
+            "Absolute scratch root capturing every managed-state surface for "
+            "this serve process (agent registry, inboxes, session records, "
+            "and the task store unless --task-backend claims it)."
         ),
     )
     parser.add_argument(
@@ -124,7 +137,7 @@ def configure_watch_parser(subparsers: Any) -> None:
 
 
 def run_serve_team_diagnostics(args: Any) -> int:
-    _apply_task_backend(args)
+    apply_serve_backends(args)
     payload = team_diagnostics_payload()
     if args.json_output:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -140,13 +153,3 @@ def run_serve_browser_artifact_path(args: Any) -> int:
         raise SpiceError(str(exc)) from exc
     print(path)
     return 0
-
-
-def _apply_task_backend(args: Any) -> None:
-    raw_backend = getattr(args, "task_backend", None)
-    if not raw_backend:
-        return
-    backend = Path(raw_backend).expanduser()
-    if not backend.is_absolute():
-        raise SpiceError("spice serve --task-backend requires an absolute scratch path")
-    task_config.set_backend(str(backend))
