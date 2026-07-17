@@ -77,11 +77,41 @@ def test_read_only_connector_encodes_every_uri_reserved_path_character(
     baseline = opslog.claim_baseline_id(uuid, ACTOR_A)
     cursor, mutations = opslog.contract_mutations_since(uuid, baseline)
 
-    assert opslog.operations_db_uri() == f"{database.resolve().as_uri()}?mode=ro"
+    assert opslog.operations_db_uri(database.resolve()) == (
+        f"{database.resolve().as_uri()}?mode=ro"
+    )
     assert opslog.task_version(uuid) == 2
     assert baseline == 1
     assert cursor == 2
     assert mutations == [opslog.ContractMutation("acceptance", "old", "new", "now")]
+
+
+def test_connector_opens_the_one_resolved_database(tmp_path, monkeypatch):
+    uuid = "11111111-1111-1111-1111-111111111111"
+    databases = [tmp_path / "resolved.sqlite3", tmp_path / "later.sqlite3"]
+    for operation_id, database in zip((1, 9), databases, strict=True):
+        con = sqlite3.connect(database)
+        try:
+            con.execute("CREATE TABLE operations (id INTEGER, uuid TEXT, data TEXT)")
+            con.execute(
+                "INSERT INTO operations VALUES (?, ?, ?)",
+                (operation_id, uuid, json.dumps({"Update": {"uuid": uuid}})),
+            )
+            con.commit()
+        finally:
+            con.close()
+
+    resolved: list[Path] = []
+
+    def alternating_backend() -> Path:
+        path = databases[len(resolved)]
+        resolved.append(path)
+        return path
+
+    monkeypatch.setattr(opslog, "operations_db_path", alternating_backend)
+
+    assert opslog.task_version(uuid) == 1
+    assert resolved == [databases[0]]
 
 
 def test_contract_mutations_track_edits_exactly(task_repo):
@@ -214,7 +244,8 @@ def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
     uuid = identity.uuid_of(identity.resolve(handle))
 
     shown = _shown_version(handle)
-    con = sqlite3.connect(opslog.operations_db_uri(), uri=True)
+    database = opslog.operations_db_path()
+    con = sqlite3.connect(opslog.operations_db_uri(database), uri=True)
     try:
         tail = con.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)
