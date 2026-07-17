@@ -38,9 +38,12 @@ from spice.mail.attachments import (
     write_inbox_attachments,
 )
 from spice.locking import bounded_exclusive_lock
-from spice.paths import STATE_DIRNAME, fsync_directory
+from spice.paths import (
+    STATE_DIRNAME,
+    fsync_directory,
+    worktree_inbox_dir,
+)
 
-INBOX_DIRNAME = "inbox"
 INBOX_ARCHIVE_DIRNAME = "archive"
 INBOX_DEADLETTER_DIRNAME = "deadletter"
 INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD = 1
@@ -158,7 +161,7 @@ class InboxResendAttempt:
 
 
 def inbox_dir(repo_root: Path | str) -> Path:
-    return Path(repo_root) / STATE_DIRNAME / INBOX_DIRNAME
+    return worktree_inbox_dir(Path(repo_root))
 
 
 def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
