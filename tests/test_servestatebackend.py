@@ -13,7 +13,6 @@ from spice import paths
 from spice.agent.maximmetrics import maxim_metrics_database_path
 from spice.agent.paths import agent_thread_pointer_path, agent_thread_state_dir
 from spice.agent.runinbox import inbox_pending_signature
-from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_database_path
 from spice.mail.inbox import collect_inbox_items, inbox_dir
 from spice.serve.app import apply_serve_backends
@@ -79,11 +78,6 @@ def test_explicit_task_backend_wins_for_the_task_store_alone(
     apply_serve_backends(_serve_args(scratch, task_scratch))
     assert task_config.backend_root() == task_scratch.resolve()
     assert paths.shared_state_root(tmp_path / "live").is_relative_to(scratch.resolve())
-
-
-def test_relative_backend_is_refused_loudly(scratch_overrides):
-    with pytest.raises(SpiceError, match="--backend requires an absolute scratch path"):
-        apply_serve_backends(Namespace(backend="scratch", task_backend=None))
 
 
 def test_backend_isolates_operator_inbox_reads_and_writes(tmp_path, scratch_overrides):

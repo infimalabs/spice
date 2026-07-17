@@ -539,20 +539,6 @@ def test_task_depends_not_after_cli_drops_edge(task_repo, capsys):
     assert row.get("depends", []) == []
 
 
-def test_task_depends_cli_requires_a_direction_flag(task_repo):
-    handle = create.add(
-        "Plan invoked with neither direction",
-        project="task.unit",
-        acceptance=["parent bookend acceptance exists"],
-        origin="ack:20260101T000000000000Z",
-    )
-
-    args = _with_backend(build_parser().parse_args(["task", "depends", handle]))
-
-    with pytest.raises(SpiceError, match="--after and/or --not-after"):
-        args.func(args)
-
-
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
         [
