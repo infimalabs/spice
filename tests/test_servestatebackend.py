@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import subprocess
+import threading
 from argparse import Namespace
+from http import HTTPStatus
 from pathlib import Path
 
 import pytest
@@ -15,9 +18,16 @@ from spice.agent.paths import agent_thread_pointer_path, agent_thread_state_dir
 from spice.agent.runinbox import inbox_pending_signature
 from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_database_path
-from spice.mail.inbox import collect_inbox_items, inbox_dir
-from spice.serve.app import apply_serve_backends
+from spice.mail.inbox import (
+    collect_inbox_items,
+    compose_inbox_text,
+    inbox_dir,
+    write_inbox_item,
+)
+from spice.serve import app as serve_app
+from spice.serve.app import TASK_BACKEND_LIVE_LANE_ERROR, apply_serve_backends
 from spice.tasks import config as task_config
+from tests.test_servehelpers import _repo, _serve_state, _target
 
 SESSION_THREAD_ID = "1kTestThread"
 
@@ -154,3 +164,109 @@ def test_live_state_stays_byte_identical_under_backend_writes(
         if item.is_file()
     }
     assert after == before
+
+
+@pytest.mark.parametrize("backend_kind", ["task", "total"])
+def test_http_send_with_scratch_backend_preserves_live_inbox(
+    tmp_path, scratch_overrides, backend_kind
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    write_inbox_item(
+        repo,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="live seed", priority=None, stop=False),
+    )
+    before = _inbox_snapshot(repo)
+    scratch = tmp_path / "scratch"
+    if backend_kind == "total":
+        apply_serve_backends(_serve_args(scratch, None))
+    else:
+        apply_serve_backends(_serve_args(None, scratch / "task"))
+
+    status, payload = _post_json(
+        state,
+        f"/api/work/trees/{target.id}/send",
+        {"text": "must remain scratch-only"},
+    )
+
+    paths.set_state_backend(None)
+    task_config.set_backend(None)
+    assert status == HTTPStatus.METHOD_NOT_ALLOWED
+    assert payload == {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR}
+    assert _inbox_snapshot(repo) == before
+
+
+def test_http_agent_ensure_with_scratch_backend_uses_isolation_policy(
+    tmp_path, scratch_overrides
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    apply_serve_backends(_serve_args(None, tmp_path / "scratch-task"))
+
+    status, payload = _post_json(
+        state,
+        f"/api/work/trees/{target.id}/agent/ensure",
+        {},
+    )
+
+    assert status == HTTPStatus.METHOD_NOT_ALLOWED
+    assert payload == {"ok": False, "error": TASK_BACKEND_LIVE_LANE_ERROR}
+
+
+def test_http_send_with_live_backend_delegates_successfully(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    calls: list[tuple[object, object, dict[str, object]]] = []
+
+    def send_payload(current_state, current_target, payload):
+        calls.append((current_state, current_target, payload))
+        return {"ok": True, "key": "inbox-key"}, HTTPStatus.OK
+
+    monkeypatch.setattr(serve_app, "work_tree_send_response_payload", send_payload)
+
+    status, payload = _post_json(
+        state,
+        f"/api/work/trees/{target.id}/send",
+        {"text": "continue live work"},
+    )
+
+    assert status == HTTPStatus.OK
+    assert payload == {"ok": True, "key": "inbox-key"}
+    assert calls == [(state, target, {"text": "continue live work"})]
+
+
+def _inbox_snapshot(repo: Path) -> dict[str, bytes]:
+    return {
+        item.name: item.source_path.read_bytes() for item in collect_inbox_items(repo)
+    }
+
+
+def _post_json(
+    state: serve_app.ServeState, path: str, payload: dict[str, object]
+) -> tuple[int, dict[str, object]]:
+    server = serve_app._ServeHttpServer(
+        ("127.0.0.1", 0), serve_app._ServeHandler, state
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    try:
+        connection = http.client.HTTPConnection(host, port, timeout=2)
+        connection.request(
+            "POST",
+            path,
+            body=json.dumps(payload),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        body = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        return response.status, body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
