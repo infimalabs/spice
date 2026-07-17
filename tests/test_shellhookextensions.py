@@ -1,17 +1,25 @@
 """Agent wrapper extension entry-point contracts."""
 
+import io
+import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from spice.agent import shellhook
+from spice.agent import shellhook, wrap
 from spice.errors import SpiceError
 from tests.test_extensionhelpers import build_fixture_wheel
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
+TOY_WRAPPER_ENTRY_POINTS = {
+    shellhook.WRAPPER_ENTRY_POINT_GROUP: {
+        "toy-wrapper": "spiceextensionwrapper:toy_wrapper_spec",
+    }
+}
 
 
 def test_agent_wrapper_lines_keep_builtin_and_configured_groups_compatible(tmp_path):
@@ -41,18 +49,14 @@ def test_agent_wrapper_lines_loads_selected_entry_point_wrapper_from_fixture_whe
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is not installed")
-    wheel = build_fixture_wheel(tmp_path)
+    wheel = build_fixture_wheel(
+        tmp_path,
+        entry_points=TOY_WRAPPER_ENTRY_POINTS,
+    )
     monkeypatch.syspath_prepend(str(wheel))
     _write_agent_wrapper_config(tmp_path, order=["toy-wrapper"], groups={})
     trace = tmp_path / "trace.log"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    toy_wrapper_bin = bin_dir / "toy-wrapper-bin"
-    toy_wrapper_bin.write_text(
-        f'#!/bin/sh\nprintf \'toy:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
-        encoding="utf-8",
-    )
-    toy_wrapper_bin.chmod(0o755)
+    bin_dir = _write_toy_wrapper_bin(tmp_path)
 
     wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
     completed = subprocess.run(
@@ -78,6 +82,63 @@ def test_agent_wrapper_lines_loads_selected_entry_point_wrapper_from_fixture_whe
     assert "toy:--from-entry-point alpha beta" in _trace_lines(
         trace, expected_prefix="toy:"
     )
+
+
+def test_agent_run_yields_rtk_rewrite_to_selected_extension_wrapper(
+    tmp_path, monkeypatch
+):
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    wheel = build_fixture_wheel(
+        tmp_path,
+        entry_points=TOY_WRAPPER_ENTRY_POINTS,
+    )
+    monkeypatch.syspath_prepend(str(wheel))
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "toy-wrapper"],
+        groups={},
+    )
+    rtk = _write_fake_rewriting_rtk(tmp_path)
+    (tmp_path / "spice.toml").write_text(
+        f"[rtk]\nexecutable = {json.dumps(str(rtk))}\n",
+        encoding="utf-8",
+    )
+    trace = tmp_path / "trace.log"
+    bin_dir = _write_toy_wrapper_bin(tmp_path)
+    base_env = dict(os.environ)  # env-policy: allow
+    base_env["PATH"] = str(bin_dir) + os.pathsep + base_env.get("PATH", "")
+    base_env[SHELL_TRACE_ENV] = str(trace)
+    steering = shellhook.apply_shell_steering_environment(
+        tmp_path,
+        base_env=base_env,
+    )
+    for name, value in steering.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(tmp_path)
+
+    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset({"toy-wrapper"})
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        [bash, "-c", "toy-wrapper alpha beta"],
+        stderr=io.StringIO(),
+    )
+    control = wrap.build_agent_run_command(
+        [bash, "-c", "rg -n needle"],
+        repo_root=tmp_path,
+        rewrite_rtk=True,
+    )
+
+    assert exit_code == 0
+    assert _trace_lines(trace, expected_prefix="toy:") == [
+        "toy:--from-entry-point alpha beta"
+    ]
+    assert control == [
+        bash,
+        "-c",
+        f"{shlex.quote(str(rtk))} grep -n needle",
+    ]
 
 
 def test_agent_wrapper_lines_rejects_entry_point_shadowing_configured_group(
@@ -134,6 +195,34 @@ def _write_agent_wrapper_config(
                 + "]"
             )
     (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_fake_rewriting_rtk(repo: Path) -> Path:
+    script = repo / "fake-rtk"
+    script.write_text(
+        "#!/bin/sh\n"
+        "shift 2\n"
+        'case "$*" in\n'
+        '"toy-wrapper"*) echo "rtk toy-wrapper alpha beta"; exit 3 ;;\n'
+        '"rg -n needle") echo "rtk grep -n needle"; exit 3 ;;\n'
+        "esac\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def _write_toy_wrapper_bin(repo: Path) -> Path:
+    bin_dir = repo / "bin"
+    bin_dir.mkdir()
+    toy_wrapper_bin = bin_dir / "toy-wrapper-bin"
+    toy_wrapper_bin.write_text(
+        f'#!/bin/sh\nprintf \'toy:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    toy_wrapper_bin.chmod(0o755)
+    return bin_dir
 
 
 def _toml_key(value: str) -> str:

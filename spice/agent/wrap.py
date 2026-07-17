@@ -391,17 +391,17 @@ def _rtk_rewrite_frontend_with_environment(
     if rewritten is None:
         return None
     remapped = remap_rewrite_frontend(rewritten, rtk_executable)
-    if _rewrite_shadows_repository_wrapper(
+    if _rewrite_shadows_selected_wrapper(
         remapped, repo_root=repo_root, rtk_executable=rtk_executable
     ):
         return None
     return remapped
 
 
-def _rewrite_shadows_repository_wrapper(
+def _rewrite_shadows_selected_wrapper(
     command_text: str, *, repo_root: Path | None, rtk_executable: str
 ) -> bool:
-    """True when RTK claimed a word a repository wrapper expands away from RTK."""
+    """True when RTK claimed a word a selected shell wrapper expands elsewhere."""
     if repo_root is None:
         return False
     try:
