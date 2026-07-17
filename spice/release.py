@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.tasks import config as task_config
 from spice.toolprocess import run_tool_command
 
 BUMP_CHOICES = ("minor", "patch")
@@ -29,6 +30,10 @@ PROJECT_HEADINGS = {
 }
 TASK_PHASE_SUBJECT_PREFIX_RE = re.compile(
     r"^(?:design|plan|todo|verify|review)\([^)]+\):\s*",
+    re.IGNORECASE,
+)
+TASK_PHASE_SUBJECT_SUFFIX_RE = re.compile(
+    r"\s+\((?:design|plan|verify|review)\)$",
     re.IGNORECASE,
 )
 
@@ -570,7 +575,7 @@ def render_release_notes(
         )
         project_subjects.setdefault(
             edited_release_highlight(
-                release_note_subject(record.subject, record.task_key)
+                release_note_subject(record.subject, record.task_key, record.project)
             ),
             [],
         ).append(shortish_commit(record.commit))
@@ -654,8 +659,13 @@ def edited_release_highlight(subject: str) -> str:
     return punctuate(capitalize_first(raw))
 
 
-def release_note_subject(subject: str, task_key: str = "") -> str:
+def release_note_subject(subject: str, task_key: str = "", project: str = "") -> str:
     trimmed = TASK_PHASE_SUBJECT_PREFIX_RE.sub("", subject, count=1)
+    if project:
+        project_prefix = f"{task_config.project_stem(project)}: "
+        if trimmed.casefold().startswith(project_prefix.casefold()):
+            trimmed = trimmed[len(project_prefix) :]
+            trimmed = TASK_PHASE_SUBJECT_SUFFIX_RE.sub("", trimmed, count=1)
     if task_key:
         head, sep, last = trimmed.rpartition(" ")
         if sep and head and last.endswith(f"-{task_key}"):

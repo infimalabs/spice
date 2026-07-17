@@ -467,7 +467,7 @@ def test_release_notes_group_edited_highlights_by_project():
             ),
             ReleaseRecord(
                 commit="7777777ffff",
-                subject="review(serve.ui): Fix menu MODEL-abc",
+                subject="serve: Fix menu MODEL-abc (review)",
                 project="serve.ui",
             ),
             ReleaseRecord(
@@ -550,10 +550,7 @@ def test_release_notes_drop_task_handle_named_by_its_own_task_key():
         records=[
             ReleaseRecord(
                 commit="9999999abcd",
-                subject=(
-                    "todo(lifecycle.notes): Add release-notes trimming "
-                    f"NOTES-{task_key}"
-                ),
+                subject=(f"lifecycle: Add release-notes trimming NOTES-{task_key}"),
                 project="lifecycle.notes",
                 task_key=task_key,
             )
@@ -564,7 +561,7 @@ def test_release_notes_drop_task_handle_named_by_its_own_task_key():
         records=[
             ReleaseRecord(
                 commit="9999999abcd",
-                subject="todo(lifecycle.notes): Add release-notes trimming",
+                subject="lifecycle: Add release-notes trimming",
                 project="lifecycle.notes",
                 task_key=task_key,
             )
