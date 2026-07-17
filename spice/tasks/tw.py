@@ -40,6 +40,11 @@ def run(
     command = [
         "task",
         f"rc:{selected_taskrc}",
+        # Taskwarrior's rc parser truncates a value at '#' with no escape
+        # form, so a backend path carrying taskrc comment characters cannot
+        # ride the file; the command-line override outranks the file and
+        # preserves the exact configured data path verbatim.
+        f"rc.data.location={selected_taskrc.parent / 'data'}",
         "rc.confirmation=no",
         "rc.bulk=0",
         "rc.verbose=nothing",
