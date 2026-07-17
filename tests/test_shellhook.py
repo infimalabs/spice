@@ -253,6 +253,91 @@ def test_canonical_and_resolved_rtk_direct_inputs_preserve_their_identity(
     assert outputs == inputs
 
 
+def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(tmp_path):
+    rtk = _write_fake_rewriting_rtk(tmp_path)
+    _write_rtk_config(tmp_path, str(rtk))
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "spice-dev"],
+        groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+    )
+    executed: list[list[str]] = []
+    environments: list[dict[str, str] | None] = []
+
+    class FakeProcess:
+        pid = 0
+
+        def wait(self) -> int:
+            return 0
+
+    def record_process(command, **kwargs):
+        executed.append(command)
+        environments.append(kwargs.get("env"))
+        return FakeProcess()
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["zsh", "-c", "pytest -q"],
+        popen_factory=record_process,
+        stderr=io.StringIO(),
+    )
+
+    wrappers = (environments[0] or {})[shellhook.SHELL_HOOK_WRAPPERS_ENV]
+    assert {
+        "exit_code": exit_code,
+        "executed": executed,
+        "pytest_wrapper_rendered": 'pytest() {\n  python -m pytest "$@"\n}' in wrappers,
+    } == {
+        "exit_code": 0,
+        "executed": [["zsh", "-c", "pytest -q"]],
+        "pytest_wrapper_rendered": True,
+    }
+
+
+def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_path):
+    rtk = _write_fake_rewriting_rtk(tmp_path)
+    _write_rtk_config(tmp_path, str(rtk))
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "spice-dev"],
+        groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+    )
+
+    module = wrap.build_agent_run_command(
+        ["zsh", "-c", "python -m pytest -q"], repo_root=tmp_path, rewrite_rtk=True
+    )
+    control = wrap.build_agent_run_command(
+        ["zsh", "-c", "rg -n needle"], repo_root=tmp_path, rewrite_rtk=True
+    )
+
+    assert module == ["zsh", "-c", "python -m pytest -q"]
+    assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
+
+
+def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "spice-dev"],
+        groups={
+            "spice-dev": {
+                "pytest": {"argv": ["python", "-m", "pytest"]},
+                "task": {"argv": ["spice", "task"]},
+                "summary": {"argv": ["rtk", "summary"]},
+            }
+        },
+    )
+
+    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset(
+        {"pytest", "task"}
+    )
+
+
+def test_rtk_rewrite_yield_selectors_leave_packaged_wrappers_rewritable(tmp_path):
+    _write_rtk_config(tmp_path, "alternate-rtk")
+
+    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset()
+
+
 def test_wrapper_degrades_malformed_direct_rewrite_to_original_execution(
     monkeypatch,
 ):
@@ -1042,6 +1127,22 @@ def _init_git_repo(repo: Path) -> None:
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def _write_fake_rewriting_rtk(repo: Path) -> Path:
+    script = repo / "fake-rtk"
+    script.write_text(
+        "#!/bin/sh\n"
+        "shift 2\n"
+        'case "$*" in\n'
+        '"pytest -q" | "python -m pytest -q") echo "rtk pytest -q"; exit 3 ;;\n'
+        '"rg -n needle") echo "rtk grep -n needle"; exit 3 ;;\n'
+        "esac\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
 
 
 def _write_rtk_config(repo: Path, executable: str) -> None:
