@@ -147,6 +147,7 @@ def run_serve_team_diagnostics(args: Any) -> int:
 
 
 def run_serve_browser_artifact_path(args: Any) -> int:
+    apply_serve_backends(args)
     try:
         path = serve_browser_artifact_path(args.filename)
     except ValueError as exc:

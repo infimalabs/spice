@@ -128,6 +128,22 @@ def worktree_state_root(repo_root: Path) -> Path:
     return git_dir(repo_root) / STATE_DIRNAME
 
 
+def worktree_runtime_state_root(repo_root: Path) -> Path:
+    """Mutable worktree-visible state, redirected with the total backend.
+
+    Worktree configuration and hook shims remain operator-authored inputs at
+    ``<worktree>/.spice``. Runtime outputs that normally share that visible
+    namespace must use this resolver so ``spice serve --backend`` owns them.
+    """
+    if _state_backend_override is not None:
+        return (
+            _state_backend_override
+            / STATE_BACKEND_WORKTREES_DIR
+            / _worktree_backend_key(repo_root)
+        )
+    return Path(repo_root) / STATE_DIRNAME
+
+
 def worktree_inbox_dir(repo_root: Path) -> Path:
     """Operator inbox for one worktree: repo-visible, still backend-isolated.
 
@@ -137,14 +153,7 @@ def worktree_inbox_dir(repo_root: Path) -> Path:
     override claims it and a scratch-backed process never observes or consumes
     live messages.
     """
-    if _state_backend_override is not None:
-        return (
-            _state_backend_override
-            / STATE_BACKEND_WORKTREES_DIR
-            / _worktree_backend_key(repo_root)
-            / INBOX_DIRNAME
-        )
-    return Path(repo_root) / STATE_DIRNAME / INBOX_DIRNAME
+    return worktree_runtime_state_root(repo_root) / INBOX_DIRNAME
 
 
 def shared_state_path(repo_root: Path, relative: str | Path) -> Path:
