@@ -226,6 +226,7 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
             "current baseline cleanly; resolve local git state first"
         )
     after = _read(root, "rev-parse", "HEAD")
+    _purge_stale_bytecode(root, before, after)
     notes = ["updated working tree to the current baseline"] if after != before else []
     return SyncResult(notes=notes)
 
@@ -261,6 +262,7 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     if _run(root, "merge", "--ff-only", baseline).returncode != 0:
         return SyncResult(notes=["skipped:diverged"])
     after = _read(root, "rev-parse", "HEAD")
+    _purge_stale_bytecode(root, before, after)
     note = (
         "updated working tree to the current baseline" if after != before else "current"
     )
@@ -618,6 +620,7 @@ def _materialize_merge_conflict(
         materialize = _run(repo_root, "read-tree", "--reset", "-u", merged_tree)
         if materialize.returncode != 0:
             raise SpiceError(_fail("materialize conflicted merge tree", materialize))
+        _purge_stale_bytecode(repo_root, agent_head, merged_tree)
         for path in sorted({path for _, path in parsed}):
             removed = _run(repo_root, "update-index", "--force-remove", "--", path)
             if removed.returncode != 0:
@@ -642,6 +645,7 @@ def _materialize_merge_conflict(
         restored = _run(repo_root, "read-tree", "--reset", "-u", agent_head)
         if restored.returncode != 0:
             raise SpiceError(_fail("restore pre-merge tree", restored))
+        _purge_stale_bytecode(repo_root, merged_tree, agent_head)
         if state_error is not None:
             raise SpiceError(
                 f"could not restore pre-merge metadata: {state_error}"
@@ -684,6 +688,39 @@ def _restore_merge_state(snapshot: dict[Path, bytes | None]) -> None:
 
 def _tree_of(repo_root: Path, ref: str) -> str:
     return _read(repo_root, "rev-parse", f"{ref}^{{tree}}")
+
+
+def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> None:
+    """Delete bytecode orphaned by a tree move from ``before`` to ``after``.
+
+    Tree moves (``read-tree --reset -u``, ``merge --ff-only``) rewrite tracked
+    files only, so untracked ``__pycache__`` entries survive every move. A
+    deleted module's bytecode keeps its package directory alive as an
+    importable namespace package, and a modified module can be shadowed by
+    bytecode whose (mtime, size) validation key still matches. The diff
+    between the move's endpoints is the whole truth: every ``.py`` path it
+    lists drops its compiled artifacts, and directories that would survive
+    only because of that bytecode are pruned.
+    """
+    if not before or not after or before == after:
+        return
+    listing = _read(
+        repo_root, "diff", "--name-only", "--no-renames", "-z", before, after
+    )
+    for name in listing.split("\0"):
+        if not name.endswith(".py"):
+            continue
+        source = repo_root / name
+        cache_dir = source.parent / "__pycache__"
+        for compiled in cache_dir.glob(f"{source.stem}.*"):
+            compiled.unlink(missing_ok=True)
+        directory = cache_dir
+        while directory != repo_root:
+            try:
+                directory.rmdir()
+            except OSError:
+                break
+            directory = directory.parent
 
 
 def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
@@ -755,7 +792,9 @@ def _materialize_and_update_head(
         restored = _run(repo_root, "read-tree", "--reset", "-u", expected_head)
         if restored.returncode != 0:
             raise SpiceError(_fail(f"restore tree after failed {action}", restored))
+        _purge_stale_bytecode(repo_root, expected_head, new_head)
         raise SpiceError(_fail(action, materialize))
+    _purge_stale_bytecode(repo_root, expected_head, new_head)
 
     update = _run(repo_root, "update-ref", current_ref, new_head, expected_head)
     current_head = _read(repo_root, "rev-parse", "HEAD")
@@ -766,6 +805,7 @@ def _materialize_and_update_head(
     restored = _run(repo_root, "read-tree", "--reset", "-u", restore_head)
     if restored.returncode != 0:
         raise SpiceError(_fail(f"restore tree after failed {action}", restored))
+    _purge_stale_bytecode(repo_root, new_head, restore_head)
     if _is_head_ref_lock_race(update):
         raise SpiceError(
             _head_ref_lock_race_recovery(
