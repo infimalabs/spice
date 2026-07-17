@@ -498,6 +498,9 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
+    transition_lines = [result]
+    if result.startswith("advanced "):
+        transition_lines.append(_phase_ownership_line())
     learning_line = _distill_task_done_learnings(
         row,
         done_at=tw.now_iso(),
@@ -508,12 +511,22 @@ def done(
     if result.endswith(" -> review"):
         next_line = next_task_drain_line(review_assignment=True)
     if not chain_next:
-        return "\n".join([result, *sync.notes, learning_line, next_line])
+        return "\n".join([*transition_lines, *sync.notes, learning_line, next_line])
     # Deferred to keep the read-side render -> ops dependency acyclic at import
     # time while reusing exactly the allocator continuation behind `task next`.
     from spice.tasks import render
 
-    return "\n".join([result, *sync.notes, learning_line, render.render_next()])
+    return "\n".join(
+        [*transition_lines, *sync.notes, learning_line, render.render_next()]
+    )
+
+
+def _phase_ownership_line() -> str:
+    return (
+        "phase ownership: this advance released your claim. Finish only the phase "
+        "you hold; spice task next may assign any eligible work and does not "
+        "guarantee this task's next phase."
+    )
 
 
 def _distill_task_done_learnings(
