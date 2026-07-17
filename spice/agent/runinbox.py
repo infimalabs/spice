@@ -11,7 +11,7 @@ from typing import Any, TextIO
 
 from spice.agent.paths import agent_state_dir
 from spice.agent.sidechannelnotify import consume_side_channel_notices
-from spice.paths import STATE_DIRNAME, atomic_write_json
+from spice.paths import atomic_write_json, worktree_inbox_dir
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 InboxSignature = tuple[tuple[str, int, int], ...]
@@ -188,7 +188,7 @@ class AgentSideChannelNoticeInjector:
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
     if repo_root is None:
         return ()
-    directory = Path(repo_root) / STATE_DIRNAME / "inbox"
+    directory = worktree_inbox_dir(repo_root)
     rows: list[tuple[str, int, int]] = []
     try:
         with os.scandir(directory) as entries:

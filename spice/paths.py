@@ -18,6 +18,7 @@ from spice.gitprocess import run_git_command
 
 STATE_DIRNAME = ".spice"
 SHARED_ATTACHMENT_DIR = Path("attachments")
+INBOX_DIRNAME = "inbox"
 
 # Layout of a total state-backend scratch root: one shared subtree standing in
 # for the repository-shared root, one keyed subtree per worktree, and the task
@@ -125,6 +126,25 @@ def worktree_state_root(repo_root: Path) -> Path:
             / _worktree_backend_key(repo_root)
         )
     return git_dir(repo_root) / STATE_DIRNAME
+
+
+def worktree_inbox_dir(repo_root: Path) -> Path:
+    """Operator inbox for one worktree: repo-visible, still backend-isolated.
+
+    Steering lands in <worktree>/.spice/inbox so operators and tools can drop
+    files without git plumbing. Unlike worktree config and hooks (operator-
+    authored inputs), pending steering is live mutable state, so the backend
+    override claims it and a scratch-backed process never observes or consumes
+    live messages.
+    """
+    if _state_backend_override is not None:
+        return (
+            _state_backend_override
+            / STATE_BACKEND_WORKTREES_DIR
+            / _worktree_backend_key(repo_root)
+            / INBOX_DIRNAME
+        )
+    return Path(repo_root) / STATE_DIRNAME / INBOX_DIRNAME
 
 
 def shared_state_path(repo_root: Path, relative: str | Path) -> Path:

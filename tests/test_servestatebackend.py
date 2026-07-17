@@ -12,8 +12,10 @@ import pytest
 from spice import paths
 from spice.agent.maximmetrics import maxim_metrics_database_path
 from spice.agent.paths import agent_thread_pointer_path, agent_thread_state_dir
+from spice.agent.runinbox import inbox_pending_signature
 from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_database_path
+from spice.mail.inbox import collect_inbox_items, inbox_dir
 from spice.serve.app import apply_serve_backends
 from spice.tasks import config as task_config
 
@@ -45,6 +47,7 @@ def test_backend_prefixes_every_managed_state_surface(tmp_path, scratch_override
         "session_records": agent_thread_state_dir(live, SESSION_THREAD_ID),
         "ack_state": ack_state_database_path(live),
         "maxim_metrics": maxim_metrics_database_path(live),
+        "operator_inbox": inbox_dir(live),
         "task_store": task_config.backend_root(),
     }
     resolved = scratch.resolve()
@@ -81,6 +84,37 @@ def test_explicit_task_backend_wins_for_the_task_store_alone(
 def test_relative_backend_is_refused_loudly(scratch_overrides):
     with pytest.raises(SpiceError, match="--backend requires an absolute scratch path"):
         apply_serve_backends(Namespace(backend="scratch", task_backend=None))
+
+
+def test_backend_isolates_operator_inbox_reads_and_writes(tmp_path, scratch_overrides):
+    live = tmp_path / "live"
+    live_inbox = inbox_dir(live)
+    assert live_inbox == live / paths.STATE_DIRNAME / paths.INBOX_DIRNAME
+    live_inbox.mkdir(parents=True)
+    pending = live_inbox / "20260101T000000000000Z.txt"
+    pending.write_text("live steering stays put\n", encoding="utf-8")
+    before = {item.name: item.read_bytes() for item in live_inbox.iterdir()}
+
+    apply_serve_backends(_serve_args(tmp_path / "scratch", None))
+    scratch_inbox = inbox_dir(live)
+    assert scratch_inbox.is_relative_to((tmp_path / "scratch").resolve())
+    scratch_inbox.mkdir(parents=True)
+    (scratch_inbox / "20260102T000000000000Z.txt").write_text(
+        "scratch steering\n", encoding="utf-8"
+    )
+    items = collect_inbox_items(live)
+    assert [item.name for item in items] == ["20260102T000000000000Z.txt"]
+    assert items[0].text == "scratch steering\n"
+    assert [row[0] for row in inbox_pending_signature(live)] == [
+        "20260102T000000000000Z.txt"
+    ]
+
+    paths.set_state_backend(None)
+    assert {item.name: item.read_bytes() for item in live_inbox.iterdir()} == before
+    restored = collect_inbox_items(live)
+    assert [(item.name, item.text) for item in restored] == [
+        ("20260101T000000000000Z.txt", "live steering stays put\n")
+    ]
 
 
 def test_live_state_stays_byte_identical_under_backend_writes(
