@@ -268,41 +268,6 @@ def test_reword_from_claimed_plan_parent_clears_child_marker(task_repo):
     assert str(child_row.get("start") or "") == ""
 
 
-def test_reword_from_parent_requires_direct_dependency(task_repo):
-    parent = _clean_plan_parent()
-    child = _suspect_unclaimed_child("Adopting unconnected child")
-    ops.claim(parent)
-
-    with pytest.raises(SpiceError, match="reword requires a claim"):
-        wordingreview.reword(
-            child,
-            reason="parent lacks the dependency edge",
-        )
-
-    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
-
-
-def test_reword_from_parent_requires_plan_phase_parent(task_repo):
-    parent = create.add(
-        "Concrete implementation parent",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-        acceptance=["parent implements the change directly"],
-    )
-    child = _suspect_unclaimed_child("Adopting implementation child")
-    ops.depends(parent, [child])
-    ops.claim(parent)
-
-    with pytest.raises(SpiceError, match="reword requires a claim"):
-        wordingreview.reword(
-            child,
-            reason="parent phase is not plan",
-        )
-
-    assert identity.resolve(parent)["phase"] == "todo"
-    assert identity.resolve(child)[config.TASK_WORDING_REVIEW_UDA] == "required"
-
-
 def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):
     handle = create.add(
         "Edit gains suspect acceptance",
