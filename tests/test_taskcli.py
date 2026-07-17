@@ -134,7 +134,7 @@ def test_task_document_cli_help_names_apply_stdin_dry_run_and_family_export(caps
     with pytest.raises(SystemExit):
         parser.parse_args(["task", "ledger", "--help"])
     ledger_help = capsys.readouterr().out
-    assert "Export a task-document family as normal-form markdown." in ledger_help
+    assert "Export a task family as normal-form markdown." in ledger_help
     assert "spice task ledger TASK-1k4Q5gJw" in ledger_help
 
 

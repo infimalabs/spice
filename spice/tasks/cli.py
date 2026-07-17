@@ -138,8 +138,8 @@ def _configure_task_read_parsers(actions: Any) -> None:
 
     ledger = actions.add_parser(
         "ledger",
-        help="Export a task-document family as normal-form markdown.",
-        description="Export a task-document family as normal-form markdown.",
+        help="Export a task family as normal-form markdown.",
+        description="Export a task family as normal-form markdown.",
         epilog="Example: spice task ledger TASK-1k4Q5gJw",
         recovery_examples=("spice task ledger TASK-1k4Q5gJw",),
     )
