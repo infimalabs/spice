@@ -707,20 +707,97 @@ def _purge_stale_bytecode(repo_root: Path, before: str, after: str) -> None:
     listing = _read(
         repo_root, "diff", "--name-only", "--no-renames", "-z", before, after
     )
-    for name in listing.split("\0"):
-        if not name.endswith(".py"):
-            continue
-        source = repo_root / name
-        cache_dir = source.parent / "__pycache__"
-        for compiled in cache_dir.glob(f"{source.stem}.*"):
-            compiled.unlink(missing_ok=True)
-        directory = cache_dir
-        while directory != repo_root:
+    if not _supports_safe_bytecode_purge():
+        return
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(repo_root.resolve(), directory_flags)
+    except OSError:
+        return
+    try:
+        for name in listing.split("\0"):
+            if not name.endswith(".py"):
+                continue
+            source = Path(name)
+            if source.is_absolute() or any(
+                part in {"", ".", ".."} for part in source.parts
+            ):
+                continue
+            _purge_source_bytecode(root_fd, source, directory_flags)
+    finally:
+        os.close(root_fd)
+
+
+def _supports_safe_bytecode_purge() -> bool:
+    """Whether this platform offers descriptor-relative, no-follow cleanup."""
+    return bool(
+        hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and os.open in os.supports_dir_fd
+        and os.unlink in os.supports_dir_fd
+        and os.rmdir in os.supports_dir_fd
+        and os.scandir in os.supports_fd
+    )
+
+
+def _purge_source_bytecode(root_fd: int, source: Path, directory_flags: int) -> None:
+    """Purge one source's cache through no-follow directory descriptors.
+
+    Every lookup below the already-open worktree root is relative to a trusted
+    directory descriptor. A changed source parent or ``__pycache__`` replaced
+    by a symlink therefore stops cleanup instead of redirecting an unlink.
+    ``unlinkat`` removes a matching entry itself and never follows a final
+    symlink.
+    """
+    parent_parts = source.parent.parts
+    parent_fds: list[int] = []
+    current_fd = root_fd
+    try:
+        for part in parent_parts:
             try:
-                directory.rmdir()
+                current_fd = os.open(
+                    part,
+                    directory_flags,
+                    dir_fd=current_fd,
+                )
+            except OSError:
+                return
+            parent_fds.append(current_fd)
+        try:
+            cache_fd = os.open(
+                "__pycache__",
+                directory_flags,
+                dir_fd=current_fd,
+            )
+        except OSError:
+            return
+        try:
+            prefix = f"{source.stem}."
+            with os.scandir(cache_fd) as entries:
+                compiled_names = [
+                    entry.name for entry in entries if entry.name.startswith(prefix)
+                ]
+            for compiled_name in compiled_names:
+                try:
+                    os.unlink(compiled_name, dir_fd=cache_fd)
+                except FileNotFoundError:
+                    continue
+        finally:
+            os.close(cache_fd)
+
+        try:
+            os.rmdir("__pycache__", dir_fd=current_fd)
+        except OSError:
+            return
+        for index in range(len(parent_parts) - 1, -1, -1):
+            parent_fd = root_fd if index == 0 else parent_fds[index - 1]
+            try:
+                os.rmdir(parent_parts[index], dir_fd=parent_fd)
             except OSError:
                 break
-            directory = directory.parent
+    finally:
+        for parent_fd in reversed(parent_fds):
+            os.close(parent_fd)
 
 
 def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
