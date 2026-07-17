@@ -200,7 +200,7 @@ deferred	strict-subset-0bd29bd01be8	strict-subset	1	tests/test_submissions.py::t
 deferred	strict-subset-3148f274de2c	strict-subset	1	tests/test_taskcli.py::test_task_add_missing_acceptance_honors_explicit_flow
 deferred	strict-subset-95ba513199a8	strict-subset	1	tests/test_taskcli.py::test_task_resolve_wording_clears_active_claim_marker
 deferred	strict-subset-9e11e7365131	strict-subset	1	tests/test_taskcli.py::test_task_review_then_marks_spawned_followup_as_cli_creation_surface
-deferred	strict-subset-15f831aa3054	strict-subset	1	tests/test_taskcli.py::test_task_undepends_cli_drops_edge
+deferred	strict-subset-15f831aa3054	strict-subset	1	tests/test_taskcli.py::test_task_depends_not_after_cli_drops_edge
 deferred	strict-subset-0fe7fa6b0ccb	strict-subset	1	tests/test_taskclishow.py::test_task_show_prints_merge_aware_diff_command_for_task_merge
 deferred	strict-subset-3458fa33c9f5	strict-subset	1	tests/test_taskconfig.py::test_phase_launch_overrides_falls_back_for_unmapped_phase_or_driver
 deferred	strict-subset-77551982d388	strict-subset	1	tests/test_taskcoordinationdeadlines.py::test_task_local_git_helpers_timeout_with_identity_and_recover[repo-root]
@@ -238,7 +238,7 @@ deferred	strict-subset-2c3bc9790476	strict-subset	1	tests/test_taskrouting.py::t
 deferred	strict-subset-569c27ff6b72	strict-subset	1	tests/test_taskrouting.py::test_steer_next_task_ignores_auto_subscriptions_but_honors_pins
 deferred	strict-subset-f305860b8294	strict-subset	1	tests/test_taskrouting.py::test_teamless_task_creation_routes_creator_without_team_subscription
 deferred	strict-subset-db99c3a9c1f8	strict-subset	1	tests/test_tasks.py::test_drive_wake_auto_subscribes_woken_project
-deferred	strict-subset-d1c4558cac0a	strict-subset	1	tests/test_tasks.py::test_task_undepends_clears_dangling_edge_after_dependency_deleted
+deferred	strict-subset-d1c4558cac0a	strict-subset	1	tests/test_tasks.py::test_task_depends_not_after_clears_dangling_edge_after_dependency_deleted
 deferred	strict-subset-ce55c535b902	strict-subset	1	tests/test_tasks.py::test_task_wake_into_rejects_hidden_or_malformed_target_and_keeps_wait
 deferred	strict-subset-35435ffd5abe	strict-subset	1	tests/test_tasks.py::test_unclean_review_requires_followup_tracking
 deferred	strict-subset-d75dd778ed54	strict-subset	1	tests/test_taskwordingreview.py::test_review_followup_suspect_wording_routes_without_claiming

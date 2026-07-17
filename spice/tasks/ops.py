@@ -893,9 +893,25 @@ def note(handle: str, text: str) -> str:
     return f"noted {identity.render_handle(row)}"
 
 
-def depends(handle: str, after: list[str]) -> str:
+def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> str:
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
+    rendered = identity.render_handle(row)
+    # Removals run before additions so a single invocation can re-point an
+    # edge without tripping Taskwarrior's cycle check on the transient state.
+    if not_after:
+        existing = set(_dependency_uuids(row))
+        annotations = _annotation_descriptions(row)
+        for dep in dict.fromkeys(not_after):
+            dep_row = identity.resolve(dep)
+            dep_uuid = identity.uuid_of(dep_row)
+            rendered_dep = identity.render_handle(dep_row)
+            if dep_uuid not in existing:
+                raise SpiceError(f"{rendered} does not depend on {rendered_dep}")
+            tw.run([uuid, "modify", f"depends:-{dep_uuid}"])
+            note = f"depends: {rendered_dep}"
+            if note in annotations:
+                denotate(uuid, note)
     for dep in after:
         dep_row = identity.resolve(dep)
         dep_uuid = identity.uuid_of(dep_row)
@@ -909,25 +925,6 @@ def depends(handle: str, after: list[str]) -> str:
                 "(would it create a cycle?)"
             ) from exc
         annotate(uuid, f"depends: {identity.render_handle(dep_row)}")
-    return identity.render_handle(row)
-
-
-def undepends(handle: str, after: list[str]) -> str:
-    row = identity.resolve(handle)
-    uuid = identity.uuid_of(row)
-    rendered = identity.render_handle(row)
-    existing = set(_dependency_uuids(row))
-    annotations = _annotation_descriptions(row)
-    for dep in dict.fromkeys(after):
-        dep_row = identity.resolve(dep)
-        dep_uuid = identity.uuid_of(dep_row)
-        rendered_dep = identity.render_handle(dep_row)
-        if dep_uuid not in existing:
-            raise SpiceError(f"{rendered} does not depend on {rendered_dep}")
-        tw.run([uuid, "modify", f"depends:-{dep_uuid}"])
-        note = f"depends: {rendered_dep}"
-        if note in annotations:
-            denotate(uuid, note)
     return rendered
 
 

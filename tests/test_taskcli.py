@@ -477,7 +477,7 @@ def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
     assert "wording review resolved: accepted child board exists" in annotations
 
 
-def test_task_undepends_cli_drops_edge(task_repo, capsys):
+def test_task_depends_not_after_cli_drops_edge(task_repo, capsys):
     handle = create.add(
         "Plan holding a CLI dependency edge",
         project="task.unit",
@@ -493,7 +493,7 @@ def test_task_undepends_cli_drops_edge(task_repo, capsys):
     ops.depends(handle, [child])
 
     args = _with_backend(
-        build_parser().parse_args(["task", "undepends", handle, "--after", child])
+        build_parser().parse_args(["task", "depends", handle, "--not-after", child])
     )
 
     assert args.func(args) == 0
@@ -501,6 +501,20 @@ def test_task_undepends_cli_drops_edge(task_repo, capsys):
     row = identity.resolve(handle)
     assert handle in output
     assert row.get("depends", []) == []
+
+
+def test_task_depends_cli_requires_a_direction_flag(task_repo):
+    handle = create.add(
+        "Plan invoked with neither direction",
+        project="task.unit",
+        acceptance=["parent bookend acceptance exists"],
+        origin="ack:20260101T000000000000Z",
+    )
+
+    args = _with_backend(build_parser().parse_args(["task", "depends", handle]))
+
+    with pytest.raises(SpiceError, match="--after and/or --not-after"):
+        args.func(args)
 
 
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
