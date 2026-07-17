@@ -320,7 +320,7 @@ def _merge_integrity_diagnostic(repo_root: Path) -> str | None:
     )
     expected_lines = expected.stdout.splitlines()
     expected_tree = expected_lines[0].strip() if expected_lines else ""
-    if not expected_tree:
+    if expected.returncode not in (0, 1) or not expected_tree:
         detail = "\n".join(
             part.strip() for part in (expected.stdout, expected.stderr) if part.strip()
         )
@@ -334,18 +334,54 @@ def _merge_integrity_diagnostic(repo_root: Path) -> str | None:
     if expected_tree == head_tree:
         return None
 
-    return (
+    refused = (
         "empty merge refused: MERGE_HEAD exists, but the staged tree still "
         f"equals HEAD ({head_tree}) while git merge-tree computes "
         f"{expected_tree}. Committing now would discard integrated content.\n"
-        "Recover without removing MERGE_HEAD:\n"
-        "  merge_tree=$(git merge-tree --write-tree HEAD MERGE_HEAD)\n"
-        '  git read-tree --reset -u "$merge_tree"\n'
-        "  git diff --cached --check\n"
-        "  git status --short\n"
-        "Verify the staged merge content, then retry git commit with "
-        "MERGE_HEAD intact."
     )
+    if expected.returncode == 0:
+        return refused + (
+            "Recover without removing MERGE_HEAD:\n"
+            "  merge_tree=$(git merge-tree --write-tree HEAD MERGE_HEAD)\n"
+            '  git read-tree --reset -u "$merge_tree"\n'
+            "  git diff --cached --check\n"
+            "  git status --short\n"
+            "Verify the staged merge content, then retry git commit with "
+            "MERGE_HEAD intact."
+        )
+    # A conflicted merge-tree result is a multi-line report, not a tree to
+    # read; installing its top tree would stage conflict markers as if
+    # resolved. The index equals HEAD here, so no staged resolution exists
+    # to lose: restart the merge and resolve it for real. The checkout line
+    # names every conflicted path so only merge debris is reset.
+    conflicted_paths = _merge_tree_conflicted_paths(expected_lines)
+    paths_text = " ".join(shlex.quote(path) for path in conflicted_paths) or "."
+    return refused + (
+        "The discarded merge is conflicted; restart it:\n"
+        "  merge_head=$(git rev-parse MERGE_HEAD)\n"
+        f"  git checkout HEAD -- {paths_text}\n"
+        "  git merge --abort\n"
+        '  git merge --no-ff "$merge_head"\n'
+        "  git status --short\n"
+        "Resolve the conflicts the restarted merge reports, git add each "
+        "resolution, then retry git commit with MERGE_HEAD intact."
+    )
+
+
+def _merge_tree_conflicted_paths(output_lines: list[str]) -> list[str]:
+    """Conflicted paths from `git merge-tree --write-tree` output.
+
+    Line one is the tree id; the following section lists one index record
+    per conflict stage as `<mode> <object> <stage>\\t<path>` until a blank
+    line separates the informational messages."""
+    paths: set[str] = set()
+    for line in output_lines[1:]:
+        if not line.strip():
+            break
+        record, separator, path = line.partition("\t")
+        if separator and len(record.split()) == 3 and path:
+            paths.add(path)
+    return sorted(paths)
 
 
 def _git_stdout(repo_root: Path, *args: str) -> str:
