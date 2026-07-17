@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spice.paths import STATE_DIRNAME
+from spice.paths import STATE_DIRNAME, worktree_runtime_state_root
 
-SERVE_BROWSER_ARTIFACT_DIR = Path(STATE_DIRNAME) / "serve" / "browser"
+SERVE_BROWSER_ARTIFACT_RELATIVE_DIR = Path("serve") / "browser"
+SERVE_BROWSER_ARTIFACT_DIR = Path(STATE_DIRNAME) / SERVE_BROWSER_ARTIFACT_RELATIVE_DIR
 
 
 def serve_browser_artifact_path(
@@ -19,7 +20,9 @@ def serve_browser_artifact_path(
     if name in (".", ".."):
         raise ValueError("serve browser artifact filename must be a plain filename")
     base = Path.cwd() if root is None else root
-    path = base / SERVE_BROWSER_ARTIFACT_DIR / name
+    path = (
+        worktree_runtime_state_root(base) / SERVE_BROWSER_ARTIFACT_RELATIVE_DIR / name
+    )
     if create:
         path.parent.mkdir(parents=True, exist_ok=True)
     return path
