@@ -189,6 +189,19 @@ class AgentDriver:
             else ""
         )
 
+    def stream_failure_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        """Terminal failure fields carried by one stdout stream line, or None.
+
+        A driver whose CLI reports account-level rejections structurally (an
+        error-flagged result event, a rate-limit event with a reset horizon)
+        surfaces them here so launch classification does not depend on the
+        human-facing message text. `kind` names the failure family in the
+        `process_failure_kind` vocabulary; `reset_epoch` carries the source
+        retry horizon when the stream includes one.
+        """
+        del raw
+        return None
+
 
 PLAYWRIGHT_MCP_SERVER_NAME = defaults.string("agent", "playwright_mcp", "server_name")
 PLAYWRIGHT_MCP_COMMAND = defaults.string("agent", "playwright_mcp", "command")
@@ -541,11 +554,15 @@ CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = defaults.integer(
 )
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
+    # The live claude.ai rejection reads "You've hit your monthly spend limit";
+    # match the phrase itself so the wording change cannot dodge classification.
+    re.compile(r"\bspend limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
     re.compile(
         r"\bcredit balance\b.*\b(?:low|exhausted|insufficient)\b", re.IGNORECASE
     ),
 )
+RATE_LIMIT_HTTP_STATUS = 429
 # Claude Code wraps each shell tool command as
 # `... && eval '<command>' ...`; this anchors the embedded eval whose quoted
 # argument carries the real command that rtk should see.
@@ -782,6 +799,32 @@ class ClaudeDriver(AgentDriver):
             "model_context_window": self.default_context_window or None,
             "cumulative_total_tokens": total,
         }
+
+    def stream_failure_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        # A spend/usage-limit rejection does not fail startup: the CLI starts,
+        # emits a synthetic assistant message, and exits cleanly. The stream's
+        # structural signals — a rejected rate_limit_event (with the reset
+        # horizon) and an error-flagged result with HTTP 429 — are the
+        # reliable carriers; the text patterns back them up for result shapes
+        # without the structured fields.
+        if raw.get("type") == "rate_limit_event":
+            info = raw.get("rate_limit_info")
+            if isinstance(info, dict) and info.get("status") == "rejected":
+                fields: dict[str, Any] = {"kind": "out-of-credits"}
+                reset_epoch = _as_int(info.get("resetsAt"), None)
+                if reset_epoch is not None:
+                    fields["reset_epoch"] = reset_epoch
+                return fields
+            return None
+        if raw.get("type") != "result" or not raw.get("is_error"):
+            return None
+        if _as_int(raw.get("api_error_status"), None) == RATE_LIMIT_HTTP_STATUS:
+            return {"kind": "out-of-credits"}
+        result_text = raw.get("result")
+        kind = self.process_failure_kind(
+            exit_code=0, output=result_text if isinstance(result_text, str) else ""
+        )
+        return {"kind": kind} if kind else None
 
 
 def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
