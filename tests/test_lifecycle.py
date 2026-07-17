@@ -29,6 +29,7 @@ from spice.agent.driver import (
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
+    RATE_LIMIT_HTTP_STATUS,
     operator_color_scheme,
     playwright_mcp_args,
     post_tool_hook_config_path,
@@ -44,6 +45,7 @@ SUPERVISED_AGENT_PID = 4444
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
+SPEND_LIMIT_RESET_EPOCH = 1784280000
 
 
 @pytest.fixture(autouse=True)
@@ -723,6 +725,139 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     assert state["prompt_skill_path"] == str(skill_path)
     assert state["fast_mode"] is True
     assert thread.joined_timeouts == [1.0]
+
+
+def test_run_agent_supervisor_records_launch_outcome_under_fakes(tmp_path, monkeypatch):
+    log_path = tmp_path / "supervisor.log"
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=5)
+    thread_id = "cccccccccccccccccccccccccccccccc"
+    monkeypatch.setattr(lifecycle, "agent_environment", lambda repo_root: {"ENV": "1"})
+    monkeypatch.setattr(
+        lifecycle,
+        "spawn_supervised_agent",
+        lambda command, *, cwd, log_path, env: (process, _FakeThread()),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "require_started_process",
+        lambda _process, _log_path, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "started_agent_thread_id",
+        lambda _log_path, *, repo_root, fallback_thread_id: thread_id,
+    )
+    monkeypatch.setattr(
+        sidechannel,
+        "AgentSideChannelServer",
+        lambda repo_root: _FakeSideChannel(repo_root, []),
+    )
+    args = argparse.Namespace(
+        repo_root=str(tmp_path),
+        action="resume",
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="",
+        resume_thread_id="resume-thread",
+        log_path=str(log_path),
+        fast_mode=False,
+        command_json='["codex","exec","prompt"]',
+    )
+
+    exit_code = lifecycle.run_agent_supervisor(args)
+    outcomes = lifecycle.read_launch_outcomes(tmp_path)
+    final_log_path = (
+        tmp_path / ".git" / ".spice" / "agents" / thread_id / "logs" / log_path.name
+    ).resolve()
+
+    assert exit_code == 5
+    assert [outcome["exit_code"] for outcome in outcomes] == [5]
+    assert outcomes[0]["thread_id"] == thread_id
+    assert outcomes[0]["log_path"] == str(final_log_path)
+    assert outcomes[0]["failure_kind"] == ""
+    assert outcomes[0]["assistant_messages"] == 0
+    assert outcomes[0]["tool_calls"] == 0
+    assert outcomes[0]["lifetime_seconds"] >= 0.0
+    assert outcomes[0]["ended_at"] >= outcomes[0]["started_at"]
+
+
+def test_supervised_launch_outcome_replays_one_turn_429_stream_log(
+    tmp_path, monkeypatch
+):
+    # The four structural lines a spend-limited claude launch actually
+    # streamed on 2026-07-17: init succeeds, the rate limiter rejects with a
+    # reset horizon, the synthetic assistant message carries the human-facing
+    # text, and the result line flags the error — then the process exits 0.
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, "claude")
+    log_path = tmp_path / "launch.log"
+    session = "805282e9-dafc-4014-8523-e6e7ae0a4144"
+    message = (
+        "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"
+    )
+    lines = [
+        {"type": "system", "subtype": "init", "session_id": session},
+        {"type": "system", "subtype": "status", "status": "requesting"},
+        {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "rejected",
+                "resetsAt": SPEND_LIMIT_RESET_EPOCH,
+                "rateLimitType": "five_hour",
+                "overageStatus": "rejected",
+            },
+            "session_id": session,
+        },
+        {
+            "type": "assistant",
+            "message": {
+                "model": "<synthetic>",
+                "role": "assistant",
+                "content": [{"type": "text", "text": message}],
+            },
+            "error": "rate_limit",
+            "session_id": session,
+        },
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "api_error_status": RATE_LIMIT_HTTP_STATUS,
+            "duration_ms": 751,
+            "num_turns": 1,
+            "result": message,
+            "session_id": session,
+        },
+    ]
+    log_path.write_text(
+        "".join(f"{json.dumps(line)}\n" for line in lines), encoding="utf-8"
+    )
+
+    outcome = lifecycle.supervised_launch_outcome(
+        tmp_path,
+        thread_id=session.replace("-", ""),
+        log_path=log_path,
+        started_at="2026-07-17T06:21:10.042183Z",
+        lifetime_seconds=2.6182,
+        exit_code=0,
+    )
+
+    assert outcome["failure_kind"] == "out-of-credits"
+    assert outcome["reset_epoch"] == SPEND_LIMIT_RESET_EPOCH
+    assert outcome["exit_code"] == 0
+    assert outcome["assistant_messages"] == 1
+    assert outcome["tool_calls"] == 0
+    assert outcome["lifetime_seconds"] == 2.618
+
+
+def test_record_launch_outcome_keeps_bounded_journal(tmp_path):
+    for index in range(lifecycle.LAUNCH_OUTCOMES_LIMIT + 3):
+        lifecycle.record_launch_outcome(tmp_path, {"exit_code": index})
+
+    outcomes = lifecycle.read_launch_outcomes(tmp_path)
+
+    assert len(outcomes) == lifecycle.LAUNCH_OUTCOMES_LIMIT
+    assert outcomes[-1] == {"exit_code": lifecycle.LAUNCH_OUTCOMES_LIMIT + 2}
+    assert outcomes[0] == {"exit_code": 3}
 
 
 def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):

@@ -90,6 +90,8 @@ SUPERVISOR_ENVIRONMENT_SCRUB_NAMES = (
     "UV_PROJECT_ENVIRONMENT",
 )
 STARTUP_GRACE_SECONDS = 0.25
+LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
+LAUNCH_OUTCOMES_LIMIT = 32
 STARTUP_SESSION_ID_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_ID_POLL_SECONDS = 0.05
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
@@ -704,48 +706,68 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
     prompt_skill_path = resolve_agent_prompt_skill_path(repo_root)
     env = agent_environment(repo_root)
     with AgentSideChannelServer(repo_root):
+        started_at = utc_now()
+        launch_clock = time.monotonic()
+        started_thread_id = str(args.resume_thread_id or "")
+        exit_code: int | None = None
         process, stdout_thread = spawn_supervised_agent(
             command,
             cwd=repo_root,
             log_path=log_path,
             env=env,
         )
-        require_started_process(process, log_path, repo_root=repo_root)
-        started_thread_id = started_agent_thread_id(
-            log_path,
-            repo_root=repo_root,
-            fallback_thread_id=str(args.resume_thread_id or ""),
-        )
-        log_path = settle_agent_log_path(repo_root, log_path, started_thread_id)
-        state = build_agent_state(
-            process=process,
-            action=str(args.action),
-            command=command,
-            driver=driver_for(repo_root).name,
-            model=str(args.model),
-            reasoning_effort=str(args.reasoning_effort),
-            service_tier=str(args.service_tier or ""),
-            thread_id=started_thread_id,
-            prompt_skill_path=prompt_skill_path,
-            log_path=log_path,
-            fast_mode=bool(getattr(args, "fast_mode", False)),
-        )
-        state["supervisor_pid"] = os.getpid()
-        write_agent_state(repo_root, state)
-        stop_watch = Event()
-        lane_watch = Thread(
-            target=_watch_supervised_lane,
-            args=(repo_root, started_thread_id, log_path, process, stop_watch),
-            name=f"spice-lane-watch-{started_thread_id or process.pid}",
-            daemon=True,
-        )
-        lane_watch.start()
         try:
-            exit_code = process.wait()
+            require_started_process(process, log_path, repo_root=repo_root)
+            started_thread_id = started_agent_thread_id(
+                log_path,
+                repo_root=repo_root,
+                fallback_thread_id=started_thread_id,
+            )
+            log_path = settle_agent_log_path(repo_root, log_path, started_thread_id)
+            state = build_agent_state(
+                process=process,
+                action=str(args.action),
+                command=command,
+                driver=driver_for(repo_root).name,
+                model=str(args.model),
+                reasoning_effort=str(args.reasoning_effort),
+                service_tier=str(args.service_tier or ""),
+                thread_id=started_thread_id,
+                prompt_skill_path=prompt_skill_path,
+                log_path=log_path,
+                fast_mode=bool(getattr(args, "fast_mode", False)),
+            )
+            state["supervisor_pid"] = os.getpid()
+            write_agent_state(repo_root, state)
+            stop_watch = Event()
+            lane_watch = Thread(
+                target=_watch_supervised_lane,
+                args=(repo_root, started_thread_id, log_path, process, stop_watch),
+                name=f"spice-lane-watch-{started_thread_id or process.pid}",
+                daemon=True,
+            )
+            lane_watch.start()
+            try:
+                exit_code = process.wait()
+            finally:
+                stop_watch.set()
+                stdout_thread.join(timeout=1.0)
+                lane_watch.join(timeout=1.0)
         finally:
-            stop_watch.set()
-            stdout_thread.join(timeout=1.0)
-            lane_watch.join(timeout=1.0)
+            # Every supervised launch leaves a terminal outcome — including a
+            # startup death, which otherwise only surfaces as a raised error —
+            # so restart policy can see consecutive rapid deaths.
+            record_launch_outcome(
+                repo_root,
+                supervised_launch_outcome(
+                    repo_root,
+                    thread_id=started_thread_id,
+                    log_path=log_path,
+                    started_at=started_at,
+                    lifetime_seconds=time.monotonic() - launch_clock,
+                    exit_code=process.poll() if exit_code is None else exit_code,
+                ),
+            )
     return int(exit_code or 0)
 
 
@@ -861,6 +883,111 @@ def touch_agent_state(repo_root: Path) -> None:
             path.touch()
     except (OSError, SpiceError):
         pass
+
+
+def launch_outcomes_path(repo_root: Path) -> Path:
+    return agent_worktree_state_dir(repo_root) / LAUNCH_OUTCOMES_FILE
+
+
+def read_launch_outcomes(repo_root: Path) -> list[dict[str, Any]]:
+    try:
+        loaded = json.loads(launch_outcomes_path(repo_root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, SpiceError):
+        return []
+    if not isinstance(loaded, list):
+        return []
+    return [entry for entry in loaded if isinstance(entry, dict)]
+
+
+def record_launch_outcome(repo_root: Path, outcome: dict[str, Any]) -> None:
+    """Append one terminal launch outcome to the bounded per-worktree journal.
+
+    The journal is the wake path's memory that starts keep dying: restart
+    policy reads it to refuse reinvoking a lane whose launches die young.
+    Recording is diagnostic and must never alter the supervised agent's own
+    exit path, so persistence failures are contained here.
+    """
+    try:
+        outcomes = [*read_launch_outcomes(repo_root), outcome]
+        atomic_write_json(
+            launch_outcomes_path(repo_root), outcomes[-LAUNCH_OUTCOMES_LIMIT:]
+        )
+    except (OSError, SpiceError):
+        pass
+
+
+def supervised_launch_outcome(
+    repo_root: Path,
+    *,
+    thread_id: str,
+    log_path: Path,
+    started_at: str,
+    lifetime_seconds: float,
+    exit_code: int | None,
+) -> dict[str, Any]:
+    scan = scan_launch_log(repo_root, log_path)
+    kind = str(scan.get("kind") or "") or agent_process_failure_kind(
+        repo_root,
+        exit_code=int(exit_code or 0),
+        output=tail_text(log_path, STARTUP_LOG_TAIL_BYTES),
+    )
+    outcome: dict[str, Any] = {
+        "thread_id": thread_id,
+        "log_path": str(log_path),
+        "started_at": started_at,
+        "ended_at": utc_now(),
+        "lifetime_seconds": round(lifetime_seconds, 3),
+        "exit_code": exit_code,
+        "assistant_messages": scan["assistant_messages"],
+        "tool_calls": scan["tool_calls"],
+        "failure_kind": kind,
+    }
+    if scan.get("reset_epoch") is not None:
+        outcome["reset_epoch"] = scan["reset_epoch"]
+    return outcome
+
+
+def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
+    """Activity counts and structural failure fields from one launch log.
+
+    Stream-json lines classify through the driver's canonical-event and
+    failure-signal vocabularies; non-JSON lines (marker-format stdout) simply
+    contribute nothing, leaving the text-pattern fallback to the caller.
+    """
+    driver = driver_for(repo_root)
+    assistant_messages = 0
+    tool_calls = 0
+    failure: dict[str, Any] = {}
+    try:
+        handle = log_path.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"assistant_messages": 0, "tool_calls": 0}
+    with handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            try:
+                raw = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            event = driver.normalize_transcript_line(raw) or {}
+            payload = event.get("payload") or {}
+            payload_type = payload.get("type") if isinstance(payload, dict) else ""
+            if payload_type == "message" and payload.get("role") == "assistant":
+                assistant_messages += 1
+            elif payload_type == "function_call":
+                tool_calls += 1
+            fields = driver.stream_failure_fields(raw)
+            if fields:
+                failure.update(fields)
+    return {
+        "assistant_messages": assistant_messages,
+        "tool_calls": tool_calls,
+        **failure,
+    }
 
 
 def tail_text(path: Path, limit: int) -> str:

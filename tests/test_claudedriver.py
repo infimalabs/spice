@@ -27,6 +27,7 @@ from spice.agent.driver import (
     POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
+    RATE_LIMIT_HTTP_STATUS,
     SPICE_AGENT_DRIVER_ENV,
     claude_auto_compact_environment,
     driver_for,
@@ -36,6 +37,8 @@ from spice.agent.driver import (
     select_driver,
 )
 from spice.agent.paths import agent_worktree_state_dir
+
+SPEND_LIMIT_RESET_EPOCH = 1784280000
 
 
 @pytest.fixture(autouse=True)
@@ -296,6 +299,79 @@ def test_claude_driver_classifies_out_of_credits_output():
         )
         == ""
     )
+
+
+def test_claude_driver_classifies_live_spend_limit_wording():
+    # The exact rejection the 2026-07-17 credit storm streamed: the CLI exits
+    # zero after this message, so text classification must recognize it
+    # wherever it appears.
+    assert (
+        CLAUDE_DRIVER.process_failure_kind(
+            exit_code=0,
+            output=(
+                "You've hit your monthly spend limit · "
+                "raise it at claude.ai/settings/usage"
+            ),
+        )
+        == "out-of-credits"
+    )
+
+
+def test_claude_stream_failure_fields_read_rejected_rate_limit_event():
+    fields = CLAUDE_DRIVER.stream_failure_fields(
+        {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "rejected",
+                "resetsAt": SPEND_LIMIT_RESET_EPOCH,
+                "rateLimitType": "five_hour",
+            },
+        }
+    )
+    allowed = CLAUDE_DRIVER.stream_failure_fields(
+        {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "resetsAt": SPEND_LIMIT_RESET_EPOCH,
+            },
+        }
+    )
+
+    assert fields == {
+        "kind": "out-of-credits",
+        "reset_epoch": SPEND_LIMIT_RESET_EPOCH,
+    }
+    assert allowed is None
+
+
+def test_claude_stream_failure_fields_read_429_result_line():
+    fields = CLAUDE_DRIVER.stream_failure_fields(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "api_error_status": RATE_LIMIT_HTTP_STATUS,
+            "result": (
+                "You've hit your monthly spend limit · "
+                "raise it at claude.ai/settings/usage"
+            ),
+        }
+    )
+    text_only = CLAUDE_DRIVER.stream_failure_fields(
+        {
+            "type": "result",
+            "is_error": True,
+            "result": "Claude AI usage limit reached",
+        }
+    )
+    clean = CLAUDE_DRIVER.stream_failure_fields(
+        {"type": "result", "subtype": "success", "is_error": False, "result": "done"}
+    )
+
+    assert fields == {"kind": "out-of-credits"}
+    assert text_only == {"kind": "out-of-credits"}
+    assert clean is None
 
 
 def test_claude_skill_prompt_matches_codex_link_form():
