@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -40,15 +41,48 @@ from spice.mail.ackstate import (
 from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
 
 from spice.mail.steeringkey import steering_token
+from spice.tasks import alloc, create, identity
+from spice.tasks import config as task_config
 
 
 WORKING_STATE_ELAPSED_SECONDS = 90
+
+ACK_MIRROR_ACTOR = "feedfacefeedfacefeedfacefeedface"
 
 
 @pytest.fixture(autouse=True)
 def _git_worktree_tmp_path(request, tmp_path):
     if "tmp_path" in request.fixturenames:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+
+@pytest.fixture
+def ack_mirror_claim(tmp_path, monkeypatch):
+    """A fixture claim on a per-test task backend for the ack mirror.
+
+    Retired acks annotate the ambient actor's active claim, so these tests
+    bind the actor and the task backend before the supervisor runs; the
+    mirror lands on this claim instead of whatever task a live agent
+    running the suite happens to hold.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACK_MIRROR_ACTOR)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-agentcli-ack-mirror")
+    backend = tmp_path / "task-backend"
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
+    task_config.set_backend(str(backend))
+    try:
+        handle = create.add(
+            "Ack mirror fixture claim",
+            project="task.unit",
+            acceptance=["retired acks mirror onto the claimed task"],
+            origin="ack:20260101T000000000000Z",
+        )
+        assigned = alloc.next_task()
+        assert identity.render_handle(assigned or {}) == handle
+        yield handle
+    finally:
+        task_config.set_backend(None)
 
 
 def _status(*, thread_id: str = "", running: bool = False):
@@ -318,7 +352,12 @@ def test_post_tool_hook_response_renders_new_pending_key_after_suppressed_key(
     assert "second hook steering" in context
 
 
-def test_hook_delivered_steering_retires_from_assistant_ack(tmp_path, monkeypatch):
+@pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
+def test_hook_delivered_steering_retires_from_assistant_ack(
+    tmp_path, monkeypatch, ack_mirror_claim, capsys
+):
     monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
     monkeypatch.setattr(
         watchdog,
@@ -374,9 +413,18 @@ def test_hook_delivered_steering_retires_from_assistant_ack(tmp_path, monkeypatc
     assert key not in command_stderr.getvalue()
     assert "hook-delivered ack target" not in command_stderr.getvalue()
 
+    show = build_parser().parse_args(["task", "show", ack_mirror_claim])
+    capsys.readouterr()
+    assert show.func(show) == 0
+    shown = capsys.readouterr().out
+    assert f"ack {key}: processed hook steering" in shown
 
+
+@pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
 def test_post_tool_hook_steering_end_to_end_without_shell_readout(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, ack_mirror_claim, capsys
 ):
     monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
     monkeypatch.setattr(
@@ -443,6 +491,12 @@ def test_post_tool_hook_steering_end_to_end_without_shell_readout(
     command_stderr = io.StringIO()
     wrap.AgentInboxInjector(tmp_path, stderr=command_stderr).inject(force=True)
     assert command_stderr.getvalue() == ""
+
+    show = build_parser().parse_args(["task", "show", ack_mirror_claim])
+    capsys.readouterr()
+    assert show.func(show) == 0
+    shown = capsys.readouterr().out
+    assert f"ack {key}: handled before another shell command" in shown
 
 
 def test_working_state_snapshot_is_empty_when_no_live_state(tmp_path):
