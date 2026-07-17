@@ -1,4 +1,4 @@
-"""Task-document family export and normal-form rendering."""
+"""Task family export and normal-form rendering."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import claimstate, config, identity
+from spice.tasks import claimstate, config, identity, tw
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import (
     DOCUMENT_ROOT_SLUG,
@@ -14,6 +14,7 @@ from spice.tasks.markdown.dialect import (
     Doc,
     Node,
     graph_signature,
+    slugify,
 )
 
 _MAX_ATX_LEVEL = 6
@@ -21,6 +22,15 @@ _HEADING_CONTENT_COL = 0
 _ITEM_INDENT_STEP = 2
 _LIST_ITEM_RE = re.compile(r"^ *- ")
 _PRIORITY_NAMES = {"H": "high", "M": "medium", "L": "low"}
+_BOARD_FAMILY_STATUS_FILTER = (
+    "(",
+    "status:pending",
+    "or",
+    "status:waiting",
+    "or",
+    "status:completed",
+    ")",
+)
 _RUNTIME_ANNOTATION_PREFIXES = (
     "ack ",
     "claim stolen:",
@@ -235,18 +245,62 @@ def _load_family(handle: str) -> Doc:
     target = identity.resolve(handle)
     target_slug = str(target.get(config.TASKDOC_ID_UDA) or "")
     if not target_slug:
-        rendered = identity.render_handle(target)
-        raise SpiceError(
-            f"{rendered} is not in a task document; spice task ledger exports "
-            "task-document families; inspect ordinary board tasks with "
-            f"`spice task show {rendered}`"
-        )
+        return _board_document_from_rows(_load_board_family_rows(target))
     project = str(target.get("project") or "")
     origin = str(target.get("origin") or "")
     rows = load_family_rows(project, origin)
     if all(str(row.get("uuid") or "") != str(target.get("uuid") or "") for row in rows):
         raise SpiceError(f"{identity.render_handle(target)} is not in a visible family")
     return _document_from_rows(rows)
+
+
+def _load_board_family_rows(target: dict[str, Any]) -> list[dict[str, Any]]:
+    """Load the visible native-dependency component containing ``target``."""
+    rows = tw.export(list(_BOARD_FAMILY_STATUS_FILTER))
+    rows_by_uuid = {
+        identity.uuid_of(row): row for row in rows if str(row.get("uuid") or "")
+    }
+    target_uuid = identity.uuid_of(target)
+    rows_by_uuid.setdefault(target_uuid, target)
+    neighbors = {uuid: set() for uuid in rows_by_uuid}
+    for source_uuid, row in rows_by_uuid.items():
+        for target_uuid_candidate in _depends(row):
+            if target_uuid_candidate not in rows_by_uuid:
+                continue
+            neighbors[source_uuid].add(target_uuid_candidate)
+            neighbors[target_uuid_candidate].add(source_uuid)
+
+    connected: set[str] = set()
+    pending = [target_uuid]
+    while pending:
+        current = pending.pop()
+        if current in connected:
+            continue
+        connected.add(current)
+        pending.extend(neighbors[current] - connected)
+    return sorted(
+        (rows_by_uuid[uuid] for uuid in connected),
+        key=identity.render_handle,
+    )
+
+
+def _board_document_from_rows(rows: list[dict[str, Any]]) -> Doc:
+    nodes: list[Node] = []
+    slugs: set[str] = set()
+    for index, row in enumerate(rows):
+        node = _node_from_row(index, row)
+        handle = identity.render_handle(row)
+        node.title = " ".join(part for part in (node.title, handle) if part)
+        node.slug = slugify(node.title)
+        if node.slug in slugs:
+            node.title = f"{node.title} {identity.uuid_of(row)}"
+            node.slug = slugify(node.title)
+        slugs.add(node.slug)
+        nodes.append(node)
+    edges = _family_edges(nodes, rows)
+    _mark_node_kinds(nodes, edges)
+    root = _family_root(nodes, edges)
+    return Doc(nodes=nodes, root=root, edges=edges, refusals=[], warnings=[])
 
 
 def _document_from_rows(rows: list[dict[str, Any]]) -> Doc:

@@ -17,7 +17,12 @@ from spice.tasks import cli as task_cli
 from spice.tasks import config, create, identity, ops, tw
 from spice.tasks.markdown import apply
 from spice.tasks.markdown.classifier import parse
-from spice.tasks.markdown.dialect import graph_signature
+from spice.tasks.markdown.dialect import (
+    DOCUMENT_ROOT_SLUG,
+    DOCUMENT_ROOT_TITLE,
+    graph_signature,
+    slugify,
+)
 from spice.tasks.markdown.ledger import export_document, export_ledger
 
 from tests.test_tasks import task_repo
@@ -584,25 +589,60 @@ def test_ledger_refuses_invalid_containment_metadata(task_repo, parent, message)
     assert str(error.value) == message
 
 
-def test_ledger_refusal_routes_plain_board_task_to_show(task_repo):
+def test_ledger_exports_plain_board_dependency_family(task_repo, capsys):
     assert task_repo.is_dir()
-    board_task = create.add(
-        "Plain board task",
+    parent = create.add(
+        "Plain board parent",
         project="task.unit",
         priority="none",
         flow=["todo"],
-        acceptance=["board inspection fixture"],
+        acceptance=["parent coordinates its prerequisites"],
         origin=f"ack:{ACK_KEY}",
     )
-
-    with pytest.raises(SpiceError) as error:
-        export_ledger(board_task)
-
-    assert str(error.value) == (
-        f"{board_task} is not in a task document; spice task ledger exports "
-        "task-document families; inspect ordinary board tasks with "
-        f"`spice task show {board_task}`"
+    first = create.add(
+        "First plain prerequisite",
+        project="task.unit",
+        priority="high",
+        flow=["todo"],
+        acceptance=["first prerequisite is complete"],
+        origin=f"task:{parent}",
     )
+    second = create.add(
+        "Second plain prerequisite",
+        project="serve.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["second prerequisite is complete"],
+        origin=f"task:{parent}",
+    )
+    ops.depends(parent, [first, second])
+
+    ledger_args = build_parser().parse_args(
+        ["task", "--backend", str(config.backend_root()), "ledger", first]
+    )
+
+    assert task_cli.handle(ledger_args) == 0
+    rendered = capsys.readouterr().out
+    document = parse(rendered)
+    assert {node.title for node in document.nodes} == {
+        f"Plain board parent {parent}",
+        f"First plain prerequisite {first}",
+        f"Second plain prerequisite {second}",
+        DOCUMENT_ROOT_TITLE,
+    }
+    parent_slug = slugify(f"Plain board parent {parent}")
+    first_slug = slugify(f"First plain prerequisite {first}")
+    second_slug = slugify(f"Second plain prerequisite {second}")
+    assert graph_signature(document)[1] == frozenset(
+        {
+            (DOCUMENT_ROOT_SLUG, parent_slug),
+            (DOCUMENT_ROOT_SLUG, first_slug),
+            (DOCUMENT_ROOT_SLUG, second_slug),
+            (parent_slug, first_slug),
+            (parent_slug, second_slug),
+        }
+    )
+    assert export_document(document) == rendered
 
 
 @pytest.mark.parametrize(
