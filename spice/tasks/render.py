@@ -336,7 +336,7 @@ def _wording_review_lines(row: dict[str, Any], rendered: str) -> list[str]:
             "wording_review_guidance suspect wording automatically prepended "
             "plan; matched wording remains in annotations. After enriching "
             "child tasks and acceptance, clear with "
-            f'spice task resolve-wording {rendered} --reason "..."'
+            f'spice task reword {rendered} --reason "..."'
         ),
     ]
 

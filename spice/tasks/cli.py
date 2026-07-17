@@ -303,7 +303,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_ingest_parser(actions)
     _configure_oops_parser(actions)
     _configure_note_parser(actions)
-    _configure_resolve_wording_parser(actions)
+    _configure_reword_parser(actions)
     _configure_depends_parser(actions)
     _configure_undepends_parser(actions)
     _configure_wake_parser(actions)
@@ -364,21 +364,21 @@ def _configure_note_parser(actions: Any) -> None:
     note.set_defaults(func=handle)
 
 
-def _configure_resolve_wording_parser(actions: Any) -> None:
-    resolve = actions.add_parser(
-        "resolve-wording",
+def _configure_reword_parser(actions: Any) -> None:
+    reword = actions.add_parser(
+        "reword",
         help="Clear a suspect-wording review marker after plan self-correction.",
         recovery_examples=(
-            'spice task resolve-wording TASK-1k4Q5gJw --reason "acceptance refined"',
+            'spice task reword TASK-1k4Q5gJw --reason "acceptance refined"',
         ),
     )
-    resolve.add_argument(
+    reword.add_argument(
         "handle",
         nargs="?",
-        help="Task handle; omit to resolve your sole active claim.",
+        help="Task handle; omit to reword your sole active claim.",
     )
-    resolve.add_argument("--reason", required=True)
-    resolve.set_defaults(func=handle)
+    reword.add_argument("--reason", required=True)
+    reword.set_defaults(func=handle)
 
 
 def _configure_depends_parser(actions: Any) -> None:
@@ -949,7 +949,7 @@ _DISPATCH = {
     ),
     "oops": _oops,
     "note": _note,
-    "resolve-wording": lambda a: wordingreview.resolve_wording_review(
+    "reword": lambda a: wordingreview.reword(
         a.handle,
         reason=a.reason,
     ),

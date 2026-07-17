@@ -25,25 +25,25 @@ def require_plan_phase_marker_cleared(row: dict[str, Any]) -> None:
     raise SpiceError(
         f"task done blocked: {handle} still requires suspect-wording "
         "self-correction. Enrich the plan and acceptance criteria, then run "
-        f'`spice task resolve-wording {handle} --reason "..."` before '
+        f'`spice task reword {handle} --reason "..."` before '
         "advancing out of plan."
     )
 
 
-def resolve_wording_review(handle: str | None, *, reason: str) -> str:
+def reword(handle: str | None, *, reason: str) -> str:
     reason = reason.strip()
     if not reason:
-        raise SpiceError("task resolve-wording requires --reason")
+        raise SpiceError("task reword requires --reason")
     from spice.tasks import claimstate
 
-    row = claimstate.resolve_claim_target(handle, action="resolve wording review")
+    row = claimstate.resolve_claim_target(handle, action="reword")
     handle_text = identity.render_handle(row)
-    claimstate._require_pending(row, "resolve wording review")
+    claimstate._require_pending(row, "reword")
     actor = tw.current_actor()
-    claimstate._require_owner(row, actor, "resolve wording review")
+    claimstate._require_owner(row, actor, "reword")
     if not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "").strip():
         raise SpiceError(f"{handle_text} has no suspect-wording review marker")
     uuid = identity.uuid_of(row)
     tw.run([uuid, "modify", f"{config.TASK_WORDING_REVIEW_UDA}:"])
     claimstate.annotate(uuid, f"wording review resolved: {reason}")
-    return f"resolved wording review for {handle_text}"
+    return f"reworded {handle_text}"
