@@ -427,11 +427,10 @@
   flex: 0 0 auto;
   font-size: 12px;
   gap: 8px;
-  /* Mosaic interlock: fixed at 2 lineHeights (2.5rem) so the footer
-     never varies with its own content and comfortably contains the
-     32px .icon-button without clipping. Border(2px) + padding(18px) +
-     margin(0.5rem) + this height sum to a whole multiple of lineHeight
-     (1.25rem) at the default type ramp; see mosaic-sizing-interlock. */
+  /* Desktop mosaic interlock: fixed at 2 lineHeights (2.5rem) so the
+     single-row footer never varies with its own content and comfortably
+     contains the 32px .icon-button without clipping. The mobile override
+     sizes to its wrapped rows so natural card measurement reserves them. */
   height: 2.5rem;
   justify-content: space-between;
   margin-top: 0.5rem;
@@ -611,6 +610,13 @@
   top: 0;
   left: 0;
   will-change: transform;
+}
+@media (max-width: 720px) {
+  /* index.css wraps both groups into full-width rows. messages.css loads
+     after that shared shell stylesheet, so responsive footer height belongs
+     here beside the desktop fixed-height owner: natural card measurement
+     must see both rows instead of the 2.5rem desktop strip. */
+  .message-footer { height: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mosaic-plane,
