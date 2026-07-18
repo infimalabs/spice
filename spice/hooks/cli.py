@@ -54,6 +54,18 @@ def configure_dev_parser(subparsers: Any) -> None:
     )
     pre_commit.set_defaults(func=handle_dev)
 
+    dev_pytest = actions.add_parser(
+        "pytest",
+        help="Run checkout tests under the worktree venv; arguments pass to pytest.",
+        recovery_examples=("spice dev pytest -q tests/test_cliversion.py",),
+    )
+    dev_pytest.add_argument(
+        "pytest_args",
+        nargs=argparse.REMAINDER,
+        help=argparse.SUPPRESS,
+    )
+    dev_pytest.set_defaults(func=handle_dev)
+
     actions.add_parser(
         "serve-web-typecheck",
         help="Typecheck the serve static JavaScript with TypeScript checkJs.",
@@ -163,6 +175,12 @@ def handle_dev(args: argparse.Namespace) -> int:
                 "to run it as the hook."
             )
         return handle_pre_commit(repo_root)
+    if command == "pytest":
+        from spice.hooks.devpytest import run_checkout_pytest
+
+        return run_checkout_pytest(
+            repo_root, list(getattr(args, "pytest_args", ()) or ())
+        )
     if command == "serve-web-typecheck":
         from spice.serve.typecheck import run_serve_web_typecheck
 

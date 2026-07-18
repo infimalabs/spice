@@ -97,7 +97,7 @@ enabled = true
 argv = ["spice", "dev", "pre-commit"]
 
 [tool.spice.wrappers.spice-dev.pytest]
-argv = ["python", "-m", "pytest"]
+argv = ["spice", "dev", "pytest"]
 
 [tool.spice.wrappers.spice-dev.task]
 argv = ["spice", "task"]
