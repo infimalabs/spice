@@ -93,7 +93,6 @@ async function run() {
             lit: pill.classList.contains("filter-pill--drainable"),
             dim: pill.classList.contains("filter-pill--undrainable"),
             implicit: pill.classList.contains("filter-pill--implicit"),
-            waiting: pill.classList.contains("filter-pill--waiting"),
             title: pill.title,
           }),
         );
@@ -120,11 +119,9 @@ async function run() {
         lit: true,
         dim: false,
       });
-      assertPill(pills, "waiting", {
-        count: "3",
-        dim: true,
-        waiting: true,
-      });
+      const labels = pills.map((pill) => pill.label).join(",");
+      if (labels !== "serve,studies,cli,tests")
+        throw new Error("unexpected header pills: " + labels);
       await page.screenshot({ path: SCREENSHOT_PATH });
       return { pills, screenshotPath: SCREENSHOT_PATH };
     },

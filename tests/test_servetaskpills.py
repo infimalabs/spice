@@ -21,24 +21,12 @@ def _between(text: str, start: str, end: str) -> str:
     return text[start_index : text.index(end, start_index)]
 
 
-def test_global_filter_pills_show_waiting_tasks_with_distinct_system_style():
+def test_global_filter_pills_keep_only_actionable_and_oops_header_stems():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
-    css = _serve_css_text()
-    waiting_rule_start = css.index(".filter-pill--waiting {")
-    waiting_rule = css[waiting_rule_start : css.index("}", waiting_rule_start)]
 
-    assert 'const taskFilterHeaderExtraStems = ["agent", "waiting", "oops"];' in (
-        app_lanes
-    )
-    assert 'if (stem.name === "waiting") classes.push("filter-pill--waiting");' in (
-        app_lanes
-    )
-    assert 'label === "waiting"' in app_lanes
-    assert "spice task wake <handle>" in app_lanes
+    assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
     assert 'label === "oops"' in app_lanes
     assert "spice task oops" in app_lanes
-    assert "border-style: dotted;" in waiting_rule
-    assert "color: var(--say-accent);" in waiting_rule
 
 
 def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
