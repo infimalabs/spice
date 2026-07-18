@@ -558,8 +558,19 @@ def test_static_mosaic_seam_rule_colw_multiplication_confined_to_geometry():
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
+    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
 
     assert ".message-footer-right { justify-content: flex-end; }" in css
+    mobile_start = css.index("@media (max-width: 720px) {")
+    mobile_css = css[mobile_start:]
+    mobile_footer_rule = (
+        "  .message-footer {\n    align-items: flex-start;\n    flex-wrap: wrap;"
+    )
+    assert mobile_footer_rule in mobile_css
+    responsive_height_start = messages_css.index("@media (max-width: 720px) {")
+    assert responsive_height_start > messages_css.index(".message-footer {")
+    responsive_height_rule = ".message-footer { height: auto; }"
+    assert responsive_height_rule in messages_css[responsive_height_start:]
     assert (
         ".message-footer-left,\n  .message-footer-right {\n    flex: 1 1 100%;" in css
     )
