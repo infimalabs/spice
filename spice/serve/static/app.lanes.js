@@ -232,6 +232,14 @@ laneStore.subscribe((change) => {
     renderFilterPills();
 });
 
+// Media-session narration state follows the open-lane set: a lane leaving the
+// store can flip whether any narration is active, so it reconciles as an
+// explicit lane-store subscriber instead of an imperative tail on lane close.
+laneStore.subscribe((change) => {
+  if (change.kind !== "lanes" || change.transition !== "removed") return;
+  syncNarrationMediaSession();
+});
+
 function materializeTeamSnapshotTransition(transition) {
   if (transition.disposition !== "applied") return;
   applyGlobalSettingsPayload(transition.globalSettings);
@@ -477,8 +485,6 @@ function closeLaneCore(lane) {
   abortLaneSpeech(lane);
   lane.element.remove();
   laneStore.removeLane(lane.targetId);
-  syncNarrationMediaSession();
-  renderFilterPills();
 }
 
 function laneHasUnsafeDraft(lane) {

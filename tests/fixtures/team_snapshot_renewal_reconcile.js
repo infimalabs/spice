@@ -104,6 +104,7 @@ function resetGlobals() {
   context.syncNarrationMediaSession = () => {};
   context.isLaneOpen = (lane) => !lane.closed;
   context.laneComposerDraftText = () => "";
+  context.targetsLoaded = true;
   context.filterStripEl = null;
   context.spiceMenuEl = null;
   context.emptyTeamCalls = [];

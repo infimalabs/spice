@@ -1247,9 +1247,10 @@ def test_static_narration_mode_holds_media_session_state():
         "if (external && !narrationMediaSessionActive()) stopAllSpeech();" in app_audio
     )
     assert "syncNarrationMediaSession();" in app_controls
-    close_start = app_lanes.index("function closeLaneCore(lane) {")
-    close_body = app_lanes[close_start : app_lanes.index("\n}", close_start)]
-    assert "syncNarrationMediaSession();" in close_body
+    assert (
+        'if (change.kind !== "lanes" || change.transition !== "removed") return;\n'
+        "  syncNarrationMediaSession();" in app_lanes
+    )
 
 
 def test_static_speech_session_title_leads_with_agent_identity():

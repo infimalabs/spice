@@ -52,6 +52,7 @@ const context = {
     throw new Error(message);
   },
   renderFilterPills() {},
+  syncNarrationMediaSession() {},
   applyGlobalSettingsPayload(settings) {
     if (!settings || settings.fastMode !== false)
       throw new Error("fresh startup fixture expected fast mode false");
