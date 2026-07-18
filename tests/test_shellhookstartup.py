@@ -444,9 +444,7 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
 
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
-def test_agent_shell_targets_worktree_python_without_shadowing_global_spice(
-    tmp_path, shell_name
-):
+def test_agent_shell_preserves_ambient_python_and_spice(tmp_path, shell_name):
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} is not installed")
@@ -459,6 +457,8 @@ def test_agent_shell_targets_worktree_python_without_shadowing_global_spice(
     executables = {
         venv_bin / "python": "worktree-python",
         venv_bin / "spice": "worktree-spice",
+        operator_bin / "python": "ambient-python",
+        operator_bin / "python3": "ambient-python3",
         operator_bin / "spice": "global-spice",
     }
     for path, label in executables.items():
@@ -490,14 +490,14 @@ def test_agent_shell_targets_worktree_python_without_shadowing_global_spice(
 
     assert env["PATH"] == base_env["PATH"]
     assert completed.stdout.splitlines() == [
-        "worktree-python:one",
-        "worktree-python:two",
+        "ambient-python:one",
+        "ambient-python3:two",
         "global-spice:three",
     ]
 
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
-def test_agent_shell_routes_pytest_arguments_through_worktree_python(
+def test_agent_shell_routes_pytest_arguments_through_explicit_dev_seam(
     tmp_path, shell_name
 ):
     shell = shutil.which(shell_name)
@@ -508,7 +508,7 @@ def test_agent_shell_routes_pytest_arguments_through_worktree_python(
         order=["spice-dev"],
         groups={
             "spice-dev": {
-                "pytest": {"argv": ["python", "-m", "pytest"]},
+                "pytest": {"argv": ["spice", "dev", "pytest"]},
             }
         },
     )
@@ -521,6 +521,7 @@ def test_agent_shell_routes_pytest_arguments_through_worktree_python(
     executables = {
         venv_bin / "python": "worktree-python",
         operator_bin / "pytest": "global-pytest",
+        operator_bin / "spice": "global-spice",
     }
     for path, label in executables.items():
         path.write_text(
@@ -550,7 +551,7 @@ def test_agent_shell_routes_pytest_arguments_through_worktree_python(
     )
 
     assert completed.stdout.splitlines() == [
-        "worktree-python:-m pytest -q tests/unit --maxfail=1"
+        "global-spice:dev pytest -q tests/unit --maxfail=1"
     ]
 
 

@@ -6,7 +6,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import sysconfig
 import tomllib
 from pathlib import Path
 
@@ -331,7 +330,7 @@ def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_p
     assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
 
 
-def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
+def test_agent_run_keeps_python_module_wrapper_on_ambient_interpreter(
     tmp_path, monkeypatch
 ):
     if shutil.which("zsh") is None:
@@ -354,10 +353,21 @@ def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
     )
     home = tmp_path / "home"
     home.mkdir()
+    operator_bin = tmp_path / "operator-bin"
+    operator_bin.mkdir()
+    ambient_python = operator_bin / "python"
+    ambient_python.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="utf-8",
+    )
+    ambient_python.chmod(0o755)
     monkeypatch.setenv("HOME", str(home))
-    # The bare worktree venv carries no pytest; the child borrows this
-    # interpreter's site-packages while sys.executable stays the venv's.
-    monkeypatch.setenv("PYTHONPATH", sysconfig.get_paths()["purelib"])
+    monkeypatch.setenv(
+        "PATH",
+        str(operator_bin)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
+    )
     for name in (
         shellhook.ZDOTDIR_ENV,
         shellhook.BASH_ENV_ENV,
@@ -399,7 +409,8 @@ def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
     venv_python = tmp_path.resolve() / ".venv" / "bin" / "python"
     assert exit_code == 0
     assert "1 passed" in output
-    assert f"probe-executable={venv_python}" in output
+    assert f"probe-executable={sys.executable}" in output
+    assert len({sys.executable, str(venv_python)}) == 2
     assert executed == [["zsh", "-c", "pytest -s test_probe.py"]]
     assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
     assert executed[0][2] != control[2]
@@ -921,20 +932,3 @@ def test_runtime_environment_leaves_path_untouched_without_a_venv(tmp_path):
         base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
     )
     assert "PATH" not in env
-
-
-def test_worktree_python_wrapper_targets_venv_interpreter(tmp_path):
-    python = tmp_path / ".venv" / "bin" / "python"
-    python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\n", encoding="utf-8")
-
-    assert shellhook.render_worktree_python_wrapper_lines(tmp_path) == [
-        "",
-        "python() {",
-        f'  command {shlex.quote(str(python))} "$@"',
-        "}",
-        "",
-        "python3() {",
-        f'  command {shlex.quote(str(python))} "$@"',
-        "}",
-    ]

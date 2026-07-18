@@ -77,12 +77,7 @@ def apply_shell_steering_environment(
 ) -> dict[str, str]:
     env = dict(base_env)
     env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
-    env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(
-        [
-            *render_agent_wrapper_lines(repo_root),
-            *render_worktree_python_wrapper_lines(repo_root),
-        ]
-    )
+    env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(render_agent_wrapper_lines(repo_root))
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)
@@ -149,24 +144,6 @@ def shell_steering_runtime_environment(
         resolved_root = repo_root.resolve()
         env[SHELL_HOOK_REPO_ROOT_ENV] = str(resolved_root)
     return env
-
-
-def render_worktree_python_wrapper_lines(repo_root: Path) -> list[str]:
-    python = repo_root.resolve() / ".venv" / "bin" / "python"
-    if not python.is_file():
-        return []
-    command = shell_quote(str(python))
-    lines: list[str] = []
-    for selector in ("python", "python3"):
-        lines.extend(
-            [
-                "",
-                f"{selector}() {{",
-                f'  command {command} "$@"',
-                "}",
-            ]
-        )
-    return lines
 
 
 def original_zsh_history_value(
