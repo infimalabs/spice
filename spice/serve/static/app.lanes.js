@@ -212,6 +212,26 @@ laneStore.subscribe((change) => {
   materializeTeamSnapshotTransition(change.transition);
 });
 
+// Menu refresh, filter panes, and lane-hint persistence are explicit store
+// subscribers rather than an imperative tail on lane materialization. Each
+// gates on the fields it consumes, so a quiet retained-only snapshot repaints
+// nothing; membership changes refresh the menu, and any lane add/update/remove
+// refreshes the filter pills.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  const transition = change.transition;
+  if (transition.disposition !== "applied") return;
+  if (targetsLoaded) persistLaneHints();
+  if (transition.adds.length || transition.removes.length)
+    renderSpiceMenuIfAvailable();
+  if (
+    transition.adds.length ||
+    transition.updates.length ||
+    transition.removes.length
+  )
+    renderFilterPills();
+});
+
 function materializeTeamSnapshotTransition(transition) {
   if (transition.disposition !== "applied") return;
   applyGlobalSettingsPayload(transition.globalSettings);
@@ -231,11 +251,6 @@ function materializeTeamSnapshotTransition(transition) {
   }
   for (const lane of transition.removes) closeLaneCore(lane);
   reconcileLaneGroups(transition.groupRuns);
-  if (typeof targetsLoaded === "undefined" || targetsLoaded)
-    persistLaneHints();
-  if (transition.adds.length || transition.removes.length)
-    renderSpiceMenuIfAvailable();
-  renderFilterPills();
 }
 
 // A team member is an explicit actor: target:<target-id> before a thread binds,
