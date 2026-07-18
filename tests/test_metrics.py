@@ -39,16 +39,14 @@ def _presence_entry(timestamp: str, payload_type: str) -> dict[str, object]:
 
 def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.record_directive_sent(
-        "20260610T120000000001Z", agent_id="agent-a", team_id="agent-a"
-    )
+    store.record_directive_sent("1k4Yh5gP", agent_id="agent-a", team_id="agent-a")
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
         rollout,
         [
             _assistant_entry(
                 "2026-06-10T12:00:00.000000Z",
-                "ACK 20260610T120000000001Z: handled",
+                "ACK 1k4Yh5gP: handled",
             ),
             _presence_entry("2026-06-10T12:00:01.000000Z", "function_call"),
             _presence_entry("2026-06-10T12:00:02.000000Z", "reasoning"),
@@ -80,7 +78,7 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         [
             _assistant_entry(
                 "2026-06-10T12:00:00.000000Z",
-                "ACK 20260610T120000000001Z: predecessor",
+                "ACK 1k4Yh5gP: predecessor",
             ),
             _presence_entry("2026-06-10T12:00:01.000000Z", "function_call"),
         ],
@@ -90,14 +88,14 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         [
             _assistant_entry(
                 "2026-06-10T12:01:00.000000Z",
-                "ACK 20260610T120100000001Z: successor",
+                "ACK 1k4YhWsF: successor",
             ),
             _presence_entry("2026-06-10T12:01:01.000000Z", "custom_tool_call"),
         ],
     )
 
     store.record_directive_sent(
-        "20260610T120000000001Z",
+        "1k4Yh5gP",
         agent_id="thread:predecessor",
         team_id=team.team_id,
     )
@@ -110,7 +108,7 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         aliases=["thread:predecessor"],
     )
     store.record_directive_sent(
-        "20260610T120100000001Z",
+        "1k4YhWsF",
         agent_id="thread:successor",
         team_id=team.team_id,
     )
@@ -171,7 +169,7 @@ def test_lane_metric_sparkline_ages_old_buckets_out(tmp_path):
 
 def test_transcript_ack_flips_its_sent_directive(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    directive_key = "20260610T120000000001Z"
+    directive_key = "1k4Yh5gP"
     store.record_directive_sent(directive_key, agent_id="agent-a", team_id="team-1")
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
@@ -201,7 +199,7 @@ def test_transcript_ack_of_unsent_key_is_a_noop(tmp_path):
         [
             _assistant_entry(
                 "2026-06-10T12:00:00.000000Z",
-                "ACK 20260610T120000000099Z: handled",
+                "ACK 1k4Yh5jH: handled",
             )
         ],
     )

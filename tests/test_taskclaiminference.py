@@ -102,7 +102,7 @@ def test_done_without_a_handle_completes_the_sole_claim(task_repo):
     handle = create.add(
         "Infer the handle from my claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         flow=["todo"],
         acceptance=["done with no handle completes the held claim"],

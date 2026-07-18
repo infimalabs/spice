@@ -281,7 +281,7 @@ def test_side_channel_stream_stays_open_past_hello_deadline(git_worktree, monkey
         time.sleep(0.5)
         write_inbox_item(
             git_worktree,
-            "20260101T000000000009Z.txt",
+            "1jN54zJT.txt",
             compose_inbox_text(
                 body="post-deadline steering", priority=None, stop=False
             ),
@@ -396,7 +396,7 @@ def test_agent_run_watch_streams_past_connect_deadline_and_stops_on_server_close
         time.sleep(0.5)
         write_inbox_item(
             git_worktree,
-            "20260101T000000000011Z.txt",
+            "1jN54zJW.txt",
             compose_inbox_text(body="late-after-deadline", priority=None, stop=False),
         )
         output = _eventually(lambda: stderr.getvalue(), needle="late-after-deadline")

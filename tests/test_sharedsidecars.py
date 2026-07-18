@@ -32,7 +32,7 @@ from spice.studies import complexity, fileloc, repodocs
 from spice.tasks import artifacts, config, create
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-ORIGIN = "ack:20260713T000002000000Z"
+ORIGIN = "ack:1kCxkWxr"
 
 
 @pytest.fixture(autouse=True)

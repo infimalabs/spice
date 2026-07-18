@@ -34,7 +34,6 @@ from spice.mail.inbox import (
     collect_inbox_items,
     discard_inbox_items,
     inbox_item_key,
-    inbox_item_key_aliases,
     inbox_payload_items,
     notify_inbox_changed,
     parse_inbox_payload,
@@ -88,16 +87,11 @@ def _archive_keyed_inbox_items(
     if repo_root is None:
         return []
     root = Path(repo_root)
-    keyed_aliases: set[str] = set()
-    for key in keys:
-        if key:
-            keyed_aliases |= inbox_item_key_aliases(key)
-    if not keyed_aliases:
+    wanted = {inbox_item_key(key) for key in keys if key}
+    if not wanted:
         return []
     pending = collect_inbox_items(str(root))
-    to_retire = [
-        item for item in pending if inbox_item_key_aliases(item.name) & keyed_aliases
-    ]
+    to_retire = [item for item in pending if inbox_item_key(item.name) in wanted]
     if not to_retire:
         return []
     record_acked_inbox_items(
@@ -169,7 +163,7 @@ def summarize_ack_archival(
             noop=True,
         )
     try:
-        already_acked_aliases = _consumed_state_aliases(
+        already_acked_keys = _consumed_state_keys(
             repo_root, disposition=ACK_DISPOSITION_ACKED
         )
         archived = archive_ackd_inbox_items(
@@ -182,23 +176,19 @@ def summarize_ack_archival(
         if _is_missing_git_worktree_error(exc):
             return _empty_ack_archival_summary()
         raise
-    archived_aliases: set[str] = set()
-    for key in archived:
-        archived_aliases |= inbox_item_key_aliases(key)
+    archived_keys = {inbox_item_key(key) for key in archived}
     already_acked = [
         key
         for key in requested
-        if not (inbox_item_key_aliases(key) & archived_aliases)
-        and (inbox_item_key_aliases(key) & already_acked_aliases)
+        if inbox_item_key(key) not in archived_keys
+        and inbox_item_key(key) in already_acked_keys
     ]
-    already_acked_request_aliases: set[str] = set()
-    for key in already_acked:
-        already_acked_request_aliases |= inbox_item_key_aliases(key)
+    already_acked_request_keys = {inbox_item_key(key) for key in already_acked}
     unmatched = [
         key
         for key in requested
-        if not (inbox_item_key_aliases(key) & archived_aliases)
-        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
+        if inbox_item_key(key) not in archived_keys
+        and inbox_item_key(key) not in already_acked_request_keys
     ]
     return AckArchivalSummary(
         archived=archived,
@@ -225,10 +215,10 @@ def summarize_nack_archival(
         dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
     )
     try:
-        already_refused_aliases = _consumed_state_aliases(
+        already_refused_keys = _consumed_state_keys(
             repo_root, disposition=ACK_DISPOSITION_REFUSED
         )
-        already_acked_aliases = _consumed_state_aliases(
+        already_acked_keys = _consumed_state_keys(
             repo_root, disposition=ACK_DISPOSITION_ACKED
         )
         refused = archive_nackd_inbox_items(
@@ -241,34 +231,28 @@ def summarize_nack_archival(
         if _is_missing_git_worktree_error(exc):
             return _empty_nack_archival_summary()
         raise
-    refused_aliases: set[str] = set()
-    for key in refused:
-        refused_aliases |= inbox_item_key_aliases(key)
+    refused_keys = {inbox_item_key(key) for key in refused}
     already_refused = [
         key
         for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and (inbox_item_key_aliases(key) & already_refused_aliases)
+        if inbox_item_key(key) not in refused_keys
+        and inbox_item_key(key) in already_refused_keys
     ]
-    already_refused_request_aliases: set[str] = set()
-    for key in already_refused:
-        already_refused_request_aliases |= inbox_item_key_aliases(key)
+    already_refused_request_keys = {inbox_item_key(key) for key in already_refused}
     already_acked = [
         key
         for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
-        and (inbox_item_key_aliases(key) & already_acked_aliases)
+        if inbox_item_key(key) not in refused_keys
+        and inbox_item_key(key) not in already_refused_request_keys
+        and inbox_item_key(key) in already_acked_keys
     ]
-    already_acked_request_aliases: set[str] = set()
-    for key in already_acked:
-        already_acked_request_aliases |= inbox_item_key_aliases(key)
+    already_acked_request_keys = {inbox_item_key(key) for key in already_acked}
     unmatched = [
         key
         for key in requested
-        if not (inbox_item_key_aliases(key) & refused_aliases)
-        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
-        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
+        if inbox_item_key(key) not in refused_keys
+        and inbox_item_key(key) not in already_refused_request_keys
+        and inbox_item_key(key) not in already_acked_request_keys
     ]
     return NackArchivalSummary(
         refused=refused,
@@ -297,18 +281,18 @@ def _is_missing_git_worktree_error(exc: SpiceError) -> bool:
     return str(exc) == _MISSING_GIT_WORKTREE_ERROR
 
 
-def _consumed_state_aliases(
+def _consumed_state_keys(
     repo_root: str | Path | None, *, disposition: str | None = None
 ) -> set[str]:
     if repo_root is None:
         return set()
-    aliases: set[str] = set()
+    keys: set[str] = set()
     for record in ack_state_records(repo_root):
         if disposition is not None and record.disposition != disposition:
             continue
-        aliases |= inbox_item_key_aliases(record.key)
-        aliases |= inbox_item_key_aliases(record.inbox_name)
-    return aliases
+        keys.add(inbox_item_key(record.key))
+        keys.add(inbox_item_key(record.inbox_name))
+    return keys
 
 
 def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
@@ -350,7 +334,4 @@ def _ack_content_for_item(
 ) -> str:
     if not content_by_key:
         return ""
-    for alias in inbox_item_key_aliases(inbox_name):
-        if alias in content_by_key:
-            return content_by_key[alias]
-    return ""
+    return content_by_key.get(inbox_item_key(inbox_name), "")

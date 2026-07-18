@@ -76,7 +76,7 @@ def ack_mirror_claim(tmp_path, monkeypatch):
             "Ack mirror fixture claim",
             project="task.unit",
             acceptance=["retired acks mirror onto the claimed task"],
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
         )
         assigned = alloc.next_task()
         assert identity.render_handle(assigned or {}) == handle
@@ -292,7 +292,7 @@ def test_post_tool_hook_config_requires_driver_capability(tmp_path):
 def test_post_tool_hook_response_renders_pending_steering(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="hook-delivered steering", priority=None, stop=False),
     )
 
@@ -309,7 +309,7 @@ def test_post_tool_hook_response_suppresses_recently_rendered_pending_steering(
 ):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="hook-suppressed steering", priority=None, stop=False),
     )
 
@@ -334,20 +334,20 @@ def test_post_tool_hook_response_renders_new_pending_key_after_suppressed_key(
 ):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="first hook steering", priority=None, stop=False),
     )
     json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
     write_inbox_item(
         tmp_path,
-        "20260101T000000000006Z.txt",
+        "1jN54zJQ.txt",
         compose_inbox_text(body="second hook steering", priority=None, stop=False),
     )
 
     response = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
     context = response["hookSpecificOutput"]["additionalContext"]
 
-    assert "key=20260101T000000000005Z: age=" in context
+    assert "key=1jN54zJP: age=" in context
     assert "(shown earlier; ACK to clear)" in context
     assert "second hook steering" in context
 
@@ -364,7 +364,7 @@ def test_hook_delivered_steering_retires_from_assistant_ack(
         "publish_maxim_hits_as_inbox",
         lambda _repo, _text, **_kwargs: [],
     )
-    key = "20260101T000000000007Z"
+    key = "1jN54zJR"
     inbox_name = f"{key}.txt"
     inbox_text = compose_inbox_text(
         body="hook-delivered ack target", priority=None, stop=False
@@ -432,7 +432,7 @@ def test_post_tool_hook_steering_end_to_end_without_shell_readout(
         "publish_maxim_hits_as_inbox",
         lambda _repo, _text, **_kwargs: [],
     )
-    key = "20260101T000000000008Z"
+    key = "1jN54zJS"
     inbox_name = f"{key}.txt"
     inbox_text = compose_inbox_text(
         body="non-shell hook steering", priority=None, stop=False
@@ -444,9 +444,9 @@ def test_post_tool_hook_steering_end_to_end_without_shell_readout(
     second = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
     second_context = second["hookSpecificOutput"]["additionalContext"]
 
-    assert "key=20260101T000000000008Z: age=" in first_context
+    assert "key=1jN54zJS: age=" in first_context
     assert "non-shell hook steering" in first_context
-    assert "key=20260101T000000000008Z" not in second_context
+    assert "key=1jN54zJS" not in second_context
     assert "non-shell hook steering" not in second_context
 
     token = steering_token(tmp_path)
@@ -533,7 +533,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.tasks.tw.export", fake_export)
     write_inbox_item(
         tmp_path,
-        "20260101T000000000009Z.txt",
+        "1jN54zJT.txt",
         compose_inbox_text(body="pending work", priority=None, stop=False),
     )
     record_maxim_metric_events(
@@ -726,12 +726,12 @@ def test_agent_reply_retires_acked_key_from_stdin(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    write_inbox_item(repo, "1jNmXPHm.txt", "please do the thing")
     assert collect_inbox_items(str(repo))  # pending before reply
     monkeypatch.setattr(
         agent_cli.sys,
         "stdin",
-        io.StringIO("ACK 20260104T000000000004Z: did the thing\n"),
+        io.StringIO("ACK 1jNmXPHm: did the thing\n"),
     )
 
     args = build_parser().parse_args(["agent", "reply"])
@@ -739,7 +739,7 @@ def test_agent_reply_retires_acked_key_from_stdin(tmp_path, monkeypatch):
 
     assert not collect_inbox_items(str(repo))  # the key was retired
     assert any(
-        r.key == "20260104T000000000004Z"
+        r.key == "1jNmXPHm"
         and r.disposition == ACK_DISPOSITION_ACKED
         and "did the thing" in (r.ack_content or "")
         for r in ack_state_records(repo)
@@ -750,10 +750,10 @@ def test_agent_reply_accepts_text_as_positional(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    write_inbox_item(repo, "1jNmXPHm.txt", "please do the thing")
 
     args = build_parser().parse_args(
-        ["agent", "reply", "ACK", "20260104T000000000004Z:", "handled it"]
+        ["agent", "reply", "ACK", "1jNmXPHm:", "handled it"]
     )
     assert agent_cli.handle_agent(args) == 0
     assert not collect_inbox_items(str(repo))
@@ -772,15 +772,12 @@ def test_agent_reply_handles_ack_and_nack_together(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    write_inbox_item(repo, "20260104T000000000004Z.txt", "do X")
-    write_inbox_item(repo, "20260104T000000000005Z.txt", "do Y")
+    write_inbox_item(repo, "1jNmXPHm.txt", "do X")
+    write_inbox_item(repo, "1jNmXPHn.txt", "do Y")
     monkeypatch.setattr(
         agent_cli.sys,
         "stdin",
-        io.StringIO(
-            "ACK 20260104T000000000004Z: shipped X\n"
-            "NACK 20260104T000000000005Z: Y is out of scope\n"
-        ),
+        io.StringIO("ACK 1jNmXPHm: shipped X\nNACK 1jNmXPHn: Y is out of scope\n"),
     )
 
     args = build_parser().parse_args(["agent", "reply"])
@@ -788,5 +785,5 @@ def test_agent_reply_handles_ack_and_nack_together(tmp_path, monkeypatch):
 
     assert not collect_inbox_items(str(repo))  # both retired
     records = {r.key: r.disposition for r in ack_state_records(repo)}
-    assert records["20260104T000000000004Z"] == ACK_DISPOSITION_ACKED
-    assert records["20260104T000000000005Z"] == ACK_DISPOSITION_REFUSED
+    assert records["1jNmXPHm"] == ACK_DISPOSITION_ACKED
+    assert records["1jNmXPHn"] == ACK_DISPOSITION_REFUSED

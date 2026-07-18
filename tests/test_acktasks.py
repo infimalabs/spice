@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_MEMBER = thread_actor_id(ACTOR)
-INBOX_KEY = "20260104T000000000004Z"
+INBOX_KEY = "1jNmXPHm"
 
 
 def _allowed_project_stems() -> list[str]:
@@ -239,7 +239,7 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
 
 
 def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
-    missing_key = "20260104T000000000099Z"
+    missing_key = "1jNmXPKb"
     log = io.StringIO()
 
     watchdog.process_supervised_assistant_message(
@@ -273,7 +273,7 @@ def test_supervised_ack_reports_noop_when_no_key_is_named(task_repo, quiet_super
 def test_supervised_marker_examples_do_not_emit_feedback_or_tasks(
     task_repo, quiet_supervisor
 ):
-    missing_key = "20260104T000000000099Z"
+    missing_key = "1jNmXPKb"
     log = io.StringIO()
 
     watchdog.process_supervised_assistant_message(
@@ -491,7 +491,7 @@ def _claimed_task(title: str) -> str:
     handle = create.add(
         title,
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["steering lands on the active task"],
     )

@@ -38,7 +38,7 @@ def test_task_capture_mints_task_over_loose_then_done_captures_it(remote_task_re
     loose = _make_loose_commit(remote_task_repo, subject="loose fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1
 
-    output = ops.capture(project="task.unit", origin="ack:20260101T000000000000Z")
+    output = ops.capture(project="task.unit", origin="ack:1jN54zJJ")
     handle = output.splitlines()[0].split()[-1]
     row = identity.resolve(handle)
 
@@ -66,7 +66,7 @@ def test_task_capture_can_complete_loose_in_one_shot(remote_task_repo):
 
     output = ops.capture(
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         complete=True,
         validation=["one-shot validation"],
     )
@@ -83,7 +83,7 @@ def test_task_capture_claims_existing_handle_over_loose(remote_task_repo):
     handle = create.add(
         "Pre-filed task awaiting its commit",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["loose commit is folded into this task"],
     )
@@ -102,7 +102,7 @@ def test_task_capture_claims_existing_active_handle_over_loose(remote_task_repo)
     handle = create.add(
         "Active task awaiting loose commit",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["loose commit is folded into the active task"],
         claim=True,
@@ -122,7 +122,7 @@ def test_task_capture_deleted_handle_points_to_new_capture_task(remote_task_repo
     handle = create.add(
         "Deleted task with loose work",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["deleted task recovery is explicit"],
     )
@@ -146,7 +146,7 @@ def test_task_capture_other_claimed_handle_points_to_new_capture_task(
     handle = create.add(
         "Peer claimed task with loose work",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["peer claimed task recovery is explicit"],
     )
@@ -169,7 +169,7 @@ def test_task_done_deleted_claim_points_to_recovery_paths(remote_task_repo):
     handle = create.add(
         "Deleted claimed task with loose work",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["deleted task done recovery is explicit"],
         claim=True,
@@ -199,7 +199,7 @@ def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_rep
         create.add(
             "Dirty claim should not leak",
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             claim=True,
         )
 
@@ -213,7 +213,7 @@ def test_task_add_claim_creates_and_claims_clean_task(task_repo):
     handle = create.add(
         "Clean claim lands",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         claim=True,
     )
     row = identity.resolve(handle)
@@ -226,7 +226,7 @@ def test_task_capture_rejects_handle_with_new_task_fields(remote_task_repo):
     handle = create.add(
         "Existing task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["x"],
     )
@@ -299,14 +299,14 @@ def test_task_done_next_selects_and_claims_follow_on_task(
     current = create.add(
         "Complete before chaining",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["todo"],
         acceptance=["successful completion chains through the allocator"],
     )
     follow_on = create.add(
         "Claim after chained completion",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["todo"],
         acceptance=["the allocator surfaces and claims this follow-on task"],
     )
@@ -332,7 +332,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     handle = create.add(
         "Exercise task phase flow",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["phase flow is covered"],
     )
@@ -383,7 +383,7 @@ def test_task_done_surfaces_git_sync_note(task_repo, monkeypatch):
     handle = create.add(
         "Report tree-same integration",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["tree-same completion is named"],
     )
@@ -412,7 +412,7 @@ def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
     handle = create.add(
         "Stale takeover",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     uuid = identity.uuid_of(identity.resolve(handle))
@@ -465,13 +465,13 @@ def test_task_next_routes_to_live_work_after_deleted_current_claim(
     deleted_handle = create.add(
         "Deleted current claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     ready_handle = create.add(
         "Live work after deleted claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     monkeypatch.setattr(
@@ -492,13 +492,13 @@ def test_task_next_routes_around_deleted_unowned_active_row(task_repo, monkeypat
     handle = create.add(
         "Deleted unowned active row",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="high",
     )
     ready_handle = create.add(
         "Live work after deleted repair candidate",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="low",
     )
     uuid = identity.uuid_of(identity.resolve(handle))
@@ -525,13 +525,13 @@ def test_task_next_takes_over_open_stale_claim_ahead_of_deleted_history(
     deleted_handle = create.add(
         "Deleted stale peer claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="high",
     )
     open_handle = create.add(
         "Open stale peer claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="low",
     )
     deleted_uuid = identity.uuid_of(identity.resolve(deleted_handle))
@@ -565,13 +565,13 @@ def test_task_next_prefers_ready_work_over_stale_takeover(task_repo, monkeypatch
     stale_handle = create.add(
         "Stale claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     ready_handle = create.add(
         "Fresh work",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     stale_uuid = identity.uuid_of(identity.resolve(stale_handle))
@@ -624,7 +624,7 @@ def test_task_done_advances_when_learning_transcript_is_missing(
     handle = create.add(
         "Complete without transcript",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["task done remains non-fragile"],
     )
@@ -651,7 +651,7 @@ def test_task_done_advances_when_learning_judge_is_unavailable(
     handle = create.add(
         "Complete with unavailable learning judge",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["judge skip remains non-fragile"],
     )
@@ -676,7 +676,7 @@ def test_plan_phase_show_injects_board_generation_guidance(task_repo):
     handle = create.add(
         "Plan a task arc",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["plan bookend acceptance exists"],
     )
@@ -694,7 +694,7 @@ def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
     handle = create.add(
         "Design a task arc",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["design", "plan", "todo", "review"],
         acceptance=["design surveys environment"],
     )
@@ -713,7 +713,7 @@ def test_plan_only_done_requires_accepted_child_despite_parent_acceptance(task_r
     handle = create.add(
         "Plan-only task needs child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan"],
         acceptance=["parent acceptance is insufficient for plan-only flow"],
     )
@@ -731,7 +731,7 @@ def test_plan_only_show_requires_accepted_child(task_repo):
     handle = create.add(
         "Show plan-only task guidance",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan"],
         acceptance=["parent acceptance remains descriptive"],
     )
@@ -747,20 +747,20 @@ def test_plan_only_done_completes_with_one_accepted_child(task_repo):
     handle = create.add(
         "Plan-only task has children",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan"],
         acceptance=["parent acceptance does not replace child acceptance"],
     )
     accepted_child = create.add(
         "Accepted child for plan-only task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     planning_child = create.add(
         "Planning sibling for plan-only task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     ops.depends(handle, [accepted_child, planning_child])
@@ -778,7 +778,7 @@ def test_plan_phase_done_advances_with_parent_acceptance_and_no_child(task_repo)
     handle = create.add(
         "Plan has parent acceptance",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
@@ -798,13 +798,13 @@ def test_plan_phase_done_advances_with_accepted_child_and_no_parent_acceptance(
     handle = create.add(
         "Plan delegates acceptance",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     child = create.add(
         "Accepted child for unaccepted plan",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -822,19 +822,19 @@ def test_plan_phase_done_ignores_additional_unaccepted_children(task_repo):
     handle = create.add(
         "Plan has mixed children",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     accepted_child = create.add(
         "Accepted plan child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     planning_child = create.add(
         "Planning child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     ops.depends(handle, [accepted_child, planning_child])
@@ -852,14 +852,14 @@ def test_plan_phase_done_advances_after_board_population(task_repo):
     handle = create.add(
         "Plan has children",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
     child = create.add(
         "Accepted child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -894,7 +894,7 @@ def test_task_capture_blocks_plan_phase_loose_commit(remote_task_repo):
     _make_loose_commit(remote_task_repo, subject="plan implementation commit")
 
     with pytest.raises(SpiceError) as exc_info:
-        ops.capture(project="task.unit", origin="ack:20260101T000000000000Z")
+        ops.capture(project="task.unit", origin="ack:1jN54zJJ")
 
     message = str(exc_info.value)
     assert "task capture blocked" in message
@@ -945,7 +945,7 @@ def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     handle = create.add(
         "Repair partial active claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["active missing-owner claims are repaired"],
     )
@@ -968,7 +968,7 @@ def test_active_claim_phase_reports_claimed_task_phase(task_repo):
     handle = create.add(
         "Report phase of an active claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["active_claim_phase reflects the claimed task's phase"],
     )
@@ -983,7 +983,7 @@ def test_renew_claim_refreshes_stale_own_active_claim(task_repo):
     handle = create.add(
         "Renew my active claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["same-actor renewal refreshes the claim deadline and context"],
     )
@@ -1022,7 +1022,7 @@ def test_renew_claim_without_active_claim_reports_no_active_claim(task_repo):
     handle = create.add(
         "Leave renewal unclaimed",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["renewal without an active claim is a no-op"],
     )
@@ -1039,7 +1039,7 @@ def test_task_next_renewal_does_not_touch_peer_claim(task_repo, monkeypatch):
     peer_handle = create.add(
         "Peer claim stays untouched",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["task next renewal does not refresh another actor"],
     )
@@ -1051,7 +1051,7 @@ def test_task_next_renewal_does_not_touch_peer_claim(task_repo, monkeypatch):
     candidate = create.add(
         "Candidate for current actor",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["current actor can still claim ready work"],
     )
@@ -1070,7 +1070,7 @@ def test_renew_claim_refuses_stale_peer_claim_without_stealing(task_repo, monkey
     handle = create.add(
         "Do not renew peer claim",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["renewal refuses peer claims even when stale"],
     )
@@ -1094,7 +1094,7 @@ def test_renew_claim_refuses_same_actor_different_worktree(task_repo):
     handle = create.add(
         "Do not renew another worktree",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["renewal requires matching actor and worktree"],
     )
@@ -1119,7 +1119,7 @@ def test_renew_claim_reports_missing_and_terminal_rows(task_repo):
     deleted = create.add(
         "Deleted renewal row",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["deleted rows report a renewal reason"],
     )
@@ -1130,7 +1130,7 @@ def test_renew_claim_reports_missing_and_terminal_rows(task_repo):
     completed = create.add(
         "Completed renewal row",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["completed rows report a renewal reason"],
     )
@@ -1156,14 +1156,14 @@ def _plan_task_with_accepted_child() -> str:
     handle = create.add(
         "Plan mutation gate parent",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
     child = create.add(
         "Plan mutation gate child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -1174,7 +1174,7 @@ def _done_learning_task(task_repo: Path, codex_home: Path, turn_id: str) -> str:
     handle = create.add(
         f"Distill learning {turn_id}",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["learning distillation is captured"],
     )

@@ -11,7 +11,7 @@ from typing import Any, Callable
 from spice.agent.lifecycle import utc_now
 from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_records
-from spice.mail.inbox import inbox_item_key_aliases
+from spice.mail.inbox import inbox_item_key
 
 SUBMISSION_STAGES = ("accepted", "received", "completed")
 MAX_TRACKED_SUBMISSIONS = 200
@@ -143,7 +143,7 @@ class SubmissionLifecycleTracker:
                         self._record_received_from_message(lifecycle, receipt)
                         events.append(lifecycle.event_payload("received"))
                     else:
-                        ack_record = ack_records.get(lifecycle.key)
+                        ack_record = ack_records.get(inbox_item_key(lifecycle.key))
                         if ack_record is not None:
                             self._record_received_from_ack_state(lifecycle, ack_record)
                             events.append(lifecycle.event_payload("received"))
@@ -252,8 +252,8 @@ def _message_matches_submission(
 def _key_in_values(key: str, values: Any) -> bool:
     if not isinstance(values, list):
         return False
-    wanted = inbox_item_key_aliases(key)
-    return any(inbox_item_key_aliases(str(value)) & wanted for value in values if value)
+    wanted = inbox_item_key(key)
+    return any(inbox_item_key(str(value)) == wanted for value in values if value)
 
 
 def _message_source(message: dict[str, Any]) -> str:
@@ -271,8 +271,7 @@ def _ack_records_by_key(repo_root: str | Path | None) -> dict[str, Any]:
         return {}
     result: dict[str, Any] = {}
     for record in records:
-        for alias in inbox_item_key_aliases(record.key):
-            result[alias] = record
+        result[inbox_item_key(record.key)] = record
     return result
 
 

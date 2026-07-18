@@ -103,7 +103,7 @@ def test_window_bound_and_recency_cap_evict_stale_rows(tmp_path, monkeypatch):
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T18:30:00.000Z disposition=acked "
-        "key=20260101T183000000000Z text=current request",
+        "key=1jNGBdTX text=current request",
     ]
 
 

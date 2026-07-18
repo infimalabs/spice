@@ -123,7 +123,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     )
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="external renewal steering", priority=None, stop=False),
     )
     ensure_calls: list[dict[str, object]] = []
@@ -187,7 +187,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
     )
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="external renewal steering", priority=None, stop=False),
     )
     ensure_calls: list[dict[str, object]] = []

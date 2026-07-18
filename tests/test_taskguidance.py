@@ -64,7 +64,7 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     handle = create.add(
         "Exercise task next guidance",
         project="task.guidance",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["post-boundary guidance is explicit"],
     )
@@ -102,7 +102,7 @@ def test_plan_phase_advance_makes_allocator_ownership_explicit(task_repo):
     handle = create.add(
         "Plan before implementation ownership",
         project="task.guidance",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         flow=["plan", "todo", "review"],
         acceptance=["plan has an execution-grade contract"],
@@ -127,7 +127,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     handle = create.add(
         "Exercise steer task guidance",
         project="task.guidance",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["steer guidance is explicit-direction only"],
     )
@@ -189,7 +189,7 @@ def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
     handle = create.add(
         "Exercise task claim guidance",
         project="task.guidance",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["claim guidance is explicit"],
     )
@@ -276,7 +276,7 @@ def test_task_next_output_drives_allocated_task_to_completion(task_repo, monkeyp
     next_handle = create.add(
         "Exercise next allocation guidance",
         project="task.guidance",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["next allocation guidance is explicit"],
     )

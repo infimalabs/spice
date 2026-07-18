@@ -111,7 +111,7 @@ def test_maxim_metric_store_persists_aggregate_counts_after_reload(tmp_path):
                 driver_name="codex",
                 thread_id="thread-a",
                 trigger_family="polling",
-                reminder_key="20260703T010000000000Z",
+                reminder_key="1k9h3MxX",
                 reminder_body="[MAXIM] Use a watcher.",
             ),
             MaximMetricEventWrite(
@@ -188,7 +188,7 @@ def test_maxim_metric_recurrence_inputs_keep_trigger_and_reminder_context(tmp_pa
                 driver_name="codex",
                 thread_id="thread-a",
                 trigger_family="poll-loop",
-                reminder_key="20260703T010000000000Z",
+                reminder_key="1k9h3MxX",
                 reminder_body="[MAXIM] Use a watcher.",
             ),
             MaximMetricEventWrite(
@@ -241,7 +241,7 @@ def test_maxim_metric_recurrence_inputs_keep_trigger_and_reminder_context(tmp_pa
             "thread-a",
             "poll-loop",
             "",
-            "20260703T010000000000Z",
+            "1k9h3MxX",
             "[MAXIM] Use a watcher.",
         ),
         (
@@ -282,7 +282,7 @@ def test_maxim_recurrence_counts_only_later_fires_inside_horizon(tmp_path):
         [
             MaximMetricEventWrite(
                 MAXIM_EVENT_PUBLISHED,
-                reminder_key="20260703T010000000000Z",
+                reminder_key="1k9h3MxX",
                 reminder_body="[MAXIM] Use a watcher.",
                 **shared,
             )
@@ -367,7 +367,7 @@ def _write_report_metric_fixture(repo) -> None:
     _record_metric_event(
         repo,
         MAXIM_EVENT_PUBLISHED,
-        reminder_key="20260703T010000000000Z",
+        reminder_key="1k9h3MxX",
         reminder_body="[MAXIM] Use a watcher.",
         now=110.0,
         **shared,

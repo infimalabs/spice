@@ -12,7 +12,7 @@ from tests.test_tasks import ACTOR_A, task_repo
 
 __all__ = ["task_repo"]
 
-ACK_KEY = "20260104T000000000004Z"
+ACK_KEY = "1jNmXPHm"
 
 
 def _seed_task(title: str = "Provenance root") -> str:
@@ -46,8 +46,8 @@ def test_origin_accepts_ack_task_and_bare_forms(task_repo):
     bare_ack = create.add(
         "Bare ack key auto-realms",
         project="task.unit",
-        # Transcribed keys sometimes drop the trailing Z; canonicalized back.
-        origin=ACK_KEY[:-1],
+        # A bare inbox-key-shaped value lands in the ack realm without a prefix.
+        origin=ACK_KEY,
         priority="medium",
         acceptance=["bare ack"],
     )

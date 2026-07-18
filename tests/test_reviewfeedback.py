@@ -16,7 +16,7 @@ from spice.worktrees import WorktreeRecord
 def _reviewed_row() -> dict[str, object]:
     return {
         "uuid": "reviewed-uuid",
-        "incepted": "20260102T000000000001Z",
+        "incepted": "1jNJvRyn",
         "project": "task.review",
         "description": "Reviewed task",
         "review_author": "agent-a",
@@ -90,7 +90,7 @@ def test_review_feedback_delivers_deduped_review_guidance(tmp_path, monkeypatch)
     assert "Priority:" not in items[0].text
     assert body == "\n".join(
         [
-            "Peer feedback for REVIEW-20260102T000000000001Z:",
+            "Peer feedback for REVIEW-1jNJvRyn:",
             "",
             "> needs coverage",
             "",

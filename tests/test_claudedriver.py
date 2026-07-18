@@ -445,7 +445,7 @@ def test_claude_normalizes_assistant_text_after_thinking_block():
             "stop_reason": "end_turn",
             "content": [
                 {"type": "thinking", "thinking": "working"},
-                {"type": "text", "text": "ACK 20260614T003000000000Z: done."},
+                {"type": "text", "text": "ACK 1k5MHYgN: done."},
             ],
         },
     }
@@ -455,7 +455,7 @@ def test_claude_normalizes_assistant_text_after_thinking_block():
     assert payload["type"] == "message"
     assert payload["role"] == "assistant"
     assert payload["phase"] == "final_answer"
-    assert payload["content"][0]["text"] == "ACK 20260614T003000000000Z: done."
+    assert payload["content"][0]["text"] == "ACK 1k5MHYgN: done."
 
 
 def test_claude_normalizes_tool_use_into_function_call():

@@ -74,7 +74,7 @@ def test_steering_token_concurrent_callers_share_one_minted_value(
 def test_readout_wraps_the_block_in_the_token(tmp_path):
     _init_git_repo(tmp_path)
     token = steering_token(tmp_path)
-    write_inbox_item(tmp_path, "20260104T000000000004Z.txt", "do the thing")
+    write_inbox_item(tmp_path, "1jNmXPHm.txt", "do the thing")
     buffer = io.StringIO()
 
     print_inbox_readout(tmp_path, displayed_keys=set(), file=buffer)

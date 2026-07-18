@@ -84,7 +84,7 @@ def test_task_generating_studies_share_deferred_origin_flags():
             "--create-tasks",
             "--deferred",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
         for action in actions
     ]
@@ -97,7 +97,7 @@ def test_task_generating_studies_share_deferred_origin_flags():
     assert controls == [
         studies_cli.StudyTaskCreationControls(
             deferred=True,
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             print_created=True,
         )
     ] * len(actions)
@@ -166,7 +166,7 @@ def test_task_generator_registry_drives_parser_and_dispatch_controls(
                 "--create-tasks",
                 "--deferred",
                 "--origin",
-                "ack:20260101T000000000000Z",
+                "ack:1jN54zJJ",
                 "--json",
             ]
         )
@@ -174,7 +174,7 @@ def test_task_generator_registry_drives_parser_and_dispatch_controls(
 
     expected_controls = studies_cli.StudyTaskCreationControls(
         deferred=True,
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         print_created=False,
     )
     assert generated == {action: (action, tmp_path) for action in registry}
@@ -410,7 +410,7 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
             "--create-tasks",
             "--deferred",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -423,7 +423,7 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
     assert options == {
         "controls": studies_cli.StudyTaskCreationControls(
             deferred=True,
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             print_created=False,
         )
     }

@@ -589,7 +589,7 @@ def test_lanes_subscribe_replies_once_with_activation_per_lane(tmp_path, monkeyp
             entry["payload"]["statusLine"]["targetId"] for entry in frame["lanes"]
         ] == ["lane-a", "lane-b"]
         assert frame["lanes"][0]["payload"]["ackContexts"] == [
-            {"key": "20260101T000000000001Z", "targetId": "lane-a"}
+            {"key": "1jN54zJK", "targetId": "lane-a"}
         ]
         assert frame["lanes"][0]["payload"]["messages"][0]["kind"] == "task"
         assert set(batch_session.subscriptions) == {"lane-a", "lane-b"}
@@ -1221,9 +1221,7 @@ def _multi_lane_callbacks(
     def default_messages_payload(bus_target, **_kwargs):
         return {
             "messages": [{"key": bus_target.id + "-m1", "kind": "task"}],
-            "ackContexts": [
-                {"key": "20260101T000000000001Z", "targetId": bus_target.id}
-            ],
+            "ackContexts": [{"key": "1jN54zJK", "targetId": bus_target.id}],
             "statusLine": {"targetId": bus_target.id},
         }
 
@@ -1277,7 +1275,7 @@ def _write_inbox_item_from_subprocess(repo: Path) -> None:
                 "from spice.mail.inbox import compose_inbox_text, write_inbox_item\n"
                 "repo = Path(__import__('sys').argv[1])\n"
                 "text = compose_inbox_text(body='external steering', priority=None, stop=False)\n"
-                "write_inbox_item(repo, '20260101T000000000001Z.txt', text)\n"
+                "write_inbox_item(repo, '1jN54zJK.txt', text)\n"
             ),
             str(repo),
         ],

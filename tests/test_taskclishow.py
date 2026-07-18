@@ -22,7 +22,7 @@ from spice.tasks import (
 
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-ACK_ORIGIN = "ack:20260101T000000000000Z"
+ACK_ORIGIN = "ack:1jN54zJJ"
 
 
 SHOW_DEFAULT_CACHED_INPUT_TOKENS = 10

@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-ORIGIN = "ack:20260713T000000000000Z"
+ORIGIN = "ack:1kCxkWCN"
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +62,7 @@ def test_coordination_state_reopens_from_linked_worktree(tmp_path, monkeypatch):
         repo,
         [
             AckStateWrite(
-                key="20260713T000001000000Z",
+                key="1kCxkWZc",
                 inbox_name="shared.txt",
                 text="shared ACK state",
             )

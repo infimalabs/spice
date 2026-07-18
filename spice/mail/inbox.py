@@ -1,8 +1,9 @@
 """The durable filesystem inbox: operator steering an agent must ACK.
 
 Items live under `.spice/inbox/*.txt`, one file per message, named by a
-UTC-microsecond timestamp key. Publish is atomic (tmp + fsync + hardlink +
-directory fsync); collisions increment a suffix. Reads never clear items. ACK
+base52 moment stamp key (the same order-preserving stamp task handles and the
+steering token use). Publish is atomic (tmp + fsync + hardlink + directory
+fsync); collisions increment a suffix. Reads never clear items. ACK
 is the only normal retirement path: ACKed items are recorded in
 `spiceacks.sqlite3` with their text and durable attachment references, then
 removed from pending input. Items older than 24 hours expire in place.
@@ -15,7 +16,7 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote
@@ -43,6 +44,7 @@ from spice.paths import (
     fsync_directory,
     worktree_inbox_dir,
 )
+from spice.tasks import identity
 
 INBOX_ARCHIVE_DIRNAME = "archive"
 INBOX_DEADLETTER_DIRNAME = "deadletter"
@@ -547,9 +549,9 @@ def inbox_ack_state_context_rows(items: Sequence[InboxItem]) -> list[str]:
 def _ack_state_record_age_epoch(record: Any) -> float | None:
     """The record's own age anchor: archived_at, or its key timestamp.
 
-    A positive ``archived_at`` records when the row entered ack state. Legacy
-    rows migrated in without one (default 0) fall back to the inbox key, which
-    is itself a UTC timestamp. Either beats the shared store file's mtime.
+    A positive ``archived_at`` records when the row entered ack state. Rows
+    without one (default 0) fall back to the inbox key, which encodes its mint
+    moment. Either beats the shared store file's mtime.
     """
     if record.archived_at > 0:
         return float(record.archived_at)
@@ -557,11 +559,10 @@ def _ack_state_record_age_epoch(record: Any) -> float | None:
 
 
 def _inbox_key_epoch(name: str) -> float | None:
-    try:
-        parsed = datetime.strptime(inbox_item_key(name), "%Y%m%dT%H%M%S%fZ")
-    except ValueError:
+    stamp = inbox_item_key(name).split("-", 1)[0]
+    if not identity.INCEPTED_RE.match(stamp):
         return None
-    return parsed.replace(tzinfo=UTC).timestamp()
+    return identity.incepted_datetime(stamp).timestamp()
 
 
 def _ack_state_record_attachments(record: Any) -> tuple[InboxAttachment, ...]:
@@ -613,16 +614,6 @@ def inbox_deadletter_context_rows(items: Sequence[InboxItem]) -> list[str]:
 def inbox_item_key(name: str) -> str:
     path = Path(name)
     return path.stem or path.name
-
-
-def inbox_item_key_aliases(name: str) -> set[str]:
-    # Keys are UTC `…Z`; agents transcribing an ACK sometimes drop the `Z`, so
-    # the stem without it is an accepted alias.
-    key = inbox_item_key(name)
-    aliases = {key}
-    if key.endswith("Z"):
-        aliases.add(key[:-1])
-    return aliases
 
 
 def inbox_payload_items(items: Sequence[InboxItem]) -> list[dict[str, str]]:
@@ -678,9 +669,9 @@ def deadletter_inbox_item(
 ) -> str | None:
     if not repo_root or not inbox_key:
         return None
-    wanted = inbox_item_key_aliases(inbox_key)
+    wanted = inbox_item_key(inbox_key)
     for item in collect_inbox_items(repo_root):
-        if not (inbox_item_key_aliases(item.name) & wanted):
+        if inbox_item_key(item.name) != wanted:
             continue
         consume_inbox_items(
             [
@@ -709,9 +700,9 @@ def requeue_deadlettered_inbox_item(
 ) -> Path | None:
     if not repo_root or not inbox_key:
         return None
-    wanted = inbox_item_key_aliases(inbox_key)
+    wanted = inbox_item_key(inbox_key)
     for item in collect_deadlettered_inbox_items(repo_root, limit=INBOX_COLLISION_MAX):
-        if not (inbox_item_key_aliases(item.name) & wanted):
+        if inbox_item_key(item.name) != wanted:
             continue
         attachments: list[InboxAttachmentInput] = []
         for attachment in item.attachments:
@@ -1114,11 +1105,14 @@ def compose_inbox_text(
 
 
 def default_inbox_name() -> str:
-    return f"{inbox_timestamp()}.txt"
+    return f"{mint_inbox_key()}.txt"
 
 
-def inbox_timestamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+def mint_inbox_key() -> str:
+    # The empty collision set keeps publish off the task export path; two mints
+    # inside one millisecond collide on the filename and pick up a `-N` suffix
+    # via `_inbox_collision_path`.
+    return identity.mint_incepted(existing=set())
 
 
 def valid_inbox_name(name: str) -> bool:

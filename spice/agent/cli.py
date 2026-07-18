@@ -186,7 +186,7 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
         extract_ack_segments_from_text,
         extract_nack_segments_from_text,
     )
-    from spice.mail.inbox import inbox_item_key_aliases
+    from spice.mail.inbox import inbox_item_key
 
     text = (
         " ".join(args.text).strip() if getattr(args, "text", None) else sys.stdin.read()
@@ -205,8 +205,8 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
         repo_root, list(nacks), nack_text=text, nack_content_by_key=nacks
     )
     _log_reply_card(repo_root, text, list(acks), list(nacks))
-    _print_reply_outcomes("ack", acks, retired, inbox_item_key_aliases)
-    _print_reply_outcomes("nack", nacks, refused, inbox_item_key_aliases)
+    _print_reply_outcomes("ack", acks, retired, inbox_item_key)
+    _print_reply_outcomes("nack", nacks, refused, inbox_item_key)
     return 0
 
 
@@ -231,12 +231,10 @@ def _log_reply_card(
     )
 
 
-def _print_reply_outcomes(label, content_by_key, retired, aliases_of) -> None:
-    retired_aliases: set[str] = set()
-    for key in retired:
-        retired_aliases |= aliases_of(key)
+def _print_reply_outcomes(label, content_by_key, retired, canonical_key) -> None:
+    retired_keys = {canonical_key(key) for key in retired}
     for key in content_by_key:
-        matched = bool(aliases_of(key) & retired_aliases)
+        matched = canonical_key(key) in retired_keys
         print(f"{label} {key}: {'retired' if matched else 'no pending item matched'}")
 
 

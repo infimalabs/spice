@@ -69,13 +69,13 @@ def test_parse_add_batch_accrues_every_collection_field_in_input_order(task_repo
         "First batch dependency",
         project="task.unit",
         acceptance=["first dependency exists"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     second_dep = create.add(
         "Second batch dependency",
         project="task.unit",
         acceptance=["second dependency exists"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
 
     requests = create.parse_add_batch(
@@ -111,8 +111,8 @@ def test_parse_add_batch_accrues_every_collection_field_in_input_order(task_repo
         ("due", "2026-07-01", "2026-07-02"),
         (
             "origin",
-            "ack:20260101T000000000000Z",
-            "ack:20260101T000000000001Z",
+            "ack:1jN54zJJ",
+            "ack:1jN54zJK",
         ),
         ("priority", "high", "low"),
         ("project", "task.unit", "task.cli"),
@@ -188,9 +188,7 @@ def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
 
 def test_parse_add_batch_accepts_missing_acceptance(task_repo):
     requests = create.parse_add_batch(
-        [
-            "TASK title=Plan batch | project=task.unit | origin=ack:20260101T000000000000Z"
-        ]
+        ["TASK title=Plan batch | project=task.unit | origin=ack:1jN54zJJ"]
     )
 
     assert requests == [
@@ -198,7 +196,7 @@ def test_parse_add_batch_accepts_missing_acceptance(task_repo):
             title="Plan batch",
             project="task.unit",
             acceptance=(),
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
         )
     ]
     assert tw.export(["status:pending"]) == []
@@ -243,7 +241,7 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
         [
             "title=Created batch | project=task.unit | description=Batch body | "
             "priority=low | acceptance=Batch creation still works | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ]
     )
     row = identity.resolve(handles[0])
@@ -260,7 +258,7 @@ def test_add_batch_creates_multiple_acceptance_criteria(task_repo):
         [
             "title=Created multi-accept batch | project=task.unit | "
             "acceptance=First criterion | acceptance=Second criterion | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ]
     )
     row = identity.resolve(handles[0])
@@ -273,7 +271,7 @@ def test_cli_surface_batch_missing_acceptance_routes_to_plan(task_repo):
     handles = create.add_batch(
         [
             "title=Plan routed batch | project=task.unit | due=2026-08-01 | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -284,7 +282,7 @@ def test_cli_surface_batch_missing_acceptance_routes_to_plan(task_repo):
     assert row["phase"] == "plan"
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert not str(row.get("acceptance") or "")
-    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert row["origin"] == "ack:1jN54zJJ"
     assert str(row.get("due") or "").startswith("20260801")
 
 
@@ -292,7 +290,7 @@ def test_cli_surface_batch_missing_acceptance_honors_explicit_flow(task_repo):
     handles = create.add_batch(
         [
             "title=Explicit flow batch | project=task.unit | flow=todo,review | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -309,7 +307,7 @@ def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_rep
         [
             "title=Adopting explicit plan batch | project=task.unit | "
             "flow=todo,plan,review | acceptance=Explicit flow is intentional | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -320,7 +318,7 @@ def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_rep
     assert row["phase"] == "todo"
     assert claimstate.phases_of(row) == ["todo", "plan", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
-    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert row["origin"] == "ack:1jN54zJJ"
     assert any(
         "adopting" in ann and "self-correction required" in ann for ann in annotations
     )
@@ -331,7 +329,7 @@ def test_add_batch_deferred_field_creates_waiting_task(task_repo):
         [
             "TASK title=Waiting batch | project=task.unit | "
             "acceptance=Batch deferred until wake | deferred=true | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ]
     )
     row = identity.resolve(handles[0])
@@ -346,7 +344,7 @@ def test_add_batch_can_mark_cli_creation_surface(task_repo):
         [
             "title=CLI marked batch | project=task.unit | "
             "acceptance=Batch task card source is durable | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -366,7 +364,7 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
         [
             "TASK title=Visible batch | project=task.batch | "
             "acceptance=Batch creation updates routing | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ]
     )
     row = identity.resolve(results[0].handle)
@@ -384,10 +382,7 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
 
 def test_add_batch_results_carry_suspect_wording_matches(task_repo):
     results = create.add_batch_results(
-        [
-            "TASK title=Adopting batch | project=task.unit | "
-            "origin=ack:20260101T000000000000Z"
-        ]
+        ["TASK title=Adopting batch | project=task.unit | origin=ack:1jN54zJJ"]
     )
 
     assert results[0].wording_matches == (

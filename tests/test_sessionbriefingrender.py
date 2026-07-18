@@ -81,7 +81,7 @@ def test_briefing_deduplicates_identical_asks_and_finals(tmp_path, monkeypatch):
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T00:05:00.000Z disposition=acked "
-        "key=20260101T000500000000Z repeat_count=2 text=repeat request",
+        "key=1jN576FX repeat_count=2 text=repeat request",
     ]
     assert _section_lines(briefing, "Latest Final") == [
         "Latest Final",
@@ -133,8 +133,8 @@ def test_briefing_renders_only_recent_consumed_ack_state_trailers(
     tmp_path, monkeypatch
 ):
     repo = _init_git_repo(tmp_path / "repo")
-    stale_key = "20260704T054409667615Z"
-    recent_key = "20260708T054409667615Z"
+    stale_key = "1k9yC6B2"
+    recent_key = "1kBsT0qt"
     stale_name = f"{stale_key}.txt"
     recent_name = f"{recent_key}.txt"
     stale_age = briefing_module.DEFAULT_RECENCY_MAX_SECONDS + 60
@@ -183,18 +183,18 @@ def test_briefing_renders_only_recent_consumed_ack_state_trailers(
         "  source=ack_state; status=already_consumed_operator_steering; store=sqlite",
     ]
     assert len(inbox) == 5
-    assert inbox[4].startswith("  refused_inbox key=20260708T054409667615Z age=")
+    assert inbox[4].startswith("  refused_inbox key=1kBsT0qt age=")
     assert inbox[4].endswith(" text=recent refusal")
     assert _section_lines(briefing, "Steering") == [
         "Steering",
-        "  2026-07-08T05:44:09.667Z disposition=refused "
-        "key=20260708T054409667615Z text=recent refusal",
+        "  2026-07-08T05:44:10.282Z disposition=refused "
+        "key=1kBsT0qt text=recent refusal",
     ]
 
 
 def test_briefing_renders_steering_before_live_task_state(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
-    key = "20260101T000001000000Z"
+    key = "1jN54zgX"
     record_acked_inbox_items(
         repo,
         [
@@ -236,7 +236,7 @@ def test_briefing_renders_steering_before_live_task_state(tmp_path, monkeypatch)
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T00:00:01.000Z disposition=acked "
-        "key=20260101T000001000000Z text=operator steering "
+        "key=1jN54zgX text=operator steering "
         "response=agent acknowledged",
     ]
     assert lines.index("Steering") < lines.index("Task Plane")
@@ -250,7 +250,7 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     _write_filter_transcript(transcript)
     _record_ack_state_ask(
         repo,
-        "20260101T000005000000Z",
+        "1jN5518S",
         "needle request",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:05Z",
@@ -272,8 +272,7 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "tools=apply_patch" in briefing
     assert _section_lines(briefing, "Steering") == [
         "Steering",
-        "  2026-01-01T00:00:05.000Z disposition=acked "
-        "key=20260101T000005000000Z text=needle request",
+        "  2026-01-01T00:00:05.000Z disposition=acked key=1jN5518S text=needle request",
     ]
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
@@ -285,7 +284,7 @@ def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
     _write_filter_transcript(transcript)
     _record_ack_state_ask(
         repo,
-        "20260101T000005000000Z",
+        "1jN5518S",
         "needle request",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:05Z",
@@ -308,8 +307,7 @@ def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
     assert payload.filters.tools == ("apply_patch",)
     assert _section_lines(rendered, "Steering") == [
         "Steering",
-        "  2026-01-01T00:00:05.000Z disposition=acked "
-        "key=20260101T000005000000Z text=needle request",
+        "  2026-01-01T00:00:05.000Z disposition=acked key=1jN5518S text=needle request",
     ]
     assert rendered == render_briefing(
         [transcript],
@@ -392,7 +390,7 @@ def test_sweep_payload_renders_precomputed_windows(tmp_path, monkeypatch):
     )
     _record_ack_state_ask(
         repo,
-        "20260101T000006000000Z",
+        "1jN551Wh",
         "after compaction",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:06Z",
@@ -446,7 +444,7 @@ def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkey
         ),
         encoding="utf-8",
     )
-    pending_key = "20260101T000001000000Z"
+    pending_key = "1jN54zgX"
     pending = write_inbox_item(
         repo,
         f"{pending_key}.txt",
@@ -455,14 +453,14 @@ def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkey
     assert pending.name == f"{pending_key}.txt"
     _record_ack_state_ask(
         repo,
-        "20260101T000002000000Z",
+        "1jN5502m",
         "refused request",
         ACK_DISPOSITION_REFUSED,
         "2026-01-01T00:00:02Z",
     )
     _record_ack_state_ask(
         repo,
-        "20260101T000003000000Z",
+        "1jN550Q0",
         "acked request",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:03Z",
@@ -473,12 +471,11 @@ def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkey
 
     assert _section_lines(briefing, "Steering") == [
         "Steering",
-        "  2026-01-01T00:00:03.000Z disposition=acked "
-        "key=20260101T000003000000Z text=acked request",
+        "  2026-01-01T00:00:03.000Z disposition=acked key=1jN550Q0 text=acked request",
         "  2026-01-01T00:00:02.000Z disposition=refused "
-        "key=20260101T000002000000Z text=refused request",
+        "key=1jN5502m text=refused request",
         "  2026-01-01T00:00:01.000Z disposition=pending "
-        "key=20260101T000001000000Z text=pending request",
+        "key=1jN54zgX text=pending request",
     ]
 
 
@@ -490,7 +487,7 @@ def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkey
     transcript.write_text("", encoding="utf-8")
     _record_scoped_ack_state_ask(
         repo,
-        "20260101T000001000000Z",
+        "1jN54zgX",
         "current lane request",
         ACK_DISPOSITION_ACKED,
         ack_content="captured current lane request",
@@ -498,7 +495,7 @@ def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkey
     )
     _record_scoped_ack_state_ask(
         repo,
-        "20260101T000002000000Z",
+        "1jN5502m",
         "other lane request",
         ACK_DISPOSITION_ACKED,
         ack_content="captured other lane request",
@@ -506,7 +503,7 @@ def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkey
     )
     _record_scoped_ack_state_ask(
         repo,
-        "20260101T000003000000Z",
+        "1jN550Q0",
         "legacy unscoped request",
         ACK_DISPOSITION_ACKED,
         ack_content="captured legacy request",
@@ -523,7 +520,7 @@ def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkey
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T00:00:01.000Z disposition=acked "
-        "key=20260101T000001000000Z text=current lane request "
+        "key=1jN54zgX text=current lane request "
         "response=captured current lane request",
     ]
 
@@ -556,14 +553,14 @@ def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypat
     )
     _record_ack_state_ask(
         repo,
-        "20260101T000005000000Z",
+        "1jN5518S",
         "pre-compaction request",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:05Z",
     )
     _record_ack_state_ask(
         repo,
-        "20260101T000015000000Z",
+        "1jN554rm",
         "post-compaction request",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:15Z",
@@ -573,7 +570,7 @@ def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypat
     sweep = render_sweep([transcript], count=1)
 
     assert (
-        "  ask acked 2026-01-01T00:00:15.000Z key=20260101T000015000000Z post-compaction request"
+        "  ask acked 2026-01-01T00:00:15.000Z key=1jN554rm post-compaction request"
         in sweep
     )
 
@@ -665,11 +662,11 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T18:30:00.000Z disposition=acked "
-        "key=20260101T183000000000Z text=inside current count window",
+        "key=1jNGBdTX text=inside current count window",
         "  2026-01-01T17:30:00.000Z disposition=acked "
-        "key=20260101T173000000000Z text=inside second count window",
+        "key=1jNFj26m text=inside second count window",
         "  2026-01-01T16:30:00.000Z disposition=acked "
-        "key=20260101T163000000000Z text=inside first count window",
+        "key=1jNFCQm0 text=inside first count window",
     ]
 
 
@@ -702,7 +699,7 @@ def test_briefing_default_horizon_starts_at_oldest_selected_window(
     assert _section_lines(briefing, "Steering") == [
         "Steering",
         "  2026-01-01T10:30:00.000Z disposition=acked "
-        "key=20260101T103000000000Z text=young current request",
+        "key=1jNBFpbN text=young current request",
     ]
 
 
@@ -844,7 +841,7 @@ def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
     assert "Window 0 (from 2026-01-01T15:00:00.000Z)" in sweep
     assert (
         "ask acked 2026-01-01T15:00:00.000Z "
-        "key=20260101T150000000000Z operator explicit start request"
+        "key=1jNDT1jr operator explicit start request"
     ) in sweep
 
 
@@ -878,8 +875,7 @@ def test_sweep_uses_last_requested_compaction_windows(tmp_path, monkeypatch):
     ) in sweep
     assert "Window 0 (from 2026-01-01T10:00:00.000Z)" in sweep
     assert (
-        "ask acked 2026-01-01T10:05:00.000Z "
-        "key=20260101T100500000000Z recent request one"
+        "ask acked 2026-01-01T10:05:00.000Z key=1jNB37sD recent request one"
     ) in sweep
 
 
@@ -941,11 +937,10 @@ def test_sweep_deduplicates_and_interleaves_window_rows(tmp_path, monkeypatch):
 
     assert sum("repeat request" in line for line in row_lines) == 1
     assert row_lines == [
-        "  ask acked 2026-01-01T00:03:00.000Z "
-        "key=20260101T000300000000Z distinct request",
+        "  ask acked 2026-01-01T00:03:00.000Z key=1jN56Fsr distinct request",
         "  final 2026-01-01T00:03:00.000Z third final",
         "  ask acked 2026-01-01T00:02:00.000Z "
-        "key=20260101T000200000000Z repeat_count=2 repeat request",
+        "key=1jN55qh0 repeat_count=2 repeat request",
     ]
 
 
@@ -982,6 +977,5 @@ def test_sweep_horizon_caps_requested_count(tmp_path, monkeypatch):
     ) in sweep
     assert "Window 4 (from 2026-01-01T05:00:00.000Z)" in sweep
     assert (
-        "ask acked 2026-01-01T05:30:00.000Z "
-        "key=20260101T053000000000Z cap current window"
+        "ask acked 2026-01-01T05:30:00.000Z key=1jN7nnnX cap current window"
     ) in sweep

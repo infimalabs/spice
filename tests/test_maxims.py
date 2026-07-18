@@ -581,7 +581,7 @@ def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
     monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
     write_inbox_item(
         repo,
-        "20260103T000000000001Z.txt",
+        "1jNXjwdF.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
     process = _FakeProcess(stdout=io.StringIO("codex\nalpha beta\nexec\n"))
@@ -590,7 +590,7 @@ def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
     watchdog._tee_agent_stdout(process, repo, log_path)
 
     items = collect_inbox_items(repo)
-    assert [item.name for item in items] == ["20260103T000000000001Z.txt"]
+    assert [item.name for item in items] == ["1jNXjwdF.txt"]
     assert "operator steering" in items[0].text
     assert "spice maxim supervisor cleanup discarded inbox:" in log_path.read_text(
         encoding="utf-8"

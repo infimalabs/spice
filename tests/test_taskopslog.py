@@ -155,7 +155,7 @@ def test_claim_baseline_reports_only_post_claim_edits(task_repo):
     handle = create.add(
         "Baseline probe task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["initial criterion"],
         priority="L",
     )
@@ -284,7 +284,7 @@ def _claimed_task(*, priority: str) -> str:
     handle = create.add(
         "Opslog probe task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["initial criterion"],
         priority=priority,
     )

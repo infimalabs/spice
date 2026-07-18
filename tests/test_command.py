@@ -289,7 +289,7 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
     claim_phase = _configure_command_working_state(tmp_path, monkeypatch)
     write_inbox_item(
         tmp_path,
-        "20260101T000000000010Z.txt",
+        "1jN54zJV.txt",
         compose_inbox_text(body="pending command work", priority=None, stop=False),
     )
     _record_command_working_state_maxim(tmp_path, "fallbacks")
@@ -310,7 +310,7 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
 
     write_inbox_item(
         tmp_path,
-        "20260101T000000000011Z.txt",
+        "1jN54zJW.txt",
         compose_inbox_text(
             body="second pending command work", priority=None, stop=False
         ),
@@ -754,7 +754,7 @@ def test_shadow_environment_reinjection_is_idempotent(tmp_path):
 def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
     now = [0.0]
@@ -791,7 +791,7 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
 def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(
             body="first steering",
             priority="critical",
@@ -824,7 +824,7 @@ def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
     now[0] = 5.0
     write_inbox_item(
         tmp_path,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(body="second steering", priority=None, stop=False),
     )
     injector.inject(force=False)
@@ -848,7 +848,7 @@ def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
 def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(
             body="No separate task is needed for the maxim itself.",
             priority="maxim",
@@ -876,7 +876,7 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
 ):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000007Z.txt",
+        "1jN54zJR.txt",
         compose_inbox_text(body="payload steering", priority=None, stop=False),
     )
     monkeypatch.setattr(
@@ -904,7 +904,7 @@ def test_post_tool_hook_payload_keeps_inbox_without_context_pressure(
 ):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000008Z.txt",
+        "1jN54zJS.txt",
         compose_inbox_text(body="post-tool steering", priority=None, stop=False),
     )
 
@@ -962,7 +962,7 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
         thread.start()
         write_inbox_item(
             tmp_path,
-            "20260101T000000000003Z.txt",
+            "1jN54zJM.txt",
             compose_inbox_text(body="late steering", priority=None, stop=False),
         )
         output = _eventually(lambda: stderr.getvalue(), contains="late steering")
@@ -976,7 +976,7 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
 
 
 def test_side_channel_stream_hello_uses_inbox_signature_shape(tmp_path):
-    signature = (("20260101T000000000001Z.txt", 123, 45),)
+    signature = (("1jN54zJK.txt", 123, 45),)
 
     hello = wrap.agent_side_channel_hello(
         tmp_path,
@@ -993,16 +993,14 @@ def test_side_channel_stream_hello_uses_inbox_signature_shape(tmp_path):
         "cwd": os.getcwd(),
         "repoRoot": str(tmp_path),
         "streamUntilParentExit": 321,
-        "initialInboxSignature": [["20260101T000000000001Z.txt", 123, 45]],
+        "initialInboxSignature": [["1jN54zJK.txt", 123, 45]],
     }
 
 
 def test_side_channel_notice_queue_consumes_once(tmp_path):
-    notice = supervisor_feedback_line(
-        "task.created", handles=["ACKS-20260101T000000000001Z"]
-    )
+    notice = supervisor_feedback_line("task.created", handles=["ACKS-1jN54zJK"])
     sidechannelnotify.publish_side_channel_feedback(
-        tmp_path, "task.created", handles=["ACKS-20260101T000000000001Z"]
+        tmp_path, "task.created", handles=["ACKS-1jN54zJK"]
     )
 
     first = sidechannelnotify.consume_side_channel_notices(tmp_path)
@@ -1017,11 +1015,9 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
 ):
     stderr = io.StringIO()
     monkeypatch.chdir(tmp_path)
-    notice = supervisor_feedback_line(
-        "task.created", handles=["ACKS-20260101T000000000002Z"]
-    )
+    notice = supervisor_feedback_line("task.created", handles=["ACKS-1jN54zJL"])
     sidechannelnotify.publish_side_channel_feedback(
-        tmp_path, "task.created", handles=["ACKS-20260101T000000000002Z"]
+        tmp_path, "task.created", handles=["ACKS-1jN54zJL"]
     )
 
     with sidechannel.AgentSideChannelServer(tmp_path):
@@ -1035,12 +1031,12 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
             },
         )
         thread.start()
-        output = _eventually(lambda: stderr.getvalue(), contains="000000000002Z")
+        output = _eventually(lambda: stderr.getvalue(), contains="1jN54zJL")
 
     thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
     assert "Supervisor Feedback" in output
     assert notice in output
-    assert output.count("000000000002Z") == 1
+    assert output.count("1jN54zJL") == 1
     assert not thread.is_alive()
 
 
@@ -1115,7 +1111,7 @@ def test_side_channel_streams_to_each_connection_without_cross_suppression(
     monkeypatch.chdir(tmp_path)
     write_inbox_item(
         tmp_path,
-        "20260101T000000000004Z.txt",
+        "1jN54zJN.txt",
         compose_inbox_text(body="multi connection steering", priority=None, stop=False),
     )
     stderr_a = io.StringIO()
@@ -1189,7 +1185,7 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
         assert registration_started.wait(timeout=1.0)
         write_inbox_item(
             tmp_path,
-            "20260101T000000000004Z.txt",
+            "1jN54zJN.txt",
             compose_inbox_text(body="runner steering", priority=None, stop=False),
         )
         allow_registration.set()
@@ -1207,7 +1203,7 @@ def test_run_agent_command_does_not_duplicate_initial_side_channel_with_watch(
     monkeypatch.chdir(tmp_path)
     write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="initial steering", priority=None, stop=False),
     )
     stderr = io.StringIO()
@@ -1231,11 +1227,11 @@ def test_run_agent_command_delivers_interleaved_initial_inbox_row_once(
     monkeypatch.chdir(tmp_path)
     initial = write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="initial snapshot steering", priority=None, stop=False),
     )
     initial_stat = initial.stat()
-    late_name = "20260101T000000000006Z.txt"
+    late_name = "1jN54zJQ.txt"
     original_print = inbox_readout.print_inbox_readout
     original_start = wrap.start_agent_side_channel_watch
     injected = False
@@ -1289,7 +1285,7 @@ def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(
     monkeypatch.chdir(tmp_path)
     write_inbox_item(
         tmp_path,
-        "20260101T000000000006Z.txt",
+        "1jN54zJQ.txt",
         compose_inbox_text(body="synchronous steering", priority=None, stop=False),
     )
     stderr = io.StringIO()

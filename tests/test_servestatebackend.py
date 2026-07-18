@@ -98,7 +98,7 @@ def test_backend_isolates_operator_inbox_reads_and_writes(tmp_path, scratch_over
     live_inbox = inbox_dir(live)
     assert live_inbox == live / paths.STATE_DIRNAME / paths.INBOX_DIRNAME
     live_inbox.mkdir(parents=True)
-    pending = live_inbox / "20260101T000000000000Z.txt"
+    pending = live_inbox / "1jN54zJJ.txt"
     pending.write_text("live steering stays put\n", encoding="utf-8")
     before = {item.name: item.read_bytes() for item in live_inbox.iterdir()}
 
@@ -106,21 +106,17 @@ def test_backend_isolates_operator_inbox_reads_and_writes(tmp_path, scratch_over
     scratch_inbox = inbox_dir(live)
     assert scratch_inbox.is_relative_to((tmp_path / "scratch").resolve())
     scratch_inbox.mkdir(parents=True)
-    (scratch_inbox / "20260102T000000000000Z.txt").write_text(
-        "scratch steering\n", encoding="utf-8"
-    )
+    (scratch_inbox / "1jNJvRym.txt").write_text("scratch steering\n", encoding="utf-8")
     items = collect_inbox_items(live)
-    assert [item.name for item in items] == ["20260102T000000000000Z.txt"]
+    assert [item.name for item in items] == ["1jNJvRym.txt"]
     assert items[0].text == "scratch steering\n"
-    assert [row[0] for row in inbox_pending_signature(live)] == [
-        "20260102T000000000000Z.txt"
-    ]
+    assert [row[0] for row in inbox_pending_signature(live)] == ["1jNJvRym.txt"]
 
     paths.set_state_backend(None)
     assert {item.name: item.read_bytes() for item in live_inbox.iterdir()} == before
     restored = collect_inbox_items(live)
     assert [(item.name, item.text) for item in restored] == [
-        ("20260101T000000000000Z.txt", "live steering stays put\n")
+        ("1jN54zJJ.txt", "live steering stays put\n")
     ]
 
 
@@ -128,7 +124,7 @@ def test_backend_isolates_serve_watcher_and_payload_paths(tmp_path, scratch_over
     live = tmp_path / "live"
     live_inbox = inbox_dir(live)
     live_inbox.mkdir(parents=True)
-    (live_inbox / "20260101T000000000000Z.txt").write_text(
+    (live_inbox / "1jN54zJJ.txt").write_text(
         "live steering stays put\n", encoding="utf-8"
     )
     before = _tree_snapshot(live)
@@ -142,11 +138,9 @@ def test_backend_isolates_serve_watcher_and_payload_paths(tmp_path, scratch_over
         assert path.is_relative_to(scratch), path
     scratch_inbox = inbox_dir(live)
     assert scratch_inbox.is_dir()
-    (scratch_inbox / "20260102T000000000000Z.txt").write_text(
-        "scratch steering\n", encoding="utf-8"
-    )
+    (scratch_inbox / "1jNJvRym.txt").write_text("scratch steering\n", encoding="utf-8")
     payload = pending_inbox_identity_payload(live)
-    assert payload["pendingInboxKeys"] == ["20260102T000000000000Z"]
+    assert payload["pendingInboxKeys"] == ["1jNJvRym"]
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxVersion"] > 0
 
@@ -154,7 +148,7 @@ def test_backend_isolates_serve_watcher_and_payload_paths(tmp_path, scratch_over
     task_config.set_backend(None)
     assert _tree_snapshot(live) == before
     live_payload = pending_inbox_identity_payload(live)
-    assert live_payload["pendingInboxKeys"] == ["20260101T000000000000Z"]
+    assert live_payload["pendingInboxKeys"] == ["1jN54zJJ"]
 
 
 def _tree_snapshot(root: Path) -> dict[Path, bytes | None]:
@@ -213,7 +207,7 @@ def test_http_send_with_scratch_backend_preserves_live_inbox(
     state = _serve_state(tmp_path, target)
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="live seed", priority=None, stop=False),
     )
     before = _inbox_snapshot(repo)
@@ -246,7 +240,7 @@ def test_live_bus_with_environment_backend_preserves_live_inbox(
     state = _serve_state(tmp_path, target)
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="live seed", priority=None, stop=False),
     )
     before = _inbox_snapshot(repo)

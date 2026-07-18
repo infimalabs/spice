@@ -236,7 +236,7 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         handle = create.add(
             "Activation claim follows fast-forward",
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             acceptance=["claim metadata reflects post-refresh HEAD"],
             claim=True,
         )

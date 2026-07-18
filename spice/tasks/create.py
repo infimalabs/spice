@@ -14,9 +14,11 @@ from spice.tasks import claimstate, config, gitsync, identity, projectsubs, tw, 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
 TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-# Inbox keys are UTC stamps like 20260104T000000000004Z; agents transcribing
-# one sometimes drop the trailing Z (see inbox_item_key_aliases).
-TASK_ORIGIN_ACK_KEY_RE = re.compile(r"^\d{8}T\d{6,}Z?$")
+# Inbox keys are base52 moment stamps like 1kF4sdFJ, optionally carrying a
+# `-N` collision suffix from inbox filename publishing.
+TASK_ORIGIN_ACK_KEY_RE = re.compile(
+    rf"^[{identity.ALPHABET}]{{{identity.STAMP_WIDTH}}}(?:-\d+)?$"
+)
 TASK_ORIGIN_REQUIRED_ERROR = (
     "task creation requires an origin: reference the acknowledgment that "
     "steered it (--origin ack:<inbox-key> / origin=ack:<inbox-key>) or the "
@@ -138,10 +140,9 @@ def _validated_origin_ack_key(key: str) -> str:
     key = key.strip()
     if not TASK_ORIGIN_ACK_KEY_RE.match(key):
         raise SpiceError(
-            "task origin ack key must be an inbox key like "
-            f"20260104T000000000004Z: {key!r}"
+            f"task origin ack key must be an inbox key like 1kF4sdFJ: {key!r}"
         )
-    return key if key.endswith("Z") else f"{key}Z"
+    return key
 
 
 def _validated_origin_task_handle(handle: str) -> str:

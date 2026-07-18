@@ -2,12 +2,14 @@
 
 An ACK in the harness idiom looks like:
 
-    ACK 20260513T184251491561Z: <what changed or was captured>
+    ACK 1kF4sdFJ: <what changed or was captured>
 
 The detector treats text as an ACK iff it carries:
 
 1. The exact ALL-CAPS word `ACK` as a standalone token, AND
-2. One or more inbox-key-shaped substrings matching `[0-9]{8}T[0-9A-Za-z]{6,}`.
+2. One or more inbox-key-shaped substrings: an 8-character base52 moment
+   stamp (the `spice.tasks.identity` alphabet), optionally carrying a `-N`
+   collision suffix from inbox filename publishing.
 
 Both signatures must appear in order: consume `ACK`, consume the key list that
 follows it, then treat the remaining text up to the next valid `ACK` as that
@@ -31,6 +33,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
 from spice import textcontext
+from spice.tasks import identity
 
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
@@ -73,11 +76,10 @@ _ACK_NARRATION_WORDS = frozenset(
         "writing",
     }
 )
-# Key grammar: 8 date digits, a "T", then 6+ alphanumerics.
-_KEY_DATE_DIGITS = 8
-_KEY_TIME_SEPARATOR_INDEX = 8
-_KEY_MIN_LENGTH = 9
-_KEY_SUFFIX_MIN_LENGTH = 6
+# Key grammar: an 8-character base52 moment stamp, optionally carrying a
+# `-N` collision suffix from inbox filename publishing.
+_KEY_STAMP_CHARS = frozenset(identity.ALPHABET)
+_KEY_STAMP_WIDTH = identity.STAMP_WIDTH
 
 
 def extract_ack_keys_from_text(text: str) -> Iterator[str]:
@@ -475,22 +477,19 @@ def _consume_ack_header_separator(
 def _ack_key_end(text: str, start: int, limit: int) -> int | None:
     if start > 0 and _is_word_char(text[start - 1]):
         return None
-    if start + _KEY_MIN_LENGTH > limit:
+    end = start + _KEY_STAMP_WIDTH
+    if end > limit:
         return None
-    for index in range(start, start + _KEY_DATE_DIGITS):
-        if not text[index].isdigit():
+    for index in range(start, end):
+        if text[index] not in _KEY_STAMP_CHARS:
             return None
-    if text[start + _KEY_TIME_SEPARATOR_INDEX] != "T":
+    if end + 1 < limit and text[end] == "-" and text[end + 1].isdigit():
+        end += 1
+        while end < limit and text[end].isdigit():
+            end += 1
+    if end < limit and _is_word_char(text[end]):
         return None
-    suffix_start = start + _KEY_MIN_LENGTH
-    suffix_end = suffix_start
-    while suffix_end < limit and text[suffix_end].isalnum():
-        suffix_end += 1
-    if suffix_end - suffix_start < _KEY_SUFFIX_MIN_LENGTH:
-        return None
-    if suffix_end < limit and _is_word_char(text[suffix_end]):
-        return None
-    return suffix_end
+    return end
 
 
 def _clean_segment_content(

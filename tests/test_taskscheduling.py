@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-ORIGIN = "ack:20260101T000000000000Z"
+ORIGIN = "ack:1jN54zJJ"
 TZ_CHICAGO = "America/Chicago"
 TZ_UTC = "UTC"
 

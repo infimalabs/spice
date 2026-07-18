@@ -27,7 +27,7 @@ from spice.studies.testquality import (
 from spice.tasks import claimstate, config, create, identity, tw
 
 ACTOR = "abababababababababababababababab"
-ACK_ORIGIN = "ack:20260101T000000000000Z"
+ACK_ORIGIN = "ack:1jN54zJJ"
 STUDY_ACTIONS = tuple(studies_cli.TASK_GENERATING_STUDY_ACTIONS)
 MODULE_FINDING = ReachabilityFinding(
     subject="spice.onlytest",
