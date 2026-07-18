@@ -719,6 +719,9 @@ def test_summarize_ack_archival_keeps_task_handle_and_retires_valid_header(tmp_p
     assert [
         (record.key, record.ack_content) for record in ack_state_records(tmp_path)
     ] == [(KEY_B, "handled the real steering.")]
+    assert summarize_ack_archival(
+        tmp_path, f"ACK-{KEY_A}: task handle without a real acknowledgment."
+    ) == AckArchivalSummary(archived=[], already_acked=[], unmatched=[])
 
 
 def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
