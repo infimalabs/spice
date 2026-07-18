@@ -609,7 +609,7 @@ def grep_search_operand_route_guard_lines(argv: str) -> list[str]:
         "          ;;",
         (
             "        -A|-B|-C|-D|-d|-m|--after-context|--before-context|"
-            "--binary-files|--context|--devices|--directories|--exclude|"
+            "--binary-files|--devices|--directories|--exclude|"
             "--exclude-from|--exclude-dir|--group-separator|--include|--label|"
             "--max-count)"
         ),
