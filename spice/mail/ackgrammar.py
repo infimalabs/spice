@@ -7,7 +7,8 @@ An ACK in the harness idiom looks like:
 The detector treats text as an ACK iff it carries:
 
 1. The exact ALL-CAPS word `ACK` as a standalone token, AND
-2. One or more inbox-key-shaped substrings matching `[0-9]{8}T[0-9A-Za-z]{6,}`.
+2. One or more non-hyphen-prefixed inbox-key-shaped substrings matching
+   `[0-9]{8}T[0-9A-Za-z]{6,}`.
 
 Both signatures must appear in order: consume `ACK`, consume the key list that
 follows it, then treat the remaining text up to the next valid `ACK` as that
@@ -473,7 +474,7 @@ def _consume_ack_header_separator(
 
 
 def _ack_key_end(text: str, start: int, limit: int) -> int | None:
-    if start > 0 and _is_word_char(text[start - 1]):
+    if start > 0 and (_is_word_char(text[start - 1]) or text[start - 1] == "-"):
         return None
     if start + _KEY_MIN_LENGTH > limit:
         return None
