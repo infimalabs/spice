@@ -63,7 +63,7 @@ const mixed = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(mixed) === "2r+1a+2u",
+  context.taskFilterStemPillCountText(mixed) === "2/1/2",
   "mixed badge labels ready, active, and unavailable work",
 );
 assert(
@@ -87,8 +87,8 @@ const readyOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(readyOnly) === "3r+0a",
-  "ready-only badge stays at the usual two counts",
+  context.taskFilterStemPillCountText(readyOnly) === "3",
+  "ready-only badge omits both zero suffixes",
 );
 assert(
   context.taskFilterStemPillTone(readyOnly) === "ready",
@@ -105,7 +105,7 @@ const activeOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(activeOnly) === "0r+2a",
+  context.taskFilterStemPillCountText(activeOnly) === "0/2",
   "active-only badge keeps claimed work explicit",
 );
 assert(
@@ -123,7 +123,7 @@ const blockedOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(blockedOnly) === "0r+0a+2u",
+  context.taskFilterStemPillCountText(blockedOnly) === "0/0/2",
   "blocked-only badge uses the conditional unavailable count",
 );
 assert(
@@ -141,7 +141,7 @@ const deferredOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(deferredOnly) === "0r+0a+2u",
+  context.taskFilterStemPillCountText(deferredOnly) === "0/0/2",
   "deferred-only badge uses the same glance-level unavailable count",
 );
 assert(
@@ -168,11 +168,11 @@ const resolvedBlocker = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(unresolvedBlocker) === "0r+0a+1u",
+  context.taskFilterStemPillCountText(unresolvedBlocker) === "0/0/1",
   "unresolved dependency is unavailable",
 );
 assert(
-  context.taskFilterStemPillCountText(resolvedBlocker) === "1r+0a",
+  context.taskFilterStemPillCountText(resolvedBlocker) === "1",
   "resolved dependency moves automatically into ready",
 );
 assert(
