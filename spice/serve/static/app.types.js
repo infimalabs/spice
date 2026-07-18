@@ -140,6 +140,7 @@
  *
  * @typedef {Object} ClaimedTask
  * @property {string=} handle
+ * @property {string=} phase
  * @property {string=} title
  *
  * @typedef {Object} MessageAttachment

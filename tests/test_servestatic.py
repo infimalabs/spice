@@ -546,14 +546,22 @@ def test_static_relative_times_are_monospace_and_padded():
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
     app_shell = _shell_and_composer_text()
 
-    assert "const label = laneMemberTargetLabel(member);" in app_shell
+    assert "const label = laneComposeTargetLabel(member);" in app_shell
+    assert "function laneComposeTargetLabel(member)" in app_shell
+    assert 'return agentBranchLabel(agent, branch, ", ");' in app_shell
     assert "const claimedTask = laneClaimedTask(member);" in app_shell
+    assert "const claimedTaskLabel = laneClaimedTaskLabel(claimedTask);" in app_shell
     assert (
-        'return [label, status, claimedTask.handle].filter(Boolean).join("\\n");'
+        'return [label, status, claimedTaskLabel].filter(Boolean).join("\\n");'
         in app_shell
     )
+    assert "function laneClaimedTaskLabel(task)" in app_shell
+    assert 'task.handle + ", " + task.phase' in app_shell
     assert "function laneComposeTaskTooltip(member)" in app_shell
-    assert 'return [task.handle, task.title].filter(Boolean).join("\\n");' in app_shell
+    assert (
+        'return [laneClaimedTaskLabel(task), task.title].filter(Boolean).join("\\n");'
+        in app_shell
+    )
     assert "textarea.title = laneComposeTaskTooltip(member);" in app_shell
     assert 'textarea.closest(".composer-band--primary")' in app_shell
     assert "function laneComposePlaceholderStatus(member)" in app_shell
@@ -603,8 +611,11 @@ def test_static_target_choice_labels_show_agent_name_on_branch():
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
 
-    assert "function agentBranchLabel(agentName, branchName)" in app_render
-    assert 'return agent + " on " + branch;' in app_render
+    assert (
+        'function agentBranchLabel(agentName, branchName, separator = " on ")'
+        in app_render
+    )
+    assert "return agent + separator + branch;" in app_render
     assert "return agentBranchLabel(agent, branch);" in app_groups
     assert "return targetIdentityDisplayLabel(target.targetIdentity);" in app_lanes
 
