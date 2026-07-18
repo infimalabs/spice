@@ -678,6 +678,7 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
     markLaneSubmitLatency(latencyProbe, "errorAt");
     if (isLaneOpen(lane)) {
       finishLanePendingSubmission(lane, { accepted: false });
+      focusAfterComposerReset(options.focusAfterReset);
       setLaneTransientStatus(sourceLane, "steer failed");
     }
     finishLaneSubmitLatencyProbe(latencyProbe, "error");
@@ -768,11 +769,11 @@ function applyLaneSendResult(
   applyTaskDrainRouteConfig(lane, result);
   if (!result.ok) {
     finishLanePendingSubmission(lane, { accepted: false });
+    focusAfterComposerReset(options.focusAfterReset);
     setLaneTransientStatus(sourceLane, result.error || "send failed");
     return;
   }
   clearAcceptedComposerDrafts(sourceLane, lane.targetId);
-  focusAfterComposerReset(options.focusAfterReset);
   finishLanePendingSubmission(lane, {
     accepted: true,
     inboxKey: result.key,
@@ -781,6 +782,7 @@ function applyLaneSendResult(
     pendingInboxRevision: result.pendingInboxRevision,
     pendingInboxVersion: result.pendingInboxVersion,
   });
+  focusAfterComposerReset(options.focusAfterReset);
   rememberAckContext(
     lane,
     result.key,

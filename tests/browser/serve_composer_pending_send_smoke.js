@@ -3,6 +3,7 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const SUCCESS_TEXT = "pending send resolves successfully";
 const FAILURE_TEXT = "pending send restores after failure";
+const REPEATED_TEXT = "second keyboard submission without clicking";
 const SHARED_BODY = "shared focused body";
 const SHARED_QUOTE = "shared quote";
 const SHARED_CONTEXT = "shared context";
@@ -19,10 +20,13 @@ async function run() {
       });
       await page.addScriptTag({
         content: [
+          configureGroupedComposer,
           pendingSendSnapshot,
           pendingSendSubmission,
           resolveSuccessfulPendingSend,
+          runGroupedButtonSubmission,
           runGroupedComposerScenarios,
+          runRepeatedKeyboardSubmission,
           waitForComposerState,
         ]
           .map((helper) => helper.toString())
@@ -30,6 +34,7 @@ async function run() {
       });
       const config = {
         failureText: FAILURE_TEXT,
+        repeatedText: REPEATED_TEXT,
         sharedBody: SHARED_BODY,
         sharedContext: SHARED_CONTEXT,
         sharedQuote: SHARED_QUOTE,
@@ -108,13 +113,7 @@ async function runPendingSendScenarios(config) {
 async function runGroupedComposerScenarios(sends, config) {
   const host = resolveIsolatedLane("composer-target-host");
   const member = resolveIsolatedLane("composer-target-member");
-  const topology = {
-    role: "host",
-    hostTargetId: host.targetId,
-    memberTargetIds: [host.targetId, member.targetId],
-  };
-  host.groupTopology = topology;
-  member.groupTopology = { ...topology, role: "member" };
+  configureGroupedComposer(host, member);
   const sharedDraft = (id) => ({
     id,
     quoteText: config.sharedQuote,
@@ -157,13 +156,101 @@ async function runGroupedComposerScenarios(sends, config) {
     2,
   );
   await commandUnlocked;
-  const commandSettled = {
+  const commandFirstSettled = {
+    focusState:
+      document.activeElement === hostTextarea ? "focused" : "blurred",
     focusedText: hostTextarea.value,
     otherQuoteState: host.quoteDrafts.has(member.targetId) ? "retained" : "cleared",
     otherState: memberTextarea.disabled ? "locked" : "editable",
     otherText: memberTextarea.value,
   };
 
+  const repeated = await runRepeatedKeyboardSubmission(
+    sends,
+    config,
+    host,
+    hostTextarea,
+    commandFirstSettled.focusState,
+  );
+  const button = await runGroupedButtonSubmission(
+    sends,
+    host,
+    member,
+    hostTextarea,
+    memberTextarea,
+  );
+  return {
+    ...button,
+    commandPending,
+    commandFirstSettled,
+    ...repeated,
+    hostTargetId: host.targetId,
+    memberTargetId: member.targetId,
+  };
+}
+
+function configureGroupedComposer(host, member) {
+  const topology = {
+    role: "host",
+    hostTargetId: host.targetId,
+    memberTargetIds: [host.targetId, member.targetId],
+  };
+  host.groupTopology = topology;
+  member.groupTopology = { ...topology, role: "member" };
+}
+
+async function runRepeatedKeyboardSubmission(
+  sends,
+  config,
+  host,
+  hostTextarea,
+  focusBeforeSubmit,
+) {
+  hostTextarea.value = config.repeatedText;
+  hostTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+  const repeatedStart = sends.length;
+  hostTextarea.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      metaKey: true,
+    }),
+  );
+  const repeatedSends = sends.slice(repeatedStart);
+  const commandRepeatedPending = {
+    focusBeforeSubmit,
+    payloads: repeatedSends.map((send) => ({
+      targetId: send.fields.targetId,
+      text: send.fields.payload.text,
+    })),
+  };
+  const repeatedUnlocked = waitForComposerState(hostTextarea, "editable");
+  resolveSuccessfulPendingSend(
+    repeatedSends[0],
+    host,
+    "composer-command-repeat-success",
+    repeatedSends[0].fields.payload.text,
+    3,
+  );
+  await repeatedUnlocked;
+  return {
+    commandRepeatedPending,
+    commandRepeatedSettled: {
+      focusState:
+        document.activeElement === hostTextarea ? "focused" : "blurred",
+      focusedText: hostTextarea.value,
+    },
+  };
+}
+
+async function runGroupedButtonSubmission(
+  sends,
+  host,
+  member,
+  hostTextarea,
+  memberTextarea,
+) {
   hostTextarea.value = "button host body";
   host.quoteDrafts.set(host.targetId, [
     {
@@ -192,7 +279,7 @@ async function runGroupedComposerScenarios(sends, config) {
       laneStates.get(send.fields.targetId),
       "composer-button-success-" + index,
       send.fields.payload.text,
-      3,
+      4,
     ),
   );
   await Promise.all(buttonUnlocked);
@@ -206,10 +293,6 @@ async function runGroupedComposerScenarios(sends, config) {
         : "cleared",
       memberText: memberTextarea.value,
     },
-    commandPending,
-    commandSettled,
-    hostTargetId: host.targetId,
-    memberTargetId: member.targetId,
   };
 }
 
@@ -313,10 +396,53 @@ function assertPendingSendScenarios(result, config) {
   expectEqual(grouped.commandPending.focused.composerState, "locked", "focused state");
   expectEqual(grouped.commandPending.other.appearance, "normal", "other appearance");
   expectEqual(grouped.commandPending.other.composerState, "editable", "other state");
-  expectEqual(grouped.commandSettled.focusedText, "", "focused accepted text");
-  expectEqual(grouped.commandSettled.otherText, config.sharedBody, "other draft text");
-  expectEqual(grouped.commandSettled.otherQuoteState, "retained", "other quote state");
-  expectEqual(grouped.commandSettled.otherState, "editable", "other settled state");
+  expectEqual(grouped.commandFirstSettled.focusState, "focused", "restored focus");
+  expectEqual(grouped.commandFirstSettled.focusedText, "", "focused accepted text");
+  expectEqual(
+    grouped.commandFirstSettled.otherText,
+    config.sharedBody,
+    "other draft text",
+  );
+  expectEqual(
+    grouped.commandFirstSettled.otherQuoteState,
+    "retained",
+    "other quote state",
+  );
+  expectEqual(
+    grouped.commandFirstSettled.otherState,
+    "editable",
+    "other settled state",
+  );
+  expectEqual(
+    grouped.commandRepeatedPending.focusBeforeSubmit,
+    "focused",
+    "repeat submit focus",
+  );
+  expectEqual(
+    grouped.commandRepeatedPending.payloads.length,
+    1,
+    "repeat Command-Enter send count",
+  );
+  expectEqual(
+    grouped.commandRepeatedPending.payloads[0].targetId,
+    grouped.hostTargetId,
+    "repeat Command-Enter target",
+  );
+  expectEqual(
+    grouped.commandRepeatedPending.payloads[0].text,
+    config.repeatedText,
+    "repeat Command-Enter text",
+  );
+  expectEqual(
+    grouped.commandRepeatedSettled.focusState,
+    "focused",
+    "repeat restored focus",
+  );
+  expectEqual(
+    grouped.commandRepeatedSettled.focusedText,
+    "",
+    "repeat accepted text",
+  );
   expectEqual(grouped.buttonPayloads.length, 2, "button fan-out count");
   const hostPayload = grouped.buttonPayloads.find(
     (payload) => payload.targetId === grouped.hostTargetId,

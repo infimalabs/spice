@@ -632,7 +632,7 @@ def test_static_cmd_enter_submits_focused_composer_target_only():
     assert "lane.formEl.requestSubmit();" not in app_shell
 
 
-def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
+def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     submit_start = app_controls.index("function submitLaneForm(")
@@ -664,7 +664,7 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
     assert "{ focusAfterReset }" in submit_body
     assert 'if (event.type !== "keydown") return null;' in focus_body
     assert "if (!(target instanceof HTMLTextAreaElement)) return null;" in focus_body
-    assert "if (!target.dataset.quoteDraftId) return null;" in focus_body
+    assert "if (!target.dataset.quoteDraftId) return target;" in focus_body
     assert (
         'throw new Error("keyboard quote submit requires main composer");' in focus_body
     )
@@ -700,10 +700,10 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
     assert 'markLaneSubmitLatency(latencyProbe, "errorAt");' in send_payload_body
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "error");' in (send_payload_body)
     assert "options = {}," in result_body
-    assert (
-        "clearAcceptedComposerDrafts(sourceLane, lane.targetId);\n"
-        "  focusAfterComposerReset(options.focusAfterReset);"
-    ) in result_body
+    assert result_body.index("finishLanePendingSubmission(lane") < result_body.index(
+        "focusAfterComposerReset(options.focusAfterReset);"
+    )
+    assert "clearAcceptedComposerDrafts(sourceLane, lane.targetId);" in result_body
     assert (
         'throw new Error("composer focus target must remain in the document");'
         in focus_reset_body
