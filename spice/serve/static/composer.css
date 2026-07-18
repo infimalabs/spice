@@ -366,6 +366,7 @@
   font: inherit;
   font-size: 14px;
   min-height: 0;
+  overflow-wrap: anywhere;
   padding: 7px 9px;
   resize: none;
   width: 100%;

@@ -339,7 +339,9 @@ function syncComposerShardOrder(container, shards) {
 function laneComposePlaceholder(member) {
   const label = laneMemberTargetLabel(member);
   const status = laneComposePlaceholderStatus(member);
-  return [label, status].filter(Boolean).join("\n");
+  const statusLine = member.lastRenderedStatusLine || {};
+  const claimedTask = String(statusLine.claimedTask || "").trim();
+  return [label, status, claimedTask].filter(Boolean).join("\n");
 }
 
 function laneComposePlaceholderStatus(member) {

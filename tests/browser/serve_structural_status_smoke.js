@@ -45,7 +45,7 @@ async function runStructuralStatusSmokePage() {
     };
   }
 
-  function statusPayload({ index, kind, preview, timestamp }) {
+  function statusPayload({ claimedTask = "", index, kind, preview, timestamp }) {
     const pending = pendingIdentity(index);
     const visualStatus = kind === "final" ? "idle" : "running";
     return {
@@ -69,6 +69,7 @@ async function runStructuralStatusSmokePage() {
         activityStatus: kind === "final" ? "inactive" : "active",
         agentProcessStatus: "running",
         agentVisualStatus: visualStatus,
+        claimedTask,
         lastAssistantAt: timestamp,
         latestActivityKind: kind,
         latestActivityPreview: preview,
@@ -99,12 +100,17 @@ async function runStructuralStatusSmokePage() {
     const header = lane.element.querySelector(".composer-latest-time");
     const ageRect = lane.statusTimeEl.getBoundingClientRect();
     const previewRect = lane.statusPreviewEl.getBoundingClientRect();
+    const textareaRect = textarea.getBoundingClientRect();
+    const shardRect = textarea.closest(".composer-shard").getBoundingClientRect();
     return {
       elapsedMs,
       headerStatus: header ? header.dataset.agentStatus || "" : "",
       latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
       pipStatus: lane.pipEl.dataset.agentStatus || "",
       placeholder: textarea.placeholder,
+      placeholderOverflowWrap: getComputedStyle(textarea).overflowWrap,
+      placeholderWithinCard:
+        textareaRect.left >= shardRect.left && textareaRect.right <= shardRect.right,
       statusAge: lane.statusTimeEl.textContent || "",
       statusGapPx: previewRect.left - ageRect.right,
       statusPreview: lane.statusPreviewEl.textContent || "",
@@ -115,6 +121,8 @@ async function runStructuralStatusSmokePage() {
 
   const active = await applyWatchPayload(
     statusPayload({
+      claimedTask:
+        "UI-1kF5xdSM Show the claimed task even when its deliberately long title must wrap inside the agent card",
       index: 1,
       kind: "assistant",
       preview: "Working through the event path.",
@@ -162,6 +170,17 @@ function assertStructuralStatusResult(result) {
   }
   if (!active.placeholder.includes("0 pending, running"))
     throw new Error("active composer status is stale: " + active.placeholder);
+  if (
+    active.placeholder !==
+    "empty team\n0 pending, running\n" +
+      "UI-1kF5xdSM Show the claimed task even when its deliberately long title must wrap inside the agent card"
+  )
+    throw new Error("claimed task is not the third placeholder line: " + active.placeholder);
+  if (
+    active.placeholderOverflowWrap !== "anywhere" ||
+    !active.placeholderWithinCard
+  )
+    throw new Error("long claimed task breaks its composer card: " + JSON.stringify(active));
 
   if (final.latestActivityKind !== "final")
     throw new Error("final event did not retain structural activity kind");
@@ -176,6 +195,8 @@ function assertStructuralStatusResult(result) {
   }
   if (!final.placeholder.includes("0 pending, idle"))
     throw new Error("final composer status is stale: " + final.placeholder);
+  if (final.placeholder !== "empty team\n0 pending, idle")
+    throw new Error("unclaimed composer placeholder mismatch: " + final.placeholder);
   if (final.statusAge !== "20m" || final.statusPreview !== "Confirmed fixed.")
     throw new Error("final lane text mismatch: " + JSON.stringify(final));
   if (final.statusGapPx < 0)
