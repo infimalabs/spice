@@ -28,6 +28,7 @@ from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.payload.wire import validate_live_bus_frame, validate_wire_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
 from spice.serve.websocket import (
     WebSocketConnection,
@@ -295,7 +296,7 @@ class LiveBusSession:
                 kind: telemetry.payload()
                 for kind, telemetry in sorted(self._frame_telemetry.items())
             }
-        return {
+        payload = {
             "clientId": self.client_id,
             "frames": frames,
             "totals": {
@@ -303,6 +304,7 @@ class LiveBusSession:
                 "bytes": sum(int(frame["bytes"]) for frame in frames.values()),
             },
         }
+        return validate_wire_payload("LiveBusDiagnostics", payload)
 
     def _send(
         self,
@@ -317,6 +319,7 @@ class LiveBusSession:
         # ack acquires it and writes as soon as any in-flight write returns
         # rather than queuing behind the encode. byte_count is the JSON payload
         # length (matching the wire text), also computed outside the lock.
+        validate_live_bus_frame(payload)
         frame = self.connection.encode_text_frame(payload)
         byte_count = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
         wait_started_at = time.perf_counter()
@@ -1063,11 +1066,12 @@ def _pending_lane_payload(target: Any) -> dict[str, Any]:
     pending_identity = pending_inbox_identity_payload(
         getattr(target, "repo_root", None)
     )
-    return {
+    payload = {
         key: pending_identity[key]
         for key in PENDING_LANE_PAYLOAD_KEYS
         if key in pending_identity
     }
+    return validate_wire_payload("PendingLanePayload", payload)
 
 
 def _lane_send_server_timing(
@@ -1077,11 +1081,12 @@ def _lane_send_server_timing(
     send_payload_started_at: float,
     send_payload_finished_at: float,
 ) -> dict[str, float]:
-    return {
+    payload = {
         "targetResolveMs": _elapsed_ms(received_at, target_resolved_at),
         "sendPayloadMs": _elapsed_ms(send_payload_started_at, send_payload_finished_at),
         "totalBeforeReplyMs": _elapsed_ms(received_at, send_payload_finished_at),
     }
+    return validate_wire_payload("ServerTiming", payload)
 
 
 def _elapsed_ms(start: float, end: float) -> float:

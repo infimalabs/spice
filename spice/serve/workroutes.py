@@ -13,6 +13,7 @@ from spice.serve.payload import identity
 from spice.serve.agentapi import sent_steering_payload, sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.serve.worktree.target import WorktreeTarget, match_serve_worktree
@@ -63,8 +64,14 @@ def work_tree_send_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    return _work_tree_send_response_payload(
+    response, status = _work_tree_send_response_payload(
         state, target, payload, ensure_agent_before_reply=True
+    )
+    return (
+        validate_emitter_payload(
+            "workroutes.work_tree_send_response_payload", response
+        ),
+        status,
     )
 
 
@@ -73,8 +80,14 @@ def work_tree_send_accepted_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    return _work_tree_send_response_payload(
+    response, status = _work_tree_send_response_payload(
         state, target, payload, ensure_agent_before_reply=False
+    )
+    return (
+        validate_emitter_payload(
+            "workroutes.work_tree_send_accepted_response_payload", response
+        ),
+        status,
     )
 
 
@@ -309,10 +322,11 @@ def work_tree_task_drain_response_payload(
     actor = identity.team_actor_for_target(state.team_store, target, thread_id)
     if bool(payload.get("replaceTaskFilters")) and isinstance(task_filters, list):
         if not actor:
-            return (
+            payload = validate_emitter_payload(
+                "workroutes.work_tree_task_drain_response_payload",
                 {"ok": False, "error": "task drain requires a bound agent"},
-                HTTPStatus.CONFLICT,
             )
+            return payload, HTTPStatus.CONFLICT
         team_id = _team_for_task_drain_actor(state.team_store, actor)
         current = state.team_store.team_config(team_id)
         from spice.tasks import config as task_config
@@ -332,7 +346,11 @@ def work_tree_task_drain_response_payload(
             replace_task_filters=True,
         )
     route = _work_tree_route_payload(state, target, thread_id=thread_id, actor=actor)
-    return {"ok": True, "route": route}, HTTPStatus.OK
+    response = validate_emitter_payload(
+        "workroutes.work_tree_task_drain_response_payload",
+        {"ok": True, "route": route},
+    )
+    return response, HTTPStatus.OK
 
 
 def _work_tree_route_payload(
@@ -355,6 +373,7 @@ def _work_tree_route_payload(
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
+        "effectiveTaskFilters": facts.get("effectiveTaskFilters", []),
         "taskFilterEntries": facts.get("taskFilterEntries", []),
         "routeFilters": facts.get("taskFilters", []),
         "filterTerms": facts.get("taskFilters", []),

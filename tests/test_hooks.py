@@ -605,6 +605,14 @@ def test_dev_serve_web_typecheck_parser_exposes_command():
     assert args.dev_command == "serve-web-typecheck"
 
 
+def test_dev_serve_web_types_parser_exposes_write_mode():
+    from spice.cli.parser import build_parser
+
+    args = build_parser().parse_args(["dev", "serve-web-types", "--write"])
+
+    assert (args.dev_command, args.write) == ("serve-web-types", True)
+
+
 def test_dev_pre_commit_parser_exposes_hook_backend_command():
     from spice.cli.parser import build_parser
 
@@ -735,6 +743,7 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
 
     calls = []
     monkeypatch.setattr(typecheck, "find_tool", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(typecheck, "check_app_types_js", lambda _repo_root: None)
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))

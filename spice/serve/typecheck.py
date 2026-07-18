@@ -8,6 +8,7 @@ from pathlib import Path
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.process.tool import run_tool_command
+from spice.serve.payload.wire import check_app_types_js
 
 SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.types.js",
@@ -91,6 +92,7 @@ def run_serve_web_typecheck(repo_root: Path) -> None:
         # The checkJs lane gates spice's own static sources; a target repo
         # without them has nothing in this lane.
         return
+    check_app_types_js(repo_root)
     _run_serve_web_typecheck_argv(repo_root, serve_web_typecheck_argv(targets))
 
 

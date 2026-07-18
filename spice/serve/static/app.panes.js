@@ -683,7 +683,8 @@ function requestLaneMetricSeries(lane, model) {
       if (lane.metricSeriesPendingKey !== key) return;
       lane.metricSeriesPendingKey = "";
       lane.metricSeriesRequestKey = key;
-      lane.metricSeries = (message && message.result) || { points: [] };
+      const frame = /** @type {MetricSeriesFrame} */ (message);
+      applyLaneMetricSeriesResult(lane, frame.result);
       renderLaneMetricsPane(lane);
     },
     () => {
@@ -692,6 +693,11 @@ function requestLaneMetricSeries(lane, model) {
       reportLaneMetricSeriesError();
     },
   );
+}
+
+/** @param {MetricSeriesPayload} result */
+function applyLaneMetricSeriesResult(lane, result) {
+  lane.metricSeries = result;
 }
 
 function laneMetricSeriesQuery(lane, model) {

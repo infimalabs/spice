@@ -13,6 +13,7 @@ from spice.agent.driver import driver_for_transcript
 from spice.agent.identity import canonical_thread_id
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, read_assistant_messages
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.worktree.target import WorktreeTarget
 
 _THREAD_ID_RE = re.compile(
@@ -64,12 +65,13 @@ class ObserverRegistry:
 
     def targets_payload(self) -> dict[str, Any]:
         targets = [observer_target_payload(session) for session in self.sessions]
-        return {
+        payload = {
             "workTrees": targets,
             "defaultTargetId": targets[0]["id"] if targets else "",
             "taskFilterInventory": {},
             "observerErrors": list(self.errors),
         }
+        return validate_emitter_payload("observer.targets_payload", payload)
 
     def team_snapshot_payload(self) -> dict[str, Any]:
         teams = []
@@ -101,7 +103,8 @@ class ObserverRegistry:
             "globalSettings": {"fastMode": False, "observerMode": True},
             "teams": teams,
         }
-        return {"revision": 1, "changed": True, "snapshot": snapshot}
+        payload = {"revision": 1, "changed": True, "snapshot": snapshot}
+        return validate_emitter_payload("observer.team_snapshot_payload", payload)
 
 
 def discover_observer_sessions(paths: list[Path]) -> ObserverRegistry:
@@ -173,7 +176,7 @@ def observer_messages_payload(
     )
     if cursor is not None and cursor.removed_keys:
         payload["removedMessageKeys"] = list(cursor.removed_keys)
-    return payload
+    return validate_emitter_payload("observer.observer_messages_payload", payload)
 
 
 def observer_target_payload(session: ObserverSession) -> dict[str, Any]:
@@ -192,7 +195,7 @@ def observer_target_payload(session: ObserverSession) -> dict[str, Any]:
 
 
 def observer_agent_status_payload(session: ObserverSession) -> dict[str, Any]:
-    return {
+    payload = {
         "ok": True,
         "provider": session.transcript.owner_driver.name,
         "workTreeId": session.target.id,
@@ -207,6 +210,7 @@ def observer_agent_status_payload(session: ObserverSession) -> dict[str, Any]:
         "bindingStatus": "bound",
         "bindingError": "",
     }
+    return validate_emitter_payload("observer.observer_agent_status_payload", payload)
 
 
 def observer_lane_signature(session: ObserverSession) -> LaneSignature:
