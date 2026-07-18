@@ -660,6 +660,63 @@ def test_dev_pre_commit_reports_repo_gate_replacement_for_upstream_args(
     assert "Run `spice dev pre-commit` for the staged gate" in message
 
 
+def test_dev_pytest_parser_exposes_command():
+    from spice.cli.parser import build_parser
+
+    args = build_parser().parse_args(["dev", "pytest", "tests/test_cliversion.py"])
+
+    assert args.dev_command == "pytest"
+    assert args.pytest_args == ["tests/test_cliversion.py"]
+
+
+def test_dev_pytest_dispatch_forwards_flag_leading_arguments(tmp_path, monkeypatch):
+    from spice.cli import entry
+
+    calls: list[tuple[Path, list[str]]] = []
+    monkeypatch.setattr(
+        "spice.hooks.devpytest.run_checkout_pytest",
+        lambda repo_root, args: calls.append((repo_root, args)) or 0,
+    )
+    monkeypatch.setattr("spice.paths.require_repo_root", lambda: tmp_path)
+
+    result = entry._dispatch(["dev", "pytest", "-q", "tests/test_cliversion.py"])
+
+    assert result == 0
+    assert calls == [(tmp_path, ["-q", "tests/test_cliversion.py"])]
+
+
+def test_dev_pytest_runs_in_process_under_worktree_venv(tmp_path, monkeypatch):
+    from spice.hooks import cli as hooks_cli
+
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(hooks_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(pytest, "main", lambda argv: calls.append(argv) or 0)
+
+    result = hooks_cli.handle_dev(
+        SimpleNamespace(dev_command="pytest", pytest_args=["-q", "tests/sample.py"])
+    )
+
+    assert result == 0
+    assert calls == [["-q", "tests/sample.py"]]
+
+
+def test_dev_pytest_refuses_interpreter_outside_worktree_venv(tmp_path, monkeypatch):
+    from spice.hooks import cli as hooks_cli
+
+    (tmp_path / ".venv").mkdir()
+    monkeypatch.setattr(hooks_cli, "require_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SpiceError) as exc_info:
+        hooks_cli.handle_dev(SimpleNamespace(dev_command="pytest", pytest_args=[]))
+
+    message = str(exc_info.value)
+    assert str((tmp_path / ".venv").resolve()) in message
+    assert "uv sync" in message
+
+
 def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):
     from spice.serve import typecheck
 
