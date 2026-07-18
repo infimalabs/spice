@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 
 
 @dataclass(frozen=True)

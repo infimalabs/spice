@@ -8,26 +8,21 @@ from pathlib import Path
 
 import pytest
 
-from spice.procs import ProcessDeadlineExceeded
-from spice import toolprocess
+from spice.process.groups import ProcessDeadlineExceeded
+from spice.process import tool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
-    "spice/agent/driver.py:operator_color_scheme:run",
     "spice/agent/judgeadapter.py:main:run",
-    "spice/agent/lifecycle.py:_worktree_dirty:run",
-    "spice/agent/lifecyclebinding.py:git_tracks_relative_path:run",
     "spice/agent/lifecycle.py:spawn_agent:Popen",
     "spice/agent/lifecycle.py:spawn_agent_supervisor:Popen",
-    "spice/agent/shadow.py:_git:run",
     "spice/agent/watchdog.py:spawn_supervised_agent:Popen",
-    "spice/procs.py:_force_windows_process_tree:run",
-    "spice/procs.py:_posix_pid_has_live_state:run",
-    "spice/procs.py:_posix_process_group_has_live_member:run",
-    "spice/procs.py:run_bounded_process_group:Popen",
-    "spice/tasks/ops.py:rtk_usage_nudge:run",
+    "spice/process/groups.py:_force_windows_process_tree:run",
+    "spice/process/groups.py:_posix_pid_has_live_state:run",
+    "spice/process/groups.py:_posix_process_group_has_live_member:run",
+    "spice/process/groups.py:run_bounded_process_group:Popen",
+    "spice/process/tool.py:run_parent_lifetime_command:run",
     "spice/tasks/tw.py:run:run",
-    "spice/toolprocess.py:run_parent_lifetime_command:run",
 }
 EXPECTED_TOOL_POLICY_CALLERS = {
     "coverage": {"spice/studies/subsumption.py:record_subsumption:capture=false"},
@@ -38,6 +33,10 @@ EXPECTED_TOOL_POLICY_CALLERS = {
         "spice/studies/reachability.py:_scan_command_reachability_provider:capture=true",
     },
     "hook": {"spice/hooks/precommit.py:_run_python_format_guard:capture=true"},
+    "probe": {
+        "spice/agent/driver.py:operator_color_scheme:capture=true",
+        "spice/tasks/ops.py:rtk_usage_nudge:capture=true",
+    },
     "release": {
         "spice/release.py:_is_ancestor:capture=true",
         "spice/release.py:github_release_url:capture=true",
@@ -60,13 +59,13 @@ def test_each_bounded_tool_policy_has_a_catalogued_production_caller():
     assert _tool_policy_callers() == EXPECTED_TOOL_POLICY_CALLERS
 
 
-@pytest.mark.parametrize("policy", sorted(toolprocess.TOOL_POLICY_TIMEOUT_SECONDS))
+@pytest.mark.parametrize("policy", sorted(tool.TOOL_POLICY_TIMEOUT_SECONDS))
 def test_each_bounded_tool_policy_reports_stalled_command_identity(policy, monkeypatch):
-    monkeypatch.setitem(toolprocess.TOOL_POLICY_TIMEOUT_SECONDS, policy, 0.02)
+    monkeypatch.setitem(tool.TOOL_POLICY_TIMEOUT_SECONDS, policy, 0.02)
     command = [sys.executable, "-c", "import time; time.sleep(30)"]
 
     try:
-        toolprocess.run_tool_command(
+        tool.run_tool_command(
             command,
             policy=policy,
             operation=f"stalled {policy} representative",
@@ -95,9 +94,9 @@ def test_parent_lifetime_command_propagates_parent_cancellation(monkeypatch):
         events.append(f"started:{command[0]}")
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(toolprocess.subprocess, "run", cancelled_parent)
+    monkeypatch.setattr(tool.subprocess, "run", cancelled_parent)
     try:
-        toolprocess.run_parent_lifetime_command(["interactive-child"])
+        tool.run_parent_lifetime_command(["interactive-child"])
     except KeyboardInterrupt:
         events.append("parent-cancelled")
 

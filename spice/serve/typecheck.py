@@ -7,7 +7,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 
 SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.types.js",

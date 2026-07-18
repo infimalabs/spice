@@ -43,14 +43,14 @@ from spice.config import AGENT_DRIVER_KEY, AGENT_MODEL_KEY, effective_agent_conf
 from spice.configlayer import contextualize_config_error, effective_table
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.paths import find_tool
 from spice.policy import (
     JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
     LEGITIMATE_INTERNAL_COUPLINGS,
 )
 from spice.policyconfig import resolve_policy
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 from spice.scopes import (
     PRE_COMMIT_STEP_SCOPES,
     SCOPES_KEY,

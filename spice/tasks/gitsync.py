@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.gitprocess import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
+from spice.process.git import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
 from spice.paths import atomic_write_text
 from spice.tasks import config, identity, wordingreview
 

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import git_lines, git_read, git_run
 
 ZERO_OID_CHARS = {"0"}
 PROTECTED_COMMIT_LIMIT = 5
@@ -26,10 +25,10 @@ def handle_reference_transaction(
 ) -> int:
     if state != "prepared":
         return 0
-    current_ref = _git_read(repo_root, "symbolic-ref", "--quiet", "HEAD")
+    current_ref = git_read(repo_root, "symbolic-ref", "--quiet", "HEAD")
     if not current_ref:
         return 0
-    upstream = _git_read(
+    upstream = git_read(
         repo_root, "rev-parse", "--verify", "--quiet", "@{upstream}^{commit}"
     )
     if not upstream:
@@ -80,13 +79,13 @@ def _abandoned_upstream_commits(
     if new_commit and _is_ancestor(repo_root, old_commit, new_commit):
         return []
 
-    merge_bases = _git_lines(repo_root, "merge-base", "--all", old_commit, upstream)
+    merge_bases = git_lines(repo_root, "merge-base", "--all", old_commit, upstream)
     if not merge_bases:
         return []
     args = ["rev-list", f"--max-count={PROTECTED_COMMIT_LIMIT}", *merge_bases]
     if new_commit:
         args.extend(["--not", new_commit])
-    return _git_lines(repo_root, *args)
+    return git_lines(repo_root, *args)
 
 
 def _is_zero_oid(value: str) -> bool:
@@ -96,36 +95,19 @@ def _is_zero_oid(value: str) -> bool:
 def _commit_oid(repo_root: Path, value: str) -> str:
     if value.startswith("ref:"):
         return ""
-    return _git_read(
+    return git_read(
         repo_root, "rev-parse", "--verify", "--quiet", f"{value}^{{commit}}"
     )
 
 
 def _short_oid(repo_root: Path, value: str) -> str:
-    return _git_read(repo_root, "rev-parse", "--short", value) or value
+    return git_read(repo_root, "rev-parse", "--short", value) or value
 
 
 def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
     return (
-        _git(repo_root, "merge-base", "--is-ancestor", ancestor, descendant).returncode
+        git_run(
+            repo_root, "merge-base", "--is-ancestor", ancestor, descendant
+        ).returncode
         == 0
-    )
-
-
-def _git_read(repo_root: Path, *args: str) -> str:
-    completed = _git(repo_root, *args)
-    return completed.stdout.strip() if completed.returncode == 0 else ""
-
-
-def _git_lines(repo_root: Path, *args: str) -> list[str]:
-    text = _git_read(repo_root, *args)
-    return [line for line in text.splitlines() if line]
-
-
-def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return run_git_command(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-        text=True,
     )

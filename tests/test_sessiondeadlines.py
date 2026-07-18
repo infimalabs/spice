@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.cli.parser import build_parser
-from spice.procs import (
+from spice.process.groups import (
     ProcessDeadlineExceeded,
     process_id_is_running,
     run_bounded_process_group,

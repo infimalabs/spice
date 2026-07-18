@@ -9,7 +9,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
-from spice.toolprocess import run_parent_lifetime_command
+from spice.process.tool import run_parent_lifetime_command
 from spice.worktrees import resolve_worktree_target
 
 SIGINT_EXIT_CODE = 130

@@ -12,7 +12,7 @@ from spice.errors import SpiceError
 from spice.mail.inbox import format_relative_seconds
 from spice.policy import MAGIC_BASELINE_REF
 from spice.policyconfig import ComplexityPolicy, resolve_policy
-from spice.procs import run_bounded_process_group
+from spice.process.groups import run_bounded_process_group
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
 

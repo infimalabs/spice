@@ -4,6 +4,7 @@ import subprocess
 
 from spice.agent import lifecycle
 from spice.agent import watchdog
+from spice.process import git as processgit
 from spice.tasks import claimstate
 
 
@@ -56,11 +57,11 @@ def test_flag_uncaptured_lane_silent_when_tree_is_clean(tmp_path, monkeypatch):
 def test_flag_uncaptured_lane_completes_when_git_cannot_launch(tmp_path, monkeypatch):
     events = []
 
-    def unavailable_git(_command, **kwargs):
-        events.append(f"probe-budget:{kwargs['timeout']:g}")
+    def unavailable_git(_command, *, timeout_seconds, **_kwargs):
+        events.append(f"probe-budget:{timeout_seconds:g}")
         raise FileNotFoundError("git unavailable")
 
-    monkeypatch.setattr(lifecycle.subprocess, "run", unavailable_git)
+    monkeypatch.setattr(processgit, "run_bounded_process_group", unavailable_git)
     monkeypatch.setattr(claimstate, "active_claim", lambda _actor: None)
     monkeypatch.setattr(
         watchdog,
@@ -72,6 +73,6 @@ def test_flag_uncaptured_lane_completes_when_git_cannot_launch(tmp_path, monkeyp
     events.append("supervisor-returned")
 
     assert events == [
-        f"probe-budget:{lifecycle.GIT_PROBE_TIMEOUT_SECONDS:g}",
+        f"probe-budget:{processgit.GIT_PROBE_TIMEOUT_SECONDS:g}",
         "supervisor-returned",
     ]

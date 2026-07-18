@@ -154,5 +154,5 @@ findings.
 | serve | `spice/serve/` plus lane-interface static UI |
 | forensics | `spice/sessions/` |
 | constitution | `spice/studies/`, `spice/hooks/`, `spice/policy.py` |
-| infra | `spice/{paths,config,configcli,locking,flexstate,procs,worktrees}.py` |
+| infra | `spice/process/` (bounded groups, tool policies, git door), `spice/{paths,config,configcli,locking,flexstate,worktrees}.py` |
 | bootstrap | `.spice/hooks`, `.agents/skills/spice`, `AGENTS.md` |

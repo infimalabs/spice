@@ -18,6 +18,8 @@ from spice.errors import SpiceError
 from spice.hooks import install as hook_install
 from spice.hooks import precommit
 from spice.paths import repo_root_from_cwd
+from spice.process.git import git_read
+from spice.process.tool import run_tool_command
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records as session_records
 from spice.sessions import resolve as session_resolve
@@ -110,14 +112,13 @@ def rtk_usage_nudge() -> str | None:
         return None
     try:
         rtk_executable = configured_rtk_executable(repo_root)
-        completed = subprocess.run(
+        completed = run_tool_command(
             [rtk_executable, "gain", "--project", "-f", "json"],
+            policy="probe",
+            operation="rtk gain summary",
             cwd=repo_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
             text=True,
-            check=False,
-            timeout=5,
+            capture_output=True,
         )
     except (OSError, SpiceError, subprocess.SubprocessError):
         return None
@@ -314,7 +315,7 @@ def _capture_default_title() -> str:
     """A task title derived from the most recent loose commit subject."""
     from spice.tasks import create
 
-    subject = tw._git("log", "-1", "--format=%s").strip()
+    subject = git_read(config.repo_root(), "log", "-1", "--format=%s")
     if not subject:
         return "Capture loose commit"
     return subject[: create.TASK_TITLE_LIMIT].strip()

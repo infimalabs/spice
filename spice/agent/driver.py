@@ -23,7 +23,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -39,6 +38,8 @@ from spice.extensions import (
     merge_builtin_and_extension_entry_points,
 )
 from spice.paths import atomic_write_json
+from spice.process.groups import ProcessDeadlineExceeded
+from spice.process.tool import run_tool_command
 from spice.sqliteconnection import sqlite_connection
 
 CommandTextRewriter = Callable[[str], str | None]
@@ -1105,22 +1106,19 @@ def write_playwright_mcp_config(repo_root: Path) -> Path:
 
 # The macOS appearance probe runs during MCP config writes on agent activation;
 # a wedged `defaults` must not stall the launch, so it degrades to the light
-# default once this budget expires.
-OPERATOR_APPEARANCE_TIMEOUT_SECONDS = 5.0
-
-
+# default once the probe policy budget expires.
 def operator_color_scheme() -> str:
     if sys.platform != "darwin":
         return "light"
     try:
-        result = subprocess.run(
+        result = run_tool_command(
             ["defaults", "read", "-g", "AppleInterfaceStyle"],
-            capture_output=True,
-            check=False,
+            policy="probe",
+            operation="operator appearance",
             text=True,
-            timeout=OPERATOR_APPEARANCE_TIMEOUT_SECONDS,
+            capture_output=True,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ProcessDeadlineExceeded):
         return "light"
     return "dark" if result.stdout.strip().lower() == "dark" else "light"
 

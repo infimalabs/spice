@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from spice.configlayer import config_string_list, effective_table
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.pathmatch import (
     has_glob_magic,
     matches_repo_path,

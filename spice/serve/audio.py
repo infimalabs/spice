@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from spice import config
-from spice.procs import run_bounded_process_group
+from spice.process.groups import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"

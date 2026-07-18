@@ -25,7 +25,7 @@ from spice.configlayer import effective_mapping, effective_table
 from spice.configlayer import layer_table as layer_table
 from spice.configlayer import load_config as load_config
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.paths import (
     atomic_write_text,
     repo_root_from_cwd,

@@ -16,7 +16,7 @@ import pytest
 from spice import config
 from spice.cli.parser import build_parser
 from spice.configcli import handle_config
-from spice.procs import ProcessDeadlineExceeded
+from spice.process.groups import ProcessDeadlineExceeded
 from spice.serve import audio
 
 ESPEAK_TEST_SAMPLE_RATE = 8000

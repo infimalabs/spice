@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.process import tool as processtool
 from spice.tasks import alloc, config, create, identity, ops, render
 
 pytestmark = pytest.mark.skipif(
@@ -226,7 +227,9 @@ def _gain_runner(
 def test_rtk_usage_nudge_fires_when_savings_are_poor(monkeypatch):
     monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: Path("/repo/root"))
     monkeypatch.setattr(
-        ops.subprocess, "run", _gain_runner(ops.RTK_NUDGE_MIN_COMMANDS + 4, 2.0)
+        processtool,
+        "run_bounded_process_group",
+        _gain_runner(ops.RTK_NUDGE_MIN_COMMANDS + 4, 2.0),
     )
 
     nudge = ops.rtk_usage_nudge()
@@ -248,8 +251,8 @@ def test_rtk_usage_nudge_reads_current_project_gain(tmp_path, monkeypatch, execu
     calls: list[tuple[list[str], Path | None]] = []
     monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: repo_root)
     monkeypatch.setattr(
-        ops.subprocess,
-        "run",
+        processtool,
+        "run_bounded_process_group",
         _gain_runner(ops.RTK_NUDGE_MIN_COMMANDS + 4, 2.0, calls),
     )
 
@@ -261,8 +264,8 @@ def test_rtk_usage_nudge_reads_current_project_gain(tmp_path, monkeypatch, execu
 def test_rtk_usage_nudge_stays_silent_when_feeding_rtk_well(monkeypatch):
     monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: Path("/repo/root"))
     monkeypatch.setattr(
-        ops.subprocess,
-        "run",
+        processtool,
+        "run_bounded_process_group",
         _gain_runner(
             ops.RTK_NUDGE_MIN_COMMANDS + 4, ops.RTK_NUDGE_SAVINGS_FLOOR_PCT + 10.0
         ),

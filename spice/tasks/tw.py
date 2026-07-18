@@ -16,7 +16,7 @@ from typing import Any
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import git_read
 from spice.tasks import config
 
 _MUTATING_COMMANDS = frozenset({"add", "annotate", "delete", "done", "modify"})
@@ -140,22 +140,12 @@ def current_actor() -> str:
     return canonical_actor(ambient_thread_id() or config.SENTINEL_ACTOR)
 
 
-def _git(*args: str) -> str:
-    result = run_git_command(
-        ["git", "-C", str(config.repo_root()), *args],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
 def current_branch() -> str:
-    return _git("branch", "--show-current")
+    return git_read(config.repo_root(), "branch", "--show-current")
 
 
 def worktree_clean() -> bool:
-    return _git("status", "--porcelain") == ""
+    return git_read(config.repo_root(), "status", "--porcelain") == ""
 
 
 def require_clean_worktree(action: str) -> None:
@@ -166,4 +156,4 @@ def require_clean_worktree(action: str) -> None:
 
 
 def claim_head() -> str:
-    return _git("rev-parse", "HEAD")
+    return git_read(config.repo_root(), "rev-parse", "HEAD")

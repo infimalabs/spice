@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,7 +27,8 @@ from spice.agent.shellhook import apply_shell_steering_environment
 from spice.errors import SpiceError
 from spice.locking import bounded_exclusive_lock
 from spice.paths import atomic_write_json, atomic_write_text
-from spice.procs import process_group_is_running, process_id_is_running
+from spice.process.git import git_probe
+from spice.process.groups import process_group_is_running, process_id_is_running
 
 # The one skill location: the standard agent-skills path, in every worktree.
 # The launch prompt must link a file inside the agent's own worktree: an
@@ -54,7 +54,6 @@ SUPERVISOR_ENVIRONMENT_SCRUB_NAMES = (
     "VIRTUAL_ENV",
     "UV_PROJECT_ENVIRONMENT",
 )
-GIT_PROBE_TIMEOUT_SECONDS = 10.0
 AGENT_ENSURE_LOCK_TIMEOUT_SECONDS = 10.0
 
 
@@ -231,24 +230,9 @@ def materialize_worktree_skill_gitignore(repo_root: Path) -> Path | None:
 
 def git_tracks_relative_path(repo_root: Path, relative_path: Path) -> bool:
     """Whether Git already tracks ``relative_path`` in ``repo_root``."""
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "ls-files",
-                "--error-unmatch",
-                "--",
-                relative_path.as_posix(),
-            ],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=GIT_PROBE_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    result = git_probe(
+        repo_root, "ls-files", "--error-unmatch", "--", relative_path.as_posix()
+    )
     return result.returncode == 0
 
 

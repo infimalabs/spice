@@ -18,7 +18,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.tasks import config as task_config
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 
 BUMP_CHOICES = ("minor", "patch")
 PYPI_POLL_ATTEMPTS = 20

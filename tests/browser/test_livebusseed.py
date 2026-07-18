@@ -32,7 +32,7 @@ from pathlib import Path
 from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
 from spice.config import WORKTREE_SOURCE, set_scope_section
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.serve.demo import CANNED_TRANSCRIPT, DEMO_PROJECT_SLUG, DEMO_STARTED_AT
 
 # A 32-hex base whose last byte is overwritten per lane, so every seeded lane
