@@ -306,7 +306,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
 
 
-def test_repo_spice_dev_wrapper_routes_pytest_through_python_module():
+def test_repo_spice_dev_wrapper_routes_pytest_through_dev_seam():
     repo = Path(__file__).resolve().parents[1]
 
     rendered = shellhook.render_agent_wrapper_lines(repo)
@@ -315,6 +315,12 @@ def test_repo_spice_dev_wrapper_routes_pytest_through_python_module():
     assert rendered[pytest_start : pytest_start + 4] == [
         "",
         "pytest() {",
-        '  python -m pytest "$@"',
+        '  spice dev pytest "$@"',
         "}",
     ]
+
+
+def test_repo_pytest_wrapper_word_yields_rtk_rewrite():
+    repo = Path(__file__).resolve().parents[1]
+
+    assert "pytest" in shellhook.rtk_rewrite_yield_selectors(repo)

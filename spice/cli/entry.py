@@ -56,6 +56,15 @@ def _dispatch(argv: list[str]) -> int:
 
         return run_agent_command(repo_root_from_cwd(), argv[2:])
 
+    if argv[:2] == ["dev", "pytest"]:
+        # argparse.REMAINDER cannot start with a flag token, and pytest
+        # invocations usually do (`pytest -q ...`), so this forwards ahead of
+        # parsing — the same shape as `agent run` above.
+        from spice.hooks.devpytest import run_checkout_pytest
+        from spice.paths import require_repo_root
+
+        return run_checkout_pytest(require_repo_root(), argv[2:])
+
     if argv and not argv[0].startswith("-"):
         from spice.cli.mounts import find_mounted_command, run_mounted_command
 
