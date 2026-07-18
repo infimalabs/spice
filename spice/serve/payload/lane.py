@@ -27,24 +27,66 @@ LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 
 TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
 REVIEW_PRESSURE_LIMIT = 3
+TASK_FILTER_STATE_COUNT_FIELDS = (
+    "openTaskCount",
+    "readyTaskCount",
+    "inFlightTaskCount",
+    "blockedTaskCount",
+    "deferredTaskCount",
+)
 
 
-def task_filter_inventory() -> dict[str, Any]:
-    """Open-task counts per assignable project, plus system header signals."""
-    revision = task_filter_inventory_revision()
-    catalog = task_config.task_project_validation_catalog()
-    filters: list[dict[str, Any]] = []
-    stems: dict[str, dict[str, Any]] = {}
+def _empty_task_filter_counts() -> dict[str, int]:
+    return {field: 0 for field in TASK_FILTER_STATE_COUNT_FIELDS}
+
+
+def _task_filter_rows() -> tuple[list[dict[str, Any]], set[str], set[str], set[str]]:
     from spice.errors import SpiceError
-    from spice.tasks import tw
 
     try:
         rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
+        ready_rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
+        waiting_rows = tw.export(["status:waiting", "-ACTIVE"])
+        blocked_rows = tw.export(["status:pending", "+BLOCKED", "-ACTIVE"])
     except SpiceError:
         # No Taskwarrior (or no backend yet): the lane UI still works; the
         # filter inventory is simply empty.
-        rows = []
-    counts: dict[str, int] = {}
+        rows, ready_rows, waiting_rows, blocked_rows = [], [], [], []
+
+    def uuids(items: list[dict[str, Any]]) -> set[str]:
+        return {str(row.get("uuid") or "") for row in items if row.get("uuid")}
+
+    return rows, uuids(ready_rows), uuids(waiting_rows), uuids(blocked_rows)
+
+
+def _task_filter_row_state(
+    row: dict[str, Any],
+    *,
+    uuid: str,
+    ready_uuids: set[str],
+    waiting_uuids: set[str],
+    blocked_uuids: set[str],
+) -> str:
+    if str(row.get("claim_by") or ""):
+        return "inFlightTaskCount"
+    if uuid in waiting_uuids:
+        return "deferredTaskCount"
+    if uuid in blocked_uuids:
+        return "blockedTaskCount"
+    if uuid in ready_uuids:
+        return "readyTaskCount"
+    # Scheduled or otherwise unavailable open work is dormant from the
+    # allocator's perspective and belongs with deferred work.
+    return "deferredTaskCount"
+
+
+def _task_filter_project_counts(
+    rows: list[dict[str, Any]],
+    ready_uuids: set[str],
+    waiting_uuids: set[str],
+    blocked_uuids: set[str],
+) -> tuple[dict[str, dict[str, int]], int, int]:
+    counts: dict[str, dict[str, int]] = {}
     waiting_count = 0
     oops_count = 0
     for row in rows:
@@ -52,40 +94,70 @@ def task_filter_inventory() -> dict[str, Any]:
         if task_config.is_hidden_project(project):
             oops_count += 1
             continue
-        if str(row.get("status") or "pending") == "waiting":
+        uuid = str(row.get("uuid") or "")
+        # Raw status stays ``pending`` for deferred tasks.  The computed
+        # status:waiting UUID set is the sole authority for waiting state.
+        if uuid in waiting_uuids:
             waiting_count += 1
+        if not project:
             continue
-        if project:
-            counts[project] = counts.get(project, 0) + 1
+        project_counts = counts.setdefault(project, _empty_task_filter_counts())
+        project_counts["openTaskCount"] += 1
+        state = _task_filter_row_state(
+            row,
+            uuid=uuid,
+            ready_uuids=ready_uuids,
+            waiting_uuids=waiting_uuids,
+            blocked_uuids=blocked_uuids,
+        )
+        project_counts[state] += 1
+    return counts, waiting_count, oops_count
+
+
+def _task_filter_system_stem(name: str, count: int, count_field: str) -> dict[str, Any]:
+    counts = _empty_task_filter_counts()
+    counts["openTaskCount"] = count
+    counts["deferredTaskCount"] = count
+    return {"name": name, **counts, "filters": [], count_field: count}
+
+
+def _task_filter_payload_rows(
+    counts: dict[str, dict[str, int]], waiting_count: int, oops_count: int
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    filters: list[dict[str, Any]] = []
+    stems: dict[str, dict[str, Any]] = {}
     assignable_stems = set(task_config.assignable_stems())
     visible_stems = set(task_config.approved_stems())
-    for project, count in sorted(counts.items()):
+    for project, project_counts in sorted(counts.items()):
         stem = project.split(".", 1)[0]
         if stem not in visible_stems:
             continue
         entry = stems.setdefault(
-            stem, {"name": stem, "openTaskCount": 0, "filters": []}
+            stem, {"name": stem, **_empty_task_filter_counts(), "filters": []}
         )
-        entry["openTaskCount"] += count
-        if stem not in assignable_stems:
-            continue
-        filters.append({"name": project, "primaryStem": stem, "openTaskCount": count})
-        if project not in entry["filters"]:
+        for field, value in project_counts.items():
+            entry[field] += value
+        if stem in assignable_stems:
+            filters.append({"name": project, "primaryStem": stem, **project_counts})
             entry["filters"].append(project)
     if waiting_count:
-        stems["waiting"] = {
-            "name": "waiting",
-            "openTaskCount": waiting_count,
-            "filters": [],
-            "waitingTaskCount": waiting_count,
-        }
+        stems["waiting"] = _task_filter_system_stem(
+            "waiting", waiting_count, "waitingTaskCount"
+        )
     if oops_count:
-        stems["oops"] = {
-            "name": "oops",
-            "openTaskCount": oops_count,
-            "filters": [],
-            "oopsTaskCount": oops_count,
-        }
+        stems["oops"] = _task_filter_system_stem("oops", oops_count, "oopsTaskCount")
+    return filters, stems
+
+
+def task_filter_inventory() -> dict[str, Any]:
+    """Open-task state counts per assignable project, plus system header signals."""
+    revision = task_filter_inventory_revision()
+    catalog = task_config.task_project_validation_catalog()
+    rows, ready_uuids, waiting_uuids, blocked_uuids = _task_filter_rows()
+    counts, waiting_count, oops_count = _task_filter_project_counts(
+        rows, ready_uuids, waiting_uuids, blocked_uuids
+    )
+    filters, stems = _task_filter_payload_rows(counts, waiting_count, oops_count)
     return {
         "revision": revision,
         "filters": filters,
