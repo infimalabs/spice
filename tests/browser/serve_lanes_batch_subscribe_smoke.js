@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { installScript } = require("./payload_factory");
 
 // Lane subscribes coalesce into ONE lanes.subscribe frame per microtask tick,
 // and the batch payloads apply state-first so each fused host paints its
@@ -11,61 +12,6 @@ const BATCH_MESSAGES_PER_MEMBER = 3;
 const BATCH_SNAPSHOT_REVISION = 50;
 const BATCH_SETTLE_MS = 80;
 const BATCH_DEFERRED_SUBSCRIBE_ATTEMPTS = 50;
-
-function batchTargetPayload(id, threadId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-batch",
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "p-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
-function batchTeam(ids, configRevision) {
-  return {
-    teamId: "team-batch",
-    revision: configRevision,
-    config: {
-      revision: configRevision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: ids.map((id) => ({ agentId: "target:" + id })),
-  };
-}
 
 // Interleaved indexes across the two members (a: 0/2/4, b: 1/3/5) so the
 // merged host stream only reads correctly when all members land together.
@@ -175,17 +121,26 @@ function batchInstallStubs(state, config) {
 // Phase A: initial fused mount -- one frame, one message-bearing host render.
 async function batchPhaseInitial(state, config) {
   laneStore.replaceTargets(
-    config.memberIds.map((id) => window.__batchTarget(id, id + "-th")),
+    config.memberIds.map((id) =>
+      window.spicePayloads.targetPayload({
+        id,
+        threadId: id + "-th",
+        teamId: "team-batch",
+        pendingPrefix: "p-",
+      }),
+    ),
   );
   applyTeamSnapshotPayload(
-    {
+    window.spicePayloads.teamSnapshot({
       revision: config.snapshotRevision,
-      changed: true,
-      snapshot: {
-        globalSettings: { fastMode: false },
-        teams: [window.__batchTeam(config.memberIds, 1)],
-      },
-    },
+      teams: [
+        window.spicePayloads.teamPayload({
+          teamId: "team-batch",
+          memberIds: config.memberIds,
+          revision: 1,
+        }),
+      ],
+    }),
     { force: true },
   );
   await window.__batchSettle(config);
@@ -382,10 +337,12 @@ async function batchPhaseCoalesce(state, config) {
   applyLaneBusPayload(
     laneStates.get(config.memberIds[0]),
     {
-      targetIdentity: window.__batchTarget(
-        config.memberIds[0],
-        config.memberIds[0] + "-th2",
-      ).targetIdentity,
+      targetIdentity: window.spicePayloads.targetPayload({
+        id: config.memberIds[0],
+        threadId: config.memberIds[0] + "-th2",
+        teamId: "team-batch",
+        pendingPrefix: "p-",
+      }).targetIdentity,
       messages: [],
       statusLine: window.__batchStatusLine(config.memberIds[0]),
     },
@@ -393,7 +350,11 @@ async function batchPhaseCoalesce(state, config) {
   );
   ensureTeamMemberLane(
     config.memberIds[1],
-    window.__batchTeam(config.memberIds, 2),
+    window.spicePayloads.teamPayload({
+      teamId: "team-batch",
+      memberIds: config.memberIds,
+      revision: 2,
+    }),
   );
   await window.__batchSettle(config);
   const frames = window.__batchSubscribeFrames(state);
@@ -466,8 +427,6 @@ async function batchMeasure(config) {
 }
 
 const BATCH_PAGE_HELPERS = {
-  __batchTarget: batchTargetPayload,
-  __batchTeam: batchTeam,
   __batchLaneMessages: batchLaneMessages,
   __batchFreshMessage: batchFreshMessage,
   __batchStatusLine: batchStatusLine,
@@ -564,6 +523,7 @@ async function run() {
           typeof ensureTeamMemberLane === "function",
         { timeout: 10000 },
       );
+      await page.addScriptTag({ content: installScript });
       await page.addScriptTag({ content: batchPageHelperScript() });
       const result = await page.evaluate(batchMeasure, {
         memberIds: BATCH_MEMBER_IDS,

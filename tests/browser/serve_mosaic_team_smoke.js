@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { targetPayload, teamPayload, installScript } = require("./payload_factory");
 
 // Mosaic team/fusion surface. A fused team host must run exactly one lattice over the
 // merged (epoch, index, key) creation order -- never one lattice per
@@ -14,59 +15,8 @@ const { withServePage } = require("./serve_playwright_harness");
 // past this bound.
 const MOSAIC_TEAM_SMOKE_WIDTH_DELTA_BOUND_PX = 30;
 
-function targetPayload(id, threadId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-main",
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "pending-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "pending-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
 function team(memberIds, revision) {
-  return {
-    teamId: "team-main",
-    revision,
-    config: {
-      revision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: memberIds.map((agentId) => ({ agentId: "target:" + agentId })),
-  };
+  return teamPayload({ teamId: "team-main", memberIds, revision });
 }
 
 function message(key, minutesAgo, threadId) {
@@ -80,17 +30,6 @@ function message(key, minutesAgo, threadId) {
   };
 }
 
-function teamSnapshotPayload(revision, teamPayload) {
-  return {
-    revision,
-    changed: true,
-    snapshot: {
-      globalSettings: { fastMode: false },
-      teams: [teamPayload],
-    },
-  };
-}
-
 // Solo alpha, one message: exercises the width-borrowing deletion (no
 // sibling lane, so nothing to "borrow" width from/for -- CSS alone must
 // already give this lane the full swimlanes width) and captures the
@@ -99,7 +38,10 @@ async function measureSoloAlpha(page, { alpha, soloTeam, soloMessage, alphaMessa
   return page.evaluate(
     ({ alpha, soloTeam, soloMessage, alphaMessage }) => {
       laneStore.replaceTargets([alpha]);
-      applyTeamSnapshotPayload(teamSnapshotPayload(1, soloTeam), { force: true });
+      applyTeamSnapshotPayload(
+        window.spicePayloads.teamSnapshot({ revision: 1, teams: [soloTeam] }),
+        { force: true },
+      );
       const solo = laneStates.get("alpha");
       if (!solo) throw new Error("missing solo alpha lane");
 
@@ -127,7 +69,10 @@ async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMes
   return page.evaluate(
     ({ alpha, beta, fusedTeam, betaMessages }) => {
       laneStore.replaceTargets([alpha, beta]);
-      applyTeamSnapshotPayload(teamSnapshotPayload(2, fusedTeam), { force: true });
+      applyTeamSnapshotPayload(
+        window.spicePayloads.teamSnapshot({ revision: 2, teams: [fusedTeam] }),
+        { force: true },
+      );
       const host = laneGroupHost(laneStates.get("alpha"));
       const betaLane = laneStates.get("beta");
       betaLane.knownMessages = betaMessages;
@@ -163,7 +108,10 @@ async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
   return page.evaluate(
     ({ alpha, survivorTeam }) => {
       laneStore.replaceTargets([alpha]);
-      applyTeamSnapshotPayload(teamSnapshotPayload(3, survivorTeam), { force: true });
+      applyTeamSnapshotPayload(
+        window.spicePayloads.teamSnapshot({ revision: 3, teams: [survivorTeam] }),
+        { force: true },
+      );
       const survivorHost = laneGroupHost(laneStates.get("alpha"));
       survivorHost.renderedMessageFingerprint = "";
       renderMessagesIfChanged(survivorHost);
@@ -176,19 +124,14 @@ async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
   );
 }
 
-async function installTeamSnapshotHelper(page) {
-  await page.addScriptTag({
-    content:
-      "function teamSnapshotPayload(revision, teamPayload) {" +
-      "return { revision, changed: true, snapshot: " +
-      "{ globalSettings: { fastMode: false }, teams: [teamPayload] } }; }",
-  });
+async function installPayloadFactory(page) {
+  await page.addScriptTag({ content: installScript });
 }
 
 function mosaicTeamSmokeFixtureArgs() {
   return {
-    alpha: targetPayload("alpha", "alpha-thread"),
-    beta: targetPayload("beta", "beta-thread"),
+    alpha: targetPayload({ id: "alpha", threadId: "alpha-thread", teamId: "team-main" }),
+    beta: targetPayload({ id: "beta", threadId: "beta-thread", teamId: "team-main" }),
     soloTeam: team(["alpha"], 1),
     soloMessage: message("solo-1", 5, "alpha-thread"),
     alphaMessage: message("alpha-1", 5, "alpha-thread"),
@@ -217,7 +160,7 @@ async function run() {
         },
         { timeout: 10000 },
       );
-      await installTeamSnapshotHelper(page);
+      await installPayloadFactory(page);
       const args = mosaicTeamSmokeFixtureArgs();
       const solo = await measureSoloAlpha(page, args);
       const fused = await fuseBetaAndMeasureLattice(page, args);

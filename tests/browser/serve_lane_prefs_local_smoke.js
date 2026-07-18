@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { installScript } = require("./payload_factory");
 
 // Narration and view prefs are browser-local interface hints, never shared
 // TeamConfig state: a lane mounted from the team snapshot initializes
@@ -12,59 +13,6 @@ const PREFS_CONFIG_REVISION = 4;
 const PREFS_HINT = { speechMode: "narrate", selectedView: "metrics" };
 const PREFS_CHANGED = { speechMode: "quiet", selectedView: "filters" };
 const PREFS_SETTLE_MS = 60;
-
-function prefsTargetPayload(id) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId: id + "-th" },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + id + "-th",
-      target: { id },
-      thread: { state: "bound", threadId: id + "-th" },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-" + id,
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "p-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
-// The reduced TeamConfig payload shape: team facts only, no interface prefs.
-function prefsTeam(id, configRevision) {
-  return {
-    teamId: "team-" + id,
-    revision: 1,
-    config: {
-      revision: configRevision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-      shellSettings: {},
-    },
-    splitBack: {},
-    members: [{ agentId: "target:" + id }],
-  };
-}
 
 function prefsStatusLine(id) {
   return {
@@ -105,17 +53,19 @@ function prefsInstallStubs(state) {
 }
 
 function prefsApplySnapshot(config, revision) {
+  // The reduced TeamConfig each member carries: team facts plus a shell
+  // settings bucket, but never the browser-local interface prefs this smoke
+  // proves stay out of the shared config.
   applyTeamSnapshotPayload(
-    {
+    window.spicePayloads.teamSnapshot({
       revision,
-      changed: true,
-      snapshot: {
-        globalSettings: { fastMode: false },
-        teams: config.memberIds.map((id) => {
-          return window.__prefsTeam(id, config.configRevision);
-        }),
-      },
-    },
+      teams: config.memberIds.map((id) =>
+        window.spicePayloads.teamPayload(
+          { teamId: "team-" + id, memberIds: [id], revision: 1 },
+          { config: { revision: config.configRevision, shellSettings: {} } },
+        ),
+      ),
+    }),
     { force: true },
   );
 }
@@ -129,7 +79,14 @@ async function prefsMeasure(config) {
   const state = { frames: [] };
   window.__prefsInstallStubs(state);
   laneStore.replaceTargets(
-    config.memberIds.map((id) => window.__prefsTarget(id)),
+    config.memberIds.map((id) =>
+      window.spicePayloads.targetPayload({
+        id,
+        threadId: id + "-th",
+        teamId: "team-" + id,
+        pendingPrefix: "p-",
+      }),
+    ),
   );
   localStorage.setItem(
     laneStorageKey,
@@ -166,8 +123,6 @@ async function prefsMeasure(config) {
 }
 
 const PREFS_PAGE_HELPERS = {
-  __prefsTarget: prefsTargetPayload,
-  __prefsTeam: prefsTeam,
   __prefsStatusLine: prefsStatusLine,
   __prefsSettle: prefsSettle,
   __prefsInstallStubs: prefsInstallStubs,
@@ -232,6 +187,7 @@ async function run() {
           typeof laneStorageKey === "string",
         { timeout: 10000 },
       );
+      await page.addScriptTag({ content: installScript });
       await page.addScriptTag({ content: prefsPageHelperScript() });
       const result = await page.evaluate(prefsMeasure, {
         memberIds: PREFS_MEMBER_IDS,

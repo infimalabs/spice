@@ -1,44 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
-
-function targetPayload(id, threadId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-main",
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "pending-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "pending-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
+const { targetPayload, teamPayload, teamSnapshot } = require("./payload_factory");
 
 async function run() {
   return withServePage(
@@ -51,31 +12,9 @@ async function run() {
         timeout: 10000,
       });
       return await page.evaluate(
-        async ({ alpha, beta }) => {
-          const team = (lifetime, revision) => ({
-            teamId: "team-main",
-            revision,
-            config: {
-              revision,
-              lifetime,
-              taskFilters: [],
-              taskFilterEntries: [],
-            },
-            splitBack: {},
-            members: [{ agentId: "target:alpha" }, { agentId: "target:beta" }],
-          });
+        async ({ alpha, beta, snapshot }) => {
           laneStore.replaceTargets([alpha, beta]);
-          applyTeamSnapshotPayload(
-            {
-              revision: 1,
-              changed: true,
-              snapshot: {
-                globalSettings: { fastMode: false },
-                teams: [team("Drive", 1)],
-              },
-            },
-            { force: true },
-          );
+          applyTeamSnapshotPayload(snapshot, { force: true });
           const host = Array.from(laneStates.values()).find(
             (lane) => !isShadowLane(lane) && laneGroupMemberTargetIds(lane).length === 2,
           );
@@ -101,8 +40,22 @@ async function run() {
           };
         },
         {
-          alpha: targetPayload("alpha", "alpha-thread"),
-          beta: targetPayload("beta", "beta-thread"),
+          alpha: targetPayload({
+            id: "alpha",
+            threadId: "alpha-thread",
+            teamId: "team-main",
+          }),
+          beta: targetPayload({
+            id: "beta",
+            threadId: "beta-thread",
+            teamId: "team-main",
+          }),
+          snapshot: teamSnapshot({
+            revision: 1,
+            teams: [
+              teamPayload({ teamId: "team-main", memberIds: ["alpha", "beta"] }),
+            ],
+          }),
         },
       );
     },

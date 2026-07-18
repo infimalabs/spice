@@ -1,5 +1,6 @@
 const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
+const { threadActorId } = require("./payload_factory");
 
 function pendingIdentity(count = 0) {
   return {
@@ -23,7 +24,7 @@ function mismatchPayload(targetId) {
       thread: { state: "bound", threadId: "thread-b" },
     },
     serveAgentIdentity: {
-      actorId: "thread:thread-b",
+      actorId: threadActorId("thread-b"),
       driver: { desired: "codex", actual: "claude", transcriptOwner: "claude" },
       launch: {
         desired: { model: "gpt-5.5", effort: "xhigh" },

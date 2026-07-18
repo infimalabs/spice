@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { installScript } = require("./payload_factory");
 
 // Closer for the parallel-load battery (LIVEBUS-1kCD3y6J, UI-1kCD5TCJ,
 // LIVEBUS-1kCD6H9x, UI-1kCDFJh3): end-to-end proof of the operator-visible
@@ -20,60 +21,23 @@ const SS_SETTLE_MS = 120;
 const SS_QUIET_MS = 160;
 
 function ssTargetPayload(id, threadId, teamId, teamRevision) {
-  return {
+  return window.spicePayloads.targetPayload({
     id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId,
-      teamRevision,
-      configRevision: teamRevision,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "p-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
+    threadId,
+    teamId,
+    teamRevision,
+    pendingPrefix: "p-",
+  });
 }
 
 function ssTeam(teamId, ids, configRevision) {
-  return {
-    teamId,
-    revision: configRevision,
-    config: {
-      revision: configRevision,
-      lifetime: "Drive",
-      speechMode: "speak",
-      selectedView: "compose",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: ids.map((id) => ({ agentId: "target:" + id })),
-  };
+  // Cold-load teams carry the shared interface defaults inside config so the
+  // settled paint provably comes from the server snapshot, never a
+  // browser-hint restore.
+  return window.spicePayloads.teamPayload(
+    { teamId, memberIds: ids, revision: configRevision },
+    { config: { speechMode: "speak", selectedView: "compose" } },
+  );
 }
 
 // start/step interleave the members so the merged host stream only reads
@@ -216,17 +180,13 @@ async function ssMeasure(config) {
   ]);
 
   applyTeamSnapshotPayload(
-    {
+    window.spicePayloads.teamSnapshot({
       revision: config.snapshotRevision,
-      changed: true,
-      snapshot: {
-        globalSettings: { fastMode: false },
-        teams: [
-          window.__ssTeam("team-fused", config.fusedIds, 1),
-          window.__ssTeam("team-solo", [config.soloId], 1),
-        ],
-      },
-    },
+      teams: [
+        window.__ssTeam("team-fused", config.fusedIds, 1),
+        window.__ssTeam("team-solo", [config.soloId], 1),
+      ],
+    }),
     { force: true },
   );
 
@@ -334,6 +294,7 @@ async function run() {
           typeof laneGroupHost === "function",
         { timeout: 10000 },
       );
+      await page.addScriptTag({ content: installScript });
       await page.addScriptTag({ content: ssPageHelperScript() });
       const result = await page.evaluate(ssMeasure, {
         fusedIds: SS_FUSED_IDS,
