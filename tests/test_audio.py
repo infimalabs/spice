@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.cli.parser import build_parser
 from spice.configcli import handle_config
 from spice.process.groups import ProcessDeadlineExceeded
@@ -50,13 +50,13 @@ def _speech_deadline_outcome(
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_VOICE_KEY: "Samantha",
-            config.SAY_WORDS_PER_MINUTE_KEY: 200,
+            values.SAY_VOICE_KEY: "Samantha",
+            values.SAY_WORDS_PER_MINUTE_KEY: 200,
         },
     )
     seen: dict[str, object] = {}
@@ -80,18 +80,18 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
     assert rendered == audio.SpeechAudio(b"m4a-bytes", "audio/mp4")
     assert seen["args"][:5] == ["say", "-v", "Samantha", "-r", "300"]
     assert seen["input"] == "hello world"
-    assert seen["timeout"] == config.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert seen["timeout"] == values.DEFAULT_SAY_TIMEOUT_SECONDS
 
 
 def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: "tts-engine --wav",
-            config.SAY_CONTENT_TYPE_KEY: "audio/wav",
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine --wav",
+            values.SAY_CONTENT_TYPE_KEY: "audio/wav",
         },
     )
     seen: dict[str, object] = {}
@@ -116,13 +116,13 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: "tts-engine",
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine",
         },
     )
 
@@ -139,14 +139,14 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
 
 
 def test_external_speech_timeout_is_configurable(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: "tts-engine",
-            config.SAY_TIMEOUT_SECONDS_KEY: 0.25,
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine",
+            values.SAY_TIMEOUT_SECONDS_KEY: 0.25,
         },
     )
     seen: dict[str, object] = {}
@@ -185,7 +185,7 @@ def test_infinite_layered_speech_timeout_renders_with_finite_default(
         "finite": seen["timeout"] < float("inf"),
     } == {
         "rendered": audio.SpeechAudio(b"wav-bytes", "audio/wav"),
-        "timeout": config.DEFAULT_SAY_TIMEOUT_SECONDS,
+        "timeout": values.DEFAULT_SAY_TIMEOUT_SECONDS,
         "finite": True,
     }
 
@@ -205,21 +205,21 @@ def test_long_message_renders_within_the_generous_default_bound(tmp_path, monkey
     rendered = audio.render_speech_audio(long_message, repo_root=tmp_path)
 
     assert rendered == audio.SpeechAudio(b"m4a-bytes", "audio/mp4")
-    assert seen["timeout"] == config.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert seen["timeout"] == values.DEFAULT_SAY_TIMEOUT_SECONDS
     assert seen["timeout"] > LONG_MESSAGE_FLOOR_SECONDS
 
 
 def test_stalled_external_speech_releases_worker_with_named_deadline(tmp_path):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: (
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: (
                 f'{sys.executable} -c "import time; time.sleep(60)"'
             ),
-            config.SAY_TIMEOUT_SECONDS_KEY: 0.1,
+            values.SAY_TIMEOUT_SECONDS_KEY: 0.1,
         },
     )
 

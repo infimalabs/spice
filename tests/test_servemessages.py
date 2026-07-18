@@ -12,7 +12,8 @@ from spice.agent.driver import (
     SPICE_AGENT_DRIVER_ENV,
     dashed_uuid,
 )
-from spice.config import WORKTREE_SOURCE, set_scope_section
+from spice.config.edit import set_scope_section
+from spice.config.layers import WORKTREE_SOURCE
 from spice.serve import messages as message_reader
 from spice.serve.messages import (
     RolloutCursor,

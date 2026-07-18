@@ -17,7 +17,7 @@ from spice.cli.parser import (
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
 from spice.process.tool import run_parent_lifetime_command
-from spice.configlayer import contextualize_config_error, effective_commands
+from spice.config.layers import contextualize_config_error, effective_commands
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow

@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from spice import configlayer
+from spice.config import layers
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_CONFIGURATION_SYMBOLS = (
@@ -67,33 +67,32 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
         "spice_table_readers": tuple(spice_table_readers),
         "loader_functions": tuple(
             sorted(
-                definitions["spice/configlayer.py"]
+                definitions["spice/config/layers.py"]
                 & {"load_config", "effective_mapping", "effective_table", "layer_table"}
             )
         ),
         "editor_functions": tuple(
             sorted(
-                definitions["spice/config.py"]
+                definitions["spice/config/edit.py"]
                 & {"set_scope_section", "clear_scope_section"}
             )
         ),
-        "scope_vocabulary": configlayer.CONFIG_SCOPE_NAMES,
+        "scope_vocabulary": layers.CONFIG_SCOPE_NAMES,
         "compatibility_symbols": compatibility_symbols,
         "config_state_files": tuple(
             marker
             for marker in ("state.json", "spice.toml")
-            if marker in source_text["spice/config.py"]
+            if marker in source_text["spice/config/edit.py"]
         ),
     }
 
     assert inventory == {
         "toml_importers": (
-            "spice/config.py",
-            "spice/configlayer.py",
-            "spice/repocfg.py",
-            "spice/serve/web.py",
+            "spice/config/edit.py",
+            "spice/config/layers.py",
+            "spice/config/pyproject.py",
         ),
-        "spice_table_readers": ("spice/configlayer.py",),
+        "spice_table_readers": ("spice/config/layers.py",),
         "loader_functions": (
             "effective_mapping",
             "effective_table",

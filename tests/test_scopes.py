@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from spice import configlayer
+from spice.config import layers
 from spice.errors import SpiceError
 from spice.scopes import (
     MAXIM_SCOPES,
@@ -288,7 +288,7 @@ def test_scopes_inline_leaf_replaces_completely_across_four_layers(
 ):
     system_root = tmp_path / "runtime"
     system_root.mkdir()
-    monkeypatch.setattr(configlayer.paths, "runtime_spice_source", lambda: system_root)
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     _write(
         system_root / "spice.toml",
         '[feature.rule]\nscopes = { paths = ["system"], drivers = ["codex"] }\n',
@@ -308,14 +308,14 @@ def test_scopes_inline_leaf_replaces_completely_across_four_layers(
         '[feature.rule]\nscopes = { extensions = [".py"] }\n',
     )
 
-    loaded = configlayer.load_config(tmp_path)
+    loaded = layers.load_config(tmp_path)
 
     assert loaded.effective["feature"]["rule"]["scopes"] == {"extensions": (".py",)}
     assert loaded.source_for("feature.rule.scopes") == loaded.layer(
-        configlayer.WORKTREE_SOURCE
+        layers.WORKTREE_SOURCE
     )
     assert loaded.source_for("feature.rule.scopes.extensions") == loaded.layer(
-        configlayer.WORKTREE_SOURCE
+        layers.WORKTREE_SOURCE
     )
     assert loaded.source_for("feature.rule.scopes.paths") is None
 

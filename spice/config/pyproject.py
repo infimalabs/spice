@@ -1,6 +1,6 @@
 """Generic repository metadata outside Spice's layered configuration.
 
-Spice settings use :mod:`spice.configlayer`; this module reads the remaining
+Spice settings use :mod:`spice.config.layers`; this module reads the remaining
 packaging and test metadata from the repository's ``pyproject.toml``.
 """
 
@@ -20,3 +20,13 @@ def read_pyproject(repo_root: Path) -> dict[str, Any]:
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def pyproject_table(data: dict[str, Any], *path: str) -> dict[str, Any]:
+    """One nested table from parsed pyproject data, or {} when absent."""
+    current: Any = data
+    for key in path:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent.driver import (
     SPICE_AGENT_DRIVER_ENV,
     driver_choices,
@@ -122,11 +122,11 @@ def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
     monkeypatch.syspath_prepend(str(wheel))
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
 
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
-        {config.AGENT_DRIVER_KEY: "toy"},
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_DRIVER_KEY: "toy"},
     )
     parser_args = build_parser().parse_args(["config", "agent", "--driver", "toy"])
 

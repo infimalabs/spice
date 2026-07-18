@@ -125,7 +125,7 @@ def assignable_stems() -> tuple[str, ...]:
 
 
 def _configured_extra_stems() -> tuple[str, ...]:
-    from spice.configlayer import config_string_list
+    from spice.config.layers import config_string_list
 
     table = _tasks_config_table()
     return tuple(
@@ -136,7 +136,7 @@ def _configured_extra_stems() -> tuple[str, ...]:
 
 
 def _configured_hidden_stems() -> tuple[str, ...]:
-    from spice.configlayer import config_string_list
+    from spice.config.layers import config_string_list
 
     table = _tasks_config_table()
     configured: list[str] = []
@@ -167,7 +167,7 @@ def per_stem_flows() -> dict[str, tuple[str, ...]]:
 
 
 def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
-    from spice.configlayer import config_string_list
+    from spice.config.layers import config_string_list
 
     raw_flows = _tasks_config_table().get("flows")
     if not isinstance(raw_flows, dict):
@@ -191,7 +191,7 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
 
 def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
-    from spice.configlayer import effective_table
+    from spice.config.layers import effective_table
 
     root = repo_root or repo_root_from_cwd()
     if root is None:
@@ -225,7 +225,7 @@ def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str
 
 
 def project_depth_bounds() -> tuple[int, int]:
-    from spice.configlayer import contextualize_config_error
+    from spice.config.layers import contextualize_config_error
     from spice.paths import repo_root_from_cwd
 
     root = repo_root_from_cwd()

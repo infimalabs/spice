@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent import driver as agent_driver
 from spice.agent import (
     lifecycle,
@@ -331,11 +331,11 @@ def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch
         lambda *_args, **_kwargs: _status(),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
-        {config.AGENT_MODEL_KEY: "sonnet"},
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_MODEL_KEY: "sonnet"},
     )
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)

@@ -12,15 +12,15 @@ CLASSIFICATIONS = frozenset(
 
 # A dotted Python export maps to the packaged TOML leaf that owns its value.
 TOML_STATIC_EXPORT_PATHS = {
-    "spice.config.SAY_BACKEND_CHOICES": "say.backend_choices",
-    "spice.config.DEFAULT_SAY_BACKEND": "say.backend",
-    "spice.config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.external_content_type",
-    "spice.config.DEFAULT_SAY_WORDS_PER_MINUTE": "say.words_per_minute",
-    "spice.config.AGENT_PERSONALITY_CHOICES": "agent.personality_choices",
-    "spice.config.DEFAULT_AGENT_PERSONALITY": "agent.personality",
-    "spice.config.DEFAULT_JUDGE_BIN": "judge.bin",
-    "spice.config.PORTABLE_JUDGE_BIN": "judge.portable_bin",
-    "spice.config.DEFAULT_RTK_EXECUTABLE": "rtk.executable",
+    "spice.config.values.SAY_BACKEND_CHOICES": "say.backend_choices",
+    "spice.config.values.DEFAULT_SAY_BACKEND": "say.backend",
+    "spice.config.values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.external_content_type",
+    "spice.config.values.DEFAULT_SAY_WORDS_PER_MINUTE": "say.words_per_minute",
+    "spice.config.values.AGENT_PERSONALITY_CHOICES": "agent.personality_choices",
+    "spice.config.values.DEFAULT_AGENT_PERSONALITY": "agent.personality",
+    "spice.config.values.DEFAULT_JUDGE_BIN": "judge.bin",
+    "spice.config.values.PORTABLE_JUDGE_BIN": "judge.portable_bin",
+    "spice.config.values.DEFAULT_RTK_EXECUTABLE": "rtk.executable",
     "spice.policy.FILE_LOC_LIMIT": "policy.limits.file_loc",
     "spice.policy.FILE_BYTE_LIMIT": "policy.limits.file_bytes",
     "spice.policy.COMPLEXITY_MAX_CCN": "policy.limits.routine_ccn",
@@ -100,7 +100,7 @@ TOML_STATIC_EXPORT_PATHS = {
 
 EXPORTED_DEFAULT_CLASSIFICATION = {
     **{name: TOML_STATIC for name in TOML_STATIC_EXPORT_PATHS},
-    "spice.config.default_judge_bin": PLATFORM_DERIVED,
+    "spice.config.values.default_judge_bin": PLATFORM_DERIVED,
     "spice.paths.runtime_spice_source": PLATFORM_DERIVED,
     "spice.agent.driver.BUILTIN_DRIVERS": DRIVER_DERIVED,
     "spice.agent.driver.DRIVER": DRIVER_DERIVED,

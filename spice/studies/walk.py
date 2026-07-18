@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from spice.configlayer import config_string_list, effective_table
+from spice.config.layers import config_string_list, effective_table
 from spice.process.git import run_git_command
 from spice.pathmatch import (
     has_glob_magic,
@@ -13,7 +13,7 @@ from spice.pathmatch import (
     matches_repo_path_or_ancestor,
     normalize_repo_path,
 )
-from spice.repocfg import read_pyproject
+from spice.config.pyproject import read_pyproject
 
 _RENAME_STATUS_FIELDS = 3
 TEST_PATHS_KEY = "test_paths"

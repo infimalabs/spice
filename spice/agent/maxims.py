@@ -23,14 +23,14 @@ from pathlib import Path
 from typing import Any
 
 from spice import defaults
-from spice.config import configured_judge_bin
+from spice.config.values import configured_judge_bin
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
 from spice.scopes import MAXIM_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
-from spice.configlayer import (
+from spice.config.layers import (
     config_string_list,
     contextualize_config_error,
     effective_table,

@@ -60,7 +60,8 @@ def test_select_driver_defaults_to_codex_and_resolves_claude(tmp_path, monkeypat
 def test_select_driver_reads_worktree_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import WORKTREE_SOURCE, set_scope_section
+    from spice.config.edit import set_scope_section
+    from spice.config.layers import WORKTREE_SOURCE
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     set_scope_section(tmp_path, WORKTREE_SOURCE, "agent", {"driver": "claude"})
@@ -69,7 +70,8 @@ def test_select_driver_reads_worktree_config(tmp_path, monkeypatch):
 
 def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import WORKTREE_SOURCE, set_scope_section
+    from spice.config.edit import set_scope_section
+    from spice.config.layers import WORKTREE_SOURCE
 
     codex_repo = tmp_path / "codex-repo"
     claude_repo = tmp_path / "claude-repo"
@@ -85,7 +87,8 @@ def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
 
 def test_driver_for_rejects_unknown_configured_driver(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import WORKTREE_SOURCE, set_scope_section
+    from spice.config.edit import set_scope_section
+    from spice.config.layers import WORKTREE_SOURCE
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     set_scope_section(tmp_path, WORKTREE_SOURCE, "agent", {"driver": "cloude"})

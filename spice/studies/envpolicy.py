@@ -30,7 +30,7 @@ from spice.policy import (
     ENV_POLICY_SELF_PATH_SUFFIX,
 )
 from spice.policyconfig import resolve_policy
-from spice.configlayer import config_string_list, effective_table
+from spice.config.layers import config_string_list, effective_table
 from spice.studies.walk import is_excluded_path
 
 # This module necessarily names the patterns it polices; it is self-waived.
