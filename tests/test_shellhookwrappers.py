@@ -480,11 +480,13 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
             "rtk grep -n needle source.txt",
             "rtk grep -A 2 needle source.txt",
             "rtk grep -C 2 needle source.txt",
+            "rtk grep --context needle source.txt",
             "rtk grep -e needle source.txt",
             "rtk grep needle",
             "rtk grep -n needle",
             "rtk grep -A 2 needle",
             "rtk grep -C 2 needle",
+            "rtk grep --context needle",
             "rtk grep -e needle",
         ]
     )
@@ -510,11 +512,13 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
         "rtk:grep -E -r -n needle source.txt",
         "rtk:grep -E -r -A 2 needle source.txt",
         "rtk:grep -E -r -C 2 needle source.txt",
+        "rtk:grep -E -r --context needle source.txt",
         "rtk:grep -E -r -e needle source.txt",
         "rtk:grep -E needle",
         "rtk:grep -E -n needle",
         "rtk:grep -E -A 2 needle",
         "rtk:grep -E -C 2 needle",
+        "rtk:grep -E --context needle",
         "rtk:grep -E -e needle",
     ]
 
