@@ -212,6 +212,18 @@ laneStore.subscribe((change) => {
   materializeTeamSnapshotTransition(change.transition);
 });
 
+// Fusion/split chrome, the merged newest-first message stream, and each
+// concrete member's live-bus activity query are an explicit store subscription
+// over the reconciled snapshot rather than an imperative tail on lane
+// materialization. It runs after the materializer has mounted and closed lanes,
+// applies the snapshot's group topology, and repaints the group flow; a
+// non-applied snapshot renders nothing.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  if (change.transition.disposition !== "applied") return;
+  reconcileLaneGroups(change.transition.groupRuns);
+});
+
 // Menu refresh, filter panes, and lane-hint persistence are explicit store
 // subscribers rather than an imperative tail on lane materialization. Each
 // gates on the fields it consumes, so a quiet retained-only snapshot repaints
@@ -258,7 +270,6 @@ function materializeTeamSnapshotTransition(transition) {
       );
   }
   for (const lane of transition.removes) closeLaneCore(lane);
-  reconcileLaneGroups(transition.groupRuns);
 }
 
 // A team member is an explicit actor: target:<target-id> before a thread binds,

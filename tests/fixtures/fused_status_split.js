@@ -92,6 +92,7 @@ const context = {
   },
   isLaneOpen: () => true,
   renderMessagesIfChanged: () => {},
+  scheduleLiveBusLaneActivitySync: () => {},
   syncComposerShards(lane, members) {
     composerWrites.push({
       targetId: lane.targetId,

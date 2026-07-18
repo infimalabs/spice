@@ -32,8 +32,7 @@ function reconcileLaneGroups(groupRuns) {
   // already adjacent, no child-list mutation reaches the board observer.
   // Reconcile activity at the topology boundary so every concrete member's
   // server query immediately reflects its newly visible (or offscreen) group.
-  if (typeof scheduleLiveBusLaneActivitySync === "function")
-    scheduleLiveBusLaneActivitySync();
+  scheduleLiveBusLaneActivitySync();
 }
 
 // The store's topology transition drives the lane class, weight, and DOM-order
