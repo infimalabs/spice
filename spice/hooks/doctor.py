@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import os
 import shlex
 import shutil
@@ -15,6 +16,9 @@ from typing import Callable
 from spice.agent.driver import DRIVER
 from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.lifecycle import packaged_skill_path
+from spice.agent.shellhook import rtk_rewrite_yield_selectors
+from spice.cli.entry import is_spice_checkout
+from spice.configlayer import effective_table
 from spice.config import (
     configured_judge_bin,
     configured_say_backend,
@@ -34,7 +38,9 @@ from spice.paths import (
     worktree_state_root,
 )
 from spice.policyconfig import resolve_policy
+from spice.repocfg import read_pyproject
 from spice.toolprocess import run_tool_command
+from spice.version import DISTRIBUTION_NAME
 from spice.studies import (
     complexity,
     envpolicy,
@@ -88,6 +94,8 @@ class InstalledSpiceRuntime:
     entrypoint: Path
     python: Path
     source: Path
+    version: str
+    editable: bool
 
 
 def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
@@ -101,6 +109,8 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _runtime_resolution_check(repo_root),
         _spice_namespace_portions_check(repo_root),
         _installed_spice_source_check(repo_root),
+        _worktree_venv_check(repo_root),
+        _wrapper_seam_check(repo_root),
         _skill_check(repo_root),
         _policy_check(repo_root),
         _git_clean_check(repo_root),
@@ -331,22 +341,50 @@ def _spice_namespace_portion_from_path(path: Path) -> Path | None:
 
 
 def _installed_spice_source_check(repo_root: Path) -> DoctorCheck:
-    del repo_root
     installed = _installed_spice_runtime()
     if installed is None:
         return _warn(
             "runtime.installed-spice",
             "installed spice package source is unavailable",
-            "python -m pip show spice",
+            _INSTALLED_SPICE_COMMAND,
+        )
+    located = (
+        f"installed spice tool -> {installed.entrypoint}; "
+        f"interpreter -> {installed.python}; package -> {installed.source}; "
+        f"version {installed.version}"
+    )
+    if not installed.editable:
+        return _fail(
+            "runtime.installed-spice",
+            f"{located}; not an editable install, so landed tasks stop "
+            "reaching it; reinstall with `uv tool install -e <checkout>`",
+            "uv tool install -e <checkout>",
+        )
+    checkout_version = _checkout_spice_version(repo_root)
+    if checkout_version is not None and installed.version != checkout_version:
+        return _warn(
+            "runtime.installed-spice",
+            f"{located} (editable); checkout pyproject declares "
+            f"{checkout_version}; drift resolves at the next lane launch",
+            _INSTALLED_SPICE_COMMAND,
         )
     return _ok(
         "runtime.installed-spice",
-        (
-            f"installed spice tool -> {installed.entrypoint}; "
-            f"interpreter -> {installed.python}; package -> {installed.source}"
-        ),
-        "python -m pip show spice",
+        f"{located} (editable)",
+        _INSTALLED_SPICE_COMMAND,
     )
+
+
+_INSTALLED_SPICE_COMMAND = f"python -m pip show {DISTRIBUTION_NAME}"
+
+
+def _checkout_spice_version(repo_root: Path) -> str | None:
+    """The checkout's declared spice version, iff this repo is the spice project."""
+    project = read_pyproject(repo_root).get("project")
+    if not isinstance(project, dict) or project.get("name") != DISTRIBUTION_NAME:
+        return None
+    version = project.get("version")
+    return str(version) if version else None
 
 
 def _installed_spice_runtime() -> InstalledSpiceRuntime | None:
@@ -357,27 +395,39 @@ def _installed_spice_runtime() -> InstalledSpiceRuntime | None:
     python = _python_from_script_shebang(entrypoint_path)
     if python is None:
         return None
-    source = _spice_package_source_for_python(python)
-    if source is None:
+    probed = _spice_runtime_probe_for_python(python)
+    if probed is None:
         return None
+    source, version, editable = probed
     return InstalledSpiceRuntime(
         entrypoint=entrypoint_path,
         python=python,
         source=source,
+        version=version,
+        editable=editable,
     )
 
 
-def _spice_package_source_for_python(python: Path) -> Path | None:
+# Runs from `/` so the probe cannot pick a checkout `spice` package off the
+# current directory instead of the interpreter's own installed distribution.
+_RUNTIME_PROBE_SCRIPT = (
+    "import json;"
+    "from importlib import metadata;"
+    "from pathlib import Path;"
+    "import spice.cli.entry as entry;"
+    f"dist = metadata.distribution('{DISTRIBUTION_NAME}');"
+    "raw = dist.read_text('direct_url.json');"
+    "info = json.loads(raw) if raw else {};"
+    "print(json.dumps({"
+    "'package': str(Path(entry.__file__).resolve().parents[1]),"
+    "'version': dist.version,"
+    "'editable': bool(info.get('dir_info', {}).get('editable'))}))"
+)
+
+
+def _spice_runtime_probe_for_python(python: Path) -> tuple[Path, str, bool] | None:
     result = run_tool_command(
-        [
-            str(python),
-            "-c",
-            (
-                "from pathlib import Path;"
-                "import spice.cli.entry as entry;"
-                "print(Path(entry.__file__).resolve().parents[1])"
-            ),
-        ],
+        [str(python), "-c", _RUNTIME_PROBE_SCRIPT],
         policy="extension",
         operation="inspect installed spice runtime",
         capture_output=True,
@@ -387,8 +437,106 @@ def _spice_package_source_for_python(python: Path) -> Path | None:
     )
     if result.returncode != 0:
         return None
-    raw = result.stdout.strip()
-    return Path(raw).expanduser().resolve() if raw else None
+    try:
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    package = str(payload.get("package") or "").strip()
+    if not package:
+        return None
+    return (
+        Path(package).expanduser().resolve(),
+        str(payload.get("version") or ""),
+        bool(payload.get("editable")),
+    )
+
+
+def _worktree_venv_check(repo_root: Path) -> DoctorCheck:
+    if not is_spice_checkout(repo_root):
+        return _ok(
+            "runtime.worktree-venv",
+            "not a spice checkout; dev commands run from the installed spice",
+            "spice dev doctor",
+        )
+    python = repo_root / ".venv" / "bin" / "python"
+    if not python.is_file():
+        return _fail(
+            "runtime.worktree-venv",
+            f"{python} missing; create the worktree venv with `uv sync`",
+            "uv sync",
+        )
+    result = run_tool_command(
+        [
+            str(python),
+            "-c",
+            "import pytest, xdist; print(pytest.__version__, xdist.__version__)",
+        ],
+        policy="extension",
+        operation="probe worktree venv dev dependencies",
+        capture_output=True,
+        check=False,
+        cwd=repo_root,
+        text=True,
+    )
+    if result.returncode != 0:
+        return _fail(
+            "runtime.worktree-venv",
+            f"{python} cannot import pytest and xdist "
+            f"({_command_problem(result)}); run `uv sync`",
+            "uv sync",
+        )
+    return _ok(
+        "runtime.worktree-venv",
+        f"{python} imports pytest and xdist ({result.stdout.strip()})",
+        "uv sync",
+    )
+
+
+_SPICE_DEV_WRAPPER_GROUP = "spice-dev"
+_DEV_PYTEST_ARGV = ["spice", "dev", "pytest"]
+
+
+def _wrapper_seam_check(repo_root: Path) -> DoctorCheck:
+    words = _declared_wrapper_word_argvs(repo_root)
+    if not words:
+        return _ok(
+            "runtime.wrapper-seam",
+            f"no {_SPICE_DEV_WRAPPER_GROUP} wrapper words declared",
+            "spice agent activation",
+        )
+    yielded = rtk_rewrite_yield_selectors(repo_root)
+    problems = [
+        f"{word} missing from the rtk rewrite yield set, so the shell "
+        "wrapper never runs"
+        for word, argv in sorted(words.items())
+        if argv[:1] == ["spice"] and word not in yielded
+    ]
+    pytest_argv = words.get("pytest")
+    if pytest_argv is not None and pytest_argv != _DEV_PYTEST_ARGV:
+        problems.append(
+            f"pytest argv {pytest_argv} bypasses the dev self-exec seam; "
+            f"expected {_DEV_PYTEST_ARGV}"
+        )
+    if problems:
+        return _fail(
+            "runtime.wrapper-seam", "; ".join(problems), "spice agent activation"
+        )
+    listed = ", ".join(
+        f"{word} -> {' '.join(argv)}" for word, argv in sorted(words.items())
+    )
+    return _ok("runtime.wrapper-seam", listed, "spice agent activation")
+
+
+def _declared_wrapper_word_argvs(repo_root: Path) -> dict[str, list[str]]:
+    group = effective_table(repo_root, "wrappers", _SPICE_DEV_WRAPPER_GROUP)
+    words: dict[str, list[str]] = {}
+    for raw_word, raw_entry in group.items():
+        if not isinstance(raw_entry, Mapping):
+            continue
+        raw_argv = raw_entry.get("argv")
+        if isinstance(raw_argv, list):
+            words[str(raw_word)] = [str(item) for item in raw_argv]
+    return words
 
 
 def _python_from_script_shebang(path: Path) -> Path | None:

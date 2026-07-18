@@ -100,14 +100,19 @@ def _switch_worktree(target: str) -> None:
     os.chdir(resolved)
 
 
-def _worktree_local_python(repo_root: Path) -> Path | None:
-    """The worktree's own venv interpreter, iff this worktree is a spice checkout.
+def is_spice_checkout(repo_root: Path) -> bool:
+    """Whether this worktree is a spice source checkout.
 
     `spice/` is a namespace package (no `__init__.py`), so its presence is
     checked against this very file instead -- guaranteed to exist in any
     checkout that has this re-exec logic at all.
     """
-    if not (repo_root / "spice" / "cli" / "entry.py").is_file():
+    return (repo_root / "spice" / "cli" / "entry.py").is_file()
+
+
+def _worktree_local_python(repo_root: Path) -> Path | None:
+    """The worktree's own venv interpreter, iff this worktree is a spice checkout."""
+    if not is_spice_checkout(repo_root):
         return None
     candidate = repo_root / ".venv" / "bin" / "python"
     return candidate if candidate.is_file() else None

@@ -82,6 +82,10 @@ def test_reexec_fires_even_when_both_venvs_share_one_symlinked_interpreter(
     other_venv = tmp_path / "other-worktree" / ".venv" / "bin"
     other_venv.mkdir(parents=True)
     (other_venv / "python").symlink_to(shared_interpreter)
+    # `spice dev pytest` itself arrives through the re-exec seam, so the
+    # sentinel may already be in this process's environment; the gate under
+    # test needs it absent.
+    monkeypatch.delenv(cli_entry.SELFEXEC_ENV, raising=False)
     monkeypatch.setattr(cli_entry, "repo_root_from_cwd", lambda: repo)
     monkeypatch.setattr(cli_entry.sys, "prefix", str(other_venv.parent))
     captured: dict[str, object] = {}
@@ -98,6 +102,7 @@ def test_reexec_fires_even_when_both_venvs_share_one_symlinked_interpreter(
 
 def test_reexec_relaunches_through_the_worktree_venv(tmp_path, monkeypatch):
     repo = _make_worktree_checkout(tmp_path)
+    monkeypatch.delenv(cli_entry.SELFEXEC_ENV, raising=False)
     monkeypatch.setattr(cli_entry, "repo_root_from_cwd", lambda: repo)
     monkeypatch.setattr(cli_entry.sys, "prefix", str(tmp_path / "some-other-venv"))
     captured: dict[str, object] = {}
