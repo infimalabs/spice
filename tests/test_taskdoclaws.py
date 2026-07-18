@@ -8,7 +8,7 @@ from spice.tasks import config, identity, ops
 from spice.tasks.markdown.apply import apply_document, load_family_rows, plan_document
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import graph_signature
-from spice.tasks.markdown.ledger import export_document, export_ledger
+from spice.tasks.markdown.ledger import export_document, render_ledger
 
 from tests.test_tasks import task_repo
 from tests.test_taskorigin import ACK_KEY
@@ -72,7 +72,7 @@ def test_apply_ledger_convergence_fixed_point_and_steady_reentrancy(task_repo, s
 
     first_plan = plan_document(document, project="task.unit", origin=f"ack:{ACK_KEY}")
     second_plan = plan_document(document, project="task.unit", origin=f"ack:{ACK_KEY}")
-    ledger = export_ledger(root)
+    ledger, _ = render_ledger(root)
 
     assert first_plan == second_plan
     assert graph_signature(parse(ledger)) == graph_signature(document)

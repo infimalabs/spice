@@ -23,7 +23,11 @@ from spice.tasks.markdown.dialect import (
     graph_signature,
     slugify,
 )
-from spice.tasks.markdown.ledger import export_document, export_ledger
+from spice.tasks.markdown.ledger import (
+    LEDGER_ROUND_TRIP_WARNING,
+    export_document,
+    render_ledger,
+)
 
 from tests.test_tasks import task_repo
 from tests.test_taskorigin import ACK_KEY, _seed_task
@@ -555,7 +559,7 @@ def test_ledger_reconstructs_applied_family_without_board_owned_edges(task_repo)
     ops.delete(deleted_external, "deleted external ledger fixture")
     ops.note(root, "ack 1jN54zJJ: runtime steering handled")
 
-    rendered = export_ledger(root)
+    rendered, _ = render_ledger(root)
     reparsed = parse(rendered)
 
     assert graph_signature(reparsed) == graph_signature(document)
@@ -584,7 +588,7 @@ def test_ledger_refuses_invalid_containment_metadata(task_repo, parent, message)
     )
 
     with pytest.raises(SpiceError) as error:
-        export_ledger(root)
+        render_ledger(root)
 
     assert str(error.value) == message
 
@@ -645,6 +649,82 @@ def test_ledger_exports_plain_board_dependency_family(task_repo, capsys):
     assert export_document(document) == rendered
 
 
+def test_ledger_warns_and_exits_zero_on_free_text_annotation_family(task_repo, capsys):
+    assert task_repo.is_dir()
+    parent = create.add(
+        "Free-text annotation parent",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["parent carries an operator note"],
+        origin=f"ack:{ACK_KEY}",
+    )
+    child = create.add(
+        "Annotated prerequisite",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["prerequisite is complete"],
+        origin=f"task:{parent}",
+    )
+    ops.depends(parent, [child])
+    # Free-text prose renders as a verbatim block and folds back into the node
+    # description on re-read, so this family cannot round-trip.
+    ops.note(parent, "Plan verification confirmed the contract still matches.")
+
+    ledger_args = build_parser().parse_args(
+        ["task", "--backend", str(config.backend_root()), "ledger", child]
+    )
+
+    assert task_cli.handle(ledger_args) == 0
+    captured = capsys.readouterr()
+    document = parse(captured.out)
+    assert {node.title for node in document.nodes} == {
+        f"Free-text annotation parent {parent}",
+        f"Annotated prerequisite {child}",
+        DOCUMENT_ROOT_TITLE,
+    }
+    assert captured.err == LEDGER_ROUND_TRIP_WARNING + "\n"
+
+
+def test_ledger_emits_no_warning_on_round_trippable_family(task_repo, capsys):
+    assert task_repo.is_dir()
+    parent = create.add(
+        "Clean board parent",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["parent coordinates its prerequisite"],
+        origin=f"ack:{ACK_KEY}",
+    )
+    child = create.add(
+        "Clean prerequisite",
+        project="task.unit",
+        priority="high",
+        flow=["todo"],
+        acceptance=["prerequisite is complete"],
+        origin=f"task:{parent}",
+    )
+    ops.depends(parent, [child])
+
+    ledger_args = build_parser().parse_args(
+        ["task", "--backend", str(config.backend_root()), "ledger", child]
+    )
+
+    assert task_cli.handle(ledger_args) == 0
+    captured = capsys.readouterr()
+    document = parse(captured.out)
+    assert {node.title for node in document.nodes} == {
+        f"Clean board parent {parent}",
+        f"Clean prerequisite {child}",
+        DOCUMENT_ROOT_TITLE,
+    }
+    assert graph_signature(parse(captured.out)) == graph_signature(
+        parse(render_ledger(child)[0])
+    )
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize(
     "source",
     (
@@ -672,7 +752,7 @@ def test_ledger_distinguishes_real_and_synthetic_document_roots(task_repo, sourc
     if document.nodes[document.root].kind == "document":
         document.nodes[document.root].flow = ["plan", "todo", "review"]
 
-    rendered = export_ledger(root)
+    rendered, _ = render_ledger(root)
 
     assert graph_signature(parse(rendered)) == graph_signature(document)
 
@@ -706,4 +786,4 @@ def test_cli_ingest_dash_and_ledger_run_the_task_document_dialect(
 
     ledger_args = build_parser().parse_args(["task", "ledger", root])
     assert task_cli.handle(ledger_args) == 0
-    assert capsys.readouterr().out == export_ledger(root)
+    assert capsys.readouterr().out == render_ledger(root)[0]
