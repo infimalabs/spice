@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from spice.config import configured_rtk_executable
+from spice.config.values import configured_rtk_executable
 from spice.errors import SpiceError
 from spice.hooks import install as hook_install
 from spice.hooks import precommit

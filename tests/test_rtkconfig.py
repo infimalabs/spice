@@ -12,38 +12,38 @@ from typing import Callable
 
 import pytest
 
-from spice import config, configlayer
+from spice.config import edit, layers, values
 from spice.configcli import handle_config
 from spice.errors import SpiceError
 
 
 def test_packaged_rtk_default_is_the_bare_executable(tmp_path: Path) -> None:
-    assert config.DEFAULT_RTK_EXECUTABLE == "rtk"
-    assert config.configured_rtk_executable(tmp_path) == "rtk"
+    assert values.DEFAULT_RTK_EXECUTABLE == "rtk"
+    assert values.configured_rtk_executable(tmp_path) == "rtk"
 
 
-@pytest.mark.parametrize("scope", config.CONFIG_SCOPE_NAMES)
+@pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
 def test_each_rtk_configuration_layer_can_win_with_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: str
 ) -> None:
     paths = _redirect_system_config(tmp_path, monkeypatch, "system-rtk")
     expected = "system-rtk"
-    if scope == config.PYPROJECT_SOURCE:
+    if scope == layers.PYPROJECT_SOURCE:
         expected = "pyproject-rtk"
         _write(
             paths[scope],
             f'[tool.spice.rtk]\nexecutable = "{expected}"\n',
         )
-    elif scope == config.REPOSITORY_SOURCE:
+    elif scope == layers.REPOSITORY_SOURCE:
         expected = "repository-rtk"
         _write(paths[scope], f'[rtk]\nexecutable = "{expected}"\n')
-    elif scope == config.WORKTREE_SOURCE:
+    elif scope == layers.WORKTREE_SOURCE:
         expected = "worktree-rtk"
         _write(paths[scope], f'[rtk]\nexecutable = "{expected}"\n')
 
-    overview = config.config_overview(tmp_path)
+    overview = values.config_overview(tmp_path)
 
-    assert config.configured_rtk_executable(tmp_path) == expected
+    assert values.configured_rtk_executable(tmp_path) == expected
     assert overview["effective"]["rtk"]["executable"] == expected
     assert overview["provenance"]["rtk.executable"] == {
         "scope": scope,
@@ -56,31 +56,31 @@ def test_all_rtk_layers_resolve_in_declared_precedence(
 ) -> None:
     paths = _redirect_system_config(tmp_path, monkeypatch, "system-rtk")
     _write(
-        paths[config.PYPROJECT_SOURCE],
+        paths[layers.PYPROJECT_SOURCE],
         '[tool.spice.rtk]\nexecutable = "pyproject-rtk"\n',
     )
     _write(
-        paths[config.REPOSITORY_SOURCE],
+        paths[layers.REPOSITORY_SOURCE],
         '[rtk]\nexecutable = "repository-rtk"\n',
     )
     _write(
-        paths[config.WORKTREE_SOURCE],
+        paths[layers.WORKTREE_SOURCE],
         '[rtk]\nexecutable = "worktree-rtk"\n',
     )
 
-    overview = config.config_overview(tmp_path)
+    overview = values.config_overview(tmp_path)
 
-    assert config.configured_rtk_executable(tmp_path) == "worktree-rtk"
+    assert values.configured_rtk_executable(tmp_path) == "worktree-rtk"
     assert overview["provenance"]["rtk.executable"] == {
         "scope": "worktree",
-        "path": str(paths[config.WORKTREE_SOURCE]),
+        "path": str(paths[layers.WORKTREE_SOURCE]),
     }
 
 
 def test_config_show_reports_effective_rtk_identity_and_winning_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    worktree = config.worktree_config_path(tmp_path)
+    worktree = edit.worktree_config_path(tmp_path)
     _write(worktree, '[rtk]\nexecutable = "visible-rtk"\n')
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
@@ -104,7 +104,7 @@ def test_rtk_executable_identity_is_retained_exactly(
         f"[rtk]\nexecutable = {json.dumps(executable)}\n",
     )
 
-    assert config.configured_rtk_executable(tmp_path) == executable
+    assert values.configured_rtk_executable(tmp_path) == executable
 
 
 @pytest.mark.parametrize(
@@ -123,7 +123,7 @@ def test_malformed_rtk_identity_reports_winning_source(
     source = tmp_path / "spice.toml"
     _write(source, f"[rtk]\n{configured}\n")
 
-    outcome = _resolution_outcome(lambda: config.configured_rtk_executable(tmp_path))
+    outcome = _resolution_outcome(lambda: values.configured_rtk_executable(tmp_path))
 
     assert outcome == {
         "state": "rejected",
@@ -149,7 +149,7 @@ def test_rtk_resolution_trusts_identity_without_availability_probe(
         '[rtk]\nexecutable = "/missing/by-contract/rtk"\n',
     )
 
-    assert config.configured_rtk_executable(tmp_path) == "/missing/by-contract/rtk"
+    assert values.configured_rtk_executable(tmp_path) == "/missing/by-contract/rtk"
 
 
 def _redirect_system_config(
@@ -158,12 +158,12 @@ def _redirect_system_config(
     system_root = tmp_path / "installed-spice"
     system_path = system_root / "spice.toml"
     _write(system_path, f'[rtk]\nexecutable = "{executable}"\n')
-    monkeypatch.setattr(configlayer.paths, "runtime_spice_source", lambda: system_root)
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     return {
-        config.SYSTEM_SOURCE: system_path,
-        config.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
-        config.REPOSITORY_SOURCE: tmp_path / "spice.toml",
-        config.WORKTREE_SOURCE: config.worktree_config_path(tmp_path),
+        layers.SYSTEM_SOURCE: system_path,
+        layers.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
+        layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
+        layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
     }
 
 

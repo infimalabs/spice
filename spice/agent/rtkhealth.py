@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from spice import config
+from spice.config import values
 from spice.agent.rtkrewrite import (
     RTK_REWRITE_MATCH_EXIT_CODE,
     RTK_REWRITE_SUCCESS_EXIT_CODES,
@@ -63,7 +63,7 @@ def probe_rtk_health(
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> RtkHealth:
     """Probe the configured executable exactly and always return a health state."""
-    executable = config.configured_rtk_executable(repo_root)
+    executable = values.configured_rtk_executable(repo_root)
     runner = run or subprocess.run
     version_result, launch_detail = _run_probe(runner, [executable, "--version"])
     if version_result is None:

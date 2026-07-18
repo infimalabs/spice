@@ -12,7 +12,7 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
-from spice.config import git_worktree_config_get, git_worktree_config_set
+from spice.config.edit import git_worktree_config_get, git_worktree_config_set
 from spice.process.git import run_git_command
 from spice.paths import STATE_DIRNAME
 

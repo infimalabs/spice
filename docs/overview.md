@@ -74,7 +74,7 @@ reports score regressions or newly unhandled zero-constraint tests.
 
 The committed cohort guards configuration precedence, immutable provenance,
 parse-error attribution, recursive merge behavior, and contextualized consumer
-errors through `spice/configlayer.py` and `tests/test_configlayer.py`. The
+errors through `spice/config/layers.py` and `tests/test_configlayer.py`. The
 baseline stores the target, test suite, mutation bound, timeout, score, and
 reviewed dispositions together so the doctor cannot silently run a different
 experiment.

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spice.errors import SpiceError
-from spice.configlayer import effective_table
+from spice.config.layers import effective_table
 from spice.studies import walk
 
 ASSERTION_HELPERS_KEY = "assertion_helpers"

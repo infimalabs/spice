@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import json
 import mimetypes
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -13,11 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from spice import defaults
-from spice.configlayer import (
-    SYSTEM_SOURCE,
-    contextualize_config_error,
-    load_config,
-)
+from spice.config.layers import SYSTEM_SOURCE, contextualize_config_error, load_config
+from spice.config.pyproject import pyproject_table, read_pyproject
 from spice.errors import SpiceError
 from spice.version import runtime_version
 
@@ -108,8 +104,8 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
             raise error
         raise contextualize_config_error(repo_root, error, "serve") from error
     serve = dict(raw_serve)
-    data = _read_pyproject(repo_root)
-    project = _table(data, "project")
+    data = read_pyproject(repo_root) if repo_root is not None else {}
+    project = pyproject_table(data, "project")
     brand_source = loaded.source_for("serve.brand") if loaded is not None else None
     configured_brand = _string(serve.get("brand"))
     if "brand" in serve and not configured_brand:
@@ -177,26 +173,6 @@ def render_index_html(
         brand_json=brand_json,
         global_settings_json=global_settings_json,
     )
-
-
-def _read_pyproject(repo_root: Path | None) -> dict[str, Any]:
-    if repo_root is None:
-        return {}
-    try:
-        with (repo_root / "pyproject.toml").open("rb") as handle:
-            loaded = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _table(source: dict[str, Any], *path: str) -> dict[str, Any]:
-    current: Any = source
-    for key in path:
-        if not isinstance(current, dict):
-            return {}
-        current = current.get(key)
-    return current if isinstance(current, dict) else {}
 
 
 def _string(value: Any) -> str:

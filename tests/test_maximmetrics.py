@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent import watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
@@ -48,11 +48,11 @@ message = "{name.upper()} reminder."
 
 
 def _enable_maxim_adjudication(repo) -> None:
-    config.set_scope_section(
+    edit.set_scope_section(
         repo,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: True},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: True},
     )
 
 

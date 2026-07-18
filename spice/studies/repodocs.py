@@ -13,7 +13,7 @@ from spice.flexstate import (
 )
 from spice.policy import REPO_TRUTH_DOCS
 from spice.policyconfig import ResolvedPolicy, resolve_policy
-from spice.configlayer import config_string_list, effective_table
+from spice.config.layers import config_string_list, effective_table
 from spice.studies import gates
 from spice.studies.walk import tracked_paths
 
