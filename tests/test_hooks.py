@@ -557,10 +557,13 @@ def _expected_hook_content(args: str) -> str:
     )
 
 
-def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(tmp_path):
+def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(
+    tmp_path, monkeypatch
+):
     repo, base, protected = _repo_with_pushed_tip(tmp_path)
     install_hooks_for_repo(repo)
 
+    monkeypatch.setenv("PYTHONPATH", _stale_spice_namespace_path(tmp_path))
     result = _git(
         repo,
         "update-ref",
@@ -568,6 +571,7 @@ def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(tmp_
         base,
         protected,
         check=False,
+        path=_current_spice_hook_path(tmp_path),
     )
 
     assert result.returncode != 0
@@ -580,11 +584,14 @@ def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(tmp_
     assert _git(repo, "rev-parse", "HEAD").stdout.strip() == protected
 
 
-def test_reference_transaction_allows_unmerged_current_branch_rewind(tmp_path):
+def test_reference_transaction_allows_unmerged_current_branch_rewind(
+    tmp_path, monkeypatch
+):
     repo, _, protected = _repo_with_pushed_tip(tmp_path)
     local = _commit(repo, "story.txt", "base\nprotected\nlocal\n", "local work")
     install_hooks_for_repo(repo)
 
+    monkeypatch.setenv("PYTHONPATH", _stale_spice_namespace_path(tmp_path))
     result = _git(
         repo,
         "update-ref",
@@ -592,6 +599,7 @@ def test_reference_transaction_allows_unmerged_current_branch_rewind(tmp_path):
         protected,
         local,
         check=False,
+        path=_current_spice_hook_path(tmp_path),
     )
 
     assert result.returncode == 0
@@ -1078,9 +1086,9 @@ def _stale_spice_namespace_path(tmp_path: Path) -> str:
 
 
 def _git(
-    repo: Path, *args: str, check: bool = True
+    repo: Path, *args: str, check: bool = True, path: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    return _run(["git", "-C", str(repo), *args], check=check)
+    return _run(["git", "-C", str(repo), *args], check=check, path=path)
 
 
 def _run(
