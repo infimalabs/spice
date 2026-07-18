@@ -297,7 +297,7 @@ function keyboardSubmitFocusTarget(host, event, targetId) {
   if (event.type !== "keydown") return null;
   const target = event.target;
   if (!(target instanceof HTMLTextAreaElement)) return null;
-  if (!target.dataset.quoteDraftId) return null;
+  if (!target.dataset.quoteDraftId) return target;
   const textarea = host.shardTextareas.get(targetId);
   if (!textarea) throw new Error("keyboard quote submit requires main composer");
   return textarea;

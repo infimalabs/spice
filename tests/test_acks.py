@@ -88,6 +88,19 @@ def test_keys_only_extracted_from_valid_headers():
     assert list(extract_ack_keys_from_text(text)) == [KEY_B]
 
 
+def test_hyphen_prefixed_task_handle_remains_preamble_before_valid_ack():
+    text = f"ACK-{KEY_A}: task handle prose.\nACK {KEY_B}: real acknowledgment."
+
+    preamble, responses = split_keyed_response(text)
+
+    assert preamble == f"ACK-{KEY_A}: task handle prose."
+    assert [
+        (response.keys, response.content, response.disposition)
+        for response in responses
+    ] == [((KEY_B,), "real acknowledgment.", ACK_DISPOSITION_ACKED)]
+    assert list(extract_ack_keys_from_text(text)) == [KEY_B]
+
+
 def test_negated_ack_mentions_do_not_extract_keys():
     guarded = [
         f"I will not ACK {KEY_A}: this steering conflicts.",
@@ -685,6 +698,30 @@ def test_summarize_ack_archival_records_ack_content_in_ack_state(tmp_path):
     assert [
         (record.key, record.ack_text, record.ack_content) for record in records
     ] == [(KEY_A, f"ACK {KEY_A}: handled fully.", "handled fully.")]
+
+
+def test_summarize_ack_archival_keeps_task_handle_and_retires_valid_header(tmp_path):
+    _init_repo(tmp_path)
+    for key, body in ((KEY_A, "task-handle lookalike"), (KEY_B, "real ack")):
+        write_inbox_item(
+            tmp_path,
+            f"{key}.txt",
+            compose_inbox_text(body=body, priority=None, stop=False),
+        )
+
+    summary = summarize_ack_archival(
+        tmp_path,
+        f"ACK-{KEY_A}: task handle prose.\nACK {KEY_B}: handled the real steering.",
+    )
+
+    assert summary.archived == [KEY_B]
+    assert [item.name for item in collect_inbox_items(tmp_path)] == [f"{KEY_A}.txt"]
+    assert [
+        (record.key, record.ack_content) for record in ack_state_records(tmp_path)
+    ] == [(KEY_B, "handled the real steering.")]
+    assert summarize_ack_archival(
+        tmp_path, f"ACK-{KEY_A}: task handle without a real acknowledgment."
+    ) == AckArchivalSummary(archived=[], already_acked=[], unmatched=[])
 
 
 def test_summarize_ack_archival_reports_already_acked_key(tmp_path):

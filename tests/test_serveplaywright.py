@@ -209,7 +209,9 @@ def test_serve_composer_pending_send_smoke_covers_lock_and_restore() -> None:
     assert 'expectEqual(result.successSettled.text, ""' in smoke
     assert "expectEqual(result.failureSettled.text, config.failureText" in smoke
     assert "grouped.commandPending.payloads.length" in smoke
-    assert 'grouped.commandSettled.otherQuoteState, "retained"' in smoke
+    assert 'grouped.commandFirstSettled.focusState, "focused"' in smoke
+    assert "grouped.commandRepeatedPending.payloads.length" in smoke
+    assert "grouped.commandRepeatedSettled.focusState" in smoke
     assert "grouped.buttonPayloads.length" in smoke
     assert 'waitForComposerState(textarea, "editable")' in smoke
     assert "new MutationObserver(" in smoke

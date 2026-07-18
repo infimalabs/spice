@@ -7,9 +7,10 @@ An ACK in the harness idiom looks like:
 The detector treats text as an ACK iff it carries:
 
 1. The exact ALL-CAPS word `ACK` as a standalone token, AND
-2. One or more inbox-key-shaped substrings: an 8-character base52 moment
-   stamp (the `spice.tasks.identity` alphabet), optionally carrying a `-N`
-   collision suffix from inbox filename publishing.
+2. One or more non-hyphen-prefixed inbox-key-shaped substrings: an
+   8-character base52 moment stamp (the `spice.tasks.identity` alphabet),
+   optionally carrying a `-N` collision suffix from inbox filename
+   publishing.
 
 Both signatures must appear in order: consume `ACK`, consume the key list that
 follows it, then treat the remaining text up to the next valid `ACK` as that
@@ -345,6 +346,12 @@ def _looks_noop_ack_marker(text: str, ack_pos: int) -> bool:
     cursor = ack_pos + len(ACK_TOKEN)
     while cursor < len(text) and text[cursor] in " \t":
         cursor += 1
+    if (
+        cursor < len(text)
+        and text[cursor] == "-"
+        and _ack_key_shape_end(text, cursor + 1, len(text)) is not None
+    ):
+        return False
     return cursor >= len(text) or text[cursor] in _ACK_HEADER_SEPARATOR_CHARS + "\r\n"
 
 
@@ -475,8 +482,12 @@ def _consume_ack_header_separator(
 
 
 def _ack_key_end(text: str, start: int, limit: int) -> int | None:
-    if start > 0 and _is_word_char(text[start - 1]):
+    if start > 0 and (_is_word_char(text[start - 1]) or text[start - 1] == "-"):
         return None
+    return _ack_key_shape_end(text, start, limit)
+
+
+def _ack_key_shape_end(text: str, start: int, limit: int) -> int | None:
     end = start + _KEY_STAMP_WIDTH
     if end > limit:
         return None
