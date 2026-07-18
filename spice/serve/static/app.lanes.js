@@ -17,10 +17,6 @@ const targetChoiceStatusValues = [
   "unknown",
 ];
 
-function renderSpiceMenuIfAvailable() {
-  if (typeof renderSpiceMenu === "function") renderSpiceMenu();
-}
-
 function emptyTeamTargetId(teamId) {
   return emptyTeamTargetPrefix + teamId;
 }
@@ -34,7 +30,7 @@ function refreshTargets() {
   if (targetsLoadPromise) return targetsLoadPromise;
   targetsLoading = true;
   if (!targetsLoaded) setGlobalActivityStatus("loading teams");
-  if (spiceMenuEl) renderSpiceMenuIfAvailable();
+  if (spiceMenuEl) renderSpiceMenu();
   targetsLoadPromise = (async () => {
     try {
       const response = /** @type {TargetsFrame} */ (
@@ -46,7 +42,7 @@ function refreshTargets() {
     } finally {
       targetsLoading = false;
       targetsLoadPromise = null;
-      if (spiceMenuEl) renderSpiceMenuIfAvailable();
+      if (spiceMenuEl) renderSpiceMenu();
     }
   })();
   return targetsLoadPromise;
@@ -68,7 +64,7 @@ function applyTargetsPayload(payload) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
     else renderLaneChrome(lane, laneStore.targetForId(lane.targetId));
   }
-  if (spiceMenuEl) renderSpiceMenuIfAvailable();
+  if (spiceMenuEl) renderSpiceMenu();
 }
 
 function syncObserverNotice(errors) {
@@ -113,11 +109,6 @@ function syncTaskFilterInventoryState(inventory) {
 }
 
 function renderTaskFilterInventoryPanes() {
-  if (
-    typeof laneGroupHost !== "function" ||
-    typeof renderLaneFiltersPane !== "function"
-  )
-    return;
   const renderedHosts = new Set();
   for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
@@ -246,7 +237,7 @@ laneStore.subscribe((change) => {
   if (transition.disposition !== "applied") return;
   if (targetsLoaded) persistLaneHints();
   if (transition.adds.length || transition.removes.length)
-    renderSpiceMenuIfAvailable();
+    renderSpiceMenu();
   if (
     transition.adds.length ||
     transition.updates.length ||

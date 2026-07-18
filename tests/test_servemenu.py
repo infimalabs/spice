@@ -475,8 +475,6 @@ def test_static_spice_menu_replaces_picker_lane():
     assert 'let spiceMenuDragTargetId = "";' in app_js
     assert "let spiceMenuRenderPending = false;" in app_js
     assert "function openSpiceMenu()" in app_menu
-    assert "function renderSpiceMenuIfAvailable()" in app_lanes
-    assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
     assert 'if (change.kind !== "teamSnapshot") return;' in app_lanes
     assert "materializeTeamSnapshotTransition(change.transition);" in app_lanes
     assert (
@@ -485,9 +483,9 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert (
         "if (transition.adds.length || transition.removes.length)\n"
-        "    renderSpiceMenuIfAvailable();" in app_lanes
+        "    renderSpiceMenu();" in app_lanes
     )
-    assert "renderSpiceMenuIfAvailable();" in app_shell
+    assert "renderSpiceMenu();" in app_shell
     assert (
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes

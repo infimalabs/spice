@@ -8,7 +8,7 @@ function addLane(targetId, hint = null, options = {}) {
   const lane = createLaneState(targetId, hint);
   laneStore.registerLane(lane);
   lanesEl.append(lane.element);
-  renderSpiceMenuIfAvailable();
+  renderSpiceMenu();
   renderFilterPills();
   subscribeLaneToLiveBus(lane);
   if (options.persist !== false && typeof persistLaneHints === "function")
@@ -25,7 +25,7 @@ function addEmptyTeamLane(team, options = {}) {
   });
   laneStore.registerLane(lane);
   lanesEl.append(lane.element);
-  renderSpiceMenuIfAvailable();
+  renderSpiceMenu();
   renderFilterPills();
 }
 

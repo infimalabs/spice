@@ -52,6 +52,7 @@ const context = {
     throw new Error(message);
   },
   renderFilterPills() {},
+  renderSpiceMenu() {},
   syncNarrationMediaSession() {},
   applyGlobalSettingsPayload(settings) {
     if (!settings || settings.fastMode !== false)
