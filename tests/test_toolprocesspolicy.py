@@ -32,7 +32,8 @@ EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
 EXPECTED_TOOL_POLICY_CALLERS = {
     "coverage": {"spice/studies/subsumption.py:record_subsumption:capture=false"},
     "extension": {
-        "spice/hooks/doctor.py:_spice_package_source_for_python:capture=true",
+        "spice/hooks/doctor.py:_spice_runtime_probe_for_python:capture=true",
+        "spice/hooks/doctor.py:_worktree_venv_check:capture=true",
         "spice/hooks/precommit.py:_run_policy_command_step:capture=true",
         "spice/studies/reachability.py:_scan_command_reachability_provider:capture=true",
     },

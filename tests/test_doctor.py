@@ -199,7 +199,7 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
     } == {
         "rtk": "ok" if health.active else "warn",
         "remaining_check": "env-name-ledger",
-        "check_count": 23,
+        "check_count": 25,
     }
 
 
@@ -361,7 +361,7 @@ def test_doctor_reports_installed_tool_runtime_for_spice_checkout(
     monkeypatch.setattr(
         doctor,
         "_installed_spice_runtime",
-        lambda: doctor.InstalledSpiceRuntime(entrypoint, python, installed),
+        lambda: _installed_runtime(entrypoint, python, installed, editable=True),
     )
 
     check = doctor._installed_spice_source_check(repo)
@@ -369,8 +369,70 @@ def test_doctor_reports_installed_tool_runtime_for_spice_checkout(
     assert check.status == "ok"
     assert (
         f"installed spice tool -> {entrypoint}; "
-        f"interpreter -> {python}; package -> {installed}"
+        f"interpreter -> {python}; package -> {installed}; "
+        "version 0.25.0 (editable)"
     ) == check.detail
+
+
+def test_doctor_fails_non_editable_installed_tool_runtime(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    entrypoint = tmp_path / "tool" / "bin" / "spice"
+    python = tmp_path / "tool" / "bin" / "python"
+    installed = tmp_path / "tool" / "spice"
+    repo.mkdir()
+    _write_spice_product_shape(repo)
+    monkeypatch.setattr(
+        doctor,
+        "_installed_spice_runtime",
+        lambda: _installed_runtime(entrypoint, python, installed, editable=True),
+    )
+    editable_check = doctor._installed_spice_source_check(repo)
+    monkeypatch.setattr(
+        doctor,
+        "_installed_spice_runtime",
+        lambda: _installed_runtime(entrypoint, python, installed, editable=False),
+    )
+
+    frozen_check = doctor._installed_spice_source_check(repo)
+
+    assert editable_check.status == "ok"
+    assert frozen_check.status == "fail"
+    assert frozen_check.detail != editable_check.detail
+    assert "reinstall with `uv tool install -e <checkout>`" in frozen_check.detail
+
+
+def test_doctor_warns_when_installed_version_differs_from_checkout(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    entrypoint = tmp_path / "tool" / "bin" / "spice"
+    python = tmp_path / "tool" / "bin" / "python"
+    installed = tmp_path / "tool" / "spice"
+    repo.mkdir()
+    _write_spice_product_shape(repo)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "spice-harness"\nversion = "0.26.0"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_installed_spice_runtime",
+        lambda: _installed_runtime(entrypoint, python, installed, editable=True),
+    )
+
+    drift_check = doctor._installed_spice_source_check(repo)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "spice-harness"\nversion = "0.25.0"\n',
+        encoding="utf-8",
+    )
+    settled_check = doctor._installed_spice_source_check(repo)
+
+    assert drift_check.status == "warn"
+    assert settled_check.status == "ok"
+    assert drift_check.detail != settled_check.detail
+    assert "version 0.25.0 (editable); checkout pyproject declares 0.26.0" in (
+        drift_check.detail
+    )
 
 
 def test_doctor_warns_when_installed_tool_runtime_is_unavailable(tmp_path, monkeypatch):
@@ -383,6 +445,78 @@ def test_doctor_warns_when_installed_tool_runtime_is_unavailable(tmp_path, monke
 
     assert check.status == "warn"
     assert "installed spice package source is unavailable" == check.detail
+
+
+def test_doctor_worktree_venv_check_reports_dev_imports_and_uv_sync_recovery(
+    tmp_path,
+):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_spice_product_shape(repo)
+    python = repo / ".venv" / "bin" / "python"
+
+    plain_check = doctor._worktree_venv_check(plain)
+    missing_check = doctor._worktree_venv_check(repo)
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\necho '9.1.0 3.8.0'\n", encoding="utf-8")
+    python.chmod(0o755)
+    imports_check = doctor._worktree_venv_check(repo)
+    python.write_text(
+        "#!/bin/sh\necho 'No module named xdist' >&2\nexit 1\n", encoding="utf-8"
+    )
+    broken_check = doctor._worktree_venv_check(repo)
+
+    assert plain_check.status == "ok"
+    assert "not a spice checkout" in plain_check.detail
+    assert missing_check.status == "fail"
+    assert f"{python} missing; create the worktree venv with `uv sync`" == (
+        missing_check.detail
+    )
+    assert imports_check.status == "ok"
+    assert f"{python} imports pytest and xdist (9.1.0 3.8.0)" == imports_check.detail
+    assert broken_check.status == "fail"
+    assert "No module named xdist" in broken_check.detail
+    assert broken_check.detail != imports_check.detail
+
+
+def test_doctor_wrapper_seam_check_requires_dev_pytest_argv(tmp_path):
+    routed = _wrapper_repo(tmp_path / "routed", '["spice", "dev", "pytest"]')
+    bypassed = _wrapper_repo(tmp_path / "bypassed", '["python", "-m", "pytest"]')
+
+    routed_check = doctor._wrapper_seam_check(routed)
+    bypassed_check = doctor._wrapper_seam_check(bypassed)
+
+    assert routed_check.status == "ok"
+    assert "pytest -> spice dev pytest" in routed_check.detail
+    assert bypassed_check.status == "fail"
+    assert "bypasses the dev self-exec seam" in bypassed_check.detail
+    assert bypassed_check.detail != routed_check.detail
+
+
+def _wrapper_repo(repo: Path, pytest_argv: str) -> Path:
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text(
+        "[tool.spice.agent]\n"
+        'wrappers = ["spice-dev"]\n'
+        "[tool.spice.wrappers.spice-dev.pytest]\n"
+        f"argv = {pytest_argv}\n",
+        encoding="utf-8",
+    )
+    return repo
+
+
+def _installed_runtime(
+    entrypoint: Path, python: Path, installed: Path, *, editable: bool
+) -> doctor.InstalledSpiceRuntime:
+    return doctor.InstalledSpiceRuntime(
+        entrypoint=entrypoint,
+        python=python,
+        source=installed,
+        version="0.25.0",
+        editable=editable,
+    )
 
 
 def test_doctor_reports_file_loc_standing_debt_as_info_with_scopes_and_excludes(
