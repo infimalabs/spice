@@ -99,7 +99,18 @@ _WORK_TREE = valid_wire_payload(
     serveAgentIdentity=valid_wire_payload("ServeAgentIdentity"),
 )
 _TARGETS_PAYLOAD = valid_wire_payload("TargetsPayload", workTrees=[_WORK_TREE])
-_TEAM_MEMBER = valid_wire_payload("TeamMemberPayload")
+_TEAM_MEMBER = valid_wire_payload(
+    "TeamMemberPayload",
+    agentFacts=valid_wire_payload(
+        "TeamAgentIdentity",
+        actorId="thread:fixture",
+        targetId="target-fixture",
+        threadId="fixture",
+        renewalState="pending",
+        renewalRevision=7,
+        updatedAt=1.0,
+    ),
+)
 _TEAM = valid_wire_payload("TeamPayload", members=[_TEAM_MEMBER])
 _TEAM_SNAPSHOT = valid_wire_payload("TeamSnapshot", teams=[_TEAM])
 _TEAM_RESPONSE = valid_wire_payload("TeamSnapshotResponse", snapshot=_TEAM_SNAPSHOT)

@@ -41,6 +41,12 @@ from spice.serve.workroutes import (
 )
 from spice.serve.worktree.target import WorktreeTarget
 from tests.test_teamstorehelpers import store_global_revision
+from tests.test_wirefixtures import (
+    valid_lane_payload,
+    valid_live_bus_callback_payloads,
+    valid_metric_series_payload,
+    valid_wire_payload,
+)
 from tests.test_servehelpers import (
     ACTOR_A,
     ACTOR_B,
@@ -364,6 +370,37 @@ def test_team_command_payload_preserves_explicit_actor_ids(tmp_path):
     assert members == [ACTOR_A, target_actor]
 
 
+def test_team_snapshot_payload_preserves_typed_agent_identity_facts(tmp_path):
+    target = _target(_repo(tmp_path))
+    state = _serve_state(tmp_path, target)
+    state.team_store.create_team(members=[ACTOR_A])
+    state.team_store.record_agent_identity(
+        actor_id=ACTOR_A,
+        target_id=target.id,
+        thread_id=THREAD_A,
+        renewal_state="pending",
+        renewal_revision=7,
+    )
+
+    payload = team_snapshot_response_payload(state, since_revision=None)
+    facts = payload["snapshot"]["teams"][0]["members"][0]["agentFacts"]
+
+    assert {
+        "actorId": facts["actorId"],
+        "targetId": facts["targetId"],
+        "threadId": facts["threadId"],
+        "renewalState": facts["renewalState"],
+        "renewalRevision": facts["renewalRevision"],
+    } == {
+        "actorId": ACTOR_A,
+        "targetId": target.id,
+        "threadId": THREAD_A,
+        "renewalState": "pending",
+        "renewalRevision": 7,
+    }
+    assert isinstance(facts["updatedAt"], float)
+
+
 def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
     tmp_path, monkeypatch
 ):
@@ -615,27 +652,32 @@ def test_status_line_ignores_stale_prompt_skill_path(tmp_path, monkeypatch):
 
 
 def _route_test_livebus_callbacks(target, calls, messages_payload):
+    def wire_messages_payload(bus_target, **kwargs):
+        return valid_lane_payload(**messages_payload(bus_target, **kwargs))
+
     return LiveBusCallbacks(
         resolve_target=lambda selector: target if selector == target.id else None,
-        work_trees_payload=lambda: {"workTrees": []},
-        messages_payload=messages_payload,
-        send_payload=lambda _target, payload: (
-            calls.append(("send", payload)) or {"ok": True, "key": "inbox-key"},
-            HTTPStatus.OK,
+        **valid_live_bus_callback_payloads(
+            messages_payload=wire_messages_payload,
+            send_payload=lambda _target, payload: (
+                calls.append(("send", payload)) or {"ok": True, "key": "inbox-key"},
+                HTTPStatus.OK,
+            ),
+            task_drain_payload=lambda _target, payload: (
+                calls.append(("taskDrain", payload))
+                or valid_wire_payload("TaskDrainResult"),
+                HTTPStatus.OK,
+            ),
+            team_snapshot_payload=lambda since_revision: valid_wire_payload(
+                "TeamSnapshotResponse",
+                revision=since_revision or 0,
+            ),
+            team_command_payload=lambda payload: (
+                calls.append(("teamCommand", payload))
+                or valid_wire_payload("TeamCommandResponse", revision=2),
+                HTTPStatus.OK,
+            ),
         ),
-        task_drain_payload=lambda _target, payload: (
-            calls.append(("taskDrain", payload)) or {"ok": True, "route": {}},
-            HTTPStatus.OK,
-        ),
-        team_snapshot_payload=lambda since_revision: {
-            "ok": True,
-            "revision": since_revision or 0,
-        },
-        team_command_payload=lambda payload: (
-            calls.append(("teamCommand", payload)) or {"ok": True, "revision": 2},
-            HTTPStatus.OK,
-        ),
-        metric_series_payload=lambda _query: {"ok": True, "points": []},
         thread_id=lambda _target: "thread",
         transcript_resolution=lambda _thread_id: _transcript_resolution(
             "thread", Path("rollout.jsonl")
@@ -765,7 +807,7 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
         },
         {
             "type": "lane.taskDrainResult",
-            "result": {"ok": True, "route": {}},
+            "result": valid_wire_payload("TaskDrainResult"),
             "requestId": "drain-1",
         },
         {
@@ -775,7 +817,10 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
         },
         {
             "type": "lane.payload",
-            "payload": {"messages": [{"key": "m1"}], "statusLine": {}},
+            "payload": valid_lane_payload(
+                messages=[{"key": "m1"}],
+                statusLine={},
+            ),
             "requestId": "history-1",
         },
     ]
@@ -800,14 +845,11 @@ def test_livebus_routes_metric_series_requests():
     calls: list[dict[str, Any]] = []
     callbacks = LiveBusCallbacks(
         resolve_target=lambda _selector: None,
-        work_trees_payload=lambda: {"workTrees": []},
-        messages_payload=lambda _target, **_kwargs: {},
-        send_payload=lambda _target, _payload: ({}, HTTPStatus.OK),
-        task_drain_payload=lambda _target, _payload: ({}, HTTPStatus.OK),
-        team_snapshot_payload=lambda _since_revision: {},
-        team_command_payload=lambda _payload: ({}, HTTPStatus.OK),
-        metric_series_payload=lambda payload: (
-            calls.append(payload) or {"ok": True, "points": []}
+        **valid_live_bus_callback_payloads(
+            metric_series_payload=lambda payload: (
+                calls.append(payload)
+                or valid_metric_series_payload(metric=str(payload["metric"]))
+            )
         ),
         thread_id=lambda _target: "thread",
         transcript_resolution=lambda _thread_id: None,
@@ -825,7 +867,7 @@ def test_livebus_routes_metric_series_requests():
     assert connection.sent == [
         {
             "type": "metrics.seriesResult",
-            "result": {"ok": True, "points": []},
+            "result": valid_metric_series_payload(metric="activity"),
             "requestId": "metrics-1",
         }
     ]

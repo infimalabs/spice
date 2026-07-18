@@ -114,7 +114,7 @@ class TeamRenewalState:
 @dataclass(frozen=True)
 class TeamMember:
     agent_id: str
-    agent_facts: dict[str, str] = field(default_factory=dict)
+    agent_facts: dict[str, Any] = field(default_factory=dict)
     renewal: TeamRenewalState | None = None
 
     def to_payload(self) -> dict[str, Any]:

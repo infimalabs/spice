@@ -524,7 +524,7 @@
  * @property {string} agentId
  * @property {RenewalIntentPayload} renewalIntent
  * @property {Array.<string>=} agentAliases
- * @property {Object.<string, string>=} agentFacts
+ * @property {TeamAgentIdentity=} agentFacts
  */
 
 /**
