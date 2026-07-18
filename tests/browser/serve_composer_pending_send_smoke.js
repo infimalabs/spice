@@ -276,7 +276,7 @@ async function runGroupedButtonSubmission(
   buttonSends.forEach((send, index) =>
     resolveSuccessfulPendingSend(
       send,
-      laneStates.get(send.fields.targetId),
+      laneStore.laneForId(send.fields.targetId),
       "composer-button-success-" + index,
       send.fields.payload.text,
       4,

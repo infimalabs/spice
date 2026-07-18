@@ -688,8 +688,7 @@ function globalStatusLineDisplay() {
 }
 
 function rerenderGlobalStatusLines() {
-  if (typeof laneStates === "undefined") return;
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     lane.renderedStatusFingerprint = "";
     setLaneStatus(lane, lane.lastRenderedStatusLine || {});
   }
@@ -979,7 +978,7 @@ function renderMessageAgentName(item) {
 
 function agentNameForThread(threadId) {
   if (!threadId) return "";
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.activeThreadId === threadId)
       return lane.agentName || lane.branchName || "";
   }
@@ -1004,7 +1003,7 @@ function appendSpeechAction(parent, lane, item) {
 
 function speechLaneForMessage(lane, item) {
   const targetId = item.producerTargetId || lane.targetId;
-  return laneStates.get(targetId) || null;
+  return laneStore.laneForId(targetId) || null;
 }
 
 function appendQuoteAction(parent, lane, item) {
@@ -1189,12 +1188,12 @@ function updateLiveRelativeTimes() {
   )) {
     setRelativeTimeText(element);
   }
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.latestPayload)
       applyRetainedLaneStatus(lane, lane.latestPayload.statusLine || {});
   }
   updateLiveTargetChoiceMetadata();
-  for (const lane of laneStates.values()) syncFusedLaneStatusLine(lane);
+  for (const lane of laneStore.lanesSnapshot()) syncFusedLaneStatusLine(lane);
 }
 
 function setRelativeTimeText(element) {

@@ -13,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AUDIO_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.audio.js"
+LANE_STORE_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.lane-store.js"
 
 
 def test_normal_speech_queue_preserves_entries_while_audio_is_active():
@@ -843,13 +844,14 @@ const context = {
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: (lane) => lane.speechMode,
   laneGroupHost: (lane) => lane,
-  laneStates: new Map([["narration", narrationLane]]),
   queueMicrotask,
   setTimeout,
   targetApi: (targetId, suffix) => targetId + suffix,
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.registerLane(narrationLane);
 
 (async () => {
   const laneA = { targetId: "lane-a", speechMode: "speak", speechAbortVersion: 0, spokenMessageKeys: new Set() };
@@ -975,8 +977,14 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
 
 
 def _run_audio_script(script: str, failure: str) -> list[str]:
+    audio_load = 'vm.runInContext(fs.readFileSync(path, "utf8"), context);'
+    store_load = (
+        'vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);\n'
+        + audio_load
+    )
+    prepared_script = script.replace(audio_load, store_load)
     result = subprocess.run(
-        ["node", "-e", script, str(AUDIO_JS)],
+        ["node", "-e", prepared_script, str(AUDIO_JS), str(LANE_STORE_JS)],
         capture_output=True,
         check=False,
         text=True,

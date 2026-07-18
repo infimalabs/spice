@@ -432,8 +432,7 @@ function speechMediaSessionPlaybackState() {
 }
 
 function narrationMediaSessionActive() {
-  if (typeof laneStates === "undefined") return false;
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.closed) continue;
     if (laneEffectiveSpeechMode(lane) === "narrate") return true;
   }

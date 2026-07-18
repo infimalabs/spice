@@ -62,9 +62,9 @@ async function measureWideViewportWiring(page) {
   return page.evaluate(() => {
     const teamId = "mosaic-capacity-wiring-smoke-team";
     const targetId = emptyTeamTargetId(teamId);
-    if (!laneStates.has(targetId))
+    if (!laneStore.hasLane(targetId))
       addEmptyTeamLane({ teamId, revision: 1, config: {} });
-    const lane = laneStates.get(targetId);
+    const lane = laneStore.laneForId(targetId);
     lane.emptyTeam = false;
     const item = {
       ack_count: 0,
@@ -124,9 +124,9 @@ async function measureSkylineSpread(page) {
   return page.evaluate((cardCount) => {
     const teamId = "mosaic-capacity-skyline-smoke-team";
     const targetId = emptyTeamTargetId(teamId);
-    if (!laneStates.has(targetId))
+    if (!laneStore.hasLane(targetId))
       addEmptyTeamLane({ teamId, revision: 1, config: {} });
-    const lane = laneStates.get(targetId);
+    const lane = laneStore.laneForId(targetId);
     lane.emptyTeam = false;
     const items = [];
     for (let index = 0; index < cardCount; index += 1) {

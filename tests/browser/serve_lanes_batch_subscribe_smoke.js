@@ -189,7 +189,7 @@ async function batchPhaseInitial(state, config) {
     { force: true },
   );
   await window.__batchSettle(config);
-  const host = laneGroupHost(laneStates.get(config.memberIds[0]));
+  const host = laneGroupHost(laneStore.laneForId(config.memberIds[0]));
   const savedFocusedTargetId = focusedLiveBusLaneTargetId;
   focusedLiveBusLaneTargetId = "different-lane-group";
   const visibleHostLiveWithoutFocus = liveBusLaneIsFocused(host);
@@ -223,8 +223,8 @@ async function batchPhaseInitial(state, config) {
 // mutation. A split makes the second member genuinely offscreen; fusing it
 // back into the visible host makes that same concrete subscription live again.
 async function batchPhaseTopologyActivity(state, config) {
-  const host = laneGroupHost(laneStates.get(config.memberIds[0]));
-  const member = laneStates.get(config.memberIds[1]);
+  const host = laneGroupHost(laneStore.laneForId(config.memberIds[0]));
+  const member = laneStore.laneForId(config.memberIds[1]);
   const originalMemberRect = member.element.getBoundingClientRect;
   let directChildMutationCount = 0;
   const observer = new MutationObserver((records) => {
@@ -299,7 +299,7 @@ async function batchPhaseFocusWhilePending(state, config) {
   }
   const priorId = config.memberIds[0];
   const selectedId = config.memberIds[1];
-  setFocusedLiveBusLane(laneStates.get(selectedId));
+  setFocusedLiveBusLane(laneStore.laneForId(selectedId));
   const subscribeFrame = state.frames.find(
     (frame) => frame.type === "lanes.subscribe",
   );
@@ -339,7 +339,7 @@ async function batchPhaseFocusWhilePending(state, config) {
 // visible part of the merged stream stale until a later composer submit.
 async function batchPhaseFocusedMemberDirty(state, config) {
   state.frames.length = 0;
-  const member = laneStates.get(config.memberIds[1]);
+  const member = laneStore.laneForId(config.memberIds[1]);
   handleBackgroundLanesDirtyPush({
     type: "lanes.dirty",
     lanes: [
@@ -380,7 +380,7 @@ async function batchPhaseResync(state, config) {
 async function batchPhaseCoalesce(state, config) {
   state.frames.length = 0;
   applyLaneBusPayload(
-    laneStates.get(config.memberIds[0]),
+    laneStore.laneForId(config.memberIds[0]),
     {
       targetIdentity: window.__batchTarget(
         config.memberIds[0],
@@ -419,10 +419,10 @@ async function batchPhaseFailedLane(state, config, hostTargetId) {
     messages: [window.__batchFreshMessage(config.memberIds[1])],
     statusLine: window.__batchStatusLine(config.memberIds[1]),
   };
-  subscribeLaneToLiveBus(laneStates.get(config.memberIds[0]));
-  subscribeLaneToLiveBus(laneStates.get(config.memberIds[1]));
+  subscribeLaneToLiveBus(laneStore.laneForId(config.memberIds[0]));
+  subscribeLaneToLiveBus(laneStore.laneForId(config.memberIds[1]));
   await window.__batchSettle(config);
-  const failedLane = laneStates.get(config.memberIds[0]);
+  const failedLane = laneStore.laneForId(config.memberIds[0]);
   const freshRenders = state.mosaicRenders.filter((render) => {
     return render.targetId === hostTargetId && render.keys.includes("m-fresh");
   });

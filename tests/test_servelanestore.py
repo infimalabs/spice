@@ -2,6 +2,7 @@
 
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 from spice.serve.web import STATIC_ROOT, render_index_html
@@ -32,6 +33,30 @@ def test_lane_store_loads_before_every_production_consumer():
         "app.stream.js",
     ):
         assert store_index < html.index(f"/static/{filename}")
+
+
+def test_lane_consumers_use_the_exact_store_registry_surface():
+    production = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(STATIC_ROOT.glob("app*.js"))
+    )
+    authority_identifiers = sorted(
+        set(re.findall(r"\b(?:laneStates|laneStore)\b", production))
+    )
+    calls = Counter(
+        re.findall(
+            r"laneStore\.(registerLane|removeLane|laneForId|hasLane|lanesSnapshot)\(",
+            production,
+        )
+    )
+
+    assert authority_identifiers == ["laneStore"]
+    assert calls == {
+        "registerLane": 2,
+        "removeLane": 1,
+        "laneForId": 28,
+        "hasLane": 8,
+        "lanesSnapshot": 28,
+    }
 
 
 def test_target_consumers_have_no_bare_collection_or_index_vestige():

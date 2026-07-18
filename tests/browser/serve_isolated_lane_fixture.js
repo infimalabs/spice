@@ -30,7 +30,7 @@ const isolatedLaneReadyTimeoutMs = 20000;
 const isolatedLaneRequiredGlobals = [
   "addEmptyTeamLane",
   "emptyTeamTargetId",
-  "laneStates",
+  "laneStore",
 ];
 
 const isolatedLaneGlobalNamePattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -39,9 +39,9 @@ const isolatedLaneGlobalNamePattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 // Idempotent per teamId; smokes needing several lanes pass distinct ids.
 function resolveIsolatedLane(teamId) {
   const targetId = emptyTeamTargetId(teamId);
-  if (!laneStates.has(targetId)) {
+  if (!laneStore.hasLane(targetId)) {
     addEmptyTeamLane({ teamId, revision: 1, config: {} });
-    const created = laneStates.get(targetId);
+    const created = laneStore.laneForId(targetId);
     if (created) {
       // addEmptyTeamLane's sync pass rendered the empty-team "import agent"
       // panel into messagesEl -- DOM built from the REAL sandbox target
@@ -52,7 +52,7 @@ function resolveIsolatedLane(teamId) {
       created.renderedMessageFingerprint = "";
     }
   }
-  const lane = laneStates.get(targetId);
+  const lane = laneStore.laneForId(targetId);
   if (!lane)
     throw new Error("failed to create isolated lane for team " + teamId);
   lane.emptyTeam = false;

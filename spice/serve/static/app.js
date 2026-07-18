@@ -59,8 +59,6 @@ const defaultLaneViewMode = "compose";
 const composerAttachmentMaxItems = 8;
 const composerAttachmentMaxBytes = 8 * 1024 * 1024;
 
-const laneStates = new Map();
-
 function agentLifetimeAutoManagesTasks(lifetime) {
   return lifetime === "Drive";
 }
