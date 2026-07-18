@@ -300,9 +300,10 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
 
     line = lane.status_line_payload(_State(), target, items=[], error=None)
 
-    assert line["claimedTask"] == (
-        "UI-1kF5xdSM Show claimed task without breaking the card"
-    )
+    assert line["claimedTask"] == {
+        "handle": "UI-1kF5xdSM",
+        "title": "Show claimed task without breaking the card",
+    }
 
 
 def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):

@@ -45,7 +45,7 @@ async function runStructuralStatusSmokePage() {
     };
   }
 
-  function statusPayload({ claimedTask = "", index, kind, preview, timestamp }) {
+  function statusPayload({ claimedTask = {}, index, kind, preview, timestamp }) {
     const pending = pendingIdentity(index);
     const visualStatus = kind === "final" ? "idle" : "running";
     return {
@@ -108,6 +108,7 @@ async function runStructuralStatusSmokePage() {
       latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
       pipStatus: lane.pipEl.dataset.agentStatus || "",
       placeholder: textarea.placeholder,
+      composerTitle: textarea.title,
       placeholderOverflowWrap: getComputedStyle(textarea).overflowWrap,
       placeholderWithinCard:
         textareaRect.left >= shardRect.left && textareaRect.right <= shardRect.right,
@@ -122,7 +123,11 @@ async function runStructuralStatusSmokePage() {
   const active = await applyWatchPayload(
     statusPayload({
       claimedTask:
-        "UI-1kF5xdSM Show the claimed task even when its deliberately long title must wrap inside the agent card",
+        {
+          handle: "UI-1kF5xdSM",
+          title:
+            "Show the claimed task even when its deliberately long title must wrap inside the agent card",
+        },
       index: 1,
       kind: "assistant",
       preview: "Working through the event path.",
@@ -172,10 +177,15 @@ function assertStructuralStatusResult(result) {
     throw new Error("active composer status is stale: " + active.placeholder);
   if (
     active.placeholder !==
-    "empty team\n0 pending, running\n" +
-      "UI-1kF5xdSM Show the claimed task even when its deliberately long title must wrap inside the agent card"
+    "empty team\n0 pending, running\nUI-1kF5xdSM"
   )
-    throw new Error("claimed task is not the third placeholder line: " + active.placeholder);
+    throw new Error("claimed task handle is not the third placeholder line: " + active.placeholder);
+  if (
+    active.composerTitle !==
+    "UI-1kF5xdSM\n" +
+      "Show the claimed task even when its deliberately long title must wrap inside the agent card"
+  )
+    throw new Error("claimed task hover detail is incomplete: " + active.composerTitle);
   if (
     active.placeholderOverflowWrap !== "anywhere" ||
     !active.placeholderWithinCard
@@ -197,6 +207,8 @@ function assertStructuralStatusResult(result) {
     throw new Error("final composer status is stale: " + final.placeholder);
   if (final.placeholder !== "empty team\n0 pending, idle")
     throw new Error("unclaimed composer placeholder mismatch: " + final.placeholder);
+  if (final.composerTitle)
+    throw new Error("unclaimed composer retained task hover text: " + final.composerTitle);
   if (final.statusAge !== "20m" || final.statusPreview !== "Confirmed fixed.")
     throw new Error("final lane text mismatch: " + JSON.stringify(final));
   if (final.statusGapPx < 0)

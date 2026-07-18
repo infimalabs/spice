@@ -83,6 +83,7 @@ function syncComposerShard(lane, shard, member) {
   const primary = composerShardPrimaryBand(shard, member.targetId);
   primary.className = "composer-band composer-band--primary";
   primary.dataset.composerPrimaryTargetId = member.targetId;
+  primary.title = laneComposeTaskTooltip(member);
   syncComposerBandAccent(primary, lane, member);
   syncComposerDriverIcon(primary, member);
   const header = composerPrimaryBandHeader(lane, member);
@@ -97,6 +98,7 @@ function syncComposerShard(lane, shard, member) {
     primary.append(textarea);
   }
   textarea.placeholder = laneComposePlaceholder(member);
+  textarea.title = laneComposeTaskTooltip(member);
   lane.shardTextareas.set(member.targetId, textarea);
 }
 
@@ -339,9 +341,22 @@ function syncComposerShardOrder(container, shards) {
 function laneComposePlaceholder(member) {
   const label = laneMemberTargetLabel(member);
   const status = laneComposePlaceholderStatus(member);
+  const claimedTask = laneClaimedTask(member);
+  return [label, status, claimedTask.handle].filter(Boolean).join("\n");
+}
+
+function laneClaimedTask(member) {
   const statusLine = member.lastRenderedStatusLine || {};
-  const claimedTask = String(statusLine.claimedTask || "").trim();
-  return [label, status, claimedTask].filter(Boolean).join("\n");
+  const task = statusLine.claimedTask || {};
+  return {
+    handle: String(task.handle || "").trim(),
+    title: String(task.title || "").trim(),
+  };
+}
+
+function laneComposeTaskTooltip(member) {
+  const task = laneClaimedTask(member);
+  return [task.handle, task.title].filter(Boolean).join("\n");
 }
 
 function laneComposePlaceholderStatus(member) {
@@ -358,6 +373,9 @@ function syncComposerPlaceholders(lane) {
   for (const [targetId, textarea] of lane.shardTextareas) {
     const member = laneStates.get(targetId) || lane;
     textarea.placeholder = laneComposePlaceholder(member);
+    textarea.title = laneComposeTaskTooltip(member);
+    const primary = textarea.closest(".composer-band--primary");
+    if (primary) primary.title = textarea.title;
   }
   for (const stack of lane.element.querySelectorAll(
     "[data-composer-quote-stack-target-id]",

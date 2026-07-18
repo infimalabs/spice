@@ -130,13 +130,17 @@
  * @property {string=} latestActivityKind
  * @property {string=} agentProcessStatus
  * @property {string=} agentVisualStatus
- * @property {string=} claimedTask
+ * @property {ClaimedTask=} claimedTask
  * @property {string=} activityStatus
  * @property {number=} pendingInboxCount
  * @property {string=} pendingInboxLabel
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
  * @property {number=} pendingInboxVersion
+ *
+ * @typedef {Object} ClaimedTask
+ * @property {string=} handle
+ * @property {string=} title
  *
  * @typedef {Object} MessageAttachment
  * @property {string=} name
