@@ -1,6 +1,11 @@
+const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
-const { withServePage } = require("./serve_playwright_harness");
+const { repoRoot, withServePage } = require("./serve_playwright_harness");
 const { threadActorId } = require("./payload_factory");
+
+const execFileAsync = promisify(execFile);
 
 function pendingIdentity(count = 0) {
   return {
@@ -113,6 +118,66 @@ function assertIdentityResult(result) {
   }
 }
 
+async function seedTypedAgentTeam(backendDir, targetId) {
+  const script = [
+    "from pathlib import Path",
+    "import sys",
+    "from spice.serve.team.store import ServeTeamStore",
+    'store = ServeTeamStore(path=Path(sys.argv[1]) / "data" / "spiceteams.sqlite3")',
+    'actor_id = "target:" + sys.argv[2]',
+    "store.create_team(members=[actor_id])",
+    "store.record_agent_identity(",
+    "    actor_id=actor_id,",
+    "    target_id=sys.argv[2],",
+    '    renewal_state="pending",',
+    "    renewal_revision=7,",
+    ")",
+  ].join("\n");
+  await execFileAsync(
+    path.join(repoRoot, ".venv", "bin", "python"),
+    ["-c", script, backendDir, targetId],
+    { cwd: repoRoot },
+  );
+}
+
+async function assertTypedAgentTeamLoads(page, backendDir) {
+  await page.waitForSelector(".lane");
+  await page.waitForFunction(
+    () =>
+      typeof laneStore !== "undefined" &&
+      typeof liveBusRequest !== "undefined" &&
+      typeof applyTeamSnapshotPayload !== "undefined" &&
+      laneStore.targetsSnapshot().length > 0,
+  );
+  const targetId = await page.evaluate(() => laneStore.targetsSnapshot()[0].id);
+  await seedTypedAgentTeam(backendDir, targetId);
+  const result = await page.evaluate(async (expectedTargetId) => {
+    const response = await liveBusRequest("teams.refresh", { query: {} });
+    applyTeamSnapshotPayload(response.payload, { force: true });
+    const member = response.payload.snapshot.teams
+      .flatMap((team) => team.members || [])
+      .find((candidate) => candidate.agentId === "target:" + expectedTargetId);
+    const lane = laneStore.laneForId(expectedTargetId);
+    return {
+      lanePresent: Boolean(lane),
+      targetId: expectedTargetId,
+      actorId: member?.agentFacts?.actorId || "",
+      renewalRevision: member?.agentFacts?.renewalRevision,
+      updatedAtType: typeof member?.agentFacts?.updatedAt,
+    };
+  }, targetId);
+  if (
+    !result.lanePresent ||
+    result.actorId !== "target:" + targetId ||
+    result.renewalRevision !== 7 ||
+    result.updatedAtType !== "number"
+  )
+    throw new Error(
+      "typed agent team did not load its lane: " + JSON.stringify(result),
+    );
+  return result;
+}
+
 async function run() {
   return withServePage(
     {
@@ -120,6 +185,10 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
     async ({ page, server }) => {
+      const typedAgentTeam = await assertTypedAgentTeamLoads(
+        page,
+        server.backendDir,
+      );
       await installIsolatedLaneFixture(page, { globals: ["renderLaneChrome"] });
       const result = await page.evaluate((payload) => {
         const lane = resolveIsolatedLane("identity-smoke-team");
@@ -141,7 +210,7 @@ async function run() {
         };
       }, mismatchPayload(""));
       assertIdentityResult(result);
-      return { ...result, url: server.url };
+      return { ...result, typedAgentTeam, url: server.url };
     },
   );
 }

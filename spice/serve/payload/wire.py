@@ -558,7 +558,7 @@ WIRE_OBJECTS = (
     _object(
         "TeamMemberPayload",
         {"agentId": STRING, "renewalIntent": _ref("RenewalIntentPayload")},
-        {"agentAliases": STRINGS, "agentFacts": STRING_MAP},
+        {"agentAliases": STRINGS, "agentFacts": _ref("TeamAgentIdentity")},
     ),
     _object(
         "TeamPayload",
