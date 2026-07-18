@@ -261,6 +261,8 @@ def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
     assert "CODEX_" + "THREAD_ID" in smoke
     assert "--origin" in smoke
     assert "liveTaskCardSmokeOrigin" in smoke
+    assert "liveTaskCardExpectedMetadata" in smoke
+    assert '"todo, review"' in smoke
     assert "liveTaskCardTargetOffset" in smoke
     assert "waitForTaskCardStage" in smoke
     assert "liveTaskCardStageTimeoutMs" in smoke

@@ -11,6 +11,12 @@ const liveTaskCardAcceptanceCriteria = [
   "Live task card appears without page reload",
   "Each acceptance criterion renders on its own row",
 ];
+// Metadata rows the live card must surface beyond the acceptance criteria: the
+// stored origin spelling passed to `task add`, and the resolved flow pipeline
+// for a serve.ui add (config default_flow ["todo", "review"] renders as
+// "todo, review"). Each renders in its own <dd>, so an exact-text match pins the
+// value that reached the DOM.
+const liveTaskCardExpectedMetadata = [liveTaskCardSmokeOrigin, "todo, review"];
 
 async function run() {
   return withServePage(
@@ -368,6 +374,12 @@ async function waitForTaskCardVisible(
       .filter({ hasText: title });
     for (const criterion of acceptanceCriteria) {
       await card.getByText(criterion, { exact: true }).waitFor({
+        state: "visible",
+        timeout: liveTaskCardStageTimeoutMs,
+      });
+    }
+    for (const value of liveTaskCardExpectedMetadata) {
+      await card.getByText(value, { exact: true }).waitFor({
         state: "visible",
         timeout: liveTaskCardStageTimeoutMs,
       });
