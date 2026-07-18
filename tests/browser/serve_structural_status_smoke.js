@@ -29,6 +29,8 @@ async function run() {
 
 async function runStructuralStatusSmokePage() {
   const lane = resolveIsolatedLane("structural-status-smoke-team");
+  lane.agentName = "spice-b";
+  lane.branchName = "main-b";
   activateIsolatedLaneWatch(lane, "structural-status-smoke");
   const host = laneGroupHost(lane);
   syncComposerShards(host, laneGroupMemberLanes(host));
@@ -125,6 +127,7 @@ async function runStructuralStatusSmokePage() {
       claimedTask:
         {
           handle: "UI-1kF5xdSM",
+          phase: "todo",
           title:
             "Show the claimed task even when its deliberately long title must wrap inside the agent card",
         },
@@ -134,9 +137,23 @@ async function runStructuralStatusSmokePage() {
       timestamp: new Date().toISOString(),
     }),
   );
+  const phaseTransition = await applyWatchPayload(
+    statusPayload({
+      claimedTask: {
+        handle: "UI-1kF5xdSM",
+        phase: "review",
+        title:
+          "Show the claimed task even when its deliberately long title must wrap inside the agent card",
+      },
+      index: 2,
+      kind: "assistant",
+      preview: "Reviewing the integrated change.",
+      timestamp: new Date().toISOString(),
+    }),
+  );
   const final = await applyWatchPayload(
     statusPayload({
-      index: 2,
+      index: 3,
       kind: "final",
       preview: "Confirmed fixed.",
       timestamp: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
@@ -150,13 +167,14 @@ async function runStructuralStatusSmokePage() {
     statusAge: lane.statusTimeEl.textContent || "",
     visualStatus: lane.lastRenderedStatusLine.agentVisualStatus || "",
   };
-  return { active, afterRelativeTick, final };
+  return { active, afterRelativeTick, final, phaseTransition };
 }
 
 function assertStructuralStatusResult(result) {
-  const { active, afterRelativeTick, final } = result;
+  const { active, afterRelativeTick, final, phaseTransition } = result;
   for (const [label, snapshot] of [
     ["active", active],
+    ["phaseTransition", phaseTransition],
     ["final", final],
   ]) {
     if (snapshot.elapsedMs > maxStatusTransitionMs)
@@ -177,15 +195,25 @@ function assertStructuralStatusResult(result) {
     throw new Error("active composer status is stale: " + active.placeholder);
   if (
     active.placeholder !==
-    "empty team\n0 pending, running\nUI-1kF5xdSM"
+    "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, todo"
   )
     throw new Error("claimed task handle is not the third placeholder line: " + active.placeholder);
   if (
     active.composerTitle !==
-    "UI-1kF5xdSM\n" +
+    "UI-1kF5xdSM, todo\n" +
       "Show the claimed task even when its deliberately long title must wrap inside the agent card"
   )
     throw new Error("claimed task hover detail is incomplete: " + active.composerTitle);
+  if (
+    phaseTransition.placeholder !==
+      "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, review" ||
+    phaseTransition.composerTitle !==
+      "UI-1kF5xdSM, review\n" +
+        "Show the claimed task even when its deliberately long title must wrap inside the agent card"
+  )
+    throw new Error(
+      "claimed task phase transition is stale: " + JSON.stringify(phaseTransition),
+    );
   if (
     active.placeholderOverflowWrap !== "anywhere" ||
     !active.placeholderWithinCard
@@ -205,7 +233,7 @@ function assertStructuralStatusResult(result) {
   }
   if (!final.placeholder.includes("0 pending, idle"))
     throw new Error("final composer status is stale: " + final.placeholder);
-  if (final.placeholder !== "empty team\n0 pending, idle")
+  if (final.placeholder !== "spice-b, main-b\n0 pending, idle")
     throw new Error("unclaimed composer placeholder mismatch: " + final.placeholder);
   if (final.composerTitle)
     throw new Error("unclaimed composer retained task hover text: " + final.composerTitle);

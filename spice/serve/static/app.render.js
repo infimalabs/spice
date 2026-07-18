@@ -247,11 +247,11 @@ function identityDisplayPair(actual, desired) {
   return desiredText || actualText;
 }
 
-function agentBranchLabel(agentName, branchName) {
+function agentBranchLabel(agentName, branchName, separator = " on ") {
   const agent = agentName || "";
   const branch = branchName || "this branch";
   if (!agent || agent === branch) return branch;
-  return agent + " on " + branch;
+  return agent + separator + branch;
 }
 
 function targetIdentityDisplayLabel(identity) {

@@ -157,8 +157,9 @@ def _claimed_task_payload(thread_id: str) -> dict[str, str]:
     if row is None:
         return {}
     handle = task_identity.render_handle(row)
+    phase = str(row.get("phase") or "").strip()
     title = " ".join(str(row.get("description") or "").split())
-    return {"handle": handle, "title": title}
+    return {"handle": handle, "phase": phase, "title": title}
 
 
 def _status_line_payload_from_status(

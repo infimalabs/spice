@@ -291,6 +291,7 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
             {
                 "description": "Show  claimed task\nwithout breaking the card",
                 "incepted": "1kF5xdSM",
+                "phase": "todo",
                 "project": "serve.ui",
             }
             if actor == "019f6eddab8c7ab2870af6b81dfc5b7f"
@@ -302,6 +303,7 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
 
     assert line["claimedTask"] == {
         "handle": "UI-1kF5xdSM",
+        "phase": "todo",
         "title": "Show claimed task without breaking the card",
     }
 

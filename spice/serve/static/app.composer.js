@@ -339,10 +339,17 @@ function syncComposerShardOrder(container, shards) {
 }
 
 function laneComposePlaceholder(member) {
-  const label = laneMemberTargetLabel(member);
+  const label = laneComposeTargetLabel(member);
   const status = laneComposePlaceholderStatus(member);
   const claimedTask = laneClaimedTask(member);
-  return [label, status, claimedTask.handle].filter(Boolean).join("\n");
+  const claimedTaskLabel = laneClaimedTaskLabel(claimedTask);
+  return [label, status, claimedTaskLabel].filter(Boolean).join("\n");
+}
+
+function laneComposeTargetLabel(member) {
+  const agent = member.agentName || "";
+  const branch = member.branchName || member.targetId || "this branch";
+  return agentBranchLabel(agent, branch, ", ");
 }
 
 function laneClaimedTask(member) {
@@ -350,13 +357,19 @@ function laneClaimedTask(member) {
   const task = statusLine.claimedTask || {};
   return {
     handle: String(task.handle || "").trim(),
+    phase: String(task.phase || "").trim(),
     title: String(task.title || "").trim(),
   };
 }
 
+function laneClaimedTaskLabel(task) {
+  if (!task.handle) return "";
+  return task.phase ? task.handle + ", " + task.phase : task.handle;
+}
+
 function laneComposeTaskTooltip(member) {
   const task = laneClaimedTask(member);
-  return [task.handle, task.title].filter(Boolean).join("\n");
+  return [laneClaimedTaskLabel(task), task.title].filter(Boolean).join("\n");
 }
 
 function laneComposePlaceholderStatus(member) {
