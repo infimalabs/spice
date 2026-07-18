@@ -40,6 +40,7 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
     element: {
       classList: fakeClassList(),
       nextElementSibling: null,
+      style: fakeStyle(),
     },
     pipEl: {
       hidden: false,

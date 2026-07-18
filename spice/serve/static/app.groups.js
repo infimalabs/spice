@@ -22,6 +22,7 @@ function reconcileLaneGroups(groupRuns) {
   for (const lane of laneStates.values()) {
     lane.groupTopology = null;
     lane.element.classList.remove("lane--shadowed");
+    lane.element.style.removeProperty("--lane-weight");
   }
   for (const run of groupRuns) {
     const members = run
@@ -36,6 +37,7 @@ function reconcileLaneGroups(groupRuns) {
       hostTargetId: host.targetId,
       memberTargetIds,
     };
+    host.element.style.setProperty("--lane-weight", String(members.length));
     restoreLaneLifetimeRuntimeState(
       host,
       pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId),

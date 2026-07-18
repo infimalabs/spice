@@ -290,7 +290,9 @@ button.primary:hover {
   border-radius: var(--soft-radius);
   box-shadow: var(--control-inset-soft);
   display: flex;
-  flex: 1 1 0;
+  /* A fused team host carries its member count as --lane-weight, so a
+     six-agent team claims six times a solo lane's share of the row. */
+  flex: var(--lane-weight, 1) 1 0;
   flex-direction: column;
   min-height: 0;
   min-width: 20em;
