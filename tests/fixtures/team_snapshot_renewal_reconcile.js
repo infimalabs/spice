@@ -102,6 +102,9 @@ function resetGlobals() {
   context.unsubscribeLaneFromLiveBus = () => {};
   context.abortLaneSpeech = () => {};
   context.syncNarrationMediaSession = () => {};
+  context.renderSpiceMenu = () => {
+    context.menuRenderCount += 1;
+  };
   context.isLaneOpen = (lane) => !lane.closed;
   context.laneComposerDraftText = () => "";
   context.targetsLoaded = true;
@@ -109,6 +112,7 @@ function resetGlobals() {
   context.spiceMenuEl = null;
   context.emptyTeamCalls = [];
   context.reconciledGroupRuns = null;
+  context.menuRenderCount = 0;
 }
 
 function renewalTeam(memberThreadId) {
@@ -188,6 +192,10 @@ assert(
   context.emptyTeamCalls.length === 0,
   "mapped renewal snapshot does not create an empty-team placeholder",
 );
+assert(
+  context.menuRenderCount === 0,
+  "mapped renewal updates lane and target state without repainting the membership menu",
+);
 
 resetGlobals();
 const pendingTarget = {
@@ -224,4 +232,8 @@ assert(
 assert(
   context.emptyTeamCalls.length === 0,
   "early renewal snapshot does not present the non-empty team as empty",
+);
+assert(
+  context.menuRenderCount === 0,
+  "early renewal renames the lane thread in place without repainting the membership menu",
 );
