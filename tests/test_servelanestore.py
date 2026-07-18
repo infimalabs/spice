@@ -32,6 +32,19 @@ def test_lane_store_reconciles_team_snapshots_as_declarative_transitions():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_lane_store_owns_group_topology_as_declarative_transitions():
+    fixture = Path(__file__).with_name("fixtures") / "lane_store_group_topology.js"
+
+    result = subprocess.run(
+        ["node", str(fixture), str(STATIC_ROOT / "app.lane-store.js")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_lane_store_loads_before_every_production_consumer():
     html = render_index_html()
     store_index = html.index("/static/app.lane-store.js")
@@ -67,9 +80,9 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
     assert calls == {
         "registerLane": 2,
         "removeLane": 1,
-        "laneForId": 28,
+        "laneForId": 29,
         "hasLane": 8,
-        "lanesSnapshot": 26,
+        "lanesSnapshot": 24,
     }
 
 

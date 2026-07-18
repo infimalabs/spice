@@ -8,6 +8,7 @@ class ServeLaneStore {
   #lanes = new Map();
   #listeners = [];
   #teamSnapshotRevision = 0;
+  #groupTopologyByTargetId = new Map();
 
   targetsSnapshot() {
     return this.#targets.slice();
@@ -258,6 +259,82 @@ class ServeLaneStore {
     this.#lanes.delete(id);
     this.#notifyLaneTransition("removed", lane);
     return lane;
+  }
+
+  laneGroupTopology(targetId) {
+    return this.#groupTopologyByTargetId.get(String(targetId || "")) || null;
+  }
+
+  applyLaneGroups(groupRuns, options = {}) {
+    const isLaneOpen =
+      typeof options.isLaneOpen === "function" ? options.isLaneOpen : () => true;
+    const captureLaneState =
+      typeof options.captureLaneState === "function"
+        ? options.captureLaneState
+        : () => null;
+    const priorLaneStateByTargetId = new Map();
+    for (const lane of this.#lanes.values())
+      priorLaneStateByTargetId.set(lane.targetId, captureLaneState(lane));
+    const previousHostByMemberTargetId = this.#laneGroupHostByMemberTargetId();
+    const nextTopology = new Map();
+    const runs = [];
+    for (const run of Array.isArray(groupRuns) ? groupRuns : []) {
+      const memberTargetIds = [];
+      for (const value of run) {
+        const targetId = String(value || "");
+        const lane = this.#lanes.get(targetId);
+        if (lane && isLaneOpen(lane) && !memberTargetIds.includes(targetId))
+          memberTargetIds.push(targetId);
+      }
+      if (memberTargetIds.length < 2) continue;
+      const hostTargetId = this.#stableLaneGroupHost(
+        memberTargetIds,
+        previousHostByMemberTargetId,
+      );
+      const members = Object.freeze(memberTargetIds.slice());
+      nextTopology.set(
+        hostTargetId,
+        Object.freeze({ role: "host", hostTargetId, memberTargetIds: members }),
+      );
+      for (const targetId of memberTargetIds)
+        if (targetId !== hostTargetId)
+          nextTopology.set(
+            targetId,
+            Object.freeze({
+              role: "member",
+              hostTargetId,
+              memberTargetIds: members,
+            }),
+          );
+      runs.push(Object.freeze({ hostTargetId, memberTargetIds: members }));
+    }
+    this.#groupTopologyByTargetId = nextTopology;
+    const transition = Object.freeze({
+      runs: Object.freeze(runs),
+      priorLaneStateByTargetId,
+    });
+    this.#notify(Object.freeze({ kind: "laneGroups", transition }));
+    return transition;
+  }
+
+  #laneGroupHostByMemberTargetId() {
+    const hosts = new Map();
+    for (const topology of this.#groupTopologyByTargetId.values()) {
+      if (topology.role !== "host" || topology.memberTargetIds.length < 2)
+        continue;
+      for (const targetId of topology.memberTargetIds)
+        hosts.set(targetId, topology.hostTargetId);
+    }
+    return hosts;
+  }
+
+  #stableLaneGroupHost(memberTargetIds, previousHostByMemberTargetId) {
+    for (const targetId of memberTargetIds) {
+      const previousHostId = previousHostByMemberTargetId.get(targetId);
+      if (previousHostId && memberTargetIds.includes(previousHostId))
+        return previousHostId;
+    }
+    return memberTargetIds[0];
   }
 
   subscribe(listener) {

@@ -17,10 +17,6 @@ const targetChoiceStatusValues = [
   "unknown",
 ];
 
-function renderSpiceMenuIfAvailable() {
-  if (typeof renderSpiceMenu === "function") renderSpiceMenu();
-}
-
 function emptyTeamTargetId(teamId) {
   return emptyTeamTargetPrefix + teamId;
 }
@@ -34,7 +30,7 @@ function refreshTargets() {
   if (targetsLoadPromise) return targetsLoadPromise;
   targetsLoading = true;
   if (!targetsLoaded) setGlobalActivityStatus("loading teams");
-  if (spiceMenuEl) renderSpiceMenuIfAvailable();
+  if (spiceMenuEl) renderSpiceMenu();
   targetsLoadPromise = (async () => {
     try {
       const response = /** @type {TargetsFrame} */ (
@@ -46,7 +42,7 @@ function refreshTargets() {
     } finally {
       targetsLoading = false;
       targetsLoadPromise = null;
-      if (spiceMenuEl) renderSpiceMenuIfAvailable();
+      if (spiceMenuEl) renderSpiceMenu();
     }
   })();
   return targetsLoadPromise;
@@ -68,7 +64,7 @@ function applyTargetsPayload(payload) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
     else renderLaneChrome(lane, laneStore.targetForId(lane.targetId));
   }
-  if (spiceMenuEl) renderSpiceMenuIfAvailable();
+  if (spiceMenuEl) renderSpiceMenu();
 }
 
 function syncObserverNotice(errors) {
@@ -113,11 +109,6 @@ function syncTaskFilterInventoryState(inventory) {
 }
 
 function renderTaskFilterInventoryPanes() {
-  if (
-    typeof laneGroupHost !== "function" ||
-    typeof renderLaneFiltersPane !== "function"
-  )
-    return;
   const renderedHosts = new Set();
   for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
@@ -207,14 +198,64 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   });
 }
 
+// Global fast-mode settings are an explicit store subscription applied before
+// lanes materialize, so the fast-mode button, spice menu, and live-bus lane
+// configuration track the global toggle. applyGlobalSettingsPayload
+// early-returns when the flag is unchanged, so a quiet snapshot repaints no
+// global chrome.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  if (change.transition.disposition !== "applied") return;
+  applyGlobalSettingsPayload(change.transition.globalSettings);
+});
+
 laneStore.subscribe((change) => {
   if (change.kind !== "teamSnapshot") return;
   materializeTeamSnapshotTransition(change.transition);
 });
 
+// Fusion/split chrome, the merged newest-first message stream, and each
+// concrete member's live-bus activity query are an explicit store subscription
+// over the reconciled snapshot rather than an imperative tail on lane
+// materialization. It runs after the materializer has mounted and closed lanes,
+// applies the snapshot's group topology, and repaints the group flow; a
+// non-applied snapshot renders nothing.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  if (change.transition.disposition !== "applied") return;
+  reconcileLaneGroups(change.transition.groupRuns);
+});
+
+// Menu refresh, filter panes, and lane-hint persistence are explicit store
+// subscribers rather than an imperative tail on lane materialization. Each
+// gates on the fields it consumes, so a quiet retained-only snapshot repaints
+// nothing; membership changes refresh the menu, and any lane add/update/remove
+// refreshes the filter pills.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  const transition = change.transition;
+  if (transition.disposition !== "applied") return;
+  if (targetsLoaded) persistLaneHints();
+  if (transition.adds.length || transition.removes.length)
+    renderSpiceMenu();
+  if (
+    transition.adds.length ||
+    transition.updates.length ||
+    transition.removes.length
+  )
+    renderFilterPills();
+});
+
+// Media-session narration state follows the open-lane set: a lane leaving the
+// store can flip whether any narration is active, so it reconciles as an
+// explicit lane-store subscriber instead of an imperative tail on lane close.
+laneStore.subscribe((change) => {
+  if (change.kind !== "lanes" || change.transition !== "removed") return;
+  syncNarrationMediaSession();
+});
+
 function materializeTeamSnapshotTransition(transition) {
   if (transition.disposition !== "applied") return;
-  applyGlobalSettingsPayload(transition.globalSettings);
   const hints = laneHintsByTargetId();
   for (const renewal of transition.renewals)
     renameTeamMemberTargetThread(renewal.targetId, renewal.actorId);
@@ -230,12 +271,6 @@ function materializeTeamSnapshotTransition(transition) {
       );
   }
   for (const lane of transition.removes) closeLaneCore(lane);
-  reconcileLaneGroups(transition.groupRuns);
-  if (typeof targetsLoaded === "undefined" || targetsLoaded)
-    persistLaneHints();
-  if (transition.adds.length || transition.removes.length)
-    renderSpiceMenuIfAvailable();
-  renderFilterPills();
 }
 
 // A team member is an explicit actor: target:<target-id> before a thread binds,
@@ -315,7 +350,7 @@ function renameTeamMemberTargetThread(targetId, actorId) {
   if (!lane) return;
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
-  if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, threadId);
+  ensureLaneOccupant(lane, threadId);
 }
 
 function unresolvedTeamLaneTargetIds(team) {
@@ -379,8 +414,7 @@ function ensureTeamMemberLane(targetId, team, hint = null, member = null) {
   if (
     lane.liveBusSubscribed &&
     previousConfigRevision > 0 &&
-    lane.configRevision > previousConfigRevision &&
-    typeof subscribeLaneToLiveBus === "function"
+    lane.configRevision > previousConfigRevision
   )
     subscribeLaneToLiveBus(lane);
 }
@@ -462,8 +496,6 @@ function closeLaneCore(lane) {
   abortLaneSpeech(lane);
   lane.element.remove();
   laneStore.removeLane(lane.targetId);
-  syncNarrationMediaSession();
-  renderFilterPills();
 }
 
 function laneHasUnsafeDraft(lane) {

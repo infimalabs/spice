@@ -201,9 +201,9 @@ function applyGlobalSettingsPayload(settings) {
   const previous = fastModeEnabled;
   fastModeEnabled = settings.fastMode;
   if (fastModeEnabled === previous) return;
-  if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
-  if (typeof renderSpiceMenu === "function") renderSpiceMenu();
-  if (typeof configureLiveBusLanes === "function") configureLiveBusLanes();
+  syncFastModeButtonState();
+  renderSpiceMenu();
+  configureLiveBusLanes();
 }
 
 async function init() {
@@ -230,6 +230,6 @@ openLaneButton.addEventListener("click", (event) => {
   toggleSpiceMenu();
 });
 
-if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
+syncFastModeButtonState();
 
 init().catch((error) => setGlobalTransientError(String(error)));

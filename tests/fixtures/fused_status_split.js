@@ -34,7 +34,6 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
     targetId,
     agentName,
     branchName,
-    groupTopology: null,
     renderedFusedStatusLine: false,
     renderedStatusFingerprint: "",
     lastRenderedStatusLine: statusLine,
@@ -93,6 +92,7 @@ const context = {
   },
   isLaneOpen: () => true,
   renderMessagesIfChanged: () => {},
+  scheduleLiveBusLaneActivitySync: () => {},
   syncComposerShards(lane, members) {
     composerWrites.push({
       targetId: lane.targetId,
@@ -132,12 +132,12 @@ vm.runInContext(
     throw new Error("fused status did not use latest compact member status: " + JSON.stringify(fusedWrite));
 
   reconcileLaneGroups([["member", "host"]]);
-  if (host.groupTopology.role !== "host")
+  if (laneStore.laneGroupTopology("host").role !== "host")
     throw new Error("reorder changed visible host role");
-  if (member.groupTopology.role !== "member")
+  if (laneStore.laneGroupTopology("member").role !== "member")
     throw new Error("reorder did not keep lead composer as shadow member");
-  if (host.groupTopology.memberTargetIds.join(",") !== "member,host")
-    throw new Error("reorder lost logical composer order: " + host.groupTopology.memberTargetIds.join(","));
+  if (laneStore.laneGroupTopology("host").memberTargetIds.join(",") !== "member,host")
+    throw new Error("reorder lost logical composer order: " + laneStore.laneGroupTopology("host").memberTargetIds.join(","));
   const reorderedComposerWrite = composerWrites.at(-1);
   if (reorderedComposerWrite.targetId !== "host" ||
       reorderedComposerWrite.memberTargetIds.join(",") !== "member,host")

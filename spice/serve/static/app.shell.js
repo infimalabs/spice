@@ -8,11 +8,10 @@ function addLane(targetId, hint = null, options = {}) {
   const lane = createLaneState(targetId, hint);
   laneStore.registerLane(lane);
   lanesEl.append(lane.element);
-  renderSpiceMenuIfAvailable();
+  renderSpiceMenu();
   renderFilterPills();
   subscribeLaneToLiveBus(lane);
-  if (options.persist !== false && typeof persistLaneHints === "function")
-    persistLaneHints();
+  if (options.persist !== false) persistLaneHints();
 }
 
 function addEmptyTeamLane(team, options = {}) {
@@ -25,7 +24,7 @@ function addEmptyTeamLane(team, options = {}) {
   });
   laneStore.registerLane(lane);
   lanesEl.append(lane.element);
-  renderSpiceMenuIfAvailable();
+  renderSpiceMenu();
   renderFilterPills();
 }
 
@@ -186,7 +185,6 @@ function laneTeamState(emptyTeam, teamIdentity, options) {
     teamSplitBackAvailable: false,
     teamSplitBackMemberCount: 0,
     configRevision: emptyTeam ? 0 : teamIdentityConfigRevision(teamIdentity),
-    groupTopology: null,
   };
 }
 

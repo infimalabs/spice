@@ -136,7 +136,7 @@ def test_static_lifetime_slider_syncs_server_state_sources():
         app_groups,
         (
             "pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId)",
-            "laneLifetimeRuntimeState(lane)",
+            "captureLaneState: laneLifetimeRuntimeState",
             "restoreLaneLifetimeRuntimeState(",
         ),
     )

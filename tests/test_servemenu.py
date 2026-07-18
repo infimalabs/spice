@@ -452,7 +452,10 @@ def test_static_spice_menu_fast_mode_uses_server_global_state():
     assert "const fastModeActive = currentFastModeEnabled();" in app_menu
     assert "function syncFastModeButtonState()" in app_menu
     assert "spice-menu-button--fast" in app_menu
-    assert "applyGlobalSettingsPayload(transition.globalSettings);" in app_lanes
+    assert (
+        'if (change.transition.disposition !== "applied") return;\n'
+        "  applyGlobalSettingsPayload(change.transition.globalSettings);" in app_lanes
+    )
     assert "fastMode: currentFastModeEnabled()," not in app_controls
     assert "fastMode: currentFastModeEnabled()," not in app_stream
     assert "fastModeStorageKey" not in app_js
@@ -472,15 +475,17 @@ def test_static_spice_menu_replaces_picker_lane():
     assert 'let spiceMenuDragTargetId = "";' in app_js
     assert "let spiceMenuRenderPending = false;" in app_js
     assert "function openSpiceMenu()" in app_menu
-    assert "function renderSpiceMenuIfAvailable()" in app_lanes
-    assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
     assert 'if (change.kind !== "teamSnapshot") return;' in app_lanes
     assert "materializeTeamSnapshotTransition(change.transition);" in app_lanes
     assert (
-        "if (transition.adds.length || transition.removes.length)\n"
-        "    renderSpiceMenuIfAvailable();" in app_lanes
+        'if (change.transition.disposition !== "applied") return;\n'
+        "  reconcileLaneGroups(change.transition.groupRuns);" in app_lanes
     )
-    assert "renderSpiceMenuIfAvailable();" in app_shell
+    assert (
+        "if (transition.adds.length || transition.removes.length)\n"
+        "    renderSpiceMenu();" in app_lanes
+    )
+    assert "renderSpiceMenu();" in app_shell
     assert (
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes

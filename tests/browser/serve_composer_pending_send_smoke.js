@@ -190,13 +190,7 @@ async function runGroupedComposerScenarios(sends, config) {
 }
 
 function configureGroupedComposer(host, member) {
-  const topology = {
-    role: "host",
-    hostTargetId: host.targetId,
-    memberTargetIds: [host.targetId, member.targetId],
-  };
-  host.groupTopology = topology;
-  member.groupTopology = { ...topology, role: "member" };
+  laneStore.applyLaneGroups([[host.targetId, member.targetId]], { isLaneOpen });
 }
 
 async function runRepeatedKeyboardSubmission(
