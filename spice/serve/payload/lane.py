@@ -40,23 +40,60 @@ def _empty_task_filter_counts() -> dict[str, int]:
     return {field: 0 for field in TASK_FILTER_STATE_COUNT_FIELDS}
 
 
+def _task_row_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.strptime(value, tw.TW_DATETIME_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _task_row_dependencies(row: dict[str, Any]) -> set[str]:
+    raw = row.get("depends")
+    if isinstance(raw, list):
+        return {str(dep) for dep in raw if dep}
+    if isinstance(raw, str):
+        return {dep.strip() for dep in raw.split(",") if dep.strip()}
+    return set()
+
+
 def _task_filter_rows() -> tuple[list[dict[str, Any]], set[str], set[str], set[str]]:
     from spice.errors import SpiceError
 
     try:
         rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
-        ready_rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
-        waiting_rows = tw.export(["status:waiting", "-ACTIVE"])
-        blocked_rows = tw.export(["status:pending", "+BLOCKED", "-ACTIVE"])
     except SpiceError:
         # No Taskwarrior (or no backend yet): the lane UI still works; the
         # filter inventory is simply empty.
-        rows, ready_rows, waiting_rows, blocked_rows = [], [], [], []
-
-    def uuids(items: list[dict[str, Any]]) -> set[str]:
-        return {str(row.get("uuid") or "") for row in items if row.get("uuid")}
-
-    return rows, uuids(ready_rows), uuids(waiting_rows), uuids(blocked_rows)
+        rows = []
+    # Taskwarrior derives +READY, +BLOCKED, and status:waiting from the wait,
+    # depends, scheduled, and start fields already carried by every exported
+    # row, so this one pending-or-waiting export is the sole authority; the
+    # ready/waiting/blocked partition below reads those fields directly instead
+    # of re-querying the same rows once per virtual tag.
+    now = datetime.now(UTC)
+    open_uuids = {str(row.get("uuid") or "") for row in rows if row.get("uuid")}
+    ready: set[str] = set()
+    waiting: set[str] = set()
+    blocked: set[str] = set()
+    for row in rows:
+        uuid = str(row.get("uuid") or "")
+        if not uuid or row.get("claim_by") or row.get("start"):
+            # Claimed or started work is inventoried by its claim as in flight,
+            # never as a ready/waiting/blocked candidate (Taskwarrior -ACTIVE).
+            continue
+        wait_at = _task_row_datetime(row.get("wait"))
+        if wait_at is not None and wait_at > now:
+            waiting.add(uuid)
+            continue
+        if _task_row_dependencies(row) & open_uuids:
+            blocked.add(uuid)
+            continue
+        scheduled_at = _task_row_datetime(row.get("scheduled"))
+        if scheduled_at is None or scheduled_at <= now:
+            ready.add(uuid)
+    return rows, ready, waiting, blocked
 
 
 def _task_filter_row_state(
