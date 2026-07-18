@@ -48,8 +48,12 @@ def test_static_filter_header_pills_render_models_and_styles():
         "      '<span class=\"filter-pill-count\"></span>';" in app_lanes
     )
     assert (
-        'pill.querySelector(".filter-pill-count").textContent = '
-        "String(model.openTaskCount);" in app_lanes
+        'pill.querySelector(".filter-pill-count").textContent ='
+        "\n      taskFilterStemPillCountText(model);" in app_lanes
+    )
+    assert "function taskFilterStemPillIsLit(model)" in app_lanes
+    assert "return model.readyTaskCount > 0 && model.drainability.drainable;" in (
+        app_lanes
     )
     assert 'classes.push("filter-pill--system");' in app_lanes
     assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
@@ -69,6 +73,7 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "agentLifetimeUsesStoredTaskFilters(lifetime)" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
     assert '"drained by " + drainability.count' in app_lanes
+    assert '"route covered by " + drainability.count' in app_lanes
     assert '"not currently drained"' in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes

@@ -66,3 +66,15 @@ def test_global_filter_pills_reject_stale_inventory_resurrection():
         text=True,
     )
     assert result.returncode == 0
+
+
+def test_global_filter_pill_ready_open_state_model():
+    script = Path(__file__).with_name("fixtures") / "task_filter_pill_states.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.lanes.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0

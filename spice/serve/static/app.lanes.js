@@ -759,6 +759,12 @@ function targetChoiceStatusLabel(target) {
 // ---- global filter pills -----------------------------------------------------------
 
 const taskFilterHeaderExtraStems = ["agent", "waiting", "oops"];
+const taskFilterStemStateCountFields = [
+  "readyTaskCount",
+  "inFlightTaskCount",
+  "blockedTaskCount",
+  "deferredTaskCount",
+];
 
 function taskFilterStemPillsFromInventory(inventory) {
   const catalog = (inventory || {}).catalog || {};
@@ -786,6 +792,10 @@ function renderFilterPills() {
       kind: model.kind,
       name: model.label,
       openTaskCount: model.openTaskCount,
+      readyTaskCount: model.readyTaskCount,
+      inFlightTaskCount: model.inFlightTaskCount,
+      blockedTaskCount: model.blockedTaskCount,
+      deferredTaskCount: model.deferredTaskCount,
       drainable: model.drainability.drainable,
       drainableCount: model.drainability.count,
       boundaryDissolved: Boolean(model.drainability.boundaryDissolved),
@@ -798,23 +808,29 @@ function renderFilterPills() {
   for (const model of pillModels) {
     const pill = document.createElement("span");
     const classes = ["filter-pill", ...model.classes];
+    const isLit = taskFilterStemPillIsLit(model);
     if (
+      isLit &&
       model.drainability.boundaryDissolved &&
       model.drainability.drainable
     )
       classes.push("filter-pill--implicit");
     classes.push(
-      model.drainability.drainable
-        ? "filter-pill--drainable"
-        : "filter-pill--undrainable",
+      isLit ? "filter-pill--drainable" : "filter-pill--undrainable",
     );
     pill.className = classes.join(" ");
     pill.title = model.title;
+    pill.dataset.readyTaskCount = String(model.readyTaskCount);
+    pill.dataset.openTaskCount = String(model.openTaskCount);
+    pill.dataset.inFlightTaskCount = String(model.inFlightTaskCount);
+    pill.dataset.blockedTaskCount = String(model.blockedTaskCount);
+    pill.dataset.deferredTaskCount = String(model.deferredTaskCount);
     pill.innerHTML =
       '<span class="filter-pill-label"></span>' +
       '<span class="filter-pill-count"></span>';
     pill.querySelector(".filter-pill-label").textContent = model.label;
-    pill.querySelector(".filter-pill-count").textContent = String(model.openTaskCount);
+    pill.querySelector(".filter-pill-count").textContent =
+      taskFilterStemPillCountText(model);
     nodes.push(pill);
   }
   filterStripEl.replaceChildren(...nodes);
@@ -828,6 +844,17 @@ function taskFilterStemPillModel(stem) {
   const drainability = taskFilterStemDrainability(stem);
   const label = stem.name;
   const openTaskCount = Math.max(0, Number(stem.openTaskCount) || 0);
+  for (const field of taskFilterStemStateCountFields) {
+    if (!Object.prototype.hasOwnProperty.call(stem, field))
+      throw new Error("task-filter stem missing " + field + ": " + label);
+  }
+  const readyTaskCount = Math.max(0, Number(stem.readyTaskCount) || 0);
+  const inFlightTaskCount = Math.max(
+    0,
+    Number(stem.inFlightTaskCount) || 0,
+  );
+  const blockedTaskCount = Math.max(0, Number(stem.blockedTaskCount) || 0);
+  const deferredTaskCount = Math.max(0, Number(stem.deferredTaskCount) || 0);
   const classes = [];
   if (stem.name === "agent") classes.push("filter-pill--private");
   if (stem.name === "oops") classes.push("filter-pill--system");
@@ -836,13 +863,44 @@ function taskFilterStemPillModel(stem) {
     kind: "stem",
     label,
     openTaskCount,
+    readyTaskCount,
+    inFlightTaskCount,
+    blockedTaskCount,
+    deferredTaskCount,
     classes,
     drainability,
-    title: taskFilterStemPillTitle(label, openTaskCount, drainability),
+    title: taskFilterStemPillTitle(
+      label,
+      {
+        openTaskCount,
+        readyTaskCount,
+        inFlightTaskCount,
+        blockedTaskCount,
+        deferredTaskCount,
+      },
+      drainability,
+    ),
   };
 }
 
-function taskFilterStemPillTitle(label, openTaskCount, drainability) {
+function taskFilterStemPillCountText(model) {
+  if (model.label === "waiting" || model.label === "oops")
+    return String(model.openTaskCount);
+  return model.readyTaskCount + "/" + model.openTaskCount;
+}
+
+function taskFilterStemPillIsLit(model) {
+  return model.readyTaskCount > 0 && model.drainability.drainable;
+}
+
+function taskFilterStemPillTitle(label, counts, drainability) {
+  const {
+    openTaskCount,
+    readyTaskCount,
+    inFlightTaskCount,
+    blockedTaskCount,
+    deferredTaskCount,
+  } = counts;
   if (label === "waiting")
     return (
       openTaskCount +
@@ -854,13 +912,25 @@ function taskFilterStemPillTitle(label, openTaskCount, drainability) {
       " oops/deferred triage tasks; inspect with `spice task oops`"
     );
   return (
+    readyTaskCount +
+    " ready / " +
     openTaskCount +
     " open across " +
     taskFilterStemScopeLabel(label) +
     "; " +
-    (drainability.drainable
-      ? "drained by " + drainability.count
-      : "not currently drained")
+    inFlightTaskCount +
+    " in flight, " +
+    blockedTaskCount +
+    " blocked, " +
+    deferredTaskCount +
+    " deferred; " +
+    (readyTaskCount > 0
+      ? drainability.drainable
+        ? "drained by " + drainability.count
+        : "not currently drained"
+      : drainability.drainable
+        ? "route covered by " + drainability.count
+        : "no task currently ready")
   );
 }
 

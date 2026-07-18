@@ -511,3 +511,16 @@ def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
     assert 'result.nackBadges.includes("NACK")' in smoke
     assert "mixedHasBoth" in smoke
     assert "page.screenshot(" in smoke
+
+
+def test_task_filter_pill_smoke_covers_ready_open_and_all_deferred_states() -> None:
+    smoke = (ROOT / "browser" / "serve_task_filter_pills_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'count: "2/5"' in smoke
+    assert 'count: "0/3"' in smoke
+    assert 'count: "3/3"' in smoke
+    assert 'title:\n          "0 ready / 3 open across studies.*;' in smoke
+    assert "dim: true" in smoke
+    assert "page.screenshot(" in smoke

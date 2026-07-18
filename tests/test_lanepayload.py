@@ -777,26 +777,59 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
 
 
 def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
-    seen: dict[str, list[str]] = {}
+    seen: list[list[str]] = []
 
     def fake_export(args: list[str]) -> list[dict[str, object]]:
-        seen["args"] = args
+        seen.append(args)
+        if args == ["status:pending", "+READY", "-ACTIVE"]:
+            return [
+                {"uuid": "ready-serve-a"},
+                {"uuid": "ready-serve-b"},
+                {"uuid": "ready-task"},
+                {"uuid": "private"},
+            ]
+        if args == ["status:waiting", "-ACTIVE"]:
+            return [
+                {"uuid": "deferred-serve"},
+                {"uuid": "deferred-oops"},
+                {"uuid": "deferred-maxim"},
+            ]
+        if args == ["status:pending", "+BLOCKED", "-ACTIVE"]:
+            return [{"uuid": "blocked-serve"}]
+        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
         return [
-            {"project": "serve.ui"},
-            {"project": "serve.ui"},
-            {"project": "task.review"},
-            {"project": "agent.abc123.task"},
-            {"project": ".oops"},
-            {"project": ".oops", "start": "2026-06-16T23:00:00Z"},
-            {"project": "serve.ui", "status": "waiting", "wait": "2099-01-01"},
+            {"uuid": "ready-serve-a", "project": "serve.ui"},
+            {"uuid": "ready-serve-b", "project": "serve.ui"},
             {
-                "project": ".oops.correctness",
-                "status": "waiting",
+                "uuid": "in-flight-serve",
+                "project": "serve.ui",
+                "claim_by": "agent-a",
+            },
+            {"uuid": "blocked-serve", "project": "serve.ui"},
+            {"uuid": "ready-task", "project": "task.review"},
+            {"uuid": "private", "project": "agent.abc123.task"},
+            {"uuid": "oops", "project": ".oops"},
+            {
+                "uuid": "active-oops",
+                "project": ".oops",
+                "start": "2026-06-16T23:00:00Z",
+            },
+            {
+                "uuid": "deferred-serve",
+                "project": "serve.ui",
+                "status": "pending",
                 "wait": "2099-01-01",
             },
             {
+                "uuid": "deferred-oops",
+                "project": ".oops.correctness",
+                "status": "pending",
+                "wait": "2099-01-01",
+            },
+            {
+                "uuid": "deferred-maxim",
                 "project": ".maxim_proposal",
-                "status": "waiting",
+                "status": "pending",
                 "wait": "2099-01-01",
             },
         ]
@@ -807,20 +840,90 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
         fake_export,
     )
     inventory = task_filter_inventory()
-    filters = {item["name"]: item["openTaskCount"] for item in inventory["filters"]}
-    stems = {item["name"]: item["openTaskCount"] for item in inventory["primaryStems"]}
-    assert seen["args"] == ["(", "status:pending", "or", "status:waiting", ")"]
-    assert inventory["openTaskCount"] == 3
-    assert filters["serve.ui"] == 2
-    assert filters["task.review"] == 1
+    filters = {item["name"]: item for item in inventory["filters"]}
+    stems = {item["name"]: item for item in inventory["primaryStems"]}
+    assert seen == [
+        ["(", "status:pending", "or", "status:waiting", ")"],
+        ["status:pending", "+READY", "-ACTIVE"],
+        ["status:waiting", "-ACTIVE"],
+        ["status:pending", "+BLOCKED", "-ACTIVE"],
+    ]
+    assert inventory["openTaskCount"] == 6
+    assert filters["serve.ui"] == {
+        "name": "serve.ui",
+        "primaryStem": "serve",
+        "openTaskCount": 5,
+        "readyTaskCount": 2,
+        "inFlightTaskCount": 1,
+        "blockedTaskCount": 1,
+        "deferredTaskCount": 1,
+    }
+    assert filters["task.review"] == {
+        "name": "task.review",
+        "primaryStem": "task",
+        "openTaskCount": 1,
+        "readyTaskCount": 1,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 0,
+    }
     assert "waiting" not in filters
     assert "agent.abc123.task" not in filters
     assert "oops" not in filters
     assert "serve.example" in inventory["catalog"]["filterExamples"]
     assert inventory["catalog"]["hiddenStems"] == ["oops", "maxim_proposal"]
     assert inventory["catalog"]["hiddenProjectPrefix"] == "."
-    assert stems["serve"] == 2
-    assert stems["task"] == 1
-    assert stems["agent"] == 1
-    assert stems["oops"] == 4
-    assert stems["waiting"] == 1
+    assert stems["serve"]["openTaskCount"] == 5
+    assert stems["serve"]["readyTaskCount"] == 2
+    assert stems["serve"]["inFlightTaskCount"] == 1
+    assert stems["serve"]["blockedTaskCount"] == 1
+    assert stems["serve"]["deferredTaskCount"] == 1
+    assert stems["task"]["readyTaskCount"] == 1
+    assert stems["agent"]["readyTaskCount"] == 1
+    assert stems["oops"]["openTaskCount"] == 4
+    assert stems["waiting"]["openTaskCount"] == 1
+    assert stems["waiting"]["deferredTaskCount"] == 1
+
+
+def test_task_filter_inventory_preserves_all_deferred_project_as_zero_ready(
+    monkeypatch,
+):
+    def fake_export(args: list[str]) -> list[dict[str, object]]:
+        if args == ["(", "status:pending", "or", "status:waiting", ")"]:
+            return [
+                {"uuid": "deferred-a", "project": "serve.ui"},
+                {"uuid": "deferred-b", "project": "serve.ui"},
+            ]
+        if args == ["status:waiting", "-ACTIVE"]:
+            return [{"uuid": "deferred-a"}, {"uuid": "deferred-b"}]
+        if args in (
+            ["status:pending", "+READY", "-ACTIVE"],
+            ["status:pending", "+BLOCKED", "-ACTIVE"],
+        ):
+            return []
+        raise AssertionError(f"unexpected export args: {args}")
+
+    monkeypatch.setattr(tw, "export", fake_export)
+    inventory = task_filter_inventory()
+    stems = {item["name"]: item for item in inventory["primaryStems"]}
+
+    assert stems["serve"] == {
+        "name": "serve",
+        "openTaskCount": 2,
+        "readyTaskCount": 0,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 2,
+        "filters": ["serve.ui"],
+    }
+    assert stems["waiting"]["openTaskCount"] == 2
+
+
+def test_task_filter_inventory_empty_board_has_empty_counts(monkeypatch):
+    monkeypatch.setattr(tw, "export", lambda _args: [])
+
+    inventory = task_filter_inventory()
+
+    assert inventory["filters"] == []
+    assert inventory["primaryStems"] == []
+    assert inventory["openTaskCount"] == 0
