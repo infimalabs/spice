@@ -687,7 +687,7 @@ def test_ledger_warns_and_exits_zero_on_free_text_annotation_family(task_repo, c
     assert captured.err == LEDGER_ROUND_TRIP_WARNING + "\n"
 
 
-def test_ledger_emits_no_warning_on_round_trippable_family(task_repo, capsys):
+def test_ledger_round_trippable_family_emits_exact_rendered_output(task_repo, capsys):
     assert task_repo.is_dir()
     parent = create.add(
         "Clean board parent",
@@ -710,19 +710,22 @@ def test_ledger_emits_no_warning_on_round_trippable_family(task_repo, capsys):
     ledger_args = build_parser().parse_args(
         ["task", "--backend", str(config.backend_root()), "ledger", child]
     )
+    expected = render_ledger(child)[0]
 
     assert task_cli.handle(ledger_args) == 0
     captured = capsys.readouterr()
+    output_events = [
+        (channel, text)
+        for channel, text in (("stdout", captured.out), ("stderr", captured.err))
+        if text
+    ]
     document = parse(captured.out)
     assert {node.title for node in document.nodes} == {
         f"Clean board parent {parent}",
         f"Clean prerequisite {child}",
         DOCUMENT_ROOT_TITLE,
     }
-    assert graph_signature(parse(captured.out)) == graph_signature(
-        parse(render_ledger(child)[0])
-    )
-    assert captured.err == ""
+    assert output_events == [("stdout", expected)]
 
 
 @pytest.mark.parametrize(
