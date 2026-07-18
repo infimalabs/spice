@@ -53,7 +53,11 @@ def test_task_list_help_shows_limit_filters_and_examples(capsys):
         parser.parse_args(["task", "list", "--help"])
 
     help_text = capsys.readouterr().out
-    assert "[--all | --project PROJECT]" in help_text
+    # Usage-line group rendering is formatter-owned and varies across supported
+    # interpreters (argparse <=3.13 flattens a wrapped mutually-exclusive
+    # group); assert the documented options and prove the exclusion
+    # behaviorally below instead of coupling to one interpreter's shape.
+    assert "--all" in help_text
     assert "--limit N" in help_text
     assert "--project PROJECT" in help_text
     assert "--status {pending,waiting,completed,deleted}" in help_text
@@ -63,6 +67,15 @@ def test_task_list_help_shows_limit_filters_and_examples(capsys):
     assert "spice task list --project serve.ui --status pending --limit 20" in help_text
     assert "Global scope:" in help_text
     assert "spice task list --all --status pending" in help_text
+
+
+def test_task_list_all_and_project_are_mutually_exclusive(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(["task", "list", "--all", "--project", "serve.ui"])
+
+    assert exc_info.value.code == 2
+    error = capsys.readouterr().err
+    assert "argument --project: not allowed with argument --all" in error
 
 
 def test_task_list_scoped_empty_points_to_matching_global_and_project_rows(
