@@ -44,7 +44,7 @@ from typing import Any, Callable, Sequence
 from spice.configlayer import effective_table
 from spice.errors import SpiceError
 from spice.scopes import SCOPES_KEY, STUDY_PROVIDER_SCOPES, ScopeContext, ScopeSelector
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 from spice.studies.reachabilitypython import (
     _SymbolRef,
     _collect_production_and_test_symbol_refs,

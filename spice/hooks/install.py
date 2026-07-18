@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 
 from spice.config import git_worktree_config_get, git_worktree_config_set
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.paths import STATE_DIRNAME
 
 HOOKS_DIRNAME = "hooks"

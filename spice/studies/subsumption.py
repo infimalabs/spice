@@ -28,7 +28,7 @@ from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 
 COHORT_ID_HEX_LENGTH = 12
 

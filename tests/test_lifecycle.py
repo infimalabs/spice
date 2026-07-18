@@ -39,6 +39,7 @@ from spice.agent.driver import (
 )
 from spice.errors import SpiceError
 from spice.paths import git_dir
+from spice.process import tool as processtool
 from spice.tasks import claimstate, ops
 
 DIRECT_AGENT_PID = 2222
@@ -248,7 +249,7 @@ def test_operator_color_scheme_defaults_to_explicit_light_when_unreadable(monkey
     def raise_os_error(*_args, **_kwargs):
         raise OSError("defaults unavailable")
 
-    monkeypatch.setattr(agent_driver.subprocess, "run", raise_os_error)
+    monkeypatch.setattr(processtool, "run_bounded_process_group", raise_os_error)
 
     assert operator_color_scheme() == "light"
 

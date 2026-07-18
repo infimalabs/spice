@@ -22,11 +22,11 @@ from types import MappingProxyType
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
-from spice.procs import ProcessDeadlineExceeded, run_bounded_process_group
+from spice.process.git import run_git_command
+from spice.process.groups import ProcessDeadlineExceeded, run_bounded_process_group
 from spice.studies.scratch import scratch_checkout
 from spice.studies.walk import is_excluded_path, is_test_path
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 
 MUTATION_RATCHET_VERSION = 1
 STANDING_MUTATION_RATCHET_PATH = Path("tests/mutation-ratchet.json")

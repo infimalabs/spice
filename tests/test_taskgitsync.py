@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from spice import gitprocess
+from spice.process import git
 from spice.errors import SpiceError
-from spice.procs import ProcessDeadlineExceeded
+from spice.process.groups import ProcessDeadlineExceeded
 from spice.tasks import gitsync
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -677,7 +677,7 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
     ("args", "expected_timeout"),
     [
         (("fetch", "origin"), gitsync.GIT_NETWORK_TIMEOUT_SECONDS),
-        (("status",), gitprocess.DEFAULT_GIT_TIMEOUT_SECONDS),
+        (("status",), git.DEFAULT_GIT_TIMEOUT_SECONDS),
     ],
 )
 def test_gitsync_commands_are_noninteractive_and_bounded(
@@ -691,7 +691,7 @@ def test_gitsync_commands_are_noninteractive_and_bounded(
         seen["timeout"] = kwargs["timeout_seconds"]
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
 
     gitsync._run(tmp_path, *args)
 
@@ -711,7 +711,7 @@ def test_gitsync_timeout_names_the_bounded_command(tmp_path, monkeypatch):
             command=command,
         )
 
-    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
 
     with pytest.raises(SpiceError) as exc_info:
         gitsync._run(tmp_path, "fetch", "origin")
@@ -719,7 +719,7 @@ def test_gitsync_timeout_names_the_bounded_command(tmp_path, monkeypatch):
     assert str(exc_info.value) == (
         f"git command timed out after {gitsync.GIT_NETWORK_TIMEOUT_SECONDS}s: "
         f"git -C {tmp_path} fetch origin; increase "
-        f"{gitprocess.GIT_TIMEOUT_ENV} for a slower repository"
+        f"{git.GIT_TIMEOUT_ENV} for a slower repository"
     )
 
 

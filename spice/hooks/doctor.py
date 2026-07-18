@@ -27,7 +27,7 @@ from spice.config import (
     maxim_adjudication_enabled,
 )
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import git_run
 from spice.hooks.install import HOOK_ARGS, hook_shim_content, hooks_dir
 from spice.paths import (
     find_tool,
@@ -39,7 +39,7 @@ from spice.paths import (
 )
 from spice.policyconfig import resolve_policy
 from spice.repocfg import read_pyproject
-from spice.toolprocess import run_tool_command
+from spice.process.tool import run_tool_command
 from spice.version import DISTRIBUTION_NAME
 from spice.studies import (
     complexity,
@@ -597,7 +597,7 @@ def _policy_check(repo_root: Path) -> DoctorCheck:
 
 
 def _git_clean_check(repo_root: Path) -> DoctorCheck:
-    result = _git(repo_root, "status", "--porcelain")
+    result = git_run(repo_root, "status", "--porcelain")
     if result.returncode != 0:
         return _fail("git.clean", _command_problem(result), "git status --short")
     dirty = [line for line in result.stdout.splitlines() if line.strip()]
@@ -692,12 +692,7 @@ def _shadowed_configured_hooks(repo_root: Path, expected: str) -> list[str]:
 
 def _git_local_config_values(repo_root: Path, key: str) -> list[str]:
     try:
-        result = run_git_command(
-            ["git", "-C", str(repo_root), "config", "--local", "--get-all", key],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
+        result = git_run(repo_root, "config", "--local", "--get-all", key)
     except OSError:
         return []
     if result.returncode != 0:
@@ -967,15 +962,6 @@ def _info(name: str, detail: str, command: str) -> DoctorCheck:
 
 def _fail(name: str, detail: str, command: str) -> DoctorCheck:
     return DoctorCheck(name=name, status="fail", detail=detail, command=command)
-
-
-def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return run_git_command(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
 
 
 def _command_problem(result: subprocess.CompletedProcess[str]) -> str:

@@ -25,9 +25,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from spice import paths, procs
+from spice import paths
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
+from spice.process.groups import process_id_is_running
 
 SCRATCH_STATE_DIR = "mutations/scratch"
 OWNER_MARKER_NAME = "SCRATCH_OWNER.json"
@@ -121,7 +122,7 @@ def scavenge_abandoned_roots(parent: Path) -> ScratchRecovery:
             removed.append(entry.name)
             continue
         pid = _owner_pid(entry)
-        if pid is not None and pid > 0 and procs.process_id_is_running(pid):
+        if pid is not None and pid > 0 and process_id_is_running(pid):
             continue
         remove_scratch_root(entry)
         removed.append(entry.name)

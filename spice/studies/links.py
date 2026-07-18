@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.studies.walk import (
     is_excluded_path,
     policy_path_exclusions,

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from spice import defaults
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.locking import bounded_exclusive_lock
 from spice.paths import atomic_write_text, shared_state_root
 

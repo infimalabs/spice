@@ -17,7 +17,7 @@ from typing import Callable, Protocol
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.procs import run_bounded_process_group
+from spice.process.groups import run_bounded_process_group
 from spice.flexstate import (
     FlexSliceClaim,
     claim_flex_slice_paths,

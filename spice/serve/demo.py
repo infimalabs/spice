@@ -23,7 +23,7 @@ from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
 from spice.config import WORKTREE_SOURCE, set_scope_section
 from spice.errors import SpiceError
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
 
 # A fixed, obviously-synthetic thread id keeps the seeded transcript path and

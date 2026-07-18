@@ -7,9 +7,9 @@ import subprocess
 import sys
 import time
 
-from spice import gitprocess
+from spice.process import git
 from spice.errors import SpiceError
-from spice.procs import process_id_is_running
+from spice.process.groups import process_id_is_running
 
 
 def test_git_deadline_reaps_stalled_descendant_and_preserves_command_identity(
@@ -33,10 +33,10 @@ def test_git_deadline_reaps_stalled_descendant_and_preserves_command_identity(
         "\ntime.sleep(30)"
     )
     command = [sys.executable, "-c", parent, str(descendant_pid_path), child]
-    monkeypatch.setenv(gitprocess.GIT_TIMEOUT_ENV, "1")
+    monkeypatch.setenv(git.GIT_TIMEOUT_ENV, "1")
 
     try:
-        gitprocess.run_git_command(command, capture_output=True, text=True)
+        git.run_git_command(command, capture_output=True, text=True)
     except SpiceError as exc:
         message = str(exc)
     else:
@@ -51,7 +51,7 @@ def test_git_deadline_reaps_stalled_descendant_and_preserves_command_identity(
     assert {"message": message, "descendant": descendant_state} == {
         "message": (
             f"git command timed out after 1s: {shlex.join(command)}; "
-            f"increase {gitprocess.GIT_TIMEOUT_ENV} for a slower repository"
+            f"increase {git.GIT_TIMEOUT_ENV} for a slower repository"
         ),
         "descendant": "reaped",
     }
@@ -68,10 +68,10 @@ def test_git_timeout_environment_applies_to_local_commands(monkeypatch):
         seen["capture_output"] = kwargs["capture_output"]
         return subprocess.CompletedProcess(command, 0, stdout="")
 
-    monkeypatch.setenv(gitprocess.GIT_TIMEOUT_ENV, "37.5")
-    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
+    monkeypatch.setenv(git.GIT_TIMEOUT_ENV, "37.5")
+    monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
 
-    gitprocess.run_git_command(["git", "status"], capture_output=True, text=True)
+    git.run_git_command(["git", "status"], capture_output=True, text=True)
 
     assert seen == {
         "command": ["git", "status"],
@@ -89,18 +89,18 @@ def test_git_timeout_configuration_accepts_only_positive_finite_values(monkeypat
         spawned.append(kwargs["timeout_seconds"])
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
     outcomes: dict[str, dict[str, object]] = {}
     for raw in ("37.5", "nan", "inf", "-inf"):
-        monkeypatch.setenv(gitprocess.GIT_TIMEOUT_ENV, raw)
+        monkeypatch.setenv(git.GIT_TIMEOUT_ENV, raw)
         try:
-            gitprocess.run_git_command(["git", "status"], capture_output=True)
+            git.run_git_command(["git", "status"], capture_output=True)
         except SpiceError as exc:
             outcomes[raw] = {"state": "rejected", "message": str(exc)}
         else:
             outcomes[raw] = {"state": "accepted", "timeout": spawned[-1]}
 
-    invalid = f"{gitprocess.GIT_TIMEOUT_ENV} must be a positive finite number"
+    invalid = f"{git.GIT_TIMEOUT_ENV} must be a positive finite number"
     assert {"outcomes": outcomes, "spawned": spawned} == {
         "outcomes": {
             "37.5": {"state": "accepted", "timeout": 37.5},

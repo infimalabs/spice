@@ -16,7 +16,7 @@ from spice import defaults
 from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
-from spice.toolprocess import run_parent_lifetime_command
+from spice.process.tool import run_parent_lifetime_command
 from spice.configlayer import effective_context, effective_table
 
 DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(

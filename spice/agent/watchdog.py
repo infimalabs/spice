@@ -50,7 +50,7 @@ from spice.mail.inbox import (
     notify_inbox_changed,
     write_inbox_item,
 )
-from spice.procs import popen_new_process_group_kwargs
+from spice.process.groups import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
 from spice.tasks import config as task_config
 from spice.tasks.create import TaskAddResult

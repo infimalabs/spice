@@ -18,7 +18,7 @@ import pytest
 
 from spice import paths
 from spice.errors import SpiceError
-from spice.procs import ProcessDeadlineExceeded
+from spice.process.groups import ProcessDeadlineExceeded
 from spice.studies import mutations, scratch
 
 SAMPLE_SOURCE = "def add(a, b):\n    return a + b\n"

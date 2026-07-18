@@ -14,7 +14,7 @@ from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any
 
-from spice.gitprocess import run_git_command
+from spice.process.git import run_git_command
 
 STATE_DIRNAME = ".spice"
 SHARED_ATTACHMENT_DIR = Path("attachments")

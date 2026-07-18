@@ -1,11 +1,12 @@
 """Deadline and deterministic-failure contracts for agent side-channel
 handshakes and helper probes (RELIABI-1kCzJcnr).
 
-Each subprocess seam is stalled by injecting ``subprocess.TimeoutExpired`` and
-asserting both that its named budget reaches ``subprocess.run`` and that the
-caller degrades deterministically. Each socket seam is stalled with a real (or
-faithfully faked) connection and observed to reap or to stay open per its
-documented lifetime.
+Each subprocess seam is stalled at its process door (``subprocess.run`` for the
+raw engine helpers, ``run_bounded_process_group`` for door-riding callers) and
+asserted both to thread its named budget through and to degrade
+deterministically. Each socket seam is stalled with a real (or faithfully
+faked) connection and observed to reap or to stay open per its documented
+lifetime.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from threading import Event, Thread
 
 import pytest
 
-from spice import procs
+from spice.process import git, groups, tool
+from spice.process.groups import ProcessDeadlineExceeded
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, shadow, sidechannel, sidechannelnotify, wrap
 from spice.agent.sidechannelnotify import (
@@ -61,6 +63,27 @@ def _raise_git_launch_error(*_args: object, **_kwargs: object):
     raise FileNotFoundError("git unavailable")
 
 
+def _recording_bounded_run(
+    box: dict[str, object], *, returncode: int = 0, stdout: str = "", stderr: str = ""
+):
+    def run(command, *, timeout_seconds, **_kwargs):
+        box["timeout"] = timeout_seconds
+        return subprocess.CompletedProcess(
+            command, returncode, stdout=stdout, stderr=stderr
+        )
+
+    return run
+
+
+def _stalling_bounded_run(command, *, timeout_seconds, **_kwargs):
+    raise ProcessDeadlineExceeded(
+        phase="stalled-probe",
+        input_label="stalled probe",
+        timeout_seconds=timeout_seconds,
+        command=list(command),
+    )
+
+
 # --- Subprocess probe seams: macOS appearance lookup -----------------------
 
 
@@ -68,17 +91,17 @@ def test_operator_appearance_threads_named_budget(monkeypatch):
     monkeypatch.setattr(agent_driver.sys, "platform", "darwin")
     box: dict[str, object] = {}
     monkeypatch.setattr(
-        agent_driver.subprocess,
-        "run",
-        _recording_run(box, returncode=0, stdout="Dark\n", stderr=""),
+        tool,
+        "run_bounded_process_group",
+        _recording_bounded_run(box, returncode=0, stdout="Dark\n", stderr=""),
     )
     assert agent_driver.operator_color_scheme() == "dark"
-    assert box["timeout"] == agent_driver.OPERATOR_APPEARANCE_TIMEOUT_SECONDS
+    assert box["timeout"] == tool.TOOL_POLICY_TIMEOUT_SECONDS["probe"]
 
 
 def test_operator_appearance_defaults_to_light_when_probe_stalls(monkeypatch):
     monkeypatch.setattr(agent_driver.sys, "platform", "darwin")
-    monkeypatch.setattr(agent_driver.subprocess, "run", _stalling_run)
+    monkeypatch.setattr(tool, "run_bounded_process_group", _stalling_bounded_run)
     assert agent_driver.operator_color_scheme() == "light"
 
 
@@ -89,36 +112,36 @@ def test_process_id_running_bounds_probe_and_assumes_alive_on_stall(monkeypatch)
     # A permission-denied os.kill routes liveness to the bounded `ps` probe; a
     # wedged `ps` must degrade to assume-alive so a supervisor never reaps a
     # process it cannot positively confirm has exited.
-    monkeypatch.setattr(procs.os, "kill", _raise_permission_error)
+    monkeypatch.setattr(groups.os, "kill", _raise_permission_error)
     box: dict[str, object] = {}
     monkeypatch.setattr(
-        procs.subprocess, "run", _recording_run(box, returncode=0, stdout="S\n")
+        groups.subprocess, "run", _recording_run(box, returncode=0, stdout="S\n")
     )
-    assert procs.process_id_is_running(424242) is True
-    assert box["timeout"] == procs.PROCESS_PROBE_TIMEOUT_SECONDS
-    monkeypatch.setattr(procs.subprocess, "run", _stalling_run)
-    assert procs.process_id_is_running(424242) is True
+    assert groups.process_id_is_running(424242) is True
+    assert box["timeout"] == groups.PROCESS_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(groups.subprocess, "run", _stalling_run)
+    assert groups.process_id_is_running(424242) is True
 
 
 def test_process_group_running_bounds_probe_and_assumes_alive_on_stall(monkeypatch):
-    monkeypatch.setattr(procs.os, "kill", _raise_permission_error)
+    monkeypatch.setattr(groups.os, "kill", _raise_permission_error)
     box: dict[str, object] = {}
     monkeypatch.setattr(
-        procs.subprocess, "run", _recording_run(box, returncode=0, stdout="S\n")
+        groups.subprocess, "run", _recording_run(box, returncode=0, stdout="S\n")
     )
-    assert procs.process_group_is_running(424242) is True
-    assert box["timeout"] == procs.PROCESS_PROBE_TIMEOUT_SECONDS
-    monkeypatch.setattr(procs.subprocess, "run", _stalling_run)
-    assert procs.process_group_is_running(424242) is True
+    assert groups.process_group_is_running(424242) is True
+    assert box["timeout"] == groups.PROCESS_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(groups.subprocess, "run", _stalling_run)
+    assert groups.process_group_is_running(424242) is True
 
 
 def test_force_windows_terminate_bounds_and_reaches_terminal_after_taskkill_stall(
     monkeypatch,
 ):
     box: dict[str, object] = {}
-    monkeypatch.setattr(procs.subprocess, "run", _recording_run(box, returncode=0))
-    procs._force_windows_process_tree(424242)
-    assert box["timeout"] == procs.PROCESS_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(groups.subprocess, "run", _recording_run(box, returncode=0))
+    groups._force_windows_process_tree(424242)
+    assert box["timeout"] == groups.PROCESS_PROBE_TIMEOUT_SECONDS
     # A wedged taskkill is swallowed so termination escalates rather than blocking.
     terminal_events: list[str] = []
 
@@ -126,8 +149,8 @@ def test_force_windows_terminate_bounds_and_reaches_terminal_after_taskkill_stal
         terminal_events.append("taskkill-timeout")
         _stalling_run(cmd, **kwargs)
 
-    monkeypatch.setattr(procs.subprocess, "run", stalling_taskkill)
-    procs._force_windows_process_tree(424242)
+    monkeypatch.setattr(groups.subprocess, "run", stalling_taskkill)
+    groups._force_windows_process_tree(424242)
     terminal_events.append("termination-helper-returned")
     assert terminal_events == ["taskkill-timeout", "termination-helper-returned"]
 
@@ -140,13 +163,13 @@ def test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall(
 ):
     box: dict[str, object] = {}
     monkeypatch.setattr(
-        lifecycle.subprocess,
-        "run",
-        _recording_run(box, returncode=0, stdout=" M file\n"),
+        git,
+        "run_bounded_process_group",
+        _recording_bounded_run(box, returncode=0, stdout=" M file\n"),
     )
     assert lifecycle._worktree_dirty(tmp_path) is True
-    assert box["timeout"] == lifecycle.GIT_PROBE_TIMEOUT_SECONDS
-    monkeypatch.setattr(lifecycle.subprocess, "run", _stalling_run)
+    assert box["timeout"] == git.GIT_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(git, "run_bounded_process_group", _stalling_bounded_run)
     status = "dirty" if lifecycle._worktree_dirty(tmp_path) else "clean"
     assert status == "clean"
 
@@ -154,7 +177,7 @@ def test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall(
 def test_worktree_dirty_resolves_clean_status_when_git_cannot_launch(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(lifecycle.subprocess, "run", _raise_git_launch_error)
+    monkeypatch.setattr(git, "run_bounded_process_group", _raise_git_launch_error)
 
     status = "dirty" if lifecycle._worktree_dirty(tmp_path) else "clean"
 
@@ -165,10 +188,12 @@ def test_git_tracks_relative_path_bounds_probe_and_resolves_untracked_status_on_
     monkeypatch, tmp_path
 ):
     box: dict[str, object] = {}
-    monkeypatch.setattr(lifecycle.subprocess, "run", _recording_run(box, returncode=0))
+    monkeypatch.setattr(
+        git, "run_bounded_process_group", _recording_bounded_run(box, returncode=0)
+    )
     assert lifecycle.git_tracks_relative_path(tmp_path, Path("kept.txt")) is True
-    assert box["timeout"] == lifecycle.GIT_PROBE_TIMEOUT_SECONDS
-    monkeypatch.setattr(lifecycle.subprocess, "run", _stalling_run)
+    assert box["timeout"] == git.GIT_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(git, "run_bounded_process_group", _stalling_bounded_run)
     status = (
         "tracked"
         if lifecycle.git_tracks_relative_path(tmp_path, Path("kept.txt"))
@@ -185,11 +210,13 @@ def test_shadow_git_bounds_reads_and_resolves_unavailable_status_on_stall(
 ):
     box: dict[str, object] = {}
     monkeypatch.setattr(
-        subprocess, "run", _recording_run(box, returncode=0, stdout="main\n")
+        git,
+        "run_bounded_process_group",
+        _recording_bounded_run(box, returncode=0, stdout="main\n"),
     )
     assert shadow.current_git_branch(tmp_path) == "main"
-    assert box["timeout"] == shadow.SHADOW_GIT_TIMEOUT_SECONDS
-    monkeypatch.setattr(subprocess, "run", _stalling_run)
+    assert box["timeout"] == git.GIT_PROBE_TIMEOUT_SECONDS
+    monkeypatch.setattr(git, "run_bounded_process_group", _stalling_bounded_run)
     status = {
         "branch": shadow.current_git_branch(tmp_path) or "unavailable",
         "git_dir": shadow.current_git_dir(tmp_path) or "unavailable",

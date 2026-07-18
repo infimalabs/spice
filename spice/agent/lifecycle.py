@@ -62,7 +62,6 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     AGENT_ENSURE_LOCK_TIMEOUT_SECONDS,
     AGENT_LOCK_FILE,
     AGENT_STATE_FILE,
-    GIT_PROBE_TIMEOUT_SECONDS,
     PACKAGED_SKILL_RESOURCE,
     SUPERVISOR_ENVIRONMENT_SCRUB_NAMES,
     WORKTREE_SKILL_GITIGNORE_CONTENT,
@@ -103,7 +102,8 @@ from spice.config import (
     configured_agent_personality,
 )
 from spice.errors import SpiceError
-from spice.procs import (
+from spice.process.git import git_probe
+from spice.process.groups import (
     popen_new_process_group_kwargs,
     process_id_is_running,
 )
@@ -482,19 +482,10 @@ CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
 
 
 # Supervisor-side git probes run on the lane-watch loop; a wedged git binary must
-# not stall progress, so each carries this budget and reports the safe "no signal"
-# answer on expiry (tree treated as clean; path treated as untracked).
+# not stall progress, so each rides the probe door's budget and reports the safe
+# "no signal" answer on expiry (tree treated as clean; path treated as untracked).
 def _worktree_dirty(repo_root: Path) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=GIT_PROBE_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    result = git_probe(repo_root, "status", "--porcelain")
     return result.returncode == 0 and result.stdout.strip() != ""
 
 

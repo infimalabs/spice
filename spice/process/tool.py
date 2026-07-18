@@ -6,12 +6,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
-from spice.procs import run_bounded_process_group
+from spice.process.groups import run_bounded_process_group
 
 ToolPolicy = Literal[
     "coverage",
     "extension",
     "hook",
+    "probe",
     "release",
     "study",
     "typecheck",
@@ -20,6 +21,7 @@ ToolPolicy = Literal[
 COVERAGE_TOOL_TIMEOUT_SECONDS = 600.0
 EXTENSION_TOOL_TIMEOUT_SECONDS = 120.0
 HOOK_TOOL_TIMEOUT_SECONDS = 300.0
+PROBE_TOOL_TIMEOUT_SECONDS = 5.0
 RELEASE_TOOL_TIMEOUT_SECONDS = 300.0
 STUDY_TOOL_TIMEOUT_SECONDS = 120.0
 TYPECHECK_TOOL_TIMEOUT_SECONDS = 300.0
@@ -28,6 +30,7 @@ TOOL_POLICY_TIMEOUT_SECONDS: dict[ToolPolicy, float] = {
     "coverage": COVERAGE_TOOL_TIMEOUT_SECONDS,
     "extension": EXTENSION_TOOL_TIMEOUT_SECONDS,
     "hook": HOOK_TOOL_TIMEOUT_SECONDS,
+    "probe": PROBE_TOOL_TIMEOUT_SECONDS,
     "release": RELEASE_TOOL_TIMEOUT_SECONDS,
     "study": STUDY_TOOL_TIMEOUT_SECONDS,
     "typecheck": TYPECHECK_TOOL_TIMEOUT_SECONDS,

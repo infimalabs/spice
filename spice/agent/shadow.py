@@ -28,15 +28,14 @@ from pathlib import Path
 from typing import TextIO
 
 from spice.paths import atomic_write_text
+from spice.process.git import git_probe, git_probe_read
 
 AGENT_GITCONFIG_NAME = "agent.gitconfig"
-# Every shadow git read funnels through `_git`; a wedged git binary must not stall
-# activation, so the runner carries this budget and reports a non-zero result on
-# expiry. All callers already treat a non-zero return as "no data" (empty branch,
-# no git dir, shadow inactive, native config in effect), so the degradation is
-# deterministic without any caller change.
-SHADOW_GIT_TIMEOUT_SECONDS = 10.0
-SHADOW_GIT_TIMEOUT_RETURNCODE = 124
+# Every shadow git read rides the probe door; a wedged git binary must not stall
+# activation, so the probe budget bounds each call and reports a non-zero result
+# on expiry. All callers already treat a non-zero return as "no data" (empty
+# branch, no git dir, shadow inactive, native config in effect), so the
+# degradation is deterministic without any caller change.
 
 
 def shadow_environment(
@@ -140,12 +139,12 @@ def true_branch_merge(
     repo_root: Path, branch: str, *, base_env: Mapping[str, str] | None = None
 ) -> str:
     native_env = native_git_env(base_env)
-    configured = _git_read(
+    configured = git_probe_read(
         repo_root, "config", "--get", f"branch.{branch}.merge", env=native_env
     )
     if configured:
         return configured
-    head_ref = _git_read(
+    head_ref = git_probe_read(
         repo_root, "symbolic-ref", "refs/remotes/origin/HEAD", env=native_env
     )
     prefix = "refs/remotes/origin/"
@@ -172,11 +171,11 @@ def ensure_origin_head(repo_root: Path | None) -> None:
     """
     if repo_root is None:
         return
-    if _git(repo_root, "remote", "get-url", "origin").returncode != 0:
+    if git_probe(repo_root, "remote", "get-url", "origin").returncode != 0:
         return
-    if _git(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD").returncode == 0:
+    if git_probe(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD").returncode == 0:
         return
-    _git(repo_root, "remote", "set-head", "origin", "--auto")
+    git_probe(repo_root, "remote", "set-head", "origin", "--auto")
 
 
 def real_system_config_path(repo_root: Path) -> str | None:
@@ -188,7 +187,7 @@ def real_system_config_path(repo_root: Path) -> str | None:
         k: v for k, v in os.environ.items() if k != "GIT_CONFIG_SYSTEM"
     }  # env-policy: allow
     env["GIT_EDITOR"] = "echo"
-    completed = _git(repo_root, "config", "--system", "--edit", env=env)
+    completed = git_probe(repo_root, "config", "--system", "--edit", env=env)
     if completed.returncode != 0:
         return None
     return completed.stdout.strip() or None
@@ -201,40 +200,12 @@ def quote_git_config_subsection(value: str) -> str:
 def current_git_branch(repo_root: Path | None) -> str:
     if repo_root is None:
         return ""
-    completed = _git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    return completed.stdout.strip() if completed.returncode == 0 else ""
-
-
-def _git_read(repo_root: Path, *args: str, env: Mapping[str, str] | None = None) -> str:
-    completed = _git(repo_root, *args, env=env)
+    completed = git_probe(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
 def current_git_dir(repo_root: Path | None) -> Path | None:
     if repo_root is None:
         return None
-    completed = _git(repo_root, "rev-parse", "--absolute-git-dir")
-    raw = completed.stdout.strip() if completed.returncode == 0 else ""
+    raw = git_probe_read(repo_root, "rev-parse", "--absolute-git-dir")
     return Path(raw) if raw else None
-
-
-def _git(repo_root: Path, *args: str, env: Mapping[str, str] | None = None):
-    import subprocess
-
-    command = ["git", "-C", str(repo_root), *args]
-    try:
-        return subprocess.run(
-            command,
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=SHADOW_GIT_TIMEOUT_SECONDS,
-            env=dict(env) if env is not None else None,
-        )
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            command,
-            returncode=SHADOW_GIT_TIMEOUT_RETURNCODE,
-            stdout="",
-            stderr="",
-        )
