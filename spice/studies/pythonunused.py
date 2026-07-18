@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-from spice.configlayer import effective_commands
-from spice.repocfg import read_pyproject
+from spice.config.layers import effective_commands
+from spice.config.pyproject import read_pyproject
 from spice.studies.reachability import PRODUCTION_ROOTS, _python_test_paths
 from spice.studies.reachabilitypython import (
     _SymbolDefinition,

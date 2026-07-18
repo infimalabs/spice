@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from spice import config
+from spice.config import values
 from spice.process.groups import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
@@ -72,8 +72,8 @@ class MacOSSayBackend:
 @dataclass(frozen=True)
 class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
-    content_type: str = config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
-    timeout: float = config.DEFAULT_SAY_TIMEOUT_SECONDS
+    content_type: str = values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
+    timeout: float = values.DEFAULT_SAY_TIMEOUT_SECONDS
 
     def render(
         self,
@@ -156,19 +156,19 @@ def render_speech_audio(
 
 
 def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
-    backend = config.configured_say_backend(repo_root)
+    backend = values.configured_say_backend(repo_root)
     if backend == "external":
         command = _external_speech_command(repo_root)
         return ExternalCommandSpeechBackend(
             command=command,
-            content_type=config.configured_say_content_type(repo_root),
-            timeout=config.configured_say_timeout(repo_root),
+            content_type=values.configured_say_content_type(repo_root),
+            timeout=values.configured_say_timeout(repo_root),
         )
     return MacOSSayBackend(repo_root)
 
 
 def _external_speech_command(repo_root: Path | None) -> tuple[str, ...]:
-    raw = config.configured_say_command(repo_root)
+    raw = values.configured_say_command(repo_root)
     if not raw:
         raise RuntimeError("external speech backend requires a configured command")
     try:
@@ -187,14 +187,14 @@ def _render_macos_say_audio(
     rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
 ) -> bytes:
     """Render macOS `say` output into browser-playable M4A bytes."""
-    timeout = config.configured_say_timeout(repo_root)
+    timeout = values.configured_say_timeout(repo_root)
     handle, raw_path = tempfile.mkstemp(prefix="spice-say-", suffix=SAY_AUDIO_SUFFIX)
     audio_path = Path(raw_path)
     try:
         os.close(handle)
         result = run_bounded_process_group(
             [
-                *config.say_command_args(
+                *values.say_command_args(
                     repo_root,
                     rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
                 ),

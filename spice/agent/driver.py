@@ -1276,7 +1276,7 @@ def driver_for_transcript(path: Path) -> AgentDriver:
 
 
 def _configured_driver_name(repo_root: Path | None) -> str:
-    from spice.config import configured_agent_driver
+    from spice.config.values import configured_agent_driver
 
     return (configured_agent_driver(repo_root) or "").strip().lower()
 

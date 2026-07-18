@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import cast
 
 from spice import defaults, policy
-from spice.configlayer import contextualize_config_error, effective_table
+from spice.config.layers import contextualize_config_error, effective_table
 from spice.errors import SpiceError
 from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 

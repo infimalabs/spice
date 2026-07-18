@@ -16,14 +16,14 @@ import json
 import sys
 from pathlib import Path
 
-from spice import configlayer
+from spice.config import layers
 
 root = Path(sys.argv[1])
-loaded = configlayer.load_config(root)
+loaded = layers.load_config(root)
 print(json.dumps({
-    "module_path": str(Path(configlayer.__file__).resolve()),
-    "system_path": str(loaded.layer(configlayer.SYSTEM_SOURCE).path.resolve()),
-    "system_personality": loaded.layer(configlayer.SYSTEM_SOURCE).values["agent"]["personality"],
+    "package_path": str(Path(layers.__file__).resolve().parents[1]),
+    "system_path": str(loaded.layer(layers.SYSTEM_SOURCE).path.resolve()),
+    "system_personality": loaded.layer(layers.SYSTEM_SOURCE).values["agent"]["personality"],
     "model": loaded.effective["agent"]["model"],
     "effort": loaded.effective["agent"]["effort"],
     "brand": loaded.effective["serve"]["brand"],
@@ -95,16 +95,16 @@ def test_wheel_and_editable_installs_load_their_own_system_layer(
     }
     for values in observed.values():
         assert {key: values[key] for key in expected_effective} == expected_effective
-        assert Path(values["system_path"]).parent == Path(values["module_path"]).parent
+        assert Path(values["system_path"]).parent == Path(values["package_path"])
 
     wheel_origin = (
         "checkout"
-        if Path(observed["wheel"]["module_path"]).is_relative_to(PROJECT_ROOT)
+        if Path(observed["wheel"]["package_path"]).is_relative_to(PROJECT_ROOT)
         else "isolated-environment"
     )
     editable_origin = (
         "checkout"
-        if Path(observed["editable"]["module_path"]).is_relative_to(PROJECT_ROOT)
+        if Path(observed["editable"]["package_path"]).is_relative_to(PROJECT_ROOT)
         else "isolated-environment"
     )
     assert wheel_origin == "isolated-environment"

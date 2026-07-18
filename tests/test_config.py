@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
@@ -41,9 +41,9 @@ def _redirect_system_config(tmp_path, monkeypatch):
         '[agent]\nmodel = "system-model"\neffort = "system-effort"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr("spice.config.runtime_spice_source", lambda: system_root)
+    monkeypatch.setattr("spice.config.edit.runtime_spice_source", lambda: system_root)
     monkeypatch.setattr(
-        "spice.configlayer.paths.runtime_spice_source", lambda: system_root
+        "spice.config.layers.paths.runtime_spice_source", lambda: system_root
     )
     return system_path
 
@@ -54,9 +54,9 @@ def test_pyproject_agent_layer_provides_launch_defaults(tmp_path):
         encoding="utf-8",
     )
 
-    assert config.configured_agent_model(tmp_path) == "gpt-project"
-    assert config.configured_agent_effort(tmp_path) == "low"
-    assert config.layer_table(tmp_path, config.PYPROJECT_SOURCE, "agent") == {
+    assert values.configured_agent_model(tmp_path) == "gpt-project"
+    assert values.configured_agent_effort(tmp_path) == "low"
+    assert layers.layer_table(tmp_path, layers.PYPROJECT_SOURCE, "agent") == {
         "model": "gpt-project",
         "effort": "low",
     }
@@ -68,19 +68,19 @@ def test_worktree_agent_layer_overrides_pyproject_defaults(tmp_path, monkeypatch
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
         {
-            config.AGENT_MODEL_KEY: "gpt-worktree",
-            config.AGENT_EFFORT_KEY: "medium",
+            values.AGENT_MODEL_KEY: "gpt-worktree",
+            values.AGENT_EFFORT_KEY: "medium",
         },
     )
 
-    assert config.configured_agent_model(tmp_path) == "gpt-worktree"
-    assert config.configured_agent_effort(tmp_path) == "medium"
-    assert config.effective_agent_config(tmp_path) == {
+    assert values.configured_agent_model(tmp_path) == "gpt-worktree"
+    assert values.configured_agent_effort(tmp_path) == "medium"
+    assert values.effective_agent_config(tmp_path) == {
         "driver": "codex",
         "model": "gpt-worktree",
         "effort": "medium",
@@ -95,16 +95,16 @@ def test_config_overview_shows_layers_effective_values_and_provenance(
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
-        {config.AGENT_EFFORT_KEY: "medium"},
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_EFFORT_KEY: "medium"},
     )
 
-    overview = config.config_overview(tmp_path)
+    overview = values.config_overview(tmp_path)
 
-    assert tuple(overview["layers"]) == config.CONFIG_SCOPE_NAMES
+    assert tuple(overview["layers"]) == layers.CONFIG_SCOPE_NAMES
     assert overview["layers"]["pyproject"]["path"] == str(tmp_path / "pyproject.toml")
     assert overview["layers"]["worktree"]["values"] == {"agent": {"effort": "medium"}}
     assert overview["effective"]["agent"]["model"] == "gpt-project"
@@ -115,7 +115,7 @@ def test_config_overview_shows_layers_effective_values_and_provenance(
     }
     assert overview["provenance"]["agent.effort"] == {
         "scope": "worktree",
-        "path": str(config.worktree_config_path(tmp_path)),
+        "path": str(edit.worktree_config_path(tmp_path)),
     }
 
 
@@ -200,7 +200,7 @@ def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert config.layer_table(tmp_path, config.PYPROJECT_SOURCE, "agent") == {
+    assert layers.layer_table(tmp_path, layers.PYPROJECT_SOURCE, "agent") == {
         "model": "gpt-project",
         "effort": "high",
     }
@@ -228,7 +228,7 @@ def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert config.layer_table(tmp_path, config.WORKTREE_SOURCE, "agent") == {
+    assert layers.layer_table(tmp_path, layers.WORKTREE_SOURCE, "agent") == {
         "model": "gpt-worktree",
         "effort": "low",
     }
@@ -257,7 +257,7 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert config.configured_agent_driver(tmp_path) == "claude"
+    assert values.configured_agent_driver(tmp_path) == "claude"
     assert (
         capsys.readouterr().out == "agent system driver=- model=- effort=-\n"
         "agent pyproject driver=- model=- effort=-\n"
@@ -274,13 +274,13 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     parser = build_parser()
-    values = (
+    scope_layers = (
         ("system", 110, "system-agent", "low"),
         ("pyproject", 120, "pyproject-agent", "medium"),
         ("repository", 130, "repository-agent", "high"),
         ("worktree", 140, "worktree-agent", "xhigh"),
     )
-    for scope, rate, model, effort in values:
+    for scope, rate, model, effort in scope_layers:
         handle_config(
             parser.parse_args(
                 [
@@ -312,9 +312,9 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
     for scope in ("worktree", "repository", "pyproject"):
         observed.append(
             (
-                config.configured_say_words_per_minute(tmp_path),
-                config.configured_agent_model(tmp_path),
-                config.configured_agent_effort(tmp_path),
+                values.configured_say_words_per_minute(tmp_path),
+                values.configured_agent_model(tmp_path),
+                values.configured_agent_effort(tmp_path),
             )
         )
         handle_config(parser.parse_args(["config", "say", "--scope", scope, "--clear"]))
@@ -323,9 +323,9 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
         )
     observed.append(
         (
-            config.configured_say_words_per_minute(tmp_path),
-            config.configured_agent_model(tmp_path),
-            config.configured_agent_effort(tmp_path),
+            values.configured_say_words_per_minute(tmp_path),
+            values.configured_agent_model(tmp_path),
+            values.configured_agent_effort(tmp_path),
         )
     )
 
@@ -338,7 +338,7 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
     capsys.readouterr()
 
 
-@pytest.mark.parametrize("scope", config.CONFIG_SCOPE_NAMES)
+@pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
 def test_personality_and_judge_setters_write_each_named_scope(
     tmp_path, monkeypatch, scope
 ):
@@ -355,8 +355,8 @@ def test_personality_and_judge_setters_write_each_named_scope(
         )
     )
 
-    assert config.layer_table(tmp_path, scope, "agent")["personality"] == "friendly"
-    assert config.layer_table(tmp_path, scope, "judge")["bin"] == f"judge-{scope}"
+    assert layers.layer_table(tmp_path, scope, "agent")["personality"] == "friendly"
+    assert layers.layer_table(tmp_path, scope, "judge")["bin"] == f"judge-{scope}"
 
 
 def test_judge_cli_toggles_worktree_adjudication_mode(tmp_path, monkeypatch):
@@ -368,12 +368,12 @@ def test_judge_cli_toggles_worktree_adjudication_mode(tmp_path, monkeypatch):
         handle_config(parser.parse_args(["config", "judge", flag]))
         modes.append(
             "adjudicated"
-            if config.maxim_adjudication_enabled(tmp_path)
+            if values.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
         )
 
     assert modes == ["adjudicated", "judge-free"]
-    assert config.layer_table(tmp_path, config.WORKTREE_SOURCE, "judge") == {
+    assert layers.layer_table(tmp_path, layers.WORKTREE_SOURCE, "judge") == {
         "enabled": False
     }
 
@@ -399,7 +399,7 @@ def test_config_help_names_exact_scope_vocabulary():
 
 def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
-    before = config.config_overview(tmp_path)["layers"]["repository"]
+    before = values.config_overview(tmp_path)["layers"]["repository"]
 
     outcome = _config_mutation_outcome(
         lambda: handle_config(
@@ -419,20 +419,20 @@ def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeyp
     assert outcome.state == "rejected"
     assert "scope=repository" in outcome.message
     assert f"path={tmp_path / 'spice.toml'}" in outcome.message
-    assert config.config_overview(tmp_path)["layers"]["repository"] == before
+    assert values.config_overview(tmp_path)["layers"]["repository"] == before
 
 
 def test_unwritable_system_scope_reports_source_before_mutation(tmp_path, monkeypatch):
     system_path = _redirect_system_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(config.os, "access", lambda _path, _mode: False)
+    monkeypatch.setattr(edit.os, "access", lambda _path, _mode: False)
     before = system_path.read_bytes()
 
     outcome = _config_mutation_outcome(
-        lambda: config.set_scope_section(
+        lambda: edit.set_scope_section(
             tmp_path,
-            config.SYSTEM_SOURCE,
-            config.AGENT_KEY,
-            {config.AGENT_MODEL_KEY: "blocked-model"},
+            layers.SYSTEM_SOURCE,
+            values.AGENT_KEY,
+            {values.AGENT_MODEL_KEY: "blocked-model"},
         )
     )
 
@@ -444,15 +444,15 @@ def test_unwritable_system_scope_reports_source_before_mutation(tmp_path, monkey
 
 def test_effective_agent_config_keeps_claude_sonnet_family(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
         {"driver": "claude", "model": "sonnet"},
     )
 
-    assert config.configured_agent_model(tmp_path) == "sonnet"
-    assert config.effective_agent_config(tmp_path) == {
+    assert values.configured_agent_model(tmp_path) == "sonnet"
+    assert values.effective_agent_config(tmp_path) == {
         "driver": "claude",
         "model": "sonnet",
         "effort": "xhigh",
@@ -461,14 +461,14 @@ def test_effective_agent_config_keeps_claude_sonnet_family(tmp_path, monkeypatch
 
 def test_effective_agent_config_preserves_explicit_claude_model(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
         {"driver": "claude", "model": "claude-sonnet-4-6"},
     )
 
-    assert config.effective_agent_config(tmp_path) == {
+    assert values.effective_agent_config(tmp_path) == {
         "driver": "claude",
         "model": "claude-sonnet-4-6",
         "effort": "xhigh",
@@ -492,8 +492,8 @@ def test_config_say_writes_macos_say_settings(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert config.configured_say_backend(tmp_path) == "say"
-    assert config.say_command_args(tmp_path) == ["say", "-v", "Samantha", "-r", "190"]
+    assert values.configured_say_backend(tmp_path) == "say"
+    assert values.say_command_args(tmp_path) == ["say", "-v", "Samantha", "-r", "190"]
     assert capsys.readouterr().out == ("say backend=say argv=say -v Samantha -r 190\n")
 
 
@@ -514,9 +514,9 @@ def test_config_say_writes_external_backend(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert config.configured_say_backend(tmp_path) == "external"
-    assert config.configured_say_command(tmp_path) == "tts-engine --wav"
-    assert config.configured_say_content_type(tmp_path) == "audio/wav"
+    assert values.configured_say_backend(tmp_path) == "external"
+    assert values.configured_say_command(tmp_path) == "tts-engine --wav"
+    assert values.configured_say_content_type(tmp_path) == "audio/wav"
     assert capsys.readouterr().out == (
         "say backend=external command=tts-engine --wav content_type=audio/wav\n"
     )
@@ -547,11 +547,11 @@ def test_repository_say_validation_rejects_command_borrowed_from_worktree(
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     repository_path = tmp_path / "spice.toml"
     repository_path.write_text("# repository settings\n", encoding="utf-8")
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_COMMAND_KEY: "later-worktree-command"},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_COMMAND_KEY: "later-worktree-command"},
     )
     original = repository_path.read_bytes()
     parser = build_parser()
@@ -582,11 +582,11 @@ def test_repository_say_validation_accepts_command_from_earlier_scope(
 ):
     _redirect_system_config(tmp_path, monkeypatch)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.PYPROJECT_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_COMMAND_KEY: "earlier-project-command"},
+        layers.PYPROJECT_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_COMMAND_KEY: "earlier-project-command"},
     )
     parser = build_parser()
 
@@ -606,8 +606,8 @@ def test_repository_say_validation_accepts_command_from_earlier_scope(
     )
 
     assert outcome.state == "applied"
-    assert config.configured_say_backend(tmp_path) == "external"
-    assert config.configured_say_command(tmp_path) == "earlier-project-command"
+    assert values.configured_say_backend(tmp_path) == "external"
+    assert values.configured_say_command(tmp_path) == "earlier-project-command"
 
 
 def test_clearing_worktree_say_rejects_invalid_revealed_stack_without_writing(
@@ -618,13 +618,13 @@ def test_clearing_worktree_say_rejects_invalid_revealed_stack_without_writing(
     (tmp_path / "spice.toml").write_text(
         '[say]\nbackend = "external"\n', encoding="utf-8"
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_COMMAND_KEY: "later-worktree-command"},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_COMMAND_KEY: "later-worktree-command"},
     )
-    worktree_path = config.worktree_config_path(tmp_path)
+    worktree_path = edit.worktree_config_path(tmp_path)
     original = worktree_path.read_bytes()
     parser = build_parser()
 
@@ -642,62 +642,62 @@ def test_clearing_worktree_say_rejects_invalid_revealed_stack_without_writing(
 
 def test_configured_judge_bin_defaults_to_platform_adapter(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.platform", "darwin")
-    assert config.configured_judge_bin(tmp_path) == config.DEFAULT_JUDGE_BIN
+    assert values.configured_judge_bin(tmp_path) == values.DEFAULT_JUDGE_BIN
 
     monkeypatch.setattr("sys.platform", "linux")
-    assert config.configured_judge_bin(tmp_path) == config.PORTABLE_JUDGE_BIN
+    assert values.configured_judge_bin(tmp_path) == values.PORTABLE_JUDGE_BIN
 
 
 def test_explicit_judge_bin_overrides_platform_default(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_BIN_KEY: "/opt/my-judge"},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_BIN_KEY: "/opt/my-judge"},
     )
 
     monkeypatch.setattr("sys.platform", "linux")
-    assert config.configured_judge_bin(tmp_path) == "/opt/my-judge"
+    assert values.configured_judge_bin(tmp_path) == "/opt/my-judge"
 
     monkeypatch.setattr("sys.platform", "darwin")
-    assert config.configured_judge_bin(tmp_path) == "/opt/my-judge"
+    assert values.configured_judge_bin(tmp_path) == "/opt/my-judge"
 
 
 def test_say_timeout_defaults_generously_above_a_minute(tmp_path):
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
-    assert config.configured_say_timeout(tmp_path) > SAY_TIMEOUT_MINUTE_FLOOR_SECONDS
+    assert values.configured_say_timeout(tmp_path) == values.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert values.configured_say_timeout(tmp_path) > SAY_TIMEOUT_MINUTE_FLOOR_SECONDS
 
 
 def test_say_timeout_honors_positive_override(tmp_path):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: SAY_TIMEOUT_OVERRIDE_SECONDS},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_TIMEOUT_SECONDS_KEY: SAY_TIMEOUT_OVERRIDE_SECONDS},
     )
-    assert config.configured_say_timeout(tmp_path) == SAY_TIMEOUT_OVERRIDE_SECONDS
+    assert values.configured_say_timeout(tmp_path) == SAY_TIMEOUT_OVERRIDE_SECONDS
 
 
 def test_say_timeout_falls_back_when_non_positive_or_invalid(tmp_path):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: 0},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_TIMEOUT_SECONDS_KEY: 0},
     )
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert values.configured_say_timeout(tmp_path) == values.DEFAULT_SAY_TIMEOUT_SECONDS
 
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: "nonsense"},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_TIMEOUT_SECONDS_KEY: "nonsense"},
     )
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert values.configured_say_timeout(tmp_path) == values.DEFAULT_SAY_TIMEOUT_SECONDS
 
 
 def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
-    config_path = config.worktree_config_path(tmp_path)
+    config_path = edit.worktree_config_path(tmp_path)
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
         "# keep this header\n"
@@ -709,11 +709,11 @@ def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
         encoding="utf-8",
     )
 
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_WORDS_PER_MINUTE_KEY: 200},
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {values.SAY_WORDS_PER_MINUTE_KEY: 200},
     )
 
     text = config_path.read_text(encoding="utf-8")
@@ -725,23 +725,23 @@ def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
 
 
 def test_clear_scope_section_preserves_unrelated_tables(tmp_path):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_BIN_KEY: "j"},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_BIN_KEY: "j"},
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.AGENT_KEY,
-        {config.AGENT_DRIVER_KEY: "claude"},
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_DRIVER_KEY: "claude"},
     )
 
-    config.clear_scope_section(tmp_path, config.WORKTREE_SOURCE, config.JUDGE_KEY)
+    edit.clear_scope_section(tmp_path, layers.WORKTREE_SOURCE, values.JUDGE_KEY)
 
     parsed = tomllib.loads(
-        config.worktree_config_path(tmp_path).read_text(encoding="utf-8")
+        edit.worktree_config_path(tmp_path).read_text(encoding="utf-8")
     )
     assert "judge" not in parsed
     assert parsed["agent"] == {"driver": "claude"}
@@ -749,25 +749,25 @@ def test_clear_scope_section_preserves_unrelated_tables(tmp_path):
 
 def test_maxim_adjudication_off_by_default_and_opt_in_toggles_it(tmp_path):
     modes = [
-        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+        "adjudicated" if values.maxim_adjudication_enabled(tmp_path) else "judge-free"
     ]
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: True},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: True},
     )
     modes.append(
-        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+        "adjudicated" if values.maxim_adjudication_enabled(tmp_path) else "judge-free"
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: False},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: False},
     )
     modes.append(
-        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+        "adjudicated" if values.maxim_adjudication_enabled(tmp_path) else "judge-free"
     )
 
     assert modes == ["judge-free", "adjudicated", "judge-free"]
@@ -779,46 +779,46 @@ def test_maxim_adjudication_honors_committed_config_layers(tmp_path, monkeypatch
     # whole repository, so an install (like spice itself) can enable the judge
     # without editing an uncommitted worktree-local config.
     committed_modes = {}
-    for scope in (config.PYPROJECT_SOURCE, config.REPOSITORY_SOURCE):
-        config.set_scope_section(
+    for scope in (layers.PYPROJECT_SOURCE, layers.REPOSITORY_SOURCE):
+        edit.set_scope_section(
             tmp_path,
             scope,
-            config.JUDGE_KEY,
-            {config.JUDGE_ENABLED_KEY: True},
+            values.JUDGE_KEY,
+            {values.JUDGE_ENABLED_KEY: True},
         )
         committed_modes[scope] = (
             "adjudicated"
-            if config.maxim_adjudication_enabled(tmp_path)
+            if values.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
         )
-        config.clear_scope_section(tmp_path, scope, config.JUDGE_KEY)
+        edit.clear_scope_section(tmp_path, scope, values.JUDGE_KEY)
 
     # The highest-precedence worktree layer still wins, so a local override can
     # switch adjudication back off even when a committed layer enabled it.
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.PYPROJECT_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: True},
+        layers.PYPROJECT_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: True},
     )
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: False},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: False},
     )
 
     assert {
         "committed": committed_modes,
         "worktree_override": (
             "adjudicated"
-            if config.maxim_adjudication_enabled(tmp_path)
+            if values.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
         ),
     } == {
         "committed": {
-            config.PYPROJECT_SOURCE: "adjudicated",
-            config.REPOSITORY_SOURCE: "adjudicated",
+            layers.PYPROJECT_SOURCE: "adjudicated",
+            layers.REPOSITORY_SOURCE: "adjudicated",
         },
         "worktree_override": "judge-free",
     }

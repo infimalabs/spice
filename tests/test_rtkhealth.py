@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent.rtkhealth import probe_rtk_health
 
 
@@ -131,11 +131,11 @@ def test_health_probe_reports_native_mode_for_each_degraded_state(
 
 
 def _configure_executable(repo_root: Path, executable: str) -> None:
-    config.set_scope_section(
+    edit.set_scope_section(
         repo_root,
-        config.WORKTREE_SOURCE,
-        config.RTK_KEY,
-        {config.RTK_EXECUTABLE_KEY: executable},
+        layers.WORKTREE_SOURCE,
+        values.RTK_KEY,
+        {values.RTK_EXECUTABLE_KEY: executable},
     )
 
 

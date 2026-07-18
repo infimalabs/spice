@@ -1,6 +1,6 @@
 {
   "modules": {
-    "spice/configlayer.py": {
+    "spice/config/layers.py": {
       "killed": 13,
       "mutants": 20,
       "score": 0.65,
@@ -12,14 +12,14 @@
     "equivalentMutants": [
       {
         "mutationIndex": 10,
-        "path": "spice/configlayer.py",
+        "path": "spice/config/layers.py",
         "reason": "zip strictness is equivalent because parsed values and layers are appended together in the same loop"
       }
     ],
     "lowInformationMutants": [
       {
         "mutationIndex": 11,
-        "path": "spice/configlayer.py",
+        "path": "spice/config/layers.py",
         "reason": "invalid Path multiplication aborts the suite before pytest can attribute the kill to an individual node ID"
       }
     ],
@@ -29,7 +29,7 @@
     },
     "surface": "spice dev doctor",
     "targets": [
-      "spice/configlayer.py"
+      "spice/config/layers.py"
     ],
     "tests": [
       "tests/test_configlayer.py"

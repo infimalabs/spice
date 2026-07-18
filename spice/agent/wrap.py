@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-from spice import config
+from spice.config import values
 from spice.agent.driver import driver_for
 from spice.agent.runinbox import (
     AGENT_RUN_INBOX_REPEAT_SECONDS as AGENT_RUN_INBOX_REPEAT_SECONDS,
@@ -200,7 +200,7 @@ def build_agent_run_command(
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
     rtk_executable = (
-        config.configured_rtk_executable(repo_root)
+        values.configured_rtk_executable(repo_root)
         if rewrite_rtk
         else RTK_CANONICAL_EXECUTABLE
     )

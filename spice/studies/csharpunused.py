@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from spice.errors import SpiceError
-from spice.configlayer import effective_table
+from spice.config.layers import effective_table
 from spice.studies.walk import is_excluded_path
 
 STATUS_CANDIDATE_UNUSED = "candidate-unused"

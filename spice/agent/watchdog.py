@@ -27,7 +27,7 @@ from typing import Any, Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import ambient_thread_id
-from spice.config import maxim_adjudication_enabled
+from spice.config.values import maxim_adjudication_enabled
 from spice.agent.maxims import (
     MaximBag,
     evaluate_maxim_any_violation,

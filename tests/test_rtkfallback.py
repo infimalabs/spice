@@ -11,7 +11,7 @@ from typing import cast
 
 import pytest
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent import driver as agent_driver
 from spice.agent import rtkrewrite
 from spice.agent import wrap
@@ -339,11 +339,11 @@ def test_warning_dedup_keys_thread_executable_and_failure_signature(
 
 def _configure_rtk(repo_root: Path, executable: str) -> None:
     repo_root.mkdir(exist_ok=True)
-    config.set_scope_section(
+    edit.set_scope_section(
         repo_root,
-        config.WORKTREE_SOURCE,
-        config.RTK_KEY,
-        {config.RTK_EXECUTABLE_KEY: executable},
+        layers.WORKTREE_SOURCE,
+        values.RTK_KEY,
+        {values.RTK_EXECUTABLE_KEY: executable},
     )
 
 

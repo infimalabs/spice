@@ -21,7 +21,8 @@ from typing import Any
 
 from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
-from spice.config import WORKTREE_SOURCE, set_scope_section
+from spice.config.edit import set_scope_section
+from spice.config.layers import WORKTREE_SOURCE
 from spice.errors import SpiceError
 from spice.process.git import run_git_command
 from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve

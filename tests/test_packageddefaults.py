@@ -8,15 +8,16 @@ import tomllib
 import zipfile
 from pathlib import Path
 
-from spice import config, defaultinventory, defaults, paths
-from spice.configlayer import SYSTEM_SOURCE, load_packaged_config
+from spice import defaultinventory, defaults, paths
+from spice.config import layers, values
+from spice.config.layers import SYSTEM_SOURCE, load_packaged_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_installed_and_layered_loaders_use_the_same_packaged_path(tmp_path):
     packaged = load_packaged_config()
-    layered = config.load_config(tmp_path).layer(SYSTEM_SOURCE)
+    layered = layers.load_config(tmp_path).layer(SYSTEM_SOURCE)
 
     assert packaged.path == paths.runtime_spice_source() / "spice.toml"
     assert layered.path == packaged.path
@@ -25,7 +26,7 @@ def test_installed_and_layered_loaders_use_the_same_packaged_path(tmp_path):
 
 
 def test_default_export_inventory_resolves_every_python_export_and_toml_leaf():
-    assert config.default_classifications() == (
+    assert values.default_classifications() == (
         defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION
     )
     assert set(defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION.values()) == (

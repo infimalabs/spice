@@ -1,0 +1,366 @@
+"""Typed configuration values resolved from the effective layered mapping."""
+
+from __future__ import annotations
+
+import math
+import sys
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from spice import defaults
+from spice.config.layers import (
+    contextualize_config_error,
+    effective_mapping,
+    load_config,
+)
+from spice.errors import SpiceError
+from spice.paths import repo_root_from_cwd
+
+SAY_KEY = "say"
+SAY_BACKEND_KEY = "backend"
+SAY_BACKEND_CHOICES = defaults.strings("say", "backend_choices")
+DEFAULT_SAY_BACKEND = defaults.string("say", "backend")
+SAY_COMMAND_KEY = "command"
+SAY_CONTENT_TYPE_KEY = "content_type"
+DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_type")
+SAY_VOICE_KEY = "voice"
+SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
+DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
+SAY_TIMEOUT_SECONDS_KEY = "timeout_seconds"
+# Generous ceiling: comfortably covers well over a minute of spoken content
+# (plus render overhead) so legitimately-long messages are never clipped, while
+# still bounding a wedged speech process instead of blocking forever. A repo or
+# worktree ``say.timeout_seconds`` override tunes it through the accessor below.
+DEFAULT_SAY_TIMEOUT_SECONDS = 300.0
+SAY_MUTABLE_KEYS = (
+    SAY_BACKEND_KEY,
+    SAY_COMMAND_KEY,
+    SAY_CONTENT_TYPE_KEY,
+    SAY_VOICE_KEY,
+    SAY_WORDS_PER_MINUTE_KEY,
+    SAY_TIMEOUT_SECONDS_KEY,
+)
+
+AGENT_KEY = "agent"
+AGENT_PERSONALITY_KEY = "personality"
+AGENT_PERSONALITY_CHOICES = defaults.strings("agent", "personality_choices")
+DEFAULT_AGENT_PERSONALITY = defaults.string("agent", "personality")
+AGENT_MODEL_KEY = "model"
+AGENT_EFFORT_KEY = "effort"
+AGENT_DRIVER_KEY = "driver"
+AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
+
+JUDGE_KEY = "judge"
+JUDGE_BIN_KEY = "bin"
+JUDGE_ENABLED_KEY = "enabled"
+DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
+PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
+RTK_KEY = "rtk"
+RTK_EXECUTABLE_KEY = "executable"
+DEFAULT_RTK_EXECUTABLE = defaults.string(RTK_KEY, RTK_EXECUTABLE_KEY)
+_CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
+
+
+@dataclass(frozen=True)
+class ScalarPolicy:
+    """Declared coercion policy for one effective scalar configuration key."""
+
+    coerce: Callable[[Any, "ScalarPolicy"], Any]
+    default: Any = None
+    choices: tuple[str, ...] = ()
+    requires_root: bool = False
+
+
+def _coerce_text(raw: Any, policy: ScalarPolicy) -> Any:
+    return str(raw or "").strip() or policy.default
+
+
+def _coerce_optional_text(raw: Any, policy: ScalarPolicy) -> str | None:
+    return str(raw).strip() or None if raw else None
+
+
+def _coerce_choice(raw: Any, policy: ScalarPolicy) -> Any:
+    value = str(raw or "").strip()
+    return value if value in policy.choices else policy.default
+
+
+def _coerce_positive_int(raw: Any, policy: ScalarPolicy) -> int | None:
+    if raw is None:
+        return policy.default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return policy.default
+    return value if value > 0 else policy.default
+
+
+def _coerce_positive_seconds(raw: Any, policy: ScalarPolicy) -> float:
+    if raw is None:
+        return policy.default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return policy.default
+    if not math.isfinite(value):
+        return policy.default
+    return value if value > 0 else policy.default
+
+
+def _coerce_flag(raw: Any, policy: ScalarPolicy) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().casefold() in _CONFIG_FLAG_TRUE
+
+
+SCALAR_SCHEMA: dict[tuple[str, str], ScalarPolicy] = {
+    (SAY_KEY, SAY_VOICE_KEY): ScalarPolicy(_coerce_optional_text),
+    (SAY_KEY, SAY_BACKEND_KEY): ScalarPolicy(
+        _coerce_choice, DEFAULT_SAY_BACKEND, SAY_BACKEND_CHOICES
+    ),
+    (SAY_KEY, SAY_COMMAND_KEY): ScalarPolicy(_coerce_text, ""),
+    (SAY_KEY, SAY_CONTENT_TYPE_KEY): ScalarPolicy(
+        _coerce_text, DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
+    ),
+    (SAY_KEY, SAY_WORDS_PER_MINUTE_KEY): ScalarPolicy(_coerce_positive_int),
+    (SAY_KEY, SAY_TIMEOUT_SECONDS_KEY): ScalarPolicy(
+        _coerce_positive_seconds, DEFAULT_SAY_TIMEOUT_SECONDS
+    ),
+    (AGENT_KEY, AGENT_PERSONALITY_KEY): ScalarPolicy(
+        _coerce_choice, DEFAULT_AGENT_PERSONALITY, AGENT_PERSONALITY_CHOICES
+    ),
+    (AGENT_KEY, AGENT_MODEL_KEY): ScalarPolicy(_coerce_text, "", requires_root=True),
+    (AGENT_KEY, AGENT_EFFORT_KEY): ScalarPolicy(_coerce_text, "", requires_root=True),
+    (AGENT_KEY, AGENT_DRIVER_KEY): ScalarPolicy(_coerce_text, "", requires_root=True),
+    (JUDGE_KEY, JUDGE_ENABLED_KEY): ScalarPolicy(
+        _coerce_flag, False, requires_root=True
+    ),
+}
+
+
+def _scalar(section: str, key: str, repo_root: Path | None) -> Any:
+    policy = SCALAR_SCHEMA[(section, key)]
+    root = _root_or_current(repo_root)
+    if root is None and policy.requires_root:
+        return policy.default
+    return policy.coerce(_configured_value(root, section, key), policy)
+
+
+def _root_or_current(repo_root: Path | None) -> Path | None:
+    return repo_root if repo_root is not None else repo_root_from_cwd()
+
+
+def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
+    raw = effective_mapping(root).get(key)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _configured_value(root: Path | None, section: str, key: str) -> Any:
+    return _effective_section(root, section).get(key)
+
+
+def configured_say_voice(repo_root: Path | None = None) -> str | None:
+    return _scalar(SAY_KEY, SAY_VOICE_KEY, repo_root)
+
+
+def configured_say_backend(repo_root: Path | None = None) -> str:
+    return _scalar(SAY_KEY, SAY_BACKEND_KEY, repo_root)
+
+
+def configured_say_command(repo_root: Path | None = None) -> str:
+    return _scalar(SAY_KEY, SAY_COMMAND_KEY, repo_root)
+
+
+def configured_say_content_type(repo_root: Path | None = None) -> str:
+    return _scalar(SAY_KEY, SAY_CONTENT_TYPE_KEY, repo_root)
+
+
+def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None:
+    return _scalar(SAY_KEY, SAY_WORDS_PER_MINUTE_KEY, repo_root)
+
+
+def configured_say_timeout(repo_root: Path | None = None) -> float:
+    """Seconds a speech subprocess may run before it is bounded and reported.
+
+    Falls back to the generous default when unset or non-positive so a valid
+    long message is never clipped; a positive override lets operators tune it.
+    """
+    return _scalar(SAY_KEY, SAY_TIMEOUT_SECONDS_KEY, repo_root)
+
+
+def configured_agent_personality(repo_root: Path | None = None) -> str:
+    return _scalar(AGENT_KEY, AGENT_PERSONALITY_KEY, repo_root)
+
+
+def configured_agent_model(repo_root: Path | None = None) -> str:
+    """Agent launch model from the canonical layered configuration."""
+    return _scalar(AGENT_KEY, AGENT_MODEL_KEY, repo_root)
+
+
+def configured_agent_effort(repo_root: Path | None = None) -> str:
+    """Codex reasoning effort from the configured spice effort setting."""
+    return _scalar(AGENT_KEY, AGENT_EFFORT_KEY, repo_root)
+
+
+def configured_agent_driver(repo_root: Path | None = None) -> str:
+    """Which agent driver this worktree binds: worktree state, then project.
+
+    Selects the agent CLI (`codex` | `claude`) when `SPICE_AGENT_DRIVER` is
+    unset. Worktree-local state wins so one clone can run a different driver
+    than the tracked project default without editing tracked history.
+    """
+    return _scalar(AGENT_KEY, AGENT_DRIVER_KEY, repo_root)
+
+
+def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
+    """Return whether the opt-in maxim judge adjudicates trigger hits.
+
+    Judge-free is the deterministic default: a matched trigger bag publishes
+    its ``[MAXIM]`` reminder directly, with no judge subprocess. An
+    installation opts into local YES/NO adjudication by setting
+    ``[judge] enabled = true`` in any effective configuration layer -- a
+    committed ``pyproject.toml`` / ``spice.toml`` or the worktree-local config
+    -- so a repository can turn adjudication on for itself without changing the
+    packaged default that every other install inherits; any other value
+    (including an absent one) resolves to the judge-free default.
+    """
+    return _scalar(JUDGE_KEY, JUDGE_ENABLED_KEY, repo_root)
+
+
+def effective_agent_config(repo_root: Path) -> dict[str, str]:
+    from spice.agent.driver import driver_for
+
+    driver = driver_for(repo_root)
+    return {
+        AGENT_DRIVER_KEY: driver.name,
+        AGENT_MODEL_KEY: driver.resolve_model(configured_agent_model(repo_root)),
+        AGENT_EFFORT_KEY: (
+            configured_agent_effort(repo_root) or driver.default_reasoning_effort
+        ),
+    }
+
+
+def default_judge_bin() -> str:
+    """Return the built-in judge bin for this platform.
+
+    macOS keeps the Apple Foundation Models ``afm-cli`` default; every other
+    platform, where ``afm-cli`` does not exist, defaults to the portable
+    ``spice-judge`` adapter so the conscience works out of the box off macOS.
+    """
+    return DEFAULT_JUDGE_BIN if sys.platform == "darwin" else PORTABLE_JUDGE_BIN
+
+
+def configured_judge_bin(repo_root: Path | None = None) -> str:
+    root = _root_or_current(repo_root)
+    raw = str(_configured_value(root, JUDGE_KEY, JUDGE_BIN_KEY) or "").strip()
+    if raw == DEFAULT_JUDGE_BIN and sys.platform != "darwin":
+        return PORTABLE_JUDGE_BIN
+    return raw or default_judge_bin()
+
+
+def configured_rtk_executable(repo_root: Path | None = None) -> str:
+    """Return the exact layered RTK executable identity without probing it."""
+    root = _root_or_current(repo_root)
+    section = effective_mapping(root).get(RTK_KEY)
+    if not isinstance(section, Mapping):
+        raise _rtk_config_error(
+            root,
+            SpiceError("[tool.spice.rtk] must be a table"),
+            RTK_KEY,
+        )
+    raw = section.get(RTK_EXECUTABLE_KEY)
+    if not isinstance(raw, str) or not _is_rtk_executable_identity(raw):
+        raise _rtk_config_error(
+            root,
+            SpiceError(
+                "[tool.spice.rtk] executable must be one non-empty executable "
+                "basename or absolute path"
+            ),
+            RTK_KEY,
+            RTK_EXECUTABLE_KEY,
+        )
+    return raw
+
+
+def _is_rtk_executable_identity(value: str) -> bool:
+    if not value or "\0" in value:
+        return False
+    path = Path(value)
+    if path.is_absolute():
+        return True
+    return path.name == value and not any(character.isspace() for character in value)
+
+
+def _rtk_config_error(
+    repo_root: Path | None, error: SpiceError, *path: str
+) -> SpiceError:
+    if repo_root is None:
+        return error
+    return contextualize_config_error(repo_root, error, *path)
+
+
+def say_command_args(
+    repo_root: Path | None = None, *, rate_multiplier: float = 1.0
+) -> list[str]:
+    """Build the macOS `say` argv from repo-local config.
+
+    Unset config emits only `["say"]` so the system voice and rate apply.
+    """
+    args = ["say"]
+    voice = configured_say_voice(repo_root)
+    if voice:
+        args.extend(["-v", voice])
+    words_per_minute = configured_say_words_per_minute(repo_root)
+    if words_per_minute is None and rate_multiplier != 1.0:
+        words_per_minute = DEFAULT_SAY_WORDS_PER_MINUTE
+    if words_per_minute is not None:
+        effective = max(1, int(words_per_minute * rate_multiplier + 0.5))
+        args.extend(["-r", str(effective)])
+    return args
+
+
+def config_overview(repo_root: Path) -> dict[str, Any]:
+    loaded = load_config(repo_root)
+    configured_rtk_executable(repo_root)
+    return {
+        "layers": {
+            layer.name: {
+                "path": str(layer.path),
+                "present": layer.present,
+                "values": _json_value(layer.values),
+            }
+            for layer in loaded.layers
+        },
+        "effective": _json_value(loaded.effective),
+        "provenance": {
+            ".".join(path): {"scope": layer.name, "path": str(layer.path)}
+            for path, layer in sorted(loaded.sources.items())
+        },
+    }
+
+
+def agent_config_overview(repo_root: Path) -> dict[str, Any]:
+    overview = config_overview(repo_root)
+    provenance = overview["provenance"]
+    return {
+        "effective": effective_agent_config(repo_root),
+        "provenance": {
+            key: value
+            for key, value in provenance.items()
+            if key.startswith(f"{AGENT_KEY}.")
+        },
+    }
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    return value
+
+
+def default_classifications() -> dict[str, str]:
+    """Classify exported defaults for configuration diagnostics."""
+    return defaults.export_classifications()

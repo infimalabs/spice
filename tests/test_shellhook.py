@@ -716,7 +716,8 @@ def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
 def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     tmp_path, monkeypatch
 ):
-    from spice.config import WORKTREE_SOURCE, set_scope_section
+    from spice.config.edit import set_scope_section
+    from spice.config.layers import WORKTREE_SOURCE
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     set_scope_section(tmp_path, WORKTREE_SOURCE, "agent", {"driver": "claude"})

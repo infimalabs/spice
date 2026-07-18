@@ -9,8 +9,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-from spice.config import configured_agent_driver, configured_rtk_executable
-from spice.configlayer import (
+from spice.config.values import configured_agent_driver, configured_rtk_executable
+from spice.config.layers import (
     SYSTEM_SOURCE,
     contextualize_config_error,
     effective_table,

@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from spice.configlayer import effective_table
+from spice.config.layers import effective_table
 from spice.errors import SpiceError
 from spice.scopes import SCOPES_KEY, STUDY_PROVIDER_SCOPES, ScopeContext, ScopeSelector
 from spice.process.tool import run_tool_command

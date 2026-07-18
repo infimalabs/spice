@@ -39,8 +39,12 @@ from spice.cli.mounts import (
     mount_command_path,
     mounted_commands,
 )
-from spice.config import AGENT_DRIVER_KEY, AGENT_MODEL_KEY, effective_agent_config
-from spice.configlayer import contextualize_config_error, effective_table
+from spice.config.values import (
+    AGENT_DRIVER_KEY,
+    AGENT_MODEL_KEY,
+    effective_agent_config,
+)
+from spice.config.layers import contextualize_config_error, effective_table
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.process.git import run_git_command

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.errors import SpiceError
 from spice.paths import require_repo_root
 
@@ -34,7 +34,7 @@ def configure_config_parser(subparsers: Any) -> None:
     say = actions.add_parser("say", help="Configure speech playback.")
     say.add_argument(
         "--backend",
-        choices=config.SAY_BACKEND_CHOICES,
+        choices=values.SAY_BACKEND_CHOICES,
         help="Speech backend: macOS say or an external stdin/stdout command.",
     )
     say.add_argument(
@@ -76,7 +76,7 @@ def configure_config_parser(subparsers: Any) -> None:
         "personality", help="Configure the agent personality."
     )
     personality.add_argument(
-        "value", nargs="?", choices=config.AGENT_PERSONALITY_CHOICES
+        "value", nargs="?", choices=values.AGENT_PERSONALITY_CHOICES
     )
     _add_scope_argument(personality)
     personality.add_argument("--clear", action="store_true")
@@ -103,8 +103,8 @@ def configure_config_parser(subparsers: Any) -> None:
 def _add_scope_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--scope",
-        choices=config.CONFIG_SCOPE_NAMES,
-        default=config.WORKTREE_SOURCE,
+        choices=layers.CONFIG_SCOPE_NAMES,
+        default=layers.WORKTREE_SOURCE,
         help="Configuration layer: system, pyproject, repository, or worktree.",
     )
 
@@ -118,18 +118,18 @@ def handle_config(args: argparse.Namespace) -> int:
 
 
 def _handle_show(args: argparse.Namespace, repo_root: Path) -> int:
-    print(json.dumps(config.config_overview(repo_root), indent=2, sort_keys=True))
+    print(json.dumps(values.config_overview(repo_root), indent=2, sort_keys=True))
     return 0
 
 
 def _handle_system(args: argparse.Namespace, repo_root: Path) -> int:
-    print(json.dumps(config.agent_config_overview(repo_root), indent=2, sort_keys=True))
+    print(json.dumps(values.agent_config_overview(repo_root), indent=2, sort_keys=True))
     return 0
 
 
 def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
     _ = repo_root
-    print(json.dumps(config.default_classifications(), indent=2, sort_keys=True))
+    print(json.dumps(values.default_classifications(), indent=2, sort_keys=True))
     return 0
 
 
@@ -137,21 +137,21 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
         _validate_say_clear(repo_root, scope)
-        config.clear_scope_section(
-            repo_root, scope, config.SAY_KEY, keys=config.SAY_MUTABLE_KEYS
+        edit.clear_scope_section(
+            repo_root, scope, values.SAY_KEY, keys=values.SAY_MUTABLE_KEYS
         )
         print(f"say {scope} config cleared")
         return 0
-    values: dict[str, Any] = {}
+    section: dict[str, Any] = {}
     if args.backend:
-        values[config.SAY_BACKEND_KEY] = args.backend
+        section[values.SAY_BACKEND_KEY] = args.backend
     if args.command and args.command.strip():
-        values[config.SAY_COMMAND_KEY] = args.command.strip()
-        values.setdefault(config.SAY_BACKEND_KEY, "external")
+        section[values.SAY_COMMAND_KEY] = args.command.strip()
+        section.setdefault(values.SAY_BACKEND_KEY, "external")
     if args.content_type and args.content_type.strip():
-        values[config.SAY_CONTENT_TYPE_KEY] = args.content_type.strip()
+        section[values.SAY_CONTENT_TYPE_KEY] = args.content_type.strip()
     if args.voice and args.voice.strip():
-        values[config.SAY_VOICE_KEY] = args.voice.strip()
+        section[values.SAY_VOICE_KEY] = args.voice.strip()
     if args.words_per_minute is not None and args.words_per_minute <= 0:
         raise SpiceError(
             _scope_error(
@@ -159,12 +159,12 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
             )
         )
     if args.words_per_minute is not None:
-        values[config.SAY_WORDS_PER_MINUTE_KEY] = args.words_per_minute
-    if not values:
+        section[values.SAY_WORDS_PER_MINUTE_KEY] = args.words_per_minute
+    if not section:
         print(_say_config_summary(repo_root))
         return 0
-    _validate_say_config(repo_root, scope, values)
-    config.set_scope_section(repo_root, scope, config.SAY_KEY, values)
+    _validate_say_config(repo_root, scope, section)
+    edit.set_scope_section(repo_root, scope, values.SAY_KEY, section)
     print(_say_config_summary(repo_root))
     return 0
 
@@ -172,17 +172,17 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
-        keys = (config.JUDGE_BIN_KEY,)
-        if scope == config.WORKTREE_SOURCE:
-            keys = (config.JUDGE_BIN_KEY, config.JUDGE_ENABLED_KEY)
-        config.clear_scope_section(repo_root, scope, config.JUDGE_KEY, keys=keys)
+        keys = (values.JUDGE_BIN_KEY,)
+        if scope == layers.WORKTREE_SOURCE:
+            keys = (values.JUDGE_BIN_KEY, values.JUDGE_ENABLED_KEY)
+        edit.clear_scope_section(repo_root, scope, values.JUDGE_KEY, keys=keys)
         print(f"judge {scope} config cleared")
         return 0
-    values: dict[str, Any] = {}
+    section: dict[str, Any] = {}
     if args.judge_bin and args.judge_bin.strip():
-        values[config.JUDGE_BIN_KEY] = args.judge_bin.strip()
+        section[values.JUDGE_BIN_KEY] = args.judge_bin.strip()
     if args.judge_enabled is not None:
-        if scope != config.WORKTREE_SOURCE:
+        if scope != layers.WORKTREE_SOURCE:
             raise SpiceError(
                 _scope_error(
                     repo_root,
@@ -190,8 +190,8 @@ def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
                     "config judge --enable and --disable are worktree-local",
                 )
             )
-        values[config.JUDGE_ENABLED_KEY] = args.judge_enabled
-    if not values:
+        section[values.JUDGE_ENABLED_KEY] = args.judge_enabled
+    if not section:
         raise SpiceError(
             _scope_error(
                 repo_root,
@@ -199,31 +199,31 @@ def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
                 "config judge requires --bin, --enable, or --disable",
             )
         )
-    config.set_scope_section(repo_root, scope, config.JUDGE_KEY, values)
-    print(f"judge_bin={config.configured_judge_bin(repo_root)}")
-    print(f"judge_enabled={config.maxim_adjudication_enabled(repo_root)}")
+    edit.set_scope_section(repo_root, scope, values.JUDGE_KEY, section)
+    print(f"judge_bin={values.configured_judge_bin(repo_root)}")
+    print(f"judge_enabled={values.maxim_adjudication_enabled(repo_root)}")
     return 0
 
 
 def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
-        config.clear_scope_section(
-            repo_root, scope, config.AGENT_KEY, keys=config.AGENT_LAUNCH_KEYS
+        edit.clear_scope_section(
+            repo_root, scope, values.AGENT_KEY, keys=values.AGENT_LAUNCH_KEYS
         )
         print(f"agent {scope} config cleared")
         return 0
-    values: dict[str, str] = {}
+    section: dict[str, str] = {}
     if args.model and args.model.strip():
-        values[config.AGENT_MODEL_KEY] = args.model.strip()
+        section[values.AGENT_MODEL_KEY] = args.model.strip()
     if args.effort and args.effort.strip():
-        values[config.AGENT_EFFORT_KEY] = args.effort.strip()
+        section[values.AGENT_EFFORT_KEY] = args.effort.strip()
     if getattr(args, "driver", None):
-        values[config.AGENT_DRIVER_KEY] = str(args.driver)
-    if not values:
+        section[values.AGENT_DRIVER_KEY] = str(args.driver)
+    if not section:
         print(_agent_config_summary(repo_root))
         return 0
-    config.set_scope_section(repo_root, scope, config.AGENT_KEY, values)
+    edit.set_scope_section(repo_root, scope, values.AGENT_KEY, section)
     print(_agent_config_summary(repo_root))
     return 0
 
@@ -231,22 +231,22 @@ def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
-        config.clear_scope_section(
+        edit.clear_scope_section(
             repo_root,
             scope,
-            config.AGENT_KEY,
-            keys=(config.AGENT_PERSONALITY_KEY,),
+            values.AGENT_KEY,
+            keys=(values.AGENT_PERSONALITY_KEY,),
         )
         print(f"personality {scope} config cleared")
         return 0
     if not args.value:
-        print(f"personality={config.configured_agent_personality(repo_root)}")
+        print(f"personality={values.configured_agent_personality(repo_root)}")
         return 0
-    config.set_scope_section(
+    edit.set_scope_section(
         repo_root,
         scope,
-        config.AGENT_KEY,
-        {config.AGENT_PERSONALITY_KEY: args.value},
+        values.AGENT_KEY,
+        {values.AGENT_PERSONALITY_KEY: args.value},
     )
     print(f"personality={args.value}")
     return 0
@@ -264,22 +264,22 @@ _CONFIG_ACTIONS = {
 
 
 def _agent_config_summary(repo_root: Path) -> str:
-    effective = config.effective_agent_config(repo_root)
+    effective = values.effective_agent_config(repo_root)
     return "\n".join(
         [
             *(
                 _agent_scope_line(
-                    scope, config.layer_table(repo_root, scope, config.AGENT_KEY)
+                    scope, layers.layer_table(repo_root, scope, values.AGENT_KEY)
                 )
-                for scope in config.CONFIG_SCOPE_NAMES
+                for scope in layers.CONFIG_SCOPE_NAMES
             ),
             _agent_scope_line("effective", effective),
         ]
     )
 
 
-def _validate_say_config(repo_root: Path, scope: str, values: dict[str, Any]) -> None:
-    candidate = _prospective_say_config(repo_root, scope, values=values)
+def _validate_say_config(repo_root: Path, scope: str, section: dict[str, Any]) -> None:
+    candidate = _prospective_say_config(repo_root, scope, section=section)
     _validate_say_candidate(repo_root, scope, candidate)
 
 
@@ -287,7 +287,7 @@ def _validate_say_clear(repo_root: Path, scope: str) -> None:
     candidate = _prospective_say_config(
         repo_root,
         scope,
-        clear_keys=config.SAY_MUTABLE_KEYS,
+        clear_keys=values.SAY_MUTABLE_KEYS,
         include_later=True,
     )
     _validate_say_candidate(repo_root, scope, candidate)
@@ -297,17 +297,17 @@ def _prospective_say_config(
     repo_root: Path,
     scope: str,
     *,
-    values: dict[str, Any] | None = None,
+    section: dict[str, Any] | None = None,
     clear_keys: tuple[str, ...] = (),
     include_later: bool = False,
 ) -> dict[str, Any]:
-    scopes = config.CONFIG_SCOPE_NAMES
+    scopes = layers.CONFIG_SCOPE_NAMES
     stop = len(scopes) if include_later else scopes.index(scope) + 1
     effective: dict[str, Any] = {}
     for current_scope in scopes[:stop]:
-        layer = config.layer_table(repo_root, current_scope, config.SAY_KEY)
+        layer = layers.layer_table(repo_root, current_scope, values.SAY_KEY)
         if current_scope == scope:
-            layer.update(values or {})
+            layer.update(section or {})
             for key in clear_keys:
                 layer.pop(key, None)
         effective.update(layer)
@@ -318,9 +318,9 @@ def _validate_say_candidate(
     repo_root: Path, scope: str, candidate: dict[str, Any]
 ) -> None:
     backend = str(
-        candidate.get(config.SAY_BACKEND_KEY) or config.DEFAULT_SAY_BACKEND
+        candidate.get(values.SAY_BACKEND_KEY) or values.DEFAULT_SAY_BACKEND
     ).strip()
-    command = str(candidate.get(config.SAY_COMMAND_KEY) or "").strip()
+    command = str(candidate.get(values.SAY_COMMAND_KEY) or "").strip()
     if backend == "external" and not command:
         raise SpiceError(
             _scope_error(
@@ -330,23 +330,23 @@ def _validate_say_candidate(
 
 
 def _say_config_summary(repo_root: Path) -> str:
-    backend = config.configured_say_backend(repo_root)
+    backend = values.configured_say_backend(repo_root)
     if backend == "external":
-        command = config.configured_say_command(repo_root) or "-"
-        content_type = config.configured_say_content_type(repo_root)
+        command = values.configured_say_command(repo_root) or "-"
+        content_type = values.configured_say_content_type(repo_root)
         return f"say backend=external command={command} content_type={content_type}"
-    return f"say backend=say argv={' '.join(config.say_command_args(repo_root))}"
+    return f"say backend=say argv={' '.join(values.say_command_args(repo_root))}"
 
 
-def _agent_scope_line(scope: str, values: dict[str, str]) -> str:
+def _agent_scope_line(scope: str, section: dict[str, str]) -> str:
     return (
         f"agent {scope} "
-        f"driver={values.get(config.AGENT_DRIVER_KEY) or '-'} "
-        f"model={values.get(config.AGENT_MODEL_KEY) or '-'} "
-        f"effort={values.get(config.AGENT_EFFORT_KEY) or '-'}"
+        f"driver={section.get(values.AGENT_DRIVER_KEY) or '-'} "
+        f"model={section.get(values.AGENT_MODEL_KEY) or '-'} "
+        f"effort={section.get(values.AGENT_EFFORT_KEY) or '-'}"
     )
 
 
 def _scope_error(repo_root: Path, scope: str, detail: str) -> str:
-    path = config.config_scope_path(repo_root, scope)
+    path = edit.config_scope_path(repo_root, scope)
     return f"{detail} (scope={scope} path={path})"
