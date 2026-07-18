@@ -96,7 +96,9 @@ wrappers. It does not choose commands for RTK; it preserves native semantics
 after RTK selection by routing:
 
 - rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`, `-g`,
-  `--glob`, `--glob=*`) to `rg`;
+  `--glob`, `--glob=*`) and trailing-directory operands (any operand ending in
+  `/`, matched by the `*/` glob) to `rg`, so a directory search keeps native rg
+  semantics instead of the canonical `rtk grep` frontend;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every remaining Codex-authored `rtk grep` through a final head-only
