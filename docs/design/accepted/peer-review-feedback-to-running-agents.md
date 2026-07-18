@@ -1,8 +1,8 @@
 # Peer Review Feedback To Running Agents
 
-Status: recommendation, 2026-06-26.
+Status: implemented contract, 2026-07-18.
 
-## Recommendation
+## Implemented Contract
 
 Feed peer-review results back to running agents, but only through an explicit
 review-feedback bridge that compiles task review outcomes into ordinary,
@@ -249,14 +249,14 @@ Clean-review auto-praise is rejected for the first version. The desire for
 positive pressure is real, but clean-review praise is better represented as
 team-visible review health than as an interrupting directive.
 
-## Follow-Ups
+## Implementation Evidence
 
-- `INBOX-20260626T060827027088Z`: add a non-resurrecting `review` inbox
-  guidance priority/class so review feedback remains ACKable but does not wake
-  idle agents as operator steering.
-- `REVIEW-20260626T060834668927Z`: route non-clean task review summaries to
-  active original authors with provenance, dedupe, inactive-target no-op, and
-  no allocator mutation.
-- `UI-20260626T060841241639Z`: surface passive review-pressure indicators in
-  serve lanes/teams so review state creates shared alignment without inbox
-  broadcasts.
+- `spice/tasks/reviewfeedback.py` compiles non-clean reviews into deduplicated,
+  non-resurrecting `[REVIEW]` inbox guidance and records delivered, inactive,
+  and ambiguous outcomes.
+- `spice/tasks/ops.py` invokes the bridge only after the review and required
+  follow-up tracking are durable.
+- Serve lane payloads project review pressure without broadcasting review text
+  to unrelated agents.
+- Focused review-feedback and browser tests pin provenance, dedupe, targeting,
+  ACK behavior, passive visibility, and the clean-review no-op.

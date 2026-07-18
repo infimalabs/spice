@@ -1,13 +1,14 @@
 # Sidecar Artifact Storage
 
-Status: recommendation, 2026-06-26.
+Status: implemented contract, 2026-07-18.
 
-## Recommendation
+## Implemented Contract
 
-Add a task-addressed sidecar artifact store for large non-code outputs that
-should be durable and reviewable without becoming source-tree changes.
+Spice provides a task-addressed sidecar artifact store for large non-code
+outputs that should be durable and reviewable without becoming source-tree
+changes.
 
-Implement a small production command surface:
+The production command surface is:
 
 ```sh
 spice task artifact add <task> <path> [--name NAME] [--type CONTENT_TYPE]
@@ -76,8 +77,7 @@ sidecars disappear or conflict across worktrees.
 
 ## Task Show / Render Integration
 
-`spice task show <handle>` should append an `artifacts:` block when a manifest
-exists:
+`spice task show <handle>` appends an `artifacts:` block when a manifest exists:
 
 ```text
 artifacts:
@@ -163,8 +163,17 @@ tasks. Artifact creation is supporting evidence, not allocator selection.
 - Do not put large artifact bodies into task annotations or serve lane payloads.
 - Do not build a general file manager before the task-addressed path exists.
 
-## Follow-Ups
+## Implementation Evidence And Residuals
 
-- `ARTIFAC-20260626T060419124312Z`: implement the `spice task artifact` storage
-  and CLI surface, including task show integration, review citation visibility,
-  retention flags, and focused tests.
+- `spice/tasks/artifacts.py` implements content-addressed add/list/show/prune,
+  atomic manifests, limits, retention flags, integrity metadata, and dry-run
+  pruning.
+- `spice task show` renders compact artifact rows, and review notes can cite
+  stable task-local ids.
+- Focused task CLI tests pin storage, rendering, limits, retention, and command
+  behavior.
+
+Serve-specific artifact rendering, explicit marking when a task is deleted,
+and a separate human-authored manifest summary are deferred. The implemented
+CLI/task-show V1 is complete without those optional consumers; adding them must
+extend this single store rather than create a second artifact path.

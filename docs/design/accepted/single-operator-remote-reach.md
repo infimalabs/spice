@@ -1,8 +1,8 @@
 # Single-Operator Remote Reach
 
-Status: recommendation, 2026-07-11.
+Status: implemented contract, 2026-07-18.
 
-## Recommendation
+## Implemented Contract
 
 Remote reach for one operator is a **transport** choice over the serve endpoint
 that already exists, not a new addressing model and not a new auth model. In one

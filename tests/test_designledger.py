@@ -34,12 +34,7 @@ ALLOWED_EXCEPTIONS: dict[str, str] = {}
 # home for generated output. Each entry names the durable reason it belongs in
 # the design ledger; exact inventory comparison below makes every new data drop
 # fail until it receives the same explicit adjudication.
-REVIEWED_ARTIFACT_ALLOWLIST = {
-    "experimental/subsumption-cohorts-2026-07-16.tsv": (
-        "stable machine-readable cohort queue used by deferred adjudication task "
-        "SUBSUMP-1kDf7Hhb"
-    ),
-}
+REVIEWED_ARTIFACT_ALLOWLIST: dict[str, str] = {}
 
 STATUS_LINE = re.compile(
     r"^Status: (?P<family>[a-z][a-z ]*[a-z]), (?P<date>\d{4}-\d{2}-\d{2})\.(?: |$)"

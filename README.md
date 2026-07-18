@@ -57,7 +57,7 @@ identity — not a limitation to grow out of:
 - **The growth vector is remote reach for one operator**, not multi-user auth.
   Reaching your own fleet from elsewhere is a transport choice — an SSH tunnel
   or a tailnet bind over the same one-token surface (see
-  [single-operator remote reach](docs/design/experimental/single-operator-remote-reach.md)).
+  [single-operator remote reach](docs/design/accepted/single-operator-remote-reach.md)).
 - **Multi-user auth is an explicit non-goal.** Do not grow a multi-operator team
   product out of the stdlib server. Many humans may steer one lane, but only
   through the same durable filesystem queue — never privileged per-user channels
