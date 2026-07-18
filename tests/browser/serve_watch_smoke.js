@@ -86,8 +86,7 @@ async function observerDiagnostics(page) {
           ? "unavailable"
           : globalTransientStatusText,
       laneCount: document.querySelectorAll(".lane").length,
-      targetCount:
-        typeof targets === "undefined" ? "unavailable" : targets.length,
+      targetCount: laneStore.targetsSnapshot().length,
       teams,
       applyError,
     };

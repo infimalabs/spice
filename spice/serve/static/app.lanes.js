@@ -51,19 +51,19 @@ function refreshTargets() {
 }
 
 function applyTargetsPayload(payload) {
-  targets = payload.workTrees || [];
-  targetById = new Map(targets.map((target) => [target.id, target]));
+  laneStore.replaceTargets(payload.workTrees || []);
   targetsLoaded = true;
   syncObserverNotice(payload.observerErrors || []);
   clearGlobalActivityStatus("loading teams");
   applyTaskFilterInventory(payload.taskFilterInventory || {});
   for (const lane of [...laneStates.values()]) {
-    if (!targetById.has(lane.targetId) && !lane.emptyTeam) closeLaneCore(lane);
+    if (!laneStore.targetForId(lane.targetId) && !lane.emptyTeam)
+      closeLaneCore(lane);
   }
   renderFilterPills();
   for (const lane of laneStates.values()) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
-    else renderLaneChrome(lane, targetById.get(lane.targetId));
+    else renderLaneChrome(lane, laneStore.targetForId(lane.targetId));
   }
   if (spiceMenuEl) renderSpiceMenuIfAvailable();
 }
@@ -81,7 +81,10 @@ function syncObserverNotice(errors) {
     notice.setAttribute("role", "alert");
     lanesEl.prepend(notice);
   }
-  notice.classList.toggle("observer-notice--empty", targets.length === 0);
+  notice.classList.toggle(
+    "observer-notice--empty",
+    laneStore.targetsSnapshot().length === 0,
+  );
   notice.textContent = errors.join("; ");
 }
 
@@ -96,12 +99,12 @@ function applyTaskFilterInventory(inventory) {
 }
 
 function syncTaskFilterInventoryState(inventory) {
-  if (typeof targets !== "undefined" && Array.isArray(targets)) {
-    for (const target of targets) target.taskFilterInventory = inventory;
-  }
-  if (typeof targetById !== "undefined" && targetById?.values) {
-    for (const target of targetById.values()) target.taskFilterInventory = inventory;
-  }
+  laneStore.replaceTargets(
+    laneStore.targetsSnapshot().map((target) => ({
+      ...target,
+      taskFilterInventory: inventory,
+    })),
+  );
   if (typeof laneStates === "undefined" || !laneStates?.values) return;
   for (const lane of laneStates.values()) lane.taskFilterInventory = inventory;
 }
@@ -251,7 +254,11 @@ function teamMemberTargetIds(team) {
   const targetIds = [];
   for (const member of team.members || []) {
     const targetId = teamMemberTargetId(member, team, targetIds);
-    if (targetId && targetById.has(targetId) && !targetIds.includes(targetId))
+    if (
+      targetId &&
+      laneStore.targetForId(targetId) &&
+      !targetIds.includes(targetId)
+    )
       targetIds.push(targetId);
   }
   return targetIds;
@@ -265,14 +272,14 @@ function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
   if (!actorId) return "";
   if (teamActorKind(actorId) === "target") {
     const targetId = teamActorValue(actorId);
-    return targetById.has(targetId) ? targetId : "";
+    return laneStore.targetForId(targetId) ? targetId : "";
   }
   const laneTargetId = teamMemberLaneTargetId(actorId);
   if (laneTargetId) {
     renameTeamMemberTargetThread(laneTargetId, actorId);
     return laneTargetId;
   }
-  for (const target of targets) {
+  for (const target of laneStore.targetsSnapshot()) {
     if (teamActorMatchesThread(actorId, targetIdentityThreadId(target.targetIdentity)))
       return target.id;
   }
@@ -283,7 +290,7 @@ function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
 
 function teamMemberLaneTargetId(actorId) {
   for (const lane of laneStates.values()) {
-    if (!targetById.has(lane.targetId)) continue;
+    if (!laneStore.targetForId(lane.targetId)) continue;
     if (
       teamActorMatchesThread(actorId, lane.targetThreadId) ||
       teamActorMatchesThread(actorId, lane.activeThreadId)
@@ -301,7 +308,7 @@ function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
   const candidates = [];
   for (const lane of laneStates.values()) {
     if (lane.emptyTeam || claimed.has(lane.targetId)) continue;
-    const target = targetById.get(lane.targetId);
+    const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
     if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
       continue;
@@ -317,12 +324,13 @@ function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
 function renameTeamMemberTargetThread(targetId, actorId) {
   const threadId = teamActorThreadId(actorId);
   if (!threadId) return;
-  const target = targetById.get(targetId);
-  if (target)
-    target.targetIdentity = {
+  laneStore.updateTarget(targetId, (target) => ({
+    ...target,
+    targetIdentity: {
       ...(target.targetIdentity || {}),
       thread: { state: "bound", threadId },
-    };
+    },
+  }));
   const lane = laneStates.get(targetId);
   if (!lane) return;
   lane.targetThreadId = threadId;
@@ -336,7 +344,7 @@ function preserveUnresolvedTeamLanes(team, openTargetIds) {
   const actorIds = teamMemberActorIds(team);
   for (const lane of laneStates.values()) {
     if (lane.emptyTeam) continue;
-    const target = targetById.get(lane.targetId);
+    const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
     if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
       continue;
@@ -406,7 +414,7 @@ function teamMemberForTargetId(team, targetId) {
 function laneTeamAgentId(lane) {
   const actor = threadTeamActorId(lane.targetThreadId);
   if (actor) return actor;
-  const target = targetById.get(lane.targetId);
+  const target = laneStore.targetForId(lane.targetId);
   const targetActor = target
     ? threadTeamActorId(targetIdentityThreadId(target.targetIdentity))
     : "";
@@ -439,7 +447,7 @@ async function openTargetTeam(targetId, options = {}) {
     if (!keepMenuOpen) closeSpiceMenu();
     return;
   }
-  const target = targetById.get(targetId);
+  const target = laneStore.targetForId(targetId);
   if (!target) throw new Error("open team requires a known target");
   await refreshTeamSnapshot({ force: true });
   if (!laneStates.has(targetId)) {
@@ -535,7 +543,7 @@ function persistLaneHints() {
   const hints = [];
   for (const lane of laneStates.values()) {
     if (!isLaneOpen(lane)) continue;
-    if (lane.emptyTeam || !targetById.has(lane.targetId)) continue;
+    if (lane.emptyTeam || !laneStore.targetForId(lane.targetId)) continue;
     hints.push({
       targetId: lane.targetId,
       speechMode: lane.speechMode,
@@ -565,7 +573,7 @@ function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
 function updateLiveTargetChoiceMetadata() {
   for (const element of document.querySelectorAll("[data-target-choice-id]")) {
     const button = /** @type {HTMLElement} */ (element);
-    const target = targetById.get(button.dataset.targetChoiceId || "");
+    const target = laneStore.targetForId(button.dataset.targetChoiceId || "");
     if (!target) continue;
     updateTargetChoiceButtonPresentation(
       button,
@@ -980,7 +988,7 @@ function taskFilterStemDrainability(stem) {
 
 function laneMemberCanDrain(member) {
   const statusLine = member.lastRenderedStatusLine || {};
-  const fromTarget = targetById.get(member.targetId) || {};
+  const fromTarget = laneStore.targetForId(member.targetId) || {};
   return (
     (statusLine.agentProcessStatus || fromTarget.agentProcessStatus) ===
     "running"

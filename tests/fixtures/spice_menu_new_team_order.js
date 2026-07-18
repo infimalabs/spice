@@ -1,13 +1,12 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const menuPath = process.argv[2];
+const storePath = process.argv[2];
+const menuPath = process.argv[3];
 const context = {
   console,
   spiceMenuEl: null,
   spiceMenuNewTeamPlacementHints: [],
-  targetById: new Map(),
-  targets: [],
   compareTargetChoices(left, right) {
     const byActivity = (left.activityRank || 0) - (right.activityRank || 0);
     if (byActivity) return byActivity;
@@ -24,9 +23,13 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(menuPath, "utf8"), context, {
   filename: "app.menu.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -52,14 +55,11 @@ function target(id, branch, teamId = "", activityRank = 0) {
 }
 
 function setTargets(items) {
-  context.targets = items;
-  context.targetById = new Map(items.map((item) => [item.id, item]));
+  laneStore.replaceTargets(items);
 }
 
 function orderedMenuTeamIds() {
-  const choices = context.targets
-    .slice()
-    .sort(context.compareSpiceMenuTargetChoices);
+  const choices = laneStore.targetsSnapshot().sort(context.compareSpiceMenuTargetChoices);
   return context.spiceMenuTeamGroups(choices).map((group) => {
     if (group.newTeam) return "new-team-drop";
     if (group.unassigned) return "unassigned";

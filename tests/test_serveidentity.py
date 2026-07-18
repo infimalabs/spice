@@ -32,7 +32,12 @@ def test_lane_creation_passes_canonical_target_payload_directly():
     script = Path(__file__).with_name("fixtures") / "lane_creation_payload_direct.js"
 
     result = subprocess.run(
-        ["node", str(script), str(STATIC_ROOT / "app.shell.js")],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.shell.js"),
+        ],
         check=True,
     )
     assert result.returncode == 0

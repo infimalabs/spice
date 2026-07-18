@@ -255,18 +255,15 @@ def test_static_filter_pane_renders_server_effective_filters_not_durable_rows():
         in app_stream
     )
     assert (
-        "target.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
+        "updated.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
         in app_stream
     )
     assert (
         "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
         in app_lanes
     )
-    assert (
-        "targetById = new Map(targets.map((target) => [target.id, target]));"
-        in app_lanes
-    )
-    assert "renderLaneChrome(lane, targetById.get(lane.targetId));" in app_lanes
+    assert "laneStore.replaceTargets(payload.workTrees || []);" in app_lanes
+    assert "renderLaneChrome(lane, laneStore.targetForId(lane.targetId));" in app_lanes
     assert (
         "effectiveTaskFilters: uniqueStringList(target.effectiveTaskFilters || []),"
         in app_shell

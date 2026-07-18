@@ -69,8 +69,9 @@ function joinTeam(ids, revision) {
 
 function joinMeasure(config) {
   const seed = (ids) => {
-    targets = ids.map((id) => window.__joinTarget(id, id + "-th"));
-    targetById = new Map(targets.map((target) => [target.id, target]));
+    laneStore.replaceTargets(
+      ids.map((id) => window.__joinTarget(id, id + "-th")),
+    );
     applyTeamSnapshotPayload(
       {
         revision: 7,

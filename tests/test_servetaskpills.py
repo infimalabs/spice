@@ -54,7 +54,12 @@ def test_global_filter_pills_reject_stale_inventory_resurrection():
     script = Path(__file__).with_name("fixtures") / "task_filter_inventory_reconcile.js"
 
     result = subprocess.run(
-        ["node", str(script), str(STATIC_ROOT / "app.lanes.js")],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.lanes.js"),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -66,7 +71,12 @@ def test_global_filter_pill_ready_active_unavailable_state_model():
     script = Path(__file__).with_name("fixtures") / "task_filter_pill_states.js"
 
     result = subprocess.run(
-        ["node", str(script), str(STATIC_ROOT / "app.lanes.js")],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.lanes.js"),
+        ],
         check=True,
         capture_output=True,
         text=True,

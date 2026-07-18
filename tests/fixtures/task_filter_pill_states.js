@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const lanesPath = process.argv[2];
+const storePath = process.argv[2];
+const lanesPath = process.argv[3];
 const lane = {
   targetId: "lane-a",
   lastRenderedStatusLine: { agentProcessStatus: "running" },
@@ -9,7 +10,6 @@ const lane = {
 const context = {
   console,
   laneStates: new Map([["lane-a", lane]]),
-  targetById: new Map([["lane-a", { agentProcessStatus: "running" }]]),
   uniqueStringList(items) {
     return Array.from(new Set((items || []).filter(Boolean)));
   },
@@ -37,9 +37,16 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.replaceTargets([
+  { id: "lane-a", agentProcessStatus: "running" },
+]);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

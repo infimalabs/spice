@@ -209,12 +209,11 @@ async function ssMeasure(config) {
   window.__ssInstallStubs(state, config);
   state.payloadByTargetId = window.__ssBuildPayloads(config);
 
-  targets = [
+  laneStore.replaceTargets([
     window.__ssTarget(config.fusedIds[0], config.fusedIds[0] + "-th", "team-fused", 1),
     window.__ssTarget(config.fusedIds[1], config.fusedIds[1] + "-th", "team-fused", 1),
     window.__ssTarget(config.soloId, config.soloId + "-th", "team-solo", 1),
-  ];
-  targetById = new Map(targets.map((target) => [target.id, target]));
+  ]);
 
   applyTeamSnapshotPayload(
     {

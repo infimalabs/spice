@@ -22,12 +22,12 @@ function pageTopology() {
     lanes,
     storedConfig: localStorage.getItem(laneStorageKey),
     snapshotRevision: teamSnapshotRevision,
-    targetIds: targets.map((target) => target.id),
+    targetIds: laneStore.targetsSnapshot().map((target) => target.id),
   };
 }
 
 function installStaleOpenLaneHints() {
-  const hints = targets.map((target, index) => ({
+  const hints = laneStore.targetsSnapshot().map((target, index) => ({
     targetId: target.id,
     open: true,
     speechMode: defaultSpeechMode,

@@ -99,7 +99,7 @@ function renderObserverSessionMenu() {
   heading.textContent = "sessions";
   const list = document.createElement("div");
   list.className = "spice-menu-target-list";
-  const choices = targets.slice().sort(compareSpiceMenuTargetChoices);
+  const choices = laneStore.targetsSnapshot().sort(compareSpiceMenuTargetChoices);
   list.replaceChildren(
     ...choices.map((target) =>
       targetChoiceButton(target, "View session", () => {
@@ -249,9 +249,7 @@ function renderSpiceMenuTargets() {
       ? "loading teams"
       : "team list unavailable";
   } else {
-    const choices = targets
-      .slice()
-      .sort(compareSpiceMenuTargetChoices);
+    const choices = laneStore.targetsSnapshot().sort(compareSpiceMenuTargetChoices);
     const groups = spiceMenuTeamGroups(choices);
     list.replaceChildren(...groups.map(renderSpiceMenuTeamGroup));
     if (!groups.length) list.textContent = "no agents available";
@@ -272,7 +270,7 @@ function spiceMenuTeamGroups(choices) {
     if (!grouped.has(teamId)) {
       grouped.set(teamId, {
         teamId,
-        totalCount: targets.filter(
+        totalCount: choices.filter(
           (item) => teamIdentityTeamId(item.teamIdentity) === teamId,
         ).length,
         targets: [],
@@ -609,7 +607,7 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
     );
   let hasMenuDrop = false;
   let menuDropTeamId = "";
-  const sourceTarget = targetById.get(target.id) || target;
+  const sourceTarget = laneStore.targetForId(target.id) || target;
   let shouldOpenDesktop = false;
   if (state.dragging && state.overContainer) {
     hasMenuDrop = true;
@@ -755,14 +753,14 @@ function clearSpiceMenuTeamDropHighlights() {
 
 function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
   if (!targetId) return false;
-  const target = targetById.get(targetId);
+  const target = laneStore.targetForId(targetId);
   if (!target) return false;
   if (teamId === spiceMenuNewTeamDropId) return true;
   return teamIdentityTeamId(target.teamIdentity) !== (teamId || "");
 }
 
 function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
-  const target = targetById.get(targetId);
+  const target = laneStore.targetForId(targetId);
   if (!target) return;
   if (teamIdentityTeamId(target.teamIdentity) === (teamId || "")) return;
   if (teamId === spiceMenuNewTeamDropId)
@@ -771,10 +769,7 @@ function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
     teamId === spiceMenuNewTeamDropId
       ? optimisticNewMenuTeamIdentity(targetId)
       : optimisticMenuTeamIdentity(teamId);
-  targets = targets.map((item) =>
-    item.id === targetId ? { ...item, teamIdentity } : item,
-  );
-  targetById = new Map(targets.map((item) => [item.id, item]));
+  laneStore.updateTarget(targetId, (item) => ({ ...item, teamIdentity }));
   if (spiceMenuEl) renderSpiceMenu();
 }
 
@@ -807,7 +802,7 @@ function optimisticNewMenuTeamId(targetId) {
 function optimisticMenuTeamIdentity(teamId) {
   const id = String(teamId || "");
   if (!id) return { state: "none" };
-  for (const target of targets) {
+  for (const target of laneStore.targetsSnapshot()) {
     if (teamIdentityTeamId(target.teamIdentity) === id)
       return { ...target.teamIdentity };
   }
@@ -815,7 +810,7 @@ function optimisticMenuTeamIdentity(teamId) {
 }
 
 async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
-  const target = sourceTarget || targetById.get(targetId);
+  const target = sourceTarget || laneStore.targetForId(targetId);
   if (!target) throw new Error("move target requires target");
   if (teamId === spiceMenuNewTeamDropId) {
     await requestTeamCommand(

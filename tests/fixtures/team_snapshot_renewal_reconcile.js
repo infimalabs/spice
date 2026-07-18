@@ -1,17 +1,22 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
-const lanesPath = process.argv[3];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
+const lanesPath = process.argv[4];
 const context = { console };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -63,12 +68,12 @@ function normalizeTeamActorId(actorId) {
   if (!actor) return "";
   if (actor.startsWith("target:")) return targetTeamActorId(actor.slice(7));
   if (actor.startsWith("thread:")) return threadTeamActorId(actor.slice(7));
-  if (context.targetById && context.targetById.has(actor))
-    return targetTeamActorId(actor);
+  if (laneStore.targetForId(actor)) return targetTeamActorId(actor);
   return threadTeamActorId(actor);
 }
 
 function resetGlobals() {
+  laneStore.replaceTargets([]);
   context.teamSnapshotRevision = 0;
   context.browserStorage = () => null;
   context.canonicalThreadActorId = canonicalThreadActorId;
@@ -159,8 +164,7 @@ const renamedLane = {
   sendAwaitingBackendCount: 0,
   element: { remove() {} },
 };
-context.targets = [staleTarget];
-context.targetById = new Map([[staleTarget.id, staleTarget]]);
+laneStore.replaceTargets([staleTarget]);
 context.laneStates = new Map([[renamedLane.targetId, renamedLane]]);
 
 applySnapshot(renewalTeam("thread:successorthread"));
@@ -170,8 +174,9 @@ assert(
   "renewed successor stays attached to the existing worktree lane",
 );
 assert(
-  staleTarget.targetIdentity.thread.threadId === "successorthread",
-  "stale target inventory thread id is renamed in place to the successor",
+  laneStore.targetForId("target-1").targetIdentity.thread.threadId ===
+    "successorthread",
+  "stale target inventory thread id is replaced with the successor",
 );
 assert(
   renamedLane.occupantThreadId === "successorthread",
@@ -196,8 +201,7 @@ const pendingLane = {
   sendAwaitingBackendCount: 1,
   element: { remove() {} },
 };
-context.targets = [pendingTarget];
-context.targetById = new Map([[pendingTarget.id, pendingTarget]]);
+laneStore.replaceTargets([pendingTarget]);
 context.laneStates = new Map([[pendingLane.targetId, pendingLane]]);
 
 applySnapshot(renewalTeam("thread:successorthread"));
@@ -211,8 +215,9 @@ assert(
   "early renewal snapshot renames the lane thread id in place",
 );
 assert(
-  pendingTarget.targetIdentity.thread.threadId === "successorthread",
-  "early renewal snapshot renames stale target inventory in place",
+  laneStore.targetForId("target-1").targetIdentity.thread.threadId ===
+    "successorthread",
+  "early renewal snapshot replaces stale target inventory",
 );
 assert(
   context.emptyTeamCalls.length === 0,

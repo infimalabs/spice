@@ -169,9 +169,7 @@ async function removeSeedRoot(seedRoot) {
 async function runProbe(page, server, seed) {
   await page.waitForFunction(
     () =>
-      typeof targets !== "undefined" &&
-      Array.isArray(targets) &&
-      targets.length > 0 &&
+      laneStore.targetsSnapshot().length > 0 &&
       typeof addLane === "function" &&
       typeof laneStates !== "undefined" &&
       typeof handleLiveBusMessage === "function" &&
@@ -264,7 +262,7 @@ async function runProbe(page, server, seed) {
 // (targetId, threadId) pairs whose watchers this probe will exercise.
 async function bindLanes(page, count) {
   return page.evaluate((count) => {
-    const bound = targets.filter(
+    const bound = laneStore.targetsSnapshot().filter(
       (target) => target.targetIdentity?.thread?.state === "bound",
     );
     const lanes = [];
