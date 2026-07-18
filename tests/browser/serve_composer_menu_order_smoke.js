@@ -18,7 +18,7 @@ async function run() {
         () =>
           typeof composerPrimaryMenuActions === "function" &&
           typeof composerBandMenuTrigger === "function" &&
-          typeof laneStates !== "undefined",
+          typeof laneStore !== "undefined",
         { timeout: 10000 },
       );
 
@@ -26,7 +26,7 @@ async function run() {
         const targetId = "composer-menu-order-agent";
         const lane = { targetId, closed: false };
         const member = { targetId, renewalIntent: {} };
-        laneStates.set(targetId, lane);
+        laneStore.registerLane(lane);
 
         const band = document.createElement("div");
         band.className = "composer-band";
@@ -52,7 +52,7 @@ async function run() {
         };
 
         band.remove();
-        laneStates.delete(targetId);
+        laneStore.removeLane(targetId);
         return snapshot;
       });
 

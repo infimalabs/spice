@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
 const source = fs.readFileSync(renderPath, "utf8");
 let nextTimerId = 1;
 const timers = new Map();
@@ -14,12 +15,13 @@ function fakeNode(text = "") {
   };
 }
 
-function fakeLane(preview) {
+function fakeLane(targetId, preview) {
   const statusLine = {
     preview,
     lastAssistantAt: new Date(Date.now() - 2000).toISOString(),
   };
   return {
+    targetId,
     renderedStatusFingerprint: "",
     lastRenderedStatusLine: statusLine,
     statusErrorEl: fakeNode(),
@@ -34,13 +36,12 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const lane = fakeLane("latest activity");
+const lane = fakeLane("lane", "latest activity");
 const context = {
   Date,
   Map,
   Number,
   console,
-  laneStates: new Map([["lane", lane]]),
   clearTimeout(id) {
     timers.delete(id);
   },
@@ -52,6 +53,11 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.registerLane(lane);
 vm.runInContext(source, context, { filename: renderPath });
 
 context.setLaneStatus(lane, lane.lastRenderedStatusLine);

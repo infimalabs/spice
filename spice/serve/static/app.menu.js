@@ -103,7 +103,7 @@ function renderObserverSessionMenu() {
   list.replaceChildren(
     ...choices.map((target) =>
       targetChoiceButton(target, "View session", () => {
-        const lane = laneStates.get(target.id);
+        const lane = laneStore.laneForId(target.id);
         if (lane) {
           lane.element.scrollIntoView({
             behavior: "smooth",
@@ -460,7 +460,7 @@ function defaultTeamConfig() {
 }
 
 function renderTargetChoice(target, group = null) {
-  const alreadyOpen = laneStates.has(target.id);
+  const alreadyOpen = laneStore.hasLane(target.id);
   let actionLabel = "Create team";
   if (alreadyOpen) actionLabel = "Show team";
   else if (group && !group.unassigned) actionLabel = "Open team";

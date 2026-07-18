@@ -23,7 +23,7 @@ async function laneReloadSetupPage() {
       config: { ...defaultTeamConfig(), lifetime },
     }),
   );
-  const shells = Array.from(laneStates.values()).filter(
+  const shells = laneStore.lanesSnapshot().filter(
     (lane) => lane.emptyTeam && lane.teamId,
   );
   if (shells.length !== 1)
@@ -32,7 +32,7 @@ async function laneReloadSetupPage() {
     );
   const lane = shells[0];
   return {
-    laneCount: laneStates.size,
+    laneCount: laneStore.lanesSnapshot().length,
     requestedLifetime: lifetime,
     lifetime: lane.lifetime,
     targetId: lane.targetId,
@@ -41,10 +41,10 @@ async function laneReloadSetupPage() {
 }
 
 function laneReloadVerifyPage(before) {
-  const lane = laneStates.get(before.targetId);
+  const lane = laneStore.laneForId(before.targetId);
   return {
     emptyTeam: Boolean(lane && lane.emptyTeam),
-    laneCount: laneStates.size,
+    laneCount: laneStore.lanesSnapshot().length,
     present: Boolean(lane),
     lifetime: lane ? lane.lifetime : "",
     teamId: lane ? lane.teamId : "",
@@ -83,7 +83,7 @@ async function run() {
       await installIsolatedLaneFixture(page, laneReloadFixtureOptions);
       await page.waitForFunction(
         (before) => {
-          const lane = laneStates.get(before.targetId);
+          const lane = laneStore.laneForId(before.targetId);
           return Boolean(lane && lane.emptyTeam && lane.teamId === before.teamId);
         },
         beforeReload,

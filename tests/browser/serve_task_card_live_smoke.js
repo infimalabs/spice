@@ -72,7 +72,7 @@ async function prepareLiveTaskCardLane(page) {
     () =>
       laneStore.targetsSnapshot().length > 0 &&
       typeof addLane === "function" &&
-      typeof laneStates !== "undefined",
+      typeof laneStore !== "undefined",
   );
   const lane = await ensureLiveTaskCardLane(page);
   await focusLiveTaskCardLane(page, lane);
@@ -80,7 +80,7 @@ async function prepareLiveTaskCardLane(page) {
     page,
     "bound-lane-selected",
     ({ targetId, threadId }) => {
-      const selected = laneStates.get(targetId);
+      const selected = laneStore.laneForId(targetId);
       return Boolean(
         selected &&
           selected.targetId === targetId &&
@@ -131,7 +131,7 @@ async function createAndObserveTaskCard(
 }
 
 function taskCardReachedLane({ targetId, title, generation }) {
-  const selected = laneStates.get(targetId);
+  const selected = laneStore.laneForId(targetId);
   return Boolean(
     selected &&
       selected.liveBusSubscriptionGeneration === generation &&
@@ -143,7 +143,7 @@ function taskCardReachedLane({ targetId, title, generation }) {
 
 async function focusLiveTaskCardLane(page, lane) {
   await page.evaluate((targetId) => {
-    const selected = laneStates.get(targetId);
+    const selected = laneStore.laneForId(targetId);
     if (!selected) throw new Error("task-card focus lane disappeared");
     setFocusedLiveBusLane(selected);
   }, lane.targetId);
@@ -151,14 +151,14 @@ async function focusLiveTaskCardLane(page, lane) {
     page,
     "focused-lane",
     (targetId) => {
-      const selected = laneStates.get(targetId);
+      const selected = laneStore.laneForId(targetId);
       return Boolean(selected && liveBusLaneIsFocused(selected));
     },
     lane.targetId,
     lane.targetId,
   );
   await page.evaluate(async (targetId) => {
-    const selected = laneStates.get(targetId);
+    const selected = laneStore.laneForId(targetId);
     if (!selected) throw new Error("task-card focus lane disappeared");
     await liveBusRequest("lane.configure", {
       targetId,
@@ -256,7 +256,7 @@ async function waitForLiveTaskCardSubscription(page, lane) {
     page,
     "subscription-generation",
     (targetId) => {
-      const selected = laneStates.get(targetId);
+      const selected = laneStore.laneForId(targetId);
       return Boolean(selected && selected.liveBusSubscriptionGeneration);
     },
     lane.targetId,
@@ -266,7 +266,7 @@ async function waitForLiveTaskCardSubscription(page, lane) {
     page,
     "watcher-activation",
     (targetId) => {
-      const selected = laneStates.get(targetId);
+      const selected = laneStore.laneForId(targetId);
       return Boolean(
         selected &&
           selected.liveBusSubscribed &&
@@ -279,14 +279,14 @@ async function waitForLiveTaskCardSubscription(page, lane) {
   );
   const activeGeneration = await page.evaluate((targetId) => {
     return String(
-      laneStates.get(targetId)?.liveBusSubscriptionGeneration || "",
+      laneStore.laneForId(targetId)?.liveBusSubscriptionGeneration || "",
     );
   }, lane.targetId);
   await waitForTaskCardStage(
     page,
     "initial-payload",
     ({ targetId, generation }) => {
-      const selected = laneStates.get(targetId);
+      const selected = laneStore.laneForId(targetId);
       return Boolean(
         selected &&
           selected.liveBusSubscriptionGeneration === generation &&
@@ -317,10 +317,10 @@ async function ensureLiveTaskCardLane(page) {
     const target =
       boundTargets[Math.min(targetOffset, boundTargets.length - 1)];
     if (!target) throw new Error("no bound target available for task-card smoke");
-    let lane = laneStates.get(target.id);
+    let lane = laneStore.laneForId(target.id);
     if (!lane) {
       addLane(target.id);
-      lane = laneStates.get(target.id);
+      lane = laneStore.laneForId(target.id);
     }
     if (!lane) throw new Error("no lane available for task-card smoke");
     const threadId = lane.targetThreadId || lane.activeThreadId || "";
@@ -386,11 +386,7 @@ async function waitForTaskCardVisible(
 
 async function taskCardDiagnostics(page, targetId, stage) {
   return page.evaluate(({ id, stageName }) => {
-    const stateMap =
-      typeof laneStates !== "undefined" && laneStates instanceof Map
-        ? laneStates
-        : null;
-    const lane = stateMap ? stateMap.get(id) : null;
+    const lane = laneStore.laneForId(id) || null;
     const observedMessageKeys = lane
       ? lane.knownMessages.map((item) => item.key || "")
       : [];

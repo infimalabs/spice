@@ -77,8 +77,9 @@ async function buildMosaicPerfBoard(page, cardCount) {
   return page.evaluate((count) => {
     const teamId = "mosaic-perf-smoke-team";
     const targetId = emptyTeamTargetId(teamId);
-    if (!laneStates.has(targetId)) addEmptyTeamLane({ teamId, revision: 1, config: {} });
-    const lane = laneStates.get(targetId);
+    if (!laneStore.hasLane(targetId))
+      addEmptyTeamLane({ teamId, revision: 1, config: {} });
+    const lane = laneStore.laneForId(targetId);
     lane.emptyTeam = false;
     const items = [];
     for (let index = 0; index < count; index += 1) {
@@ -98,7 +99,7 @@ async function buildMosaicPerfBoard(page, cardCount) {
 // measurements (base width, wide width), never a pass over the whole board.
 async function measureSingleInsert(page) {
   return page.evaluate(() => {
-    const lane = laneStates.get(window.__mosaicPerfLaneTargetId);
+    const lane = laneStore.laneForId(window.__mosaicPerfLaneTargetId);
     window.__mosaicPerfReset();
     const item = mosaicPerfBoardItem(9000, 2);
     lane.knownMessages.unshift(item);
@@ -115,7 +116,7 @@ async function measureSingleInsert(page) {
 async function measureFullReplay(page, cardCount) {
   await page.setViewportSize({ width: 900, height: 900 });
   return page.evaluate((count) => {
-    const lane = laneStates.get(window.__mosaicPerfLaneTargetId);
+    const lane = laneStore.laneForId(window.__mosaicPerfLaneTargetId);
     window.__mosaicPerfReset();
     lane.renderedMessageFingerprint = "";
     renderMessagesIfChanged(lane);
@@ -128,7 +129,7 @@ async function measureFullReplay(page, cardCount) {
 // mosaic measurement or packing machinery.
 async function measureSteadyStateTicks(page, tickCount) {
   return page.evaluate((count) => {
-    const lane = laneStates.get(window.__mosaicPerfLaneTargetId);
+    const lane = laneStore.laneForId(window.__mosaicPerfLaneTargetId);
     const originalRender = mosaicRenderMessageStream;
     let renderCalls = 0;
     mosaicRenderMessageStream = function (...args) {

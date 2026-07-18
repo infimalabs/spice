@@ -100,7 +100,7 @@ async function measureSoloAlpha(page, { alpha, soloTeam, soloMessage, alphaMessa
     ({ alpha, soloTeam, soloMessage, alphaMessage }) => {
       laneStore.replaceTargets([alpha]);
       applyTeamSnapshotPayload(teamSnapshotPayload(1, soloTeam), { force: true });
-      const solo = laneStates.get("alpha");
+      const solo = laneStore.laneForId("alpha");
       if (!solo) throw new Error("missing solo alpha lane");
 
       solo.knownMessages = [soloMessage];
@@ -128,8 +128,8 @@ async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMes
     ({ alpha, beta, fusedTeam, betaMessages }) => {
       laneStore.replaceTargets([alpha, beta]);
       applyTeamSnapshotPayload(teamSnapshotPayload(2, fusedTeam), { force: true });
-      const host = laneGroupHost(laneStates.get("alpha"));
-      const betaLane = laneStates.get("beta");
+      const host = laneGroupHost(laneStore.laneForId("alpha"));
+      const betaLane = laneStore.laneForId("beta");
       betaLane.knownMessages = betaMessages;
       betaLane.retainedMessageLimit = 50;
       host.renderedMessageFingerprint = "";
@@ -164,7 +164,7 @@ async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
     ({ alpha, survivorTeam }) => {
       laneStore.replaceTargets([alpha]);
       applyTeamSnapshotPayload(teamSnapshotPayload(3, survivorTeam), { force: true });
-      const survivorHost = laneGroupHost(laneStates.get("alpha"));
+      const survivorHost = laneGroupHost(laneStore.laneForId("alpha"));
       survivorHost.renderedMessageFingerprint = "";
       renderMessagesIfChanged(survivorHost);
       const survivorKeys = survivorHost.mosaicCards

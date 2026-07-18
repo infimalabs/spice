@@ -57,7 +57,7 @@ function mobileLayoutSnapshot(targetId) {
     right: window.innerWidth,
     top: 0,
   };
-  const lane = laneStates.get(targetId);
+  const lane = laneStore.laneForId(targetId);
   const panel = lane.element.querySelector(
     '[data-lane-view-panel="compose"]',
   );
@@ -94,7 +94,7 @@ function mobileLayoutSnapshot(targetId) {
 }
 
 function activePanelSnapshot(targetId) {
-  const lane = laneStates.get(targetId);
+  const lane = laneStore.laneForId(targetId);
   const panel = lane.element.querySelector(
     ".lane-view-panel--active[data-lane-view-panel]",
   );

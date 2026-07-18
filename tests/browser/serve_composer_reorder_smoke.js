@@ -22,7 +22,7 @@ async function run() {
           typeof snapshotComposerReorder === "function" &&
           typeof composerReorderDropTarget === "function" &&
           typeof clearComposerMoveDropHighlights === "function" &&
-          typeof laneStates !== "undefined" &&
+          typeof laneStore !== "undefined" &&
           typeof lanesEl !== "undefined",
         { timeout: 10000 },
       );
@@ -64,9 +64,9 @@ async function run() {
           shardsEl,
           groupTopology: topology,
         };
-        laneStates.set("alpha", hostLane);
+        laneStore.registerLane(hostLane);
         for (const id of ids.slice(1)) {
-          laneStates.set(id, {
+          laneStore.registerLane({
             targetId: id,
             closed: false,
             element: hostEl,
@@ -109,7 +109,7 @@ async function run() {
 
         const cleanup = () => {
           hostEl.remove();
-          for (const id of ids) laneStates.delete(id);
+          for (const id of ids) laneStore.removeLane(id);
         };
         cleanup();
 

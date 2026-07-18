@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AUDIO_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.audio.js"
+LANE_STORE_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.lane-store.js"
 
 
 def test_speech_text_preparation_strips_markdown_link_targets():
@@ -192,6 +193,7 @@ def _speech_session_title_states(brand: str | None = None) -> dict[str, str]:
 const fs = require("fs");
 const vm = require("vm");
 const path = process.argv[1];
+const storePath = process.argv[2];
 class FakeMediaMetadata {
   constructor(value) {
     Object.assign(this, value);
@@ -209,6 +211,7 @@ const context = {
   MediaMetadata: FakeMediaMetadata,
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
 vm.runInContext(
   "currentSpeech = {" +
@@ -234,7 +237,7 @@ process.stdout.write(JSON.stringify({
 """
     )
     result = subprocess.run(
-        ["node", "-e", script, str(AUDIO_JS)],
+        ["node", "-e", script, str(AUDIO_JS), str(LANE_STORE_JS)],
         capture_output=True,
         check=False,
         text=True,
@@ -252,6 +255,7 @@ def _narration_media_session_states() -> dict[str, object]:
 const fs = require("fs");
 const vm = require("vm");
 const path = process.argv[1];
+const storePath = process.argv[2];
 const actions = [];
 class FakeMediaMetadata {
   constructor(value) {
@@ -271,17 +275,18 @@ const context = {
     },
   },
   MediaMetadata: FakeMediaMetadata,
-  laneStates: new Map(),
   laneEffectiveSpeechMode: (lane) => lane.speechMode,
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
+const laneStore = vm.runInContext("laneStore", context);
 const speakLane = { targetId: "speak", speechMode: "speak" };
 const narrationLane = { targetId: "narrate", speechMode: "narrate" };
-context.laneStates.set("speak", speakLane);
+laneStore.registerLane(speakLane);
 context.syncNarrationMediaSession();
 const speakOnlyPlaybackState = context.navigator.mediaSession.playbackState;
-context.laneStates.set("narrate", narrationLane);
+laneStore.registerLane(narrationLane);
 context.syncNarrationMediaSession();
 const narrationPlaybackState = context.navigator.mediaSession.playbackState;
 narrationLane.closed = true;
@@ -294,7 +299,7 @@ process.stdout.write(JSON.stringify({
 }));
 """
     result = subprocess.run(
-        ["node", "-e", script, str(AUDIO_JS)],
+        ["node", "-e", script, str(AUDIO_JS), str(LANE_STORE_JS)],
         capture_output=True,
         check=False,
         text=True,

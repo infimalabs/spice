@@ -1,10 +1,11 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
-const liveBusPath = process.argv[3];
-const streamPath = process.argv[4];
-const submissionsPath = process.argv[5];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
+const liveBusPath = process.argv[4];
+const streamPath = process.argv[5];
+const submissionsPath = process.argv[6];
 const context = {
   console,
   Map,
@@ -14,6 +15,9 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
@@ -78,7 +82,7 @@ function lane() {
   };
 }
 
-context.laneStates = new Map();
+const laneStore = vm.runInContext("laneStore", context);
 context.laneGroupHost = (item) => item;
 context.renderLaneChrome = (item, payload) => {
   item.renderedChromePayload = payload;
@@ -103,7 +107,7 @@ context.refreshServerTopology = () => Promise.resolve();
 
 async function main() {
   const subject = lane();
-  context.laneStates.set(subject.targetId, subject);
+  laneStore.registerLane(subject);
   const initial = message("2026-06-22T03:00:00.000000Z#1", "initial");
   const fullPayload = {
     messages: [initial],

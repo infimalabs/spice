@@ -17,16 +17,16 @@ let laneTeamMenuDismissHandler = null;
 function reconcileLaneGroups(groupRuns) {
   const lifetimeStateByTargetId = new Map();
   const previousHostByMemberTargetId = currentLaneGroupHostByMemberTargetId();
-  for (const lane of laneStates.values())
+  for (const lane of laneStore.lanesSnapshot())
     lifetimeStateByTargetId.set(lane.targetId, laneLifetimeRuntimeState(lane));
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     lane.groupTopology = null;
     lane.element.classList.remove("lane--shadowed");
     lane.element.style.removeProperty("--lane-weight");
   }
   for (const run of groupRuns) {
     const members = run
-      .map((targetId) => laneStates.get(targetId))
+      .map((targetId) => laneStore.laneForId(targetId))
       .filter((lane) => lane && isLaneOpen(lane));
     if (members.length < 2) continue;
     const host = stableLaneGroupHost(members, previousHostByMemberTargetId);
@@ -52,7 +52,7 @@ function reconcileLaneGroups(groupRuns) {
     }
     syncLaneGroupDomOrder(host);
   }
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     syncFusedLaneChrome(lane);
     renderMessagesIfChanged(lane);
   }
@@ -67,7 +67,7 @@ function reconcileLaneGroups(groupRuns) {
 function currentLaneGroupHostByMemberTargetId() {
   const hosts = new Map();
   const seenHosts = new Set();
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
     if (seenHosts.has(host.targetId)) continue;
     seenHosts.add(host.targetId);
@@ -113,7 +113,7 @@ function laneIsFusedHost(lane) {
 
 function laneGroupHost(lane) {
   if (!isShadowLane(lane)) return lane;
-  return laneStates.get(lane.groupTopology.hostTargetId) || lane;
+  return laneStore.laneForId(lane.groupTopology.hostTargetId) || lane;
 }
 
 function laneGroupMemberTargetIds(lane) {
@@ -125,7 +125,7 @@ function laneGroupMemberTargetIds(lane) {
 function laneGroupMemberLanes(lane) {
   const host = laneGroupHost(lane);
   return laneGroupMemberTargetIds(host)
-    .map((id) => laneStates.get(id))
+    .map((id) => laneStore.laneForId(id))
     .filter((member) => member && isLaneOpen(member));
 }
 
@@ -412,7 +412,7 @@ function closeLaneTeamMenu(host) {
 
 function closeLaneTeamMenusExcept(exceptHost = null) {
   const closedHosts = new Set();
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
     if (closedHosts.has(host)) continue;
     closedHosts.add(host);
@@ -436,7 +436,7 @@ function syncLaneTeamMenuDismissHandler() {
 function dismissLaneTeamMenusOnPointerDown(event) {
   const target = event.target;
   if (!(target instanceof Node)) return;
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
     if (!host.element.classList.contains("lane--team-menu-open")) continue;
     if (host.element.querySelector(".lane-team-menu")?.contains(target))
@@ -555,7 +555,7 @@ async function updateLaneGroupConfigOnServer(host) {
 
 function splitComposerAgentFromTeam(lane, targetId) {
   const host = laneGroupHost(lane);
-  const member = laneStates.get(targetId);
+  const member = laneStore.laneForId(targetId);
   if (!member) return;
   if (laneGroupMemberLanes(host).length < 2) return;
   if (laneComposerTargetDraftText(host, targetId).trim()) {
@@ -729,7 +729,7 @@ function composerMoveDragMatches(event) {
 function updateComposerMoveDragTarget(state, clientX, clientY) {
   clearLaneFuseHighlights();
   state.dropTarget = null;
-  const sourceMember = laneStates.get(state.targetId);
+  const sourceMember = laneStore.laneForId(state.targetId);
   if (!sourceMember) {
     clearComposerMoveDropHighlights();
     return;
@@ -753,7 +753,7 @@ function updateComposerMoveDragTarget(state, clientX, clientY) {
   });
   if (!under) return;
   const underLane = /** @type {HTMLElement} */ (under);
-  const targetLane = laneStates.get(underLane.dataset.targetId || "");
+  const targetLane = laneStore.laneForId(underLane.dataset.targetId || "");
   if (!targetLane || !composerCanMoveToLane(sourceMember, targetLane)) return;
   state.dropTarget = { kind: "move", lane: targetLane };
   underLane.classList.add("lane--composer-drop");
@@ -896,7 +896,7 @@ function finishComposerMoveDrag(state) {
 }
 
 async function moveComposerToTeamOnServer(sourceHost, targetLane, targetId) {
-  const member = laneStates.get(targetId);
+  const member = laneStore.laneForId(targetId);
   const destinationTeamId = laneGroupHost(targetLane).teamId;
   if (!member || !destinationTeamId)
     throw new Error("move composer requires destination team id");
@@ -941,7 +941,7 @@ function moveComposerOptimisticUi(sourceHost, targetLane, member) {
 async function reorderComposersOnServer(host, orderedTargetIds) {
   const teamId = laneGroupHost(host).teamId;
   const members = orderedTargetIds
-    .map((targetId) => laneStates.get(targetId))
+    .map((targetId) => laneStore.laneForId(targetId))
     .filter(Boolean);
   if (!teamId || members.length !== orderedTargetIds.length)
     throw new Error("reorder composers requires a complete team");
@@ -969,7 +969,7 @@ function reorderComposerOptimisticUi(host, orderedTargetIds) {
 function currentLaneGroupRunsWithReplacements(replacements) {
   const runs = [];
   const seenHosts = new Set();
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
     if (seenHosts.has(host.targetId)) continue;
     seenHosts.add(host.targetId);
@@ -1161,7 +1161,7 @@ function updateLaneDragTarget(state, clientX, clientY) {
   const underLane = /** @type {HTMLElement} */ (under);
   const rect = underLane.getBoundingClientRect();
   const offset = (clientX - rect.left) / Math.max(1, rect.width);
-  const targetLane = laneStates.get(underLane.dataset.targetId || "");
+  const targetLane = laneStore.laneForId(underLane.dataset.targetId || "");
   if (offset <= laneFuseGutterFraction || offset >= 1 - laneFuseGutterFraction) {
     if (targetLane && laneGroupCanFuse(state.lane, targetLane)) {
       state.dropTarget = targetLane;

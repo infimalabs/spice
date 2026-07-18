@@ -33,6 +33,33 @@ def test_lane_store_loads_before_every_production_consumer():
         assert store_index < html.index(f"/static/{filename}")
 
 
+def test_lane_consumers_use_the_exact_store_registry_surface():
+    store_source = (STATIC_ROOT / "app.lane-store.js").read_text(encoding="utf-8")
+    production = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(STATIC_ROOT.glob("app*.js"))
+        if path.name != "app.lane-store.js"
+    )
+    api_names = (
+        "registerLane",
+        "removeLane",
+        "laneForId",
+        "hasLane",
+        "lanesSnapshot",
+    )
+
+    assert "#lanes = new Map();" in store_source
+    assert all(f"{name}(" in store_source for name in api_names)
+    calls = {name: production.count(f"laneStore.{name}(") for name in api_names}
+    assert calls == {
+        "registerLane": 2,
+        "removeLane": 1,
+        "laneForId": 28,
+        "hasLane": 8,
+        "lanesSnapshot": 28,
+    }
+
+
 def test_target_inventory_is_owned_by_the_store_and_consumed_through_its_api():
     """The store module privately owns the ordered collection and id index and
     builds the single production instance; consumers reach target state through

@@ -5,6 +5,7 @@
 class ServeLaneStore {
   #targets = [];
   #targetById = new Map();
+  #lanes = new Map();
   #listeners = [];
 
   targetsSnapshot() {
@@ -39,6 +40,37 @@ class ServeLaneStore {
     return true;
   }
 
+  lanesSnapshot() {
+    return Array.from(this.#lanes.values());
+  }
+
+  laneForId(targetId) {
+    return this.#lanes.get(String(targetId || ""));
+  }
+
+  hasLane(targetId) {
+    return this.#lanes.has(String(targetId || ""));
+  }
+
+  registerLane(lane) {
+    const targetId = String((lane || {}).targetId || "");
+    if (!targetId) throw new Error("lane store lane target id is required");
+    if (this.#lanes.has(targetId))
+      throw new Error("lane store lane target id must be unique: " + targetId);
+    this.#lanes.set(targetId, lane);
+    this.#notifyLaneTransition("registered", lane);
+    return lane;
+  }
+
+  removeLane(targetId) {
+    const id = String(targetId || "");
+    const lane = this.#lanes.get(id);
+    if (!lane) return undefined;
+    this.#lanes.delete(id);
+    this.#notifyLaneTransition("removed", lane);
+    return lane;
+  }
+
   subscribe(listener) {
     if (typeof listener !== "function")
       throw new TypeError("lane store listener must be a function");
@@ -69,6 +101,21 @@ class ServeLaneStore {
       kind: "targets",
       targets: Object.freeze(this.targetsSnapshot()),
     });
+    this.#notify(change);
+  }
+
+  #notifyLaneTransition(transition, lane) {
+    this.#notify(
+      Object.freeze({
+        kind: "lanes",
+        transition,
+        lane,
+        lanes: Object.freeze(this.lanesSnapshot()),
+      }),
+    );
+  }
+
+  #notify(change) {
     for (const registration of this.#listeners.slice())
       registration.listener(change);
   }

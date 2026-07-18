@@ -260,7 +260,7 @@ function submitLaneForm(lane, event, targetId = "") {
     : host.shardTextareas;
   for (const [submitTargetId, textarea] of targetEntries) {
     if (!textarea) continue;
-    const member = laneStates.get(submitTargetId);
+    const member = laneStore.laneForId(submitTargetId);
     if (!member || !isLaneOpen(member)) continue;
     const text = laneComposerSubmissionText(
       host,

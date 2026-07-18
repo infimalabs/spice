@@ -77,7 +77,7 @@ function connectLiveBus() {
     if (liveBusSocket !== socket) return;
     liveBusSocket = null;
     liveBusOpenPromise = null;
-    for (const lane of laneStates.values()) {
+    for (const lane of laneStore.lanesSnapshot()) {
       lane.liveBusSubscribed = false;
       lane.liveBusSubscribePending = false;
       lane.liveBusWatcherActive = false;
@@ -244,7 +244,7 @@ function handleLaneSubmissionPush(message) {
 }
 
 async function handleLaneAppendPush(message) {
-  const lane = laneStates.get(message.targetId);
+  const lane = laneStore.laneForId(message.targetId);
   if (lane && isLaneOpen(lane))
     await applyLaneAppendBusPayload(lane, message.payload || {});
 }
@@ -255,7 +255,7 @@ function handleLiveBusErrorPush(message) {
 
 function handleBackgroundLanesDirtyPush(message) {
   for (const frame of message.lanes || []) {
-    const lane = laneStates.get(frame.targetId);
+    const lane = laneStore.laneForId(frame.targetId);
     if (!lane || !isLaneOpen(lane)) continue;
     if (!liveBusPushMatchesSubscription(lane, frame)) continue;
     lane.liveBusDirty = true;
@@ -264,13 +264,13 @@ function handleBackgroundLanesDirtyPush(message) {
 }
 
 function matchingLiveBusLane(message) {
-  const lane = laneStates.get(message.targetId);
+  const lane = laneStore.laneForId(message.targetId);
   if (!lane || !isLaneOpen(lane)) return null;
   return liveBusPushMatchesSubscription(lane, message) ? lane : null;
 }
 
 function isLaneOpen(lane) {
-  return !lane.closed && laneStates.get(lane.targetId) === lane;
+  return !lane.closed && laneStore.laneForId(lane.targetId) === lane;
 }
 
 function liveBusPushMatchesSubscription(lane, message) {
@@ -331,7 +331,7 @@ function installLiveBusLaneFocusTracking() {
   const focusFromEvent = (event) => {
     const element = event.target?.closest?.(".lane[data-target-id]");
     const lane = element
-      ? laneStates.get(element.dataset.targetId || "")
+      ? laneStore.laneForId(element.dataset.targetId || "")
       : null;
     if (lane && isLaneOpen(lane)) setFocusedLiveBusLane(lane);
   };
@@ -455,13 +455,13 @@ function applyLanesSubscribePayloads(lanes, laneFrames) {
 }
 
 function resubscribeLiveBusLanes() {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);
   }
 }
 
 function configureLiveBusLanes() {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (
       lane.emptyTeam ||
       !isLaneOpen(lane) ||
@@ -495,7 +495,7 @@ function unsubscribeLaneFromLiveBus(lane) {
   );
   if (focusedLiveBusLaneTargetId === lane.targetId) {
     focusedLiveBusLaneTargetId = "";
-    const replacement = [...laneStates.values()].find(
+    const replacement = laneStore.lanesSnapshot().find(
       (candidate) => candidate !== lane && isLaneOpen(candidate),
     );
     if (replacement) setFocusedLiveBusLane(replacement);

@@ -487,7 +487,6 @@ def test_static_spice_menu_replaces_picker_lane():
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes
     )
-    assert "if (laneStates.size) closeSpiceMenu();" not in app_static
     assert "function createEmptyTeamFromMenu()" not in app_menu
     assert "const spiceMenuNewTeamDropId" in app_menu
     assert "function spiceMenuTeamGroups(choices)" in app_menu
@@ -600,11 +599,11 @@ def test_static_spice_menu_team_groups_and_actions():
     assert 'hint.textContent = "Drop agent here";' in app_menu
     assert "wireSpiceMenuTeamDropTarget(container, group);" in app_menu
     assert '"open any member; " + count + " agents open together"' in app_menu
-    assert "const alreadyOpen = laneStates.has(target.id);" in app_menu
+    assert "const alreadyOpen = laneStore.hasLane(target.id);" in app_menu
     assert 'if (alreadyOpen) actionLabel = "Show team";' in app_menu
     assert 'else if (group && !group.unassigned) actionLabel = "Open team";' in app_menu
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_menu
-    assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
+    assert 'if (laneStore.hasLane(target.id)) parts.push("open");' in app_lanes
     assert 'setGlobalTransientError("open team failed");' in app_menu
     assert (
         'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'

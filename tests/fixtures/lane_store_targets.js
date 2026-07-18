@@ -105,3 +105,48 @@ assert(
   "the surviving update still commits to the store",
 );
 unsubscribeSecond();
+
+const laneNotifications = [];
+store.subscribe((change) => {
+  if (change.kind !== "lanes") return;
+  laneNotifications.push(
+    change.transition +
+      ":" +
+      change.lane.targetId +
+      ":" +
+      change.lanes.map((lane) => lane.targetId).join(","),
+  );
+});
+const laneAlpha = { targetId: "lane-alpha", closed: false };
+const laneBeta = { targetId: "lane-beta", closed: false };
+assert(store.registerLane(laneAlpha) === laneAlpha, "registration returns lane identity");
+assert(store.registerLane(laneBeta) === laneBeta, "second registration returns identity");
+assert(
+  store.lanesSnapshot().map((lane) => lane.targetId).join(",") ===
+    "lane-alpha,lane-beta",
+  "lane registration preserves insertion order",
+);
+assert(store.laneForId("lane-alpha") === laneAlpha, "lane lookup preserves identity");
+assert(store.hasLane("lane-beta") === true, "lane membership reports registration");
+const callerLanes = store.lanesSnapshot();
+callerLanes.reverse();
+assert(
+  store.lanesSnapshot().map((lane) => lane.targetId).join(",") ===
+    "lane-alpha,lane-beta",
+  "caller lane snapshot changes preserve store ordering",
+);
+assert(
+  store.removeLane("lane-alpha") === laneAlpha,
+  "lane removal returns removed identity",
+);
+assert(
+  store.lanesSnapshot().map((lane) => lane.targetId).join(",") === "lane-beta",
+  "lane removal preserves remaining order",
+);
+assert(
+  laneNotifications.join("|") ===
+    "registered:lane-alpha:lane-alpha|" +
+      "registered:lane-beta:lane-alpha,lane-beta|" +
+      "removed:lane-alpha:lane-beta",
+  "lane transitions notify once after ordered state changes",
+);
