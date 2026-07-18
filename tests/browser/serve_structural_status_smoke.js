@@ -13,6 +13,8 @@ async function run() {
       await installIsolatedLaneFixture(page, {
         globals: [
           "handleLiveBusMessage",
+          "laneComposePlaceholder",
+          "lanePrimaryComposePlaceholder",
           "laneGroupHost",
           "laneGroupMemberLanes",
           "syncComposerShards",
@@ -110,6 +112,11 @@ async function runStructuralStatusSmokePage() {
       latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
       pipStatus: lane.pipEl.dataset.agentStatus || "",
       placeholder: textarea.placeholder,
+      compactPlaceholder: laneComposePlaceholder(lane),
+      memberPlaceholder: lanePrimaryComposePlaceholder(lane, {
+        ...lane,
+        targetId: "structural-status-member",
+      }),
       composerTitle: textarea.title,
       placeholderOverflowWrap: getComputedStyle(textarea).overflowWrap,
       placeholderWithinCard:
@@ -195,9 +202,19 @@ function assertStructuralStatusResult(result) {
     throw new Error("active composer status is stale: " + active.placeholder);
   if (
     active.placeholder !==
-    "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, todo"
+    "spice-b, main-b · 0 pending, running\n" +
+      "UI-1kF5xdSM, todo\n" +
+      "Next: Show the claimed task even when its deliberatel…"
   )
-    throw new Error("claimed task handle is not the third placeholder line: " + active.placeholder);
+    throw new Error("main composer task context is incomplete: " + active.placeholder);
+  if (
+    active.compactPlaceholder !==
+      "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, todo" ||
+    active.memberPlaceholder !== active.compactPlaceholder
+  )
+    throw new Error(
+      "compact member/quote task context changed: " + JSON.stringify(active),
+    );
   if (
     active.composerTitle !==
     "UI-1kF5xdSM, todo\n" +
@@ -206,7 +223,9 @@ function assertStructuralStatusResult(result) {
     throw new Error("claimed task hover detail is incomplete: " + active.composerTitle);
   if (
     phaseTransition.placeholder !==
-      "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, review" ||
+      "spice-b, main-b · 0 pending, running\n" +
+        "UI-1kF5xdSM, review\n" +
+        "Next: Show the claimed task even when its deliberatel…" ||
     phaseTransition.composerTitle !==
       "UI-1kF5xdSM, review\n" +
         "Show the claimed task even when its deliberately long title must wrap inside the agent card"
