@@ -11,7 +11,6 @@ from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.flexstate import (
     sticky_function_keys_after_renames,
-    sticky_items_after_flex_breaches,
     sticky_paths_after_renames,
 )
 from spice.policy import (
@@ -24,9 +23,8 @@ from spice.policy import (
 )
 from spice.sqliteconnection import sqlite_connection
 from spice.studies import cli as studies_cli
-from spice.studies import testquality
+from spice.studies import fileloc, gates, mutations, testquality
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
-from spice.studies import mutations
 from spice.studies.subsumption import record_subsumption, scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.testquality import (
@@ -43,16 +41,6 @@ MAGIC_HIGH_LITERAL = "125"
 def test_flex_ratio_is_three_halves():
     for limit in (FILE_LOC_LIMIT, COMPLEXITY_MAX_LENGTH, COMPLEXITY_MAX_CCN):
         assert flex_limit(limit) == limit * FLEX_NUMERATOR // FLEX_DENOMINATOR
-
-
-def test_flex_breach_joins_sticky_set():
-    sticky = sticky_items_after_flex_breaches(
-        [("a.py", 1600), ("b.py", 900)],
-        {Path("c.py")},
-        key_for_item=lambda item: Path(item[0]),
-        is_breach=lambda item: item[1] > flex_limit(FILE_LOC_LIMIT),
-    )
-    assert sticky == {Path("a.py"), Path("c.py")}
 
 
 def test_sticky_paths_follow_renames():
@@ -855,34 +843,36 @@ def test_subsumption_arc_only_detects_subsumed_test(tmp_path):
     assert report.findings[0].covered_features == 1
 
 
-def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
-    tmp_path, monkeypatch
-):
+def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(tmp_path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
     lock_path = Path("uv.lock")
     sticky_source_path = Path("sticky_source.py")
-    (tmp_path / lock_path).write_text("package = []\n" * 20, encoding="utf-8")
-    (tmp_path / sticky_source_path).write_text(
+    (repo / lock_path).write_text("package = []\n" * 20, encoding="utf-8")
+    (repo / sticky_source_path).write_text(
         "print('large')\n" * 20,
         encoding="utf-8",
     )
-    saved: dict[str, set[Path]] = {}
-
-    monkeypatch.setattr(
-        "spice.studies.fileloc.staged_renames",
-        lambda _root: {},
+    ledgers = (
+        gates.path_sticky_ledger(
+            fileloc.FILE_LOC_STICKY_STATE_GIT_PATH,
+            version=fileloc.FILE_LOC_VERSION,
+        ),
+        gates.path_sticky_ledger(
+            fileloc.FILE_BYTE_STICKY_STATE_GIT_PATH,
+            version=fileloc.FILE_LOC_VERSION,
+        ),
     )
-    monkeypatch.setattr(
-        "spice.studies.fileloc._load_sticky",
-        lambda _root, git_path: {lock_path, sticky_source_path},
-    )
-    monkeypatch.setattr(
-        "spice.studies.fileloc._save_sticky",
-        lambda paths, _root, git_path: saved.setdefault(git_path, set(paths)),
-    )
+    for ledger in ledgers:
+        gates.persist_sticky_ledger(
+            ledger,
+            {lock_path, sticky_source_path},
+            root=repo,
+        )
 
     findings = scan_staged_loc_violations(
         [lock_path],
-        root=tmp_path,
+        root=repo,
         limit=10,
         flex_limit_value=10,
         byte_limit=100,
@@ -891,9 +881,9 @@ def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
     )
 
     assert findings == []
-    assert len(saved) == 2
-    assert all(lock_path not in paths for paths in saved.values())
-    assert all(sticky_source_path in paths for paths in saved.values())
+    assert [
+        gates.load_sticky_ledger(ledger, root=repo, renames={}) for ledger in ledgers
+    ] == [{sticky_source_path}, {sticky_source_path}]
 
 
 def test_sticky_function_keys_follow_renames():
