@@ -350,7 +350,7 @@ function renameTeamMemberTargetThread(targetId, actorId) {
   if (!lane) return;
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
-  if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, threadId);
+  ensureLaneOccupant(lane, threadId);
 }
 
 function unresolvedTeamLaneTargetIds(team) {
@@ -414,8 +414,7 @@ function ensureTeamMemberLane(targetId, team, hint = null, member = null) {
   if (
     lane.liveBusSubscribed &&
     previousConfigRevision > 0 &&
-    lane.configRevision > previousConfigRevision &&
-    typeof subscribeLaneToLiveBus === "function"
+    lane.configRevision > previousConfigRevision
   )
     subscribeLaneToLiveBus(lane);
 }

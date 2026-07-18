@@ -11,8 +11,7 @@ function addLane(targetId, hint = null, options = {}) {
   renderSpiceMenu();
   renderFilterPills();
   subscribeLaneToLiveBus(lane);
-  if (options.persist !== false && typeof persistLaneHints === "function")
-    persistLaneHints();
+  if (options.persist !== false) persistLaneHints();
 }
 
 function addEmptyTeamLane(team, options = {}) {
