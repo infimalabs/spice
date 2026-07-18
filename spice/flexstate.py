@@ -22,7 +22,6 @@ from spice.paths import shared_state_path, worktree_state_path
 from spice.policy import flex_limit as flex_limit  # single source of the ratio
 
 StickyKey = TypeVar("StickyKey")
-Item = TypeVar("Item")
 FLEX_SLICE_CLAIM_TTL_SECONDS = 6 * 60 * 60
 FLEX_SLICE_CLAIMS_VERSION = 1
 FLEX_SLICE_CLAIMS_GIT_PATH = "flex-slice-claims.json"
@@ -360,20 +359,6 @@ def _format_claim_timestamp(timestamp: float) -> str:
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
-
-
-def sticky_items_after_flex_breaches(
-    items: list[Item],
-    sticky_items: set[StickyKey],
-    *,
-    key_for_item: Callable[[Item], StickyKey],
-    is_breach: Callable[[Item], bool],
-) -> set[StickyKey]:
-    updated = set(sticky_items)
-    for item in items:
-        if is_breach(item):
-            updated.add(key_for_item(item))
-    return updated
 
 
 def sticky_paths_after_renames(

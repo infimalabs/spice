@@ -20,14 +20,8 @@ from spice.paths import find_tool
 from spice.process.groups import run_bounded_process_group
 from spice.flexstate import (
     FlexSliceClaim,
-    claim_flex_slice_paths,
     flex_limit,
-    git_state_path,
-    load_sticky_items,
     render_flex_slice_claim_redirect,
-    save_sticky_items,
-    sticky_function_keys_after_renames,
-    sticky_items_after_flex_breaches,
 )
 from spice.policy import (
     COMPLEXITY_HOTSPOT_LIMIT,
@@ -35,12 +29,21 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     COMPLEXITY_SUFFIXES,
 )
-from spice.studies.walk import is_excluded_path, staged_renames
+from spice.studies import gates
+from spice.studies.walk import is_excluded_path
 
 COMPLEXITY_VERSION = 1
 COMPLEXITY_PROCESS_TIMEOUT_SECONDS = 30.0
 COMPLEXITY_CCN_STICKY_GIT_PATH = "complexity-ccn-sticky.json"
 COMPLEXITY_LENGTH_STICKY_GIT_PATH = "complexity-length-sticky.json"
+_CCN_STICKY_LEDGER = gates.function_sticky_ledger(
+    COMPLEXITY_CCN_STICKY_GIT_PATH,
+    version=COMPLEXITY_VERSION,
+)
+_LENGTH_STICKY_LEDGER = gates.function_sticky_ledger(
+    COMPLEXITY_LENGTH_STICKY_GIT_PATH,
+    version=COMPLEXITY_VERSION,
+)
 
 # lizard --csv columns: nloc, ccn, token_count, param_count, length,
 # location, path, function_name, ...
@@ -131,13 +134,9 @@ class ComplexityBounds(Protocol):
 
 
 @dataclass(frozen=True)
-class _DefaultComplexityBounds:
-    max_ccn: int
-    ccn_flex_limit: int
-    max_length: int
-    length_flex_limit: int
-    ccn_unlimited: bool = False
-    length_unlimited: bool = False
+class _ComplexityBoundSet:
+    ccn: gates.BoundedValue
+    length: gates.BoundedValue
 
 
 def require_lizard() -> str:
@@ -213,38 +212,6 @@ def _complexity_input_label(root: Path, paths: list[Path]) -> str:
     return f"repository={root} paths={rendered_paths}"
 
 
-def _load_sticky(root: Path, git_path: str) -> set[tuple[str, str]]:
-    def decode(raw: object) -> tuple[str, str] | None:
-        if (
-            isinstance(raw, list)
-            and len(raw) == 2
-            and all(isinstance(item, str) for item in raw)
-        ):
-            return (raw[0], raw[1])
-        return None
-
-    return load_sticky_items(
-        root=root,
-        state_path=None,
-        git_path=git_path,
-        entries_key="functions",
-        decode=decode,
-        version=COMPLEXITY_VERSION,
-    )
-
-
-def _save_sticky(keys: set[tuple[str, str]], root: Path, git_path: str) -> None:
-    save_sticky_items(
-        keys,
-        root=root,
-        state_path=None,
-        git_path=git_path,
-        entries_key="functions",
-        encode=list,
-        version=COMPLEXITY_VERSION,
-    )
-
-
 def scan_staged_complexity_violations(
     paths: list[Path],
     *,
@@ -266,13 +233,7 @@ def scan_staged_complexity_violations(
     routines breach flex. Leave ``flex_actor`` empty for read-only scans.
     """
     records = collect_complexity_records(paths, root=root, suffixes=suffixes)
-    renames = staged_renames(root)
-    loaded_ccn_sticky = sticky_function_keys_after_renames(
-        _load_sticky(root, COMPLEXITY_CCN_STICKY_GIT_PATH), renames
-    )
-    loaded_length_sticky = sticky_function_keys_after_renames(
-        _load_sticky(root, COMPLEXITY_LENGTH_STICKY_GIT_PATH), renames
-    )
+    renames = gates.staged_gate_renames(root)
     ccn_flex = (
         ccn_flex_limit_value
         if ccn_flex_limit_value is not None
@@ -283,50 +244,48 @@ def scan_staged_complexity_violations(
         if length_flex_limit_value is not None
         else flex_limit(max_length)
     )
-    default_bounds = _DefaultComplexityBounds(
-        max_ccn=max_ccn,
-        ccn_flex_limit=ccn_flex,
-        max_length=max_length,
-        length_flex_limit=length_flex,
+    default_bounds = _ComplexityBoundSet(
+        ccn=gates.BoundedValue.from_base(max_ccn, ccn_flex),
+        length=gates.BoundedValue.from_base(max_length, length_flex),
     )
-    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
+
+    def resolve_bounds(path: Path) -> _ComplexityBoundSet:
+        return _resolved_complexity_bounds(
+            path,
+            bounds_for_path=bounds_for_path,
+            default_bounds=default_bounds,
+        )
+
     ccn_breaches, length_breaches = _complexity_breach_sets(records, resolve_bounds)
-    ccn_sticky = _retained_over_base_sticky(
-        loaded_ccn_sticky,
+    ccn_state = gates.reconcile_sticky_latch(
+        _CCN_STICKY_LEDGER,
         root=root,
-        attribute="ccn",
-        fallback_limit=max_ccn,
-        resolve_bounds=resolve_bounds,
-        suffixes=suffixes,
+        renames=renames,
+        retain=lambda keys: _retained_complexity_sticky(
+            keys,
+            root=root,
+            measure=lambda record: record.ccn,
+            bounds_for_path=lambda path: resolve_bounds(path).ccn,
+            suffixes=suffixes,
+        ),
+        breach_keys=(record.key for record in ccn_breaches),
+        persist=persist,
     )
-    length_sticky = _retained_over_base_sticky(
-        loaded_length_sticky,
+    length_state = gates.reconcile_sticky_latch(
+        _LENGTH_STICKY_LEDGER,
         root=root,
-        attribute="length",
-        fallback_limit=max_length,
-        resolve_bounds=resolve_bounds,
-        suffixes=suffixes,
+        renames=renames,
+        retain=lambda keys: _retained_complexity_sticky(
+            keys,
+            root=root,
+            measure=lambda record: record.length,
+            bounds_for_path=lambda path: resolve_bounds(path).length,
+            suffixes=suffixes,
+        ),
+        breach_keys=(record.key for record in length_breaches),
+        persist=persist,
     )
-    updated_ccn_sticky = sticky_items_after_flex_breaches(
-        records,
-        ccn_sticky,
-        key_for_item=lambda record: record.key,
-        is_breach=lambda record: record in ccn_breaches,
-    )
-    updated_length_sticky = sticky_items_after_flex_breaches(
-        records,
-        length_sticky,
-        key_for_item=lambda record: record.key,
-        is_breach=lambda record: record in length_breaches,
-    )
-    if persist:
-        if updated_ccn_sticky != loaded_ccn_sticky:
-            _persist_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
-        if updated_length_sticky != loaded_length_sticky:
-            _persist_sticky(
-                updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH
-            )
-    peer_claims = _peer_flex_slice_claims(
+    peer_claims = gates.peer_flex_slice_claims(
         {Path(record.path) for record in ccn_breaches | length_breaches},
         root=root,
         actor=flex_actor,
@@ -336,61 +295,62 @@ def scan_staged_complexity_violations(
     return _complexity_findings(
         records,
         resolve_bounds=resolve_bounds,
-        updated_ccn_sticky=updated_ccn_sticky,
-        updated_length_sticky=updated_length_sticky,
+        updated_ccn_sticky=ccn_state.updated,
+        updated_length_sticky=length_state.updated,
         peer_claims=peer_claims,
     )
 
 
 def _complexity_breach_sets(
     records: list[ComplexityRecord],
-    resolve_bounds: Callable[[Path], ComplexityBounds],
+    resolve_bounds: Callable[[Path], _ComplexityBoundSet],
 ) -> tuple[set[ComplexityRecord], set[ComplexityRecord]]:
     ccn_breaches = {
         record
         for record in records
-        if (
-            not resolve_bounds(Path(record.path)).ccn_unlimited
-            and record.ccn > resolve_bounds(Path(record.path)).ccn_flex_limit
-        )
+        if gates.bounded_disposition(
+            record.ccn,
+            resolve_bounds(Path(record.path)).ccn,
+        ).flex_breach
     }
     length_breaches = {
         record
         for record in records
-        if (
-            not resolve_bounds(Path(record.path)).length_unlimited
-            and record.length > resolve_bounds(Path(record.path)).length_flex_limit
-        )
+        if gates.bounded_disposition(
+            record.length,
+            resolve_bounds(Path(record.path)).length,
+        ).flex_breach
     }
     return ccn_breaches, length_breaches
 
 
-def _peer_flex_slice_claims(
-    paths: set[Path],
+def _resolved_complexity_bounds(
+    path: Path,
     *,
-    root: Path,
-    actor: str,
-    renames: dict[Path, Path],
-    now: float | None,
-) -> dict[Path, FlexSliceClaim]:
-    claim_decisions = claim_flex_slice_paths(
-        paths,
-        root=root,
-        actor=actor,
-        renames=renames,
-        now=now,
+    bounds_for_path: Callable[[Path], ComplexityBounds] | None,
+    default_bounds: _ComplexityBoundSet,
+) -> _ComplexityBoundSet:
+    if bounds_for_path is None:
+        return default_bounds
+    bounds = bounds_for_path(path)
+    return _ComplexityBoundSet(
+        ccn=gates.BoundedValue(
+            base_limit=bounds.max_ccn,
+            flex_limit=bounds.ccn_flex_limit,
+            unlimited=bounds.ccn_unlimited,
+        ),
+        length=gates.BoundedValue(
+            base_limit=bounds.max_length,
+            flex_limit=bounds.length_flex_limit,
+            unlimited=bounds.length_unlimited,
+        ),
     )
-    return {
-        path: decision.claim
-        for path, decision in claim_decisions.items()
-        if decision.peer_held
-    }
 
 
 def _complexity_findings(
     records: list[ComplexityRecord],
     *,
-    resolve_bounds: Callable[[Path], ComplexityBounds],
+    resolve_bounds: Callable[[Path], _ComplexityBoundSet],
     updated_ccn_sticky: set[tuple[str, str]],
     updated_length_sticky: set[tuple[str, str]],
     peer_claims: dict[Path, FlexSliceClaim],
@@ -398,41 +358,36 @@ def _complexity_findings(
     findings: list[ComplexityFinding] = []
     for record in records:
         bounds = resolve_bounds(Path(record.path))
-        if bounds.ccn_unlimited and bounds.length_unlimited:
-            continue
-        ccn_limit = (
-            bounds.max_ccn
-            if record.key in updated_ccn_sticky
-            else bounds.ccn_flex_limit
+        ccn_disposition = gates.bounded_disposition(
+            record.ccn,
+            bounds.ccn,
+            latched=record.key in updated_ccn_sticky,
         )
-        length_limit = (
-            bounds.max_length
-            if record.key in updated_length_sticky
-            else bounds.length_flex_limit
+        length_disposition = gates.bounded_disposition(
+            record.length,
+            bounds.length,
+            latched=record.key in updated_length_sticky,
         )
-        over_ccn = False if bounds.ccn_unlimited else record.ccn > ccn_limit
-        over_length = False if bounds.length_unlimited else record.length > length_limit
-        if over_ccn or over_length:
+        if ccn_disposition.over_limit or length_disposition.over_limit:
             findings.append(
                 ComplexityFinding(
                     record=record,
-                    over_ccn=over_ccn,
-                    over_length=over_length,
-                    ccn_limit=ccn_limit,
-                    length_limit=length_limit,
+                    over_ccn=ccn_disposition.over_limit,
+                    over_length=length_disposition.over_limit,
+                    ccn_limit=ccn_disposition.limit,
+                    length_limit=length_disposition.limit,
                     flex_slice_claim=peer_claims.get(Path(record.path)),
                 )
             )
     return findings
 
 
-def _retained_over_base_sticky(
+def _retained_complexity_sticky(
     sticky: set[tuple[str, str]],
     *,
     root: Path,
-    attribute: str,
-    fallback_limit: int,
-    resolve_bounds: Callable[[Path], ComplexityBounds],
+    measure: Callable[[ComplexityRecord], int],
+    bounds_for_path: Callable[[Path], gates.BoundedValue],
     suffixes: tuple[str, ...],
 ) -> set[tuple[str, str]]:
     """The still-latched subset: routines still over their base limit.
@@ -452,37 +407,11 @@ def _retained_over_base_sticky(
         key
         for key in sticky
         if key in by_key
-        and _complexity_bound_is_retained(
-            by_key[key],
-            attribute=attribute,
-            fallback_limit=fallback_limit,
-            bounds=resolve_bounds(Path(by_key[key].path)),
-        )
+        and gates.bounded_disposition(
+            measure(by_key[key]),
+            bounds_for_path(Path(by_key[key].path)),
+        ).over_base
     }
-
-
-def _persist_sticky(keys: set[tuple[str, str]], root: Path, git_path: str) -> None:
-    """Write the latch set, or delete the state file once nothing stays latched."""
-    if keys:
-        _save_sticky(keys, root, git_path)
-        return
-    state_path = git_state_path(git_path, root=root)
-    if state_path.exists():
-        state_path.unlink()
-
-
-def _complexity_bound_is_retained(
-    record: ComplexityRecord,
-    *,
-    attribute: str,
-    fallback_limit: int,
-    bounds: ComplexityBounds,
-) -> bool:
-    if attribute == "ccn":
-        return not bounds.ccn_unlimited and record.ccn > bounds.max_ccn
-    if attribute == "length":
-        return not bounds.length_unlimited and record.length > bounds.max_length
-    return getattr(record, attribute) > fallback_limit
 
 
 def render_complexity_board(
