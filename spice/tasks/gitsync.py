@@ -1,7 +1,7 @@
 """Git integration bound to task boundaries — invisible to the agent.
 
-Agents never pull and never push directly. Git is touched in exactly two
-places, both owned by the task control plane:
+Agents never pull and never push directly. Git is touched at exactly three
+control-plane boundaries:
 
 * **claim** (`prepare_for_claim`): fast-forward the local tree to the current
   baseline so new work starts from the latest shared state, then the claim
@@ -12,6 +12,10 @@ places, both owned by the task control plane:
   from the local line. A real content
   conflict is the one and only thing surfaced to the agent — framed as an
   overlap with the baseline, never as a sync with an upstream.
+* **agent launch** (`prepare_for_agent_launch`): fetch and fast-forward a clean,
+  uncommitted lane immediately before its supervisor or native harness starts,
+  so long-lived processes never import a checkout that was already stale when
+  they launched.
 
 The default baseline is the current branch's user-managed merge target on the
 conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
@@ -228,6 +232,71 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     after = _read(root, "rev-parse", "HEAD")
     blocked = _purge_stale_bytecode(root, before, after)
     notes = ["updated working tree to the current baseline"] if after != before else []
+    if blocked:
+        notes.append(_bytecode_cleanup_note(blocked))
+    return SyncResult(notes=notes)
+
+
+def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
+    """Strictly synchronize a lane immediately before its agent process starts.
+
+    Launch is the last boundary at which the globally installed control plane
+    can update the checkout before ``python -m spice`` and the native harness
+    import from it. Fetching is read-only with respect to user work; any dirty,
+    ahead, divergent, or unverifiable state refuses the launch instead of
+    starting a process from a checkout that is known to be stale.
+    """
+    root = repo_root or config.repo_root()
+    resolved = _resolve_target(root)
+    if resolved is None:
+        return SyncResult(notes=["current:local-only"])
+    remote, baseline = resolved
+    fetched = _run(root, "fetch", remote)
+    if fetched.returncode != 0:
+        raise SpiceError(
+            "cannot launch agent: the current baseline could not be fetched; "
+            "fix the remote or credentials and retry\n"
+            + _fail(f"fetch {remote} for agent launch", fetched)
+        )
+    if not _read(root, "rev-parse", baseline):
+        raise SpiceError(
+            f"cannot launch agent: baseline {baseline} was not found after "
+            f"fetching {remote}; repair branch tracking and retry"
+        )
+    if _worktree_dirty(root):
+        raise SpiceError(
+            "cannot launch agent: the working tree is dirty; commit or clear "
+            "the user-owned changes before retrying"
+        )
+    counts = _read(root, "rev-list", "--left-right", "--count", f"{baseline}...HEAD")
+    try:
+        behind_text, ahead_text = counts.split()
+        behind, ahead = int(behind_text), int(ahead_text)
+    except (TypeError, ValueError):
+        behind = ahead = 0
+    if ahead:
+        if behind:
+            raise SpiceError(
+                f"cannot launch agent: the branch has diverged from {baseline}; "
+                "resolve the branch through the task Git control plane and retry"
+            )
+        raise SpiceError(
+            f"cannot launch agent: the branch has {ahead} local commit(s) not "
+            "recorded by a completed task; capture or complete that work and retry"
+        )
+    before = _read(root, "rev-parse", "HEAD")
+    completed = _run(root, "merge", "--ff-only", baseline)
+    if completed.returncode != 0:
+        raise SpiceError(
+            f"cannot launch agent: the working tree could not fast-forward to "
+            f"{baseline}; repair the branch and retry\n"
+            + _fail(f"fast-forward agent launch to {baseline}", completed)
+        )
+    after = _read(root, "rev-parse", "HEAD")
+    blocked = _purge_stale_bytecode(root, before, after)
+    notes = [
+        "updated working tree to the current baseline" if after != before else "current"
+    ]
     if blocked:
         notes.append(_bytecode_cleanup_note(blocked))
     return SyncResult(notes=notes)

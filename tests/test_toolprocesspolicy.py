@@ -16,7 +16,7 @@ EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
     "spice/agent/driver.py:operator_color_scheme:run",
     "spice/agent/judgeadapter.py:main:run",
     "spice/agent/lifecycle.py:_worktree_dirty:run",
-    "spice/agent/lifecycle.py:git_tracks_relative_path:run",
+    "spice/agent/lifecyclebinding.py:git_tracks_relative_path:run",
     "spice/agent/lifecycle.py:spawn_agent:Popen",
     "spice/agent/lifecycle.py:spawn_agent_supervisor:Popen",
     "spice/agent/shadow.py:_git:run",

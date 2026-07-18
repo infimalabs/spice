@@ -825,6 +825,78 @@ def test_fast_forward_if_safe_reports_updated_then_current(tmp_path):
     assert gitsync.fast_forward_if_safe(repo).notes == ["current"]
 
 
+def test_prepare_for_agent_launch_reports_updated_then_current(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    _advance_upstream(tmp_path)
+
+    advanced = gitsync.prepare_for_agent_launch(repo)
+
+    assert advanced.notes == ["updated working tree to the current baseline"]
+    assert gitsync.prepare_for_agent_launch(repo).notes == ["current"]
+
+
+def test_prepare_for_agent_launch_accepts_current_local_only_tree(tmp_path):
+    repo = _init_repo(tmp_path / "agent")
+
+    assert gitsync.prepare_for_agent_launch(repo).notes == ["current:local-only"]
+
+
+def test_prepare_for_agent_launch_preserves_dirty_user_work(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+    _run(repo, "git", "add", "dirty.txt")
+
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+
+    assert outcome.state == "rejected"
+    assert "working tree is dirty" in outcome.message
+    assert (repo / "dirty.txt").read_text(encoding="utf-8") == "uncommitted\n"
+
+
+def test_prepare_for_agent_launch_routes_ahead_work_to_task_control_plane(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    (repo / "ahead.txt").write_text("local commit\n", encoding="utf-8")
+    _run(repo, "git", "add", "ahead.txt")
+    _run(repo, "git", "commit", "-m", "ahead of baseline")
+
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+
+    assert outcome.state == "rejected"
+    assert "not recorded by a completed task" in outcome.message
+
+
+def test_prepare_for_agent_launch_reports_divergent_tree_recovery(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    (repo / "local.txt").write_text("local commit\n", encoding="utf-8")
+    _run(repo, "git", "add", "local.txt")
+    _run(repo, "git", "commit", "-m", "local work")
+    _advance_upstream(tmp_path)
+
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+
+    assert outcome.state == "rejected"
+    assert "branch has diverged" in outcome.message
+    assert "task Git control plane" in outcome.message
+
+
+def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = gitsync._run
+
+    def fail_fetch(repo_root, *args):
+        if args and args[0] == "fetch":
+            return subprocess.CompletedProcess(list(args), 128, "", "offline")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", fail_fetch)
+
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+
+    assert outcome.state == "rejected"
+    assert "current baseline could not be fetched" in outcome.message
+    assert "offline" in outcome.message
+
+
 def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
