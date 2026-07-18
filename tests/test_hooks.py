@@ -1,6 +1,7 @@
 """Pre-commit hook installation, execution, and runtime integration tests."""
 
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -436,7 +437,7 @@ def test_init_gates_repo_installs_constitution_without_fleet_assets(tmp_path):
     assert sorted(path.name for path in repo.iterdir()) == [".git", ".spice"]
 
 
-def test_init_gates_cli_is_a_standalone_entry(tmp_path):
+def test_init_gates_cli_is_a_standalone_entry(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
 
     result = _run([sys.executable, "-m", "spice", "init", "--gates"], cwd=repo)
@@ -453,27 +454,27 @@ def test_init_gates_cli_is_a_standalone_entry(tmp_path):
 
     _write_repo_file(repo, "README.md", "Concrete repository documentation.\n")
     _git(repo, "add", "README.md")
-    gate = _run([str(hooks_dir(repo) / "pre-commit")], cwd=repo)
+    monkeypatch.setenv("PYTHONPATH", _stale_spice_namespace_path(tmp_path))
+    gate = _run(
+        [str(hooks_dir(repo) / "pre-commit")],
+        cwd=repo,
+        path=_current_spice_hook_path(tmp_path),
+    )
 
     assert gate.returncode == 0
 
 
-def test_init_gates_first_commit_passes_without_taskwarrior(tmp_path):
+def test_init_gates_first_commit_passes_without_taskwarrior(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
     init_gates_repo(repo)
-    executable_dir = tmp_path / "gate-bin"
-    executable_dir.mkdir()
-    for name in ("git", "sh", "spice"):
-        source = shutil.which(name)
-        assert source
-        (executable_dir / name).symlink_to(source)
     _write_repo_file(repo, "README.md", "Concrete repository documentation.\n")
     _git(repo, "add", "README.md")
+    monkeypatch.setenv("PYTHONPATH", _stale_spice_namespace_path(tmp_path))
 
     commit = _run(
         ["git", "commit", "-m", "first commit"],
         cwd=repo,
-        path=str(executable_dir),
+        path=_current_spice_hook_path(tmp_path),
     )
 
     assert commit.returncode == 0
@@ -1043,6 +1044,37 @@ def _write_spice_product_shape(repo: Path) -> None:
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# test spice product shape\n", encoding="utf-8")
+
+
+def _current_spice_hook_path(tmp_path: Path) -> str:
+    """Restricted hook PATH whose spice entry belongs to this test interpreter."""
+    executable_dir = tmp_path / "gate-bin"
+    executable_dir.mkdir()
+    for name in ("git", "sh"):
+        source = shutil.which(name)
+        assert source
+        (executable_dir / name).symlink_to(source)
+    spice = executable_dir / "spice"
+    spice.write_text(
+        "#!/usr/bin/env sh\n\n"
+        "set -eu\n\n"
+        f'exec {shlex.quote(sys.executable)} -I -m spice "$@"\n',
+        encoding="utf-8",
+    )
+    spice.chmod(spice.stat().st_mode | stat.S_IXUSR)
+    return str(executable_dir)
+
+
+def _stale_spice_namespace_path(tmp_path: Path) -> str:
+    """Model a sibling checkout that still exposes spice.config as a module."""
+    root = tmp_path / "stale-worktree"
+    package = root / "spice"
+    package.mkdir(parents=True)
+    (package / "config.py").write_text(
+        '"""Stale sibling configuration module."""\n',
+        encoding="utf-8",
+    )
+    return str(root)
 
 
 def _git(
