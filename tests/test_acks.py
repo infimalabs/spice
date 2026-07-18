@@ -44,10 +44,10 @@ from spice.mail.inbox import (
 )
 from spice.mail.inbox import write_inbox_item
 
-KEY_A = "20260513T184251491561Z"
-KEY_B = "20260513T184252000000Z"
-KEY_C = "20260513T184253000000Z"
-KEY_D = "20260513T184254000000Z"
+KEY_A = "1jyG6kGq"
+KEY_B = "1jyG6kSc"
+KEY_C = "1jyG6kqr"
+KEY_D = "1jyG6lC4"
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
@@ -77,10 +77,10 @@ def test_filler_words_between_ack_and_key():
     assert list(extract_ack_keys_from_text(text)) == [KEY_A]
 
 
-def test_dropped_z_key_is_extracted_verbatim():
-    bare = KEY_A[:-1]
-    text = f"ACK {bare}: transcribed without the Z."
-    assert list(extract_ack_keys_from_text(text)) == [bare]
+def test_collision_suffixed_key_is_extracted_verbatim():
+    suffixed = f"{KEY_A}-2"
+    text = f"ACK {suffixed}: retried send handled."
+    assert list(extract_ack_keys_from_text(text)) == [suffixed]
 
 
 def test_keys_only_extracted_from_valid_headers():
@@ -141,7 +141,7 @@ def test_hypothetical_and_narrated_ack_mentions_do_not_extract_keys():
 
 
 def test_ack_parser_ignores_markdown_examples_and_rendered_source_lines():
-    real_key = "20260513T184255000000Z"
+    real_key = "1jyG6lZJ"
     text = (
         "Example output:\n"
         "```text\n"
@@ -458,7 +458,7 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
     ] == [(KEY_A, name, text, ACK_DISPOSITION_ACKED)]
 
 
-def test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias(
+def test_summarize_ack_archival_retires_lineage_record_by_exact_key(
     tmp_path,
     monkeypatch,
 ):
@@ -486,7 +486,7 @@ def test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias(
 
     summary = summarize_ack_archival(
         tmp_path,
-        f"ACK {KEY_A[:-1]}: handled after retry.",
+        f"ACK {KEY_A}: handled after retry.",
     )
 
     archived = collect_acked_inbox_items(tmp_path)
@@ -531,7 +531,7 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     write_inbox_item(tmp_path, name, text)
 
     summary = summarize_nack_archival(
-        tmp_path, f"NACK {KEY_A[:-1]}: refusing because it conflicts with policy."
+        tmp_path, f"NACK {KEY_A}: refusing because it conflicts with policy."
     )
 
     refused = collect_refused_inbox_items(tmp_path)
@@ -556,7 +556,7 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     ] == [
         (
             KEY_A,
-            f"NACK {KEY_A[:-1]}: refusing because it conflicts with policy.",
+            f"NACK {KEY_A}: refusing because it conflicts with policy.",
             "refusing because it conflicts with policy.",
             ACK_DISPOSITION_REFUSED,
         )
@@ -689,7 +689,7 @@ def test_summarize_ack_archival_records_ack_content_in_ack_state(tmp_path):
     text = compose_inbox_text(body="durable ack content", priority=None, stop=False)
     write_inbox_item(tmp_path, name, text)
 
-    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A[:-1]}: handled fully.")
+    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A}: handled fully.")
 
     records = ack_state_records(tmp_path)
     assert summary.archived == [KEY_A]
@@ -697,7 +697,7 @@ def test_summarize_ack_archival_records_ack_content_in_ack_state(tmp_path):
     assert summary.unmatched == []
     assert [
         (record.key, record.ack_text, record.ack_content) for record in records
-    ] == [(KEY_A, f"ACK {KEY_A[:-1]}: handled fully.", "handled fully.")]
+    ] == [(KEY_A, f"ACK {KEY_A}: handled fully.", "handled fully.")]
 
 
 def test_summarize_ack_archival_keeps_task_handle_and_retires_valid_header(tmp_path):
@@ -731,10 +731,10 @@ def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
     write_inbox_item(tmp_path, name, text)
     assert archive_ackd_inbox_items(tmp_path, [KEY_A]) == [KEY_A]
 
-    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A[:-1]}: repeated.")
+    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A}: repeated.")
 
     assert summary.archived == []
-    assert summary.already_acked == [KEY_A[:-1]]
+    assert summary.already_acked == [KEY_A]
     assert summary.unmatched == []
     assert not summary.noop
 

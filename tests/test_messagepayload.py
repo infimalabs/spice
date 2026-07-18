@@ -360,7 +360,7 @@ def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
                 {
                     "type": "output_text",
                     "text": (
-                        "ACK 20260610T115900000000Z: captured.\n"
+                        "ACK 1k4YggTX: captured.\n"
                         "TASK: title=ACK follow-up | project=serve.ui | "
                         "acceptance=Inline block appears\n"
                         "Continuing."
@@ -403,8 +403,8 @@ def test_assistant_message_payload_splits_ack_and_nack_polarity(tmp_path):
                 {
                     "type": "output_text",
                     "text": (
-                        "ACK 20260610T115900000000Z: shipped the doctor rollup.\n"
-                        "NACK 20260610T115901000000Z: refusing — that weakens "
+                        "ACK 1k4YggTX: shipped the doctor rollup.\n"
+                        "NACK 1k4Yggrm: refusing — that weakens "
                         "the gate."
                     ),
                 }
@@ -418,12 +418,12 @@ def test_assistant_message_payload_splits_ack_and_nack_polarity(tmp_path):
     # ack_keys is the polarity-agnostic union of responded keys, in source order;
     # the counts and nack_keys carry the positive/negative split for tinting.
     assert payload["ack_keys"] == [
-        "20260610T115900000000Z",
-        "20260610T115901000000Z",
+        "1k4YggTX",
+        "1k4Yggrm",
     ]
     assert payload["ack_count"] == 1
     assert payload["nack_count"] == 1
-    assert payload["nack_keys"] == ["20260610T115901000000Z"]
+    assert payload["nack_keys"] == ["1k4Yggrm"]
     assert [seg["disposition"] for seg in payload["ack_segments"]] == [
         "acked",
         "refused",
@@ -442,7 +442,7 @@ def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path)
             "content": [
                 {
                     "type": "output_text",
-                    "text": ("NACK 20260610T115900000000Z: cannot comply with that."),
+                    "text": ("NACK 1k4YggTX: cannot comply with that."),
                 }
             ],
         },
@@ -455,7 +455,7 @@ def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path)
     # must not read as an acknowledgment (no acked tint / ACK chip).
     assert payload["ack_count"] == 0
     assert payload["nack_count"] == 1
-    assert payload["nack_keys"] == ["20260610T115900000000Z"]
+    assert payload["nack_keys"] == ["1k4YggTX"]
     assert payload["preamble_html"] == ""
     assert [seg["disposition"] for seg in payload["ack_segments"]] == ["refused"]
     assert "Cannot comply with that." in payload["ack_segments"][0]["html"]
@@ -497,7 +497,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     row = {
         "id": 42,
         "uuid": "task-uuid-42",
-        "incepted": "20260610T120001000001Z",
+        "incepted": "1k4Yh62d",
         "description": "CLI follow-up",
         "project": "serve.ui",
         "acceptance": ("Task card comes from the backend | Second backend criterion"),
@@ -585,7 +585,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert item["kind"] == "task_card"
     assert item["source_kind"] == "cli_task_created"
     assert item["task_card_count"] == 1
-    assert item["timestamp"] == "2026-06-10T12:00:01.000001Z"
+    assert item["timestamp"] == "2026-06-10T12:00:01.001000Z"
     assert item["display_text"] == "Task capture: CLI follow-up (serve.ui)"
     assert item["preview"] == "Task capture: CLI follow-up (serve.ui)"
     assert '<blockquote class="task-directive-quote">' in item["display_html"]
@@ -600,7 +600,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         '<div class="task-directive-property">'
         "<dt>acceptance</dt><dd>Second backend criterion</dd>" in item["display_html"]
     )
-    assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
+    assert "<dt>handle</dt><dd>UI-1k4Yh62d</dd>" in item["display_html"]
 
 
 def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
@@ -611,7 +611,7 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
         {
             "id": 42,
             "uuid": "oops-task-42",
-            "incepted": "20260610T120001000001Z",
+            "incepted": "1k4Yh62d",
             "description": "Oops task card",
             "task_description": "Full oops diagnostic stays visible.",
             "project": task_config.OOPS_PROJECT,
@@ -622,7 +622,7 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
         {
             "id": 43,
             "uuid": "private-task-43",
-            "incepted": "20260610T120002000001Z",
+            "incepted": "1k4Yh6Ps",
             "description": "Private task card",
             "task_description": "Private details stay visible.",
             "project": task_config.private_project(actor),
@@ -681,14 +681,14 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
     row = {
         "id": 43,
         "uuid": "newer-task",
-        "incepted": "20260610T120002000001Z",
+        "incepted": "1k4Yh6Ps",
         "description": "Later CLI follow-up",
         "project": "serve.ui",
         "origin_thread": actor,
         "creation_surface": "cli",
         "status": "pending",
     }
-    boundary_key = "2026-06-10T12:00:01.000001Z#task-card:older-task"
+    boundary_key = "2026-06-10T12:00:01.001000Z#task-card:older-task"
     seen: dict[str, object] = {}
 
     def fake_messages(_thread_id: str, **kwargs) -> message_reader.AssistantMessageRead:
@@ -774,7 +774,7 @@ def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
     row = {
         "id": 43,
         "uuid": "review-followup-43",
-        "incepted": "20260610T120003000001Z",
+        "incepted": "1k4Yh6n5",
         "description": "CLI review follow-up",
         "project": "serve.ui",
         "acceptance": "Review follow-up appears as a card",
@@ -816,7 +816,7 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
         {
             "id": 1,
             "uuid": "older-task",
-            "incepted": "20260610T120001000001Z",
+            "incepted": "1k4Yh62d",
             "description": "Older CLI follow-up",
             "project": "serve.ui",
             "origin_thread": actor,
@@ -825,14 +825,14 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
         {
             "id": 2,
             "uuid": "newer-task",
-            "incepted": "20260610T120002000001Z",
+            "incepted": "1k4Yh6Ps",
             "description": "Later CLI follow-up",
             "project": "serve.ui",
             "origin_thread": actor,
             "creation_surface": "cli",
         },
     ]
-    boundary_key = "2026-06-10T12:00:01.000001Z#task-card:older-task"
+    boundary_key = "2026-06-10T12:00:01.001000Z#task-card:older-task"
 
     monkeypatch.setattr(message.tw, "export", lambda _filters: rows)
 
@@ -847,7 +847,7 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
         "hello",
         "Task capture: Later CLI follow-up (serve.ui)",
     ]
-    boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.000001Z")
+    boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.001000Z")
     assert boundary is not None
     assert all(
         (timestamp := message_reader.parse_timestamp(item.timestamp)) is not None
@@ -862,7 +862,7 @@ def test_task_card_tail_merge_drops_cards_older_than_visible_window(monkeypatch)
         {
             "id": 1,
             "uuid": "stale-task",
-            "incepted": "20260610T060000000001Z",
+            "incepted": "1k4VkTVn",
             "description": "Stale CLI follow-up",
             "project": "serve.docs",
             "origin_thread": actor,
@@ -871,7 +871,7 @@ def test_task_card_tail_merge_drops_cards_older_than_visible_window(monkeypatch)
         {
             "id": 2,
             "uuid": "fresh-task",
-            "incepted": "20260610T120001000001Z",
+            "incepted": "1k4Yh62d",
             "description": "Fresh CLI follow-up",
             "project": "serve.ui",
             "origin_thread": actor,
@@ -1101,7 +1101,7 @@ def test_sent_steering_payload_includes_image_attachments(tmp_path):
 
 def test_messages_payload_round_trips_ack_context_attachments(monkeypatch, tmp_path):
     _init_repo(tmp_path)
-    name = "20260104T000000000004Z.txt"
+    name = "1jNmXPHm.txt"
     key = inbox_item_key(name)
     composed = compose_inbox_text(
         body=f"look here\n{RENEWAL_HANDOFF_REQUEST_SUFFIX}",
@@ -1149,8 +1149,8 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_repo(repo)
-    pending_name = "20260104T000000000006Z.txt"
-    archived_name = "20260104T000000000007Z.txt"
+    pending_name = "1jNmXPHp.txt"
+    archived_name = "1jNmXPHq.txt"
     write_inbox_item(
         repo,
         pending_name,
@@ -1231,20 +1231,22 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
 
 
-def test_messages_payload_finds_ack_context_by_dropped_z_alias(monkeypatch, tmp_path):
+def test_messages_payload_finds_ack_context_by_collision_suffixed_key(
+    monkeypatch, tmp_path
+):
     _init_repo(tmp_path)
-    name = "20260104T000000000005Z.txt"
-    bare_key = "20260104T000000000005"
+    name = "1jNmXPHn-2.txt"
+    suffixed_key = "1jNmXPHn-2"
     composed = compose_inbox_text(body="operator original", priority=None, stop=False)
     write_inbox_item(tmp_path, name, composed)
-    archive_ackd_inbox_items(tmp_path, [bare_key])
+    archive_ackd_inbox_items(tmp_path, [suffixed_key])
     _stub_messages_payload(
         monkeypatch,
         [
             _message(
                 "2026-01-04T00:00:01.000000Z",
                 ack_count=1,
-                ack_keys=[bare_key],
+                ack_keys=[suffixed_key],
             )
         ],
     )
@@ -1255,7 +1257,7 @@ def test_messages_payload_finds_ack_context_by_dropped_z_alias(monkeypatch, tmp_
         limit=5,
     )
 
-    assert payload["ackContexts"][0]["key"] == bare_key
+    assert payload["ackContexts"][0]["key"] == suffixed_key
     assert payload["ackContexts"][0]["found"] is True
     assert payload["ackContexts"][0]["text"] == "operator original"
 
@@ -1264,7 +1266,7 @@ def test_messages_payload_does_not_quote_assistant_ack_when_inbox_missing(
     monkeypatch, tmp_path
 ):
     _init_repo(tmp_path)
-    key = "20260104T000000000005Z"
+    key = "1jNmXPHn"
     _stub_messages_payload(
         monkeypatch,
         [_message("2026-01-04T00:00:01.000000Z", ack_count=1, ack_keys=[key])],

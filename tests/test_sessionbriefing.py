@@ -281,7 +281,7 @@ def test_briefing_recovery_uses_parsed_intent_and_prior_steering(tmp_path, monke
         "  intent=Keep draining allocator-selected tasks. Validate before completion.",
         "  user_after=continue with recovery",
         "  steering=acked 2026-01-01T00:00:09.000Z "
-        "key=20260101T000009000000Z operator asks before compaction",
+        "key=1jN552dN operator asks before compaction",
     ]
 
 
@@ -291,7 +291,7 @@ def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monke
     _write_recovery_transcript(transcript, include_summary=False)
     _record_ack_state_ask(
         repo,
-        "20260101T000009000000Z",
+        "1jN552dN",
         "operator asks before compaction",
         ACK_DISPOSITION_ACKED,
         "2026-01-01T00:00:09Z",
@@ -308,7 +308,7 @@ def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monke
         "  assistant_before=ready to compact",
         "  user_after=-",
         "  steering=acked 2026-01-01T00:00:09.000Z "
-        "key=20260101T000009000000Z operator asks before compaction",
+        "key=1jN552dN operator asks before compaction",
     ]
 
 
@@ -398,7 +398,7 @@ def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
     active = create.add(
         "Read top task learnings",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["briefing renders the top five learnings"],
     )
@@ -429,7 +429,7 @@ def test_briefing_surfaces_learning_from_prior_task_done(
     completed = create.add(
         "Distill session learning",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["task done stores a durable learning"],
     )
@@ -446,7 +446,7 @@ def test_briefing_surfaces_learning_from_prior_task_done(
     active = create.add(
         "Use session learning",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["briefing surfaces the active stem learning"],
     )
@@ -468,10 +468,10 @@ def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
-    deadletter_inbox_item(repo, "20260101T000000000001Z")
+    deadletter_inbox_item(repo, "1jN54zJK")
     monkeypatch.chdir(repo)
 
     briefing = render_briefing([], max_lines=200, max_bytes=20000)
@@ -480,7 +480,7 @@ def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
     assert "deadlettered=1" in briefing
     assert "source=inbox_deadletter" in briefing
     assert "requeue=spice agent requeue-deadletter <key>" in briefing
-    assert "deadlettered_inbox key=20260101T000000000001Z" in briefing
+    assert "deadlettered_inbox key=1jN54zJK" in briefing
 
 
 def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
@@ -489,7 +489,7 @@ def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
     repo = _init_git_repo(tmp_path / "repo")
     write_inbox_item(
         repo,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
     monkeypatch.chdir(repo)
@@ -515,22 +515,18 @@ def test_agent_requeue_deadletter_command_restores_pending_item(
     repo = _init_git_repo(tmp_path / "repo")
     write_inbox_item(
         repo,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
-    deadletter_inbox_item(repo, "20260101T000000000002Z")
+    deadletter_inbox_item(repo, "1jN54zJL")
     monkeypatch.chdir(repo)
-    args = build_parser().parse_args(
-        ["agent", "requeue-deadletter", "20260101T000000000002Z"]
-    )
+    args = build_parser().parse_args(["agent", "requeue-deadletter", "1jN54zJL"])
 
     assert args.func(args) == 0
 
     output = capsys.readouterr().out
-    assert "requeued_deadletter key=20260101T000000000002Z" in output
-    assert [item.name for item in collect_inbox_items(repo)] == [
-        "20260101T000000000002Z.txt"
-    ]
+    assert "requeued_deadletter key=1jN54zJL" in output
+    assert [item.name for item in collect_inbox_items(repo)] == ["1jN54zJL.txt"]
     assert collect_deadlettered_inbox_items(repo) == []
 
 
@@ -954,9 +950,7 @@ def _record_ack_state_asks(repo, asks: list[tuple[str, str]]) -> None:
 
 
 def _ack_key(ts: str) -> str:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime(
-        "%Y%m%dT%H%M%S%fZ"
-    )
+    return task_identity.encode_width(int(_epoch_seconds(ts) * 1000))
 
 
 def _epoch_seconds(ts: str) -> float:

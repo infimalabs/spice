@@ -244,7 +244,7 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     monkeypatch.setattr(gitsync, "_run", racing_run)
 
     result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000004Z",
+        "TASK-1jN54zJN",
         repo_root=repo,
         meta={
             "title": "Publish raced task work",
@@ -304,7 +304,7 @@ def test_integrate_and_publish_converges_after_consecutive_publish_races(
     monkeypatch.setattr(gitsync, "_run", storming_run)
 
     result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000005Z",
+        "TASK-1jN54zJP",
         repo_root=repo,
         meta={
             "title": "Publish storm task work",
@@ -430,7 +430,7 @@ def test_integrate_and_publish_surfaces_recovery_when_races_never_stop(
 
     with pytest.raises(SpiceError, match="publish"):
         gitsync.integrate_and_publish(
-            "TASK-20260101T000000000006Z",
+            "TASK-1jN54zJQ",
             repo_root=repo,
             meta={
                 "title": "Publish unwinnable race",
@@ -496,7 +496,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
 
     with pytest.raises(SpiceError) as exc_info:
         gitsync.integrate_and_publish(
-            "TASK-20260101T000000000006Z",
+            "TASK-1jN54zJQ",
             repo_root=repo,
             meta={
                 "title": "Publish local head race",
@@ -512,7 +512,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
     assert "task state was not advanced" in message
     assert "git status --short" in message
     assert "git rev-parse HEAD" in message
-    assert 'spice task done TASK-20260101T000000000006Z --validation "..."' in message
+    assert 'spice task done TASK-1jN54zJQ --validation "..."' in message
     assert f"expected_head={agent_head}" in message
     assert f"current_head={raced_head}" in message
     assert _git(repo, "rev-parse", "HEAD") == raced_head
@@ -528,7 +528,7 @@ def test_merge_message_omits_task_description_body():
         {
             "title": "Fix image labels",
             "description": (
-                "Operator steering 20260612T043642083543Z: the labels "
+                "Operator steering 1k4xgthL: the labels "
                 "input_image and view_image look clickable but do not navigate.\n\n"
                 "Screenshot references: "
                 "/tmp/spice/attachments/sha-a/01-image.png and "
@@ -556,7 +556,7 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
         {
             "title": "",
             "description": (
-                "Operator steering 20260612T054500966259Z: final task merge "
+                "Operator steering 1k4yF2RY: final task merge "
                 "commit bodies currently include the task description, which "
                 "can read well but carries too many transient details such as "
                 "'operator steering ...' wording and links/paths to .spice "

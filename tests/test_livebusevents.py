@@ -243,7 +243,7 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         pushed = _wait_for_watch_push(connection)
         assert pushed["type"] == "lane.pending"
         assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["pendingInboxKeys"] == ["20260101T000000000001Z"]
+        assert pushed["payload"]["pendingInboxKeys"] == ["1jN54zJK"]
         assert pushed["payload"]["pendingInboxRevision"]
         assert pushed["payload"]["pendingInboxVersion"] > 0
         assert set(pushed["payload"]) == {
@@ -367,7 +367,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         pushed = _wait_for_watch_push(connection)
         assert pushed["type"] == "lane.pending"
         assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["pendingInboxKeys"] == ["20260101T000000000001Z"]
+        assert pushed["payload"]["pendingInboxKeys"] == ["1jN54zJK"]
         assert "agentEnsure" not in pushed["payload"]
         assert ensure_calls == []
     finally:
@@ -852,8 +852,8 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
             repo,
             THREAD_ID,
             timestamp="2026-01-01T00:00:01.000000Z",
-            text="ACK 20260101T000000000001Z: applied",
-            ack_keys=["20260101T000000000001Z"],
+            text="ACK 1jN54zJK: applied",
+            ack_keys=["1jN54zJK"],
             nack_keys=[],
         )
         change_written.set()

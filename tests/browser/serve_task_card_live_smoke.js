@@ -3,7 +3,7 @@ const { promisify } = require("util");
 const { repoRoot, withServePage } = require("./serve_playwright_harness");
 
 const execFileAsync = promisify(execFile);
-const liveTaskCardSmokeOrigin = "ack:20260101T000000000000Z";
+const liveTaskCardSmokeOrigin = "ack:1jN54zJJ";
 // Later bound scratch targets avoid unrelated historical image fixtures.
 const liveTaskCardTargetOffset = 2;
 const liveTaskCardStageTimeoutMs = 10000;

@@ -253,7 +253,7 @@ def test_lane_signature_reply_log_append_is_not_a_pending_only_change(tmp_path):
         base = app.lane_signature_for_target(state, target, THREAD_A, None)
         write_inbox_item(
             repo,
-            "20260101T000000000001Z.txt",
+            "1jN54zJK.txt",
             compose_inbox_text(body="steer", priority=None, stop=False),
         )
         inbox_only = app.lane_signature_for_target(state, target, THREAD_A, None)
@@ -261,8 +261,8 @@ def test_lane_signature_reply_log_append_is_not_a_pending_only_change(tmp_path):
             repo,
             THREAD_A,
             timestamp="2026-01-01T00:00:01.000000Z",
-            text="ACK 20260101T000000000001Z: applied",
-            ack_keys=["20260101T000000000001Z"],
+            text="ACK 1jN54zJK: applied",
+            ack_keys=["1jN54zJK"],
             nack_keys=[],
         )
         with_reply = app.lane_signature_for_target(state, target, THREAD_A, None)
@@ -444,12 +444,12 @@ def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260102T000000000001Z.txt",
+        "1jNJvRyn.txt",
         compose_inbox_text(body="automated maxim", priority="maxim", stop=False),
     )
     write_inbox_item(
         repo,
-        "20260102T000000000002Z.txt",
+        "1jNJvRyp.txt",
         compose_inbox_text(
             body="automated review feedback", priority="review", stop=False
         ),
@@ -483,19 +483,19 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260102T000000000001Z.txt",
+        "1jNJvRyn.txt",
         compose_inbox_text(body="automated maxim", priority="maxim", stop=False),
     )
     write_inbox_item(
         repo,
-        "20260102T000000000002Z.txt",
+        "1jNJvRyp.txt",
         compose_inbox_text(
             body="automated review feedback", priority="review", stop=False
         ),
     )
     write_inbox_item(
         repo,
-        "20260102T000000000003Z.txt",
+        "1jNJvRyq.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
 
@@ -514,13 +514,13 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
         retry_seconds=0.0,
     )
 
-    assert payload["deadletteredInboxKey"] == "20260102T000000000003Z"
+    assert payload["deadletteredInboxKey"] == "1jNJvRyq"
     assert [item.name for item in collect_inbox_items(repo)] == [
-        "20260102T000000000001Z.txt",
-        "20260102T000000000002Z.txt",
+        "1jNJvRyn.txt",
+        "1jNJvRyp.txt",
     ]
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
-        "20260102T000000000003Z.txt"
+        "1jNJvRyq.txt"
     ]
 
 
@@ -535,12 +535,12 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260717T062038000001Z.txt",
+        "1kDw6qsY.txt",
         compose_inbox_text(body="operator broadcast", priority=None, stop=False),
     )
     write_inbox_item(
         repo,
-        "20260717T062038000002Z.txt",
+        "1kDw6qsZ.txt",
         compose_inbox_text(body="operator follow-up", priority=None, stop=False),
     )
     launches = 0
@@ -581,23 +581,23 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
         == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
     )
     assert refused["deadletteredInboxKeys"] == [
-        "20260717T062038000001Z",
-        "20260717T062038000002Z",
+        "1kDw6qsY",
+        "1kDw6qsZ",
     ]
     assert refused["pendingInboxCount"] == 0
     assert payloads[4:] == [None, None]
     assert pending_inbox_count(repo) == 0
     # Deadletter listings read newest-first, like the archive preview.
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
-        "20260717T062038000002Z.txt",
-        "20260717T062038000001Z.txt",
+        "1kDw6qsZ.txt",
+        "1kDw6qsY.txt",
     ]
 
     # A fresh operator send is an explicit action: exactly one new attempt,
     # journal intact — and its rapid death re-arms the refusal.
     write_inbox_item(
         repo,
-        "20260717T063000000001Z.txt",
+        "1kDwBqjF.txt",
         compose_inbox_text(body="operator retry", priority=None, stop=False),
     )
     granted = agentapi.ensure_agent_for_pending_inbox(
@@ -610,7 +610,7 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
     assert granted["action"] == "start"
     assert launches == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
     assert reopened["failure"] == lifecycle.AGENT_FAILURE_RESTART_REFUSED
-    assert reopened["deadletteredInboxKeys"] == ["20260717T063000000001Z"]
+    assert reopened["deadletteredInboxKeys"] == ["1kDwBqjF"]
     assert pending_inbox_count(repo) == 0
     outcomes = lifecycle.read_launch_outcomes(repo)
     assert len(outcomes) == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
@@ -647,7 +647,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
     rollout.write_text("{}\n", encoding="utf-8")
     write_inbox_item(
         repo,
-        "20260102T000000000001Z.txt",
+        "1jNJvRyn.txt",
         compose_inbox_text(body="pending", priority=None, stop=False),
     )
     monkeypatch.setattr(

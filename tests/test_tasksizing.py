@@ -104,7 +104,7 @@ def test_task_sizing_distinguishes_unavailable_evidence_from_measured_zero():
         "review", 0, "phase:not_required"
     )
     assert sizing.render_task_sizing(unavailable).startswith(
-        "UNIT-20260626T061545678415Z size=unavailable size_score=unavailable"
+        "UNIT-1k87wp0F size=unavailable size_score=unavailable"
     )
     assert "elapsed=+0(phase_effort_windows:0s)" in sizing.render_task_sizing(measured)
 
@@ -151,7 +151,7 @@ def test_task_sizing_rows_filter_and_render_raw_evidence():
     row = _completed_row(
         title="Rendered sizing task",
         uuid="task-3",
-        incepted="20260626T061545678415Z",
+        incepted="1k87wp0F",
         project="task.metrics",
         flow=("todo", "verify", "review"),
         validation="focused sizing tests passed",
@@ -170,7 +170,7 @@ def test_task_sizing_rows_filter_and_render_raw_evidence():
 
     assert len(reports) == 1
     assert output.startswith(
-        "METRICS-20260626T061545678415Z size=M size_score=2 project=task.metrics "
+        "METRICS-1k87wp0F size=M size_score=2 project=task.metrics "
     )
     assert "elapsed=+1(phase_effort_windows:1800s)" in output
     assert "review=+0(review_finding:clean)" in output
@@ -183,7 +183,7 @@ def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
         title="Newest task",
         uuid="task-cli",
         project="task.metrics",
-        incepted="20260626T060000000002Z",
+        incepted="1k87p46B",
         end="20260626T061000Z",
         validation="focused sizing tests passed",
     )
@@ -200,7 +200,7 @@ def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
 
     assert args.func(args) == 0
     output = capsys.readouterr().out
-    assert "METRICS-20260626T060000000002Z" in output
+    assert "METRICS-1k87p46B" in output
     assert "size_score=0" in output
     assert "validation=recorded(completion_validation)" in output
 
@@ -241,7 +241,7 @@ def _completed_row(
     title: str,
     uuid: str | None = None,
     project: str = "task.unit",
-    incepted: str = "20260626T061545678415Z",
+    incepted: str = "1k87wp0F",
     entry: str = "20260626T060000Z",
     end: str = "20260626T060100Z",
     validation: str = "focused tests passed",

@@ -44,6 +44,7 @@ from spice.sessions.records import (
     collect_compactions,
     collect_turns,
 )
+from spice.tasks import identity
 
 STEERING_ROW_LIMIT = 6
 STEERING_TEXT_PREVIEW_CHARS = 200
@@ -249,12 +250,15 @@ def collect_ask_candidates(
     candidates: list[RehydrationCandidate] = []
     if repo_root is not None:
         candidates.extend(
-            _pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))
+            _pending_ask_candidate(item)
+            for item in collect_inbox_items(str(repo_root))
+            if _valid_ask_key(inbox_item_key(item.name))
         )
         candidates.extend(
             _ack_state_ask_candidate(record)
             for record in ack_state_records(repo_root)
-            if _ack_state_record_matches_subject(record, subject_thread_ids)
+            if _valid_ask_key(record.key)
+            and _ack_state_record_matches_subject(record, subject_thread_ids)
         )
     return dedupe_rehydration_candidates(
         [
@@ -329,13 +333,17 @@ def _ask_candidate_matches_filters(
     return not needle or needle in haystack
 
 
+def _valid_ask_key(key: str) -> bool:
+    # Records predating the base52 key grammar are not ask candidates; the
+    # stamp is the only timestamp source for a rehydrated ask.
+    return bool(identity.INCEPTED_RE.match(key.split("-", 1)[0]))
+
+
 def _ask_timestamp_from_key(key: str) -> str:
-    raw = key.split("-", 1)[0]
-    raw = raw[:-1] if raw.endswith("Z") else raw
-    try:
-        parsed = datetime.strptime(raw, "%Y%m%dT%H%M%S%f").replace(tzinfo=UTC)
-    except ValueError as exc:
-        raise SpiceError(f"invalid ACK steering key timestamp: {key or '-'}") from exc
+    stamp = key.split("-", 1)[0]
+    if not identity.INCEPTED_RE.match(stamp):
+        raise SpiceError(f"invalid ACK steering key stamp: {key or '-'}")
+    parsed = identity.incepted_datetime(stamp)
     return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 

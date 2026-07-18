@@ -45,10 +45,10 @@ from spice.mail.ackstate import (
 from spice.mail.inbox import compose_inbox_text
 from spice.tasks import alloc, config as task_config, identity, tw
 
-KEY_A = "20260703T020000000000Z"
-KEY_B = "20260703T020001000000Z"
-KEY_C = "20260703T020002000000Z"
-KEY_D = "20260703T020003000000Z"
+KEY_A = "1k9hXzJJ"
+KEY_B = "1k9hXzgX"
+KEY_C = "1k9hY02m"
+KEY_D = "1k9hY0Q0"
 ARCHIVED_AT_OLDER = 100.0
 ARCHIVED_AT_NEWER = 200.0
 ARCHIVED_AT_NEWEST = 300.0

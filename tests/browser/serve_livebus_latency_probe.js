@@ -85,7 +85,7 @@ async function seedScratchLanes(seedRoot, laneCount) {
   return JSON.parse(stdout.trim());
 }
 
-const probeOrigin = "ack:20260101T000000000000Z";
+const probeOrigin = "ack:1jN54zJJ";
 const probeLaneCount = Number(process.env.PROBE_LANES || 8); // env-policy: allow
 const probeRounds = Number(process.env.PROBE_ROUNDS || 5); // env-policy: allow
 const probeSubmits = Number(process.env.PROBE_SUBMITS || 5); // env-policy: allow

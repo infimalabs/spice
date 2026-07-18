@@ -281,17 +281,15 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
                 "Output:\n"
                 "Supervisor Feedback\n"
                 "  "
-                + supervisor_feedback_line(
-                    "ack.archived", keys=["20260610T120000000000Z"]
-                )
+                + supervisor_feedback_line("ack.archived", keys=["1k4Yh5gN"])
                 + "\n"
                 "Supervisor Feedback\n"
                 "  "
                 + supervisor_feedback_line(
                     "task.created",
                     handles=[
-                        "FILTERS-20260610T120000000001Z",
-                        "UI-20260610T120000000002Z",
+                        "FILTERS-1k4Yh5gP",
+                        "UI-1k4Yh5gQ",
                     ],
                 )
                 + "\n"
@@ -319,8 +317,7 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
     item = items[0]
     assert item.kind == "presence:function_call_output"
     assert item.preview == (
-        "Acknowledged: 20260610T120000000000Z "
-        "Tasks captured: FILTERS-20260610T120000000001Z, UI-20260610T120000000002Z"
+        "Acknowledged: 1k4Yh5gN Tasks captured: FILTERS-1k4Yh5gP, UI-1k4Yh5gQ"
     )
     assert line["preview"] == item.preview
     assert line["latestActivityPreview"] == item.preview
@@ -406,7 +403,7 @@ def test_tool_output_preview_uses_output_text_without_call_context(tmp_path):
 def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monkeypatch):
     first = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     duplicate = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
-    key = "20260610T120000000000Z"
+    key = "1k4Yh5gN"
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text(
         "\n".join(
@@ -663,7 +660,7 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
             return [
                 {
                     "uuid": "reviewed-uuid",
-                    "incepted": "20260102T000000000001Z",
+                    "incepted": "1jNJvRyn",
                     "project": "task.review",
                     "description": "Fix reviewed issue",
                     "review_author": "agent-a",
@@ -673,7 +670,7 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
                 },
                 {
                     "uuid": "clean-uuid",
-                    "incepted": "20260102T000000000002Z",
+                    "incepted": "1jNJvRyp",
                     "project": "task.review",
                     "description": "Clean review",
                     "review_author": "agent-a",
@@ -683,7 +680,7 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
                 },
                 {
                     "uuid": "other-uuid",
-                    "incepted": "20260102T000000000003Z",
+                    "incepted": "1jNJvRyq",
                     "project": "task.review",
                     "description": "Other actor review",
                     "review_author": "agent-z",
@@ -720,7 +717,7 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
     assert pressure["openFollowupCount"] == 2
     assert pressure["items"] == [
         {
-            "reviewedTask": "REVIEW-20260102T000000000001Z",
+            "reviewedTask": "REVIEW-1jNJvRyn",
             "finding": "changes",
             "findingSeverity": "changes",
             "reviewer": "agent-b",
@@ -732,8 +729,7 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
     assert rows["review pressure"] == {
         "key": "review pressure",
         "value": (
-            "changes on REVIEW-20260102T000000000001Z "
-            "by agent-b via task-review; 2 follow-ups"
+            "changes on REVIEW-1jNJvRyn by agent-b via task-review; 2 follow-ups"
         ),
         "span": True,
     }

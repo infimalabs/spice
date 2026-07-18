@@ -373,7 +373,7 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="external steering", priority=None, stop=False),
     )
     ensure_calls: list[dict[str, object]] = []
@@ -412,12 +412,12 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
     _patch_agent_status(monkeypatch, thread_id="", running=False)
     write_inbox_item(
         repo_a,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="lane a", priority=None, stop=False),
     )
     write_inbox_item(
         repo_b,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(body="lane b", priority=None, stop=False),
     )
     ensure_calls: list[dict[str, object]] = []
@@ -468,7 +468,7 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         compose_inbox_text(body="external steering", priority=None, stop=False),
     )
     ensure_calls = 0
@@ -488,10 +488,10 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     payload = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
-    assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
+    assert payload["agentEnsure"]["deadletteredInboxKey"] == "1jN54zJK"
     assert (
         payload["agentEnsure"]["deadletterRequeueCommand"]
-        == "spice agent requeue-deadletter 20260101T000000000001Z"
+        == "spice agent requeue-deadletter 1jN54zJK"
     )
     assert payload["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxCount"] == 0
@@ -502,7 +502,7 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     assert payload["agentEnsure"]["pendingInboxKeys"] == []
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
-        "20260101T000000000001Z.txt"
+        "1jN54zJK.txt"
     ]
 
 
@@ -513,7 +513,7 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     write_inbox_item(
         repo,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         compose_inbox_text(body="external steering", priority=None, stop=False),
     )
     ensure_calls = 0
@@ -535,10 +535,10 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert "failure" not in payload["agentEnsure"]
-    assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000002Z"
+    assert payload["agentEnsure"]["deadletteredInboxKey"] == "1jN54zJL"
     assert (
         payload["agentEnsure"]["deadletterRequeueCommand"]
-        == "spice agent requeue-deadletter 20260101T000000000002Z"
+        == "spice agent requeue-deadletter 1jN54zJL"
     )
     assert payload["agentEnsure"]["pendingInboxCount"] == 0
     assert payload["agentEnsure"]["pendingInboxLabel"] == "0"
@@ -550,7 +550,7 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
     assert payload["statusLine"]["pendingInboxKeys"] == []
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
-        "20260101T000000000002Z.txt"
+        "1jN54zJL.txt"
     ]
 
 

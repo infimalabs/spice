@@ -73,7 +73,7 @@ def test_task_list_scoped_empty_points_to_matching_global_and_project_rows(
     create.add(
         "Peer global board row",
         project="task.cli",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["row remains globally visible"],
     )
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
@@ -145,16 +145,16 @@ def test_task_add_after_accepts_space_separated_dependencies():
             "add",
             "Follow-up title",
             "--after",
-            "TASK-20260101T000000000001Z",
-            "TASK-20260101T000000000002Z",
+            "TASK-1jN54zJK",
+            "TASK-1jN54zJL",
             "--project",
             "task.unit",
         ]
     )
 
     assert args.after == [
-        "TASK-20260101T000000000001Z",
-        "TASK-20260101T000000000002Z",
+        "TASK-1jN54zJK",
+        "TASK-1jN54zJL",
     ]
     assert args.title == "Follow-up title"
 
@@ -166,15 +166,15 @@ def test_task_add_after_repeats_for_multiple_dependencies():
             "add",
             "Follow-up title",
             "--after",
-            "TASK-20260101T000000000001Z",
+            "TASK-1jN54zJK",
             "--after",
-            "TASK-20260101T000000000002Z",
+            "TASK-1jN54zJL",
         ]
     )
 
     assert args.after == [
-        "TASK-20260101T000000000001Z",
-        "TASK-20260101T000000000002Z",
+        "TASK-1jN54zJK",
+        "TASK-1jN54zJL",
     ]
     assert args.title == "Follow-up title"
 
@@ -185,14 +185,14 @@ def test_task_depends_after_accumulates_all_edges(task_repo, capsys, repeated_fl
         "Parent waiting on several dependencies",
         project="task.unit",
         acceptance=["parent acceptance"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     children = [
         create.add(
             f"Dependency {index}",
             project="task.unit",
             acceptance=[f"dependency {index} acceptance"],
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
         )
         for index in range(3)
     ]
@@ -223,53 +223,49 @@ def test_task_wake_parser_accepts_multiple_handles():
         [
             "task",
             "wake",
-            "TASK-20260101T000000000001Z",
-            "TASK-20260101T000000000002Z",
+            "TASK-1jN54zJK",
+            "TASK-1jN54zJL",
         ]
     )
 
     assert args.task_action == "wake"
     assert args.handles == [
-        "TASK-20260101T000000000001Z",
-        "TASK-20260101T000000000002Z",
+        "TASK-1jN54zJK",
+        "TASK-1jN54zJL",
     ]
 
 
 def test_task_wake_parser_rejects_claim_flag():
     with pytest.raises(SystemExit) as exc_info:
-        build_parser().parse_args(
-            ["task", "wake", "TASK-20260101T000000000001Z", "--claim"]
-        )
+        build_parser().parse_args(["task", "wake", "TASK-1jN54zJK", "--claim"])
 
     assert exc_info.value.code == 2
 
 
 def test_task_wake_parser_accepts_into_project():
     args = build_parser().parse_args(
-        ["task", "wake", "OOPS-20260101T000000000001Z", "--into", "task.cli"]
+        ["task", "wake", "OOPS-1jN54zJK", "--into", "task.cli"]
     )
 
     assert args.task_action == "wake"
-    assert args.handles == ["OOPS-20260101T000000000001Z"]
+    assert args.handles == ["OOPS-1jN54zJK"]
     assert args.into == "task.cli"
 
 
 def test_task_wake_parser_defaults_into_to_none():
-    args = build_parser().parse_args(["task", "wake", "TASK-20260101T000000000001Z"])
+    args = build_parser().parse_args(["task", "wake", "TASK-1jN54zJK"])
 
     assert args.into is None
 
 
 def test_task_reclaim_parser_accepts_optional_handle():
     bare = build_parser().parse_args(["task", "reclaim"])
-    explicit = build_parser().parse_args(
-        ["task", "reclaim", "TASK-20260101T000000000001Z"]
-    )
+    explicit = build_parser().parse_args(["task", "reclaim", "TASK-1jN54zJK"])
 
     assert bare.task_action == "reclaim"
     assert bare.handle is None
     assert explicit.task_action == "reclaim"
-    assert explicit.handle == "TASK-20260101T000000000001Z"
+    assert explicit.handle == "TASK-1jN54zJK"
 
 
 def test_task_reclaim_parser_rejects_renew_alias():
@@ -286,17 +282,14 @@ def test_task_reclaim_renders_result(monkeypatch):
         lambda _handle: claimstate.ClaimRenewalResult(
             True,
             "renewed",
-            handle="TASK-20260101T000000000001Z",
+            handle="TASK-1jN54zJK",
             claim_until="2026-07-09T06:00:00.000000Z",
         ),
     )
 
-    output = task_cli._reclaim(argparse.Namespace(handle="TASK-20260101T000000000001Z"))
+    output = task_cli._reclaim(argparse.Namespace(handle="TASK-1jN54zJK"))
 
-    assert (
-        output == "reclaimed TASK-20260101T000000000001Z until "
-        "2026-07-09T06:00:00.000000Z"
-    )
+    assert output == "reclaimed TASK-1jN54zJK until 2026-07-09T06:00:00.000000Z"
 
 
 def test_task_reclaim_renders_noop(monkeypatch):
@@ -316,7 +309,7 @@ def test_task_delete_parser_accepts_force_claimed():
         [
             "task",
             "delete",
-            "TASK-20260101T000000000001Z",
+            "TASK-1jN54zJK",
             "--reason",
             "duplicate",
             "--force-claimed",
@@ -331,7 +324,7 @@ def test_task_edit_rewrites_description_composed_with_priority(task_repo, capsys
     handle = create.add(
         "Refresh my description",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         description="sketch that predates the landed mechanism",
         priority="low",
     )
@@ -385,7 +378,7 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
             "--project",
             "task.unit",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -408,7 +401,7 @@ def test_task_add_missing_acceptance_routes_to_plan(task_repo, capsys):
             "--due",
             "2026-08-01",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -421,7 +414,7 @@ def test_task_add_missing_acceptance_routes_to_plan(task_repo, capsys):
     assert row["phase"] == "plan"
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert not str(row.get("acceptance") or "")
-    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert row["origin"] == "ack:1jN54zJJ"
     assert str(row.get("due") or "").startswith("20260801")
 
 
@@ -436,7 +429,7 @@ def test_task_add_missing_acceptance_honors_explicit_flow(task_repo, capsys):
             "--flow",
             "todo,review",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -461,7 +454,7 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
             "--acceptance",
             "Accepted tasks still route through plan when wording is suspect",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -475,7 +468,7 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
-    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert row["origin"] == "ack:1jN54zJJ"
     assert any(
         "adopting" in ann and "self-correction required" in ann for ann in annotations
     )
@@ -486,13 +479,13 @@ def test_task_reword_clears_active_claim_marker(task_repo, capsys):
         "Adopting CLI resolve",
         project="task.unit",
         acceptance=["parent bookend acceptance exists"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     child = create.add(
         "Concrete CLI child",
         project="task.unit",
         acceptance=["child node has acceptance"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [child])
     ops.claim(handle)
@@ -523,13 +516,13 @@ def test_task_depends_not_after_cli_drops_edge(task_repo, capsys):
         "Plan holding a CLI dependency edge",
         project="task.unit",
         acceptance=["parent bookend acceptance exists"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     child = create.add(
         "Dependency dropped through the CLI",
         project="task.unit",
         acceptance=["child node has acceptance"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [child])
 
@@ -554,7 +547,7 @@ def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
             "task.unit",
             "--deferred",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -574,7 +567,7 @@ def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
     handle = create.add(
         "Review target for CLI follow-up",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         flow=["review"],
         acceptance=["review starts directly for CLI coverage"],
@@ -632,7 +625,7 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
             "--description",
             "Longer triage context for the board.",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -659,7 +652,7 @@ def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
             "--severity",
             "H",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -692,22 +685,22 @@ def test_task_list_project_scope_filters_board_and_sorts_newest(monkeypatch):
         _row(
             "Serve UI oldest",
             project="serve.ui",
-            incepted="20260612T000000000001Z",
+            incepted="1k4vPpg5",
         ),
         _row(
             "Task newest ignored",
             project="task.cli",
-            incepted="20260612T000000000004Z",
+            incepted="1k4vPpg8",
         ),
         _row(
             "Serve API newest",
             project="serve.api",
-            incepted="20260612T000000000003Z",
+            incepted="1k4vPpg7",
         ),
         _row(
             "Serve UI middle",
             project="serve.ui",
-            incepted="20260612T000000000002Z",
+            incepted="1k4vPpg6",
         ),
     ]
     seen: dict[str, object] = {}
@@ -757,7 +750,7 @@ def test_task_list_status_filter_uses_visible_rows(monkeypatch):
                     "Waiting task",
                     project="task.cli",
                     status="waiting",
-                    incepted="20260612T000000000001Z",
+                    incepted="1k4vPpg5",
                 )
             ],
             ["project:task.cli"],
@@ -782,7 +775,7 @@ def test_task_list_explicit_hidden_project_uses_raw_export(monkeypatch):
         _row(
             "Hidden oops item",
             project=config.OOPS_PROJECT,
-            incepted="20260612T000000000001Z",
+            incepted="1k4vPpg5",
         )
     ]
     seen: dict[str, object] = {}
@@ -823,21 +816,21 @@ def test_task_list_all_marks_completed_and_deleted_rows(monkeypatch):
         _row(
             "Live task",
             project="task.render",
-            incepted="20260612T000000000001Z",
+            incepted="1k4vPpg5",
             status="pending",
             phase="todo",
         ),
         _row(
             "Completed task",
             project="task.render",
-            incepted="20260612T000000000002Z",
+            incepted="1k4vPpg6",
             status="completed",
             phase="review",
         ),
         _row(
             "Deleted task",
             project="task.render",
-            incepted="20260612T000000000003Z",
+            incepted="1k4vPpg7",
             status="deleted",
             phase="todo",
         ),
@@ -872,7 +865,7 @@ def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
     handle = create.add(
         "Capture task artifacts",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["artifact CLI stores text and binary evidence"],
     )
@@ -958,7 +951,7 @@ def test_task_artifact_prune_is_dry_run_until_apply(task_repo, tmp_path, capsys)
     handle = create.add(
         "Prune completed artifact",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         flow=["todo"],
         acceptance=["prunable artifacts are removed only with --apply"],

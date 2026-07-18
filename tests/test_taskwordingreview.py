@@ -56,7 +56,7 @@ def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
         [
             "TASK title=Adopting inline task | project=task.unit | "
             "acceptance=Inline task still needs self-correction | "
-            "origin=ack:20260101T000000000000Z"
+            "origin=ack:1jN54zJJ"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -88,7 +88,7 @@ def test_explicitly_negated_wording_starts_in_todo(task_repo, acceptance):
         "Concrete wording task",
         project="task.unit",
         acceptance=[acceptance],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
 
     row = identity.resolve(handle)
@@ -108,7 +108,7 @@ def test_prohibition_means_clause_starts_in_plan(task_repo, acceptance):
         "Concrete wording task",
         project="task.unit",
         acceptance=[acceptance],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
 
     row = identity.resolve(handle)
@@ -123,7 +123,7 @@ def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
         project="task.unit",
         flow=["review"],
         acceptance=["review can spawn a requested-change task"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         claim=True,
     )
 
@@ -272,7 +272,7 @@ def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):
     handle = create.add(
         "Edit gains suspect acceptance",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["clean criterion"],
     )
 
@@ -291,13 +291,13 @@ def _suspect_plan_task_with_accepted_child() -> str:
     handle = create.add(
         "Adopting plan parent",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["parent bookend acceptance exists"],
     )
     child = create.add(
         "Concrete child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -308,14 +308,14 @@ def _plan_task_with_accepted_child() -> str:
     handle = create.add(
         "Plan wording review parent",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
     child = create.add(
         "Plan wording review child",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -326,7 +326,7 @@ def _clean_plan_parent() -> str:
     return create.add(
         "Plan parent bookend",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
@@ -336,7 +336,7 @@ def _suspect_unclaimed_child(title: str) -> str:
     child = create.add(
         title,
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["child node has acceptance"],
     )
     row = identity.resolve(child)

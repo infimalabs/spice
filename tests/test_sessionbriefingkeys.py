@@ -12,8 +12,8 @@ from tests.test_sessionbriefing import _init_git_repo, _section_lines
 
 def test_briefing_accepts_collision_suffixed_ask_keys(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
-    pending_key = "20260101T000000000001Z-2"
-    ack_key = "20260101T000000000001Z-3"
+    pending_key = "1jN54zJK-2"
+    ack_key = "1jN54zJK-3"
     write_inbox_item(
         repo,
         f"{pending_key}.txt",
@@ -50,15 +50,13 @@ def test_briefing_accepts_collision_suffixed_ask_keys(tmp_path, monkeypatch):
 
     assert _section_lines(briefing, "Steering") == [
         "Steering",
-        "  2026-01-01T00:00:00.000Z disposition=pending "
-        "key=20260101T000000000001Z-2 text=pending collision",
-        "  2026-01-01T00:00:00.000Z disposition=acked "
-        "key=20260101T000000000001Z-3 text=acked collision",
+        "  2026-01-01T00:00:00.001Z disposition=pending "
+        "key=1jN54zJK-2 text=pending collision",
+        "  2026-01-01T00:00:00.001Z disposition=acked "
+        "key=1jN54zJK-3 text=acked collision",
     ]
     assert _section_lines(sweep, "Window 0 (from 2026-01-01T00:00:00.000Z)") == [
         "Window 0 (from 2026-01-01T00:00:00.000Z)",
-        "  ask pending 2026-01-01T00:00:00.000Z "
-        "key=20260101T000000000001Z-2 pending collision",
-        "  ask acked 2026-01-01T00:00:00.000Z "
-        "key=20260101T000000000001Z-3 acked collision",
+        "  ask pending 2026-01-01T00:00:00.001Z key=1jN54zJK-2 pending collision",
+        "  ask acked 2026-01-01T00:00:00.001Z key=1jN54zJK-3 acked collision",
     ]

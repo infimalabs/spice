@@ -55,7 +55,7 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000002Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
 
     message = str(exc_info.value)
     assert "README.md" in message
@@ -64,7 +64,7 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     assert "git status --short" in message
     assert "git rev-parse --verify MERGE_HEAD" in message
     assert "git add -- README.md" in message
-    assert 'spice task done TASK-20260101T000000000002Z --validation "..."' in message
+    assert 'spice task done TASK-1jN54zJL --validation "..."' in message
     assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
     assert _git(repo, "status", "--porcelain") == "UU README.md"
 
@@ -75,12 +75,10 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
         "git",
         "commit",
         "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000002Z",
+        "Resolve baseline overlap for TASK-1jN54zJL",
     )
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000002Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -117,7 +115,7 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000008Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -125,7 +123,7 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000008Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -139,9 +137,7 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     _run(repo, "git", "checkout", upstream_head, "--", "peer.txt")
     _run(repo, "git", "commit", "-m", "Restore baseline content")
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000008Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -177,7 +173,7 @@ def test_integrate_and_publish_refuses_rename_detected_peer_deletion(tmp_path):
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000010Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -185,7 +181,7 @@ def test_integrate_and_publish_refuses_rename_detected_peer_deletion(tmp_path):
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000010Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -201,9 +197,7 @@ def test_integrate_and_publish_allows_task_owned_rename(tmp_path):
     _run(repo, "git", "mv", "README.md", "NOTES.md")
     _run(repo, "git", "commit", "-m", "rename readme")
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000011Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJW", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -240,7 +234,7 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(peer, "git", "push", "origin", "main")
 
     with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000012Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
@@ -248,23 +242,21 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000012Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
     assert "stale.txt" in message
     assert _refusal_commands(message) == [
         "git rm -- stale.txt",
-        'git commit -m "Restore baseline content for TASK-20260101T000000000012Z"',
-        'spice task done TASK-20260101T000000000012Z --validation "..."',
+        'git commit -m "Restore baseline content for TASK-1jN54zJX"',
+        'spice task done TASK-1jN54zJX --validation "..."',
     ]
 
     _run(repo, "git", "rm", "stale.txt")
     _run(repo, "git", "commit", "-m", "Restore baseline deletion")
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000012Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -302,7 +294,7 @@ def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000013Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
 
     (repo / "README.md").write_text("initial\n", encoding="utf-8")
     (repo / "conflict.txt").write_text("agent conflict work\n", encoding="utf-8")
@@ -311,7 +303,7 @@ def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000013Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -320,8 +312,8 @@ def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path
     assert _refusal_commands(message) == [
         f"git checkout {upstream_head} -- README.md",
         "git rm -- stale.txt",
-        'git commit -m "Restore baseline content for TASK-20260101T000000000013Z"',
-        'spice task done TASK-20260101T000000000013Z --validation "..."',
+        'git commit -m "Restore baseline content for TASK-1jN54zJY"',
+        'spice task done TASK-1jN54zJY --validation "..."',
     ]
 
 
@@ -374,7 +366,7 @@ def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
     monkeypatch.setattr(gitsync, "_synthesize_and_fast_forward", adopting_synth)
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000009Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
 
     message = str(exc_info.value)
     raced_upstream = _git(peer, "rev-parse", "HEAD")
@@ -428,7 +420,7 @@ def test_integrate_and_publish_computes_merge_before_materializing_tree(
     monkeypatch.setattr(gitsync, "_run", observe_atomic_update)
 
     result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000007Z",
+        "TASK-1jN54zJR",
         repo_root=repo,
         meta={
             "title": "Publish missing merge head cleanup",
@@ -553,9 +545,7 @@ def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
     monkeypatch.setattr(gitsync, "_run", observe_merge_tree)
 
     conflict_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish(
-            "TASK-20260101T000000000005Z", repo_root=repo
-        )
+        lambda: gitsync.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
     )
 
     message = conflict_outcome.message
@@ -574,14 +564,12 @@ def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
         "git",
         "commit",
         "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000005Z",
+        "Resolve baseline overlap for TASK-1jN54zJP",
     )
     rescue_merge = _git(repo, "rev-parse", "HEAD")
     assert _git(repo, "status", "--porcelain") == ""
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000005Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -645,9 +633,7 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
     merge_attempts = _observe_merge_tree(repo, monkeypatch)
 
     conflict_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish(
-            "TASK-20260101T000000000009Z", repo_root=repo
-        )
+        lambda: gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
     )
 
     message = conflict_outcome.message
@@ -667,15 +653,13 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
         "git",
         "commit",
         "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000009Z",
+        "Resolve baseline overlap for TASK-1jN54zJT",
     )
     rescue_merge = _git(repo, "rev-parse", "HEAD")
     assert _git(repo, "rev-parse", f"{rescue_merge}^{{tree}}") == merged_tree
     assert _git(repo, "status", "--porcelain") == ""
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000009Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -761,7 +745,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
 
     conflicted = (repo / "README.md").read_text(encoding="utf-8")
     assert "<<<<<<<" in conflicted
@@ -769,7 +753,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap, badly")
 
     with pytest.raises(SpiceError, match="conflict markers") as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+        gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
 
     message = str(exc_info.value)
     assert "README.md" in message
@@ -783,9 +767,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     _run(repo, "git", "add", "README.md")
     _run(repo, "git", "commit", "--amend", "--no-edit")
 
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000003Z", repo_root=repo
-    )
+    result = gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 

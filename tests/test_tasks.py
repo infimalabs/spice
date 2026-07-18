@@ -87,7 +87,7 @@ def test_task_edit_changes_priority_in_place(task_repo):
     handle = create.add(
         "Bump me",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="low",
     )
     assert identity.resolve(handle)["priority"] == "L"
@@ -101,7 +101,7 @@ def test_task_edit_reassigns_project_in_place(task_repo):
     handle = create.add(
         "Move me",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
 
@@ -114,7 +114,7 @@ def test_task_edit_requires_at_least_one_field(task_repo):
     handle = create.add(
         "Leave me",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     with pytest.raises(SpiceError):
@@ -125,7 +125,7 @@ def test_task_edit_replaces_acceptance_in_place(task_repo):
     handle = create.add(
         "Reword my acceptance",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["original criterion"],
     )
 
@@ -138,13 +138,13 @@ def test_task_edit_acceptance_unsticks_plan_phase(task_repo):
     handle = create.add(
         "Plan gains bookend acceptance via edit",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     child = create.add(
         "Unaccepted child for edited plan",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [child])
     ops.claim(handle)
@@ -164,7 +164,7 @@ def test_task_edit_acceptance_rejects_completed_task(task_repo):
     handle = create.add(
         "Complete before acceptance edit",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         flow=["todo"],
         acceptance=["complete once"],
     )
@@ -187,17 +187,17 @@ def test_task_depends_not_after_drops_one_edge_and_leaves_the_other(task_repo):
     handle = create.add(
         "Plan with two dependency edges",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     keep = create.add(
         "Edge that stays",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     drop = create.add(
         "Edge that goes",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [keep, drop])
     keep_uuid = identity.uuid_of(identity.resolve(keep))
@@ -216,12 +216,12 @@ def test_task_depends_not_after_clears_dangling_edge_after_dependency_deleted(
     handle = create.add(
         "Plan pointing at a doomed dependency",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     doomed = create.add(
         "Dependency about to be deleted",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [doomed])
     doomed_uuid = identity.uuid_of(identity.resolve(doomed))
@@ -239,12 +239,12 @@ def test_task_depends_not_after_rejects_an_absent_edge(task_repo):
     handle = create.add(
         "Plan with no such edge",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     other = create.add(
         "Unrelated task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
 
     with pytest.raises(SpiceError, match="does not depend on"):
@@ -255,17 +255,17 @@ def test_task_depends_repoints_an_edge_in_one_invocation(task_repo):
     handle = create.add(
         "Plan whose edge moves",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     old = create.add(
         "Superseded dependency",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     new = create.add(
         "Replacement dependency",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [old])
     new_uuid = identity.uuid_of(identity.resolve(new))
@@ -282,12 +282,12 @@ def test_task_depends_keeps_an_edge_dropped_and_readded_in_one_call(task_repo):
     handle = create.add(
         "Plan whose edge is dropped and re-added at once",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     dep = create.add(
         "Dependency removed and restored in one call",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     ops.depends(handle, [dep])
     dep_uuid = identity.uuid_of(identity.resolve(dep))
@@ -303,13 +303,13 @@ def test_task_depends_repoints_multiple_edges_in_one_invocation(task_repo):
     handle = create.add(
         "Plan whose two edges move together",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     old_edges = [
         create.add(
             f"Superseded dependency {index}",
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
         )
         for index in range(2)
     ]
@@ -317,7 +317,7 @@ def test_task_depends_repoints_multiple_edges_in_one_invocation(task_repo):
         create.add(
             f"Replacement dependency {index}",
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
         )
         for index in range(2)
     ]
@@ -336,12 +336,12 @@ def test_task_depends_repeated_after_handle_lands_one_native_edge(task_repo):
     handle = create.add(
         "Plan given the same dependency twice",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     dep = create.add(
         "Dependency named twice in one call",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     dep_uuid = identity.uuid_of(identity.resolve(dep))
 
@@ -356,7 +356,7 @@ def test_task_delete_allows_unclaimed_task(task_repo):
     handle = create.add(
         "Delete unclaimed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     uuid = identity.uuid_of(identity.resolve(handle))
@@ -373,7 +373,7 @@ def test_task_delete_refuses_live_claim_without_override(task_repo):
     handle = create.add(
         "Delete claimed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     ops.claim(handle)
@@ -390,7 +390,7 @@ def test_task_delete_force_claimed_logs_holder(task_repo):
     handle = create.add(
         "Force delete claimed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
     )
     ops.claim(handle)
@@ -416,7 +416,7 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
         create.add(
             f"Wake delayed task {index}",
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             priority="medium",
             wait=config.OOPS_WAIT,
         )
@@ -443,14 +443,14 @@ def test_task_wake_rejects_batch_without_partial_clear(task_repo):
     delayed = create.add(
         "Wake batch delayed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         wait=config.OOPS_WAIT,
     )
     claimed = create.add(
         "Wake batch claimed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         claim=True,
     )
 
@@ -468,7 +468,7 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
     created = ops.oops(
         "Delayed oops remains triage",
         description="triage only",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     handle = created.split()[1]
 
@@ -484,7 +484,7 @@ def test_task_oops_kind_routes_to_child_board_with_caller_tags_only(task_repo):
         description="triage only",
         kind="Tooling",
         tags=["repro"],
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     handle = created.split()[1]
     row = identity.resolve(handle)
@@ -504,7 +504,7 @@ def test_task_wake_into_promotes_deferred_oops_into_public_project(task_repo):
     created = ops.oops(
         "Promote this oops into the queue",
         description="promotion candidate",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     handle = created.split()[1]
     assert identity.resolve(handle).get("wait")
@@ -528,7 +528,7 @@ def test_task_wake_into_rejects_hidden_or_malformed_target_and_keeps_wait(task_r
     created = ops.oops(
         "Hidden target keeps deferral",
         description="triage only",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     handle = created.split()[1]
     project_before = str(identity.resolve(handle)["project"])
@@ -547,7 +547,7 @@ def test_task_wake_into_still_refuses_active_or_claimed(task_repo):
     claimed = create.add(
         "Promotion refuses claimed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         claim=True,
     )
 
@@ -559,7 +559,7 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
     handle = create.add(
         "Drive wakes delayed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["drive wake subscribes delayed work"],
@@ -590,7 +590,7 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
     handle = create.add(
         "Drain wakes delayed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["drain wake subscribes delayed work"],
@@ -617,7 +617,7 @@ def test_steer_wake_keeps_preparation_only_boundary(task_repo):
     handle = create.add(
         "Steer wakes delayed task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["steer wake remains preparation only"],
@@ -637,7 +637,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
         create.add(
             overlong,
             project="task.unit",
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             priority="medium",
             acceptance=["title cap is enforced"],
         )
@@ -646,7 +646,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
     handle = create.add(
         "Short subject",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         description=body,
         priority="medium",
         acceptance=["description is stored"],
@@ -668,7 +668,7 @@ def test_task_add_treats_title_as_literal_text(task_repo, title):
     handle = create.add(
         title,
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="none",
     )
     row = identity.resolve(handle)
@@ -686,7 +686,7 @@ def test_task_add_preserves_shared_attachment_refs(task_repo):
     handle = create.add(
         "Preserve shared attachment references",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         description=f"Screenshot/reference attachment: {shared_ref}.",
         priority="medium",
         acceptance=[f"Open {shared_ref}."],
@@ -702,7 +702,7 @@ def test_task_note_preserves_shared_attachment_refs(task_repo):
     handle = create.add(
         "Track attachment note",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["notes are normalized"],
     )
@@ -734,7 +734,7 @@ def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
     handle = create.add(
         "Exercise configured flow",
         project="qa.pipeline",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["configured flow is applied"],
     )
@@ -825,12 +825,12 @@ def test_oops_rows_returns_the_oops_project_hierarchy_against_a_real_backend(
     # oops_rows fetches by the .oops project stem alone: the deferred triage
     # root and any .oops.<kind> descendant belong to it, while an ordinary
     # public task in its own project is a distinct, separately-resolved row.
-    ops.oops("Root triage", origin="ack:20260101T000000000000Z")
-    ops.oops("Kind triage", kind="Tooling", origin="ack:20260101T000000000000Z")
+    ops.oops("Root triage", origin="ack:1jN54zJJ")
+    ops.oops("Kind triage", kind="Tooling", origin="ack:1jN54zJJ")
     public = create.add(
         "Ordinary work",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
 
     oops_projects = sorted(row["project"] for row in alloc.oops_rows())
@@ -913,7 +913,7 @@ def test_unclean_review_passes_followups_to_feedback_bridge(task_repo, monkeypat
         return ops.reviewfeedback.ReviewFeedbackResult(
             "delivered",
             "source=task-review",
-            key="20260102T000000000001Z",
+            key="1jNJvRyn",
             target_repo_root=str(task_repo),
         )
 
@@ -944,7 +944,7 @@ def test_unclean_review_passes_followups_to_feedback_bridge(task_repo, monkeypat
     ]
     assert str(calls[0]["reviewed_at"])
     assert (
-        "review-feedback delivered; key=20260102T000000000001Z; "
+        "review-feedback delivered; key=1jNJvRyn; "
         f"target={task_repo}; source=task-review"
     ) in output
 
@@ -955,7 +955,7 @@ def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     existing = create.add(
         "Existing review follow-up",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         acceptance=["Tracks the requested review change"],
     )
 
@@ -1014,7 +1014,7 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
     handle = create.add(
         "Review follow-up invariant",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["review follow-up tracking is enforced"],
     )

@@ -42,7 +42,7 @@ def _deferred_task(title: str, *, flow: list[str] | None = None) -> str:
     return create.add(
         title,
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["deferral survives the lifecycle"],
         flow=flow,
@@ -70,7 +70,7 @@ def test_deferred_creation_is_hidden_from_allocator_until_woken(task_repo):
     handle = create.add(
         "Deferred allocator task",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         deferred=True,
     )
@@ -195,14 +195,14 @@ def test_blocked_task_claim_preserves_scheduling(task_repo):
     blocker = create.add(
         "Blocker in front of the deferred follow-up",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["blocker exists"],
     )
     handle = create.add(
         "Blocked task keeps its scheduling envelope",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["blocked claim leaves scheduling untouched"],
         after=[blocker],
@@ -222,7 +222,7 @@ def test_ready_task_claim_preserves_scheduling(task_repo):
     handle = create.add(
         "Ready task keeps its SLA due date",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["ready claim leaves scheduling untouched"],
     )
@@ -239,7 +239,7 @@ def test_deferred_creation_suspends_sla_and_wake_starts_it(task_repo):
     deferred = create.add(
         "Deferred task starts its SLA clock at wake",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["the SLA clock starts at wake"],
         deferred=True,
@@ -250,7 +250,7 @@ def test_deferred_creation_suspends_sla_and_wake_starts_it(task_repo):
     ordinary = create.add(
         "Ordinary task of the same priority",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["the ordinary SLA baseline"],
     )
@@ -268,7 +268,7 @@ def test_deferred_explicit_due_stays_exact_through_wake(task_repo):
     handle = create.add(
         "Deferred task keeps its explicit due",
         project="task.unit",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
         priority="medium",
         acceptance=["an explicit due survives deferral"],
         deferred=True,
@@ -290,7 +290,7 @@ def test_wake_into_promotion_starts_sla_clock(task_repo):
     created = ops.oops(
         "Promoted oops starts its SLA clock",
         description="promotion candidate",
-        origin="ack:20260101T000000000000Z",
+        origin="ack:1jN54zJJ",
     )
     handle = created.split()[1]
     assert _scheduling_snapshot(handle)["due"] == ""

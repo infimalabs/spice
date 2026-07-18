@@ -3,7 +3,6 @@
 import os
 import subprocess
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 from spice.mail.ackarchive import archive_ackd_inbox_items
@@ -36,7 +35,6 @@ from spice.mail.inbox import (
     inbox_dir,
     inbox_deadletter_context_rows,
     inbox_item_key,
-    inbox_item_key_aliases,
     inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
@@ -46,6 +44,7 @@ from spice.mail.inbox import (
 )
 from spice.paths import shared_attachment_root
 from spice.serve.markdown import render_message_html
+from spice.tasks import identity
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 _ONE_DAY_SECONDS = 24 * 60 * 60
@@ -55,15 +54,18 @@ _SUBMIT_BACKLOG_DEPTH = 40
 _SUBMIT_DUPLICATE_INDEX = 20
 
 
+_DATED_EPOCH_MS = 1767225600000  # 2026-01-01T00:00:00Z
+
+
 def _dated_inbox_name(index: int) -> str:
-    return f"20260101T{index:012d}Z.txt"
+    return f"{identity.encode_width(_DATED_EPOCH_MS + index)}.txt"
 
 
 def test_write_then_collect_round_trip(tmp_path):
     composed = compose_inbox_text(body="steer left", priority=None, stop=False)
-    written = write_inbox_item(tmp_path, "20260101T000000000001Z.txt", composed)
+    written = write_inbox_item(tmp_path, "1jN54zJK.txt", composed)
     items = collect_inbox_items(str(tmp_path))
-    assert [item.name for item in items] == ["20260101T000000000001Z.txt"]
+    assert [item.name for item in items] == ["1jN54zJK.txt"]
     assert items[0].text == composed
     assert written.parent == inbox_dir(tmp_path)
     assert pending_inbox_count(str(tmp_path)) == 1
@@ -73,13 +75,13 @@ def test_write_inbox_item_can_dedupe_pending_text(tmp_path):
     composed = compose_inbox_text(body="same steering", priority=None, stop=False)
     first = write_inbox_item(
         tmp_path,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         composed,
         dedupe_pending_text=True,
     )
     second = write_inbox_item(
         tmp_path,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         composed,
         dedupe_pending_text=True,
     )
@@ -87,7 +89,7 @@ def test_write_inbox_item_can_dedupe_pending_text(tmp_path):
     items = collect_inbox_items(tmp_path)
 
     assert second == first
-    assert [item.name for item in items] == ["20260101T000000000001Z.txt"]
+    assert [item.name for item in items] == ["1jN54zJK.txt"]
     assert pending_inbox_count(tmp_path) == 1
 
 
@@ -96,7 +98,7 @@ def test_write_inbox_item_does_not_dedupe_attachment_messages_by_text_only(tmp_p
     composed = compose_inbox_text(body="same steering", priority=None, stop=False)
     first = write_inbox_item(
         tmp_path,
-        "20260101T000000000001Z.txt",
+        "1jN54zJK.txt",
         composed,
         attachments=prepare_inbox_attachments(
             [
@@ -111,15 +113,15 @@ def test_write_inbox_item_does_not_dedupe_attachment_messages_by_text_only(tmp_p
     )
     second = write_inbox_item(
         tmp_path,
-        "20260101T000000000002Z.txt",
+        "1jN54zJL.txt",
         composed,
         dedupe_pending_text=True,
     )
 
     assert second != first
     assert [item.name for item in collect_inbox_items(tmp_path)] == [
-        "20260101T000000000001Z.txt",
-        "20260101T000000000002Z.txt",
+        "1jN54zJK.txt",
+        "1jN54zJL.txt",
     ]
     assert pending_inbox_count(tmp_path) == 2
 
@@ -185,7 +187,7 @@ def test_submit_body_reads_stay_flat_as_unacknowledged_backlog_grows(
     )
     body_reads.clear()
     landed = write_inbox_item(
-        tmp_path, "20260101T000000009999Z.txt", duplicate, dedupe_pending_text=True
+        tmp_path, "1jN5530b.txt", duplicate, dedupe_pending_text=True
     )
     duplicate_reads = list(body_reads)
     assert landed == inbox / _dated_inbox_name(_SUBMIT_DUPLICATE_INDEX)
@@ -272,11 +274,11 @@ def test_inbox_readout_labels_resend_lineage(tmp_path):
             ),
         ),
     )
-    write_inbox_item(tmp_path, "20260101T000000000002Z.txt", composed)
+    write_inbox_item(tmp_path, "1jN54zJL.txt", composed)
 
     readout = "\n".join(inbox_payload_rows(collect_inbox_items(str(tmp_path))))
 
-    assert "key=20260101T000000000002Z: age=" in readout
+    assert "key=1jN54zJL: age=" in readout
     assert "resend #2" in readout
     assert "priority=critical" in readout
 
@@ -293,7 +295,7 @@ def test_compose_parse_and_readout_keep_controls_out_of_body(tmp_path):
         stop=False,
         controls=(INBOX_CONTROL_DRAIN_QUEUE,),
     )
-    write_inbox_item(tmp_path, "20260101T000000000002Z.txt", composed)
+    write_inbox_item(tmp_path, "1jN54zJL.txt", composed)
 
     parsed = parse_inbox_payload(composed)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
@@ -312,7 +314,7 @@ def test_compose_parse_and_readout_keep_controls_out_of_body(tmp_path):
 def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260101T000000000003Z.txt",
+        "1jN54zJM.txt",
         compose_inbox_text(body="please capture this", priority=None, stop=False),
     )
 
@@ -339,7 +341,7 @@ def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
 def test_aged_inbox_ack_hint_avoids_literal_response_script(tmp_path):
     written = write_inbox_item(
         tmp_path,
-        "20260101T000000000004Z.txt",
+        "1jN54zJN.txt",
         compose_inbox_text(body="please capture this too", priority=None, stop=False),
     )
     old = time.time() - 2 * 60
@@ -358,7 +360,7 @@ def test_aged_inbox_ack_hint_avoids_literal_response_script(tmp_path):
 def test_aged_inbox_ack_nag_names_both_reply_paths(tmp_path):
     written = write_inbox_item(
         tmp_path,
-        "20260101T000000000005Z.txt",
+        "1jN54zJP.txt",
         compose_inbox_text(body="please respond", priority=None, stop=False),
     )
     fresh_row = inbox_ack_format_hint_row(collect_inbox_items(str(tmp_path)))
@@ -387,24 +389,25 @@ def _init_repo(path):
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
-def test_key_aliases_accept_dropped_z():
-    aliases = inbox_item_key_aliases("20260101T000000000001Z.txt")
-    assert aliases == {"20260101T000000000001Z", "20260101T000000000001"}
+def test_inbox_item_key_strips_extension_and_keeps_collision_suffix():
+    assert inbox_item_key("1jN54zJK.txt") == "1jN54zJK"
+    assert inbox_item_key("1jN54zJK-2.txt") == "1jN54zJK-2"
+    assert inbox_item_key("1jN54zJK") == "1jN54zJK"
 
 
-def test_ack_retires_pending_item_via_dropped_z_alias(tmp_path):
+def test_ack_retires_pending_item_by_exact_key(tmp_path):
     _init_repo(tmp_path)
-    name = "20260102T000000000002Z.txt"
+    name = "1jNJvRyp.txt"
     composed = compose_inbox_text(body="please ack me", priority=None, stop=False)
     write_inbox_item(tmp_path, name, composed)
-    archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000002"])
+    archived = archive_ackd_inbox_items(tmp_path, ["1jNJvRyp"])
     assert archived == [inbox_item_key(name)]
     assert pending_inbox_count(str(tmp_path)) == 0
 
 
 def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     _init_repo(tmp_path)
-    name = "20260102T000000000003Z.txt"
+    name = "1jNJvRyq.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
         [
@@ -423,7 +426,7 @@ def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     assert attachment_path.read_bytes() == b"image-bytes"
     assert shared_attachment_root(tmp_path) in attachment_path.parents
 
-    archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000003"])
+    archived = archive_ackd_inbox_items(tmp_path, ["1jNJvRyq"])
     archived_items = collect_acked_inbox_items(tmp_path)
     archived_attachment = archived_items[0].attachments[0]
     assert archived == [inbox_item_key(name)]
@@ -437,7 +440,7 @@ def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
 
 def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     _init_repo(tmp_path)
-    name = "20260102T000000000004Z.txt"
+    name = "1jNJvRyr.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
         [
@@ -464,7 +467,7 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
 
 def test_reading_does_not_clear_pending(tmp_path):
     composed = compose_inbox_text(body="sticky until acked", priority=None, stop=False)
-    write_inbox_item(tmp_path, "20260103T000000000003Z.txt", composed)
+    write_inbox_item(tmp_path, "1jNXjwdH.txt", composed)
     collect_inbox_items(str(tmp_path))
     collect_inbox_items(str(tmp_path))
     assert pending_inbox_count(str(tmp_path)) == 1
@@ -472,7 +475,7 @@ def test_reading_does_not_clear_pending(tmp_path):
 
 def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
     composed = compose_inbox_text(body="new scope", priority=None, stop=False)
-    write_inbox_item(tmp_path, "20260103T000000000004Z.txt", composed)
+    write_inbox_item(tmp_path, "1jNXjwdJ.txt", composed)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert INBOX_TASK_HINT_ROW in rows
@@ -493,21 +496,21 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
 def test_pending_operator_count_excludes_automated_guidance(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260103T000000000010Z.txt",
+        "1jNXjwdQ.txt",
         compose_inbox_text(
             body="please pick up the new ask", priority=None, stop=False
         ),
     )
     write_inbox_item(
         tmp_path,
-        "20260103T000000000011Z.txt",
+        "1jNXjwdR.txt",
         compose_inbox_text(
             body="automated maxim guidance", priority="maxim", stop=False
         ),
     )
     write_inbox_item(
         tmp_path,
-        "20260103T000000000012Z.txt",
+        "1jNXjwdS.txt",
         compose_inbox_text(
             body="automated review guidance", priority="review", stop=False
         ),
@@ -522,14 +525,14 @@ def test_pending_operator_count_excludes_automated_guidance(tmp_path):
 def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
     write_inbox_item(
         tmp_path,
-        "20260103T000000000012Z.txt",
+        "1jNXjwdS.txt",
         compose_inbox_text(
             body="automated maxim guidance", priority="maxim", stop=False
         ),
     )
     write_inbox_item(
         tmp_path,
-        "20260103T000000000013Z.txt",
+        "1jNXjwdT.txt",
         compose_inbox_text(
             body="automated review guidance", priority="review", stop=False
         ),
@@ -541,7 +544,7 @@ def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
 
 def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     _init_repo(tmp_path)
-    name = "20260103T000000000014Z.txt"
+    name = "1jNXjwdV.txt"
     composed = compose_inbox_text(body="operator steering", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
         [
@@ -554,9 +557,7 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     )
     write_inbox_item(tmp_path, name, composed, attachments=attachments)
 
-    assert deadletter_inbox_item(tmp_path, "20260103T000000000014") == inbox_item_key(
-        name
-    )
+    assert deadletter_inbox_item(tmp_path, "1jNXjwdV") == inbox_item_key(name)
     assert pending_inbox_count(tmp_path) == 0
     assert len(pending_operator_inbox_items(tmp_path)) == 0
     assert collect_inbox_items(tmp_path) == []
@@ -568,11 +569,11 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     )
     rows = inbox_deadletter_context_rows(deadletters)
     assert "requeue=spice agent requeue-deadletter <key>" in rows[0]
-    assert "deadlettered_inbox key=20260103T000000000014Z" in rows[1]
+    assert "deadlettered_inbox key=1jNXjwdV" in rows[1]
     deadletter_attachment_dir = inbox_attachment_dir(deadletters[0].source_path)
     assert deadletter_attachment_dir.is_dir()
 
-    requeued = requeue_deadlettered_inbox_item(tmp_path, "20260103T000000000014Z")
+    requeued = requeue_deadlettered_inbox_item(tmp_path, "1jNXjwdV")
 
     assert requeued is not None
     assert not deadletter_attachment_dir.exists()
@@ -595,8 +596,8 @@ def test_inbox_payload_rows_suppress_task_offload_for_automated_guidance(tmp_pat
         priority="review",
         stop=False,
     )
-    write_inbox_item(tmp_path, "20260103T000000000005Z.txt", maxim)
-    write_inbox_item(tmp_path, "20260103T000000000006Z.txt", review)
+    write_inbox_item(tmp_path, "1jNXjwdK.txt", maxim)
+    write_inbox_item(tmp_path, "1jNXjwdL.txt", review)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert "  priority=maxim" in rows
@@ -622,9 +623,9 @@ def test_inbox_payload_rows_keep_task_offload_for_mixed_user_steering(tmp_path):
         priority="review",
         stop=False,
     )
-    write_inbox_item(tmp_path, "20260103T000000000006Z.txt", maxim)
-    write_inbox_item(tmp_path, "20260103T000000000007Z.txt", review)
-    write_inbox_item(tmp_path, "20260103T000000000008Z.txt", user)
+    write_inbox_item(tmp_path, "1jNXjwdL.txt", maxim)
+    write_inbox_item(tmp_path, "1jNXjwdM.txt", review)
+    write_inbox_item(tmp_path, "1jNXjwdN.txt", user)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert INBOX_TASK_HINT_ROW in rows
@@ -632,7 +633,7 @@ def test_inbox_payload_rows_keep_task_offload_for_mixed_user_steering(tmp_path):
 
 def test_ack_state_row_age_derives_from_archived_at_not_store_mtime(tmp_path):
     _init_repo(tmp_path)
-    name = "20260704T054409667615Z.txt"
+    name = "1k9yC5yC.txt"
     four_days = 4 * _ONE_DAY_SECONDS
     archived_at = time.time() - four_days
     record_acked_inbox_items(
@@ -664,10 +665,10 @@ def test_ack_state_row_age_derives_from_archived_at_not_store_mtime(tmp_path):
 
     assert inbox_ack_state_context_rows(items) == [
         "source=ack_state; status=already_consumed_operator_steering; store=sqlite",
-        "refused_inbox key=20260704T054409667615Z age=4d ago text=stale refusal",
+        "refused_inbox key=1k9yC5yC age=4d ago text=stale refusal",
     ]
     assert inbox_item_readout_rows(item) == [
-        "key=20260704T054409667615Z: age=4d ago",
+        "key=1k9yC5yC: age=4d ago",
         "  stale refusal",
         f"  note={INBOX_CONTINUE_NOTE}",
     ]
@@ -675,7 +676,7 @@ def test_ack_state_row_age_derives_from_archived_at_not_store_mtime(tmp_path):
 
 def test_ack_state_row_age_falls_back_to_key_timestamp_without_archived_at(tmp_path):
     _init_repo(tmp_path)
-    name = "20260704T054409667615Z.txt"
+    name = "1k9yC5yC.txt"
     record_acked_inbox_items(
         tmp_path,
         [
@@ -692,12 +693,8 @@ def test_ack_state_row_age_falls_back_to_key_timestamp_without_archived_at(tmp_p
     )
 
     item = collect_refused_inbox_items(tmp_path)[0]
-    # archived_at is 0 (legacy migration default); the key's UTC timestamp
-    # (2026-07-04) anchors age instead of falling back to the store mtime.
-    key_epoch = (
-        datetime.strptime(inbox_item_key(name), "%Y%m%dT%H%M%S%fZ")
-        .replace(tzinfo=UTC)
-        .timestamp()
-    )
+    # archived_at is 0; the key's mint moment (2026-07-04) anchors age instead
+    # of falling back to the store mtime.
+    key_epoch = identity.incepted_datetime(inbox_item_key(name)).timestamp()
     assert item.age_epoch == key_epoch
     assert inbox_item_age_seconds(item) >= _ONE_DAY_SECONDS

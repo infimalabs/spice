@@ -515,7 +515,7 @@ def test_study_reachability_cli_create_tasks_passes_findings(
             "--create-tasks",
             "--deferred",
             "--origin",
-            "ack:20260101T000000000000Z",
+            "ack:1jN54zJJ",
         ]
     )
 
@@ -527,7 +527,7 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     assert options == {
         "controls": studies_cli.StudyTaskCreationControls(
             deferred=True,
-            origin="ack:20260101T000000000000Z",
+            origin="ack:1jN54zJJ",
             print_created=True,
         )
     }

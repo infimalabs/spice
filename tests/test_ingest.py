@@ -124,7 +124,7 @@ def test_family_matching_scopes_rows_and_keeps_completed_work(task_repo):
     _family_task(
         "Other origin child",
         slug="child",
-        origin="ack:20260104T000000000005Z",
+        origin="ack:1jNmXPHn",
     )
     create.add(
         "Ordinary same-family row",
@@ -553,7 +553,7 @@ def test_ledger_reconstructs_applied_family_without_board_owned_edges(task_repo)
     )
     ops.depends(root, [external, deleted_external])
     ops.delete(deleted_external, "deleted external ledger fixture")
-    ops.note(root, "ack 20260101T000000000000Z: runtime steering handled")
+    ops.note(root, "ack 1jN54zJJ: runtime steering handled")
 
     rendered = export_ledger(root)
     reparsed = parse(rendered)

@@ -12,7 +12,7 @@ from spice.mail.replies import append_reply_record, read_reply_records
 from spice.serve import messages as message_reader
 
 THREAD = "f2249a9fb99641e29e1854cb381cc634"
-KEY = "20260104T000000000004Z"
+KEY = "1jNmXPHm"
 
 
 def _init_git_repo(path: Path) -> None:

@@ -75,7 +75,7 @@ def test_agent_run_inbox_injection_degrades_when_readout_import_fails(
 ):
     inbox = tmp_path / ".spice" / "inbox"
     inbox.mkdir(parents=True)
-    (inbox / "20260101T000000000001Z.txt").write_text("pending\n", encoding="utf-8")
+    (inbox / "1jN54zJK.txt").write_text("pending\n", encoding="utf-8")
     real_import = builtins.__import__
 
     def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):

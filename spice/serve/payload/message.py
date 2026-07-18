@@ -16,7 +16,7 @@ from spice.mail.inbox import (
     collect_acked_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
-    inbox_item_key_aliases,
+    inbox_item_key,
     inbox_request_body,
     inbox_request_priority,
 )
@@ -295,9 +295,11 @@ def _task_card_index(row: dict[str, Any]) -> int:
 
 
 def _task_row_timestamp(row: dict[str, Any]) -> str:
-    parsed = _parse_task_timestamp(str(row.get("incepted") or "")) or (
-        _parse_task_timestamp(str(row.get("entry") or ""))
-    )
+    incepted = str(row.get("incepted") or "").strip()
+    if task_identity.INCEPTED_RE.match(incepted):
+        parsed: datetime | None = task_identity.incepted_datetime(incepted)
+    else:
+        parsed = _parse_task_timestamp(str(row.get("entry") or ""))
     if parsed is None:
         return ""
     return parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")
@@ -310,12 +312,10 @@ def _parse_task_timestamp(raw: str) -> datetime | None:
     parsed = message_reader.parse_timestamp(value)
     if parsed is not None:
         return parsed
-    for fmt in ("%Y%m%dT%H%M%S%fZ", "%Y%m%dT%H%M%SZ"):
-        try:
-            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
-        except ValueError:
-            continue
-    return None
+    try:
+        return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 def _filter_non_offset_boundary(
@@ -644,11 +644,11 @@ def _ack_contexts_for_worktree(
     )
     pending = collect_inbox_items(str(target.repo_root))
     for item in (*acked, *refused, *pending):
-        item_aliases = inbox_item_key_aliases(item.name)
+        item_key = inbox_item_key(item.name)
         matching_keys = [
             key
             for key in wanted
-            if key not in by_key and inbox_item_key_aliases(key) & item_aliases
+            if key not in by_key and inbox_item_key(key) == item_key
         ]
         if matching_keys:
             body = strip_renewal_handoff_request_suffix(inbox_request_body(item.text))
