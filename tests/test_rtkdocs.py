@@ -96,3 +96,11 @@ def test_rtk_command_shape_ownership_matches_the_default_group():
     assert "matched by the `*/` glob) to `rg`" in wrapper_contract
     assert "native find predicates" in wrapper_contract
     assert "diagnostic git flags" in wrapper_contract
+    assert (
+        "bypasses the generated `rtk()` function through the POSIX `command` builtin"
+        in wrapper_contract
+    )
+    assert (
+        "known limitation of the shell-function mechanism, not a routed case"
+        in wrapper_contract
+    )
