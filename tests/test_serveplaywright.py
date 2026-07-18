@@ -178,6 +178,23 @@ def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     assert "grid did not use available horizontal space" in smoke
 
 
+def test_serve_team_width_smoke_measures_weighted_column_ratios() -> None:
+    smoke = (ROOT / "browser" / "serve_team_width_smoke.js").read_text(encoding="utf-8")
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # Team columns weight by agent count: measured in the real served UI at
+    # representative 2:1 and 6:1 team sizes, wide enough to clear the
+    # min-width floor.
+    assert "TEAM_WIDTH_VIEWPORT = { width: 2560" in smoke
+    assert "--lane-weight" in smoke
+    assert 'assertPhase("pair (2:1)", result.pair, 2)' in smoke
+    assert 'assertPhase("pack (6:1)", result.pack, 6)' in smoke
+    assert "ratio: hostWidth / soloWidth" in smoke
+    assert "solo column fell under the usable min width" in smoke
+    assert "row overflowed its container at this viewport" in smoke
+
+
 def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     smoke = (ROOT / "browser" / "serve_pending_badge_smoke.js").read_text(
         encoding="utf-8"
