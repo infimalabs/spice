@@ -534,3 +534,74 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'inventory.revision = "100000000000000000000000000000";' in smoke
     assert 'ariaHidden: strip?.getAttribute("aria-hidden")' in smoke
     assert "page.screenshot(" in smoke
+
+
+# The serve browser smokes that source their target/team wire shape from the
+# shared payload_factory authority. serve_structural_status is deliberately
+# absent: it exercises a variable-version watch/status payload with no
+# target-identity trio and no actor-id prefix, so it has nothing to fold.
+PAYLOAD_FACTORY_SMOKES = (
+    "serve_lifetime_team_smoke.js",
+    "serve_mosaic_join_smoke.js",
+    "serve_composer_accent_smoke.js",
+    "serve_lifetime_reflow_smoke.js",
+    "serve_mosaic_team_smoke.js",
+    "serve_team_width_smoke.js",
+    "serve_lane_prefs_local_smoke.js",
+    "serve_lanes_batch_subscribe_smoke.js",
+    "serve_mosaic_single_settle_smoke.js",
+    "serve_identity_smoke.js",
+)
+
+# A migrated smoke reaches the authority through one of these public tokens:
+# in-page smokes call window.spicePayloads.*, Node-scope smokes destructure the
+# builders or the actor-id helpers from the require.
+PAYLOAD_FACTORY_API_TOKENS = (
+    "spicePayloads",
+    "targetPayload",
+    "teamPayload",
+    "teamSnapshot",
+    "threadActorId",
+    "targetActorId",
+    "installScript",
+)
+
+
+def test_payload_factory_is_the_single_wire_shape_authority() -> None:
+    factory = (ROOT / "browser" / "payload_factory.js").read_text(encoding="utf-8")
+
+    # One set of top-level builders serves both delivery modes: Node-scope
+    # require (module.exports) and in-page injection assembled from the same
+    # helper list (installScript -> window.spicePayloads), so neither mode can
+    # drift from the other.
+    assert "module.exports = {" in factory
+    assert "const installScript =" in factory
+    assert "FACTORY_HELPERS" in factory
+    assert "fn.toString()" in factory
+    assert "window.spicePayloads" in factory
+    # The target/thread actor-id prefixes are defined here once, inline in the
+    # actor-id helpers, as mirrors of the production sources they must stay in
+    # lockstep with.
+    assert 'return "target:" + id' in factory
+    assert 'return "thread:" + id' in factory
+    assert "spice/serve/static/app.js" in factory
+    assert "spice/serve/team/ids.py" in factory
+    # The public builder set the smokes consume, plus the deep-merge override
+    # hook that lets a smoke state only its intentional deviation.
+    for symbol in (
+        "function targetActorId",
+        "function threadActorId",
+        "function targetPayload",
+        "function teamPayload",
+        "function teamSnapshot",
+        "function withOverrides",
+        "return withOverrides(base, overrides)",
+    ):
+        assert symbol in factory, symbol
+
+
+def test_serve_smokes_share_the_payload_factory_authority() -> None:
+    for name in PAYLOAD_FACTORY_SMOKES:
+        smoke = (ROOT / "browser" / name).read_text(encoding="utf-8")
+        assert 'require("./payload_factory")' in smoke, name
+        assert any(token in smoke for token in PAYLOAD_FACTORY_API_TOKENS), name

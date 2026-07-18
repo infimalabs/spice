@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { installScript } = require("./payload_factory");
 
 // Agent join must not rebuild the board. When a new member fuses into a
 // team, the merged stream gains that member's keys -- but every EXISTING
@@ -12,75 +13,29 @@ const JOIN_ADDED_ID = "j3";
 const JOIN_MESSAGES_PER_MEMBER = 3;
 const JOIN_OBSERVER_FLUSH_MS = 60;
 
-function joinTargetPayload(id, threadId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-main",
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "p-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
-function joinTeam(ids, revision) {
-  return {
-    teamId: "team-main",
-    revision,
-    config: {
-      revision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: ids.map((id) => ({ agentId: "target:" + id })),
-  };
-}
-
 function joinMeasure(config) {
   const seed = (ids) => {
     laneStore.replaceTargets(
-      ids.map((id) => window.__joinTarget(id, id + "-th")),
+      ids.map((id) =>
+        window.spicePayloads.targetPayload({
+          id,
+          threadId: id + "-th",
+          teamId: "team-main",
+          pendingPrefix: "p-",
+        }),
+      ),
     );
     applyTeamSnapshotPayload(
-      {
+      window.spicePayloads.teamSnapshot({
         revision: 7,
-        changed: true,
-        snapshot: {
-          globalSettings: { fastMode: false },
-          teams: [window.__joinTeam(ids, 7)],
-        },
-      },
+        teams: [
+          window.spicePayloads.teamPayload({
+            teamId: "team-main",
+            revision: 7,
+            memberIds: ids,
+          }),
+        ],
+      }),
       { force: true },
     );
   };
@@ -164,14 +119,7 @@ async function run() {
           typeof laneGroupHost === "function",
         { timeout: 10000 },
       );
-      await page.addScriptTag({
-        content:
-          "window.__joinTarget = " +
-          joinTargetPayload.toString() +
-          "; window.__joinTeam = " +
-          joinTeam.toString() +
-          ";",
-      });
+      await page.addScriptTag({ content: installScript });
       const result = await page.evaluate(joinMeasure, {
         initialIds: JOIN_INITIAL_IDS,
         addedId: JOIN_ADDED_ID,

@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { targetPayload, teamPayload, teamSnapshot } = require("./payload_factory");
 
 // Team columns weight by agent count: a fused team host carries
 // --lane-weight = member count, so in the horizontal swimlanes row a
@@ -13,70 +14,10 @@ const TEAM_WIDTH_VIEWPORT = { width: 2560, height: 800 };
 // phases, far outside it.
 const TEAM_WIDTH_RATIO_RELATIVE_TOLERANCE = 0.04;
 
-function targetPayload(id, threadId, teamId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId,
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "pending-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "pending-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
+// Positional convenience over the shared team builder for this fixture's
+// repeated (teamId, memberIds, revision) calls.
 function team(teamId, memberIds, revision) {
-  return {
-    teamId,
-    revision,
-    config: {
-      revision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: memberIds.map((agentId) => ({ agentId: "target:" + agentId })),
-  };
-}
-
-function teamsSnapshotPayload(revision, teams) {
-  return {
-    revision,
-    changed: true,
-    snapshot: {
-      globalSettings: { fastMode: false },
-      teams,
-    },
-  };
+  return teamPayload({ teamId, memberIds, revision });
 }
 
 // Applies one multi-team snapshot and measures the visible (non-shadowed)
@@ -131,24 +72,28 @@ function teamWidthFixture() {
   const pairIds = ["a1", "a2"];
   const packIds = ["a1", "a2", "a3", "a4", "a5", "a6"];
   const allTargets = [...packIds, "b1"].map((id) =>
-    targetPayload(id, id + "-thread", id === "b1" ? "team-solo" : "team-pack"),
+    targetPayload({
+      id,
+      threadId: id + "-thread",
+      teamId: id === "b1" ? "team-solo" : "team-pack",
+    }),
   );
   return {
     pair: {
       allTargets,
-      payload: teamsSnapshotPayload(1, [
-        team("team-pack", pairIds, 1),
-        team("team-solo", ["b1"], 1),
-      ]),
+      payload: teamSnapshot({
+        revision: 1,
+        teams: [team("team-pack", pairIds, 1), team("team-solo", ["b1"], 1)],
+      }),
       weightedMemberIds: pairIds,
       soloId: "b1",
     },
     pack: {
       allTargets,
-      payload: teamsSnapshotPayload(2, [
-        team("team-pack", packIds, 2),
-        team("team-solo", ["b1"], 2),
-      ]),
+      payload: teamSnapshot({
+        revision: 2,
+        teams: [team("team-pack", packIds, 2), team("team-solo", ["b1"], 2)],
+      }),
       weightedMemberIds: packIds,
       soloId: "b1",
     },

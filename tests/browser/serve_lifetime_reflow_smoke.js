@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { targetPayload, installScript } = require("./payload_factory");
 
 // Repro + regression for UI-1kBMcKKZ. Root cause: updateTeamConfig woke the
 // shared task event file (in every lane's signature), so flipping ONE team's
@@ -6,41 +7,6 @@ const { withServePage } = require("./serve_playwright_harness");
 // updateTeamConfig with wake=False; the client resubscribes only the lanes whose
 // team config revision actually advanced. This asserts the routing: flip team A's
 // config and confirm team A's lanes resubscribe while team B's do not.
-
-function targetPayload(id, threadId, teamId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: { state: "member", teamId, teamRevision: 1, configRevision: 1 },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "pending-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "pending-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
 
 async function run() {
   return withServePage(
@@ -56,30 +22,22 @@ async function run() {
           typeof laneStore !== "undefined",
         { timeout: 10000 },
       );
+      await page.addScriptTag({ content: installScript });
       return page.evaluate(
         async ({ alpha, delta, beta }) => {
-          const team = (teamId, memberIds, lifetime, configRevision) => ({
-            teamId,
-            revision: configRevision,
-            config: {
-              revision: configRevision,
+          const team = (teamId, memberIds, lifetime, configRevision) =>
+            window.spicePayloads.teamPayload({
+              teamId,
+              memberIds,
               lifetime,
-              taskFilters: [],
-              taskFilterEntries: [],
-            },
-            splitBack: {},
-            members: memberIds.map((id) => ({ agentId: "target:" + id })),
-          });
+              revision: configRevision,
+            });
           const apply = (teamA, teamB, revision) =>
             applyTeamSnapshotPayload(
-              {
+              window.spicePayloads.teamSnapshot({
                 revision,
-                changed: true,
-                snapshot: {
-                  globalSettings: { fastMode: false },
-                  teams: [teamA, teamB],
-                },
-              },
+                teams: [teamA, teamB],
+              }),
               { force: true },
             );
 
@@ -120,9 +78,21 @@ async function run() {
           };
         },
         {
-          alpha: targetPayload("alpha", "alpha-thread", "team-a"),
-          delta: targetPayload("delta", "delta-thread", "team-a"),
-          beta: targetPayload("beta", "beta-thread", "team-b"),
+          alpha: targetPayload({
+            id: "alpha",
+            threadId: "alpha-thread",
+            teamId: "team-a",
+          }),
+          delta: targetPayload({
+            id: "delta",
+            threadId: "delta-thread",
+            teamId: "team-a",
+          }),
+          beta: targetPayload({
+            id: "beta",
+            threadId: "beta-thread",
+            teamId: "team-b",
+          }),
         },
       );
     },

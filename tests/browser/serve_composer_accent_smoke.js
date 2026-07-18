@@ -1,4 +1,5 @@
 const { withServePage } = require("./serve_playwright_harness");
+const { installScript } = require("./payload_factory");
 
 // Composer reorder is a color-only remap: the accent slot (member order ->
 // border color) is NOT part of message identity, so reordering composers
@@ -9,61 +10,6 @@ const { withServePage } = require("./serve_playwright_harness");
 const ACCENT_MEMBER_IDS = ["a1", "a2", "a3"];
 const ACCENT_REORDERED_IDS = ["a2", "a1", "a3"];
 const ACCENT_MESSAGES_PER_MEMBER = 3;
-
-function accentTargetPayload(id, threadId) {
-  return {
-    id,
-    name: id,
-    branch: id,
-    targetIdentity: {
-      targetId: id,
-      worktreeName: id,
-      branch: id,
-      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-      agent: { state: "unconfigured" },
-      thread: { state: "bound", threadId },
-    },
-    serveAgentIdentity: {
-      actorId: "thread:" + threadId,
-      target: { id },
-      thread: { state: "bound", threadId },
-    },
-    teamIdentity: {
-      state: "member",
-      teamId: "team-main",
-      teamRevision: 1,
-      configRevision: 1,
-    },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: "Drive",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
-    statusLine: {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "p-" + id,
-      pendingInboxVersion: 1,
-    },
-  };
-}
-
-function accentTeam(ids, revision) {
-  return {
-    teamId: "team-main",
-    revision,
-    config: {
-      revision,
-      lifetime: "Drive",
-      taskFilters: [],
-      taskFilterEntries: [],
-    },
-    splitBack: {},
-    members: ids.map((id) => ({ agentId: "target:" + id })),
-  };
-}
 
 function accentMeasureReorder(config) {
   const accentSnapshotHost = (host) =>
@@ -78,17 +24,26 @@ function accentMeasureReorder(config) {
   }));
   const ids = config.memberIds;
   laneStore.replaceTargets(
-    ids.map((id) => window.__accentTarget(id, id + "-th")),
+    ids.map((id) =>
+      window.spicePayloads.targetPayload({
+        id,
+        threadId: id + "-th",
+        teamId: "team-main",
+        pendingPrefix: "p-",
+      }),
+    ),
   );
   applyTeamSnapshotPayload(
-    {
+    window.spicePayloads.teamSnapshot({
       revision: 7,
-      changed: true,
-      snapshot: {
-        globalSettings: { fastMode: false },
-        teams: [window.__accentTeam(ids, 7)],
-      },
-    },
+      teams: [
+        window.spicePayloads.teamPayload({
+          teamId: "team-main",
+          revision: 7,
+          memberIds: ids,
+        }),
+      ],
+    }),
     { force: true },
   );
   const host = laneGroupHost(laneStore.laneForId(ids[0]));
@@ -126,14 +81,16 @@ function accentMeasureReorder(config) {
     node.dataset.accentProbeTag = String((tag += 1));
   const taggedCount = tag;
   applyTeamSnapshotPayload(
-    {
+    window.spicePayloads.teamSnapshot({
       revision: 8,
-      changed: true,
-      snapshot: {
-        globalSettings: { fastMode: false },
-        teams: [window.__accentTeam(config.reorderedIds, 8)],
-      },
-    },
+      teams: [
+        window.spicePayloads.teamPayload({
+          teamId: "team-main",
+          revision: 8,
+          memberIds: config.reorderedIds,
+        }),
+      ],
+    }),
     { force: true },
   );
   renderMessagesIfChanged(host);
@@ -182,14 +139,7 @@ async function run() {
           typeof renderMessagesIfChanged === "function",
         { timeout: 10000 },
       );
-      await page.addScriptTag({
-        content:
-          "window.__accentTarget = " +
-          accentTargetPayload.toString() +
-          "; window.__accentTeam = " +
-          accentTeam.toString() +
-          ";",
-      });
+      await page.addScriptTag({ content: installScript });
       const result = await page.evaluate(accentMeasureReorder, {
         memberIds: ACCENT_MEMBER_IDS,
         reorderedIds: ACCENT_REORDERED_IDS,
