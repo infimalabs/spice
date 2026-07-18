@@ -754,8 +754,8 @@ def test_repo_doc_sticky_latch_self_heals_when_doc_drops_under_base(tmp_path):
     doc.write_text("x" * 8, encoding="utf-8")  # 8 > flex 7 -> latched
 
     repodocs.repo_truth_doc_findings(repo, persist=True)
-    state = repodocs.repo_doc_char_sticky_state_path(repo)
-    assert state is not None and state.exists()
+    state = git_state_path(repodocs.REPO_DOC_CHAR_STICKY_STATE_GIT_PATH, root=repo)
+    assert state.exists()
 
     doc.write_text("x" * 4, encoding="utf-8")  # 4 <= base 5
     healed = repodocs.repo_truth_doc_findings(repo, persist=True)
@@ -780,8 +780,8 @@ def test_repo_doc_sticky_latch_holds_in_flex_band_until_under_base(tmp_path):
     # base until it drops under base -- self-heal must not clear early.
     assert [finding.path.as_posix() for finding in findings] == ["AGENTS.md"]
     assert findings[0].limit == 5
-    state = repodocs.repo_doc_char_sticky_state_path(repo)
-    assert state is not None and state.exists()
+    state = git_state_path(repodocs.REPO_DOC_CHAR_STICKY_STATE_GIT_PATH, root=repo)
+    assert state.exists()
 
 
 def _init_repo_with_doc_policy(tmp_path: Path) -> Path:
