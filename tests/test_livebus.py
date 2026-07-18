@@ -20,6 +20,11 @@ from spice.serve import livebus
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
+from tests.test_wirefixtures import (
+    valid_lane_payload,
+    valid_live_bus_callback_payloads,
+    valid_metric_series_payload,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -115,7 +120,10 @@ def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
     )
     ticks = iter((1.0, 1.004, 1.005, 1.011))
     monkeypatch.setattr(livebus.time, "perf_counter", lambda: next(ticks))
-    payload = {"type": "lane.payload", "payload": {"messages": []}}
+    payload = {
+        "type": "lane.payload",
+        "payload": valid_lane_payload(messages=[]),
+    }
 
     timing = session._send(payload)
     diagnostics = session.diagnostics()
@@ -147,7 +155,9 @@ def test_ping_reset_clears_frame_telemetry_between_windows(tmp_path):
     )
     try:
         # First measurement window: one frame lands in the counters.
-        session._send({"type": "lane.payload", "payload": {"messages": []}})
+        session._send(
+            {"type": "lane.payload", "payload": valid_lane_payload(messages=[])}
+        )
         assert session.diagnostics()["totals"]["count"] == 1
 
         # A diagnostic client (the latency probe) resets telemetry with the same
@@ -170,7 +180,9 @@ def test_ping_reset_clears_frame_telemetry_between_windows(tmp_path):
 
         # A frame sent in the fresh window counts from one, proving the window
         # owns its counters rather than inheriting the prior run's high-water.
-        session._send({"type": "lane.payload", "payload": {"messages": []}})
+        session._send(
+            {"type": "lane.payload", "payload": valid_lane_payload(messages=[])}
+        )
         assert session.diagnostics()["totals"]["count"] == 1
     finally:
         session._teardown()
@@ -210,7 +222,13 @@ def test_background_lane_burst_coalesces_before_focused_delivery(
         for _change in range(10):
             assert session.coalesce_background_update(subscription) is True
 
-    session._send({"type": "lane.payload", "targetId": target.id, "payload": {}})
+    session._send(
+        {
+            "type": "lane.payload",
+            "targetId": target.id,
+            "payload": valid_lane_payload(),
+        }
+    )
     assert [frame["type"] for frame in connection.sent] == ["lane.payload"]
     assert len(callbacks) == 1
 
@@ -240,7 +258,7 @@ def test_two_refreshes_for_one_target_reply_in_request_order(tmp_path):
             first_started.set()
             release_first.wait(timeout=2.0)
         compute_order.append(after)
-        return {"messages": [], "statusLine": {"after": after}}
+        return {"messages": [], "statusLine": {"preview": after}}
 
     session = LiveBusSession(
         connection,
@@ -459,7 +477,7 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
 
     def metric_series(query):
         seen.append(query)
-        return {"ok": True, "points": [], "echo": query.get("series")}
+        return valid_metric_series_payload(metric=str(query["series"]))
 
     callbacks = replace(
         _callbacks(target=target, transcript=transcript),
@@ -478,7 +496,7 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     results = [m for m in connection.sent if m.get("type") == "metrics.seriesResult"]
     assert len(results) == 1
     assert results[0]["requestId"] == "r1"
-    assert results[0]["result"]["echo"] == "burndown"
+    assert results[0]["result"] == valid_metric_series_payload(metric="burndown")
 
 
 class _DeadConnection:
@@ -508,7 +526,7 @@ def test_metrics_worker_ends_quietly_when_peer_vanishes_mid_reply(tmp_path):
 
     def metric_series(query):
         seen.append(query)
-        return {"ok": True, "points": []}
+        return valid_metric_series_payload(metric=str(query["series"]))
 
     callbacks = replace(
         _callbacks(target=target, transcript=transcript),
@@ -586,10 +604,10 @@ def test_lanes_subscribe_replies_once_with_activation_per_lane(tmp_path, monkeyp
         assert [entry["watcherError"] for entry in frame["lanes"]] == ["", ""]
         assert len({entry["subscriptionGeneration"] for entry in frame["lanes"]}) == 2
         assert [
-            entry["payload"]["statusLine"]["targetId"] for entry in frame["lanes"]
+            entry["payload"]["statusLine"]["preview"] for entry in frame["lanes"]
         ] == ["lane-a", "lane-b"]
         assert frame["lanes"][0]["payload"]["ackContexts"] == [
-            {"key": "1jN54zJK", "targetId": "lane-a"}
+            {"key": "1jN54zJK", "found": True, "text": "lane-a"}
         ]
         assert frame["lanes"][0]["payload"]["messages"][0]["kind"] == "task"
         assert set(batch_session.subscriptions) == {"lane-a", "lane-b"}
@@ -634,7 +652,7 @@ def test_lanes_subscribe_reports_watcher_activation_per_lane(tmp_path, monkeypat
         assert entries["lane-a"]["watcherError"] == "lane-a watcher unavailable"
         assert entries["lane-b"]["watcherError"] == ""
         assert [
-            entries[target_id]["payload"]["statusLine"]["targetId"]
+            entries[target_id]["payload"]["statusLine"]["preview"]
             for target_id in entries
         ] == [
             "lane-a",
@@ -978,7 +996,7 @@ def test_lanes_subscribe_computes_payloads_concurrently(tmp_path, monkeypatch):
         # execution passes the barrier; serial execution breaks it and the
         # error payload below fails the equality assertion.
         barrier.wait(timeout=2.0)
-        return {"messages": [], "statusLine": {"targetId": bus_target.id}}
+        return {"messages": [], "statusLine": {"preview": bus_target.id}}
 
     session = LiveBusSession(
         connection,
@@ -1002,8 +1020,8 @@ def test_lanes_subscribe_computes_payloads_concurrently(tmp_path, monkeypatch):
         frame = _wait_for_reply(connection, request_id="batch-1")
         elapsed = time.perf_counter() - started
         assert [entry["payload"] for entry in frame["lanes"]] == [
-            {"messages": [], "statusLine": {"targetId": "lane-a"}},
-            {"messages": [], "statusLine": {"targetId": "lane-b"}},
+            valid_lane_payload(messages=[], statusLine={"preview": "lane-a"}),
+            valid_lane_payload(messages=[], statusLine={"preview": "lane-b"}),
         ]
         assert elapsed < 2.0  # one overlapped rendezvous, well inside 2x the wait
     finally:
@@ -1102,7 +1120,7 @@ def test_subscribe_payload_deadline_releases_queue_for_later_lane(
         if len(payload_calls) == 1:
             release_stalled_payload.wait(timeout=2.0)
             stalled_payload_finished.set()
-        return {"messages": [], "statusLine": {"targetId": bus_target.id}}
+        return {"messages": [], "statusLine": {"preview": bus_target.id}}
 
     session = LiveBusSession(
         connection,
@@ -1155,6 +1173,11 @@ def _callbacks(
             "statusLine": pending_identity,
         }
 
+    raw_messages_payload = messages_payload or default_messages_payload
+
+    def wire_messages_payload(bus_target, **kwargs):
+        return valid_lane_payload(**raw_messages_payload(bus_target, **kwargs))
+
     def watch_paths(_target, _thread_id, transcript):
         paths = [inbox_dir(target.repo_root)]
         if transcript is not None:
@@ -1175,13 +1198,7 @@ def _callbacks(
 
     return LiveBusCallbacks(
         resolve_target=lambda selector: target if selector == target.id else None,
-        work_trees_payload=lambda: {},
-        messages_payload=messages_payload or default_messages_payload,
-        send_payload=lambda _target, _payload: ({}, None),
-        task_drain_payload=lambda _target, _payload: ({}, None),
-        team_snapshot_payload=lambda _since_revision: {},
-        team_command_payload=lambda _payload: ({}, None),
-        metric_series_payload=lambda _query: {"ok": True, "points": []},
+        **valid_live_bus_callback_payloads(messages_payload=wire_messages_payload),
         thread_id=lambda _target: "thread",
         transcript_resolution=lambda _thread_id: _transcript_resolution(
             "thread", transcript
@@ -1221,9 +1238,14 @@ def _multi_lane_callbacks(
     def default_messages_payload(bus_target, **_kwargs):
         return {
             "messages": [{"key": bus_target.id + "-m1", "kind": "task"}],
-            "ackContexts": [{"key": "1jN54zJK", "targetId": bus_target.id}],
-            "statusLine": {"targetId": bus_target.id},
+            "ackContexts": [{"key": "1jN54zJK", "text": bus_target.id}],
+            "statusLine": {"preview": bus_target.id},
         }
+
+    raw_messages_payload = messages_payload or default_messages_payload
+
+    def wire_messages_payload(bus_target, **kwargs):
+        return valid_lane_payload(**raw_messages_payload(bus_target, **kwargs))
 
     def watch_paths(bus_target, _thread_id, transcript):
         paths = [inbox_dir(bus_target.repo_root)]
@@ -1237,13 +1259,7 @@ def _multi_lane_callbacks(
 
     return LiveBusCallbacks(
         resolve_target=lambda selector: by_id.get(str(selector or "")),
-        work_trees_payload=lambda: {},
-        messages_payload=messages_payload or default_messages_payload,
-        send_payload=lambda _target, _payload: ({}, None),
-        task_drain_payload=lambda _target, _payload: ({}, None),
-        team_snapshot_payload=lambda _since_revision: {},
-        team_command_payload=lambda _payload: ({}, None),
-        metric_series_payload=lambda _query: {"ok": True, "points": []},
+        **valid_live_bus_callback_payloads(messages_payload=wire_messages_payload),
         thread_id=lambda bus_target: "thread-" + bus_target.id,
         transcript_resolution=lambda thread_id: _transcript_resolution(
             thread_id, transcripts[thread_id]

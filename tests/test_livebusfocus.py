@@ -13,6 +13,10 @@ from spice.agent.driver import CODEX_DRIVER
 from spice.serve import livebus
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
+from tests.test_wirefixtures import (
+    valid_lane_payload,
+    valid_live_bus_callback_payloads,
+)
 
 
 @dataclass(frozen=True)
@@ -287,22 +291,14 @@ def _focus_callbacks(
         return LaneSignature(transcript=revisions[target.id], inbox=(), other=())
 
     def messages_payload(target, **_kwargs):
-        return {
-            "messages": [
-                {"key": f"{target.id}-{revisions[target.id]}", "kind": "task"}
-            ],
-            "statusLine": {"targetId": target.id},
-        }
+        return valid_lane_payload(
+            messages=[{"key": f"{target.id}-{revisions[target.id]}", "kind": "task"}],
+            statusLine={"preview": target.id},
+        )
 
     return LiveBusCallbacks(
         resolve_target=lambda selector: by_id.get(str(selector or "")),
-        work_trees_payload=lambda: {},
-        messages_payload=messages_payload,
-        send_payload=lambda _target, _payload: ({}, None),
-        task_drain_payload=lambda _target, _payload: ({}, None),
-        team_snapshot_payload=lambda _since_revision: {},
-        team_command_payload=lambda _payload: ({}, None),
-        metric_series_payload=lambda _query: {"ok": True, "points": []},
+        **valid_live_bus_callback_payloads(messages_payload=messages_payload),
         thread_id=lambda target: "thread-" + target.id,
         transcript_resolution=lambda thread_id: TranscriptResolution(
             thread_id=thread_id,

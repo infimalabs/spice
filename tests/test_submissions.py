@@ -31,6 +31,10 @@ from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
 from tests.test_livebus import _Target, _subscribe_lane, _transcript_resolution
+from tests.test_wirefixtures import (
+    valid_lane_payload,
+    valid_live_bus_callback_payloads,
+)
 
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -259,11 +263,11 @@ def _submission_callbacks(
             )
         items.sort(key=lambda item: (item.timestamp, item.index))
         pending = pending_inbox_identity_payload(target.repo_root)
-        return {
-            "messages": [item.to_payload() for item in items],
+        return valid_lane_payload(
+            messages=[item.to_payload() for item in items],
             **pending,
-            "statusLine": pending,
-        }
+            statusLine=pending,
+        )
 
     def send_payload(
         _target: _Target, payload: dict[str, Any]
@@ -296,13 +300,10 @@ def _submission_callbacks(
 
     return LiveBusCallbacks(
         resolve_target=lambda selector: target if selector == target.id else None,
-        work_trees_payload=lambda: {},
-        messages_payload=messages_payload,
-        send_payload=send_payload,
-        task_drain_payload=lambda _target, _payload: ({}, None),
-        team_snapshot_payload=lambda _since_revision: {},
-        team_command_payload=lambda _payload: ({}, None),
-        metric_series_payload=lambda _query: {"ok": True, "points": []},
+        **valid_live_bus_callback_payloads(
+            messages_payload=messages_payload,
+            send_payload=send_payload,
+        ),
         thread_id=lambda _target: THREAD_ID,
         transcript_resolution=lambda _thread_id: _transcript_resolution(
             THREAD_ID, transcript
