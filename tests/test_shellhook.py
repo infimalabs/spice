@@ -1,15 +1,12 @@
 """Agent wrapper routing and shell steering contracts."""
 
-import getpass
 import io
-import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
 import sysconfig
-import time
 import tomllib
 from pathlib import Path
 
@@ -18,8 +15,17 @@ import pytest
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from tests.test_shellhookhelpers import (
+    SHELL_TRACE_ENV,
+    expected_python_module_wrapper_lines,
+    expected_wrapper_lines,
+    init_git_repo,
+    write_agent_wrapper_config,
+    write_fake_rewriting_rtk,
+    write_rtk_config,
+    write_spice_product_shape,
+)
 
-SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND = "spice agent " + "shell-hook"
 UNSUPPORTED_AGENT_STEER_COMMAND = "spice agent " + "steer"
@@ -112,7 +118,7 @@ def test_wrapper_does_not_reroute_spice_commands_under_single_install(
     # rewrites a spice invocation to a per-worktree `python -m spice`. Even a
     # worktree that contains spice's own source (product shape) must pass spice
     # commands through unchanged to the installed runtime on PATH.
-    _write_spice_product_shape(tmp_path)
+    write_spice_product_shape(tmp_path)
 
     spice_command = wrap.build_agent_run_command(
         ["spice", "task", "status"], repo_root=tmp_path
@@ -201,7 +207,7 @@ def test_configured_rtk_routes_canonical_shell_and_direct_rewrites(
         if identity_kind == "basename"
         else str(tmp_path / "Spice Tools" / "rtk companion")
     )
-    _write_rtk_config(tmp_path, executable)
+    write_rtk_config(tmp_path, executable)
     calls: list[tuple[tuple[str, ...], str]] = []
 
     def fake_rewrite(*args: str, **kwargs) -> str:
@@ -231,7 +237,7 @@ def test_canonical_and_resolved_rtk_direct_inputs_preserve_their_identity(
     tmp_path, monkeypatch
 ):
     executable = str(tmp_path / "Spice Tools" / "rtk companion")
-    _write_rtk_config(tmp_path, executable)
+    write_rtk_config(tmp_path, executable)
     monkeypatch.setattr(
         wrap,
         "rtk_rewrite_command_text",
@@ -257,9 +263,9 @@ def test_canonical_and_resolved_rtk_direct_inputs_preserve_their_identity(
 def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
     tmp_path, monkeypatch
 ):
-    rtk = _write_fake_rewriting_rtk(tmp_path)
-    _write_rtk_config(tmp_path, str(rtk))
-    _write_agent_wrapper_config(
+    rtk = write_fake_rewriting_rtk(tmp_path)
+    write_rtk_config(tmp_path, str(rtk))
+    write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
@@ -306,9 +312,9 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
 
 
 def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_path):
-    rtk = _write_fake_rewriting_rtk(tmp_path)
-    _write_rtk_config(tmp_path, str(rtk))
-    _write_agent_wrapper_config(
+    rtk = write_fake_rewriting_rtk(tmp_path)
+    write_rtk_config(tmp_path, str(rtk))
+    write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
@@ -330,9 +336,9 @@ def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
 ):
     if shutil.which("zsh") is None:
         pytest.skip("zsh is required for the end-to-end child shell")
-    rtk = _write_fake_rewriting_rtk(tmp_path)
-    _write_rtk_config(tmp_path, str(rtk))
-    _write_agent_wrapper_config(
+    rtk = write_fake_rewriting_rtk(tmp_path)
+    write_rtk_config(tmp_path, str(rtk))
+    write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
@@ -400,7 +406,7 @@ def test_agent_run_executes_repository_pytest_in_worktree_venv_end_to_end(
 
 
 def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={
@@ -418,7 +424,7 @@ def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
 
 
 def test_rtk_rewrite_yield_selectors_leave_packaged_wrappers_rewritable(tmp_path):
-    _write_rtk_config(tmp_path, "alternate-rtk")
+    write_rtk_config(tmp_path, "alternate-rtk")
 
     assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset()
 
@@ -483,7 +489,7 @@ def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
 def test_wrapper_routes_python_commands_through_deployment_interpreter(
     tmp_path, monkeypatch
 ):
-    _write_spice_product_shape(tmp_path)
+    write_spice_product_shape(tmp_path)
 
     python_command = wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
@@ -497,7 +503,7 @@ def test_wrapper_routes_python_commands_through_deployment_interpreter(
 
 
 def test_wrapper_does_not_python_route_proxy_argv(tmp_path):
-    _write_spice_product_shape(tmp_path)
+    write_spice_product_shape(tmp_path)
 
     assert wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
@@ -550,7 +556,7 @@ def test_wrapper_routes_python_without_repo_venv_to_deployment_interpreter(
 def test_wrapper_plain_commands_do_not_inject_worktree_spice_pythonpath(
     tmp_path, monkeypatch
 ):
-    _write_spice_product_shape(tmp_path)
+    write_spice_product_shape(tmp_path)
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
     env = wrap.build_agent_run_environment(["pytest"], repo_root=tmp_path)
@@ -582,7 +588,7 @@ def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
 def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
     tmp_path, monkeypatch
 ):
-    _init_git_repo(tmp_path)
+    init_git_repo(tmp_path)
     monkeypatch.setenv(DRIVER.thread_id_env, "thread-a")
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
 
@@ -599,13 +605,13 @@ def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
 def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
     tmp_path, monkeypatch, identity_kind
 ):
-    _init_git_repo(tmp_path)
+    init_git_repo(tmp_path)
     executable = {
         "builtin": "rtk",
         "basename": "alternate-rtk",
         "absolute": str(tmp_path / "Spice Tools" / "rtk companion"),
     }[identity_kind]
-    _write_rtk_config(tmp_path, executable)
+    write_rtk_config(tmp_path, executable)
     monkeypatch.setenv(wrap.RTK_DB_PATH_ENV, "/ambient/global-history.db")
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setattr(wrap, "emit_initial_side_channel_payload", lambda *_a, **_k: ())
@@ -676,306 +682,8 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
     ]
 
 
-def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
-    tmp_path, monkeypatch
-):
-    _write_spice_product_shape(tmp_path)
-    monkeypatch.setenv("ZDOTDIR", "hook")
-    monkeypatch.setenv("BASH_ENV", "hook")
-
-    env = wrap.build_agent_run_environment(
-        ["zsh", "-c", "true"],
-        repo_root=tmp_path,
-    )
-
-    assert env is not None
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
-    assert env["ZDOTDIR"] == str(static_hook_dir)
-    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
-
-
-def test_wrapper_installs_shell_hook_environment_for_direct_shell_commands(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv("ZDOTDIR", raising=False)
-    monkeypatch.delenv("BASH_ENV", raising=False)
-
-    env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
-
-    assert env is not None
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
-    assert env["ZDOTDIR"] == str(static_hook_dir)
-    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
-
-
-def test_agent_environment_redirects_zsh_compdump_outside_shellhooks_dir(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv("ZDOTDIR", raising=False)
-    monkeypatch.delenv("BASH_ENV", raising=False)
-    monkeypatch.delenv("ZSH_COMPDUMP", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    assert env["ZSH_COMPDUMP"] == str(tmp_path / ".zcompdump")
-    assert not env["ZSH_COMPDUMP"].startswith(str(hook_dir))
-
-
-def test_agent_environment_redirects_zsh_compdump_to_original_zdotdir_when_set(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    zdotdir = tmp_path / "zdotdir"
-    monkeypatch.setenv("ZDOTDIR", str(zdotdir))
-    monkeypatch.delenv("BASH_ENV", raising=False)
-    monkeypatch.delenv("ZSH_COMPDUMP", raising=False)
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    assert env["ZSH_COMPDUMP"] == str(zdotdir / ".zcompdump")
-
-
-def test_agent_environment_preserves_caller_zsh_compdump_when_already_set(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    custom_dump = str(tmp_path / "custom" / ".zcompdump")
-    monkeypatch.delenv("ZDOTDIR", raising=False)
-    monkeypatch.delenv("BASH_ENV", raising=False)
-    monkeypatch.setenv("ZSH_COMPDUMP", custom_dump)
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    assert env["ZSH_COMPDUMP"] == custom_dump
-
-
-def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
-    tmp_path, monkeypatch
-):
-    zsh = shutil.which("zsh")
-    if zsh is None:
-        pytest.skip("zsh is not installed")
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
-    _write_agent_wrapper_config(
-        tmp_path,
-        order=["common"],
-        groups={"common": {"wrap": ["grep"]}},
-    )
-    trace = tmp_path / "trace.log"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    wrap_bin = bin_dir / "wrap"
-    wrap_bin.write_text(
-        f'#!/bin/sh\nprintf \'wrap:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
-        encoding="utf-8",
-    )
-    wrap_bin.chmod(0o755)
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
-    base_env = dict(os.environ)  # env-policy: allow
-    base_env["PATH"] = (
-        str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
-    )  # env-policy: allow
-    base_env[SHELL_TRACE_ENV] = str(trace)
-    base_env.pop(shellhook.ZDOTDIR_ENV, None)
-    base_env.pop(shellhook.BASH_ENV_ENV, None)
-    ambient_env = shellhook.apply_shell_steering_environment(
-        tmp_path,
-        base_env=base_env,
-    )
-    for name, value in ambient_env.items():
-        monkeypatch.setenv(name, value)
-
-    exit_code = wrap.run_agent_command(
-        tmp_path,
-        [zsh, "-c", "grep needle /dev/null"],
-        stderr=io.StringIO(),
-    )
-
-    assert exit_code == 0
-    lines = _trace_lines(trace, expected_prefix="wrap:")
-    assert "wrap:grep needle /dev/null" in lines
-
-
-def test_wrapper_find_route_sends_unsupported_primaries_to_native_find(
-    tmp_path, monkeypatch
-):
-    zsh = shutil.which("zsh")
-    if zsh is None:
-        pytest.skip("zsh is not installed")
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    wrappers = tmp_path / "wrappers.zsh"
-    wrappers.write_text(
-        "\n".join(shellhook.render_agent_wrapper_lines(tmp_path)) + "\n",
-        encoding="utf-8",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    rtk_bin = bin_dir / "rtk"
-    rtk_bin.write_text("#!/bin/sh\nprintf 'rtk:%s\\n' \"$*\"\n", encoding="utf-8")
-    rtk_bin.chmod(0o755)
-    env = dict(os.environ)  # env-policy: allow
-    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")  # env-policy: allow
-    fixture = tmp_path / "fixture"
-    (fixture / "sub").mkdir(parents=True)
-    (fixture / "sub" / "needle.txt").write_text("needle\n", encoding="utf-8")
-    (fixture / "big.bin").write_bytes(b"\0" * 30_000)
-    (fixture / "empty.txt").touch()
-    old = fixture / "old.txt"
-    old.write_text("old\n", encoding="utf-8")
-    os.utime(old, (1_000_000_000, 1_000_000_000))
-
-    def routed_output(args: list[str]) -> str:
-        words = " ".join(shlex.quote(word) for word in ["find", str(fixture), *args])
-        completed = subprocess.run(
-            [zsh, "-f", "-c", f"source {shlex.quote(str(wrappers))}; rtk {words}"],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=True,
-        )
-        return completed.stdout
-
-    cases = [
-        ("big.bin", ["-size", "+24k"]),
-        ("big.bin", ["-not", "-name", "*.txt"]),
-        ("needle.txt", ["-mtime", "-1"]),
-        ("needle.txt", ["-path", "*sub*"]),
-        ("needle.txt", ["-user", getpass.getuser()]),
-        ("needle.txt", ["-newer", str(old)]),
-        ("empty.txt", ["-empty"]),
-        ("needle.txt", ["-regex", ".*needle.*"]),
-        ("needle.txt", ["-perm", "-200"]),
-    ]
-    for sentinel, args in cases:
-        native = subprocess.run(
-            ["find", str(fixture), *args], capture_output=True, text=True, check=True
-        )
-        assert sentinel in native.stdout
-        assert routed_output(args) == native.stdout
-
-    kept_cases = [
-        [],
-        ["-name", "*.txt"],
-        ["-type", "d"],
-        ["-maxdepth", "1", "-iname", "*.TXT"],
-    ]
-    for args in kept_cases:
-        joined = " ".join(["find", str(fixture), *args])
-        assert routed_output(args) == f"rtk:{joined}\n"
-
-
-def test_agent_environment_does_not_inject_worktree_spice_pythonpath(
-    tmp_path, monkeypatch
-):
-    _write_spice_product_shape(tmp_path)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv("PYTHONPATH", raising=False)
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    assert "PYTHONPATH" not in env
-
-
-def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(shellhook.ZDOTDIR_ENV, raising=False)
-    monkeypatch.delenv(shellhook.BASH_ENV_ENV, raising=False)
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
-    assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
-    assert env[shellhook.SHELL_HOOK_REPO_ROOT_ENV] == str(tmp_path.resolve())
-    assert shellhook.SHELL_HOOK_WRAPPERS_ENV.startswith(
-        "SPICE_SHELL_HOOK_"  # env-policy: allow
-    )
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        shellhook.render_agent_wrapper_lines(tmp_path)
-    )
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        _builtin_common_wrapper_lines()
-    )
-    assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
-    assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
-    zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
-    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in zshenv
-    assert "spice agent run --" in zshenv
-    assert "--preserve-shell-hook-env" not in zshenv
-    assert shellhook.SHELL_HOOK_WRAPPERS_ENV in zshenv
-    assert UNSUPPORTED_AGENT_STEER_COMMAND not in zshenv
-    assert "--watch --parent-pid" not in zshenv
-
-
-def test_agent_environment_precomputes_configured_shell_wrapper_block(
-    tmp_path, monkeypatch
-):
-    _write_agent_wrapper_config(
-        tmp_path,
-        order=["common"],
-        groups={
-            "common": {
-                "wrap": ["grep", "git"],
-                "pytest": {"argv": ["python", "-m", "pytest"]},
-            }
-        },
-    )
-    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
-    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
-
-    env = lifecycle.agent_environment(tmp_path)
-
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        shellhook.render_agent_wrapper_lines(tmp_path)
-    )
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        [
-            *_expected_wrapper_lines("wrap", ["grep", "git"]),
-            *_expected_python_module_wrapper_lines(["pytest"]),
-        ]
-    )
-
-
-def test_repo_spice_dev_wrapper_routes_pytest_through_dev_seam():
-    repo = Path(__file__).resolve().parents[1]
-
-    rendered = shellhook.render_agent_wrapper_lines(repo)
-
-    pytest_start = rendered.index("pytest() {") - 1
-    assert rendered[pytest_start : pytest_start + 4] == [
-        "",
-        "pytest() {",
-        '  spice dev pytest "$@"',
-        "}",
-    ]
-
-
-def test_repo_pytest_wrapper_word_yields_rtk_rewrite():
-    repo = Path(__file__).resolve().parents[1]
-
-    assert "pytest" in shellhook.rtk_rewrite_yield_selectors(repo)
-
-
 def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common", "disabled", "active"],
         groups={
@@ -989,8 +697,8 @@ def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
     )
 
     assert shellhook.render_agent_wrapper_lines(tmp_path) == [
-        *_expected_wrapper_lines("wrap", ["grep"]),
-        *_expected_python_module_wrapper_lines(["pytest"]),
+        *expected_wrapper_lines("wrap", ["grep"]),
+        *expected_python_module_wrapper_lines(["pytest"]),
     ]
 
 
@@ -1196,268 +904,6 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
     ]["setuptools"]["package-data"]["spice.agent"]
     assert "shellhooks/.zshrc" in package_data
     assert "staticshellhooks/.zshrc" in package_data
-
-
-def _write_spice_product_shape(repo: Path) -> None:
-    for relative in (
-        Path("spice") / "__main__.py",
-        Path("spice") / "cli" / "entry.py",
-        Path("spice") / "agent" / "wrap.py",
-    ):
-        path = repo / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# test spice product shape\n", encoding="utf-8")
-
-
-def _init_git_repo(repo: Path) -> None:
-    subprocess.run(
-        ["git", "init"],
-        cwd=repo,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-
-def _write_fake_rewriting_rtk(repo: Path) -> Path:
-    script = repo / "fake-rtk"
-    script.write_text(
-        "#!/bin/sh\n"
-        "shift 2\n"
-        'case "$*" in\n'
-        '"pytest"* | "python -m pytest"*) echo "rtk pytest"; exit 3 ;;\n'
-        '"rg -n needle") echo "rtk grep -n needle"; exit 3 ;;\n'
-        "esac\n"
-        "exit 1\n",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    return script
-
-
-def _write_rtk_config(repo: Path, executable: str) -> None:
-    (repo / "spice.toml").write_text(
-        f"[rtk]\nexecutable = {json.dumps(executable)}\n",
-        encoding="utf-8",
-    )
-
-
-def _write_agent_wrapper_config(
-    repo: Path,
-    *,
-    order: list[str] | None,
-    groups: dict[str, dict[str, object] | bool],
-) -> None:
-    lines: list[str] = []
-    if order is not None:
-        wrappers_value = "[" + ", ".join(f'"{name}"' for name in order) + "]"
-        lines.extend(
-            [
-                "[tool.spice.agent]",
-                f"wrappers = {wrappers_value}",
-            ]
-        )
-    disabled_groups = [name for name, entries in groups.items() if entries is False]
-    if disabled_groups:
-        lines.extend(["", "[tool.spice.wrappers]"])
-        lines.extend(f"{_toml_key(name)} = false" for name in disabled_groups)
-    for group_name, entries in groups.items():
-        if entries is False:
-            continue
-        assert isinstance(entries, dict)
-        lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
-        for wrapper, value in entries.items():
-            if value is False:
-                lines.append(f"{_toml_key(wrapper)} = false")
-                continue
-            if isinstance(value, dict):
-                command = value["argv"]
-                lines.append(
-                    f"{_toml_key(wrapper)} = {{ argv = ["
-                    + ", ".join(f'"{word}"' for word in command)
-                    + "] }"
-                )
-                continue
-            lines.append(
-                f"{_toml_key(wrapper)} = ["
-                + ", ".join(f'"{selector}"' for selector in value)
-                + "]"
-            )
-    (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _toml_key(value: str) -> str:
-    if shellhook.CONFIG_NAME_RE.fullmatch(value):
-        return value
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
-    return [
-        *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
-        *_expected_python_module_wrapper_lines(["pytest"]),
-    ]
-
-
-def _builtin_common_wrapper_lines(
-    rtk_executable: str = "rtk", *, driver_name: str = "codex"
-) -> list[str]:
-    command_word = shellhook.shell_command_word(rtk_executable)
-    lines = [
-        "",
-        "rtk() {",
-        '  if [ "${1-}" = grep ]; then',
-        '    for _spice_word in "$@"; do',
-        '      case "$_spice_word" in',
-        "        --files|--type|--type=*|--no-heading|-g|--glob|--glob=*)",
-        "          shift",
-        '          command rg "$@"',
-        "          return",
-        "          ;;",
-        "      esac",
-        "    done",
-        "  fi",
-        '  if [ "${1-}" = find ]; then',
-        '    for _spice_word in "$@"; do',
-        '      case "$_spice_word" in',
-        "        -name|-iname|-type|-maxdepth) ;;",
-        "        -*|'('|')'|'!')",
-        "          shift",
-        '          command find "$@"',
-        "          return",
-        "          ;;",
-        "      esac",
-        "    done",
-        "  fi",
-        '  if [ "${1-}" = git ]; then',
-        '    for _spice_word in "$@"; do',
-        '      case "$_spice_word" in',
-        "        --first-parent|--check|--name-status|--name-only)",
-        "          shift",
-        '          command git "$@"',
-        "          return",
-        "          ;;",
-        "      esac",
-        "    done",
-        "  fi",
-    ]
-    if driver_name == "codex":
-        lines.extend(
-            [
-                '  if [ "${1-}" = grep ]; then',
-                "    shift",
-                f'    command {command_word} grep -E "$@"',
-                "    return",
-                "  fi",
-            ]
-        )
-    lines.extend([f'  command {command_word} "$@"', "}"])
-    if driver_name == "codex":
-        lines.extend(
-            [
-                "",
-                "grep() {",
-                '  for _spice_word in "$@"; do',
-                '    case "$_spice_word" in',
-                "      -E|-F|-P|-G)",
-                '        command grep "$@"',
-                "        return",
-                "        ;;",
-                "    esac",
-                "  done",
-                '  command grep -E "$@"',
-                "}",
-            ]
-        )
-    return lines
-
-
-def _expected_wrapper_lines(wrapper: str, selectors: list[str]) -> list[str]:
-    lines: list[str] = []
-    for selector in selectors:
-        lines.extend(["", f"{selector}() {{", f'  {wrapper} {selector} "$@"', "}"])
-    return lines
-
-
-def _expected_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
-    lines: list[str] = []
-    for selector in selectors:
-        lines.extend(["", f"{selector}() {{", f'  python -m {selector} "$@"', "}"])
-    return lines
-
-
-def _fake_spice_executable(tmp_path: Path, *, run_agent_commands: bool = False) -> Path:
-    path = tmp_path / "installed" / "bin" / "spice"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
-    agent_run_exec = (
-        (
-            'if [ "$1" = "agent" ] && [ "$2" = "run" ] '
-            '&& [ "$3" = "--" ]; then\n'
-            "  shift 3\n"
-            '  if [ "$2" = "-c" ] || [ "$2" = "-lc" ]; then\n'
-            f"    export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
-            f"    export BASH_ENV={shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
-            "  fi\n"
-            '  exec "$@"\n'
-            "fi\n"
-        )
-        if run_agent_commands
-        else ""
-    )
-    path.write_text(
-        (
-            "#!/bin/sh\n"
-            "printf 'fake:%s:%s:%s\\n' "
-            f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
-            f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
-            '"$*" '
-            f'>> "${{{SHELL_TRACE_ENV}}}"\n'
-            f"{agent_run_exec}"
-        ),
-        encoding="utf-8",
-    )
-    path.chmod(0o755)
-    return path
-
-
-def _trace_lines(trace: Path, *, expected_prefix: str) -> list[str]:
-    return _eventually(
-        lambda: (
-            trace.read_text(encoding="utf-8").splitlines() if trace.exists() else []
-        ),
-        contains=expected_prefix,
-    )
-
-
-def _completed_process_detail(
-    completed: subprocess.CompletedProcess, trace: Path
-) -> str:
-    trace_text = trace.read_text(encoding="utf-8") if trace.exists() else "<missing>"
-    return (
-        f"returncode={completed.returncode}\n"
-        f"stdout={completed.stdout!r}\n"
-        f"stderr={completed.stderr!r}\n"
-        f"trace={trace_text!r}"
-    )
-
-
-def _eventually(factory, *, contains: str):
-    deadline = time.monotonic() + 2.0
-    latest = factory()
-    while time.monotonic() < deadline:
-        if _contains(latest, contains):
-            return latest
-        time.sleep(0.05)
-        latest = factory()
-    return latest
-
-
-def _contains(value, needle: str) -> bool:
-    if isinstance(value, str):
-        return needle in value
-    return any(needle in item for item in value)
 
 
 def test_runtime_environment_preserves_operator_path_with_worktree_venv(tmp_path):

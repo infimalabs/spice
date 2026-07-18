@@ -43,6 +43,7 @@ match = [
   # native find.
   { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
+  { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
   { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },
 ]
 

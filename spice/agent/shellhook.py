@@ -515,6 +515,7 @@ class WrapperMatchRoute(NamedTuple):
     head: str | None
     flags: tuple[str, ...]
     keep: tuple[str, ...]
+    search_operands: bool
     argv: tuple[str, ...]
     scope: ScopeSelector
 
@@ -535,6 +536,9 @@ def render_agent_match_wrapper_lines(
 
 def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     argv = " ".join(shell_command_word(word) for word in route.argv)
+    if route.search_operands:
+        assert route.head == "grep"
+        return grep_search_operand_route_guard_lines(argv)
     if not route.flags:
         assert route.head is not None
         return [
@@ -567,6 +571,73 @@ def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     ]
 
 
+def grep_search_operand_route_guard_lines(argv: str) -> list[str]:
+    """Route grep only when argv contains a file/directory search operand."""
+    return [
+        '  if [ "${1-}" = grep ]; then',
+        "    local _spice_grep_seen_head=",
+        "    local _spice_grep_seen_pattern=",
+        "    local _spice_grep_expect=",
+        "    local _spice_grep_positional=",
+        "    local _spice_grep_has_operand=",
+        '    for _spice_word in "$@"; do',
+        '      if [ -z "$_spice_grep_seen_head" ]; then',
+        "        _spice_grep_seen_head=1",
+        "        continue",
+        "      fi",
+        '      if [ -n "$_spice_grep_expect" ]; then',
+        '        if [ "$_spice_grep_expect" = pattern ]; then',
+        "          _spice_grep_seen_pattern=1",
+        "        fi",
+        "        _spice_grep_expect=",
+        "        continue",
+        "      fi",
+        '      if [ -n "$_spice_grep_positional" ]; then',
+        '        if [ -n "$_spice_grep_seen_pattern" ]; then',
+        "          _spice_grep_has_operand=1",
+        "          break",
+        "        fi",
+        "        _spice_grep_seen_pattern=1",
+        "        continue",
+        "      fi",
+        '      case "$_spice_word" in',
+        "        --)",
+        "          _spice_grep_positional=1",
+        "          ;;",
+        "        -e|--regexp|-f|--file)",
+        "          _spice_grep_expect=pattern",
+        "          ;;",
+        (
+            "        -A|-B|-C|-D|-d|-m|--after-context|--before-context|"
+            "--binary-files|--context|--devices|--directories|--exclude|"
+            "--exclude-from|--exclude-dir|--group-separator|--include|--label|"
+            "--max-count)"
+        ),
+        "          _spice_grep_expect=value",
+        "          ;;",
+        "        --regexp=*|--file=*|-e?*|-f?*)",
+        "          _spice_grep_seen_pattern=1",
+        "          ;;",
+        "        -A?*|-B?*|-C?*|-D?*|-d?*|-m?*|--*=*) ;;",
+        "        -*) ;;",
+        "        *)",
+        '          if [ -n "$_spice_grep_seen_pattern" ]; then',
+        "            _spice_grep_has_operand=1",
+        "            break",
+        "          fi",
+        "          _spice_grep_seen_pattern=1",
+        "          ;;",
+        "      esac",
+        "    done",
+        '    if [ -n "$_spice_grep_has_operand" ]; then',
+        "      shift",
+        f'      command {argv} "$@"',
+        "      return",
+        "    fi",
+        "  fi",
+    ]
+
+
 def agent_wrapper_match_routes(
     raw: object, *, config_path: str
 ) -> tuple[WrapperMatchRoute, ...]:
@@ -584,7 +655,9 @@ def agent_wrapper_match_routes(
 def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     if not isinstance(raw, Mapping):
         raise SpiceError(f"spice shell hook: {label} must be a table")
-    extra = sorted(set(raw) - {"head", "flags", "keep", "argv", SCOPES_KEY})
+    extra = sorted(
+        set(raw) - {"head", "flags", "keep", "search_operands", "argv", SCOPES_KEY}
+    )
     if extra:
         raise SpiceError(
             f"spice shell hook: {label} has unsupported keys: {', '.join(extra)}"
@@ -615,12 +688,20 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
             raise SpiceError(f"spice shell hook: {label}.keep has no entries")
         for word in keep:
             match_route_word(word, label=f"{label}.keep")
+    search_operands = raw.get("search_operands", False)
+    if not isinstance(search_operands, bool):
+        raise SpiceError(f"spice shell hook: {label}.search_operands must be boolean")
+    if search_operands and (head != "grep" or flags):
+        raise SpiceError(
+            f"spice shell hook: {label}.search_operands requires a head-only grep route"
+        )
     argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
     scope = WRAPPER_ROUTE_SCOPES.parse(raw.get(SCOPES_KEY))
     return WrapperMatchRoute(
         head=head,
         flags=tuple(flags),
         keep=tuple(keep),
+        search_operands=search_operands,
         argv=tuple(argv),
         scope=scope,
     )
