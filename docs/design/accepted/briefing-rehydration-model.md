@@ -1,6 +1,6 @@
 # Briefing Rehydration Model
 
-Status: decision, 2026-07-08.
+Status: implemented contract, 2026-07-18.
 
 ## Decision
 
@@ -225,8 +225,9 @@ sheds the lowest-value candidate rather than the last-rendered line.
   record is about ranking, horizon, and packing over the existing
   `TurnRecord` / `CompactionRecord` / ACK-DB sources, not about the transcript
   format.
-- **This is a design record, not an implementation.** The behavior lands through
-  the battery below; nothing here is code.
+- **The record is authority; code is execution.** This document fixes the
+  implemented contract, while the code and focused tests named below prove the
+  current execution. Future changes must update both in one reviewed boundary.
 
 ## Examples
 
@@ -242,39 +243,18 @@ sheds the lowest-value candidate rather than the last-rendered line.
   first: weak file touches and successful commands go before any pending ask or
   the newest final, because packing is value-ordered rather than section-ordered.
 
-## Follow-Ups
+## Implementation Evidence
 
-This record is the root of the briefing-rehydration battery. Each task deletes
-one strand of the flat-slice model and replaces it with the ranked, horizoned,
-packed equivalent; all share this record as the single source of truth for the
-end state. Sequencing matters only where one change needs another's type to
-exist (the candidate model precedes the pack step), not because the tasks are
-arbitrarily chained.
+The former implementation battery is complete. Current authority is code and
+focused behavior, rather than the original task handles:
 
-- `session.rank` (`RANK-1kBrRxSW`) — typed candidate model + per-class domain
-  rank keys for the taxonomy above. **Replaces** flat `operator_asks` tail-slice
-  ordering with an explicit value rank per signal class.
-- `session.horizon` (`HORIZON-1kBrRzTw`) — dual-axis adaptive horizon (3 default
-  / 5 cap + wall-clock floor + `horizon_basis` label). **Replaces**
-  `render_sweep`'s `boundaries[-count:]` edges and the briefing's unbounded time
-  filters.
-- `session.asks` (`ASKS-1kBrS1T0`) — source the ask/coordination class from the
-  ACK DB (`spiceacks.sqlite3` via `spice/mail/ackstate.py`) and the coordination
-  plane (claimed task/phase), with deterministic fail-loud shape classification.
-  **Deletes** `operator_asks` + the `is_scaffolding_text` heuristic as the ask
-  source.
-- `session.pack` (`PACK-1kBrS6sv`, after `RANK`) — rank-then-pack to a character
-  budget with explicit overflow markers and placeholder suppression.
-  **Replaces** `apply_output_budget`'s post-hoc whole-text clamp and the literal
-  `-` placeholder rows.
-- `session.converge` (`CONVERG-1kBrSBwv`, after `PACK` + `HORIZON`) — unify
-  `render_briefing` and `render_sweep` onto the shared horizon → candidates →
-  rank → pack → render pipeline. **Deletes** the duplicated flat-slice sweep
-  path; the briefing becomes the default-horizon case.
-- `session.render` (`RENDER-1kBrS2rV`) — typed payload/render split per surface
-  (gritctl typed data-flow model), so the ranked payload is computed once and
-  each surface renders it. **Refactors** the monolithic `render_briefing` string
-  assembly.
+- `spice/sessions/briefing.py` owns typed candidates, per-class rank keys,
+  ACK-state and coordination inputs, value-ordered packing, overflow markers,
+  placeholder suppression, and the shared briefing/sweep render pipeline.
+- `spice/sessions/slices.py` owns the three-window default, five-window cap,
+  wall-clock floor, and explicit `horizon_basis` result.
+- Session briefing, invariant, and slice tests pin ranking, horizon selection,
+  budget degradation, source classification, and briefing/sweep convergence.
 
-Each follow-up links back to this record in its description and carries
-acceptance stated as observable behavior, not "implement the recommendation."
+Future changes modify this implemented contract directly; the deleted battery
+is not a live work queue.

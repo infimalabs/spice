@@ -19,7 +19,7 @@ spice agent run -- <shell> -c "<original command>"
 
 That gives `spice agent run` ownership of stderr for steering injection,
 keep-working guidance, RTK rewrite routing,
-source-checkout routing, and wrapper setup before the requested command.
+and wrapper setup before the requested command.
 `agent run` repoints `ZDOTDIR`/`BASH_ENV` at the packaged static hook dir for
 the shell command it runs, so that shell and its descendants do not reexec and
 do not inject steering again. The static stage restores the user's original
@@ -63,6 +63,29 @@ zsh is covered through `ZDOTDIR` startup files; bash is covered through
 `BASH_ENV`. The `.zshrc` surface is static-stage only for interactive shells. Missing
 packaged startup files fail at spawn, and static hooks fail loudly when required
 environment variables are missing or the command shell cannot be resolved.
+
+## Agent-Native Delivery
+
+Shell delivery and agent-native hooks are complementary mechanisms with one
+steering payload and one ACK ledger:
+
+- `.spice/hooks/` is Git's worktree-local gate directory. Its `pre-commit`,
+  `commit-msg`, and `reference-transaction` shims dispatch to `spice dev ...`;
+  they do not deliver agent context.
+- `<worktree-git-dir>/.spice/agents/<driver>-post-tool-hook.json` is a generated
+  inspection record, not the live registration. The driver launch settings are
+  authoritative and register `spice agent post-tool-hook` on each PostToolUse
+  surface that driver supports.
+- PostToolUse renders pending inbox and keep-working guidance as additional
+  context after supported native tool calls. Driver capability is explicit:
+  callers must not infer one driver's native-tool coverage from another.
+- Agent-native delivery never injects or rewrites a command. Shell command
+  steering and RTK ownership remain exclusively in the redirector →
+  `spice agent run` → static-stage path above.
+
+Both paths read the same durable inbox and preserve transcript-visible ACK/NACK
+retirement. The native hook closes supported non-shell tool stretches; it does
+not form a second control plane.
 
 ## Wrapper Groups
 
@@ -116,4 +139,5 @@ until that resolver exists.
   string is still available.
 - `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; hooks eval it
   but do not regenerate wrapper functions.
-- The direct shell-startup path is the only command-injection contract.
+- The direct shell-startup path is the only command-string injection contract;
+  agent-native hooks add context but never commands.

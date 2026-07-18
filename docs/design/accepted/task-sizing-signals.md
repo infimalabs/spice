@@ -1,19 +1,15 @@
 # Task Sizing Signals
 
-Status: recommendation, 2026-06-26.
+Status: implemented contract, 2026-07-18.
 
-## Recommendation
+## Implemented Contract
 
-Evidence boundary revised 2026-07-16.
+Task-sizing signals do not change allocator ranking, priority, due dates, or
+claim selection. Spice provides an observational completed-task size report
+that labels past work and exposes the raw signals that produced the label.
 
-Do not let task-sizing signals change allocator ranking, priority, due dates, or
-claim selection yet. Spice should first add an observational completed-task size
-report that labels past work and exposes the raw signals that produced the
-label.
-
-Use the report to calibrate heuristics over real completed tasks. Only after the
-team trusts the labels should Spice consider task creation hints or allocator
-weighting.
+Use the report to calibrate heuristics over real completed tasks. Any future
+task-creation hint or allocator weighting requires a separate accepted decision.
 
 The only current consumer is the operator reading `spice task sizing`. A
 repository-wide consumer audit found no allocator, quality-gate, task-creation,
@@ -42,7 +38,7 @@ estimate. Agent work contains long idle gaps, live steering, review churn,
 validation gates, and task-boundary sync. A durable sizing signal needs to say
 what it measured and how confident it is.
 
-## Signals To Collect
+## Scored Signals
 
 ### Elapsed Time
 
@@ -176,7 +172,7 @@ Heuristic contribution:
 - dependency count above two: `+1`;
 - a canonical `verify` phase: `+1`.
 
-## Initial Heuristic
+## Implemented Heuristic
 
 For each completed task, calculate:
 
@@ -214,10 +210,12 @@ component caused it and tune that component.
   review churn are separated.
 - Do not treat command count as productivity.
 
-## Follow-Ups
+## Implementation Evidence
 
-- `METRICS-20260626T060642088454Z`: the original completed-task sizing report,
-  which printed raw signal components without changing allocator behavior.
-- `SIZING-1kDStBkZ`: remove unsupported quantitative dimensions, delegate
-  active-time interpretation to the phase-effort API, and distinguish missing
-  evidence from measured zero without adding lifecycle metadata.
+- `spice/tasks/sizing.py` computes S/M/L/XL or `unavailable` from complete
+  phase-effort windows, canonical review evidence, and dependency/verify
+  metadata.
+- `spice task sizing` renders every scored component and preserves unscored
+  completion validation as qualitative evidence.
+- Focused sizing tests distinguish missing evidence from measured zero and pin
+  the absence of allocator, gate, and task-creation consumers.

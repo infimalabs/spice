@@ -1,8 +1,8 @@
 # Serve UI Frontend Framework Path
 
-Status: recommendation, 2026-06-19.
+Status: decision, 2026-07-18.
 
-## Recommendation
+## Decision
 
 Do not rewrite the serve UI into a full framework now. First keep the static
 no-build app and extract testable seams: state derivation, routing decisions,
@@ -108,13 +108,11 @@ clean state seams.
 
 ## Pilot Result
 
-The first Lit island prototype is recorded in
-`docs/design/experimental/serve-ui-lit-island-prototype.md`. The pilot was closed and
-decommissioned: it proved Lit could mount as a no-build Web Component island, but
-the metrics implementation still duplicated the same hand-built SVG chart. The
-serve UI keeps one metrics renderer, the vanilla `app.panes.js` path. A future
-graphing library should replace that chart path directly rather than adding a
-second optional renderer.
+The closed Lit island pilot proved Lit could mount as a no-build Web Component
+island, but the metrics implementation still duplicated the same hand-built SVG
+chart. The opt-in renderer was decommissioned. The serve UI keeps one metrics
+renderer, the vanilla `app.panes.js` path. A future graphing library should
+replace that chart path directly rather than adding a second optional renderer.
 
 ## Sources
 

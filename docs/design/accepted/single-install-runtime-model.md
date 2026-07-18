@@ -1,6 +1,6 @@
 # Single-Install Runtime Model
 
-Status: decision, 2026-06-26.
+Status: implemented contract, 2026-07-18.
 
 ## Decision
 
@@ -14,10 +14,15 @@ to be active.
   in progress, but they do **not** supply their own spice runtime. Editing a
   worker tree changes that tree's files, never the code that is currently
   running.
-- The installed tool is the **single coherent running code**. Every `spice`
-  invocation in every worktree resolves to that one installation, so the
-  allocator, steering socket, and serve process are all the same build
-  regardless of which directory a shell sits in.
+- The installed tool is the **single coherent production/control-plane code**.
+  Agent, task, serve, session, and ordinary CLI commands resolve to that one
+  installation, so the allocator, steering socket, and serve process are the
+  same build regardless of which directory a shell sits in.
+- **Development commands are the deliberate exception.** `spice dev ...`
+  reexecs through `spice/cli/entry.py` into the operated checkout environment
+  so its gates and tests inspect that checkout's candidate code. This scoped
+  development seam never changes the runtime used by agent, task, serve, or
+  session commands.
 - **Common-directory install is removed.** The uv tool layout is the only
   supported install shape; no coherent load-bearing reason for the opt-in
   common-dir variant surfaced, so it was dropped rather than kept as an
@@ -51,39 +56,25 @@ mechanisms. The single-install battery removed them:
 - **Worktree PYTHONPATH + venv injection** —
   agent, wrapper, and mounted-command environments no longer prepend the
   operated worktree root to `PYTHONPATH` or promote that tree's `.venv`.
-- **The worktree-spice reexec** —
-  `spice` no longer re-execs into an active checkout; the installed console
-  script remains the runtime.
+- **The production worktree-spice reexec** — ordinary commands no longer
+  reexec into an active checkout; only the explicit `spice dev ...` surface
+  enters candidate code for development validation.
 - **`python` / `python3` worktree-venv routing** — agent shells route bare
   `python` and `python3` to the deployment interpreter, not the operated
   worktree `.venv`.
 - **The now-dead strippers** — release and doctor no longer compensate for
   worktree-injected `PYTHONPATH`, because the injection path is gone.
 
-## Scope / This Battery
+## Implementation Evidence
 
-This record is the root of the single-install battery. It states the target
-model; the implementing tasks remove the magic above and document/test the
-result:
+- The packaged console entrypoint owns ordinary runtime resolution.
+- `spice/cli/entry.py` limits checkout self-execution to `spice dev ...`.
+- Agent, wrapper, and mounted-command environments do not prepend an operated
+  worktree to `PYTHONPATH` or promote its virtual environment.
+- Shell-hook, runtime hermeticity, installed-runtime, Doctor, and release tests
+  pin the boundary.
 
-- `lifecycle.install` — make `uv tool` the default install.
-- `cli.entry` — remove the worktree-spice reexec so spice always runs the
-  installed runtime.
-- `cli.paths` — remove worktree `PYTHONPATH`/venv injection and the now-dead
-  strippers.
-- `lifecycle.shellhooks` — stop routing `python`/`python3` to the worktree venv
-  in agent shells.
-- `serve.deploy` — codify serve as the single main-tree deployment; workers are
-  operated trees.
-- `tests.hermeticity` — document the single-install model and add
-  no-per-tree-runtime tests.
-
-These tasks are not artificial dependencies on each other: they each delete one
-strand of the same coupling, and they share this record as the single source of
-truth for *what the end state is*. Sequencing matters only where one removal
-would leave the runtime unbootable without another (e.g. dropping the reexec
-before the default install path exists), not because the tasks are arbitrarily
-chained.
+The former single-install battery is complete and is not a live work queue.
 
 ## Non-Goals
 

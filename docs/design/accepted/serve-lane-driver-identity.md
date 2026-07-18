@@ -1,11 +1,15 @@
 # Serve Lane Driver Identity
 
-Status: recommendation, 2026-06-20.
+Status: implemented contract, 2026-07-18.
 
-## Problem
+The contract below is implemented. Sections describing the baseline before the
+identity work are retained as historical rationale; current authority is the
+implemented contract, persistence shape, invariants, and evidence.
+
+## Historical Question
 
 Serve needs one explicit agent identity contract for lanes. Today the runtime
-can answer several adjacent questions, but the answers live in different
+needed to answer several adjacent questions whose answers lived in different
 places:
 
 - Which driver should this worktree launch next?
@@ -19,11 +23,11 @@ places:
 - Which durable actor should team membership, metrics, renewal, and UI routing
   use while an agent is unbound, bound, or being renewed?
 
-The contract should model those facts directly. It should not add driver modes
-or parallel Codex-vs-Claude paths, and it should not infer uncertainty from
+The contract had to model those facts directly. It could not add driver modes
+or parallel Codex-vs-Claude paths, and it could not infer uncertainty from
 UUID shape, transcript accidents, or UI placement.
 
-## Current Flow
+## Historical Baseline
 
 Worktree discovery starts with `spice/serve/worktrees.py`. `WorktreeTarget`
 contains `id`, `repo_root`, `name`, and `branch`. The target id is a path slug
@@ -72,7 +76,7 @@ thread id. Renewals record predecessor and successor ids, but those ids are
 still bare strings; there is no durable driver, actual launch, desired
 launch, or transcript-owner fact attached to the actor.
 
-## Loss Points
+## Historical Loss Points
 
 The worktree target is too small. It is the only stable object before a thread
 exists, but it has no field for driver, actual session, desired model, or
@@ -112,7 +116,7 @@ desired to change driver, model, effort, service tier, or only cut loose from
 a stuck process. It also does not explicitly model replacing the actual
 identity at one team index with a desired identity.
 
-## Recommended Contract
+## Implemented Contract
 
 Add one serve agent identity object and make all lane routing, display, team,
 renewal, and metrics callers consume it. The shape should be driver-neutral:
@@ -204,7 +208,7 @@ to use the actor id string, but the meaning of that string must be documented
 as `target:<id>` or `thread:<id>`. Callers that need driver or model facts
 should join through `agent_identities`, not parse the actor id.
 
-## Migration Plan
+## Implemented Migration
 
 1. Add a pure resolver that returns the recommended identity object for a
    `WorktreeTarget`.
@@ -238,17 +242,15 @@ should join through `agent_identities`, not parse the actor id.
 - Display surfaces may summarize identity, but source-of-truth callers should
   consume the full identity object.
 
-## Follow-Ups
+## Implementation Evidence
 
-- `UI-20260620T035248093442Z`: implement the pure serve agent identity
-  resolver and tests.
-- `UI-20260620T035254978199Z`: add durable `agent_identities` storage and
-  legacy bare-id compatibility.
-- `UI-20260620T035301125050Z`: use explicit `target:<id>` and `thread:<id>`
-  actor ids in team routing.
-- `UI-20260620T035307551021Z`: return transcript owner driver from transcript
-  resolution.
-- `UI-20260620T035315356317Z`: update lane info and hover text to distinguish
-  actual model from desired model.
-- `UI-20260620T035322336971Z`: rework renewal bookkeeping to store desired
-  successor launch facts and team-slot replacement identity.
+- `spice/serve/payload/identity.py` resolves one structured identity for lane,
+  routing, display, renewal, and metric consumers.
+- The team schema and store persist `agent_identities`, promote explicit
+  `target:<id>` placeholders to `thread:<id>` actors, and preserve aliases.
+- Transcript resolution reports its owner driver; payloads separate actual and
+  desired driver/model/effort/service-tier facts.
+- Renewal payloads record predecessor, successor, ancestor, and team-slot
+  identity without inferring meaning from UUID shape.
+- Identity payload, persistence, routing, rendering, and renewal tests pin the
+  complete contract.

@@ -226,8 +226,11 @@ Show concrete scenarios when they clarify the recommendation.
 
 ## Current Conforming Examples
 
-- `accepted/single-install-runtime-model.md`: decision status, explicit
-  decision, why, removed mechanisms, scoped battery, and non-goals.
+- `accepted/single-install-runtime-model.md`: implemented contract, explicit
+  runtime boundary, dev-only self-exec exception, removed mechanisms, and
+  non-goals.
+- `accepted/serve-lane-driver-identity.md`: implemented contract with explicit
+  actor, target, thread, driver, launch, transcript-owner, and renewal facts.
 - `experimental/top-level-non-code-phases.md`: recommendation/superseded
   record, candidate evaluation, artifact expectations, allocator implications,
   examples, deferred changes, and follow-up tasks.

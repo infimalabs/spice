@@ -1,170 +1,49 @@
 # In-Band Assistant Output Protocol
 
-Status: recommendation, 2026-07-01.
+Status: prototype result, 2026-07-18.
 
-## Recommendation
+## Decision
 
-Build the protocol as a small alias layer over the existing text control verbs,
-not as a second control plane. `ACK ...` and `TASK ...` remain canonical.
-Emoji or emoji-pair markers are sugar the assistant may emit in its own prose
-when a compact signal is better than text.
+The emoji alias protocol is rejected and decommissioned. `ACK ...`, `NACK ...`,
+and `TASK ...` remain the only canonical assistant-output control verbs. Do not
+restore emoji or emoji-pair control markers without a new design decision based
+on a concrete need that text verbs cannot satisfy.
 
-The first implementation should be a scanner and registry, not a hook rewrite:
+## Prototype Result
 
-- define a tiny marker registry mapping canonical emoji sequences to existing
-  verbs such as ACK and TASK;
-- scan only reconstructed assistant messages, after driver-specific transcript
-  framing has already produced one assistant message body;
-- reuse and extend the existing ACK/TASK suppression rules so quoted markers,
-  fenced code, and examples never fire;
-- normalize Unicode before matching, with explicit tests for NFC, variation
-  selector 16, ZWJ sequences, and literal side-by-side emoji pairs.
+The original recommendation proposed a Unicode-normalized registry that mapped
+markers such as `🌶️✅` and `🌶️📋` onto the existing ACK/TASK semantics after
+driver message reconstruction. It correctly required markdown suppression,
+variation-selector handling, literal-pair and ZWJ tests, and no parallel control
+plane.
 
-Treat vendor hooks as the ambient inbound channel for non-shell tool stretches.
-They complement the assistant-output protocol, but they are not the protocol
-itself.
+That path was implemented in commit `c2ee1098` and its transcript-fidelity work
+was implemented in `2d48dd69`. The operator then rejected the marker surface;
+commit `398d9dd7` reverted the implementation and `bd9eaad0` reverted the
+fidelity layer. Current `spice/mail` code has no emoji registry or scanner.
 
-## Context
+## Why It Stays Rejected
 
-`PROTOCO-1k93MWlW` asks for an in-band protocol that lives in assistant output:
-emoji or emoji-pair markers at turn boundaries or other structured moments,
-read by the harness as lightweight control/framing. The purpose is duplex
-control: the harness already pushes steering to the agent; this gives the agent
-a compact way to push state or intent back through its normal transcript.
+- Text ACK/NACK/TASK forms are already explicit, searchable, portable, and
+  auditable.
+- Emoji aliases add Unicode canonicalization and markdown-suppression risk
+  without adding a new semantic capability.
+- A compact alias can become accidental ceremony and makes discussion/examples
+  harder to distinguish from control output.
+- Vendor PostToolUse hooks solve ambient inbound steering coverage; they do not
+  create a need for a second assistant-output vocabulary.
 
-Operator corrections on the task constrain the design:
+## Surviving Authority
 
-- "emoji pairs" means literal adjacent emoji such as `🌶️📋`, not necessarily a
-  single ZWJ grapheme;
-- ZWJ sequences remain allowed, but they are one marker shape among others;
-- text ACK/TASK forms remain canonical aliases;
-- implementation must solve deterministic Unicode matching and suppression;
-- this task is design-only, with no marker or hook implementation.
+`docs/design/accepted/semantic-ack-standalone-protocol.md` owns durable ACK
+semantics. `docs/design/accepted/transparent-steering-injection.md` owns shell
+and agent-native inbound delivery. Git history preserves the rejected prototype
+implementation.
 
-## Findings
+## Reopening Condition
 
-### Existing Text Protocol
-
-`spice/mail/acks.py` already models text control verbs as assistant-output
-markers. It finds standalone `ACK` and `NACK` tokens, parses key-shaped
-arguments, splits keyed segments, and extracts inline `TASK` batch lines. The
-guard logic suppresses obvious discussion of ACKs: quoted ACK tokens, inline
-backtick contexts, negation, hypothetical phrasing, and narration words.
-
-That is the correct seam to generalize. Emoji markers should compile to the
-same internal verbs before retirement or task capture happens. They should not
-create a parallel ACK state machine.
-
-Current gap: the ACK guard is not a reusable markdown/block scanner. It has an
-inline quote/backtick guard, but a marker scanner will also need fenced-code and
-blockquote awareness so examples in design records, docs, or reviews cannot
-trigger control effects.
-
-### Driver Message Boundaries
-
-`spice/agent/driver.py` and `spice/agent/watchdog.py` make driver-specific
-stdout reconstruction explicit. The marker scanner should run after that layer,
-when the harness has a complete assistant message, not on raw stdout chunks.
-
-This keeps the protocol independent of whether a driver speaks marker-framed
-stdout or JSON events. It also gives one place to validate transcript fidelity:
-the reconstructed assistant message must preserve the exact marker sequences
-the scanner receives.
-
-### Vendor Hook Experiment
-
-Session tooling for author session `74bebe1f85064551b0cf7f22d3e5ea22` recovered
-the Claude Code hook experiment recorded on the task:
-
-- Claude Code `PostToolUse` supports `hookSpecificOutput.additionalContext`.
-- A mid-session `.claude/settings.local.json` probe did not fire, indicating
-  hook configuration loads at session startup.
-- After restart, a `PostToolUse` hook on non-shell `Read` injected an
-  `EDGE-PROBE-OK chili=spicy pending=demo3` reminder that reached the model.
-- Under the wrapper there was no hook approval prompt.
-- A wildcard matcher would fire on every tool call, so it needs the same
-  repeat-suppression discipline as stderr steering.
-
-Conclusion: vendor hooks are a proven inbound ambient channel for non-shell
-tool spans. They should be used to close "native tool dark stretches" for
-steering delivery where the active driver exposes that coverage, while Bash
-keeps the existing shell reexec/stderr path. That does not replace the
-assistant-output marker protocol; it reduces how often the assistant must ask
-the harness for state.
-
-Codex is deliberately narrower. Codex CLI 0.136.0 exposes stable
-`hooks.PostToolUse` and can return `additionalContext`, but the OpenAI Codex
-hooks documentation scopes PostToolUse to Bash, `apply_patch`, and MCP tool
-calls. It explicitly does not fire for WebSearch or other non-shell non-MCP
-native tools. The Codex launch path therefore must wire only the supported
-PostToolUse surface unless a separate delivery mechanism is introduced; it must
-not inherit Claude's native non-shell coverage claim by implication.
-
-### Unicode Normalization
-
-The registry must store a canonical sequence for every marker. Matching should
-normalize the candidate text before lookup, but normalization alone is not
-enough:
-
-- NFC does not erase all emoji presentation differences.
-- `🌶` and `🌶️` may differ by variation selector 16.
-- literal pairs such as `🌶️📋` are valid marker sequences even though they are
-  multiple grapheme clusters.
-- ZWJ sequences may be valid markers but must not be required for every marker.
-
-The implementation should therefore normalize to NFC, then apply an explicit
-emoji marker canonicalization policy owned by the registry. A test vector
-should name every accepted spelling for each marker and the exact canonical
-sequence it maps to.
-
-## Constraints
-
-- Do not make emoji markers required ceremony. They should reduce text, not add
-  obligations.
-- Do not let emoji aliases bypass ACK/TASK auditability. The transcript must
-  still show a durable receipt and task creation intent.
-- Do not parse raw tool output streams for protocol markers. Parse assistant
-  messages after driver reconstruction.
-- Do not make a shell wrapper like `spice <emoji>` the primary surface. Wrappers
-  are secondary affordances.
-- Do not implement this in the design task. Implementation belongs to follow-up
-  tasks.
-
-## Proposed Marker Shape
-
-V1 should reserve a spice glyph plus a verb glyph, followed by the same payload
-the text form would use:
-
-```text
-🌶️✅ <inbox-key>: received and applied
-🌶️📋 title=Add scanner tests | project=lifecycle.protocol | acceptance=...
-```
-
-The scanner maps those to:
-
-```text
-ACK <inbox-key>: received and applied
-TASK title=Add scanner tests | project=lifecycle.protocol | acceptance=...
-```
-
-This keeps all downstream semantics unchanged.
-
-## Validation Requirements
-
-Before enabling the protocol:
-
-- unit-test registry normalization for NFC, variation selector 16, ZWJ, and
-  literal adjacent emoji pairs;
-- unit-test suppression for inline code, fenced code, blockquotes, quoted prose,
-  and narration;
-- replay Codex and Claude reconstructed assistant messages through the scanner;
-- prove the Claude `PostToolUse "*"` inbound hook path uses repeat suppression
-  and does not fire unbounded duplicate reminders;
-- assert the Codex PostToolUse path is limited to Bash, `apply_patch`, and MCP
-  tools, with WebSearch and other non-MCP native tools recorded as unsupported;
-- include examples where markers are discussed in docs without taking effect.
-
-## Follow-Ups
-
-- `PROTOCO-1k9FypbS`: implement the emoji marker alias scanner and registry.
-- `PROTOCO-1k9FypYx`: validate emoji marker transcript fidelity across drivers.
+Reopen only if measured operator or agent friction demonstrates a control
+operation that canonical text verbs cannot express compactly and safely. A new
+proposal must account for the prior reversion and prove that examples, quoted
+text, markdown, Unicode variants, and reconstructed driver messages cannot fire
+accidentally.

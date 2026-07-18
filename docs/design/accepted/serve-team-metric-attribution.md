@@ -1,13 +1,12 @@
 # Serve Team Metric Attribution
 
-Status: decision, 2026-06-21.
+Status: implemented contract, 2026-07-18.
 
 This is the canonical decision record for how serve attributes lane metrics
-across teams and agents. Every ticket in the metric-model battery
-(`serve.metrics.*`, `serve.teams.*`) cites it. The decisions below are locked;
-the dependent tickets implement them.
+across teams and agents. The decisions below are implemented and locked by the
+current schema, query paths, and focused tests.
 
-## Problem
+## Historical Problem
 
 Lane metrics double-book their counters. `record_agent_metric_delta` always
 writes a per-agent counter (`agent_metrics`, `agent_metric_buckets`) and
@@ -92,6 +91,7 @@ projection over `events` and `agent_metric_buckets`.
 churn no longer fragments anything, so a permanent home team is evaluated on UX
 merits only, never for metric reasons.
 
+<a id="d9"></a>
 **D9 — Renewal lineage accumulates by id-unification.** Per-agent counters
 accumulate across a renewal because the successor's id is unified to the
 canonical actor by the existing alias rewrite. The successor inherits the
@@ -179,19 +179,15 @@ an append-only `events` table and per-agent time buckets. The membership-derived
 model decided here is the first increment toward that fold and must not
 foreclose it.
 
-## Implementation order
+## Implementation Evidence
 
-The battery is a dependency-ordered DAG rooted at this decision:
+- `spice/serve/team/schema.py` stores immutable membership timestamps,
+  explicit positions, per-agent facts, task events, and renewal facts.
+- `spice/serve/team/store.py` derives live, lineage-cumulative, per-session,
+  and team-historical views from agent facts plus membership/event state.
+- Lane payloads consume those projections; moving or renewing an agent keeps
+  work with the canonical actor rather than a transient team row.
+- Team metric unit/property tests and real browser smokes pin attribution,
+  ordering, move, merge, split, renewal, lens selection, and task-flow views.
 
-1. This decision (the doc).
-2. Schema migration (drop the team/history tables, add `memberships.position`)
-   and write-path (record only per-agent) — both depend only on this decision.
-3. Read-path (derive from current membership) depends on schema + write-path.
-   Ordering (position column, immutable `joined_at`) depends on schema.
-4. Lifecycle cleanup and the live-render browser check depend on the read path;
-   the optional historical lens depends on ordering.
-5. Invariant tests depend on read-path + lifecycle + ordering.
-
-Two tickets are independent of this decision and can proceed in parallel: the
-ingestion-cursor exactly-once fix (a correctness bug orthogonal to attribution)
-and the home-team UX design task (D8).
+The former metric-model battery is complete and is not a live work queue.

@@ -1,6 +1,12 @@
 # Serve Actor-Lineage Metric Prototype
 
-Status: prototype result, 2026-06-21. No production migration.
+Status: superseded, 2026-07-18.
+
+Superseded by
+[`accepted/serve-team-metric-attribution.md`, D9](../accepted/serve-team-metric-attribution.md#d9).
+Production uses canonical successor-id unification rather than the immutable
+lineage projection below. This compact prototype remains as rejected-option
+rationale because it documents the auditability/read-cost tradeoff.
 
 ## Question
 
