@@ -93,7 +93,6 @@ let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];
 let fastModeEnabled = initialFastModeEnabled();
-let teamSnapshotRevision = 0;
 
 function laneViewMode(value) {
   return laneViewModes.includes(value || "") ? value : defaultLaneViewMode;

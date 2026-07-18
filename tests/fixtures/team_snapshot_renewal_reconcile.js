@@ -76,7 +76,6 @@ function resetGlobals() {
   laneStore.replaceTargets([]);
   for (const lane of laneStore.lanesSnapshot())
     laneStore.removeLane(lane.targetId);
-  context.teamSnapshotRevision = 0;
   context.browserStorage = () => null;
   context.canonicalThreadActorId = canonicalThreadActorId;
   context.targetTeamActorId = targetTeamActorId;

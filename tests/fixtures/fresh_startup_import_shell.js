@@ -29,7 +29,6 @@ const context = {
   defaultSpeechMode: "speak",
   defaultLaneViewMode: "compose",
   defaultAgentLifetime: "Drive",
-  teamSnapshotRevision: 0,
   observerModeEnabled: false,
   targetsLoaded: false,
   targetsLoading: false,
