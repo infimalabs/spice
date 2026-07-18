@@ -21,6 +21,7 @@ from spice.studies.walk import staged_renames
 
 StickyKey = TypeVar("StickyKey")
 FunctionKey = tuple[str, str]
+GateErrors = tuple[type[BaseException], ...]
 
 
 @dataclass(frozen=True)
@@ -143,12 +144,20 @@ def reconcile_sticky_latch(
     retain: Callable[[set[StickyKey]], set[StickyKey]],
     breach_keys: Iterable[StickyKey],
     persist: bool,
+    load_errors: GateErrors = (),
+    persist_errors: GateErrors = (),
 ) -> StickyLatchState[StickyKey]:
-    loaded = load_sticky_ledger(ledger, root=root, renames=renames)
+    try:
+        loaded = load_sticky_ledger(ledger, root=root, renames=renames)
+    except load_errors:
+        loaded = set()
     retained = retain(set(loaded)) & loaded
     updated = retained | set(breach_keys)
     if persist and updated != loaded:
-        persist_sticky_ledger(ledger, updated, root=root)
+        try:
+            persist_sticky_ledger(ledger, updated, root=root)
+        except persist_errors:
+            pass
     return StickyLatchState(loaded=loaded, retained=retained, updated=updated)
 
 
@@ -171,8 +180,11 @@ def persist_sticky_ledger(
         state_path.unlink()
 
 
-def staged_gate_renames(root: Path) -> dict[Path, Path]:
-    return staged_renames(root)
+def staged_gate_renames(root: Path, *, errors: GateErrors = ()) -> dict[Path, Path]:
+    try:
+        return staged_renames(root)
+    except errors:
+        return {}
 
 
 def peer_flex_slice_claims(

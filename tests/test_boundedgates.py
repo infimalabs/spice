@@ -1,11 +1,13 @@
 """Shared bounded-gate decisions and sticky-latch lifecycle."""
 
+import ast
+import inspect
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from spice.studies import gates
+from spice.studies import complexity, fileloc, gates, repodocs
 
 
 @pytest.mark.parametrize(
@@ -142,6 +144,77 @@ def test_peer_claims_return_only_the_existing_owner(tmp_path):
 
     assert peer_claims[path].actor == "owner"
     assert peer_claims[path].path == path
+
+
+def test_bounded_studies_delegate_one_exact_kernel_contract():
+    actual = {
+        module.__name__.rsplit(".", 1)[-1]: {
+            "flexstate_imports": sorted(
+                alias.name
+                for node in ast.walk(ast.parse(inspect.getsource(module)))
+                if isinstance(node, ast.ImportFrom) and node.module == "spice.flexstate"
+                for alias in node.names
+            ),
+            "kernel_calls": sorted(
+                {
+                    node.func.attr
+                    for node in ast.walk(ast.parse(inspect.getsource(module)))
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "gates"
+                }
+            ),
+        }
+        for module in (fileloc, complexity, repodocs)
+    }
+
+    assert actual == {
+        "fileloc": {
+            "flexstate_imports": [
+                "FlexSliceClaim",
+                "flex_limit",
+                "render_flex_slice_claim_redirect",
+            ],
+            "kernel_calls": [
+                "BoundedValue",
+                "bounded_disposition",
+                "path_sticky_ledger",
+                "peer_flex_slice_claims",
+                "reconcile_sticky_latch",
+                "staged_gate_renames",
+            ],
+        },
+        "complexity": {
+            "flexstate_imports": [
+                "FlexSliceClaim",
+                "flex_limit",
+                "render_flex_slice_claim_redirect",
+            ],
+            "kernel_calls": [
+                "BoundedValue",
+                "bounded_disposition",
+                "function_sticky_ledger",
+                "peer_flex_slice_claims",
+                "reconcile_sticky_latch",
+                "staged_gate_renames",
+            ],
+        },
+        "repodocs": {
+            "flexstate_imports": [
+                "FlexSliceClaim",
+                "render_flex_slice_claim_redirect",
+            ],
+            "kernel_calls": [
+                "BoundedValue",
+                "bounded_disposition",
+                "path_sticky_ledger",
+                "peer_flex_slice_claims",
+                "reconcile_sticky_latch",
+                "staged_gate_renames",
+            ],
+        },
+    }
 
 
 def _init_repo(tmp_path: Path) -> Path:
