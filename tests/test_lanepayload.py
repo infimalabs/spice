@@ -267,6 +267,44 @@ def test_status_line_derives_visual_status_from_structural_activity_kind(
     ]
 
 
+def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch):
+    target = _Target(id="wt", repo_root=tmp_path)
+    monkeypatch.setattr(
+        lane,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="019f6edd-ab8c-7ab2-870a-f6b81dfc5b7f",
+        ),
+    )
+    monkeypatch.setattr(
+        lane,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+    monkeypatch.setattr(
+        lane.claimstate,
+        "active_claim",
+        lambda actor: (
+            {
+                "description": "Show  claimed task\nwithout breaking the card",
+                "incepted": "1kF5xdSM",
+                "project": "serve.ui",
+            }
+            if actor == "019f6eddab8c7ab2870af6b81dfc5b7f"
+            else None
+        ),
+    )
+
+    line = lane.status_line_payload(_State(), target, items=[], error=None)
+
+    assert line["claimedTask"] == (
+        "UI-1kF5xdSM Show claimed task without breaking the card"
+    )
+
+
 def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):
     latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

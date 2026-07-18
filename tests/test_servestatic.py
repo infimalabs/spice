@@ -547,7 +547,12 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     app_shell = _shell_and_composer_text()
 
     assert "const label = laneMemberTargetLabel(member);" in app_shell
-    assert 'return [label, status].filter(Boolean).join("\\n");' in app_shell
+    assert (
+        'const claimedTask = String(statusLine.claimedTask || "").trim();' in app_shell
+    )
+    assert (
+        'return [label, status, claimedTask].filter(Boolean).join("\\n");' in app_shell
+    )
     assert "function laneComposePlaceholderStatus(member)" in app_shell
     assert "const pending = lanePendingDisplayCount(member);" in app_shell
     assert 'parts.push(pending + " pending");' in app_shell

@@ -130,6 +130,7 @@
  * @property {string=} latestActivityKind
  * @property {string=} agentProcessStatus
  * @property {string=} agentVisualStatus
+ * @property {string=} claimedTask
  * @property {string=} activityStatus
  * @property {number=} pendingInboxCount
  * @property {string=} pendingInboxLabel

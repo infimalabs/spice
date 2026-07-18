@@ -14,8 +14,9 @@ from spice.serve.payload.identity import (
 )
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import identity as task_identity
+from spice.tasks import claimstate
 from spice.tasks import config as task_config
+from spice.tasks import identity as task_identity
 from spice.tasks import tw
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
@@ -140,7 +141,24 @@ def status_line_payload(
         items=items,
         error=error,
         pending_identity=pending,
+        claimed_task=_claimed_task_label(status.thread_id),
     )
+
+
+def _claimed_task_label(thread_id: str) -> str:
+    if not thread_id:
+        return ""
+    from spice.errors import SpiceError
+
+    try:
+        row = claimstate.active_claim(tw.canonical_actor(thread_id))
+    except SpiceError:
+        return ""
+    if row is None:
+        return ""
+    handle = task_identity.render_handle(row)
+    title = " ".join(str(row.get("description") or "").split())
+    return " ".join(part for part in (handle, title) if part)
 
 
 def _status_line_payload_from_status(
@@ -151,6 +169,7 @@ def _status_line_payload_from_status(
     items: list[message_reader.AssistantMessage],
     error: str | None,
     pending_identity: dict[str, Any],
+    claimed_task: str = "",
 ) -> dict[str, Any]:
     thread_id = thread_id or ""
     visible = [item for item in items if not item.kind.startswith("presence:")]
@@ -175,6 +194,7 @@ def _status_line_payload_from_status(
         "agentVisualStatus": _agent_visual_status(
             status.process_status, latest_activity_kind
         ),
+        "claimedTask": claimed_task,
         "error": binding_error or error or "",
     }
 
