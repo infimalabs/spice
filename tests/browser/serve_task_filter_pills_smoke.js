@@ -114,25 +114,25 @@ async function installInitialState(page) {
 
 function assertInitialPills(pills) {
   assertPill(pills, "serve", {
-    count: "2r+1a+2u",
+    count: "2/1/2",
     tone: "ready",
     implicit: true,
     unavailable: "2",
   });
   assertPill(pills, "studies", {
-    count: "0r+0a+3u",
+    count: "0/0/3",
     tone: "dormant",
     title:
       "0 ready, 0 active/in flight, 0 blocked, 3 deferred; 3 open across studies.*; no task currently movable",
   });
   assertPill(pills, "cli", {
-    count: "0r+0a+1u",
+    count: "0/0/1",
     tone: "dormant",
     unavailable: "1",
   });
-  assertPill(pills, "tests", { count: "3r+0a", tone: "ready" });
+  assertPill(pills, "tests", { count: "3", tone: "ready" });
   assertPill(pills, "lifecycle", {
-    count: "0r+2a",
+    count: "0/2",
     tone: "active",
     implicit: false,
     unavailable: "0",
@@ -180,7 +180,7 @@ async function runScenario({ page }) {
   await page.screenshot({ path: SCREENSHOT_PATH });
   const resolvedPills = await resolveCliBlocker(page);
   assertPill(resolvedPills, "cli", {
-    count: "1r+0a",
+    count: "1",
     tone: "ready",
     unavailable: "0",
   });

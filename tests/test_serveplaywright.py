@@ -518,11 +518,11 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
         encoding="utf-8"
     )
 
-    assert 'count: "2r+1a+2u"' in smoke
-    assert 'count: "0r+0a+3u"' in smoke
-    assert 'count: "3r+0a"' in smoke
-    assert 'count: "0r+2a"' in smoke
-    assert 'count: "1r+0a"' in smoke
+    assert 'count: "2/1/2"' in smoke
+    assert 'count: "0/0/3"' in smoke
+    assert 'count: "3"' in smoke
+    assert 'count: "0/2"' in smoke
+    assert 'count: "1"' in smoke
     assert 'title:\n      "0 ready, 0 active/in flight' in smoke
     assert 'tone: "ready"' in smoke
     assert 'tone: "active"' in smoke

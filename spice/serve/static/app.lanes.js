@@ -897,9 +897,11 @@ function taskFilterStemPillModel(stem) {
 
 function taskFilterStemPillCountText(model) {
   if (model.label === "oops") return String(model.openTaskCount);
-  let text = model.readyTaskCount + "r+" + model.inFlightTaskCount + "a";
+  let text = String(model.readyTaskCount);
+  if (model.inFlightTaskCount > 0 || model.unavailableTaskCount > 0)
+    text += "/" + model.inFlightTaskCount;
   if (model.unavailableTaskCount > 0)
-    text += "+" + model.unavailableTaskCount + "u";
+    text += "/" + model.unavailableTaskCount;
   return text;
 }
 
