@@ -344,6 +344,12 @@ def _looks_noop_ack_marker(text: str, ack_pos: int) -> bool:
     cursor = ack_pos + len(ACK_TOKEN)
     while cursor < len(text) and text[cursor] in " \t":
         cursor += 1
+    if (
+        cursor < len(text)
+        and text[cursor] == "-"
+        and _ack_key_shape_end(text, cursor + 1, len(text)) is not None
+    ):
+        return False
     return cursor >= len(text) or text[cursor] in _ACK_HEADER_SEPARATOR_CHARS + "\r\n"
 
 
@@ -476,6 +482,10 @@ def _consume_ack_header_separator(
 def _ack_key_end(text: str, start: int, limit: int) -> int | None:
     if start > 0 and (_is_word_char(text[start - 1]) or text[start - 1] == "-"):
         return None
+    return _ack_key_shape_end(text, start, limit)
+
+
+def _ack_key_shape_end(text: str, start: int, limit: int) -> int | None:
     if start + _KEY_MIN_LENGTH > limit:
         return None
     for index in range(start, start + _KEY_DATE_DIGITS):
