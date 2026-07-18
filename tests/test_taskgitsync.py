@@ -879,6 +879,49 @@ def test_prepare_for_agent_launch_reports_divergent_tree_recovery(tmp_path):
     assert "task Git control plane" in outcome.message
 
 
+def test_prepare_for_agent_launch_fast_forwards_to_upstream_then_refuses_divergence(
+    tmp_path,
+):
+    # The serve pre-supervisor-launch autoupdate is `prepare_for_agent_launch`
+    # (start_agent -> here, before the supervisor spawns). It must behave like
+    # `git merge --ff-only --quiet @{u}`: advance strictly to the tracked
+    # upstream, and refuse anything that would need a merge commit or a rewind.
+    repo = _repo_with_upstream(tmp_path)
+    _advance_upstream(tmp_path)
+
+    # Clean fast-forward: HEAD lands on exactly the fetched upstream tip, the
+    # upstream file arrives, and history holds no merge commit -- a strict
+    # fast-forward, not a merge.
+    advanced = gitsync.prepare_for_agent_launch(repo)
+    assert advanced.notes == ["updated working tree to the current baseline"]
+    assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "origin/main")
+    assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
+    assert _git(repo, "rev-list", "--merges", "HEAD") == ""
+
+    # Diverge: a local commit the control plane never recorded, plus a fresh
+    # upstream commit, so HEAD is both ahead of and behind origin/main.
+    (repo / "local.txt").write_text("local commit\n", encoding="utf-8")
+    _run(repo, "git", "add", "local.txt")
+    _run(repo, "git", "commit", "-m", "local work")
+    peer = tmp_path / "peer"
+    (peer / "second.txt").write_text("second upstream\n", encoding="utf-8")
+    _run(peer, "git", "add", "second.txt")
+    _run(peer, "git", "commit", "-m", "second upstream")
+    _run(peer, "git", "push", "origin", "main")
+    diverged_head = _git(repo, "rev-parse", "HEAD")
+
+    # Non-fast-forward: the launch refuses loudly and leaves HEAD exactly where
+    # it was -- the local commit is still the tip, no merge commit was created,
+    # and no half-finished merge state is left behind.
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    assert outcome.state == "rejected"
+    assert "branch has diverged" in outcome.message
+    assert _git(repo, "rev-parse", "HEAD") == diverged_head
+    assert _git(repo, "log", "-1", "--format=%s") == "local work"
+    assert _git(repo, "rev-list", "--merges", "HEAD") == ""
+    assert _merge_head_missing(repo)
+
+
 def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
     repo = _repo_with_upstream(tmp_path)
     real_run = gitsync._run
