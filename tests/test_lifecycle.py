@@ -519,14 +519,24 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     process = _FakeProcess(pid=DIRECT_AGENT_PID, returncode=None)
     spawned: list[tuple[list[str], object, object]] = []
     reaped: list[int] = []
+    events: list[str] = []
     thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     monkeypatch.setattr(lifecycle, "next_agent_log_path", lambda _repo: log_path)
     monkeypatch.setattr(
+        lifecycle.gitsync,
+        "prepare_for_agent_launch",
+        lambda repo_root: events.append(f"sync:{repo_root}"),
+    )
+
+    def spawn_direct(command, *, cwd, log_path):
+        events.append("spawn-direct")
+        spawned.append((command, cwd, log_path))
+        return process
+
+    monkeypatch.setattr(
         lifecycle,
         "spawn_agent",
-        lambda command, *, cwd, log_path: (
-            spawned.append((command, cwd, log_path)) or process
-        ),
+        spawn_direct,
     )
     monkeypatch.setattr(
         lifecycle,
@@ -570,17 +580,28 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     assert state["thread_id"] == thread_id
     assert state["log_path"] == str(final_log_path)
     assert reaped == [DIRECT_AGENT_PID]
+    assert events == [f"sync:{tmp_path}", "spawn-direct"]
 
 
-def test_start_agent_supervised_path_uses_supervisor_and_reaper(tmp_path, monkeypatch):
+@pytest.mark.parametrize("action", ["start", "resume", "renew"])
+def test_start_agent_supervised_path_uses_supervisor_and_reaper(
+    tmp_path, monkeypatch, action
+):
     log_path = tmp_path / "supervised.log"
     process = _FakeProcess(pid=SUPERVISOR_PID, returncode=None)
     spawned: list[dict[str, object]] = []
     required: list[tuple[int, object, object]] = []
     reaped: list[int] = []
+    events: list[str] = []
     monkeypatch.setattr(lifecycle, "next_agent_log_path", lambda _repo: log_path)
+    monkeypatch.setattr(
+        lifecycle.gitsync,
+        "prepare_for_agent_launch",
+        lambda repo_root: events.append(f"sync:{repo_root}"),
+    )
 
     def spawn_supervisor(repo_root, **kwargs):
+        events.append("spawn-supervisor")
         spawned.append({"repo_root": repo_root, **kwargs})
         return process
 
@@ -600,7 +621,7 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(tmp_path, monkey
 
     returned = lifecycle.start_agent(
         tmp_path,
-        action="resume",
+        action=action,
         command=["codex", "exec", "resume", "thread", "prompt"],
         model="gpt-test",
         reasoning_effort="high",
@@ -613,12 +634,13 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(tmp_path, monkey
 
     assert returned == log_path
     assert spawned[0]["repo_root"] == tmp_path
-    assert spawned[0]["action"] == "resume"
+    assert spawned[0]["action"] == action
     assert spawned[0]["service_tier"] == "fast"
     assert spawned[0]["fast_mode"] is True
     assert "prompt_skill_path" not in spawned[0]
     assert required == [(SUPERVISOR_PID, tmp_path, log_path)]
     assert reaped == [SUPERVISOR_PID]
+    assert events == [f"sync:{tmp_path}", "spawn-supervisor"]
 
 
 def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatch):
