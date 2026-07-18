@@ -207,6 +207,17 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   });
 }
 
+// Global fast-mode settings are an explicit store subscription applied before
+// lanes materialize, so the fast-mode button, spice menu, and live-bus lane
+// configuration track the global toggle. applyGlobalSettingsPayload
+// early-returns when the flag is unchanged, so a quiet snapshot repaints no
+// global chrome.
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  if (change.transition.disposition !== "applied") return;
+  applyGlobalSettingsPayload(change.transition.globalSettings);
+});
+
 laneStore.subscribe((change) => {
   if (change.kind !== "teamSnapshot") return;
   materializeTeamSnapshotTransition(change.transition);
@@ -254,7 +265,6 @@ laneStore.subscribe((change) => {
 
 function materializeTeamSnapshotTransition(transition) {
   if (transition.disposition !== "applied") return;
-  applyGlobalSettingsPayload(transition.globalSettings);
   const hints = laneHintsByTargetId();
   for (const renewal of transition.renewals)
     renameTeamMemberTargetThread(renewal.targetId, renewal.actorId);

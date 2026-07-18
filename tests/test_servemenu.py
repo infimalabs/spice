@@ -452,7 +452,10 @@ def test_static_spice_menu_fast_mode_uses_server_global_state():
     assert "const fastModeActive = currentFastModeEnabled();" in app_menu
     assert "function syncFastModeButtonState()" in app_menu
     assert "spice-menu-button--fast" in app_menu
-    assert "applyGlobalSettingsPayload(transition.globalSettings);" in app_lanes
+    assert (
+        'if (change.transition.disposition !== "applied") return;\n'
+        "  applyGlobalSettingsPayload(change.transition.globalSettings);" in app_lanes
+    )
     assert "fastMode: currentFastModeEnabled()," not in app_controls
     assert "fastMode: currentFastModeEnabled()," not in app_stream
     assert "fastModeStorageKey" not in app_js
