@@ -11,6 +11,7 @@ from spice.process.tool import run_tool_command
 
 SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.types.js",
+    "spice/serve/static/app.lane-store.js",
     "spice/serve/static/app.render.js",
     "spice/serve/static/app.live-bus.js",
     "spice/serve/static/app.mosaic-geometry.js",

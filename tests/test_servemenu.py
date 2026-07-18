@@ -758,7 +758,12 @@ def test_static_spice_menu_drag_manages_team_membership():
 def test_spice_menu_new_team_drop_keeps_created_team_near_drop_zone():
     script = Path(__file__).with_name("fixtures") / "spice_menu_new_team_order.js"
     result = subprocess.run(
-        ["node", str(script), str(STATIC_ROOT / "app.menu.js")],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.menu.js"),
+        ],
         check=True,
     )
     assert result.returncode == 0
@@ -773,7 +778,9 @@ def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
     assert "const targetId = emptyTeamTargetId(team.teamId);" in app_lanes
     assert "const canCloseEmptyTeam = teams.length > 1;" in app_lanes
     assert "ensureEmptyTeamLane(team, { canClose: canCloseEmptyTeam });" in app_lanes
-    assert "if (!targetById.has(lane.targetId) && !lane.emptyTeam)" in app_lanes
+    assert "if (!laneStore.targetForId(lane.targetId) && !lane.emptyTeam)" in (
+        app_lanes
+    )
     assert "if (lane.emptyTeam) syncEmptyTeamLane(lane);" in app_lanes
     close_lane_start = app_lanes.index("function closeLane(lane) {")
     close_lane_end = app_lanes.index("function closeLaneCore(lane)", close_lane_start)
@@ -907,7 +914,10 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     )
     assert "function renderEmptyTeamMessages(lane)" in app_stream
     assert "function emptyTeamMessageFingerprint(lane)" in app_stream
-    assert "targets: targets.map(emptyTeamTargetFingerprint)," in app_stream
+    assert (
+        "targets: laneStore.targetsSnapshot().map(emptyTeamTargetFingerprint),"
+        in app_stream
+    )
     assert "function emptyTeamTargetFingerprint(target)" in app_stream
     assert "targetIdentityBranch(target.targetIdentity)," in app_stream
     assert "targetIdentityAgentName(target.targetIdentity)," in app_stream

@@ -1,8 +1,9 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
-const lanesPath = process.argv[3];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
+const lanesPath = process.argv[4];
 const statusWrites = [];
 const lifetimeCalls = [];
 const renderedPayloads = [];
@@ -11,8 +12,6 @@ const context = {
   Map,
   Set,
   observerModeEnabled: false,
-  targets: [],
-  targetById: new Map(),
   targetsLoaded: false,
   taskFilterInventoryRevision: "99",
   taskFilterStemPills: [],
@@ -41,6 +40,9 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });

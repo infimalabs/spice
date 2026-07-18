@@ -52,7 +52,12 @@ def test_static_fresh_startup_keeps_import_shell_with_stale_restore_hints():
     script = Path(__file__).with_name("fixtures") / "fresh_startup_import_shell.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_lanes)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_lanes),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -102,9 +107,9 @@ def test_static_send_route_applies_fresh_start_identity_before_refresh():
     assert "applyLaneTargetIdentity(lane, config);" in route_body
     assert 'payloadHasField(config, "serveAgentIdentity")' in route_body
     assert "applyLaneServeAgentIdentity(lane, config);" in route_body
-    assert "target.targetIdentity = config.targetIdentity;" in inventory_body
-    assert "target.serveAgentIdentity = config.serveAgentIdentity;" in inventory_body
-    assert "target.teamIdentity = config.teamIdentity;" in inventory_body
+    assert "updated.targetIdentity = config.targetIdentity;" in inventory_body
+    assert "updated.serveAgentIdentity = config.serveAgentIdentity;" in inventory_body
+    assert "updated.teamIdentity = config.teamIdentity;" in inventory_body
 
 
 def test_static_lane_status_preview_requires_relative_time():

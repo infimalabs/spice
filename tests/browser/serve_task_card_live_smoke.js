@@ -70,9 +70,7 @@ async function prepareLiveTaskCardLane(page) {
     page,
     "targets-ready",
     () =>
-      typeof targets !== "undefined" &&
-      Array.isArray(targets) &&
-      targets.length > 0 &&
+      laneStore.targetsSnapshot().length > 0 &&
       typeof addLane === "function" &&
       typeof laneStates !== "undefined",
   );
@@ -313,7 +311,7 @@ async function waitForLiveTaskCardSubscription(page, lane) {
 
 async function ensureLiveTaskCardLane(page) {
   return page.evaluate((targetOffset) => {
-    const boundTargets = targets.filter(
+    const boundTargets = laneStore.targetsSnapshot().filter(
       (target) => target.targetIdentity?.thread?.state === "bound",
     );
     const target =
@@ -419,10 +417,7 @@ async function taskCardDiagnostics(page, targetId, stage) {
         ? lane.liveBusSubscriptionGeneration || ""
         : "",
       targetId: id,
-      targetCount:
-        typeof targets !== "undefined" && Array.isArray(targets)
-          ? targets.length
-          : 0,
+      targetCount: laneStore.targetsSnapshot().length,
       threadId: lane ? lane.targetThreadId || lane.activeThreadId || "" : "",
       watcherActive: Boolean(lane && lane.liveBusWatcherActive),
     };

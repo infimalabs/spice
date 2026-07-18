@@ -174,8 +174,9 @@ function batchInstallStubs(state, config) {
 
 // Phase A: initial fused mount -- one frame, one message-bearing host render.
 async function batchPhaseInitial(state, config) {
-  targets = config.memberIds.map((id) => window.__batchTarget(id, id + "-th"));
-  targetById = new Map(targets.map((target) => [target.id, target]));
+  laneStore.replaceTargets(
+    config.memberIds.map((id) => window.__batchTarget(id, id + "-th")),
+  );
   applyTeamSnapshotPayload(
     {
       revision: config.snapshotRevision,

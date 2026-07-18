@@ -128,8 +128,9 @@ function prefsStoredHint(targetId) {
 async function prefsMeasure(config) {
   const state = { frames: [] };
   window.__prefsInstallStubs(state);
-  targets = config.memberIds.map((id) => window.__prefsTarget(id));
-  targetById = new Map(targets.map((target) => [target.id, target]));
+  laneStore.replaceTargets(
+    config.memberIds.map((id) => window.__prefsTarget(id)),
+  );
   localStorage.setItem(
     laneStorageKey,
     JSON.stringify([{ targetId: config.memberIds[0], ...config.hint }]),

@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const lanesPath = process.argv[2];
+const storePath = process.argv[2];
+const lanesPath = process.argv[3];
 const targetA = { id: "a", taskFilterInventory: { revision: "0" } };
 const targetB = { id: "b", taskFilterInventory: { revision: "0" } };
 const laneA = { targetId: "a", taskFilterInventory: { revision: "0" } };
@@ -9,11 +10,6 @@ const laneB = { targetId: "b", taskFilterInventory: { revision: "0" } };
 const renderedFilterPaneTargetIds = [];
 const context = {
   console,
-  targets: [targetA, targetB],
-  targetById: new Map([
-    ["a", targetA],
-    ["b", targetB],
-  ]),
   laneStates: new Map([
     ["a", laneA],
     ["b", laneB],
@@ -32,9 +28,14 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.replaceTargets([targetA, targetB]);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -73,8 +74,10 @@ assert(
   "initial inventory syncs to every open lane",
 );
 assert(
-  targetA.taskFilterInventory.revision === "90071992547409931234" &&
-    targetB.taskFilterInventory.revision === "90071992547409931234",
+  laneStore.targetForId("a").taskFilterInventory.revision ===
+      "90071992547409931234" &&
+    laneStore.targetForId("b").taskFilterInventory.revision ===
+      "90071992547409931234",
   "initial inventory syncs to every target cache entry",
 );
 assert(
@@ -93,8 +96,10 @@ assert(
   "newer inventory replaces every open lane inventory",
 );
 assert(
-  targetA.taskFilterInventory.revision === "90071992547409931235" &&
-    targetB.taskFilterInventory.revision === "90071992547409931235",
+  laneStore.targetForId("a").taskFilterInventory.revision ===
+      "90071992547409931235" &&
+    laneStore.targetForId("b").taskFilterInventory.revision ===
+      "90071992547409931235",
   "newer inventory replaces every target cache entry",
 );
 assert(

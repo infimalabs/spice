@@ -4,7 +4,7 @@
 // slide horizontally along --lane-view-position.
 
 function addLane(targetId, hint = null, options = {}) {
-  if (!targetById.has(targetId) || laneStates.has(targetId)) return;
+  if (!laneStore.targetForId(targetId) || laneStates.has(targetId)) return;
   const lane = createLaneState(targetId, hint);
   laneStates.set(targetId, lane);
   lanesEl.append(lane.element);
@@ -254,7 +254,7 @@ function lanePaneState() {
 function createLaneState(targetId, hint = null, options = {}) {
   const emptyTeam = Boolean(options.emptyTeam);
   /** @type {LaneChromePayload | undefined} */
-  const target = emptyTeam ? {} : targetById.get(targetId);
+  const target = emptyTeam ? {} : laneStore.targetForId(targetId);
   if (!target) throw new Error("lane target payload is required: " + targetId);
   const targetIdentity = target.targetIdentity || {};
   const serveAgentIdentity = target.serveAgentIdentity || {};
@@ -444,7 +444,7 @@ function teamImportChoice(lane, target, options = {}) {
 
 async function importTargetIntoTeam(lane, targetId) {
   const host = laneGroupHost(lane);
-  const target = targetById.get(targetId);
+  const target = laneStore.targetForId(targetId);
   if (!host || !host.teamId || !target)
     throw new Error("import requires team and target");
   setLaneTransientStatus(lane, "importing agent");
@@ -465,7 +465,8 @@ function teamImportAliases(target) {
 function teamImportTargets(lane) {
   const host = laneGroupHost(lane);
   const memberTargetIds = new Set(laneGroupMemberTargetIds(host));
-  return targets
+  return laneStore
+    .targetsSnapshot()
     .filter((target) => !memberTargetIds.has(target.id))
     .sort(compareTargetChoices);
 }

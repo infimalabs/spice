@@ -80,8 +80,6 @@ function agentLifetimeHelpText(lifetime) {
 function serveBrandMenuTitle() {
   return "Open " + serveBrandName + " menu";
 }
-let targets = [];
-let targetById = new Map();
 let targetsLoaded = false;
 let targetsLoading = false;
 let targetsLoadPromise = null;
@@ -161,7 +159,7 @@ function normalizeTeamActorId(actorId) {
   if (!actor) return "";
   if (actor.startsWith("target:")) return targetTeamActorId(actor.slice(7));
   if (actor.startsWith("thread:")) return threadTeamActorId(actor.slice(7));
-  if (targetById.has(actor)) return targetTeamActorId(actor);
+  if (laneStore.targetForId(actor)) return targetTeamActorId(actor);
   return threadTeamActorId(actor);
 }
 

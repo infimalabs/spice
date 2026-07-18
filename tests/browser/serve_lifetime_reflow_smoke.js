@@ -83,8 +83,7 @@ async function run() {
               { force: true },
             );
 
-          targets = [alpha, delta, beta];
-          targetById = new Map(targets.map((t) => [t.id, t]));
+          laneStore.replaceTargets([alpha, delta, beta]);
           apply(
             team("team-a", ["alpha", "delta"], "Drive", 1),
             team("team-b", ["beta"], "Drive", 1),

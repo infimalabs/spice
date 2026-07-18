@@ -484,7 +484,7 @@ function emptyTeamMessageFingerprint(lane) {
   return JSON.stringify({
     emptyTeam: true,
     teamId: lane.teamId || "",
-    targets: targets.map(emptyTeamTargetFingerprint),
+    targets: laneStore.targetsSnapshot().map(emptyTeamTargetFingerprint),
   });
 }
 
@@ -864,22 +864,26 @@ function applyTaskDrainRouteConfig(lane, result) {
 }
 
 function applyRouteConfigToTargetInventory(lane, config) {
-  const target = targetById.get(lane.targetId);
-  if (!target) return;
-  if (payloadHasField(config, "targetIdentity"))
-    target.targetIdentity = config.targetIdentity;
-  if (payloadHasField(config, "serveAgentIdentity"))
-    target.serveAgentIdentity = config.serveAgentIdentity;
-  if (payloadHasField(config, "teamIdentity"))
-    target.teamIdentity = config.teamIdentity;
-  if (Array.isArray(config.taskFilters))
-    target.taskFilters = uniqueStringList(config.taskFilters);
-  if (Array.isArray(config.effectiveTaskFilters))
-    target.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
-  if (Array.isArray(config.taskFilterEntries))
-    target.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
-  if (payloadHasField(config, "laneFilterVersion"))
-    target.laneFilterVersion = String(config.laneFilterVersion || "");
-  if (payloadHasField(config, "lifetime"))
-    target.lifetime = String(config.lifetime || "");
+  laneStore.updateTarget(lane.targetId, (target) => {
+    const updated = { ...target };
+    if (payloadHasField(config, "targetIdentity"))
+      updated.targetIdentity = config.targetIdentity;
+    if (payloadHasField(config, "serveAgentIdentity"))
+      updated.serveAgentIdentity = config.serveAgentIdentity;
+    if (payloadHasField(config, "teamIdentity"))
+      updated.teamIdentity = config.teamIdentity;
+    if (Array.isArray(config.taskFilters))
+      updated.taskFilters = uniqueStringList(config.taskFilters);
+    if (Array.isArray(config.effectiveTaskFilters))
+      updated.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
+    if (Array.isArray(config.taskFilterEntries))
+      updated.taskFilterEntries = normalizedTaskFilterEntries(
+        config.taskFilterEntries,
+      );
+    if (payloadHasField(config, "laneFilterVersion"))
+      updated.laneFilterVersion = String(config.laneFilterVersion || "");
+    if (payloadHasField(config, "lifetime"))
+      updated.lifetime = String(config.lifetime || "");
+    return updated;
+  });
 }

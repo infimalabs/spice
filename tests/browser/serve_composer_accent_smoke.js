@@ -75,10 +75,11 @@ function accentMeasureReorder(config) {
       width: el.style.width,
       height: el.style.height,
       accent: el.dataset.accentSlot,
-    }));
+  }));
   const ids = config.memberIds;
-  targets = ids.map((id) => window.__accentTarget(id, id + "-th"));
-  targetById = new Map(targets.map((target) => [target.id, target]));
+  laneStore.replaceTargets(
+    ids.map((id) => window.__accentTarget(id, id + "-th")),
+  );
   applyTeamSnapshotPayload(
     {
       revision: 7,

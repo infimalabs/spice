@@ -16,7 +16,13 @@ def test_target_refresh_updates_lane_chrome_without_replacing_live_transcript():
     )
 
     result = subprocess.run(
-        ["node", str(script), str(app_render), str(app_lanes)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_render),
+            str(app_lanes),
+        ],
         check=True,
     )
     assert result.returncode == 0
@@ -28,7 +34,13 @@ def test_team_snapshot_renewal_reuses_existing_lane_without_empty_placeholder():
     script = Path(__file__).with_name("fixtures") / "team_snapshot_renewal_reconcile.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_render), str(app_lanes)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_render),
+            str(app_lanes),
+        ],
         check=True,
     )
     assert result.returncode == 0

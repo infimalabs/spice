@@ -90,10 +90,11 @@ async function measureTeamWidths(page, phase) {
           .flatMap((entry) => entry.members)
           .map((member) => member.agentId),
       );
-      targets = allTargets.filter((target) =>
-        memberAgentIds.has("target:" + target.id),
+      laneStore.replaceTargets(
+        allTargets.filter((target) =>
+          memberAgentIds.has("target:" + target.id),
+        ),
       );
-      targetById = new Map(targets.map((target) => [target.id, target]));
       applyTeamSnapshotPayload(payload, { force: true });
 
       const host = laneGroupHost(laneStates.get(weightedMemberIds[0]));

@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const lanesPath = process.argv[2];
+const storePath = process.argv[2];
+const lanesPath = process.argv[3];
 const storageKey = "spice.serve.laneConfigs";
 const storage = {
   values: new Map([
@@ -28,8 +29,6 @@ const context = {
   defaultSpeechMode: "speak",
   defaultLaneViewMode: "compose",
   defaultAgentLifetime: "Drive",
-  targets: [],
-  targetById: new Map(),
   laneStates: new Map(),
   teamSnapshotRevision: 0,
   observerModeEnabled: false,
@@ -74,6 +73,9 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });

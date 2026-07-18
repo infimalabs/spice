@@ -64,8 +64,7 @@ async function run() {
             splitBack: {},
             members: [{ agentId: "target:alpha" }, { agentId: "target:beta" }],
           });
-          targets = [alpha, beta];
-          targetById = new Map(targets.map((target) => [target.id, target]));
+          laneStore.replaceTargets([alpha, beta]);
           applyTeamSnapshotPayload(
             {
               revision: 1,
@@ -95,7 +94,8 @@ async function run() {
             hostTransientStatus: host.transientStatus || "",
             betaThreadBefore,
             betaThreadAfter: laneStates.get("beta").targetThreadId,
-            betaTargetIdentity: targetById.get("beta").targetIdentity.targetId,
+            betaTargetIdentity:
+              laneStore.targetForId("beta").targetIdentity.targetId,
             hasTaskDrainUpdater: typeof updateTaskDrainForLane === "function",
             hasTeamConfigUpdater: typeof updateLaneTeamConfigForLane === "function",
           };

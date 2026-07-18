@@ -1,8 +1,10 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const shellPath = process.argv[2];
+const storePath = process.argv[2];
+const shellPath = process.argv[3];
 const target = {
+  id: "target-a",
   targetIdentity: {
     targetId: "target-a",
     worktreeName: "tree-a",
@@ -19,14 +21,17 @@ const rendered = [];
 const identityCalls = [];
 const context = {
   console,
-  targetById: new Map([["target-a", target]]),
   observerModeEnabled: false,
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(shellPath, "utf8"), context, {
   filename: "app.shell.js",
 });
+vm.runInContext("laneStore", context).replaceTargets([target]);
 
 context.createLaneShellElement = () => ({ classList: { add() {} } });
 context.laneTargetIdentityFields = (

@@ -64,6 +64,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <main id="swimlanes" class="swimlanes" aria-label="Open teams"></main>
   <script>const spiceServeBranding = {brand_json};</script>
   <script>const spiceServeInitialGlobalSettings = {global_settings_json};</script>
+  <script src="/static/app.lane-store.js"></script>
   <script src="/static/app.render.js"></script>
   <script src="/static/app.live-bus.js"></script>
   <script src="/static/app.mosaic-geometry.js"></script>
