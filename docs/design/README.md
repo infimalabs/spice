@@ -52,6 +52,56 @@ The `experimental` directory is the path-level modifier for design records that
 are still exploratory. Promote a record into `accepted/` only when its status
 and reviewed content say the decision is accepted or implemented.
 
+## Lifecycle, Retention, And Archive Policy
+
+The checked-out design tree is a current decision surface, not a historical
+warehouse. Every record should have one of these lifecycle dispositions:
+
+- **Keep active:** retain governance, an accepted decision or implemented
+  contract, active research with an unresolved question, or a deferred
+  recommendation with an explicit evidence gate that would reopen it.
+- **Reconcile or condense:** update stale evidence and status in place, or fold
+  overlapping records into one authoritative destination. The destination must
+  preserve the unique contract, rejected-option rationale, and lineage that a
+  future reader still needs.
+- **Promote:** move an experimental record to `accepted/` only after its text
+  matches the reviewed decision or implemented behavior. A move is not a claim
+  that the original sketch was implemented verbatim.
+- **Retain as superseded:** keep a compact historical record only when its
+  rejected rationale is uniquely useful for preventing the same dead end. It
+  must link to its current replacement.
+- **Remove from the active tree:** delete redundant prototypes, session-specific
+  observations, stale machine-readable queues, and source records whose durable
+  content has been folded into a surviving authority.
+
+There is intentionally no `docs/design/archive/` directory. Git history is the
+archive for removed prose, and task sidecar artifacts are the archive for large
+inventories, logs, and one-time migration matrices. Keeping a second live
+directory of obsolete records would preserve the scan burden and blur which
+paths future work may trust.
+
+Accepted records are not deleted merely because their behavior is implemented;
+implemented contracts are current truth. Experimental records do not earn
+permanent retention merely because work once cited them. Once an experiment is
+closed, either promote its reviewed conclusion, condense it to a short
+`prototype result` or `superseded` rationale, fold its unique content into an
+authority, or remove it.
+
+Before consolidation or removal:
+
+1. Name the surviving authority and classify every source artifact.
+2. Preserve unique decisions, invariants, rejected alternatives, and reopening
+   conditions in that authority or in a justified superseded record.
+3. Update inbound links and lineage references in the same change.
+4. Remove raw data and one-time queues from the design tree after their durable
+   conclusion is recorded; keep large evidence as a task sidecar instead.
+5. Scan the repository for stale references and run the design-ledger gate.
+
+One-time cleanup plans belong to task state or a task sidecar, not to a new
+design record that would itself require later cleanup. The repository keeps the
+durable lifecycle policy and final authorities; the task system keeps the
+ordered migration batch and its validation evidence.
+
 ## Task Phase Contract
 
 `design` is the task phase for deep repo-durable prose artifacts. A design-phase
