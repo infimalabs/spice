@@ -15,24 +15,24 @@ async function run() {
         async ({ alpha, beta, snapshot }) => {
           laneStore.replaceTargets([alpha, beta]);
           applyTeamSnapshotPayload(snapshot, { force: true });
-          const host = Array.from(laneStates.values()).find(
+          const host = laneStore.lanesSnapshot().find(
             (lane) => !isShadowLane(lane) && laneGroupMemberTargetIds(lane).length === 2,
           );
           if (!host) throw new Error("missing fused team host");
-          const betaLane = laneStates.get("beta");
+          const betaLane = laneStore.laneForId("beta");
           if (!betaLane) throw new Error("missing beta lane");
           const betaThreadBefore = betaLane.targetThreadId;
 
           setLaneLifetime(host, "Steer");
 
           return {
-            laneCount: laneStates.size,
+            laneCount: laneStore.lanesSnapshot().length,
             memberIds: laneGroupMemberTargetIds(host),
             hostTeamId: host.teamId,
             hostLifetime: laneEffectiveLifetime(host),
             hostTransientStatus: host.transientStatus || "",
             betaThreadBefore,
-            betaThreadAfter: laneStates.get("beta").targetThreadId,
+            betaThreadAfter: laneStore.laneForId("beta").targetThreadId,
             betaTargetIdentity:
               laneStore.targetForId("beta").targetIdentity.targetId,
             hasTaskDrainUpdater: typeof updateTaskDrainForLane === "function",

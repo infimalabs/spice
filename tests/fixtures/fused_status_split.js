@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const groupsPath = process.argv[2];
+const storePath = process.argv[2];
+const groupsPath = process.argv[3];
 const source = fs.readFileSync(groupsPath, "utf8");
 const statusWrites = [];
 const composerWrites = [];
@@ -84,10 +85,6 @@ const context = {
   member,
   statusWrites,
   composerWrites,
-  laneStates: new Map([
-    [host.targetId, host],
-    [member.targetId, member],
-  ]),
   lanesEl: { insertBefore() {} },
   document: {
     createElement() {
@@ -116,7 +113,14 @@ const context = {
   },
 };
 
-vm.runInNewContext(
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.registerLane(host);
+laneStore.registerLane(member);
+vm.runInContext(
   source +
     `
   reconcileLaneGroups([["host", "member"]]);

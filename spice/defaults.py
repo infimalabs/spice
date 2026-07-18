@@ -7,13 +7,17 @@ from functools import cache
 from typing import Any, cast
 
 from spice import defaultinventory
-from spice.configlayer import load_packaged_config
 from spice.errors import SpiceError
 
 
 @cache
 def packaged_values() -> Mapping[str, Any]:
     """The immutable canonical values installed in ``spice/spice.toml``."""
+    # Function-level import: spice.config.values evaluates packaged defaults
+    # while the spice.config package is still initializing, so a module-scope
+    # binding here would be circular.
+    from spice.config.layers import load_packaged_config
+
     return load_packaged_config().values
 
 

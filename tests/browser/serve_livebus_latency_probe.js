@@ -171,7 +171,7 @@ async function runProbe(page, server, seed) {
     () =>
       laneStore.targetsSnapshot().length > 0 &&
       typeof addLane === "function" &&
-      typeof laneStates !== "undefined" &&
+      typeof laneStore !== "undefined" &&
       typeof handleLiveBusMessage === "function" &&
       typeof liveBusRequest === "function",
     { timeout: probeReadyTimeoutMs },
@@ -267,8 +267,8 @@ async function bindLanes(page, count) {
     );
     const lanes = [];
     for (const target of bound.slice(0, count)) {
-      if (!laneStates.has(target.id)) addLane(target.id);
-      const lane = laneStates.get(target.id);
+      if (!laneStore.hasLane(target.id)) addLane(target.id);
+      const lane = laneStore.laneForId(target.id);
       if (!lane) continue;
       const threadId = lane.targetThreadId || lane.activeThreadId || "";
       if (threadId) lanes.push({ targetId: lane.targetId, threadId });
@@ -286,7 +286,7 @@ async function waitAllWatchersActive(page, lanes) {
     await page.waitForFunction(
       (targetIds) =>
         targetIds.every((targetId) => {
-          const lane = laneStates.get(targetId);
+          const lane = laneStore.laneForId(targetId);
           return Boolean(
             lane &&
               lane.liveBusSubscribed &&
@@ -300,7 +300,7 @@ async function waitAllWatchersActive(page, lanes) {
   } catch (error) {
     const states = await page.evaluate((ids) => {
       return ids.map((targetId) => {
-        const lane = laneStates.get(targetId);
+        const lane = laneStore.laneForId(targetId);
         return {
           targetId,
           exists: Boolean(lane),
@@ -333,7 +333,7 @@ async function setLaneFocus(page, lanes, focusedTargetIds) {
       const focusedLookup = new Set(focused);
       await Promise.all(
         targetIds.map((targetId) => {
-          const lane = laneStates.get(targetId);
+          const lane = laneStore.laneForId(targetId);
           if (!lane) return Promise.resolve();
           const base =
             typeof laneMessageQuery === "function"
@@ -493,7 +493,7 @@ async function runSubmitPass(page, lanes) {
       const samples = window.__spiceSubmitLatencySamples;
       const out = [];
       for (let index = 0; index < count; index += 1) {
-        const lane = laneStates.get(targetId);
+        const lane = laneStore.laneForId(targetId);
         if (!lane) {
           out.push({ index, targetId, status: "no-lane", marks: {}, durations: {}, serverTiming: {} });
           continue;

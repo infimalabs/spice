@@ -223,7 +223,7 @@ function syncLaneHistoryObserver(lane) {
 
 function historyLaneForSentinel(host, sentinel) {
   const targetId = sentinel.dataset.historyTargetId || host.targetId;
-  const member = laneStates.get(targetId);
+  const member = laneStore.laneForId(targetId);
   if (member && laneGroupHost(member) === host) return member;
   return host;
 }
@@ -242,16 +242,18 @@ async function hydrateOlderMessages(lane) {
   if (lane.olderHydrationInFlight || !isLaneOpen(lane)) return;
   lane.olderHydrationInFlight = true;
   try {
-    const response = await liveBusRequest("lane.history", {
-      targetId: lane.targetId,
-      query: {
-        limit: requestLimit,
-        before: lane.oldestMessageKey || "",
-        threadId: lane.targetThreadId || "",
-      },
-    });
+    const response = /** @type {LaneFrame} */ (
+      await liveBusRequest("lane.history", {
+        targetId: lane.targetId,
+        query: {
+          limit: requestLimit,
+          before: lane.oldestMessageKey || "",
+          threadId: lane.targetThreadId || "",
+        },
+      })
+    );
     if (!isLaneOpen(lane)) return;
-    const added = mergeOlderPayloadMessages(lane, response.payload || {});
+    const added = mergeOlderPayloadMessages(lane, response.payload);
     if (!added) lane.olderHistoryExhausted = true;
     renderMessagesIfChanged(lane);
   } catch (error) {
@@ -657,12 +659,18 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
   lane.sendAwaitingBackendCount += 1;
   try {
     markLaneSubmitLatency(latencyProbe, "requestAwaitStartAt");
-    const response = await liveBusRequest("lane.send", {
-      targetId: lane.targetId,
-      payload,
-    }, latencyProbe);
+    const response = /** @type {LaneSendResultFrame} */ (
+      await liveBusRequest(
+        "lane.send",
+        {
+          targetId: lane.targetId,
+          payload,
+        },
+        latencyProbe,
+      )
+    );
     markLaneSubmitLatency(latencyProbe, "responseResolvedAt");
-    const result = response.result || {};
+    const result = response.result;
     latencyProbe.serverTiming = result.serverTiming || {};
     if (!isLaneOpen(lane)) {
       finishLaneSubmitLatencyProbe(latencyProbe, "closed");
@@ -765,6 +773,7 @@ function applyLaneSendResult(
   sourceLane = lane,
   options = {},
 ) {
+  result = /** @type {WorkTreeSendResult} */ (result);
   const previousThreadId = lane.targetThreadId || "";
   applyTaskDrainRouteConfig(lane, result);
   if (!result.ok) {
@@ -828,10 +837,15 @@ function focusAfterComposerReset(element) {
 
 // ---- route application -----------------------------------------------------------
 
+/**
+ * @param {RoutedResult} result
+ * @returns {WorkTreeRoute|undefined}
+ */
 function taskDrainRouteConfig(result) {
-  return result.ok === false ? result : result.route;
+  return result.ok === false ? undefined : result.route;
 }
 
+/** @param {RoutedResult} result */
 function applyTaskDrainRouteConfig(lane, result) {
   const config = taskDrainRouteConfig(result);
   if (!config) return;

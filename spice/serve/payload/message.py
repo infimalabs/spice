@@ -36,6 +36,7 @@ from spice.serve.payload.lane import (
     status_line_payload,
     task_filter_inventory,
 )
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.inventory import (
@@ -43,6 +44,7 @@ from spice.serve.worktree.inventory import (
     _work_tree_renewal_intent,
 )
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import claimstate
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
 from spice.tasks import tw
@@ -211,30 +213,10 @@ def _task_card_message_from_row(
     timestamp = _task_row_timestamp(row)
     if not timestamp:
         return None
-    handle = task_identity.render_handle(row)
-    fields: list[tuple[str, str]] = []
-    title = str(row.get("description") or "").strip()
-    description = str(row.get("task_description") or "").strip()
-    project = str(row.get("project") or "").strip()
-    status = str(row.get("status") or "").strip()
-    phase = str(row.get("phase") or "").strip()
-    acceptance = str(row.get("acceptance") or "").strip()
-    if title:
-        fields.append(("title", title))
-    if description:
-        fields.append(("description", description))
-    if project:
-        fields.append(("project", project))
-    if status:
-        fields.append(("status", status))
-    if phase:
-        fields.append(("phase", phase))
-    if acceptance:
-        fields.append(("acceptance", acceptance))
-    if handle:
-        fields.append(("handle", handle))
+    fields = _task_card_fields(row)
     if not fields:
         return None
+    handle = task_identity.render_handle(row)
     classes, kicker = _task_card_presentation(row)
     return message_reader.task_card_message(
         key=f"{timestamp}#task-card:{str(row.get('uuid') or handle)}",
@@ -245,6 +227,39 @@ def _task_card_message_from_row(
         classes=classes,
         kicker=kicker,
     )
+
+
+def _task_card_fields(row: dict[str, Any]) -> list[tuple[str, str]]:
+    """Ordered (label, value) rows a task card surfaces for one export row.
+
+    Order is explicit: identity (title/description/project), then provenance and
+    task-state metadata (origin/priority/status), then phase context (the current
+    phase followed by the full flow pipeline), then tags, and finally acceptance
+    and handle. Origin carries the row's stored provenance spelling verbatim
+    (``ack:<key>`` or ``task:<handle>``); flow reconstructs the phase pipeline via
+    ``claimstate.phases_of``. Each field is emitted only when it has a value.
+    """
+    flow = ", ".join(claimstate.phases_of(row))
+    raw_tags = row.get("tags")
+    tags = (
+        ", ".join(tag for tag in (str(item).strip() for item in raw_tags) if tag)
+        if isinstance(raw_tags, list)
+        else ""
+    )
+    candidates = (
+        ("title", str(row.get("description") or "").strip()),
+        ("description", str(row.get("task_description") or "").strip()),
+        ("project", str(row.get("project") or "").strip()),
+        ("origin", str(row.get("origin") or "").strip()),
+        ("priority", str(row.get("priority") or "").strip()),
+        ("status", str(row.get("status") or "").strip()),
+        ("phase", str(row.get("phase") or "").strip()),
+        ("flow", flow),
+        ("tags", tags),
+        ("acceptance", str(row.get("acceptance") or "").strip()),
+        ("handle", task_identity.render_handle(row)),
+    )
+    return [(label, value) for label, value in candidates if value]
 
 
 def _task_card_source_kind(row: dict[str, Any]) -> str:
@@ -610,7 +625,9 @@ def _messages_worktree_payload(
     }
     if removed_keys:
         payload["removedMessageKeys"] = list(removed_keys)
-    return payload
+    return validate_emitter_payload(
+        "payload.message._messages_worktree_payload", payload
+    )
 
 
 def _ack_keys_for_messages(items: list[message_reader.AssistantMessage]) -> list[str]:

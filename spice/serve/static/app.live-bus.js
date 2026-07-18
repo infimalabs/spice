@@ -77,7 +77,7 @@ function connectLiveBus() {
     if (liveBusSocket !== socket) return;
     liveBusSocket = null;
     liveBusOpenPromise = null;
-    for (const lane of laneStates.values()) {
+    for (const lane of laneStore.lanesSnapshot()) {
       lane.liveBusSubscribed = false;
       lane.liveBusSubscribePending = false;
       lane.liveBusWatcherActive = false;
@@ -197,45 +197,52 @@ function recordLaneSendTiming(message) {
   else pendingLaneSendServerTimings.set(message.requestId, message.serverTiming || {});
 }
 
-const liveBusPushHandlers = new Map([
-  ["targets.payload", handleTargetsPush],
-  ["teams.payload", handleTeamsPush],
-  ["lane.payload", handleLanePayloadPush],
-  ["lane.pending", handleLanePendingPush],
-  ["lane.submission", handleLaneSubmissionPush],
-  ["lane.append", handleLaneAppendPush],
-  ["lanes.dirty", handleBackgroundLanesDirtyPush],
-  ["bus.error", handleLiveBusErrorPush],
-]);
+const liveBusPushHandlers = new Map(
+  /** @type {Array<[string, Function]>} */ ([
+    ["targets.payload", handleTargetsPush],
+    ["teams.payload", handleTeamsPush],
+    ["lane.payload", handleLanePayloadPush],
+    ["lane.pending", handleLanePendingPush],
+    ["lane.submission", handleLaneSubmissionPush],
+    ["lane.append", handleLaneAppendPush],
+    ["lanes.dirty", handleBackgroundLanesDirtyPush],
+    ["bus.error", handleLiveBusErrorPush],
+  ]),
+);
 
 async function dispatchLiveBusPush(message) {
   const handler = liveBusPushHandlers.get(message.type);
   if (handler) await handler(message);
 }
 
+/** @param {TargetsFrame} message */
 function handleTargetsPush(message) {
-  applyTargetsPayload(message.payload || {});
+  applyTargetsPayload(message.payload);
 }
 
+/** @param {TeamsFrame} message */
 function handleTeamsPush(message) {
-  applyTeamSnapshotPayload(message.payload || {});
+  applyTeamSnapshotPayload(message.payload);
 }
 
+/** @param {LaneFrame} message */
 async function handleLanePayloadPush(message) {
   const lane = matchingLiveBusLane(message);
   if (!lane) return;
   await applyLaneBusPayload(
     lane,
-    message.payload || {},
+    message.payload,
     message.source || "bus",
   );
 }
 
+/** @param {LanePendingFrame} message */
 function handleLanePendingPush(message) {
   const lane = matchingLiveBusLane(message);
-  if (lane) applyLanePendingBusPayload(lane, message.payload || {});
+  if (lane) applyLanePendingBusPayload(lane, message.payload);
 }
 
+/** @param {LaneSubmissionFrame} message */
 function handleLaneSubmissionPush(message) {
   const lane = matchingLiveBusLane(message);
   if (!lane) return;
@@ -243,19 +250,21 @@ function handleLaneSubmissionPush(message) {
   syncLaneSubmissionLifecycleUi(lane);
 }
 
+/** @param {LaneAppendFrame} message */
 async function handleLaneAppendPush(message) {
-  const lane = laneStates.get(message.targetId);
+  const lane = laneStore.laneForId(message.targetId);
   if (lane && isLaneOpen(lane))
-    await applyLaneAppendBusPayload(lane, message.payload || {});
+    await applyLaneAppendBusPayload(lane, message.payload);
 }
 
 function handleLiveBusErrorPush(message) {
   setGlobalTransientError(message.error || "live bus error");
 }
 
+/** @param {LanesDirtyFrame} message */
 function handleBackgroundLanesDirtyPush(message) {
   for (const frame of message.lanes || []) {
-    const lane = laneStates.get(frame.targetId);
+    const lane = laneStore.laneForId(frame.targetId);
     if (!lane || !isLaneOpen(lane)) continue;
     if (!liveBusPushMatchesSubscription(lane, frame)) continue;
     lane.liveBusDirty = true;
@@ -264,13 +273,13 @@ function handleBackgroundLanesDirtyPush(message) {
 }
 
 function matchingLiveBusLane(message) {
-  const lane = laneStates.get(message.targetId);
+  const lane = laneStore.laneForId(message.targetId);
   if (!lane || !isLaneOpen(lane)) return null;
   return liveBusPushMatchesSubscription(lane, message) ? lane : null;
 }
 
 function isLaneOpen(lane) {
-  return !lane.closed && laneStates.get(lane.targetId) === lane;
+  return !lane.closed && laneStore.laneForId(lane.targetId) === lane;
 }
 
 function liveBusPushMatchesSubscription(lane, message) {
@@ -331,7 +340,7 @@ function installLiveBusLaneFocusTracking() {
   const focusFromEvent = (event) => {
     const element = event.target?.closest?.(".lane[data-target-id]");
     const lane = element
-      ? laneStates.get(element.dataset.targetId || "")
+      ? laneStore.laneForId(element.dataset.targetId || "")
       : null;
     if (lane && isLaneOpen(lane)) setFocusedLiveBusLane(lane);
   };
@@ -402,9 +411,12 @@ async function flushPendingLaneSubscribes() {
   const entries = lanes.map((lane) => {
     return { targetId: lane.targetId, query: laneMessageQuery(lane) };
   });
+  /** @type {LanesFrame} */
   let response;
   try {
-    response = await liveBusRequest("lanes.subscribe", { entries });
+    response = /** @type {LanesFrame} */ (
+      await liveBusRequest("lanes.subscribe", { entries })
+    );
   } catch (error) {
     for (const lane of lanes) {
       if (isLaneOpen(lane)) {
@@ -414,9 +426,10 @@ async function flushPendingLaneSubscribes() {
     }
     return;
   }
-  applyLanesSubscribePayloads(lanes, (response && response.lanes) || []);
+  applyLanesSubscribePayloads(lanes, response.lanes);
 }
 
+/** @param {Array.<LaneSubscriptionPayload>} laneFrames */
 function applyLanesSubscribePayloads(lanes, laneFrames) {
   const frameByTargetId = new Map(
     laneFrames.map((frame) => [frame.targetId, frame]),
@@ -430,7 +443,7 @@ function applyLanesSubscribePayloads(lanes, laneFrames) {
       setLaneTransientStatus(lane, "subscription reply missing");
       continue;
     }
-    const payload = frame.payload || {};
+    const payload = frame.payload;
     lane.liveBusSubscriptionGeneration = String(
       frame.subscriptionGeneration || "",
     );
@@ -455,13 +468,13 @@ function applyLanesSubscribePayloads(lanes, laneFrames) {
 }
 
 function resubscribeLiveBusLanes() {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);
   }
 }
 
 function configureLiveBusLanes() {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (
       lane.emptyTeam ||
       !isLaneOpen(lane) ||
@@ -495,7 +508,7 @@ function unsubscribeLaneFromLiveBus(lane) {
   );
   if (focusedLiveBusLaneTargetId === lane.targetId) {
     focusedLiveBusLaneTargetId = "";
-    const replacement = [...laneStates.values()].find(
+    const replacement = laneStore.lanesSnapshot().find(
       (candidate) => candidate !== lane && isLaneOpen(candidate),
     );
     if (replacement) setFocusedLiveBusLane(replacement);

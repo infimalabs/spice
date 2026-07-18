@@ -57,7 +57,7 @@ function joinMeasure(config) {
   };
 
   seed(config.initialIds);
-  let host = laneGroupHost(laneStates.get(config.initialIds[0]));
+  let host = laneGroupHost(laneStore.laneForId(config.initialIds[0]));
   for (const member of laneGroupMemberLanes(host)) fillMessages(member);
   renderMessagesIfChanged(host);
 
@@ -76,7 +76,7 @@ function joinMeasure(config) {
   }).observe(host.mosaicPlaneEl, { childList: true });
 
   seed([...config.initialIds, config.addedId]);
-  host = laneGroupHost(laneStates.get(config.initialIds[0]));
+  host = laneGroupHost(laneStore.laneForId(config.initialIds[0]));
   for (const member of laneGroupMemberLanes(host)) fillMessages(member);
   renderMessagesIfChanged(host);
 

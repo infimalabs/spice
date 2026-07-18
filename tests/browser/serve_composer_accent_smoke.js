@@ -46,7 +46,7 @@ function accentMeasureReorder(config) {
     }),
     { force: true },
   );
-  const host = laneGroupHost(laneStates.get(ids[0]));
+  const host = laneGroupHost(laneStore.laneForId(ids[0]));
   for (const member of laneGroupMemberLanes(host)) {
     const base = member.targetId.charCodeAt(1) * 10;
     member.knownMessages = Array.from(

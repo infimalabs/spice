@@ -9,7 +9,6 @@ const lane = {
 };
 const context = {
   console,
-  laneStates: new Map([["lane-a", lane]]),
   uniqueStringList(items) {
     return Array.from(new Set((items || []).filter(Boolean)));
   },
@@ -47,6 +46,7 @@ const laneStore = vm.runInContext("laneStore", context);
 laneStore.replaceTargets([
   { id: "lane-a", agentProcessStatus: "running" },
 ]);
+laneStore.registerLane(lane);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

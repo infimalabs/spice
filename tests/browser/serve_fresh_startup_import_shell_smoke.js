@@ -3,7 +3,7 @@ const { withServePage } = require("./serve_playwright_harness");
 async function waitForImportShell(page) {
   await page.waitForFunction(
     () => {
-      const lanes = Array.from(laneStates.values());
+      const lanes = laneStore.lanesSnapshot();
       return lanes.length === 1 && lanes[0].emptyTeam && lanes[0].teamId;
     },
     {},
@@ -12,16 +12,16 @@ async function waitForImportShell(page) {
 }
 
 function pageTopology() {
-  const lanes = Array.from(laneStates.values()).map((lane) => ({
+  const lanes = laneStore.lanesSnapshot().map((lane) => ({
     targetId: lane.targetId,
     emptyTeam: Boolean(lane.emptyTeam),
     teamId: lane.teamId || "",
   }));
   return {
-    laneCount: laneStates.size,
+    laneCount: laneStore.lanesSnapshot().length,
     lanes,
     storedConfig: localStorage.getItem(laneStorageKey),
-    snapshotRevision: teamSnapshotRevision,
+    snapshotRevision: laneStore.teamSnapshotRevision(),
     targetIds: laneStore.targetsSnapshot().map((target) => target.id),
   };
 }

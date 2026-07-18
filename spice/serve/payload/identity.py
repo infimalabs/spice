@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_status
-from spice.config import configured_say_voice, effective_agent_config
+from spice.config.values import configured_say_voice, effective_agent_config
 from spice.errors import SpiceError
 from spice.serve.team.store import ServeTeamStore, renewal_intent_payload
 from spice.serve.team.ids import (

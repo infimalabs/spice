@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spice import config
+from spice.config import values
 from spice.agent.maxims import configured_maxim
 from spice.agent.shellhook import (
     configured_agent_wrapper_definitions,
@@ -119,7 +119,7 @@ def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeyp
     assert policy.limits.file_loc == REPOSITORY_FILE_LOC
     assert policy.limits.file_bytes == PROJECT_FILE_BYTES
     assert "repostem" in task_config.approved_stems()
-    assert config.configured_agent_model(tmp_path) == "repository-model"
+    assert values.configured_agent_model(tmp_path) == "repository-model"
     wrappers, _sources = configured_agent_wrapper_definitions(tmp_path)
     assert wrappers["custom"]["echo"]["argv"] == ["echo", "repository"]
     assert mounted_commands(tmp_path)[("layered-check",)] == (

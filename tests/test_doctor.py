@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from spice import config
+from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RtkHealth
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
@@ -680,11 +680,11 @@ def test_doctor_judge_optional_by_default_and_required_when_opted_in(
     monkeypatch.setattr(doctor, "find_tool", lambda _binary: None)
 
     default_check = _binary_check(repo, "tool.judge")
-    config.set_scope_section(
+    edit.set_scope_section(
         repo,
-        config.WORKTREE_SOURCE,
-        config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: True},
+        layers.WORKTREE_SOURCE,
+        values.JUDGE_KEY,
+        {values.JUDGE_ENABLED_KEY: True},
     )
     opted_in_check = _binary_check(repo, "tool.judge")
 
@@ -754,13 +754,13 @@ def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monke
 
 
 def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
-    config.set_scope_section(
+    edit.set_scope_section(
         tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
         {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: "tts-engine --wav",
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine --wav",
         },
     )
     monkeypatch.setattr(doctor, "find_tool", lambda name: f"/tools/{name}")

@@ -22,9 +22,9 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
-from spice.configlayer import config_string_list, effective_table
+from spice.config.layers import config_string_list, effective_table
 from spice.pathmatch import matches_repo_path
-from spice.repocfg import read_pyproject
+from spice.config.pyproject import read_pyproject
 from spice.studies.walk import configured_test_roots, is_test_path
 
 BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)

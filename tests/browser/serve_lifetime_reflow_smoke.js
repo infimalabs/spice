@@ -19,7 +19,7 @@ async function run() {
         () =>
           typeof applyTeamSnapshotPayload === "function" &&
           typeof subscribeLaneToLiveBus === "function" &&
-          typeof laneStates !== "undefined",
+          typeof laneStore !== "undefined",
         { timeout: 10000 },
       );
       await page.addScriptTag({ content: installScript });
@@ -51,7 +51,8 @@ async function run() {
           // Mark every lane subscribed so the fix's resubscribe guard is live,
           // and instrument which lanes resubscribe.
           const resubscribes = {};
-          for (const lane of laneStates.values()) lane.liveBusSubscribed = true;
+          for (const lane of laneStore.lanesSnapshot())
+            lane.liveBusSubscribed = true;
           const original = subscribeLaneToLiveBus;
           // eslint-disable-next-line no-global-assign
           subscribeLaneToLiveBus = function (lane) {

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-from spice import config
+from spice.config import values
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_thread_state_dir
 from spice.errors import SpiceError
@@ -59,7 +59,7 @@ def rewrite_command_text(
 ) -> str | None:
     """Return a usable RTK rewrite or select native execution with one warning."""
     executable = (
-        config.configured_rtk_executable(repo_root)
+        values.configured_rtk_executable(repo_root)
         if rtk_executable is None
         else rtk_executable
     )

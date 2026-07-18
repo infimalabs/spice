@@ -187,7 +187,8 @@ def test_target_identity_payload_rejects_blank_bound_thread_id():
 
 def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch):
     from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
-    from spice.config import WORKTREE_SOURCE, set_scope_section
+    from spice.config.edit import set_scope_section
+    from spice.config.layers import WORKTREE_SOURCE
 
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -96,7 +96,7 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     write_agent_state,
 )
 from spice.agent.watchdog import spawn_supervised_agent
-from spice.config import (
+from spice.config.values import (
     configured_agent_effort,
     configured_agent_model,
     configured_agent_personality,

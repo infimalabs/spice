@@ -42,7 +42,7 @@ async function measureSoloAlpha(page, { alpha, soloTeam, soloMessage, alphaMessa
         window.spicePayloads.teamSnapshot({ revision: 1, teams: [soloTeam] }),
         { force: true },
       );
-      const solo = laneStates.get("alpha");
+      const solo = laneStore.laneForId("alpha");
       if (!solo) throw new Error("missing solo alpha lane");
 
       solo.knownMessages = [soloMessage];
@@ -73,8 +73,8 @@ async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMes
         window.spicePayloads.teamSnapshot({ revision: 2, teams: [fusedTeam] }),
         { force: true },
       );
-      const host = laneGroupHost(laneStates.get("alpha"));
-      const betaLane = laneStates.get("beta");
+      const host = laneGroupHost(laneStore.laneForId("alpha"));
+      const betaLane = laneStore.laneForId("beta");
       betaLane.knownMessages = betaMessages;
       betaLane.retainedMessageLimit = 50;
       host.renderedMessageFingerprint = "";
@@ -112,7 +112,7 @@ async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
         window.spicePayloads.teamSnapshot({ revision: 3, teams: [survivorTeam] }),
         { force: true },
       );
-      const survivorHost = laneGroupHost(laneStates.get("alpha"));
+      const survivorHost = laneGroupHost(laneStore.laneForId("alpha"));
       survivorHost.renderedMessageFingerprint = "";
       renderMessagesIfChanged(survivorHost);
       const survivorKeys = survivorHost.mosaicCards

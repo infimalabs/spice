@@ -10,13 +10,13 @@ import pytest
 
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.errors import SpiceError
-from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim
+from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim, git_state_path
 from spice.hooks import precommit
 from spice.studies import taste
 from spice.studies.fileloc import LocFinding
 from spice.studies.repodocs import (
+    REPO_DOC_CHAR_STICKY_STATE_GIT_PATH,
     render_repo_truth_doc_lines,
-    repo_doc_char_sticky_state_path,
     repo_truth_doc_findings,
     repo_truth_docs,
 )
@@ -339,8 +339,7 @@ def test_repo_doc_guard_scans_tracked_markdown_with_depth_budget_and_sticky(
     first_message = str(first_exc.value)
     assert "README.md" in first_message
     assert "cap 10000" in first_message
-    state_path = repo_doc_char_sticky_state_path(repo)
-    assert state_path is not None
+    state_path = git_state_path(REPO_DOC_CHAR_STICKY_STATE_GIT_PATH, root=repo)
     assert state_path.exists()
 
     _write_repo_file(repo, "README.md", "x" * 11_000)

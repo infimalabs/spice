@@ -452,9 +452,7 @@ def test_static_spice_menu_fast_mode_uses_server_global_state():
     assert "const fastModeActive = currentFastModeEnabled();" in app_menu
     assert "function syncFastModeButtonState()" in app_menu
     assert "spice-menu-button--fast" in app_menu
-    assert "applyGlobalSettingsPayload((payload.snapshot || {}).globalSettings);" in (
-        app_lanes
-    )
+    assert "applyGlobalSettingsPayload(transition.globalSettings);" in app_lanes
     assert "fastMode: currentFastModeEnabled()," not in app_controls
     assert "fastMode: currentFastModeEnabled()," not in app_stream
     assert "fastModeStorageKey" not in app_js
@@ -476,10 +474,10 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "function openSpiceMenu()" in app_menu
     assert "function renderSpiceMenuIfAvailable()" in app_lanes
     assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
-    assert "function laneStateTargetIds()" in app_lanes
-    assert "function sameStringSets(left, right)" in app_lanes
+    assert 'if (change.kind !== "teamSnapshot") return;' in app_lanes
+    assert "materializeTeamSnapshotTransition(change.transition);" in app_lanes
     assert (
-        "if (!sameStringSets(openBefore, laneStateTargetIds()))\n"
+        "if (transition.adds.length || transition.removes.length)\n"
         "    renderSpiceMenuIfAvailable();" in app_lanes
     )
     assert "renderSpiceMenuIfAvailable();" in app_shell
@@ -487,7 +485,6 @@ def test_static_spice_menu_replaces_picker_lane():
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes
     )
-    assert "if (laneStates.size) closeSpiceMenu();" not in app_static
     assert "function createEmptyTeamFromMenu()" not in app_menu
     assert "const spiceMenuNewTeamDropId" in app_menu
     assert "function spiceMenuTeamGroups(choices)" in app_menu
@@ -600,11 +597,11 @@ def test_static_spice_menu_team_groups_and_actions():
     assert 'hint.textContent = "Drop agent here";' in app_menu
     assert "wireSpiceMenuTeamDropTarget(container, group);" in app_menu
     assert '"open any member; " + count + " agents open together"' in app_menu
-    assert "const alreadyOpen = laneStates.has(target.id);" in app_menu
+    assert "const alreadyOpen = laneStore.hasLane(target.id);" in app_menu
     assert 'if (alreadyOpen) actionLabel = "Show team";' in app_menu
     assert 'else if (group && !group.unassigned) actionLabel = "Open team";' in app_menu
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_menu
-    assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
+    assert 'if (laneStore.hasLane(target.id)) parts.push("open");' in app_lanes
     assert 'setGlobalTransientError("open team failed");' in app_menu
     assert (
         'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
@@ -770,14 +767,17 @@ def test_spice_menu_new_team_drop_keeps_created_team_near_drop_zone():
 
 
 def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
+    lane_store = (STATIC_ROOT / "app.lane-store.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
     assert 'const emptyTeamTargetPrefix = "empty-team:";' in app_lanes
     assert "function ensureEmptyTeamLane(team, options = {})" in app_shell
-    assert "const targetId = emptyTeamTargetId(team.teamId);" in app_lanes
-    assert "const canCloseEmptyTeam = teams.length > 1;" in app_lanes
-    assert "ensureEmptyTeamLane(team, { canClose: canCloseEmptyTeam });" in app_lanes
+    assert "this.#reconcileTeam(team, state, adapters, teams.length > 1);" in lane_store
+    assert 'kind: "emptyTeam",' in lane_store
+    assert (
+        "ensureEmptyTeamLane(change.team, { canClose: change.canClose });" in app_lanes
+    )
     assert "if (!laneStore.targetForId(lane.targetId) && !lane.emptyTeam)" in (
         app_lanes
     )

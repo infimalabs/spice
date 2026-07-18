@@ -18,12 +18,12 @@ from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.lifecycle import packaged_skill_path
 from spice.agent.shellhook import rtk_rewrite_yield_selectors
 from spice.cli.entry import is_spice_checkout
-from spice.configlayer import effective_table
-from spice.config import (
+from spice.config.layers import effective_table
+from spice.config.edit import git_worktree_config_get
+from spice.config.values import (
     configured_judge_bin,
     configured_say_backend,
     configured_say_command,
-    git_worktree_config_get,
     maxim_adjudication_enabled,
 )
 from spice.errors import SpiceError
@@ -38,7 +38,7 @@ from spice.paths import (
     worktree_state_root,
 )
 from spice.policyconfig import resolve_policy
-from spice.repocfg import read_pyproject
+from spice.config.pyproject import read_pyproject
 from spice.process.tool import run_tool_command
 from spice.version import DISTRIBUTION_NAME
 from spice.studies import (

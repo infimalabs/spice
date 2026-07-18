@@ -24,6 +24,7 @@ from spice.serve.payload.lane import (
     _status_line_payload_from_status,
     task_filter_inventory,
 )
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -31,13 +32,14 @@ from spice.serve.worktree.target import WorktreeTarget
 def work_trees_payload(state: Any) -> dict[str, Any]:
     targets = state.worktree_targets()
     inventory = task_filter_inventory()
-    return {
+    payload = {
         "workTrees": [
             _work_tree_payload(state, target, inventory) for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
         "taskFilterInventory": inventory,
     }
+    return validate_emitter_payload("worktree.inventory.work_trees_payload", payload)
 
 
 def _work_tree_payload(

@@ -29,8 +29,6 @@ const context = {
   defaultSpeechMode: "speak",
   defaultLaneViewMode: "compose",
   defaultAgentLifetime: "Drive",
-  laneStates: new Map(),
-  teamSnapshotRevision: 0,
   observerModeEnabled: false,
   targetsLoaded: false,
   targetsLoading: false,
@@ -76,6 +74,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
   filename: "app.lane-store.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
@@ -102,7 +101,7 @@ function target(id) {
 
 context.ensureEmptyTeamLane = (team) => {
   const targetId = context.emptyTeamTargetId(team.teamId);
-  context.laneStates.set(targetId, {
+  laneStore.registerLane({
     targetId,
     emptyTeam: true,
     closed: false,
@@ -114,7 +113,7 @@ context.ensureEmptyTeamLane = (team) => {
 
 context.closeLaneCore = (lane) => {
   lane.closed = true;
-  context.laneStates.delete(lane.targetId);
+  laneStore.removeLane(lane.targetId);
 };
 
 context.liveBusRequest = async (type, request = {}) => {
@@ -148,7 +147,7 @@ context.liveBusRequest = async (type, request = {}) => {
   if (type === "teams.command") {
     const member = String(((request.payload || {}).members || [])[0] || "");
     const targetId = member.startsWith("target:") ? member.slice(7) : member;
-    context.laneStates.set(targetId, {
+    laneStore.registerLane({
       targetId,
       emptyTeam: false,
       closed: false,
@@ -162,7 +161,7 @@ context.liveBusRequest = async (type, request = {}) => {
 
 (async () => {
   await context.refreshServerTopology();
-  const topology = Array.from(context.laneStates.values()).map((lane) => ({
+  const topology = laneStore.lanesSnapshot().map((lane) => ({
     targetId: lane.targetId,
     emptyTeam: lane.emptyTeam === true,
   }));

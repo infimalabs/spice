@@ -27,6 +27,7 @@ from spice.mail.inbox import (
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -36,7 +37,7 @@ PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
-    return {
+    payload = {
         "ok": True,
         "provider": driver_for(target.repo_root).name,
         "workTreeId": target.id,
@@ -54,6 +55,7 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
         "bindingError": binding_error,
         "restartRefusal": launch_refusal(target.repo_root) or {},
     }
+    return validate_emitter_payload("agentapi.agent_status_payload", payload)
 
 
 def agent_ensure_response_payload(

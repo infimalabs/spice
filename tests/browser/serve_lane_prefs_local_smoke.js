@@ -94,8 +94,8 @@ async function prefsMeasure(config) {
   );
   window.__prefsApplySnapshot(config, config.snapshotRevision);
   await window.__prefsSettle(config.settleMs);
-  const laneA = laneStates.get(config.memberIds[0]);
-  const laneB = laneStates.get(config.memberIds[1]);
+  const laneA = laneStore.laneForId(config.memberIds[0]);
+  const laneB = laneStore.laneForId(config.memberIds[1]);
   const mounted = {
     hintSpeechMode: laneA.speechMode,
     hintSelectedView: laneA.selectedView,
