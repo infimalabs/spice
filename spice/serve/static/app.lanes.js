@@ -758,7 +758,7 @@ function targetChoiceStatusLabel(target) {
 
 // ---- global filter pills -----------------------------------------------------------
 
-const taskFilterHeaderExtraStems = ["agent", "waiting", "oops"];
+const taskFilterHeaderExtraStems = ["agent", "oops"];
 const taskFilterStemStateCountFields = [
   "readyTaskCount",
   "inFlightTaskCount",
@@ -858,7 +858,6 @@ function taskFilterStemPillModel(stem) {
   const classes = [];
   if (stem.name === "agent") classes.push("filter-pill--private");
   if (stem.name === "oops") classes.push("filter-pill--system");
-  if (stem.name === "waiting") classes.push("filter-pill--waiting");
   return {
     kind: "stem",
     label,
@@ -884,8 +883,7 @@ function taskFilterStemPillModel(stem) {
 }
 
 function taskFilterStemPillCountText(model) {
-  if (model.label === "waiting" || model.label === "oops")
-    return String(model.openTaskCount);
+  if (model.label === "oops") return String(model.openTaskCount);
   return model.readyTaskCount + "/" + model.openTaskCount;
 }
 
@@ -901,11 +899,6 @@ function taskFilterStemPillTitle(label, counts, drainability) {
     blockedTaskCount,
     deferredTaskCount,
   } = counts;
-  if (label === "waiting")
-    return (
-      openTaskCount +
-      " waiting/deferred tasks; wake with `spice task wake <handle>`"
-    );
   if (label === "oops")
     return (
       openTaskCount +
@@ -935,12 +928,11 @@ function taskFilterStemPillTitle(label, counts, drainability) {
 }
 
 function taskFilterStemScopeLabel(stemName) {
-  if (stemName === "waiting") return "waiting/deferred tasks";
   return stemName === "oops" ? "oops" : stemName + ".*";
 }
 
 function taskFilterStemIsSystem(stemName) {
-  return stemName === "agent" || stemName === "oops" || stemName === "waiting";
+  return stemName === "agent" || stemName === "oops";
 }
 
 function taskFilterStemDrainability(stem) {

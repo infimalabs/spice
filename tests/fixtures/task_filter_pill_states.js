@@ -108,3 +108,29 @@ const empty = context.taskFilterStemPillsFromInventory({
   primaryStems: [],
 });
 assert(empty.length === 0, "empty inventory has no pill model");
+
+const waitingPayload = context.taskFilterStemPillsFromInventory({
+  catalog: { approvedStems: ["serve"] },
+  primaryStems: [
+    stem({
+      openTaskCount: 2,
+      readyTaskCount: 0,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 2,
+    }),
+    {
+      name: "waiting",
+      filters: [],
+      openTaskCount: 2,
+      readyTaskCount: 0,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 2,
+    },
+  ],
+});
+assert(
+  waitingPayload.map((item) => item.name).join(",") === "serve",
+  "project ready/open pills fully represent deferred inventory",
+);
