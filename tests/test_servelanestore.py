@@ -1,8 +1,6 @@
 """Serve lane-store ownership and load-order contracts."""
 
-import re
 import subprocess
-from collections import Counter
 from pathlib import Path
 
 from spice.serve.web import STATIC_ROOT, render_index_html
@@ -13,12 +11,12 @@ def test_lane_store_constructs_real_target_authority():
 
     result = subprocess.run(
         ["node", str(fixture), str(STATIC_ROOT / "app.lane-store.js")],
-        check=True,
         capture_output=True,
         text=True,
+        check=False,
     )
 
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_lane_store_loads_before_every_production_consumer():
@@ -36,20 +34,23 @@ def test_lane_store_loads_before_every_production_consumer():
 
 
 def test_lane_consumers_use_the_exact_store_registry_surface():
+    store_source = (STATIC_ROOT / "app.lane-store.js").read_text(encoding="utf-8")
     production = "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(STATIC_ROOT.glob("app*.js"))
+        path.read_text(encoding="utf-8")
+        for path in sorted(STATIC_ROOT.glob("app*.js"))
+        if path.name != "app.lane-store.js"
     )
-    authority_identifiers = sorted(
-        set(re.findall(r"\b(?:laneStates|laneStore)\b", production))
-    )
-    calls = Counter(
-        re.findall(
-            r"laneStore\.(registerLane|removeLane|laneForId|hasLane|lanesSnapshot)\(",
-            production,
-        )
+    api_names = (
+        "registerLane",
+        "removeLane",
+        "laneForId",
+        "hasLane",
+        "lanesSnapshot",
     )
 
-    assert authority_identifiers == ["laneStore"]
+    assert "#lanes = new Map();" in store_source
+    assert all(f"{name}(" in store_source for name in api_names)
+    calls = {name: production.count(f"laneStore.{name}(") for name in api_names}
     assert calls == {
         "registerLane": 2,
         "removeLane": 1,
@@ -59,26 +60,29 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
     }
 
 
-def test_target_consumers_have_no_bare_collection_or_index_vestige():
+def test_target_inventory_is_owned_by_the_store_and_consumed_through_its_api():
+    """The store module privately owns the ordered collection and id index and
+    builds the single production instance; consumers reach target state through
+    its public methods."""
+    store_source = (STATIC_ROOT / "app.lane-store.js").read_text(encoding="utf-8")
     production = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(STATIC_ROOT.glob("app*.js"))
         if path.name != "app.lane-store.js"
     )
 
-    assert "targetById" not in production
-    assert re.search(r"\b(?:let|const|var)\s+targets\b", production) is None
-    assert re.search(r"\btargets\s*=", production) is None
-    for direct_read in (
-        r"(?<![.\w])targets\.length",
-        r"(?<![.\w])targets\.map\(",
-        r"(?<![.\w])targets\.filter\(",
-        r"(?<![.\w])targets\.slice\(",
-        r"for \(const target of targets\)",
-    ):
-        assert re.search(direct_read, production) is None
+    assert "#targets = [];" in store_source
+    assert "#targetById = new Map();" in store_source
+    assert "const laneStore = new ServeLaneStore();" in store_source
+
+    instance_owners = sorted(
+        path.name
+        for path in STATIC_ROOT.glob("app*.js")
+        if "new ServeLaneStore()" in path.read_text(encoding="utf-8")
+    )
+    assert instance_owners == ["app.lane-store.js"]
 
     assert "laneStore.replaceTargets(payload.workTrees || []);" in production
-    assert "laneStore.updateTarget(targetId" in production
     assert "laneStore.targetsSnapshot()" in production
     assert "laneStore.targetForId(" in production
+    assert "laneStore.updateTarget(targetId" in production

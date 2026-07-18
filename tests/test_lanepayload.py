@@ -781,21 +781,6 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
 
     def fake_export(args: list[str]) -> list[dict[str, object]]:
         seen.append(args)
-        if args == ["status:pending", "+READY", "-ACTIVE"]:
-            return [
-                {"uuid": "ready-serve-a"},
-                {"uuid": "ready-serve-b"},
-                {"uuid": "ready-task"},
-                {"uuid": "private"},
-            ]
-        if args == ["status:waiting", "-ACTIVE"]:
-            return [
-                {"uuid": "deferred-serve"},
-                {"uuid": "deferred-oops"},
-                {"uuid": "deferred-maxim"},
-            ]
-        if args == ["status:pending", "+BLOCKED", "-ACTIVE"]:
-            return [{"uuid": "blocked-serve"}]
         assert args == ["(", "status:pending", "or", "status:waiting", ")"]
         return [
             {"uuid": "ready-serve-a", "project": "serve.ui"},
@@ -804,33 +789,38 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
                 "uuid": "in-flight-serve",
                 "project": "serve.ui",
                 "claim_by": "agent-a",
+                "start": "20260616T230000Z",
             },
-            {"uuid": "blocked-serve", "project": "serve.ui"},
+            {
+                "uuid": "blocked-serve",
+                "project": "serve.ui",
+                "depends": ["ready-serve-a"],
+            },
             {"uuid": "ready-task", "project": "task.review"},
             {"uuid": "private", "project": "agent.abc123.task"},
             {"uuid": "oops", "project": ".oops"},
             {
                 "uuid": "active-oops",
                 "project": ".oops",
-                "start": "2026-06-16T23:00:00Z",
+                "start": "20260616T230000Z",
             },
             {
                 "uuid": "deferred-serve",
                 "project": "serve.ui",
                 "status": "pending",
-                "wait": "2099-01-01",
+                "wait": "20990101T000000Z",
             },
             {
                 "uuid": "deferred-oops",
                 "project": ".oops.correctness",
                 "status": "pending",
-                "wait": "2099-01-01",
+                "wait": "20990101T000000Z",
             },
             {
                 "uuid": "deferred-maxim",
                 "project": ".maxim_proposal",
                 "status": "pending",
-                "wait": "2099-01-01",
+                "wait": "20990101T000000Z",
             },
         ]
 
@@ -842,12 +832,7 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     inventory = task_filter_inventory()
     filters = {item["name"]: item for item in inventory["filters"]}
     stems = {item["name"]: item for item in inventory["primaryStems"]}
-    assert seen == [
-        ["(", "status:pending", "or", "status:waiting", ")"],
-        ["status:pending", "+READY", "-ACTIVE"],
-        ["status:waiting", "-ACTIVE"],
-        ["status:pending", "+BLOCKED", "-ACTIVE"],
-    ]
+    assert seen == [["(", "status:pending", "or", "status:waiting", ")"]]
     assert inventory["openTaskCount"] == 6
     assert filters["serve.ui"] == {
         "name": "serve.ui",
@@ -889,19 +874,11 @@ def test_task_filter_inventory_preserves_all_deferred_project_as_zero_ready(
     monkeypatch,
 ):
     def fake_export(args: list[str]) -> list[dict[str, object]]:
-        if args == ["(", "status:pending", "or", "status:waiting", ")"]:
-            return [
-                {"uuid": "deferred-a", "project": "serve.ui"},
-                {"uuid": "deferred-b", "project": "serve.ui"},
-            ]
-        if args == ["status:waiting", "-ACTIVE"]:
-            return [{"uuid": "deferred-a"}, {"uuid": "deferred-b"}]
-        if args in (
-            ["status:pending", "+READY", "-ACTIVE"],
-            ["status:pending", "+BLOCKED", "-ACTIVE"],
-        ):
-            return []
-        raise AssertionError(f"unexpected export args: {args}")
+        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
+        return [
+            {"uuid": "deferred-a", "project": "serve.ui", "wait": "20990101T000000Z"},
+            {"uuid": "deferred-b", "project": "serve.ui", "wait": "20990101T000000Z"},
+        ]
 
     monkeypatch.setattr(tw, "export", fake_export)
     inventory = task_filter_inventory()
