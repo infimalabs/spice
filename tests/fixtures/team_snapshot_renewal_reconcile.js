@@ -74,7 +74,8 @@ function normalizeTeamActorId(actorId) {
 
 function resetGlobals() {
   laneStore.replaceTargets([]);
-  context.teamSnapshotRevision = 0;
+  for (const lane of laneStore.lanesSnapshot())
+    laneStore.removeLane(lane.targetId);
   context.browserStorage = () => null;
   context.canonicalThreadActorId = canonicalThreadActorId;
   context.targetTeamActorId = targetTeamActorId;
@@ -165,12 +166,12 @@ const renamedLane = {
   element: { remove() {} },
 };
 laneStore.replaceTargets([staleTarget]);
-context.laneStates = new Map([[renamedLane.targetId, renamedLane]]);
+laneStore.registerLane(renamedLane);
 
 applySnapshot(renewalTeam("thread:successorthread"));
 
 assert(
-  context.laneStates.get("target-1") === renamedLane,
+  laneStore.laneForId("target-1") === renamedLane,
   "renewed successor stays attached to the existing worktree lane",
 );
 assert(
@@ -202,12 +203,12 @@ const pendingLane = {
   element: { remove() {} },
 };
 laneStore.replaceTargets([pendingTarget]);
-context.laneStates = new Map([[pendingLane.targetId, pendingLane]]);
+laneStore.registerLane(pendingLane);
 
 applySnapshot(renewalTeam("thread:successorthread"));
 
 assert(
-  context.laneStates.get("target-1") === pendingLane,
+  laneStore.laneForId("target-1") === pendingLane,
   "early renewal snapshot keeps the existing lane instead of closing it",
 );
 assert(

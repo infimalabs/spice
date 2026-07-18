@@ -21,7 +21,7 @@ from spice.tasks import (
     wordingreview,
 )
 from spice.tasks.markdown.apply import ingest_path
-from spice.tasks.markdown.ledger import export_ledger
+from spice.tasks.markdown.ledger import render_ledger
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -904,6 +904,13 @@ def _oops(args: argparse.Namespace) -> str:
     )
 
 
+def _ledger(args: argparse.Namespace) -> str:
+    text, warning = render_ledger(args.handle)
+    if warning:
+        print(warning, file=sys.stderr)
+    return text.removesuffix("\n")
+
+
 _DISPATCH = {
     "status": lambda a: render.render_status(),
     "next": lambda a: render.render_next(),
@@ -914,7 +921,7 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
-    "ledger": lambda a: export_ledger(a.handle).removesuffix("\n"),
+    "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(
         a.path,

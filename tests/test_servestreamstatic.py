@@ -1313,7 +1313,12 @@ def test_fused_lane_status_restores_host_status_on_split():
     script = Path(__file__).with_name("fixtures") / "fused_status_split.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_groups)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_groups),
+        ],
         capture_output=True,
         text=True,
         check=False,

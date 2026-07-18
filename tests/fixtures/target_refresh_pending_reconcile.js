@@ -15,7 +15,6 @@ const context = {
   targetsLoaded: false,
   taskFilterInventoryRevision: "99",
   taskFilterStemPills: [],
-  laneStates: new Map(),
   spiceMenuEl: null,
   uniqueStringList(values) {
     return Array.from(new Set(values || []));
@@ -43,6 +42,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
   filename: "app.lane-store.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
@@ -120,7 +120,7 @@ const lane = {
   lastRenderedStatusLine: cachedPayload.statusLine,
   pipEl: { dataset: {}, title: "" },
 };
-context.laneStates.set(lane.targetId, lane);
+laneStore.registerLane(lane);
 
 const refreshedMetrics = { completed: 9 };
 const refreshedInfo = {

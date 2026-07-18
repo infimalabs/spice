@@ -97,12 +97,12 @@ async function measureTeamWidths(page, phase) {
       );
       applyTeamSnapshotPayload(payload, { force: true });
 
-      const host = laneGroupHost(laneStates.get(weightedMemberIds[0]));
-      const solo = laneStates.get(soloId);
+      const host = laneGroupHost(laneStore.laneForId(weightedMemberIds[0]));
+      const solo = laneStore.laneForId(soloId);
       if (laneGroupMemberTargetIds(host).length < weightedMemberIds.length)
         throw new Error("weighted team did not fuse into one host lane");
 
-      const visible = [...laneStates.values()].filter(
+      const visible = laneStore.lanesSnapshot().filter(
         (lane) =>
           isLaneOpen(lane) &&
           lane.element.classList.contains("lane--shadowed") === false,

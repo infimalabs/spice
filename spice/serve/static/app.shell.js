@@ -4,9 +4,9 @@
 // slide horizontally along --lane-view-position.
 
 function addLane(targetId, hint = null, options = {}) {
-  if (!laneStore.targetForId(targetId) || laneStates.has(targetId)) return;
+  if (!laneStore.targetForId(targetId) || laneStore.hasLane(targetId)) return;
   const lane = createLaneState(targetId, hint);
-  laneStates.set(targetId, lane);
+  laneStore.registerLane(lane);
   lanesEl.append(lane.element);
   renderSpiceMenuIfAvailable();
   renderFilterPills();
@@ -17,13 +17,13 @@ function addLane(targetId, hint = null, options = {}) {
 
 function addEmptyTeamLane(team, options = {}) {
   const targetId = emptyTeamTargetId(team.teamId);
-  if (laneStates.has(targetId)) return;
+  if (laneStore.hasLane(targetId)) return;
   const lane = createLaneState(targetId, null, {
     emptyTeam: true,
     team,
     canClose: Boolean(options.canClose),
   });
-  laneStates.set(targetId, lane);
+  laneStore.registerLane(lane);
   lanesEl.append(lane.element);
   renderSpiceMenuIfAvailable();
   renderFilterPills();
@@ -307,8 +307,8 @@ function configureObserverLane(lane) {
 function ensureEmptyTeamLane(team, options = {}) {
   if (!team.teamId) return;
   const targetId = emptyTeamTargetId(team.teamId);
-  if (!laneStates.has(targetId)) addEmptyTeamLane(team, options);
-  const lane = laneStates.get(targetId);
+  if (!laneStore.hasLane(targetId)) addEmptyTeamLane(team, options);
+  const lane = laneStore.laneForId(targetId);
   if (lane) syncEmptyTeamLane(lane, team, options);
 }
 

@@ -45,6 +45,14 @@ _RUNTIME_ANNOTATION_PREFIXES = (
 )
 
 
+LEDGER_ROUND_TRIP_WARNING = (
+    "ledger export does not round-trip: re-ingesting this text would not "
+    "reproduce the same task graph. Free-text runtime annotations render as "
+    "prose and fold back into the node description on re-read, so this ledger "
+    "is a lossy view -- read it, but do not apply it back onto the board."
+)
+
+
 def export_document(document: Doc) -> str:
     """Render a task-document graph in ledger normal form.
 
@@ -58,17 +66,34 @@ def export_document(document: Doc) -> str:
     parentless leaves it depends on, and those dependency edges re-derive from
     the shape on re-read.
 
-    The result obeys the two ledger laws: parsing it reproduces the same graph
-    (round trip), and re-exporting the re-parsed document is byte-identical
-    (fixed point). The round trip is asserted here -- the ledger refuses to
-    emit a document it cannot read back to the same graph.
+    The result aims to obey the two ledger laws: parsing it reproduces the same
+    graph (round trip), and re-exporting the re-parsed document is byte-identical
+    (fixed point). Rendering never fails on drift -- free-text runtime
+    annotations render as prose and fold into the description on re-read, which
+    no renderer can avoid. Callers that must know whether a given family
+    round-trips ask :func:`ledger_round_trip_warning`; :func:`render_ledger`
+    pairs the rendered text with that warning.
     """
     if not document.nodes or document.root < 0:
         return ""
-    text = _Renderer(document).render()
-    if graph_signature(parse(text)) != graph_signature(document):
-        raise SpiceError("ledger export does not round-trip to the same graph")
-    return text
+    return _Renderer(document).render()
+
+
+def ledger_round_trip_warning(document: Doc, text: str | None = None) -> str | None:
+    """Return the drift warning when rendering ``document`` is lossy.
+
+    ``None`` means the rendered ledger reads back to the same graph. Pass the
+    already-rendered ``text`` to avoid rendering twice.
+    """
+    if not document.nodes or document.root < 0:
+        return None
+    if text is None:
+        text = export_document(document)
+    if not text:
+        return None
+    if graph_signature(parse(text)) == graph_signature(document):
+        return None
+    return LEDGER_ROUND_TRIP_WARNING
 
 
 class _Renderer:
@@ -234,9 +259,16 @@ class _Renderer:
         return body + "\n" if body else ""
 
 
-def export_ledger(handle: str) -> str:
-    """Export the task family containing ``handle`` in ledger normal form."""
-    return export_document(_load_family(handle))
+def render_ledger(handle: str) -> tuple[str, str | None]:
+    """Render the family containing ``handle`` and flag a lossy round-trip.
+
+    Returns the ledger text plus a warning when re-ingesting the text would not
+    reproduce the same graph (``None`` when it round-trips cleanly). The family
+    is loaded and rendered exactly once.
+    """
+    document = _load_family(handle)
+    text = export_document(document)
+    return text, ledger_round_trip_warning(document, text)
 
 
 def _load_family(handle: str) -> Doc:

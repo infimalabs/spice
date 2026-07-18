@@ -223,7 +223,7 @@ function syncLaneHistoryObserver(lane) {
 
 function historyLaneForSentinel(host, sentinel) {
   const targetId = sentinel.dataset.historyTargetId || host.targetId;
-  const member = laneStates.get(targetId);
+  const member = laneStore.laneForId(targetId);
   if (member && laneGroupHost(member) === host) return member;
   return host;
 }

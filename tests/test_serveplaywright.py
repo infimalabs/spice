@@ -155,7 +155,7 @@ def test_serve_fresh_startup_import_shell_smoke_asserts_stale_hint_reset() -> No
     assert '"[]"' in smoke
     assert "fresh startup topology must settle on the import shell" in smoke
     assert "fresh startup must rewrite stale lane config" in smoke
-    assert "snapshotRevision: teamSnapshotRevision" in smoke
+    assert "snapshotRevision: laneStore.teamSnapshotRevision()" in smoke
     assert "stale open-lane hints must not mutate the team store revision" in smoke
 
 

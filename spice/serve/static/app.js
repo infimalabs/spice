@@ -59,8 +59,6 @@ const defaultLaneViewMode = "compose";
 const composerAttachmentMaxItems = 8;
 const composerAttachmentMaxBytes = 8 * 1024 * 1024;
 
-const laneStates = new Map();
-
 function agentLifetimeAutoManagesTasks(lifetime) {
   return lifetime === "Drive";
 }
@@ -95,7 +93,6 @@ let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];
 let fastModeEnabled = initialFastModeEnabled();
-let teamSnapshotRevision = 0;
 
 function laneViewMode(value) {
   return laneViewModes.includes(value || "") ? value : defaultLaneViewMode;

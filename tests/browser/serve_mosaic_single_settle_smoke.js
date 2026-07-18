@@ -232,8 +232,8 @@ async function ssMeasure(config) {
 
   await window.__ssSettle(config.settleMs);
 
-  const fusedHost = laneGroupHost(laneStates.get(config.fusedIds[0]));
-  const soloHost = laneGroupHost(laneStates.get(config.soloId));
+  const fusedHost = laneGroupHost(laneStore.laneForId(config.fusedIds[0]));
+  const soloHost = laneGroupHost(laneStore.laneForId(config.soloId));
   const fusedExpectedKeys = window
     .__ssExpectedKeys(config.fusedIds[0], 0, 2, config.perLane)
     .concat(window.__ssExpectedKeys(config.fusedIds[1], 1, 2, config.perLane));

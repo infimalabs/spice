@@ -384,7 +384,7 @@ function laneComposePlaceholderStatus(member) {
 
 function syncComposerPlaceholders(lane) {
   for (const [targetId, textarea] of lane.shardTextareas) {
-    const member = laneStates.get(targetId) || lane;
+    const member = laneStore.laneForId(targetId) || lane;
     textarea.placeholder = laneComposePlaceholder(member);
     textarea.title = laneComposeTaskTooltip(member);
     const primary = textarea.closest(".composer-band--primary");
@@ -394,7 +394,7 @@ function syncComposerPlaceholders(lane) {
     "[data-composer-quote-stack-target-id]",
   )) {
     const targetId = stack.dataset.composerQuoteStackTargetId || "";
-    const member = laneStates.get(targetId) || lane;
+    const member = laneStore.laneForId(targetId) || lane;
     for (const textarea of stack.querySelectorAll("textarea[data-quote-draft-id]")) {
       textarea.placeholder = laneComposePlaceholder(member);
     }
@@ -693,7 +693,7 @@ function renderComposerQuoteBands(lane) {
 }
 
 function syncComposerQuoteStack(lane, stack, targetId) {
-  const member = laneStates.get(targetId) || lane;
+  const member = laneStore.laneForId(targetId) || lane;
   const bands = composerQuoteDraftsForTarget(lane, targetId).map((draft) => {
     let band = composerQuoteBandElementForDraft(stack, draft.id);
     if (!band) band = composerQuoteBand(lane, targetId, member, draft);
@@ -1011,7 +1011,7 @@ function pruneComposerAttachments(lane, targetIds) {
 
 function removeComposerAgentFromTeam(lane, targetId) {
   const host = laneGroupHost(lane);
-  const member = laneStates.get(targetId);
+  const member = laneStore.laneForId(targetId);
   if (!member) return;
   if (laneComposerTargetDraftText(host, targetId).trim()) {
     if (!window.confirm(unsafeDraftWarningText())) return;

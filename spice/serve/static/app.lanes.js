@@ -59,12 +59,12 @@ function applyTargetsPayload(payload) {
   syncObserverNotice(payload.observerErrors || []);
   clearGlobalActivityStatus("loading teams");
   applyTaskFilterInventory(payload.taskFilterInventory || {});
-  for (const lane of [...laneStates.values()]) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (!laneStore.targetForId(lane.targetId) && !lane.emptyTeam)
       closeLaneCore(lane);
   }
   renderFilterPills();
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
     else renderLaneChrome(lane, laneStore.targetForId(lane.targetId));
   }
@@ -108,20 +108,18 @@ function syncTaskFilterInventoryState(inventory) {
       taskFilterInventory: inventory,
     })),
   );
-  if (typeof laneStates === "undefined" || !laneStates?.values) return;
-  for (const lane of laneStates.values()) lane.taskFilterInventory = inventory;
+  for (const lane of laneStore.lanesSnapshot())
+    lane.taskFilterInventory = inventory;
 }
 
 function renderTaskFilterInventoryPanes() {
   if (
-    typeof laneStates === "undefined" ||
-    !laneStates?.values ||
     typeof laneGroupHost !== "function" ||
     typeof renderLaneFiltersPane !== "function"
   )
     return;
   const renderedHosts = new Set();
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     const host = laneGroupHost(lane);
     const key = host.targetId || lane.targetId || "";
     if (renderedHosts.has(key)) continue;
@@ -165,8 +163,8 @@ function normalizedNonnegativeIntegerString(value) {
 
 async function refreshTeamSnapshot(options = {}) {
   const query = {};
-  if (!options.force && teamSnapshotRevision)
-    query.sinceRevision = teamSnapshotRevision;
+  if (!options.force && laneStore.teamSnapshotRevision())
+    query.sinceRevision = laneStore.teamSnapshotRevision();
   const response = /** @type {TeamsFrame} */ (
     await liveBusRequest("teams.refresh", { query })
   );
@@ -191,7 +189,7 @@ async function requestTeamCommand(payload) {
 }
 
 function teamCommandPayload(command, fields = {}) {
-  return { command, expectedRevision: teamSnapshotRevision, ...fields };
+  return laneStore.teamCommandPayload(command, fields);
 }
 
 /**
@@ -199,108 +197,80 @@ function teamCommandPayload(command, fields = {}) {
  * @param {Object=} options
  */
 function applyTeamSnapshotPayload(payload, options = {}) {
-  const revision = Math.max(
-    0,
-    Number(payload.revision || (payload.snapshot || {}).globalRevision || 0),
-  );
-  if (revision < teamSnapshotRevision) return;
-  const changed = payload.changed !== false || options.force;
-  teamSnapshotRevision = revision;
-  if (!changed) return;
-  applyGlobalSettingsPayload((payload.snapshot || {}).globalSettings);
-  const openBefore = laneStateTargetIds();
-  const teams = (payload.snapshot || {}).teams || [];
-  const canCloseEmptyTeam = teams.length > 1;
+  return laneStore.applyTeamSnapshot(payload, {
+    force: Boolean(options.force),
+    emptyTeamTargetId,
+    resolveMember: resolveTeamSnapshotMember,
+    unresolvedLaneTargetIds: unresolvedTeamLaneTargetIds,
+    canRemoveLane: (lane) =>
+      !laneHasUnsafeDraft(lane) || Boolean(lane.serverCloseRequested),
+  });
+}
+
+laneStore.subscribe((change) => {
+  if (change.kind !== "teamSnapshot") return;
+  materializeTeamSnapshotTransition(change.transition);
+});
+
+function materializeTeamSnapshotTransition(transition) {
+  if (transition.disposition !== "applied") return;
+  applyGlobalSettingsPayload(transition.globalSettings);
   const hints = laneHintsByTargetId();
-  const openTargetIds = new Set();
-  const groupRuns = [];
-  for (const team of teams) {
-    const members = team.members || [];
-    const memberTargetIds = teamMemberTargetIds(team);
-    if (!memberTargetIds.length) {
-      if (members.length) {
-        preserveUnresolvedTeamLanes(team, openTargetIds);
-        continue;
-      }
-      if (!team.teamId) continue;
-      const targetId = emptyTeamTargetId(team.teamId);
-      openTargetIds.add(targetId);
-      ensureEmptyTeamLane(team, { canClose: canCloseEmptyTeam });
-      continue;
-    }
-    for (const targetId of memberTargetIds) {
-      openTargetIds.add(targetId);
-      ensureTeamMemberLane(targetId, team, hints.get(targetId));
-    }
-    if (memberTargetIds.length < members.length)
-      preserveUnresolvedTeamLanes(team, openTargetIds);
-    if (memberTargetIds.length > 1) groupRuns.push(memberTargetIds);
+  for (const renewal of transition.renewals)
+    renameTeamMemberTargetThread(renewal.targetId, renewal.actorId);
+  for (const change of [...transition.adds, ...transition.updates]) {
+    if (change.kind === "emptyTeam")
+      ensureEmptyTeamLane(change.team, { canClose: change.canClose });
+    else
+      ensureTeamMemberLane(
+        change.targetId,
+        change.team,
+        hints.get(change.targetId),
+        change.member,
+      );
   }
-  for (const lane of [...laneStates.values()]) {
-    if (openTargetIds.has(lane.targetId)) continue;
-    if (laneHasUnsafeDraft(lane) && !lane.serverCloseRequested) continue;
-    closeLaneCore(lane);
-  }
-  reconcileLaneGroups(groupRuns);
+  for (const lane of transition.removes) closeLaneCore(lane);
+  reconcileLaneGroups(transition.groupRuns);
   if (typeof targetsLoaded === "undefined" || targetsLoaded)
     persistLaneHints();
-  if (!sameStringSets(openBefore, laneStateTargetIds()))
+  if (transition.adds.length || transition.removes.length)
     renderSpiceMenuIfAvailable();
   renderFilterPills();
 }
 
-function laneStateTargetIds() {
-  return new Set(laneStates.keys());
-}
-
-function sameStringSets(left, right) {
-  if (left.size !== right.size) return false;
-  for (const value of left) {
-    if (!right.has(value)) return false;
-  }
-  return true;
-}
-
-function teamMemberTargetIds(team) {
-  const targetIds = [];
-  for (const member of team.members || []) {
-    const targetId = teamMemberTargetId(member, team, targetIds);
-    if (
-      targetId &&
-      laneStore.targetForId(targetId) &&
-      !targetIds.includes(targetId)
-    )
-      targetIds.push(targetId);
-  }
-  return targetIds;
-}
-
 // A team member is an explicit actor: target:<target-id> before a thread binds,
 // then thread:<canonical-thread-id> once an agent exists.
-function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
+function resolveTeamSnapshotMember(member, team, claimedTargetIds = []) {
   const agentId = String((member || {}).agentId || "");
   const actorId = normalizeTeamActorId(agentId);
-  if (!actorId) return "";
+  if (!actorId) return {};
   if (teamActorKind(actorId) === "target") {
     const targetId = teamActorValue(actorId);
-    return laneStore.targetForId(targetId) ? targetId : "";
+    return laneStore.targetForId(targetId) ? { targetId, actorId } : {};
   }
   const laneTargetId = teamMemberLaneTargetId(actorId);
-  if (laneTargetId) {
-    renameTeamMemberTargetThread(laneTargetId, actorId);
-    return laneTargetId;
-  }
+  if (laneTargetId)
+    return {
+      targetId: laneTargetId,
+      actorId,
+      threadId: teamActorThreadId(actorId),
+    };
   for (const target of laneStore.targetsSnapshot()) {
     if (teamActorMatchesThread(actorId, targetIdentityThreadId(target.targetIdentity)))
-      return target.id;
+      return { targetId: target.id, actorId };
   }
   const renewedTargetId = renewedTeamSlotTargetId(team, actorId, claimedTargetIds);
-  if (renewedTargetId) return renewedTargetId;
-  return "";
+  if (renewedTargetId)
+    return {
+      targetId: renewedTargetId,
+      actorId,
+      threadId: teamActorThreadId(actorId),
+    };
+  return {};
 }
 
 function teamMemberLaneTargetId(actorId) {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (!laneStore.targetForId(lane.targetId)) continue;
     if (
       teamActorMatchesThread(actorId, lane.targetThreadId) ||
@@ -317,7 +287,7 @@ function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
   const actorIds = teamMemberActorIds(team);
   const claimed = new Set(claimedTargetIds);
   const candidates = [];
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.emptyTeam || claimed.has(lane.targetId)) continue;
     const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
@@ -328,7 +298,6 @@ function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
     candidates.push(lane.targetId);
   }
   if (candidates.length !== 1) return "";
-  renameTeamMemberTargetThread(candidates[0], actorId);
   return candidates[0];
 }
 
@@ -342,18 +311,19 @@ function renameTeamMemberTargetThread(targetId, actorId) {
       thread: { state: "bound", threadId },
     },
   }));
-  const lane = laneStates.get(targetId);
+  const lane = laneStore.laneForId(targetId);
   if (!lane) return;
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
   if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, threadId);
 }
 
-function preserveUnresolvedTeamLanes(team, openTargetIds) {
+function unresolvedTeamLaneTargetIds(team) {
   const teamId = String((team || {}).teamId || "");
-  if (!teamId) return;
+  if (!teamId) return [];
   const actorIds = teamMemberActorIds(team);
-  for (const lane of laneStates.values()) {
+  const targetIds = [];
+  for (const lane of laneStore.lanesSnapshot()) {
     if (lane.emptyTeam) continue;
     const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
@@ -361,8 +331,9 @@ function preserveUnresolvedTeamLanes(team, openTargetIds) {
       continue;
     const laneActorId = laneTeamAgentId(lane);
     if (laneActorId && actorIds.has(laneActorId)) continue;
-    openTargetIds.add(lane.targetId);
+    targetIds.push(lane.targetId);
   }
+  return targetIds;
 }
 
 function teamMemberActorIds(team) {
@@ -374,14 +345,13 @@ function teamMemberActorIds(team) {
   return actorIds;
 }
 
-function ensureTeamMemberLane(targetId, team, hint = null) {
-  if (!laneStates.has(targetId)) addLane(targetId, hint, { persist: false });
-  const lane = laneStates.get(targetId);
+function ensureTeamMemberLane(targetId, team, hint = null, member = null) {
+  if (!laneStore.hasLane(targetId)) addLane(targetId, hint, { persist: false });
+  const lane = laneStore.laneForId(targetId);
   if (!lane) return;
   const previousConfigRevision = lane.configRevision || 0;
   const config = team.config || {};
   const splitBack = team.splitBack || {};
-  const member = teamMemberForTargetId(team, targetId);
   lane.teamId = String(team.teamId || "");
   lane.teamRevision = Math.max(0, Number(team.revision || 0));
   lane.teamSplitBackAvailable = Boolean(splitBack.available);
@@ -415,13 +385,6 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
     subscribeLaneToLiveBus(lane);
 }
 
-function teamMemberForTargetId(team, targetId) {
-  for (const member of team.members || []) {
-    if (teamMemberTargetId(member) === targetId) return member;
-  }
-  return null;
-}
-
 function laneTeamAgentId(lane) {
   const actor = threadTeamActorId(lane.targetThreadId);
   if (actor) return actor;
@@ -451,8 +414,8 @@ function laneTeamAgentAliases(lane) {
 
 async function openTargetTeam(targetId, options = {}) {
   const keepMenuOpen = Boolean(options.keepMenuOpen);
-  if (laneStates.has(targetId)) {
-    const lane = laneStates.get(targetId);
+  if (laneStore.hasLane(targetId)) {
+    const lane = laneStore.laneForId(targetId);
     if (lane)
       lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });
     if (!keepMenuOpen) closeSpiceMenu();
@@ -461,7 +424,7 @@ async function openTargetTeam(targetId, options = {}) {
   const target = laneStore.targetForId(targetId);
   if (!target) throw new Error("open team requires a known target");
   await refreshTeamSnapshot({ force: true });
-  if (!laneStates.has(targetId)) {
+  if (!laneStore.hasLane(targetId)) {
     await requestTeamCommand(
       teamCommandPayload("createTeam", {
         members: [targetTeamAgentId(target)],
@@ -498,7 +461,7 @@ function closeLaneCore(lane) {
   lane.paneMetricsFrame = 0;
   abortLaneSpeech(lane);
   lane.element.remove();
-  laneStates.delete(lane.targetId);
+  laneStore.removeLane(lane.targetId);
   syncNarrationMediaSession();
   renderFilterPills();
 }
@@ -510,7 +473,7 @@ function laneHasUnsafeDraft(lane) {
 }
 
 function servePageHasUnsafeComposerState() {
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (laneHasUnsafeDraft(lane)) return true;
   }
   return false;
@@ -552,7 +515,7 @@ function persistLaneHints() {
   const storage = browserStorage();
   if (!storage) return;
   const hints = [];
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (!isLaneOpen(lane)) continue;
     if (lane.emptyTeam || !laneStore.targetForId(lane.targetId)) continue;
     hints.push({
@@ -611,7 +574,7 @@ function syncTargetChoiceNameAccent(button, target) {
 }
 
 function targetChoiceNameAccent(target) {
-  const lane = laneStates.get(target.id);
+  const lane = laneStore.laneForId(target.id);
   if (!lane) return "";
   const host = laneGroupHost(lane);
   const members = laneGroupMemberLanes(host);
@@ -631,7 +594,7 @@ function targetChoiceName(target) {
 
 function targetChoiceMetadata(target) {
   const parts = [];
-  if (laneStates.has(target.id)) parts.push("open");
+  if (laneStore.hasLane(target.id)) parts.push("open");
   const activity = relativeTime(targetChoiceLastAssistantAt(target));
   if (activity) parts.push(activity.trim());
   else if (!targetIdentityThreadId(target.targetIdentity)) parts.push("never");
@@ -682,7 +645,7 @@ function targetChoiceStatusLine(target) {
 }
 
 function targetChoiceLaneStatusLine(target) {
-  const lane = laneStates.get(target.id);
+  const lane = laneStore.laneForId(target.id);
   return (lane && lane.lastRenderedStatusLine) || {};
 }
 
@@ -978,7 +941,7 @@ function taskFilterStemDrainability(stem) {
   const covered = new Set(uniqueStringList([stem.name, ...(stem.filters || [])]));
   let count = 0;
   let boundaryDissolved = false;
-  for (const lane of laneStates.values()) {
+  for (const lane of laneStore.lanesSnapshot()) {
     if (!isLaneOpen(lane) || isShadowLane(lane)) continue;
     const lifetime = laneEffectiveLifetime(lane);
     if (

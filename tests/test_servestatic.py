@@ -196,7 +196,12 @@ def test_global_transient_status_renders_in_lane_status_line():
     script = Path(__file__).with_name("fixtures") / "global_status_line.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_render)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_render),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -581,7 +586,7 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     assert "if (status) parts.push(status);" in app_shell
     assert 'return "Steer " + laneMemberTargetLabel(lane);' not in app_shell
     assert 'textarea.placeholder = "Reply with quoted context";' not in app_shell
-    assert "const member = laneStates.get(targetId) || lane;" in app_shell
+    assert "const member = laneStore.laneForId(targetId) || lane;" in app_shell
     assert "syncComposerQuoteBand(band, lane, targetId, member, draft);" in app_shell
     assert "createComposerQuoteTextarea(lane, targetId, draft);" in app_shell
     assert (
@@ -673,6 +678,7 @@ def test_static_lane_differential_frames_update_pending_and_messages():
         [
             "node",
             str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
             str(app_render),
             str(app_live_bus),
             str(app_stream),
@@ -739,7 +745,7 @@ def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
         'const targetId = stack.dataset.composerQuoteStackTargetId || "";' in sync_body
     )
     assert 'stack.querySelectorAll("textarea[data-quote-draft-id]")' in sync_body
-    assert sync_body.count("const member = laneStates.get(targetId) || lane;") == 2
+    assert sync_body.count("const member = laneStore.laneForId(targetId) || lane;") == 2
     assert (
         sync_body.count("textarea.placeholder = laneComposePlaceholder(member);") == 2
     )

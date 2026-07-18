@@ -10,10 +10,6 @@ const laneB = { targetId: "b", taskFilterInventory: { revision: "0" } };
 const renderedFilterPaneTargetIds = [];
 const context = {
   console,
-  laneStates: new Map([
-    ["a", laneA],
-    ["b", laneB],
-  ]),
   taskFilterInventoryRevision: "",
   taskFilterStemPills: [],
   uniqueStringList(items) {
@@ -36,6 +32,8 @@ vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
 });
 const laneStore = vm.runInContext("laneStore", context);
 laneStore.replaceTargets([targetA, targetB]);
+laneStore.registerLane(laneA);
+laneStore.registerLane(laneB);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
