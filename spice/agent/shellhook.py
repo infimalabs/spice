@@ -714,9 +714,15 @@ def match_route_word(value: object, *, label: str) -> str:
 
 
 def match_route_pattern(flag: str) -> str:
-    if flag.endswith("*") and len(flag) > 1:
-        return shell_quote(flag[:-1]) + "*"
-    return shell_quote(flag)
+    """Compile one match flag into a shell ``case`` glob.
+
+    A literal ``*`` anywhere in the flag stays an unquoted wildcard while every
+    other segment is shell-quoted literally. This lets a trailing wildcard like
+    ``--glob=*`` match any ``--glob=`` value and a leading wildcard like ``*/``
+    match any trailing-directory operand, without a bespoke operand scanner.
+    """
+    segments = flag.split("*")
+    return "*".join(shell_quote(segment) if segment else "" for segment in segments)
 
 
 def render_agent_wrapper_selector_lines(

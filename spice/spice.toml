@@ -34,7 +34,7 @@ executable = "rtk"
 [wrappers.common.rtk]
 argv = ["rtk"]
 match = [
-  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*"], argv = ["rg"] },
+  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*", "*/"], argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
   # refuses (exit 1) or silently binds the directory operand as the pattern
