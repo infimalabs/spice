@@ -796,6 +796,7 @@ function renderFilterPills() {
       inFlightTaskCount: model.inFlightTaskCount,
       blockedTaskCount: model.blockedTaskCount,
       deferredTaskCount: model.deferredTaskCount,
+      unavailableTaskCount: model.unavailableTaskCount,
       drainable: model.drainability.drainable,
       drainableCount: model.drainability.count,
       boundaryDissolved: Boolean(model.drainability.boundaryDissolved),
@@ -808,16 +809,14 @@ function renderFilterPills() {
   for (const model of pillModels) {
     const pill = document.createElement("span");
     const classes = ["filter-pill", ...model.classes];
-    const isLit = taskFilterStemPillIsLit(model);
+    const tone = taskFilterStemPillTone(model);
     if (
-      isLit &&
+      tone === "ready" &&
       model.drainability.boundaryDissolved &&
       model.drainability.drainable
     )
       classes.push("filter-pill--implicit");
-    classes.push(
-      isLit ? "filter-pill--drainable" : "filter-pill--undrainable",
-    );
+    classes.push("filter-pill--" + tone);
     pill.className = classes.join(" ");
     pill.title = model.title;
     pill.dataset.readyTaskCount = String(model.readyTaskCount);
@@ -825,6 +824,7 @@ function renderFilterPills() {
     pill.dataset.inFlightTaskCount = String(model.inFlightTaskCount);
     pill.dataset.blockedTaskCount = String(model.blockedTaskCount);
     pill.dataset.deferredTaskCount = String(model.deferredTaskCount);
+    pill.dataset.unavailableTaskCount = String(model.unavailableTaskCount);
     pill.innerHTML =
       '<span class="filter-pill-label"></span>' +
       '<span class="filter-pill-count"></span>';
@@ -855,6 +855,18 @@ function taskFilterStemPillModel(stem) {
   );
   const blockedTaskCount = Math.max(0, Number(stem.blockedTaskCount) || 0);
   const deferredTaskCount = Math.max(0, Number(stem.deferredTaskCount) || 0);
+  const unavailableTaskCount = blockedTaskCount + deferredTaskCount;
+  const stateTaskCount =
+    readyTaskCount + inFlightTaskCount + unavailableTaskCount;
+  if (stateTaskCount !== openTaskCount)
+    throw new Error(
+      "task-filter stem state counts total " +
+        stateTaskCount +
+        " but openTaskCount is " +
+        openTaskCount +
+        ": " +
+        label,
+    );
   const classes = [];
   if (stem.name === "agent") classes.push("filter-pill--private");
   if (stem.name === "oops") classes.push("filter-pill--system");
@@ -866,6 +878,7 @@ function taskFilterStemPillModel(stem) {
     inFlightTaskCount,
     blockedTaskCount,
     deferredTaskCount,
+    unavailableTaskCount,
     classes,
     drainability,
     title: taskFilterStemPillTitle(
@@ -884,11 +897,16 @@ function taskFilterStemPillModel(stem) {
 
 function taskFilterStemPillCountText(model) {
   if (model.label === "oops") return String(model.openTaskCount);
-  return model.readyTaskCount + "/" + model.openTaskCount;
+  let text = model.readyTaskCount + "r+" + model.inFlightTaskCount + "a";
+  if (model.unavailableTaskCount > 0)
+    text += "+" + model.unavailableTaskCount + "u";
+  return text;
 }
 
-function taskFilterStemPillIsLit(model) {
-  return model.readyTaskCount > 0 && model.drainability.drainable;
+function taskFilterStemPillTone(model) {
+  if (model.readyTaskCount > 0) return "ready";
+  if (model.inFlightTaskCount > 0) return "active";
+  return "dormant";
 }
 
 function taskFilterStemPillTitle(label, counts, drainability) {
@@ -906,24 +924,24 @@ function taskFilterStemPillTitle(label, counts, drainability) {
     );
   return (
     readyTaskCount +
-    " ready / " +
-    openTaskCount +
-    " open across " +
-    taskFilterStemScopeLabel(label) +
-    "; " +
+    " ready, " +
     inFlightTaskCount +
-    " in flight, " +
+    " active/in flight, " +
     blockedTaskCount +
     " blocked, " +
     deferredTaskCount +
     " deferred; " +
+    openTaskCount +
+    " open across " +
+    taskFilterStemScopeLabel(label) +
+    "; " +
     (readyTaskCount > 0
       ? drainability.drainable
-        ? "drained by " + drainability.count
-        : "not currently drained"
-      : drainability.drainable
-        ? "route covered by " + drainability.count
-        : "no task currently ready")
+        ? "ready work drained by " + drainability.count
+        : "ready work not currently drained"
+      : inFlightTaskCount > 0
+        ? "work in flight"
+        : "no task currently movable")
   );
 }
 

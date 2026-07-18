@@ -62,30 +62,19 @@ const mixed = context.taskFilterStemPillModel(
     deferredTaskCount: 1,
   }),
 );
-assert(context.taskFilterStemPillCountText(mixed) === "2/5", "mixed badge is ready/open");
-assert(context.taskFilterStemPillIsLit(mixed) === true, "mixed ready work lights the pill");
+assert(
+  context.taskFilterStemPillCountText(mixed) === "2r+1a+2u",
+  "mixed badge labels ready, active, and unavailable work",
+);
+assert(
+  context.taskFilterStemPillTone(mixed) === "ready",
+  "mixed work receives the ready treatment",
+);
+assert(mixed.unavailableTaskCount === 2, "blocked and deferred work combine as unavailable");
 assert(
   mixed.title ===
-    "2 ready / 5 open across serve.*; 1 in flight, 1 blocked, 1 deferred; drained by 1",
+    "2 ready, 1 active/in flight, 1 blocked, 1 deferred; 5 open across serve.*; ready work drained by 1",
   "mixed hover exposes the complete state breakdown",
-);
-
-const allDeferred = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 2,
-    readyTaskCount: 0,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 0,
-    deferredTaskCount: 2,
-  }),
-);
-assert(
-  context.taskFilterStemPillCountText(allDeferred) === "0/2",
-  "all-deferred badge preserves the open denominator",
-);
-assert(
-  allDeferred.readyTaskCount === 0,
-  "all-deferred work exposes zero ready tasks for the dim treatment",
 );
 
 const readyOnly = context.taskFilterStemPillModel(
@@ -98,10 +87,102 @@ const readyOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(readyOnly) === "3/3",
-  "ready-only badge retains equal ready and open counts",
+  context.taskFilterStemPillCountText(readyOnly) === "3r+0a",
+  "ready-only badge stays at the usual two counts",
 );
-assert(context.taskFilterStemPillIsLit(readyOnly) === true, "ready-only work lights the pill");
+assert(
+  context.taskFilterStemPillTone(readyOnly) === "ready",
+  "ready-only work receives the ready treatment",
+);
+
+const activeOnly = context.taskFilterStemPillModel(
+  stem({
+    openTaskCount: 2,
+    readyTaskCount: 0,
+    inFlightTaskCount: 2,
+    blockedTaskCount: 0,
+    deferredTaskCount: 0,
+  }),
+);
+assert(
+  context.taskFilterStemPillCountText(activeOnly) === "0r+2a",
+  "active-only badge keeps claimed work explicit",
+);
+assert(
+  context.taskFilterStemPillTone(activeOnly) === "active",
+  "active-only work receives a distinct live treatment",
+);
+
+const blockedOnly = context.taskFilterStemPillModel(
+  stem({
+    openTaskCount: 2,
+    readyTaskCount: 0,
+    inFlightTaskCount: 0,
+    blockedTaskCount: 2,
+    deferredTaskCount: 0,
+  }),
+);
+assert(
+  context.taskFilterStemPillCountText(blockedOnly) === "0r+0a+2u",
+  "blocked-only badge uses the conditional unavailable count",
+);
+assert(
+  context.taskFilterStemPillTone(blockedOnly) === "dormant",
+  "blocked-only work receives the dormant treatment",
+);
+
+const deferredOnly = context.taskFilterStemPillModel(
+  stem({
+    openTaskCount: 2,
+    readyTaskCount: 0,
+    inFlightTaskCount: 0,
+    blockedTaskCount: 0,
+    deferredTaskCount: 2,
+  }),
+);
+assert(
+  context.taskFilterStemPillCountText(deferredOnly) === "0r+0a+2u",
+  "deferred-only badge uses the same glance-level unavailable count",
+);
+assert(
+  context.taskFilterStemPillTone(deferredOnly) === "dormant",
+  "deferred-only work receives the dormant treatment",
+);
+
+const unresolvedBlocker = context.taskFilterStemPillModel(
+  stem({
+    openTaskCount: 1,
+    readyTaskCount: 0,
+    inFlightTaskCount: 0,
+    blockedTaskCount: 1,
+    deferredTaskCount: 0,
+  }),
+);
+const resolvedBlocker = context.taskFilterStemPillModel(
+  stem({
+    openTaskCount: 1,
+    readyTaskCount: 1,
+    inFlightTaskCount: 0,
+    blockedTaskCount: 0,
+    deferredTaskCount: 0,
+  }),
+);
+assert(
+  context.taskFilterStemPillCountText(unresolvedBlocker) === "0r+0a+1u",
+  "unresolved dependency is unavailable",
+);
+assert(
+  context.taskFilterStemPillCountText(resolvedBlocker) === "1r+0a",
+  "resolved dependency moves automatically into ready",
+);
+assert(
+  context.taskFilterStemPillTone(unresolvedBlocker) === "dormant",
+  "unresolved dependency starts dormant",
+);
+assert(
+  context.taskFilterStemPillTone(resolvedBlocker) === "ready",
+  "resolved dependency receives the ready treatment",
+);
 
 const empty = context.taskFilterStemPillsFromInventory({
   catalog: { approvedStems: ["serve"] },
@@ -132,5 +213,5 @@ const waitingPayload = context.taskFilterStemPillsFromInventory({
 });
 assert(
   waitingPayload.map((item) => item.name).join(",") === "serve",
-  "project ready/open pills fully represent deferred inventory",
+  "project state pills fully represent deferred inventory",
 );

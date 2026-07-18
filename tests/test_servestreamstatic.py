@@ -49,10 +49,11 @@ def test_static_filter_header_pills_render_models_and_styles():
         'pill.querySelector(".filter-pill-count").textContent ='
         "\n      taskFilterStemPillCountText(model);" in app_lanes
     )
-    assert "function taskFilterStemPillIsLit(model)" in app_lanes
-    assert "return model.readyTaskCount > 0 && model.drainability.drainable;" in (
-        app_lanes
-    )
+    assert "function taskFilterStemPillTone(model)" in app_lanes
+    assert 'if (model.readyTaskCount > 0) return "ready";' in app_lanes
+    assert 'if (model.inFlightTaskCount > 0) return "active";' in app_lanes
+    assert 'return "dormant";' in app_lanes
+    assert 'classes.push("filter-pill--" + tone);' in app_lanes
     assert 'classes.push("filter-pill--system");' in app_lanes
     assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
     assert 'return stemName === "oops" ? "oops" : stemName + ".*";' in app_lanes
@@ -66,9 +67,10 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "boundaryDissolved = true;" in app_lanes
     assert "agentLifetimeUsesStoredTaskFilters(lifetime)" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
-    assert '"drained by " + drainability.count' in app_lanes
-    assert '"route covered by " + drainability.count' in app_lanes
-    assert '"not currently drained"' in app_lanes
+    assert '"ready work drained by " + drainability.count' in app_lanes
+    assert '"ready work not currently drained"' in app_lanes
+    assert '"work in flight"' in app_lanes
+    assert '"no task currently movable"' in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
     assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in (
@@ -86,8 +88,11 @@ def test_static_filter_header_pills_render_models_and_styles():
         "  padding: 0 5px;\n"
     )
     assert (
-        ".filter-pill--undrainable .filter-pill-count { background: var(--muted); }"
+        ".filter-pill--active .filter-pill-count { background: var(--team-teal-accent); }"
         in css
+    )
+    assert (
+        ".filter-pill--dormant .filter-pill-count { background: var(--muted); }" in css
     )
     assert ".filter-pill--implicit {" in css
     assert ".filter-pill--system { color: var(--warn); }" in css
