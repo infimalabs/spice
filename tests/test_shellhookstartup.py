@@ -8,14 +8,14 @@ import subprocess
 import pytest
 
 from spice.agent import shellhook
-from tests.test_shellhook import (
-    SHELL_HOOK_FAILURE_EXIT_CODE,
+from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
-    _completed_process_detail,
-    _fake_spice_executable,
-    _trace_lines,
-    _write_agent_wrapper_config,
+    completed_process_detail,
+    fake_spice_executable,
+    trace_lines,
+    write_agent_wrapper_config,
 )
+from tests.test_shellhook import SHELL_HOOK_FAILURE_EXIT_CODE
 
 INTERACTIVE_ZSH_TIMEOUT_SECONDS = 15
 
@@ -54,7 +54,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     (home / ".zshenv").write_text(
         (
             "print -r -- "
@@ -86,7 +86,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
 
     subprocess.run([zsh, "-c", command], check=True, env=env)
 
-    lines = _trace_lines(trace, expected_prefix="after:")
+    lines = trace_lines(trace, expected_prefix="after:")
     assert (
         f"after:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
     )
@@ -100,7 +100,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     for name in shellhook.ZSH_HOOK_NAMES:
         (home / name).write_text(
             f"print -r -- 'real:{name}' >> \"${{{SHELL_TRACE_ENV}}}\"\n",
@@ -123,7 +123,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     # No timeout deadline (load-sensitive) and no in-shell sleep are needed.
     subprocess.run([zsh, "-lc", ":"], check=True, env=env)
 
-    lines = _trace_lines(trace, expected_prefix="real:")
+    lines = trace_lines(trace, expected_prefix="real:")
     assert lines[0].startswith("fake:unset:unset:agent run --")
     assert lines[1:] == ["real:.zshenv", "real:.zprofile", "real:.zlogin"]
 
@@ -132,7 +132,7 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common"],
         groups={"common": {"wrap": ["grep"]}},
@@ -185,8 +185,8 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
         trace=trace,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    lines = _trace_lines(trace, expected_prefix="wrap:")
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    lines = trace_lines(trace, expected_prefix="wrap:")
     assert lines.count("real:.zshenv") == 1
     assert lines.count("real:.zshrc") == 1
     assert f"histfile:{home / '.zsh_history'}" in lines
@@ -199,7 +199,7 @@ def test_zshrc_hook_interactive_shell_loads_bare_pre_commit_wrapper(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["repo-tools"],
         groups={"repo-tools": {"pre-commit": {"argv": ["spice", "dev", "pre-commit"]}}},
@@ -239,8 +239,8 @@ def test_zshrc_hook_interactive_shell_loads_bare_pre_commit_wrapper(tmp_path):
         trace=trace,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    lines = _trace_lines(trace, expected_prefix="spice:")
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    lines = trace_lines(trace, expected_prefix="spice:")
     assert "spice:dev pre-commit --all-files" in lines
 
 
@@ -251,7 +251,7 @@ def test_zsh_login_hook_reexec_does_not_loop_when_active_zdotdir_is_hook(tmp_pat
     home = tmp_path / "home"
     home.mkdir()
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
@@ -272,7 +272,7 @@ def test_zsh_login_hook_reexec_does_not_loop_when_active_zdotdir_is_hook(tmp_pat
         timeout=2,
     )
 
-    lines = _trace_lines(trace, expected_prefix="ran")
+    lines = trace_lines(trace, expected_prefix="ran")
     agent_run_lines = [line for line in lines if "agent run --" in line]
     assert len(agent_run_lines) == 1
     assert lines[-1] == "ran"
@@ -285,7 +285,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     real_bash_env = tmp_path / "real-bash-env"
     real_bash_env.write_text(
         (
@@ -317,7 +317,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
 
     subprocess.run([bash, "-c", command], check=True, env=env)
 
-    lines = _trace_lines(trace, expected_prefix="after:")
+    lines = trace_lines(trace, expected_prefix="after:")
     assert f"after:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
     assert lines.count(f"real-bash:{real_bash_env}") == 2
 
@@ -327,7 +327,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     if zsh is None:
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
@@ -351,7 +351,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     completed = subprocess.run([zsh, "-c", command], check=False, env=env, timeout=2)
 
     assert completed.returncode == 7
-    lines = _trace_lines(trace, expected_prefix="ran:")
+    lines = trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "agent run --" in line]
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")
@@ -366,7 +366,7 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     if zsh is None:
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     base_env = {
         "PATH": str(fake_spice.parent)
@@ -390,7 +390,7 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     completed = subprocess.run([zsh, "-c", command], check=False, env=env, timeout=2)
 
     assert completed.returncode == 7
-    lines = _trace_lines(trace, expected_prefix="ran:")
+    lines = trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "agent run --" in line]
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")
@@ -404,13 +404,13 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common"],
         groups={"common": {"wrap": ["grep"]}},
     )
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     wrap_bin = bin_dir / "wrap"
@@ -439,7 +439,7 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
 
     subprocess.run([zsh, "-c", "grep needle /dev/null"], check=True, env=env)
 
-    lines = _trace_lines(trace, expected_prefix="wrap:")
+    lines = trace_lines(trace, expected_prefix="wrap:")
     assert "wrap:grep needle /dev/null" in lines
 
 
@@ -503,7 +503,7 @@ def test_agent_shell_routes_pytest_arguments_through_worktree_python(
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} is not installed")
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["spice-dev"],
         groups={
@@ -559,7 +559,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     if bash is None:
         pytest.skip("bash is not installed")
     trace = tmp_path / "trace.log"
-    fake_spice = _fake_spice_executable(tmp_path, run_agent_commands=True)
+    fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
@@ -581,7 +581,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     completed = subprocess.run([bash, "-c", command], check=False, env=env)
 
     assert completed.returncode == 6
-    lines = _trace_lines(trace, expected_prefix="ran:")
+    lines = trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "agent run --" in line]
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")

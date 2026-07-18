@@ -10,27 +10,27 @@ import pytest
 from spice.agent import driver as agent_driver
 from spice.agent import shellhook
 from spice.errors import SpiceError
-from tests.test_shellhook import (
+from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
-    _builtin_common_wrapper_lines,
-    _completed_process_detail,
-    _expected_project_common_with_pytest_wrapper_lines,
-    _expected_python_module_wrapper_lines,
-    _expected_wrapper_lines,
-    _trace_lines,
-    _write_agent_wrapper_config,
-    _write_rtk_config,
+    builtin_common_wrapper_lines,
+    completed_process_detail,
+    expected_project_common_with_pytest_wrapper_lines,
+    expected_python_module_wrapper_lines,
+    expected_wrapper_lines,
+    trace_lines,
+    write_agent_wrapper_config,
+    write_rtk_config,
 )
 
 
 def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common"],
         groups={"common": {"wrap": ["grep", "find", "git"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == expected_wrapper_lines(
         "wrap", ["grep", "find", "git"]
     )
 
@@ -43,19 +43,18 @@ def test_agent_wrapper_lines_scopes_builtin_common_default_by_driver(
 
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
-    ) == _builtin_common_wrapper_lines(driver_name=driver_name)
+    ) == builtin_common_wrapper_lines(driver_name=driver_name)
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["common"],
         groups={},
     )
 
     assert (
-        shellhook.render_agent_wrapper_lines(tmp_path)
-        == _builtin_common_wrapper_lines()
+        shellhook.render_agent_wrapper_lines(tmp_path) == builtin_common_wrapper_lines()
     )
 
 
@@ -125,19 +124,19 @@ def test_wrapper_group_direct_and_match_route_scopes_share_driver_selection(
 def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
     tmp_path,
 ):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=None,
         groups={"common": {"wrap": ["grep"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == expected_wrapper_lines(
         "wrap", ["grep"]
     )
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=None,
         groups={
@@ -150,7 +149,7 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
 
     assert (
         shellhook.render_agent_wrapper_lines(tmp_path)
-        == _expected_project_common_with_pytest_wrapper_lines()
+        == expected_project_common_with_pytest_wrapper_lines()
     )
 
 
@@ -213,15 +212,15 @@ def test_spice_checkout_task_wrapper_forwards_and_preserves_native_escape(
         capture_output=True,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    assert _trace_lines(trace, expected_prefix="task:native status") == [
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="task:native status") == [
         "spice:task status --limit 3",
         "task:native status",
     ]
 
 
 def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["tests"],
         groups={"tests": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
@@ -229,7 +228,7 @@ def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
 
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
-    ) == _expected_python_module_wrapper_lines(["pytest"])
+    ) == expected_python_module_wrapper_lines(["pytest"])
 
 
 def test_agent_wrapper_lines_renders_match_route_guards(tmp_path):
@@ -304,7 +303,7 @@ def test_agent_wrapper_lines_rejects_route_lacking_head_and_flags(tmp_path):
 
 
 def test_agent_wrapper_lines_rejects_self_intercepting_wrapper_lacking_match(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["tools"],
         groups={"tools": {"toolbox": {"argv": ["toolbox"]}}},
@@ -383,7 +382,7 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         "basename": "alternate-rtk",
         "absolute": str(tmp_path / "Spice Tools" / "rtk companion"),
     }[identity_kind]
-    _write_rtk_config(tmp_path, executable)
+    write_rtk_config(tmp_path, executable)
     resolved_tool = (
         bin_dir / executable if identity_kind != "absolute" else Path(executable)
     )
@@ -401,7 +400,7 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         )
         tool.chmod(0o755)
     wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
-    assert wrapper_lines == _builtin_common_wrapper_lines(executable)
+    assert wrapper_lines == builtin_common_wrapper_lines(executable)
     script = "\n".join(
         [
             "set -u",
@@ -436,16 +435,16 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         capture_output=True,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    lines = _trace_lines(trace, expected_prefix="rg:")
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    lines = trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
         "rg:-g *.md needle docs",
         "rg:--glob *.toml needle .",
         "rg:--glob=*.py needle src",
-        "resolved:grep -E needle src",
-        "resolved:grep -E -F a|b src",
-        "resolved:grep -E -G a\\|b src",
+        "resolved:grep -E -r needle src",
+        "resolved:grep -E -r -F a|b src",
+        "resolved:grep -E -r -G a\\|b src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "git:log --first-parent v1..HEAD",
@@ -455,6 +454,69 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         "resolved:",
     ]
     assert lines[0] != lines[1]
+
+
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_name):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tool = bin_dir / "rtk"
+    tool.write_text(
+        f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            "rtk grep needle one-dir",
+            "rtk grep needle one-dir two-dir",
+            "rtk grep needle source.txt",
+            "rtk grep -n needle source.txt",
+            "rtk grep -A 2 needle source.txt",
+            "rtk grep -C 2 needle source.txt",
+            "rtk grep -e needle source.txt",
+            "rtk grep needle",
+            "rtk grep -n needle",
+            "rtk grep -A 2 needle",
+            "rtk grep -C 2 needle",
+            "rtk grep -e needle",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="rtk:") == [
+        "rtk:grep -E -r needle one-dir",
+        "rtk:grep -E -r needle one-dir two-dir",
+        "rtk:grep -E -r needle source.txt",
+        "rtk:grep -E -r -n needle source.txt",
+        "rtk:grep -E -r -A 2 needle source.txt",
+        "rtk:grep -E -r -C 2 needle source.txt",
+        "rtk:grep -E -r -e needle source.txt",
+        "rtk:grep -E needle",
+        "rtk:grep -E -n needle",
+        "rtk:grep -E -A 2 needle",
+        "rtk:grep -E -C 2 needle",
+        "rtk:grep -E -e needle",
+    ]
 
 
 def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
@@ -497,8 +559,8 @@ def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
         capture_output=True,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    lines = _trace_lines(trace, expected_prefix="toolbox:")
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    lines = trace_lines(trace, expected_prefix="toolbox:")
     assert lines == [
         "toolbox:scan -E a|b src",
         "toolbox:status",
@@ -526,7 +588,7 @@ def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
             "alpha|beta",
             [
                 "grep:-E alpha|beta source.txt",
-                "rtk:grep -E alpha|beta source.txt",
+                "rtk:grep -E -r alpha|beta source.txt",
             ],
         ),
         (
@@ -578,8 +640,8 @@ def test_global_grep_defaults_follow_active_driver_in_live_zsh(
         capture_output=True,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    assert _trace_lines(trace, expected_prefix="grep:") == expected_trace
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="grep:") == expected_trace
 
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
@@ -623,8 +685,8 @@ def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
         capture_output=True,
     )
 
-    assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    assert _trace_lines(trace, expected_prefix="grep:") == [
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="grep:") == [
         "grep:-E alpha|beta source.txt",
         "grep:-E alpha|beta source.txt",
         "grep:-F alpha|beta source.txt",
@@ -634,7 +696,7 @@ def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
 
 
 def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=[],
         groups={"common": {"wrap": ["grep"]}},
@@ -644,7 +706,7 @@ def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
 
 
 def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_selectors(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["shells"],
         groups={"shells": {"dash": ["/bin/sh", "sh"]}},
@@ -655,7 +717,7 @@ def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_selectors(tmp_path):
 
 
 def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_commands(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["shells"],
         groups={"shells": {"pytest": {"argv": ["/bin/python", "-m", "pytest"]}}},
@@ -666,7 +728,7 @@ def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_commands(tmp_path):
 
 
 def test_agent_wrapper_lines_fails_loudly_for_duplicate_wrapper_selectors(tmp_path):
-    _write_agent_wrapper_config(
+    write_agent_wrapper_config(
         tmp_path,
         order=["base", "shells"],
         groups={"base": {"wrap": ["sh"]}, "shells": {"dash": ["sh"]}},
