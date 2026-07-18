@@ -603,6 +603,56 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert "<dt>handle</dt><dd>UI-1k4Yh62d</dd>" in item["display_html"]
 
 
+def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
+    actor = "a" * 32
+    row = {
+        "id": 77,
+        "uuid": "task-uuid-77",
+        "incepted": "1k4Yh62d",
+        "description": "Surface task origin",
+        "task_description": "Origin and metadata reach the card.",
+        "project": "serve.taskcards",
+        "origin": "ack:1kF7MMCS",
+        "priority": "M",
+        "status": "pending",
+        "phase": "todo",
+        "phase_0": "plan",
+        "phase_1": "todo",
+        "phase_2": "review",
+        "phase_i": 1,
+        "tags": ["cards", "origin"],
+        "acceptance": "Origin renders on the card.",
+        "origin_thread": actor,
+    }
+
+    monkeypatch.setattr(message.tw, "export", lambda _filters: [row])
+
+    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
+
+    card = cards[0]
+    # The card fronts title/project/acceptance, then surfaces the provenance and
+    # phase metadata as its own contiguous, ordered <dd> rows: the stored origin
+    # spelling verbatim, priority, status, current phase, the full flow pipeline
+    # (claimstate.phases_of -> "plan, todo, review"), and the joined tags.
+    metadata_rows = (
+        '<div class="task-directive-property">'
+        "<dt>origin</dt><dd>ack:1kF7MMCS</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>priority</dt><dd>M</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>status</dt><dd>pending</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>phase</dt><dd>todo</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>flow</dt><dd>plan, todo, review</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>tags</dt><dd>cards, origin</dd></div>"
+    )
+    assert metadata_rows in card.display_html
+    assert "<dt>title</dt><dd>Surface task origin</dd>" in card.display_html
+    assert "<dt>handle</dt><dd>TASKCAR-1k4Yh62d</dd>" in card.display_html
+
+
 def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
     monkeypatch,
 ):
