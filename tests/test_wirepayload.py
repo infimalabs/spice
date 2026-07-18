@@ -9,6 +9,7 @@ from pathlib import Path
 from spice.serve import agentapi, httpapi, livebus, observer, submissions, workroutes
 from spice.serve.payload import message, metric, wire
 from spice.serve.worktree import inventory
+from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,6 +58,16 @@ def test_live_bus_outbound_discriminants_match_the_exact_frame_registry():
     )
 
     assert actual == sorted(wire.LIVE_BUS_FRAME_SCHEMAS)
+
+
+def test_live_bus_frame_registry_recursively_accepts_exact_named_representatives():
+    actual = {
+        frame_type: wire.validate_live_bus_frame(frame)
+        for frame_type, frame in LIVE_BUS_FRAME_FIXTURES.items()
+    }
+
+    assert actual == LIVE_BUS_FRAME_FIXTURES
+    assert sorted(actual) == sorted(wire.LIVE_BUS_FRAME_SCHEMAS)
 
 
 def test_generated_app_types_are_the_exact_schema_render():

@@ -39,6 +39,7 @@ from tests.test_livebus import (
     _wait_for_watch_push,
     _write_inbox_item_from_subprocess,
 )
+from tests.test_wirefixtures import valid_lane_payload, valid_live_bus_callback_payloads
 
 
 def test_existing_watch_paths_returns_existing_input_paths(tmp_path):
@@ -259,6 +260,83 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         session._teardown()
 
 
+def _agent_status(*, running: bool, pid: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        running=running,
+        thread_id=THREAD_ID,
+        process_status="idle",
+        pid=pid,
+        process_group_id=pid,
+        model="gpt-test",
+        reasoning_effort="low",
+        service_tier="",
+        started_at="",
+        log_path=None,
+        prompt_skill_path=None,
+    )
+
+
+def _patch_agent_status(monkeypatch, status: SimpleNamespace) -> None:
+    for module in (agentapi, identity, lane, message, inventory):
+        monkeypatch.setattr(module, "agent_status", lambda *_args, **_kwargs: status)
+
+
+def _single_change_wait(path: Path, ready: Event, changed: Event):
+    def wait(paths: tuple[Path, ...], stop, watch=None, *, activated=None) -> bool:
+        if activated is not None:
+            activated.set()
+        assert path in paths
+        ready.set()
+        changed.wait(timeout=1.0)
+        return changed.is_set() and not stop.is_set()
+
+    return wait
+
+
+def _pending_signature(repo: Path, transcript: Path):
+    def signature(_target, _thread_id, _transcript_path):
+        pending_names = tuple(
+            sorted(path.name for path in inbox_dir(repo).glob("*.txt"))
+        )
+        return LaneSignature(
+            transcript=transcript.stat().st_size,
+            inbox=pending_names,
+            other=(),
+        )
+
+    return signature
+
+
+def _live_message_session(
+    connection: _Connection,
+    state: ServeState,
+    target: WorktreeTarget,
+    transcript: Path,
+    lane_signature,
+) -> LiveBusSession:
+    return LiveBusSession(
+        connection,
+        LiveBusCallbacks(
+            resolve_target=lambda selector: target if selector == target.id else None,
+            **valid_live_bus_callback_payloads(
+                messages_payload=lambda bus_target, **kwargs: (
+                    message.messages_payload_for_worktree(state, bus_target, **kwargs)
+                )
+            ),
+            thread_id=lambda _target: THREAD_ID,
+            transcript_resolution=lambda _thread_id: _transcript_resolution(
+                THREAD_ID, transcript
+            ),
+            lane_watch_paths=lambda bus_target, thread_id, transcript_path: (
+                app.lane_watch_paths_for_target(
+                    state, bus_target, thread_id, transcript_path
+                )
+            ),
+            lane_signature=lane_signature,
+        ),
+    )
+
+
 def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     tmp_path, monkeypatch
 ):
@@ -278,24 +356,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
-    status = SimpleNamespace(
-        running=False,
-        thread_id=THREAD_ID,
-        process_status="idle",
-        pid=0,
-        process_group_id=0,
-        model="gpt-test",
-        reasoning_effort="low",
-        service_tier="",
-        started_at="",
-        log_path=None,
-        prompt_skill_path=None,
-    )
-    monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(identity, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)
+    _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
     ensure_calls: list[dict[str, object]] = []
 
     def fake_ensure(ensured_target, **kwargs):
@@ -306,52 +367,17 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     connection = _Connection()
     watcher_ready = Event()
     change_written = Event()
-
-    def observed_wait(
-        paths: tuple[Path, ...], stop, watch=None, *, activated=None
-    ) -> bool:
-        if activated is not None:
-            activated.set()
-        assert inbox_dir(repo) in paths
-        watcher_ready.set()
-        change_written.wait(timeout=1.0)
-        return change_written.is_set() and not stop.is_set()
-
-    def pending_signature(_target, _thread_id, _transcript_path):
-        pending_names = tuple(
-            sorted(path.name for path in inbox_dir(repo).glob("*.txt"))
-        )
-        return LaneSignature(
-            transcript=transcript.stat().st_size,
-            inbox=pending_names,
-            other=(),
-        )
-
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
-    session = LiveBusSession(
+    monkeypatch.setattr(
+        livebus,
+        "_wait_for_change",
+        _single_change_wait(inbox_dir(repo), watcher_ready, change_written),
+    )
+    session = _live_message_session(
         connection,
-        LiveBusCallbacks(
-            resolve_target=lambda selector: target if selector == target.id else None,
-            work_trees_payload=lambda: {},
-            messages_payload=lambda bus_target, **kwargs: (
-                message.messages_payload_for_worktree(state, bus_target, **kwargs)
-            ),
-            send_payload=lambda _target, _payload: ({}, None),
-            task_drain_payload=lambda _target, _payload: ({}, None),
-            team_snapshot_payload=lambda _since_revision: {},
-            team_command_payload=lambda _payload: ({}, None),
-            metric_series_payload=lambda _query: {"ok": True, "points": []},
-            thread_id=lambda _target: THREAD_ID,
-            transcript_resolution=lambda _thread_id: _transcript_resolution(
-                THREAD_ID, transcript
-            ),
-            lane_watch_paths=lambda bus_target, thread_id, transcript_path: (
-                app.lane_watch_paths_for_target(
-                    state, bus_target, thread_id, transcript_path
-                )
-            ),
-            lane_signature=pending_signature,
-        ),
+        state,
+        target,
+        transcript,
+        _pending_signature(repo, transcript),
     )
 
     try:
@@ -378,6 +404,46 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     assert isolated_task_backend.is_dir()
 
 
+def _assert_send_ack_and_timing(connection: _Connection) -> None:
+    with connection.lock:
+        assert len(connection.sent) == 2
+        send_result, send_timing = connection.sent
+    assert send_result["type"] == "lane.sendResult"
+    assert send_result["requestId"] == "send-1"
+    assert send_result["result"]["ok"] is True
+    assert send_result["result"]["key"] == "inbox-key"
+    assert set(send_result["result"]["serverTiming"]) == {
+        "targetResolveMs",
+        "sendPayloadMs",
+        "totalBeforeReplyMs",
+        "replyLockWaitMs",
+    }
+    assert all(value >= 0.0 for value in send_result["result"]["serverTiming"].values())
+    assert send_timing["type"] == "lane.sendTiming"
+    assert send_timing["requestId"] == "send-1"
+    assert set(send_timing["serverTiming"]) == {
+        "targetResolveMs",
+        "sendPayloadMs",
+        "totalBeforeReplyMs",
+        "replyLockWaitMs",
+        "replyLockHoldMs",
+        "replyWriteMs",
+        "totalMs",
+    }
+    assert all(value >= 0.0 for value in send_timing["serverTiming"].values())
+
+
+def _wait_for_send_followup(connection: _Connection) -> dict[str, Any]:
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        with connection.lock:
+            for payload in connection.sent:
+                if payload.get("source") == "send":
+                    return payload
+        time.sleep(0.02)
+    pytest.fail(f"timed out waiting for send followup; sent={connection.sent!r}")
+
+
 def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
     target = _Target(id="lane", repo_root=tmp_path)
     connection = _Connection()
@@ -393,7 +459,10 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
         calls.append(("followup", payload))
         followup_entered.set()
         followup_continue.wait(timeout=1.0)
-        return {"messages": [], "statusLine": {"pendingInboxCount": 1}}
+        return valid_lane_payload(
+            messages=[],
+            statusLine={"pendingInboxCount": 1},
+        )
 
     session = LiveBusSession(
         connection,
@@ -425,62 +494,17 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
         )
 
         assert followup_entered.wait(timeout=1.0)
-        with connection.lock:
-            assert len(connection.sent) == 2
-            send_result = connection.sent[0]
-            send_timing = connection.sent[1]
-        assert send_result["type"] == "lane.sendResult"
-        assert send_result["requestId"] == "send-1"
-        assert send_result["result"]["ok"] is True
-        assert send_result["result"]["key"] == "inbox-key"
-        assert set(send_result["result"]["serverTiming"]) == {
-            "targetResolveMs",
-            "sendPayloadMs",
-            "totalBeforeReplyMs",
-            "replyLockWaitMs",
-        }
-        assert all(
-            value >= 0.0 for value in send_result["result"]["serverTiming"].values()
-        )
-        assert send_timing["type"] == "lane.sendTiming"
-        assert send_timing["requestId"] == "send-1"
-        assert set(send_timing["serverTiming"]) == {
-            "targetResolveMs",
-            "sendPayloadMs",
-            "totalBeforeReplyMs",
-            "replyLockWaitMs",
-            "replyLockHoldMs",
-            "replyWriteMs",
-            "totalMs",
-        }
-        assert all(value >= 0.0 for value in send_timing["serverTiming"].values())
+        _assert_send_ack_and_timing(connection)
         followup_continue.set()
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            with connection.lock:
-                send_pushes = [
-                    payload
-                    for payload in connection.sent
-                    if payload.get("source") == "send"
-                ]
-            if send_pushes:
-                break
-            time.sleep(0.02)
-        else:
-            pytest.fail(
-                f"timed out waiting for send followup; sent={connection.sent!r}"
-            )
-        assert send_pushes == [
-            {
-                "type": "lane.payload",
-                "targetId": "lane",
-                "source": "send",
-                "payload": {
-                    "messages": [],
-                    "statusLine": {"pendingInboxCount": 1},
-                },
-            }
-        ]
+        assert _wait_for_send_followup(connection) == {
+            "type": "lane.payload",
+            "targetId": "lane",
+            "source": "send",
+            "payload": valid_lane_payload(
+                messages=[],
+                statusLine={"pendingInboxCount": 1},
+            ),
+        }
         assert calls == [
             ("send", {"text": "hello"}),
             ("followup", {"text": "hello"}),
@@ -569,7 +593,7 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
 
     def messages_payload(_target, **kwargs):
         payload_kwargs.append(kwargs)
-        return {"messages": [], "statusLine": {}}
+        return valid_lane_payload(messages=[], statusLine={})
 
     monkeypatch.setattr(livebus, "_wait_for_change", fake_wait)
     callbacks = replace(
@@ -782,65 +806,24 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
-    status = SimpleNamespace(
-        running=True,
-        thread_id=THREAD_ID,
-        process_status="idle",
-        pid=123,
-        process_group_id=123,
-        model="gpt-test",
-        reasoning_effort="low",
-        service_tier="",
-        started_at="",
-        log_path=None,
-        prompt_skill_path=None,
-    )
-    for module in (agentapi, identity, lane, message, inventory):
-        monkeypatch.setattr(module, "agent_status", lambda *_args, **_kwargs: status)
+    _patch_agent_status(monkeypatch, _agent_status(running=True, pid=123))
     connection = _Connection()
     watcher_ready = Event()
     change_written = Event()
     reply_log = reply_log_path(repo, THREAD_ID)
-
-    def observed_wait(
-        paths: tuple[Path, ...], stop, watch=None, *, activated=None
-    ) -> bool:
-        if activated is not None:
-            activated.set()
-        assert reply_log in paths
-        watcher_ready.set()
-        change_written.wait(timeout=1.0)
-        return change_written.is_set() and not stop.is_set()
-
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(
+        livebus,
+        "_wait_for_change",
+        _single_change_wait(reply_log, watcher_ready, change_written),
+    )
     task_config.set_backend(str(tmp_path / "task-backend"))
-    session = LiveBusSession(
+    session = _live_message_session(
         connection,
-        LiveBusCallbacks(
-            resolve_target=lambda selector: target if selector == target.id else None,
-            work_trees_payload=lambda: {},
-            messages_payload=lambda bus_target, **kwargs: (
-                message.messages_payload_for_worktree(state, bus_target, **kwargs)
-            ),
-            send_payload=lambda _target, _payload: ({}, None),
-            task_drain_payload=lambda _target, _payload: ({}, None),
-            team_snapshot_payload=lambda _since_revision: {},
-            team_command_payload=lambda _payload: ({}, None),
-            metric_series_payload=lambda _query: {"ok": True, "points": []},
-            thread_id=lambda _target: THREAD_ID,
-            transcript_resolution=lambda _thread_id: _transcript_resolution(
-                THREAD_ID, transcript
-            ),
-            lane_watch_paths=lambda bus_target, thread_id, transcript_path: (
-                app.lane_watch_paths_for_target(
-                    state, bus_target, thread_id, transcript_path
-                )
-            ),
-            lane_signature=lambda bus_target, thread_id, transcript_path: (
-                app.lane_signature_for_target(
-                    state, bus_target, thread_id, transcript_path
-                )
-            ),
+        state,
+        target,
+        transcript,
+        lambda bus_target, thread_id, transcript_path: app.lane_signature_for_target(
+            state, bus_target, thread_id, transcript_path
         ),
     )
 

@@ -973,7 +973,7 @@ def validate_live_bus_frame(payload: PayloadValue) -> PayloadValue:
         schema = WIRE_OBJECTS_BY_NAME[LIVE_BUS_FRAME_SCHEMAS[kind]]
     except KeyError as exc:
         raise SpiceError(f"live-bus frame has no wire schema: {kind or '-'}") from exc
-    _validate_object(schema, payload, path=schema.name, descend_references=False)
+    _validate_object(schema, payload, path=schema.name, descend_references=True)
     return payload
 
 
