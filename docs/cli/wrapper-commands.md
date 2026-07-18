@@ -104,6 +104,17 @@ after RTK selection by routing:
 - every remaining Codex-authored `rtk grep` through a final head-only
   `rtk grep -E` route.
 
+Because these routes are shell functions named after the wrapped command, they
+intercept only ordinary command words. A `command`-prefixed invocation such as
+`command rg --files docs/design` bypasses the generated `rtk()` function through
+the POSIX `command` builtin: RTK still rewrites it to
+`command rtk grep --files docs/design`, but no `wrappers.common.rtk` match flag
+can fire, so it reaches the real RTK grep frontend unrouted and the rg-only
+`--files` forwards to the platform grep to fail natively. The `command`-prefixed
+form is a known limitation of the shell-function mechanism, not a routed case;
+Spice's post-selection routing governs only wrapper-visible command words, never
+RTK's external rewrite selection.
+
 The Codex driver also receives the global plain `grep` wrapper. Those two
 driver-scoped routes make extended regular expressions the Codex default:
 `rtk grep` delegates to the platform grep, whose BASIC dialect would read
