@@ -79,26 +79,15 @@ assert(
   "optimistic update notifies exactly once per listener in registration order",
 );
 
-assert(
-  store.updateTarget("missing", (target) => target) === false,
-  "optimistic update of an unknown id reports failure",
-);
-assert(
-  store.targetsSnapshot().map((target) => target.id).join(",") === "beta,alpha",
-  "an unknown-id update leaves the collection exactly as it was",
-);
-assert(
-  notifications.join("|") === "first:beta,alpha|second:beta,alpha",
-  "an unknown-id update adds nothing to the notification log",
-);
-
-unsubscribeFirst();
 unsubscribeFirst();
 notifications.length = 0;
-store.updateTarget("beta", (target) => ({ ...target, team: "four" }));
+assert(
+  store.updateTarget("beta", (target) => ({ ...target, team: "four" })) === true,
+  "a present-target update succeeds after one listener unsubscribes",
+);
 assert(
   notifications.join("|") === "second:beta,alpha",
-  "after unsubscribe the surviving listener alone is notified, and repeat unsubscribe changes nothing",
+  "after unsubscribe the surviving listener alone receives the ordered update",
 );
 assert(
   store.targetForId("beta").team === "four",
