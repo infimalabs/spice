@@ -52,17 +52,11 @@ async function run() {
         hostEl.append(shardsEl);
         lanesEl.append(hostEl);
 
-        const topology = {
-          role: "host",
-          hostTargetId: "alpha",
-          memberTargetIds: ids.slice(),
-        };
         const hostLane = {
           targetId: "alpha",
           closed: false,
           element: hostEl,
           shardsEl,
-          groupTopology: topology,
         };
         laneStore.registerLane(hostLane);
         for (const id of ids.slice(1)) {
@@ -70,9 +64,9 @@ async function run() {
             targetId: id,
             closed: false,
             element: hostEl,
-            groupTopology: { ...topology, role: "member" },
           });
         }
+        laneStore.applyLaneGroups([ids.slice()], { isLaneOpen });
 
         function shardRect(id) {
           return shardsEl

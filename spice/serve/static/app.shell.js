@@ -186,7 +186,6 @@ function laneTeamState(emptyTeam, teamIdentity, options) {
     teamSplitBackAvailable: false,
     teamSplitBackMemberCount: 0,
     configRevision: emptyTeam ? 0 : teamIdentityConfigRevision(teamIdentity),
-    groupTopology: null,
   };
 }
 

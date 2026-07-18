@@ -14,44 +14,16 @@ let laneDragState = null;
 let composerMoveDragState = null;
 let laneTeamMenuDismissHandler = null;
 
+// Topology (standalone/host/member roles, stable host selection, member
+// ordering, replacement) is owned by the lane store; this binds the app's
+// openness and lifetime-capture adapters to that store transition. The store
+// publishes a "laneGroups" change and the DOM materialization below is the
+// subscriber side effect.
 function reconcileLaneGroups(groupRuns) {
-  const lifetimeStateByTargetId = new Map();
-  const previousHostByMemberTargetId = currentLaneGroupHostByMemberTargetId();
-  for (const lane of laneStore.lanesSnapshot())
-    lifetimeStateByTargetId.set(lane.targetId, laneLifetimeRuntimeState(lane));
-  for (const lane of laneStore.lanesSnapshot()) {
-    lane.groupTopology = null;
-    lane.element.classList.remove("lane--shadowed");
-    lane.element.style.removeProperty("--lane-weight");
-  }
-  for (const run of groupRuns) {
-    const members = run
-      .map((targetId) => laneStore.laneForId(targetId))
-      .filter((lane) => lane && isLaneOpen(lane));
-    if (members.length < 2) continue;
-    const host = stableLaneGroupHost(members, previousHostByMemberTargetId);
-    const shadows = members.filter((member) => member !== host);
-    const memberTargetIds = members.map((member) => member.targetId);
-    host.groupTopology = {
-      role: "host",
-      hostTargetId: host.targetId,
-      memberTargetIds,
-    };
-    host.element.style.setProperty("--lane-weight", String(members.length));
-    restoreLaneLifetimeRuntimeState(
-      host,
-      pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId),
-    );
-    for (const shadow of shadows) {
-      shadow.groupTopology = {
-        role: "member",
-        hostTargetId: host.targetId,
-        memberTargetIds,
-      };
-      shadow.element.classList.add("lane--shadowed");
-    }
-    syncLaneGroupDomOrder(host);
-  }
+  laneStore.applyLaneGroups(groupRuns, {
+    isLaneOpen,
+    captureLaneState: laneLifetimeRuntimeState,
+  });
   for (const lane of laneStore.lanesSnapshot()) {
     syncFusedLaneChrome(lane);
     renderMessagesIfChanged(lane);
@@ -64,29 +36,40 @@ function reconcileLaneGroups(groupRuns) {
     scheduleLiveBusLaneActivitySync();
 }
 
-function currentLaneGroupHostByMemberTargetId() {
-  const hosts = new Map();
-  const seenHosts = new Set();
-  for (const lane of laneStore.lanesSnapshot()) {
-    const host = laneGroupHost(lane);
-    if (seenHosts.has(host.targetId)) continue;
-    seenHosts.add(host.targetId);
-    const memberTargetIds = laneGroupMemberTargetIds(host);
-    if (memberTargetIds.length < 2) continue;
-    for (const targetId of memberTargetIds) hosts.set(targetId, host.targetId);
-  }
-  return hosts;
-}
+// The store's topology transition drives the lane class, weight, and DOM-order
+// side effects; host lifetime carries across the handoff from the pre-transition
+// snapshot the store captured.
+laneStore.subscribe((change) => {
+  if (change.kind !== "laneGroups") return;
+  materializeLaneGroupTransition(change.transition);
+});
 
-function stableLaneGroupHost(members, previousHostByMemberTargetId) {
-  for (const member of members) {
-    const previousHostId = previousHostByMemberTargetId.get(member.targetId);
-    const previousHost = members.find(
-      (candidate) => candidate.targetId === previousHostId,
-    );
-    if (previousHost) return previousHost;
+function materializeLaneGroupTransition(transition) {
+  for (const lane of laneStore.lanesSnapshot()) {
+    lane.element.classList.remove("lane--shadowed");
+    lane.element.style.removeProperty("--lane-weight");
   }
-  return members[0];
+  for (const run of transition.runs) {
+    const host = laneStore.laneForId(run.hostTargetId);
+    if (!host) continue;
+    const members = run.memberTargetIds
+      .map((targetId) => laneStore.laneForId(targetId))
+      .filter(Boolean);
+    host.element.style.setProperty(
+      "--lane-weight",
+      String(run.memberTargetIds.length),
+    );
+    restoreLaneLifetimeRuntimeState(
+      host,
+      pendingLaneLifetimeStateForMembers(
+        members,
+        transition.priorLaneStateByTargetId,
+      ),
+    );
+    for (const member of members)
+      if (member !== host) member.element.classList.add("lane--shadowed");
+    syncLaneGroupDomOrder(host);
+  }
 }
 
 function pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId) {
@@ -98,7 +81,8 @@ function pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId) {
 }
 
 function laneGroupRole(lane) {
-  return lane.groupTopology ? lane.groupTopology.role : "standalone";
+  const topology = laneStore.laneGroupTopology(lane.targetId);
+  return topology ? topology.role : "standalone";
 }
 
 function isShadowLane(lane) {
@@ -113,13 +97,13 @@ function laneIsFusedHost(lane) {
 
 function laneGroupHost(lane) {
   if (!isShadowLane(lane)) return lane;
-  return laneStore.laneForId(lane.groupTopology.hostTargetId) || lane;
+  const topology = laneStore.laneGroupTopology(lane.targetId);
+  return laneStore.laneForId(topology.hostTargetId) || lane;
 }
 
 function laneGroupMemberTargetIds(lane) {
-  return lane.groupTopology
-    ? lane.groupTopology.memberTargetIds
-    : [lane.targetId];
+  const topology = laneStore.laneGroupTopology(lane.targetId);
+  return topology ? topology.memberTargetIds : [lane.targetId];
 }
 
 function laneGroupMemberLanes(lane) {
