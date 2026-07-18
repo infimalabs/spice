@@ -37,8 +37,10 @@ function refreshTargets() {
   if (spiceMenuEl) renderSpiceMenuIfAvailable();
   targetsLoadPromise = (async () => {
     try {
-      const response = await liveBusRequest("targets.refresh");
-      applyTargetsPayload(response.payload || {});
+      const response = /** @type {TargetsFrame} */ (
+        await liveBusRequest("targets.refresh")
+      );
+      applyTargetsPayload(response.payload);
     } catch (error) {
       setGlobalTransientError("team refresh failed");
     } finally {
@@ -50,6 +52,7 @@ function refreshTargets() {
   return targetsLoadPromise;
 }
 
+/** @param {TargetsPayload} payload */
 function applyTargetsPayload(payload) {
   laneStore.replaceTargets(payload.workTrees || []);
   targetsLoaded = true;
@@ -164,13 +167,17 @@ async function refreshTeamSnapshot(options = {}) {
   const query = {};
   if (!options.force && teamSnapshotRevision)
     query.sinceRevision = teamSnapshotRevision;
-  const response = await liveBusRequest("teams.refresh", { query });
-  applyTeamSnapshotPayload(response.payload || {}, options);
+  const response = /** @type {TeamsFrame} */ (
+    await liveBusRequest("teams.refresh", { query })
+  );
+  applyTeamSnapshotPayload(response.payload, options);
 }
 
 async function requestTeamCommand(payload) {
-  const response = await liveBusRequest("teams.command", { payload });
-  const result = response.result || {};
+  const response = /** @type {TeamCommandFrame} */ (
+    await liveBusRequest("teams.command", { payload })
+  );
+  const result = response.result;
   if (result.snapshot)
     applyTeamSnapshotPayload(
       { revision: result.revision, changed: true, snapshot: result.snapshot },
@@ -187,6 +194,10 @@ function teamCommandPayload(command, fields = {}) {
   return { command, expectedRevision: teamSnapshotRevision, ...fields };
 }
 
+/**
+ * @param {TeamSnapshotResponse} payload
+ * @param {Object=} options
+ */
 function applyTeamSnapshotPayload(payload, options = {}) {
   const revision = Math.max(
     0,

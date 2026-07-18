@@ -210,7 +210,7 @@ def test_background_lane_burst_coalesces_before_focused_delivery(
         for _change in range(10):
             assert session.coalesce_background_update(subscription) is True
 
-    session._send({"type": "lane.payload", "targetId": target.id})
+    session._send({"type": "lane.payload", "targetId": target.id, "payload": {}})
     assert [frame["type"] for frame in connection.sent] == ["lane.payload"]
     assert len(callbacks) == 1
 

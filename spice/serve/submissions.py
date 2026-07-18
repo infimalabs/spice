@@ -12,6 +12,7 @@ from spice.agent.lifecycle import utc_now
 from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_records
 from spice.mail.inbox import inbox_item_key
+from spice.serve.payload.wire import validate_emitter_payload
 
 SUBMISSION_STAGES = ("accepted", "received", "completed")
 MAX_TRACKED_SUBMISSIONS = 200
@@ -47,7 +48,7 @@ class SubmissionLifecycle:
     stages: dict[str, SubmissionStage] = field(default_factory=dict)
 
     def event_payload(self, stage: str) -> dict[str, Any]:
-        return {
+        payload = {
             "key": self.key,
             "stage": stage,
             "disposition": self.disposition,
@@ -58,6 +59,9 @@ class SubmissionLifecycle:
             },
             "durationsMs": self._durations_payload(),
         }
+        return validate_emitter_payload(
+            "submissions.SubmissionLifecycle.event_payload", payload
+        )
 
     def _durations_payload(self) -> dict[str, float]:
         accepted = self.stages["accepted"].observed_epoch

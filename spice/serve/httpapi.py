@@ -21,6 +21,7 @@ from spice.paths import shared_attachment_root
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, resolve_thread_transcript
 from spice.serve.payload import identity
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
@@ -73,12 +74,13 @@ def team_snapshot_response_payload(
 ) -> dict[str, Any]:
     snapshot = state.team_store.team_snapshot(since_revision=since_revision)
     changed = since_revision is None or snapshot.global_revision > since_revision
-    return {
+    payload = {
         "ok": True,
         "revision": snapshot.global_revision,
         "changed": changed,
         "snapshot": snapshot.to_payload(),
     }
+    return validate_emitter_payload("httpapi.team_snapshot_response_payload", payload)
 
 
 def team_command_response_payload(
@@ -91,13 +93,21 @@ def team_command_response_payload(
             )
         )
     except SpiceError as exc:
-        return {"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT
-    return (
+        payload = validate_emitter_payload(
+            "httpapi.team_command_response_payload",
+            {"ok": False, "error": str(exc)},
+        )
+        return payload, HTTPStatus.CONFLICT
+    payload = validate_emitter_payload(
+        "httpapi.team_command_response_payload",
         {
             "ok": True,
             "revision": result.revision,
             "snapshot": result.snapshot.to_payload(),
         },
+    )
+    return (
+        payload,
         HTTPStatus.OK,
     )
 

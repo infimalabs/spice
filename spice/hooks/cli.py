@@ -72,6 +72,18 @@ def configure_dev_parser(subparsers: Any) -> None:
         recovery_examples=("spice dev serve-web-typecheck",),
     ).set_defaults(func=handle_dev)
 
+    serve_web_types = actions.add_parser(
+        "serve-web-types",
+        help="Check or regenerate the Python-owned serve wire typedefs.",
+        recovery_examples=("spice dev serve-web-types --write",),
+    )
+    serve_web_types.add_argument(
+        "--write",
+        action="store_true",
+        help="Regenerate spice/serve/static/app.types.js from the wire schema.",
+    )
+    serve_web_types.set_defaults(func=handle_dev)
+
     actions.add_parser(
         "python-typecheck",
         help="Typecheck the project's Python package roots with pyright.",
@@ -185,6 +197,14 @@ def handle_dev(args: argparse.Namespace) -> int:
         from spice.serve.typecheck import run_serve_web_typecheck
 
         run_serve_web_typecheck(repo_root)
+        return 0
+    if command == "serve-web-types":
+        from spice.serve.payload.wire import check_app_types_js, write_app_types_js
+
+        if bool(args.write):
+            print(write_app_types_js(repo_root))
+        else:
+            check_app_types_js(repo_root)
         return 0
     if command == "python-typecheck":
         from spice.studies.typecheck import run_python_typecheck

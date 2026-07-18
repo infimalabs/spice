@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from spice.errors import SpiceError
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
@@ -59,7 +60,7 @@ def metric_series_payload(state: Any, query: dict[str, Any]) -> dict[str, Any]:
         end=end,
         bucket_seconds=bucket_seconds,
     )
-    return {
+    payload = {
         "ok": True,
         "metric": metric,
         "lens": lens,
@@ -70,6 +71,7 @@ def metric_series_payload(state: Any, query: dict[str, Any]) -> dict[str, Any]:
         "subject": subject.payload,
         "points": points,
     }
+    return validate_emitter_payload("payload.metric.metric_series_payload", payload)
 
 
 def _series_points(

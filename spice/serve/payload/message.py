@@ -36,6 +36,7 @@ from spice.serve.payload.lane import (
     status_line_payload,
     task_filter_inventory,
 )
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.inventory import (
@@ -610,7 +611,9 @@ def _messages_worktree_payload(
     }
     if removed_keys:
         payload["removedMessageKeys"] = list(removed_keys)
-    return payload
+    return validate_emitter_payload(
+        "payload.message._messages_worktree_payload", payload
+    )
 
 
 def _ack_keys_for_messages(items: list[message_reader.AssistantMessage]) -> list[str]:
