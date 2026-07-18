@@ -33,7 +33,8 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()
     implicit_rule = _between(css, ".filter-pill--implicit {", "}")
-    drainable_rule = _between(css, ".filter-pill--drainable {", "}")
+    ready_rule = _between(css, ".filter-pill--ready {", "}")
+    active_rule = _between(css, ".filter-pill--active {", "}")
 
     assert "model.drainability.boundaryDissolved" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
@@ -41,7 +42,12 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
         implicit_rule == ".filter-pill--implicit {\n"
         "  background: color-mix(in srgb, var(--good) 8%, transparent);\n"
     )
-    assert "border-color: var(--good);" in drainable_rule
+    assert "border-color: var(--good);" in ready_rule
+    assert (
+        "background: color-mix(in srgb, var(--team-teal-accent) 8%, transparent);"
+        in active_rule
+    )
+    assert "border-color: var(--team-teal-accent);" in active_rule
 
 
 def test_global_filter_pills_reject_stale_inventory_resurrection():
@@ -56,7 +62,7 @@ def test_global_filter_pills_reject_stale_inventory_resurrection():
     assert result.returncode == 0
 
 
-def test_global_filter_pill_ready_open_state_model():
+def test_global_filter_pill_ready_active_unavailable_state_model():
     script = Path(__file__).with_name("fixtures") / "task_filter_pill_states.js"
 
     result = subprocess.run(

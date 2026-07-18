@@ -513,15 +513,22 @@ def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
     assert "page.screenshot(" in smoke
 
 
-def test_task_filter_pill_smoke_covers_ready_open_and_all_deferred_states() -> None:
+def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() -> None:
     smoke = (ROOT / "browser" / "serve_task_filter_pills_smoke.js").read_text(
         encoding="utf-8"
     )
 
-    assert 'count: "2/5"' in smoke
-    assert 'count: "0/3"' in smoke
-    assert 'count: "3/3"' in smoke
-    assert 'title:\n          "0 ready / 3 open across studies.*;' in smoke
-    assert "dim: true" in smoke
-    assert 'labels !== "serve,studies,cli,tests"' in smoke
+    assert 'count: "2r+1a+2u"' in smoke
+    assert 'count: "0r+0a+3u"' in smoke
+    assert 'count: "3r+0a"' in smoke
+    assert 'count: "0r+2a"' in smoke
+    assert 'count: "1r+0a"' in smoke
+    assert 'title:\n      "0 ready, 0 active/in flight' in smoke
+    assert 'tone: "ready"' in smoke
+    assert 'tone: "active"' in smoke
+    assert 'tone: "dormant"' in smoke
+    assert 'labels !== "serve,studies,cli,tests,lifecycle"' in smoke
+    assert 'inventory.revision = "10000000000000000000000000000";' in smoke
+    assert 'inventory.revision = "100000000000000000000000000000";' in smoke
+    assert 'ariaHidden: strip?.getAttribute("aria-hidden")' in smoke
     assert "page.screenshot(" in smoke

@@ -247,8 +247,13 @@ button.primary:hover {
   padding: 2px 10px;
   white-space: nowrap;
 }
-.filter-pill--drainable { border-color: var(--good); color: var(--good); }
-.filter-pill--undrainable { color: var(--muted); }
+.filter-pill--ready { border-color: var(--good); color: var(--good); }
+.filter-pill--active {
+  background: color-mix(in srgb, var(--team-teal-accent) 8%, transparent);
+  border-color: var(--team-teal-accent);
+  color: var(--team-teal-accent);
+}
+.filter-pill--dormant { color: var(--muted); }
 .filter-pill--implicit {
   background: color-mix(in srgb, var(--good) 8%, transparent);
 }
@@ -264,7 +269,8 @@ button.primary:hover {
   font-size: 9px;
   padding: 0 5px;
 }
-.filter-pill--undrainable .filter-pill-count { background: var(--muted); }
+.filter-pill--active .filter-pill-count { background: var(--team-teal-accent); }
+.filter-pill--dormant .filter-pill-count { background: var(--muted); }
 
 /* ---- swimlanes ---- */
 .swimlanes {
