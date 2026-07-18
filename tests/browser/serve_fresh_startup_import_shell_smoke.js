@@ -21,7 +21,7 @@ function pageTopology() {
     laneCount: laneStore.lanesSnapshot().length,
     lanes,
     storedConfig: localStorage.getItem(laneStorageKey),
-    snapshotRevision: teamSnapshotRevision,
+    snapshotRevision: laneStore.teamSnapshotRevision(),
     targetIds: laneStore.targetsSnapshot().map((target) => target.id),
   };
 }
