@@ -92,8 +92,9 @@ def test_rtk_command_shape_ownership_matches_the_default_group():
     assert "Those two driver-scoped routes" in wrapper_contract
     assert "RTK rewrite selection happens inside `spice agent run`" in reference
     assert "rg-only grep flags" in wrapper_contract
-    assert "trailing-directory operands" in wrapper_contract
-    assert "matched by the `*/` glob) to `rg`" in wrapper_contract
+    assert "Trailing-directory operands" in wrapper_contract
+    assert "stay on the canonical `rtk grep` frontend" in wrapper_contract
+    assert "reinterprets grep short flags" in wrapper_contract
     assert "native find predicates" in wrapper_contract
     assert "diagnostic git flags" in wrapper_contract
     assert (
