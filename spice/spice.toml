@@ -34,7 +34,13 @@ executable = "rtk"
 [wrappers.common.rtk]
 argv = ["rtk"]
 match = [
-  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*", "*/"], argv = ["rg"] },
+  # Only rg-native flags divert grep to ripgrep. A grep-dialect command (bare
+  # directory operand, -r/-R recursion) must not reach rg, because grep and rg
+  # share short flags with different meanings (-r=--replace, -E=--encoding,
+  # -L=--follow, -U=--multiline) and forwarding argv untranslated silently
+  # rewrites or misdirects output. Such searches stay on the rtk grep frontend,
+  # which runs native grep correctly.
+  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*"], argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
   # refuses (exit 1) or silently binds the directory operand as the pattern
