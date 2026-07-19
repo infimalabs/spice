@@ -104,8 +104,11 @@ after RTK selection by routing:
   and would silently rewrite or misdirect the search;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
-- every remaining Codex-authored `rtk grep` through a final head-only
-  `rtk grep -E` route.
+- every `rtk grep` carrying a file or directory search operand through the
+  driver-scoped recursion route — `rtk grep -E -r` for Codex, `rtk grep -r` for
+  Claude — so a bare directory operand recurses through native grep instead of
+  failing, and every remaining Codex-authored `rtk grep` through a final
+  head-only `rtk grep -E` route.
 
 Because these routes are shell functions named after the wrapped command, they
 intercept only ordinary command words. A `command`-prefixed invocation such as
@@ -123,7 +126,9 @@ driver-scoped routes make extended regular expressions the Codex default:
 `rtk grep` delegates to the platform grep, whose BASIC dialect would read
 Codex-authored `| + ? ( )` as literals, so `-E` is injected ahead of the
 caller's arguments. Claude authors BASIC alternation as `\|`, so its generated
-wrapper set omits both injections and preserves the native dialect. Matcher
+wrapper set omits both `-E` dialect injections and preserves the native dialect,
+while still gaining the search-operand `-r` recursion route so a bare directory
+operand recurses through native grep instead of failing. Matcher
 selection stays deterministic for Codex — an explicit `-F` or `-G`, later in
 argv, still wins because grep honors the last matcher flag; a repeated `-E` is
 harmless; and unsupported or conflicting backend flags pass through unchanged
