@@ -51,6 +51,17 @@ match = [
   # native find.
   { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
+  # Two orthogonal concerns shape the search_operand routes. RECURSION is
+  # universal: a directory operand must recurse, so every driver's route injects
+  # -r. The driver-exhaustive recursion test in tests/test_shellhookwrappers.py
+  # is parametrized over every known driver, so a newly registered driver that
+  # lacks a recursion route fails the gate instead of silently regressing.
+  # DIALECT is per-driver: Codex authors extended regex (| + ? ( ) as operators)
+  # so it also injects -E, while Claude authors BASIC (\|) natively and must
+  # never receive -E. Because a search_operand route dispatches and returns, each
+  # driver carries its complete prefix here (Codex -E -r, Claude -r) rather than
+  # layering -E over a shared -r route; the final head-only 'rtk grep -E' route
+  # then covers Codex greps that carry no search operand.
   { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
   { head = "grep", search_operands = true, scopes = { drivers = ["claude"] }, argv = ["rtk", "grep", "-r"] },
   { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },

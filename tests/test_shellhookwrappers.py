@@ -582,6 +582,69 @@ def test_claude_grep_recurses_directory_operands_through_native_grep(
     ]
 
 
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+@pytest.mark.parametrize("driver_name", sorted(shellhook.known_wrapper_driver_names()))
+def test_every_driver_recurses_directory_operands_through_native_grep(
+    tmp_path, monkeypatch, driver_name, shell_name
+):
+    # Recursion into a directory operand is dialect-independent: it is the one
+    # search-operand behavior every agent driver must share. Parametrizing over
+    # the full known-driver set makes that invariant driver-exhaustive, so a
+    # newly registered driver whose wrapper lacks a search_operand recursion
+    # route fails this gate here instead of silently forwarding a grep-dialect
+    # directory search to rg (where -r reinterprets as --replace and rewrites
+    # the output). This asserts only the shared invariant; the exact per-driver
+    # dialect prefix (-E for Codex, none for Claude) is pinned by the dedicated
+    # recursion tests above.
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("rtk", "rg"):
+        tool = bin_dir / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            "rtk grep needle project/",
+            "rtk grep --glob '*.py' needle project/",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    directory_line, rg_native_line = trace_lines(trace, expected_prefix="rg:")
+    # The directory operand resolves to the native rtk grep frontend, carrying an
+    # injected -r, with the pattern and directory operand preserved verbatim.
+    assert directory_line.startswith("rtk:grep ")
+    assert "-r" in directory_line.split()
+    assert directory_line.endswith(" needle project/")
+    # An rg-native flag still reaches rg for every driver, so the router keeps
+    # the two dialects on genuinely different frontends.
+    assert rg_native_line == "rg:--glob *.py needle project/"
+    assert directory_line != rg_native_line
+
+
 def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
