@@ -718,8 +718,9 @@ def match_route_pattern(flag: str) -> str:
 
     A literal ``*`` anywhere in the flag stays an unquoted wildcard while every
     other segment is shell-quoted literally. This lets a trailing wildcard like
-    ``--glob=*`` match any ``--glob=`` value and a leading wildcard like ``*/``
-    match any trailing-directory operand, without a bespoke operand scanner.
+    ``--glob=*`` match any ``--glob=`` value. Directory operands are matched by
+    the dedicated ``search_operands`` scanner, not a leading-wildcard glob, so a
+    grep-dialect directory search never reaches ``rg`` through this compiler.
     """
     segments = flag.split("*")
     return "*".join(shell_quote(segment) if segment else "" for segment in segments)

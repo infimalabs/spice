@@ -38,8 +38,10 @@ match = [
   # directory operand, -r/-R recursion) must not reach rg, because grep and rg
   # share short flags with different meanings (-r=--replace, -E=--encoding,
   # -L=--follow, -U=--multiline) and forwarding argv untranslated silently
-  # rewrites or misdirects output. Such searches stay on the rtk grep frontend,
-  # which runs native grep correctly.
+  # rewrites or misdirects output. Such searches stay on the rtk grep frontend:
+  # the driver-scoped search_operands routes below inject -r so a bare directory
+  # operand recurses through native grep, which runs the intended search
+  # correctly without ever translating a grep short flag against rg's dialect.
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*"], argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
@@ -50,6 +52,7 @@ match = [
   { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
   { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
+  { head = "grep", search_operands = true, scopes = { drivers = ["claude"] }, argv = ["rtk", "grep", "-r"] },
   { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },
 ]
 
