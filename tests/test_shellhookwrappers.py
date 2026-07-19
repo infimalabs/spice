@@ -443,7 +443,7 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         "rg:-g *.md needle docs",
         "rg:--glob *.toml needle .",
         "rg:--glob=*.py needle src",
-        "rg:needle docs/design/",
+        "resolved:grep -E -r needle docs/design/",
         "resolved:grep -E -r needle src",
         "resolved:grep -E -r -F a|b src",
         "resolved:grep -E -r -G a\\|b src",
@@ -522,6 +522,57 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
         "rtk:grep -E -C 2 needle",
         "rtk:grep -E --context needle",
         "rtk:grep -E -e needle",
+    ]
+
+
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_rtk_grep_keeps_recursive_directory_search_off_ripgrep(
+    tmp_path, monkeypatch, shell_name
+):
+    # A grep-dialect recursive search (a -r bundle on a trailing-directory
+    # operand) stays on the rtk grep frontend, so ripgrep never reinterprets the
+    # bundle's -r as --replace. An explicit rg-native flag still reaches rg,
+    # proving the router keeps distinguishing the two dialects.
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("rtk", "rg"):
+        tool = bin_dir / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, "claude")
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            "rtk grep -rin needle project/",
+            "rtk grep --glob '*.py' needle project/",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="rg:") == [
+        "rtk:grep -rin needle project/",
+        "rg:--glob *.py needle project/",
     ]
 
 

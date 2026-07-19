@@ -96,9 +96,12 @@ wrappers. It does not choose commands for RTK; it preserves native semantics
 after RTK selection by routing:
 
 - rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`, `-g`,
-  `--glob`, `--glob=*`) and trailing-directory operands (any operand ending in
-  `/`, matched by the `*/` glob) to `rg`, so a directory search keeps native rg
-  semantics instead of the canonical `rtk grep` frontend;
+  `--glob`, `--glob=*`) to `rg`, since those flags are an explicit request for
+  ripgrep's own frontend. Trailing-directory operands (any operand ending in
+  `/`) instead stay on the canonical `rtk grep` frontend: a grep-dialect command
+  must never be forwarded to `rg`, which reinterprets grep short flags (`-r` as
+  `--replace`, `-E` as `--encoding`, `-L` as `--follow`, `-U` as `--multiline`)
+  and would silently rewrite or misdirect the search;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every remaining Codex-authored `rtk grep` through a final head-only
