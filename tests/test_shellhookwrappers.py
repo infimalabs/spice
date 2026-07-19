@@ -526,13 +526,17 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
 
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
-def test_rtk_grep_keeps_recursive_directory_search_off_ripgrep(
+def test_claude_grep_recurses_directory_operands_through_native_grep(
     tmp_path, monkeypatch, shell_name
 ):
-    # A grep-dialect recursive search (a -r bundle on a trailing-directory
-    # operand) stays on the rtk grep frontend, so ripgrep never reinterprets the
-    # bundle's -r as --replace. An explicit rg-native flag still reaches rg,
-    # proving the router keeps distinguishing the two dialects.
+    # The Claude directory-search contract, proven end to end:
+    #  - a bare directory operand with no recursion flag gains an injected -r and
+    #    recurses through the rtk grep frontend (native grep), so a zero-flag
+    #    'grep needle dir/' finds matches instead of failing "Is a directory";
+    #  - a grep-dialect -r bundle stays on that same frontend (double -r is
+    #    harmless), so ripgrep never reinterprets the bundle's -r as --replace;
+    #  - an explicit rg-native flag still reaches rg, proving the router keeps
+    #    distinguishing the two dialects.
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} is not installed")
@@ -551,6 +555,7 @@ def test_rtk_grep_keeps_recursive_directory_search_off_ripgrep(
         [
             "set -u",
             *shellhook.render_agent_wrapper_lines(tmp_path),
+            "rtk grep needle project/",
             "rtk grep -rin needle project/",
             "rtk grep --glob '*.py' needle project/",
         ]
@@ -571,7 +576,8 @@ def test_rtk_grep_keeps_recursive_directory_search_off_ripgrep(
 
     assert completed.returncode == 0, completed_process_detail(completed, trace)
     assert trace_lines(trace, expected_prefix="rg:") == [
-        "rtk:grep -rin needle project/",
+        "rtk:grep -r needle project/",
+        "rtk:grep -r -rin needle project/",
         "rg:--glob *.py needle project/",
     ]
 
@@ -653,7 +659,7 @@ def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
             "alpha\\|beta",
             [
                 "grep:alpha\\|beta source.txt",
-                "rtk:grep alpha\\|beta source.txt",
+                "rtk:grep -r alpha\\|beta source.txt",
             ],
         ),
     ],

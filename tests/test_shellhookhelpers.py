@@ -168,6 +168,13 @@ def builtin_common_wrapper_lines(
                 "  fi",
             ]
         )
+    elif driver_name == "claude":
+        # Claude authors BASIC dialect natively, so it skips the -E injections
+        # and only gains the search_operands -r route: a directory operand
+        # recurses through native grep instead of failing or reaching rg.
+        lines.extend(
+            shellhook.grep_search_operand_route_guard_lines(f"{command_word} grep -r")
+        )
     lines.extend([f'  command {command_word} "$@"', "}"])
     if driver_name == "codex":
         lines.extend(
