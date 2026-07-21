@@ -211,6 +211,41 @@ function serveAgentTranscriptOwner(identity) {
   return String(serveAgentDriver(identity).transcriptOwner || "").trim();
 }
 
+function driverIconAssetPath(driver) {
+  const iconPaths = {
+    claude: "/static/icons/claude.svg",
+    codex: "/static/icons/openai.svg",
+    openai: "/static/icons/openai.svg",
+  };
+  return iconPaths[driver] || "";
+}
+
+function driverDisplayLabel(driver) {
+  const labels = {
+    claude: "Claude driver",
+    codex: "Codex driver",
+    openai: "OpenAI driver",
+  };
+  return labels[driver] || "Agent driver";
+}
+
+function driverIdentityTooltip(fields) {
+  const driver = String(fields.driver || "").trim().toLowerCase();
+  const driverName = String(fields.driverName || "").trim();
+  const model = String(fields.model || "").trim();
+  const effort = String(fields.effort || "").trim();
+  const threadId = String(fields.threadId || "").trim();
+  const session = String(fields.session || "").trim();
+  const parts = [driverDisplayLabel(driver)];
+  if (driverName && driverName.toLowerCase() !== driver)
+    parts.push("driver: " + driverName);
+  if (model) parts.push("model: " + model);
+  if (effort) parts.push("effort: " + effort);
+  parts.push("thread: " + (threadId || "unbound"));
+  if (session) parts.push("session: " + session);
+  return parts.join("; ");
+}
+
 function serveAgentLaunch(identity, kind) {
   return (((identity || {}).launch || {})[kind] || {});
 }

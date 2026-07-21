@@ -596,7 +596,7 @@ function updateTargetChoiceButtonPresentation(button, target, actionLabel) {
   syncTargetChoiceNameAccent(button, target);
   button.title = actionLabel + " " + targetChoiceName(target) + "; " + metadata;
   const metadataEl = button.querySelector(".target-choice-meta");
-  if (metadataEl) metadataEl.textContent = metadata;
+  if (metadataEl) renderTargetChoiceMetadata(metadataEl, target);
 }
 
 function syncTargetChoiceNameAccent(button, target) {
@@ -624,16 +624,75 @@ function targetChoiceName(target) {
   return targetIdentityDisplayLabel(target.targetIdentity);
 }
 
-function targetChoiceMetadata(target) {
+function targetChoiceMetadataParts(target) {
   const parts = [];
   if (laneStore.hasLane(target.id)) parts.push("open");
   const activity = relativeTime(targetChoiceLastAssistantAt(target));
   if (activity) parts.push(activity.trim());
   else if (!targetIdentityThreadId(target.targetIdentity)) parts.push("never");
+  const statusIndex = parts.length;
   parts.push(targetChoiceStatusLabel(target));
   const pending = targetChoicePendingCount(target);
   if (pending > 0) parts.push(pending + " pending");
-  return parts.join(" · ");
+  return { parts, statusIndex };
+}
+
+function targetChoiceMetadata(target) {
+  return targetChoiceMetadataParts(target).parts.join(" · ");
+}
+
+function targetChoiceDriverIconName(target) {
+  return String(targetIdentityDriver((target || {}).targetIdentity).name || "")
+    .trim()
+    .toLowerCase();
+}
+
+function targetChoiceDriverTooltip(target, driver) {
+  const identity = (target || {}).targetIdentity || {};
+  const driverIdentity = targetIdentityDriver(identity);
+  return driverIdentityTooltip({
+    driver,
+    driverName: driverIdentity.name,
+    model: driverIdentity.model,
+    effort: driverIdentity.effort,
+    threadId: targetIdentityThreadId(identity),
+    session: driverIdentity.transcriptOwner,
+  });
+}
+
+function targetChoiceDriverIcon(target, driver, src) {
+  const icon = document.createElement("span");
+  const tooltip = targetChoiceDriverTooltip(target, driver);
+  icon.className = "target-choice-driver-icon target-choice-driver-icon--" + driver;
+  icon.dataset.targetChoiceDriverIcon = driver;
+  icon.title = tooltip;
+  icon.setAttribute("aria-label", tooltip);
+  icon.setAttribute("role", "img");
+  icon.style.setProperty("--target-choice-driver-icon-url", 'url("' + src + '")');
+  return icon;
+}
+
+function renderTargetChoiceMetadata(metadataEl, target) {
+  const { parts, statusIndex } = targetChoiceMetadataParts(target);
+  const driver = targetChoiceDriverIconName(target);
+  const src = driverIconAssetPath(driver);
+  if (!src) {
+    metadataEl.textContent = parts.join(" · ");
+    return;
+  }
+  const icon = targetChoiceDriverIcon(target, driver, src);
+  if (statusIndex < 1) {
+    metadataEl.replaceChildren(
+      icon,
+      document.createTextNode(" " + parts.join(" · ")),
+    );
+    return;
+  }
+  metadataEl.replaceChildren(
+    document.createTextNode(parts.slice(0, statusIndex).join(" · ") + " "),
+    icon,
+    document.createTextNode(" " + parts.slice(statusIndex).join(" · ")),
+  );
 }
 
 function targetChoiceLastAssistantAt(target) {

@@ -136,12 +136,7 @@ function composerDriverIconName(member) {
 }
 
 function composerDriverIconPath(driver) {
-  const iconPaths = {
-    claude: "/static/icons/claude.svg",
-    codex: "/static/icons/openai.svg",
-    openai: "/static/icons/openai.svg",
-  };
-  return iconPaths[driver] || "";
+  return driverIconAssetPath(driver);
 }
 
 function composerDriverIcon(member) {
@@ -164,24 +159,14 @@ function syncComposerDriverIconElement(icon, member, driver, src) {
 }
 
 function composerDriverTooltip(member, driver) {
-  const labels = {
-    claude: "Claude driver",
-    codex: "Codex driver",
-    openai: "OpenAI driver",
-  };
-  const parts = [labels[driver] || "Agent driver"];
-  const driverName = String((member || {}).driverName || "").trim();
-  const model = String((member || {}).driverModel || "").trim();
-  const effort = String((member || {}).driverEffort || "").trim();
-  const threadId = String((member || {}).targetThreadId || "").trim();
-  const session = String((member || {}).driverTranscriptOwner || "").trim();
-  if (driverName && driverName.toLowerCase() !== driver)
-    parts.push("driver: " + driverName);
-  if (model) parts.push("model: " + model);
-  if (effort) parts.push("effort: " + effort);
-  parts.push("thread: " + (threadId || "unbound"));
-  if (session) parts.push("session: " + session);
-  return parts.join("; ");
+  return driverIdentityTooltip({
+    driver,
+    driverName: (member || {}).driverName,
+    model: (member || {}).driverModel,
+    effort: (member || {}).driverEffort,
+    threadId: (member || {}).targetThreadId,
+    session: (member || {}).driverTranscriptOwner,
+  });
 }
 
 function composerShardQuoteStack(shard, targetId) {
