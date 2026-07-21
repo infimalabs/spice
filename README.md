@@ -120,7 +120,7 @@ spice task next
 
 | Surface | Command |
 | --- | --- |
-| Watch existing agent sessions | `spice watch <session-dir>...` |
+| Discover and watch existing agent sessions | `spice watch --discover` |
 | Install constitution gates only | `spice init --gates` |
 | Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
