@@ -537,7 +537,10 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert "assertDrainColorRamp(pills)" in smoke
     assert "draining pill shifted hue instead of desaturating" in smoke
     assert "drain ramp saturation did not fall ready>active>dormant" in smoke
-    assert 'labels !== "serve,studies,cli,tests,lifecycle"' in smoke
+    assert (
+        'labels !== "serve,studies,cli,tests,lifecycle,agent,oops,maxim_proposal"'
+        in smoke
+    )
     assert 'inventory.revision = "10000000000000000000000000000";' in smoke
     assert 'inventory.revision = "100000000000000000000000000000";' in smoke
     assert 'ariaHidden: strip?.getAttribute("aria-hidden")' in smoke
