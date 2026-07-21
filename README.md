@@ -72,6 +72,50 @@ hygiene; bind one agent when direct intervention becomes necessary; move to the
 task-backed fleet only when work needs multiple coordinated lanes. The full
 prerequisite and graduation path is the [entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder).
 
+## Quickstart
+
+First install the `spice` CLI (see [Install](#install)), then follow the
+[entry ladder](docs/overview.md#entry-ladder) — **watch -> gates -> steer ->
+fleet** — entering read-only and graduating only when a rung's limit appears.
+
+**Watch** an existing Claude Code or Codex session. This is read-only: it binds
+no repository, installs no hooks, and never writes to the observed directory.
+
+```sh
+spice watch <session-dir>...
+```
+
+**Gates** add pre-commit and commit-message enforcement to a Git repository.
+Everything from here writes to the repository:
+
+```sh
+cd /path/to/your/repo
+spice init --gates      # writes to the repo: constitution gates only
+```
+
+This installs the `pre-commit` constitution (sticky-flex limits, regression-only
+magic-number ratchets, taste policy, and configured extensions) plus
+commit-message hygiene, with no task plane, shell wrapper, agent skill, or fleet
+reference guard. Commit normally to run the gates, or invoke the staged gate
+directly with `spice dev pre-commit`.
+
+**Steer** materializes the full steering and fleet surfaces. `spice init` writes
+the agent skill, shell wrapper, and steering surfaces into the repo, and
+`spice doctor` verifies them:
+
+```sh
+spice init      # writes to the repo: steering + fleet surfaces
+spice doctor
+```
+
+Bind one lane and open the console with `spice agent ensure` and `spice serve`.
+
+**Fleet** turns on allocator-driven selection once a steered lane proves useful:
+
+```sh
+spice task next
+```
+
 ## Commands
 
 | Surface | Command |
@@ -94,6 +138,8 @@ expectations for extensions and command coupling live in [STABILITY.md](https://
 
 ## Install
 
+Install the `spice` CLI as a uv tool:
+
 ```sh
 uv tool install -e /path/to/spice-main
 # or, for the released package:
@@ -102,29 +148,14 @@ uv tool install spice-harness
 # Optional: RTK 0.42.4 or newer compacts agent-shell command output:
 brew install rtk
 # or: cargo install --git https://github.com/rtk-ai/rtk
-
-cd /path/to/your/repo
-spice init
-spice doctor
 ```
-
-For repository hygiene without the task plane, shell wrapper, or agent skill,
-install the standalone constitution tier instead:
-
-```sh
-spice init --gates
-```
-
-This installs the `pre-commit` constitution (including sticky-flex limits,
-regression-only magic-number ratchets, taste policy, and configured extensions)
-plus commit-message hygiene. It does not install the fleet-specific reference
-guard or materialize agent files. Commit normally to run the gates, or invoke
-the staged gate directly with `spice dev pre-commit`.
 
 The default install is a uv tool. Operators who deploy from a main tree should
 use the editable form so the installed `spice` command resolves to that tree;
 that editable main tree is the server deployment. Other worktrees remain
-operated trees and do not supply their own runtime.
+operated trees and do not supply their own runtime. See the
+[Quickstart](#quickstart) for the read-only watch -> gates -> steer -> fleet
+walkthrough.
 
 ### Graceful degradation
 
