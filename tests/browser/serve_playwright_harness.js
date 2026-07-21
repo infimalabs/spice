@@ -180,6 +180,13 @@ function waitForServeUrl(child, stdout, stderr, options = {}) {
 
 async function startServe(options = {}) {
   const scratch = await createServeScratch();
+  try {
+    if (typeof options.prepareScratch === "function")
+      await options.prepareScratch(scratch);
+  } catch (error) {
+    await fs.rm(scratch.tmpRoot, { recursive: true, force: true });
+    throw error;
+  }
   const { child, stderr, stdout } = spawnServeProcess(options, scratch);
   const stop = serveStopper(child, stdout, stderr, scratch, options);
   try {
