@@ -624,6 +624,23 @@ def test_builtin_maxim_bags_default_to_unconstrained_scopes():
     )
 
 
+def test_builtin_fallbacks_bag_lists_only_fallback_specific_words():
+    assert maxims.resolved_maxim_bags()["fallbacks"].words == frozenset(
+        {"fall back", "fall backs", "fallback", "fallbacks", "falls back"}
+    )
+
+
+def test_optional_language_stays_clean_while_real_fallbacks_trip():
+    optional_prose = (
+        "The doctor lists optional external dependencies and their options."
+    )
+    fallback_prose = "This path will fall back to a default when the value is missing."
+    assert maxims.triggered_maxims([optional_prose]) == []
+    assert [hit.name for hit in maxims.triggered_maxims([fallback_prose])] == [
+        "fallbacks"
+    ]
+
+
 def test_repo_config_declares_maxim_driver_scope(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     _write_pyproject(
