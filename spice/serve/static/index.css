@@ -249,9 +249,15 @@ button.primary:hover {
 }
 .filter-pill--ready { border-color: var(--good); color: var(--good); }
 .filter-pill--active {
-  background: color-mix(in srgb, var(--team-teal-accent) 8%, transparent);
-  border-color: var(--team-teal-accent);
-  color: var(--team-teal-accent);
+  /* Draining/in-flight work reads as the ready hue washed out toward the idle
+     gray -- saturation drops while hue and lightness hold, so there is no
+     green->cyan drift. Relative color keeps --good's hue/lightness and lowers
+     only saturation, making ready -> active -> dormant one constant-hue,
+     monotonically desaturating ramp that ends at the neutral idle --muted. */
+  --filter-pill-draining: hsl(from var(--good) h calc(s * 0.5) l);
+  background: color-mix(in srgb, var(--filter-pill-draining) 8%, transparent);
+  border-color: var(--filter-pill-draining);
+  color: var(--filter-pill-draining);
 }
 .filter-pill--dormant { color: var(--muted); }
 .filter-pill--implicit {
@@ -269,7 +275,7 @@ button.primary:hover {
   font-size: 9px;
   padding: 0 5px;
 }
-.filter-pill--active .filter-pill-count { background: var(--team-teal-accent); }
+.filter-pill--active .filter-pill-count { background: var(--filter-pill-draining); }
 .filter-pill--dormant .filter-pill-count { background: var(--muted); }
 
 /* ---- swimlanes ---- */

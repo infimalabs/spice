@@ -16,6 +16,72 @@ function assertPill(pills, label, expected) {
   }
 }
 
+// getComputedStyle returns the resolved tone color as `rgb(...)`/`rgba(...)`
+// (or a `color(srgb ...)` fallback with 0-1 channels); recover its HSL so the
+// drain ramp can be checked in hue/saturation terms.
+function parseRgb(value) {
+  const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
+  if (channels.length < 3) throw new Error("unparseable color: " + value);
+  const scale = /color\(|srgb/i.test(value) ? 255 : 1;
+  return channels.map((channel) => channel * scale);
+}
+
+function rgbToHsl(value) {
+  const [r, g, b] = parseRgb(value).map((channel) => channel / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === r) hue = ((g - b) / delta) % 6;
+    else if (max === g) hue = (b - r) / delta + 2;
+    else hue = (r - g) / delta + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  const lightness = (max + min) / 2;
+  const saturation =
+    delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
+  return { hue, saturation, lightness };
+}
+
+function toneColor(pills, label) {
+  const pill = pills.find((item) => item.label === label);
+  if (!pill) throw new Error("missing " + label + " pill for drain ramp");
+  return rgbToHsl(pill.color);
+}
+
+// The drain pill's ready -> active(draining) -> dormant(idle) progression must
+// vary saturation only at a constant hue: the ready green washes out toward the
+// neutral idle gray with no green->cyan hue shift. `serve`/`tests` render ready
+// (green), `lifecycle` renders active/draining, `studies`/`cli` render
+// dormant/idle. A regression that reintroduces an off-hue accent (e.g. the old
+// teal) moves the active hue away from the ready hue and fails here.
+const DRAIN_RAMP_HUE_TOLERANCE_DEG = 8;
+const DRAIN_RAMP_IDLE_MAX_SATURATION = 0.2;
+
+function assertDrainColorRamp(pills) {
+  const ready = toneColor(pills, "serve");
+  const active = toneColor(pills, "lifecycle");
+  const dormant = toneColor(pills, "studies");
+  const ramp = { ready, active, dormant };
+  if (Math.abs(active.hue - ready.hue) > DRAIN_RAMP_HUE_TOLERANCE_DEG)
+    throw new Error(
+      "draining pill shifted hue instead of desaturating: " +
+        JSON.stringify(ramp),
+    );
+  if (!(ready.saturation > active.saturation && active.saturation > dormant.saturation))
+    throw new Error(
+      "drain ramp saturation did not fall ready>active>dormant: " +
+        JSON.stringify(ramp),
+    );
+  if (dormant.saturation > DRAIN_RAMP_IDLE_MAX_SATURATION)
+    throw new Error(
+      "idle/dormant pill is not a neutral gray endpoint: " +
+        JSON.stringify(ramp),
+    );
+  return ramp;
+}
+
 function initialInventory() {
   return {
     revision: "9999999999999999999999999999",
@@ -94,6 +160,7 @@ async function readPills(page) {
       implicit: pill.classList.contains("filter-pill--implicit"),
       unavailable: pill.dataset.unavailableTaskCount,
       title: pill.title,
+      color: getComputedStyle(pill).color,
     })),
   );
 }
@@ -177,6 +244,7 @@ async function clearInventory(page) {
 async function runScenario({ page }) {
   const pills = await installInitialState(page);
   assertInitialPills(pills);
+  const drainRamp = assertDrainColorRamp(pills);
   await page.screenshot({ path: SCREENSHOT_PATH });
   const resolvedPills = await resolveCliBlocker(page);
   assertPill(resolvedPills, "cli", {
@@ -187,7 +255,13 @@ async function runScenario({ page }) {
   const emptyState = await clearInventory(page);
   if (emptyState.ariaHidden !== "true" || emptyState.pillCount !== 0)
     throw new Error("empty inventory mismatch: " + JSON.stringify(emptyState));
-  return { pills, resolvedPills, emptyState, screenshotPath: SCREENSHOT_PATH };
+  return {
+    pills,
+    resolvedPills,
+    emptyState,
+    drainRamp,
+    screenshotPath: SCREENSHOT_PATH,
+  };
 }
 
 async function run() {
