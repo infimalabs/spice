@@ -815,7 +815,13 @@ function targetChoiceStatusLabel(target) {
 
 // ---- global filter pills -----------------------------------------------------------
 
-const taskFilterHeaderExtraStems = ["agent", "oops"];
+// The agent stem is the operator's private channel: internal (not a public
+// project stem) but still handed out, so its tasks move through phases and its
+// pill keeps the public triple. Hidden stems instead come from the catalog
+// (catalog.hiddenStems: oops, maxim_proposal, and any project-configured
+// additions); they are never handed out, so their pills collapse to a single
+// open count and sit out the public boundary-dissolution accounting.
+const taskFilterPrivateChannelStem = "agent";
 const taskFilterStemStateCountFields = [
   "readyTaskCount",
   "inFlightTaskCount",
@@ -825,16 +831,22 @@ const taskFilterStemStateCountFields = [
 
 function taskFilterStemPillsFromInventory(inventory) {
   const catalog = (inventory || {}).catalog || {};
+  const hiddenStems = new Set(catalog.hiddenStems || []);
   const stemsByName = new Map(
     ((inventory || {}).primaryStems || []).map((stem) => [stem.name, stem]),
   );
   const pills = [];
+  // Public project stems, then the private agent channel, then every hidden
+  // stem the catalog knows about. Each stem is marked hidden from the catalog so
+  // its pill can collapse and stay out of the public drain accounting.
   for (const stemName of uniqueStringList([
     ...(catalog.approvedStems || []),
-    ...taskFilterHeaderExtraStems,
+    taskFilterPrivateChannelStem,
+    ...(catalog.hiddenStems || []),
   ])) {
     const stem = stemsByName.get(stemName);
-    if (stem && stem.openTaskCount > 0) pills.push(stem);
+    if (stem && stem.openTaskCount > 0)
+      pills.push({ ...stem, hidden: hiddenStems.has(stemName) });
   }
   return pills;
 }
@@ -924,12 +936,15 @@ function taskFilterStemPillModel(stem) {
         ": " +
         label,
     );
+  const hidden = Boolean(stem.hidden);
   const classes = [];
-  if (stem.name === "agent") classes.push("filter-pill--private");
-  if (stem.name === "oops") classes.push("filter-pill--system");
+  if (stem.name === taskFilterPrivateChannelStem)
+    classes.push("filter-pill--private");
+  else if (hidden) classes.push("filter-pill--system");
   return {
     kind: "stem",
     label,
+    hidden,
     openTaskCount,
     readyTaskCount,
     inFlightTaskCount,
@@ -953,10 +968,14 @@ function taskFilterStemPillModel(stem) {
 }
 
 function taskFilterStemPillCountText(model) {
-  if (model.label === "oops") return String(model.openTaskCount);
-  // Always render the full ready/in-flight/unavailable triple so the pill keeps
-  // a fixed footprint; collapsing zero slots made the width jitter as counts
-  // moved between slots.
+  // Hidden stems (catalog.hiddenStems: oops, maxim_proposal, and any
+  // project-configured additions) are never handed out by the allocator, so
+  // their ready/in-flight/unavailable phases never advance and the triple
+  // carries no information -- collapse to a single open count. Public stems and
+  // the private agent channel are handed out and move through phases, so they
+  // keep the full triple, whose fixed footprint stops the pill jittering as
+  // counts move between slots.
+  if (model.hidden) return String(model.openTaskCount);
   return [
     model.readyTaskCount,
     model.inFlightTaskCount,
@@ -1014,8 +1033,11 @@ function taskFilterStemScopeLabel(stemName) {
   return stemName === "oops" ? "oops" : stemName + ".*";
 }
 
-function taskFilterStemIsSystem(stemName) {
-  return stemName === "agent" || stemName === "oops";
+function taskFilterStemIsSystem(stem) {
+  // Non-public channels -- the private agent stem and every hidden stem -- are
+  // not handed out through the public project boundary, so they sit out the
+  // boundary-dissolution drain accounting below.
+  return stem.name === taskFilterPrivateChannelStem || Boolean(stem.hidden);
 }
 
 function taskFilterStemDrainability(stem) {
@@ -1026,7 +1048,7 @@ function taskFilterStemDrainability(stem) {
     if (!isLaneOpen(lane) || isShadowLane(lane)) continue;
     const lifetime = laneEffectiveLifetime(lane);
     if (
-      !taskFilterStemIsSystem(stem.name) &&
+      !taskFilterStemIsSystem(stem) &&
       agentLifetimeDissolvesTaskBoundary(lifetime)
     ) {
       boundaryDissolved = true;

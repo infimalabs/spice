@@ -36,7 +36,18 @@ def test_static_filter_header_pills_render_models_and_styles():
     filter_count_rule = css[filter_count_start : css.index("}", filter_count_start)]
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
-    assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
+    assert 'const taskFilterPrivateChannelStem = "agent";' in app_lanes
+    # The pill inventory is data-driven: public stems, then the private agent
+    # channel, then every catalog-declared hidden stem, each marked hidden so its
+    # pill can collapse and sit out the public drain accounting.
+    assert (
+        "for (const stemName of uniqueStringList([\n"
+        "    ...(catalog.approvedStems || []),\n"
+        "    taskFilterPrivateChannelStem,\n"
+        "    ...(catalog.hiddenStems || []),\n"
+        "  ])) {" in app_lanes
+    )
+    assert "pills.push({ ...stem, hidden: hiddenStems.has(stemName) });" in app_lanes
     assert "function filterPillModels()" in app_lanes
     assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
     assert "function taskFilterStemPillModel(stem)" in app_lanes
@@ -49,9 +60,11 @@ def test_static_filter_header_pills_render_models_and_styles():
         'pill.querySelector(".filter-pill-count").textContent ='
         "\n      taskFilterStemPillCountText(model);" in app_lanes
     )
-    # The non-oops badge always renders the full ready/in-flight/unavailable
-    # triple so the pill footprint stays fixed instead of jittering as counts
-    # move between slots.
+    # Hidden stems (never handed out) collapse to a single open count; public
+    # stems and the private agent channel keep the full ready/in-flight/
+    # unavailable triple so the pill footprint stays fixed instead of jittering
+    # as counts move between slots.
+    assert "if (model.hidden) return String(model.openTaskCount);" in app_lanes
     assert (
         "  return [\n"
         "    model.readyTaskCount,\n"
@@ -64,16 +77,20 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert 'if (model.inFlightTaskCount > 0) return "active";' in app_lanes
     assert 'return "dormant";' in app_lanes
     assert 'classes.push("filter-pill--" + tone);' in app_lanes
+    assert 'classes.push("filter-pill--private");' in app_lanes
     assert 'classes.push("filter-pill--system");' in app_lanes
     assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
     assert 'return stemName === "oops" ? "oops" : stemName + ".*";' in app_lanes
-    assert "function taskFilterStemIsSystem(stemName)" in app_lanes
-    assert 'return stemName === "agent" || stemName === "oops";' in app_lanes
+    assert "function taskFilterStemIsSystem(stem)" in app_lanes
+    assert (
+        "return stem.name === taskFilterPrivateChannelStem || Boolean(stem.hidden);"
+        in app_lanes
+    )
     assert "boundaryDissolved: Boolean(model.drainability.boundaryDissolved)" in (
         app_lanes
     )
     assert "function taskFilterStemDrainability(stem)" in app_lanes
-    assert "!taskFilterStemIsSystem(stem.name)" in app_lanes
+    assert "!taskFilterStemIsSystem(stem)" in app_lanes
     assert "boundaryDissolved = true;" in app_lanes
     assert "agentLifetimeUsesStoredTaskFilters(lifetime)" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
@@ -105,7 +122,9 @@ def test_static_filter_header_pills_render_models_and_styles():
         ".filter-pill--dormant .filter-pill-count { background: var(--muted); }" in css
     )
     assert ".filter-pill--implicit {" in css
-    assert ".filter-pill--system { color: var(--warn); }" in css
+    assert (
+        ".filter-pill--private,\n.filter-pill--system { border-style: dashed; }" in css
+    )
 
 
 def test_live_lane_payload_refreshes_global_task_filter_inventory():

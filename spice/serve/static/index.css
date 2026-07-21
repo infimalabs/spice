@@ -263,9 +263,12 @@ button.primary:hover {
 .filter-pill--implicit {
   background: color-mix(in srgb, var(--good) 8%, transparent);
 }
+/* Hidden stems (agent = private, oops = system) are marked only by the dashed
+   border; their text color rides the shared ready/active/dormant saturation
+   ramp like every other pill instead of a pinned accent, so an idle oops bucket
+   desaturates to the dormant gray rather than standing out in --warn. */
 .filter-pill--private,
 .filter-pill--system { border-style: dashed; }
-.filter-pill--system { color: var(--warn); }
 .filter-pill-count {
   background: var(--accent);
   border-radius: var(--pill-radius);

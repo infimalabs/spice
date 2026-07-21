@@ -21,10 +21,18 @@ def _between(text: str, start: str, end: str) -> str:
     return text[start_index : text.index(end, start_index)]
 
 
-def test_global_filter_pills_keep_only_actionable_and_oops_header_stems():
+def test_global_filter_pills_build_from_catalog_stems_and_private_channel():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
 
-    assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
+    # The header inventory is data-driven: public project stems, then the private
+    # agent channel, then every hidden stem the catalog knows about. Hidden stems
+    # are marked from catalog.hiddenStems so their pill can collapse; the agent
+    # channel is named as the single private (not hidden) exception.
+    assert 'const taskFilterPrivateChannelStem = "agent";' in app_lanes
+    assert "const hiddenStems = new Set(catalog.hiddenStems || []);" in app_lanes
+    assert "...(catalog.approvedStems || [])," in app_lanes
+    assert "...(catalog.hiddenStems || [])," in app_lanes
+    assert "pills.push({ ...stem, hidden: hiddenStems.has(stemName) });" in app_lanes
     assert 'label === "oops"' in app_lanes
     assert "spice task oops" in app_lanes
 

@@ -201,6 +201,142 @@ assert(
   "resolved dependency receives the ready treatment",
 );
 
+// Hidden stems (marked from catalog.hiddenStems) are never handed out, so their
+// badge collapses to a single open count and they ride the saturation ramp. The
+// private agent channel IS handed out (moves through phases), so it keeps the
+// full public triple. Project-defined hidden stems behave exactly like oops.
+const oopsPill = context.taskFilterStemPillModel({
+  name: "oops",
+  filters: [],
+  hidden: true,
+  openTaskCount: 3,
+  readyTaskCount: 0,
+  inFlightTaskCount: 0,
+  blockedTaskCount: 0,
+  deferredTaskCount: 3,
+});
+assert(
+  context.taskFilterStemPillCountText(oopsPill) === "3",
+  "the oops hidden stem collapses its badge to the single open count",
+);
+assert(
+  context.taskFilterStemPillTone(oopsPill) === "dormant",
+  "an idle hidden stem desaturates to dormant instead of a pinned accent",
+);
+assert(
+  oopsPill.classes.includes("filter-pill--system"),
+  "hidden stems carry the dashed system marker",
+);
+
+const maximPill = context.taskFilterStemPillModel({
+  name: "maxim_proposal",
+  filters: [],
+  hidden: true,
+  openTaskCount: 4,
+  readyTaskCount: 0,
+  inFlightTaskCount: 0,
+  blockedTaskCount: 0,
+  deferredTaskCount: 4,
+});
+assert(
+  context.taskFilterStemPillCountText(maximPill) === "4",
+  "a project-defined hidden stem collapses exactly like oops",
+);
+assert(
+  maximPill.classes.includes("filter-pill--system"),
+  "project-defined hidden stems also carry the dashed system marker",
+);
+
+const agentPill = context.taskFilterStemPillModel({
+  name: "agent",
+  filters: [],
+  hidden: false,
+  openTaskCount: 3,
+  readyTaskCount: 2,
+  inFlightTaskCount: 1,
+  blockedTaskCount: 0,
+  deferredTaskCount: 0,
+});
+assert(
+  context.taskFilterStemPillCountText(agentPill) === "2·1·0",
+  "the private agent channel keeps the public triple because its tasks move through phases",
+);
+assert(
+  context.taskFilterStemPillTone(agentPill) === "ready",
+  "the agent channel reacts to the saturation ramp like a public stem",
+);
+assert(
+  agentPill.classes.includes("filter-pill--private"),
+  "the agent channel is marked private, not system",
+);
+assert(
+  context.taskFilterStemPillCountText(maximPill) !==
+    context.taskFilterStemPillCountText(agentPill),
+  "hidden stems collapse to one number while the moving agent channel stays split",
+);
+
+// taskFilterStemPillsFromInventory marks stems hidden from catalog.hiddenStems
+// and includes public stems, the private agent channel, then every hidden stem.
+const inventoryPills = context.taskFilterStemPillsFromInventory({
+  catalog: {
+    approvedStems: ["serve"],
+    hiddenStems: ["oops", "maxim_proposal"],
+  },
+  primaryStems: [
+    stem({
+      openTaskCount: 1,
+      readyTaskCount: 1,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 0,
+    }),
+    {
+      name: "agent",
+      filters: [],
+      openTaskCount: 1,
+      readyTaskCount: 1,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 0,
+    },
+    {
+      name: "oops",
+      filters: [],
+      openTaskCount: 2,
+      readyTaskCount: 0,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 2,
+    },
+    {
+      name: "maxim_proposal",
+      filters: [],
+      openTaskCount: 3,
+      readyTaskCount: 0,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 3,
+    },
+  ],
+});
+const hiddenByName = new Map(
+  inventoryPills.map((item) => [item.name, Boolean(item.hidden)]),
+);
+assert(
+  hiddenByName.get("serve") === false && hiddenByName.get("agent") === false,
+  "public stems and the private agent channel are not marked hidden",
+);
+assert(
+  hiddenByName.get("oops") === true &&
+    hiddenByName.get("maxim_proposal") === true,
+  "catalog hidden stems (built-in and project-defined) are marked hidden",
+);
+assert(
+  inventoryPills.map((item) => item.name).join(",") ===
+    "serve,agent,oops,maxim_proposal",
+  "pill order is public stems, then the private agent channel, then hidden stems",
+);
+
 const empty = context.taskFilterStemPillsFromInventory({
   catalog: { approvedStems: ["serve"] },
   primaryStems: [],

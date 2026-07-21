@@ -87,6 +87,7 @@ function initialInventory() {
     revision: "9999999999999999999999999999",
     catalog: {
       approvedStems: ["serve", "studies", "cli", "tests", "lifecycle"],
+      hiddenStems: ["oops", "maxim_proposal"],
     },
     filters: [],
     primaryStems: [
@@ -136,6 +137,33 @@ function initialInventory() {
         deferredTaskCount: 0,
       },
       {
+        name: "agent",
+        filters: [],
+        openTaskCount: 3,
+        readyTaskCount: 2,
+        inFlightTaskCount: 1,
+        blockedTaskCount: 0,
+        deferredTaskCount: 0,
+      },
+      {
+        name: "oops",
+        filters: [],
+        openTaskCount: 2,
+        readyTaskCount: 0,
+        inFlightTaskCount: 0,
+        blockedTaskCount: 0,
+        deferredTaskCount: 2,
+      },
+      {
+        name: "maxim_proposal",
+        filters: [],
+        openTaskCount: 4,
+        readyTaskCount: 0,
+        inFlightTaskCount: 0,
+        blockedTaskCount: 0,
+        deferredTaskCount: 4,
+      },
+      {
         name: "waiting",
         filters: [],
         openTaskCount: 3,
@@ -161,6 +189,7 @@ async function readPills(page) {
       unavailable: pill.dataset.unavailableTaskCount,
       title: pill.title,
       color: getComputedStyle(pill).color,
+      borderStyle: getComputedStyle(pill).borderTopStyle,
     })),
   );
 }
@@ -204,8 +233,49 @@ function assertInitialPills(pills) {
     implicit: false,
     unavailable: "0",
   });
+  // The private agent channel is handed out, so its tasks move through phases and
+  // it keeps the public triple while carrying only the dashed private marker.
+  assertPill(pills, "agent", {
+    count: "2·1·0",
+    tone: "ready",
+    borderStyle: "dashed",
+  });
+  // Hidden stems (built-in oops and project-defined maxim_proposal) are never
+  // handed out, so their badges collapse to a single open count and they ride the
+  // saturation ramp down to dormant behind the same dashed marker.
+  assertPill(pills, "oops", {
+    count: "2",
+    tone: "dormant",
+    borderStyle: "dashed",
+  });
+  assertPill(pills, "maxim_proposal", {
+    count: "4",
+    tone: "dormant",
+    borderStyle: "dashed",
+  });
+  const serveBorder = pills.find((pill) => pill.label === "serve")?.borderStyle;
+  if (serveBorder !== "solid")
+    throw new Error("public serve pill lost its solid border: " + serveBorder);
+  // An idle hidden pill desaturates to the same dormant color a public idle pill
+  // resolves to -- proof the old --warn accent pin is gone and hidden pills now
+  // ride the shared ramp instead of standing out.
+  const studiesColor = pills.find((pill) => pill.label === "studies")?.color;
+  const oopsColor = pills.find((pill) => pill.label === "oops")?.color;
+  const maximColor = pills.find(
+    (pill) => pill.label === "maxim_proposal",
+  )?.color;
+  if (oopsColor !== studiesColor)
+    throw new Error(
+      "idle hidden oops pill did not match the public dormant color: " +
+        JSON.stringify({ oopsColor, studiesColor }),
+    );
+  if (maximColor !== studiesColor)
+    throw new Error(
+      "idle hidden maxim_proposal pill did not match the public dormant color: " +
+        JSON.stringify({ maximColor, studiesColor }),
+    );
   const labels = pills.map((pill) => pill.label).join(",");
-  if (labels !== "serve,studies,cli,tests,lifecycle")
+  if (labels !== "serve,studies,cli,tests,lifecycle,agent,oops,maxim_proposal")
     throw new Error("unexpected header pills: " + labels);
 }
 
