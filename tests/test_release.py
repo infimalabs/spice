@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import spice.agent.driver as agent_driver
 import spice.release as release
 from spice.errors import SpiceError
 from spice.tasks import claimstate
@@ -298,14 +299,44 @@ def test_release_cleanup_removes_stale_build_and_distribution_trees(tmp_path):
 def test_release_constitution_runs_executable_browser_gate(monkeypatch):
     calls = []
     monkeypatch.setattr(release, "run", lambda command: calls.append(command))
+    monkeypatch.setattr(
+        release, "run_browser_gate", lambda: calls.append("browser-gate")
+    )
 
     release.run_constitution_gate()
 
     assert calls == [
         ["uv", "run", "pytest"],
         ["uv", "run", "ruff", "check", "."],
-        ["node", "tests/browser/run_release_smokes.js"],
+        "browser-gate",
     ]
+
+
+def test_release_browser_gate_passes_canonical_playwright_config(tmp_path, monkeypatch):
+    config_path = tmp_path / ".git" / ".spice" / "agents" / "playwright-mcp.json"
+    calls = []
+
+    monkeypatch.setenv("GIT_EDITOR", "preserved")
+    monkeypatch.setattr(
+        agent_driver,
+        "write_playwright_mcp_config",
+        lambda root: calls.append(("config", root)) or config_path,
+    )
+    monkeypatch.setattr(
+        release,
+        "run",
+        lambda command, **kwargs: calls.append(("run", command, kwargs["env"])),
+    )
+
+    release.run_browser_gate(tmp_path)
+
+    assert calls[0] == ("config", tmp_path)
+    assert calls[1][0:2] == (
+        "run",
+        ["node", "tests/browser/run_release_smokes.js"],
+    )
+    assert calls[1][2][release.PLAYWRIGHT_MCP_CONFIG_ENV] == str(config_path)
+    assert calls[1][2]["GIT_EDITOR"] == "preserved"
 
 
 def test_release_runner_streams_or_captures_output_as_declared(capfd):

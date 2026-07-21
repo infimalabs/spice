@@ -43,10 +43,12 @@ def test_serve_playwright_harness_loads_shared_agent_context() -> None:
         encoding="utf-8"
     )
 
-    assert "defaultPlaywrightConfigPath" in harness
-    assert '".spice"' in harness
-    assert '"agent"' in harness
-    assert '"playwright-mcp.json"' in harness
+    assert (  # env-policy: allow
+        'playwrightMcpConfigEnv = "SPICE_PLAYWRIGHT_MCP_CONFIG"' in harness
+    )
+    assert "sharedPlaywrightConfigPath" in harness
+    assert "process.env[playwrightMcpConfigEnv]" in harness
+    assert "pass playwrightConfigPath explicitly" in harness
     assert "readSharedPlaywrightContextOptions" in harness
     assert "missing shared Playwright config" in harness
     assert "config.browser.contextOptions" in harness
