@@ -245,6 +245,48 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
+def test_successor_bind_completes_requested_renewal_before_fresh_steering(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target)
+    state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
+
+    # The live duplicate-renewal sequence crossed an unbound refresh between
+    # predecessor exit and successor startup. That refresh must not re-key the
+    # active request onto the target placeholder; the first real successor then
+    # completes the existing transition before this distinct message is routed.
+    identity.team_actor_for_target(state.team_store, target, None)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_B, running=True)
+
+    payload, status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "fresh steering after renewal"},
+    )
+
+    body = inbox_request_body(collect_inbox_items(repo)[0].text)
+    completed = state.team_store.renewal_state_for_agent(ACTOR_A)
+    assert status == HTTPStatus.OK
+    assert body == "fresh steering after renewal"
+    assert completed is not None
+    assert completed.state == "started"
+    assert completed.ancestor_thread_id == THREAD_A
+    assert completed.successor_agent_id == ACTOR_B
+    assert completed.successor_thread_id == THREAD_B
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
+    assert payload["route"]["actor"] == ACTOR_B
+
+    with state.team_store.connect() as connection:
+        renewal_started_events = connection.execute(
+            "SELECT payload FROM events WHERE kind = 'renewalStarted'"
+        ).fetchall()
+    assert len(renewal_started_events) == 1
+
+
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
