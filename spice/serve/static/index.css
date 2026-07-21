@@ -1159,6 +1159,32 @@ button.primary:hover {
   white-space: nowrap;
 }
 .target-choice-meta { color: var(--muted); font-size: 11px; }
+.target-choice-driver-icon {
+  --target-choice-driver-icon-color: var(--muted);
+  cursor: help;
+  display: inline-block;
+  height: 12px;
+  position: relative;
+  vertical-align: -2px;
+  width: 12px;
+}
+.target-choice-driver-icon::before {
+  background: var(--target-choice-driver-icon-color);
+  content: "";
+  inset: 0;
+  -webkit-mask: var(--target-choice-driver-icon-url) center / contain no-repeat;
+  mask: var(--target-choice-driver-icon-url) center / contain no-repeat;
+  position: absolute;
+}
+.target-choice-driver-icon--claude {
+  --target-choice-driver-icon-color: color-mix(in srgb, #d97706 88%, var(--fg));
+  opacity: 0.82;
+}
+.target-choice-driver-icon--codex,
+.target-choice-driver-icon--openai {
+  --target-choice-driver-icon-color: color-mix(in srgb, var(--fg) 86%, var(--control));
+  opacity: 0.84;
+}
 .target-choice-drag-affordance {
   color: var(--muted);
   flex: none;

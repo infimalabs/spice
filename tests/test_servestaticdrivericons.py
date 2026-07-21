@@ -32,6 +32,18 @@ def test_static_composer_driver_icons_use_local_driver_assets():
             "function identityDisplayPair(actual, desired)",
             "lane.driverName = identityDisplayPair(actualDriver, desiredDriver);",
             "lane.driverIconName = actualDriver || transcriptOwner || desiredDriver;",
+            "function driverIconAssetPath(driver)",
+            "function driverDisplayLabel(driver)",
+            "function driverIdentityTooltip(fields)",
+            'claude: "/static/icons/claude.svg",',
+            'codex: "/static/icons/openai.svg",',
+            'openai: "/static/icons/openai.svg",',
+            '"Codex driver"',
+            '"driver: " + driverName',
+            '"model: " + model',
+            '"effort: " + effort',
+            '"thread: " + (threadId || "unbound")',
+            '"session: " + session',
         ),
     )
     _assert_contains_all(
@@ -47,20 +59,13 @@ def test_static_composer_driver_icons_use_local_driver_assets():
         app_composer,
         (
             "syncComposerDriverIcon(primary, member);",
-            'claude: "/static/icons/claude.svg",',
-            'codex: "/static/icons/openai.svg",',
-            'openai: "/static/icons/openai.svg",',
+            "return driverIconAssetPath(driver);",
+            "return driverIdentityTooltip({",
             "icon.dataset.composerDriverIcon = driver;",
             "const tooltip = composerDriverTooltip(member, driver);",
             "icon.title = tooltip;",
             'icon.setAttribute("aria-label", tooltip);',
             'icon.setAttribute("role", "img");',
-            '"Codex driver"',
-            '"driver: " + driverName',
-            '"model: " + model',
-            '"effort: " + effort',
-            '"thread: " + (threadId || "unbound")',
-            '"session: " + session',
         ),
     )
     assert '"source: worktree launch config"' not in app_composer
@@ -152,3 +157,97 @@ def test_static_composer_driver_icons_style_local_driver_assets():
     assert "display: none;" in menu_open_rule
     assert "padding-bottom: 28px;" in textarea_rule
     assert "padding-right: 32px;" in textarea_rule
+
+
+def test_static_target_choice_driver_icons_reuse_shared_driver_logic():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_composer = (STATIC_ROOT / "app.composer.js").read_text(encoding="utf-8")
+
+    _assert_contains_all(
+        app_lanes,
+        (
+            "function targetChoiceMetadataParts(target)",
+            "const statusIndex = parts.length;",
+            "function targetChoiceDriverIconName(target)",
+            "function targetChoiceDriverTooltip(target, driver)",
+            "function targetChoiceDriverIcon(target, driver, src)",
+            "function renderTargetChoiceMetadata(metadataEl, target)",
+            "const src = driverIconAssetPath(driver);",
+            "return driverIdentityTooltip({",
+            "icon.dataset.targetChoiceDriverIcon = driver;",
+            'icon.setAttribute("aria-label", tooltip);',
+            'icon.setAttribute("role", "img");',
+            'icon.className = "target-choice-driver-icon target-choice-driver-icon--"',
+            'icon.style.setProperty("--target-choice-driver-icon-url", ',
+            "if (metadataEl) renderTargetChoiceMetadata(metadataEl, target);",
+        ),
+    )
+
+    # The menu and the composer resolve their driver emblem through the same
+    # render.js helper, so the icon asset and the tooltip format live in exactly
+    # one place instead of being copied per surface.
+    assert "const src = driverIconAssetPath(driver);" in app_lanes
+    assert "return driverIconAssetPath(driver);" in app_composer
+    assert "return driverIdentityTooltip({" in app_lanes
+    assert "return driverIdentityTooltip({" in app_composer
+
+
+def test_target_choice_driver_icon_replaces_middle_dot():
+    app_lanes = STATIC_ROOT / "app.lanes.js"
+    script = Path(__file__).with_name("fixtures") / "target_choice_driver_icon.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_lanes)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_static_target_choice_driver_icons_style_inline_marker():
+    css = _serve_css_text()
+    icon_start = css.index(".target-choice-driver-icon {")
+    icon_rule = css[icon_start : css.index("}", icon_start)]
+    before_start = css.index(".target-choice-driver-icon::before {")
+    before_rule = css[before_start : css.index("}", before_start)]
+    claude_start = css.index(".target-choice-driver-icon--claude {")
+    claude_rule = css[claude_start : css.index("}", claude_start)]
+    openai_start = css.index(
+        ".target-choice-driver-icon--codex,\n.target-choice-driver-icon--openai {"
+    )
+    openai_rule = css[openai_start : css.index("}", openai_start)]
+
+    _assert_contains_all(
+        icon_rule,
+        (
+            "cursor: help;",
+            "display: inline-block;",
+            "height: 12px;",
+            "position: relative;",
+            "vertical-align: -2px;",
+            "width: 12px;",
+        ),
+    )
+    _assert_contains_all(
+        before_rule,
+        (
+            "background: var(--target-choice-driver-icon-color);",
+            'content: "";',
+            "inset: 0;",
+            "-webkit-mask: var(--target-choice-driver-icon-url) center / contain no-repeat;",
+            "mask: var(--target-choice-driver-icon-url) center / contain no-repeat;",
+            "position: absolute;",
+        ),
+    )
+    assert (
+        "--target-choice-driver-icon-color: color-mix(in srgb, #d97706 88%, var(--fg));"
+        in claude_rule
+    )
+    assert "opacity: 0.82;" in claude_rule
+    assert (
+        "--target-choice-driver-icon-color: color-mix(in srgb, var(--fg) 86%, var(--control));"
+        in openai_rule
+    )
+    assert "opacity: 0.84;" in openai_rule

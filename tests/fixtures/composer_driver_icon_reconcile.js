@@ -1,7 +1,9 @@
 const fs = require("fs");
+const path = require("path");
 const vm = require("vm");
 
 const composerPath = process.argv[2];
+const renderPath = path.join(path.dirname(composerPath), "app.render.js");
 
 class FakeStyle {
   constructor() {
@@ -93,6 +95,9 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
+  filename: "app.render.js",
+});
 vm.runInContext(fs.readFileSync(composerPath, "utf8"), context, {
   filename: "app.composer.js",
 });
