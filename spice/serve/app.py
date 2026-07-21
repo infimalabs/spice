@@ -261,8 +261,8 @@ def run_serve(args: argparse.Namespace) -> int:
         os.environ.pop(driver.thread_id_env, None)  # env-policy: allow
     os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)  # env-policy: allow
     apply_serve_backends(args)
-    auth_token = _serve_auth_token(args)
-    _guard_exposed_bind(
+    auth_token = serve_auth_token(args)
+    guard_exposed_bind(
         args.host,
         args.port,
         allow_insecure=bool(getattr(args, "allow_insecure_bind", False)),
@@ -302,7 +302,7 @@ def run_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _serve_auth_token(args: argparse.Namespace) -> str | None:
+def serve_auth_token(args: argparse.Namespace) -> str | None:
     raw_token = getattr(args, "auth_token", None)
     if raw_token is None:
         return None
@@ -312,7 +312,7 @@ def _serve_auth_token(args: argparse.Namespace) -> str | None:
     return token
 
 
-def _guard_exposed_bind(
+def guard_exposed_bind(
     host: str,
     port: int,
     *,
@@ -323,7 +323,7 @@ def _guard_exposed_bind(
         return
     if allow_insecure or auth_token:
         return
-    address = _serve_address(host, port)
+    address = serve_address(host, port)
     raise SpiceError(
         "spice serve refuses to bind the no-auth control surface to exposed "
         f"address {address}; use --allow-insecure-bind to expose it deliberately "
@@ -336,7 +336,7 @@ def _guard_exposed_bind(
 def _warn_exposed_bind(host: str, port: int, *, auth_token: str | None) -> None:
     if not _is_exposed_bind_host(host):
         return
-    address = _serve_address(host, port)
+    address = serve_address(host, port)
     if auth_token:
         print(
             f"WARNING: spice serve is exposed on {address} with token auth enabled; "
@@ -363,7 +363,7 @@ def _is_exposed_bind_host(host: str) -> bool:
         return True
 
 
-def _serve_address(host: str, port: int) -> str:
+def serve_address(host: str, port: int) -> str:
     display_host = host or "0.0.0.0"
     try:
         address = ipaddress.ip_address(display_host)

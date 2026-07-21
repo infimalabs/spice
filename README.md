@@ -76,7 +76,7 @@ prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-la
 
 | Surface | Command |
 | --- | --- |
-| Watch existing agent sessions | `spice watch <session-dir>...` |
+| Discover and watch existing agent sessions | `spice watch --discover` |
 | Install constitution gates only | `spice init --gates` |
 | Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |

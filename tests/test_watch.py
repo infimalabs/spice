@@ -20,6 +20,8 @@ from spice.serve.observer import (
 FIXTURES = Path(__file__).parent / "fixtures" / "session"
 CODEX_THREAD = "12345678-1234-1234-1234-123456789abc"
 CLAUDE_THREAD = "87654321-4321-4321-4321-cba987654321"
+CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"  # env-policy: allow
+CODEX_HOME_ENV = "CODEX_HOME"  # env-policy: allow
 
 
 def _copy_observer_fixtures(root: Path) -> tuple[Path, Path]:
@@ -70,6 +72,42 @@ def test_watch_parser_accepts_multiple_session_roots_and_until(tmp_path: Path) -
     assert args.port == 0
     assert args.until == stop_path
     assert args.observer_mode is True
+
+
+def test_watch_discovery_prints_paste_ready_command_and_token_url_read_only(
+    tmp_path: Path,
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_sessions = codex_home / "sessions"
+    claude_home = tmp_path / "claude-home"
+    claude_projects = claude_home / "projects"
+    codex_sessions.mkdir(parents=True)
+    claude_projects.mkdir(parents=True)
+    (codex_sessions / "existing.txt").write_text("codex\n", encoding="utf-8")
+    (claude_projects / "existing.txt").write_text("claude\n", encoding="utf-8")
+    before = _directory_snapshot(tmp_path)
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
+    args = build_parser().parse_args(
+        ["watch", "--discover", "--port", "9876", "--auth-token", "hello world"]
+    )
+
+    result = args.func(args)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert result == 0
+    assert args.session_dirs == []
+    assert args.discover is True
+    assert lines == [
+        "command: spice watch "
+        f"{codex_sessions} {claude_projects} --host 127.0.0.1 --port 9876 "
+        "--auth-token 'hello world'",
+        "url: http://127.0.0.1:9876/?token=hello+world",
+        "spice watch: detected=2 read_only=true",
+    ]
+    assert _directory_snapshot(tmp_path) == before
 
 
 def test_observer_discovers_both_drivers_and_preserves_timeline(tmp_path: Path) -> None:

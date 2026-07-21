@@ -23,6 +23,11 @@ transcripts, presents each session as a switchable lane, and follows file
 appends as they arrive. Multiple directories or individual transcript paths may
 be supplied in one invocation.
 
+`spice watch --discover` checks the conventional Codex and Claude session roots
+and prints both a paste-ready `spice watch ...` command and the exact browser URL
+without starting a server or changing either root. An `--auth-token` is shell
+quoted in the command and URL-encoded into the printed URL.
+
 Observer mode is read-only. It does not initialize a repository or worktree,
 create team state, claim tasks, install hooks, open a supervisor socket, or
 expose steering and lifecycle controls. Unrecognized files are skipped and

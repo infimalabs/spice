@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import driver_for_transcript
+from spice.agent.driver import BUILTIN_DRIVERS, driver_for_transcript
 from spice.agent.identity import canonical_thread_id
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, read_assistant_messages
@@ -105,6 +105,20 @@ class ObserverRegistry:
         }
         payload = {"revision": 1, "changed": True, "snapshot": snapshot}
         return validate_emitter_payload("observer.team_snapshot_payload", payload)
+
+
+def discover_default_observer_roots() -> tuple[Path, ...]:
+    """Return existing built-in driver transcript roots without modifying them."""
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for driver in BUILTIN_DRIVERS:
+        for candidate in driver.observer_roots():
+            path = candidate.expanduser().resolve(strict=False)
+            if not path.is_dir() or path in seen:
+                continue
+            seen.add(path)
+            roots.append(path)
+    return tuple(roots)
 
 
 def discover_observer_sessions(paths: list[Path]) -> ObserverRegistry:

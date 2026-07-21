@@ -117,6 +117,10 @@ class AgentDriver:
         """True iff `path` sits in this driver's transcript layout."""
         return False
 
+    def observer_roots(self) -> tuple[Path, ...]:
+        """Conventional read-only transcript roots this driver can discover."""
+        return ()
+
     def build_exec_command(
         self,
         *,
@@ -367,6 +371,9 @@ class CodexDriver(AgentDriver):
 
     def sessions_root(self) -> Path:
         return self.home() / "sessions"
+
+    def observer_roots(self) -> tuple[Path, ...]:
+        return (self.sessions_root(),)
 
     def owns_transcript(self, path: Path) -> bool:
         return path.name.startswith("rollout-") or self.sessions_root() in path.parents
@@ -663,6 +670,9 @@ class ClaudeDriver(AgentDriver):
 
     def projects_root(self) -> Path:
         return self.home() / "projects"
+
+    def observer_roots(self) -> tuple[Path, ...]:
+        return (self.projects_root(),)
 
     def resolve_model(self, model: str = "") -> str:
         return resolve_claude_model(model)
