@@ -166,13 +166,15 @@ def test_static_target_choice_driver_icons_reuse_shared_driver_logic():
     _assert_contains_all(
         app_lanes,
         (
-            "function targetChoiceMetadataParts(target)",
-            "const statusIndex = parts.length;",
+            "function targetChoiceMetadata(target)",
+            'return parts.join(" · ");',
             "function targetChoiceDriverIconName(target)",
             "function targetChoiceDriverTooltip(target, driver)",
             "function targetChoiceDriverIcon(target, driver, src)",
             "function renderTargetChoiceMetadata(metadataEl, target)",
             "const src = driverIconAssetPath(driver);",
+            "const metadata = targetChoiceMetadata(target);",
+            'metadataEl.replaceChildren(icon, document.createTextNode(" " + metadata));',
             "return driverIdentityTooltip({",
             "icon.dataset.targetChoiceDriverIcon = driver;",
             'icon.setAttribute("aria-label", tooltip);',
@@ -192,7 +194,7 @@ def test_static_target_choice_driver_icons_reuse_shared_driver_logic():
     assert "return driverIdentityTooltip({" in app_composer
 
 
-def test_target_choice_driver_icon_replaces_middle_dot():
+def test_target_choice_driver_icon_leads_and_keeps_middle_dot():
     app_lanes = STATIC_ROOT / "app.lanes.js"
     script = Path(__file__).with_name("fixtures") / "target_choice_driver_icon.js"
 
