@@ -961,7 +961,7 @@ function taskFilterStemPillCountText(model) {
     model.readyTaskCount,
     model.inFlightTaskCount,
     model.unavailableTaskCount,
-  ].join("/");
+  ].join("·");
 }
 
 function taskFilterStemPillTone(model) {

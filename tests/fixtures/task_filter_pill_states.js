@@ -70,7 +70,7 @@ const mixed = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(mixed) === "2/1/2",
+  context.taskFilterStemPillCountText(mixed) === "2·1·2",
   "mixed badge labels ready, active, and unavailable work",
 );
 assert(
@@ -94,7 +94,7 @@ const readyOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(readyOnly) === "3/0/0",
+  context.taskFilterStemPillCountText(readyOnly) === "3·0·0",
   "ready-only badge still renders the full triple with zero slots",
 );
 assert(
@@ -112,7 +112,7 @@ const activeOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(activeOnly) === "0/2/0",
+  context.taskFilterStemPillCountText(activeOnly) === "0·2·0",
   "active-only badge renders the full triple with claimed work in the middle slot",
 );
 assert(
@@ -130,7 +130,7 @@ const blockedOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(blockedOnly) === "0/0/2",
+  context.taskFilterStemPillCountText(blockedOnly) === "0·0·2",
   "blocked-only badge renders the full triple with unavailable work in the last slot",
 );
 assert(
@@ -158,7 +158,7 @@ const deferredOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(deferredOnly) === "0/0/2",
+  context.taskFilterStemPillCountText(deferredOnly) === "0·0·2",
   "deferred-only badge uses the same glance-level unavailable count",
 );
 assert(
@@ -185,11 +185,11 @@ const resolvedBlocker = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(unresolvedBlocker) === "0/0/1",
+  context.taskFilterStemPillCountText(unresolvedBlocker) === "0·0·1",
   "unresolved dependency is unavailable",
 );
 assert(
-  context.taskFilterStemPillCountText(resolvedBlocker) === "1/0/0",
+  context.taskFilterStemPillCountText(resolvedBlocker) === "1·0·0",
   "resolved dependency moves automatically into the ready slot",
 );
 assert(
