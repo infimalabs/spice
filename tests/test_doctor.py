@@ -138,7 +138,7 @@ def test_dev_doctor_parser_exposes_fix_flag():
             ),
             "ok",
         ),
-        (RtkHealth("missing-rtk", "missing", "launch failed"), "warn"),
+        (RtkHealth("missing-rtk", "missing", "launch failed"), "skip"),
         (
             RtkHealth("/opt/old-rtk", "obsolete", "RTK 0.41.0 is obsolete", "0.41.0"),
             "warn",
@@ -161,11 +161,13 @@ def test_doctor_rtk_check_reports_health_without_failing(
 
     assert {
         "status": check.status,
+        "required": check.required,
         "detail_has_executable": f"executable={health.executable!r}" in check.detail,
         "detail_has_mode": f"mode={health.mode}" in check.detail,
         "command": check.command,
     } == {
         "status": expected_status,
+        "required": False,
         "detail_has_executable": True,
         "detail_has_mode": True,
         "command": health.verification_command(),
@@ -191,13 +193,16 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
 
     report = doctor.run_doctor(repo)
     names = [check.name for check in report.checks]
+    expected_rtk = (
+        "ok" if health.active else "skip" if health.state == "missing" else "warn"
+    )
 
     assert {
         "rtk": _check(report, "tool.rtk").status,
         "remaining_check": names[-1],
         "check_count": len(names),
     } == {
-        "rtk": "ok" if health.active else "warn",
+        "rtk": expected_rtk,
         "remaining_check": "env-name-ledger",
         "check_count": 25,
     }
@@ -689,9 +694,17 @@ def test_doctor_judge_optional_by_default_and_required_when_opted_in(
     opted_in_check = _binary_check(repo, "tool.judge")
 
     assert [
-        (default_check.status, "judge-free" in default_check.detail),
-        (opted_in_check.status, "opted in" in opted_in_check.detail),
-    ] == [("warn", True), ("fail", True)]
+        (
+            default_check.status,
+            default_check.required,
+            "judge-free" in default_check.detail,
+        ),
+        (
+            opted_in_check.status,
+            opted_in_check.required,
+            "opted in" in opted_in_check.detail,
+        ),
+    ] == [("skip", False, True), ("fail", True, True)]
 
 
 def _binary_check(repo: Path, name: str) -> doctor.DoctorCheck:
@@ -749,8 +762,63 @@ def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monke
     checks = doctor._binary_checks(tmp_path)
     npm = next(check for check in checks if check.name == "tool.npm")
 
-    assert npm.status == "warn"
+    assert npm.status == "skip"
+    assert npm.required is False
+    assert "optional -- you're fine without it" in npm.detail
     assert "no serve web checkJs sources" in npm.detail
+
+
+def test_doctor_render_groups_optional_companions_and_reports_ready_posture(tmp_path):
+    report = doctor.DoctorReport(
+        repo_root=_repo(tmp_path),
+        checks=[
+            doctor.DoctorCheck("tool.git", "ok", "git -> /usr/bin/git", "which git"),
+            doctor.DoctorCheck(
+                "tool.tts",
+                "skip",
+                "optional -- you're fine without it; say missing",
+                "spice dev doctor",
+                required=False,
+            ),
+        ],
+        fixes=[],
+    )
+
+    lines = report.render().splitlines()
+    header_index = lines.index("  optional companions (safe to skip):")
+    git_index = next(i for i, line in enumerate(lines) if "tool.git" in line)
+    tts_index = next(i for i, line in enumerate(lines) if "tool.tts" in line)
+
+    assert git_index < header_index < tts_index
+    assert lines[-1] == (
+        "  ready: required checks satisfied; "
+        "1 optional companion(s) absent and safe to skip"
+    )
+
+
+def test_doctor_render_reports_attention_posture_when_required_check_fails(tmp_path):
+    report = doctor.DoctorReport(
+        repo_root=_repo(tmp_path),
+        checks=[
+            doctor.DoctorCheck(
+                "git.clean", "fail", "2 dirty path(s)", "git status --short"
+            ),
+            doctor.DoctorCheck(
+                "tool.rtk",
+                "skip",
+                "optional -- you're fine without it; state=missing",
+                "rtk --version",
+                required=False,
+            ),
+        ],
+        fixes=[],
+    )
+
+    lines = report.render().splitlines()
+
+    assert lines[-1] == (
+        "  attention: 1 required check(s) failed; fix before relying on this worktree"
+    )
 
 
 def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
