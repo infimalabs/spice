@@ -252,6 +252,9 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
         lambda commit: calls.append(("head", commit)),
     )
     monkeypatch.setattr(
+        release, "clean_build_artifacts", lambda root: calls.append(("clean", root))
+    )
+    monkeypatch.setattr(
         release, "run_constitution_gate", lambda: calls.append("constitution")
     )
     monkeypatch.setattr(
@@ -271,10 +274,25 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     assert calls == [
         ("target", "0.9.0", "HEAD"),
         ("head", "head"),
+        ("clean", tmp_path),
         "constitution",
         "0.9.0",
         ("publish", "0.9.0", None, "head"),
     ]
+
+
+def test_release_cleanup_removes_stale_build_and_distribution_trees(tmp_path):
+    (tmp_path / "build" / "lib" / "spice").mkdir(parents=True)
+    (tmp_path / "build" / "lib" / "spice" / "config.py").write_text(
+        "stale = True\n", encoding="utf-8"
+    )
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "stale.whl").write_text("stale\n", encoding="utf-8")
+    (tmp_path / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+    release.clean_build_artifacts(tmp_path)
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["keep.txt"]
 
 
 def test_release_constitution_runs_executable_browser_gate(monkeypatch):

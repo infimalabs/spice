@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from spice.release import clean_build_artifacts
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_TIMEOUT_SECONDS = 120
@@ -37,11 +40,18 @@ print(json.dumps({
 def test_wheel_and_editable_installs_load_their_own_system_layer(
     tmp_path: Path,
 ) -> None:
+    package_source = tmp_path / "package-source"
+    _copy_package_source(package_source)
+    stale_module = package_source / "build" / "lib" / "spice" / "config.py"
+    stale_module.parent.mkdir(parents=True)
+    stale_module.write_text("stale = True\n", encoding="utf-8")
+    clean_build_artifacts(package_source)
+
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     _run(
         ["uv", "build", "--wheel", "--out-dir", str(wheelhouse)],
-        cwd=PROJECT_ROOT,
+        cwd=package_source,
         timeout=INSTALL_TIMEOUT_SECONDS,
     )
     wheel = next(wheelhouse.glob("*.whl"))
@@ -109,6 +119,13 @@ def test_wheel_and_editable_installs_load_their_own_system_layer(
     )
     assert wheel_origin == "isolated-environment"
     assert editable_origin == "checkout"
+
+
+def _copy_package_source(destination: Path) -> None:
+    destination.mkdir()
+    for name in ("LICENSE", "MANIFEST.in", "README.md", "pyproject.toml"):
+        shutil.copy2(PROJECT_ROOT / name, destination / name)
+    shutil.copytree(PROJECT_ROOT / "spice", destination / "spice")
 
 
 def _write_fixture_layers(root: Path) -> None:

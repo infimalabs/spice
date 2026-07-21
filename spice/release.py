@@ -157,6 +157,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
 
     if mode in {"prepare", "release"}:
         ensure_release_preconditions(root)
+        clean_build_artifacts(root)
         run_constitution_gate()
         version = bump_version(str(args.bump))
         run_artifact_gate(version)
@@ -218,6 +219,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             version, getattr(args, "release_commit", None)
         )
         ensure_publish_release_commit_is_head(release_commit)
+        clean_build_artifacts(root)
         run_constitution_gate()
         run_artifact_gate(version)
         publish_release(
@@ -290,11 +292,16 @@ def run_browser_gate() -> None:
     run(["node", "tests/browser/run_release_smokes.js"])
 
 
+def clean_build_artifacts(root: Path) -> None:
+    for name in ("build", "dist"):
+        shutil.rmtree(root / name, ignore_errors=True)
+
+
 def run_artifact_gate(version: str) -> None:
     sdist = Path("dist") / f"spice_harness-{version}.tar.gz"
     wheel = Path("dist") / f"spice_harness-{version}-py3-none-any.whl"
 
-    shutil.rmtree("dist", ignore_errors=True)
+    clean_build_artifacts(Path.cwd())
     run(["uv", "build", "--python", "3.12"])
     run(["uvx", "twine", "check", str(sdist), str(wheel)])
 
@@ -305,6 +312,16 @@ def run_artifact_gate(version: str) -> None:
         run(["uv", "venv", "--python", "3.12", str(venv)])
         run(["uv", "pip", "install", "--python", str(python), str(wheel)])
         smoke_env = hermetic_wheel_env()
+        run(
+            [
+                str(python),
+                "-I",
+                "-c",
+                "from spice.config import layers; print(layers.__file__)",
+            ],
+            capture=True,
+            env=smoke_env,
+        )
         run([str(spice), "--help"], capture=True, env=smoke_env)
         run([str(spice), "task", "--help"], capture=True, env=smoke_env)
         run([str(spice), "session", "--help"], capture=True, env=smoke_env)
