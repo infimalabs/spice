@@ -23,10 +23,16 @@ transcripts, presents each session as a switchable lane, and follows file
 appends as they arrive. Multiple directories or individual transcript paths may
 be supplied in one invocation.
 
-`spice watch --discover` checks the conventional Codex and Claude session roots
-and prints both a paste-ready `spice watch ...` command and the exact browser URL
-without starting a server or changing either root. An `--auth-token` is shell
-quoted in the command and URL-encoded into the printed URL.
+`spice watch` with no arguments detects the local primary agent from existing
+session roots, config directories, and installed CLIs, then prints both a
+paste-ready `spice watch ...` command and the exact browser URL without starting
+a server or changing any root. The deterministic precedence contract is
+**session root > config > CLI**, then **Codex > Claude** to break equal-signal
+ties. The output names the classification (`Codex-primary`, `Claude-primary`, or
+`both`), primary, precedence, and observed signals. `--primary codex` and
+`--primary claude` force a provider with an existing session root. An
+`--auth-token` is shell quoted in the command and URL-encoded into the printed
+URL.
 
 Observer mode is read-only. It does not initialize a repository or worktree,
 create team state, claim tasks, install hooks, open a supervisor socket, or

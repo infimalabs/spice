@@ -10,12 +10,10 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from spice.cli.parser import build_parser
-from spice.errors import SpiceError
 from spice.serve import app
 from spice.serve.observer import (
+    detect_observer_primary,
     discover_observer_sessions,
     observer_messages_payload,
 )
@@ -93,8 +91,11 @@ def test_watch_discovery_prints_paste_ready_command_and_token_url_read_only(
     before = _directory_snapshot(tmp_path)
     monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
     monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
+    monkeypatch.setattr(
+        "spice.serve.observer.shutil.which", lambda binary: f"/tools/{binary}"
+    )
     args = build_parser().parse_args(
-        ["watch", "--discover", "--port", "9876", "--auth-token", "hello world"]
+        ["watch", "--port", "9876", "--auth-token", "hello world"]
     )
 
     result = args.func(args)
@@ -102,82 +103,94 @@ def test_watch_discovery_prints_paste_ready_command_and_token_url_read_only(
     lines = capsys.readouterr().out.splitlines()
     assert result == 0
     assert args.session_dirs == []
-    assert args.discover is True
     assert lines == [
         "command: spice watch "
         f"{codex_sessions} {claude_projects} --host 127.0.0.1 --port 9876 "
         "--auth-token 'hello world'",
         "url: http://127.0.0.1:9876/?token=hello+world",
-        "spice watch: detected=2 read_only=true",
+        "spice watch: classification=both primary=codex basis=session-root "
+        "precedence=session-root>config>cli;codex>claude "
+        "signals=codex[session-root,config,cli];"
+        "claude[session-root,config,cli] roots=2 read_only=true",
     ]
     assert _directory_snapshot(tmp_path) == before
 
 
-def test_watch_discovery_none_detected_raises_manual_usage_read_only(
+def test_watch_primary_override_is_surfaced_and_orders_roots(
     tmp_path: Path,
     monkeypatch: Any,
     capsys: Any,
 ) -> None:
     codex_home = tmp_path / "codex-home"
+    codex_sessions = codex_home / "sessions"
     claude_home = tmp_path / "claude-home"
-    codex_home.mkdir()
-    claude_home.mkdir()
-    before = _directory_snapshot(tmp_path)
+    claude_projects = claude_home / "projects"
+    codex_sessions.mkdir(parents=True)
+    claude_projects.mkdir(parents=True)
     monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
     monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
-    args = build_parser().parse_args(["watch", "--discover", "--port", "9876"])
+    monkeypatch.setattr("spice.serve.observer.shutil.which", lambda _binary: None)
+    args = build_parser().parse_args(["watch", "--primary", "claude", "--port", "9876"])
 
-    with pytest.raises(SpiceError) as excinfo:
-        args.func(args)
+    result = args.func(args)
 
-    message = str(excinfo.value)
-    assert "none detected" in message
-    assert "manual usage: spice watch <session-dir>" in message
-    assert capsys.readouterr().out == ""
-    assert _directory_snapshot(tmp_path) == before
-
-
-def test_watch_discovery_rejects_explicit_session_dirs(tmp_path: Path) -> None:
-    args = build_parser().parse_args(
-        ["watch", "--discover", "one", "two", "--port", "9876"]
-    )
-
-    with pytest.raises(SpiceError) as excinfo:
-        args.func(args)
-
-    message = str(excinfo.value)
-    assert args.discover is True
-    assert args.session_dirs == [Path("one"), Path("two")]
-    assert "does not accept SESSION_DIR arguments" in message
+    lines = capsys.readouterr().out.splitlines()
+    assert result == 0
+    assert lines == [
+        f"command: spice watch {claude_projects} {codex_sessions} "
+        "--host 127.0.0.1 --port 9876",
+        "url: http://127.0.0.1:9876/",
+        "spice watch: classification=both primary=claude basis=override "
+        "precedence=session-root>config>cli;codex>claude "
+        "signals=codex[session-root,config];claude[session-root,config] "
+        "roots=2 read_only=true",
+    ]
 
 
-def test_watch_discovery_rejects_ephemeral_port(
+def test_watch_detection_prefers_session_root_over_config_and_cli(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
     codex_home = tmp_path / "codex-home"
-    (codex_home / "sessions").mkdir(parents=True)
+    codex_home.mkdir()
+    claude_home = tmp_path / "claude-home"
+    claude_projects = claude_home / "projects"
+    claude_projects.mkdir(parents=True)
     monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
-    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "claude-home"))
-    args = build_parser().parse_args(["watch", "--discover", "--port", "0"])
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
+    monkeypatch.setattr(
+        "spice.serve.observer.shutil.which",
+        lambda binary: "/tools/codex" if binary == "codex" else None,
+    )
 
-    with pytest.raises(SpiceError) as excinfo:
-        args.func(args)
+    detection = detect_observer_primary()
 
-    assert "requires a fixed --port" in str(excinfo.value)
+    assert detection.classification == "both"
+    assert detection.primary == "claude"
+    assert detection.basis == "session-root"
+    assert detection.roots == (claude_projects,)
 
 
-def test_watch_requires_session_dirs_or_discover(tmp_path: Path) -> None:
-    args = build_parser().parse_args(["watch", "--port", "9876"])
+def test_watch_detection_classifies_a_single_claude_provider(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    codex_home = tmp_path / "absent-codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_projects = claude_home / "projects"
+    claude_projects.mkdir(parents=True)
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
+    monkeypatch.setattr(
+        "spice.serve.observer.shutil.which",
+        lambda binary: "/tools/claude" if binary == "claude" else None,
+    )
 
-    with pytest.raises(SpiceError) as excinfo:
-        args.func(args)
+    detection = detect_observer_primary()
 
-    message = str(excinfo.value)
-    assert args.session_dirs == []
-    assert args.discover is False
-    assert "requires SESSION_DIR" in message
-    assert "manual usage: spice watch <session-dir>" in message
+    assert detection.classification == "Claude-primary"
+    assert detection.primary == "claude"
+    assert detection.signal_summary == "codex[none];claude[session-root,config,cli]"
 
 
 def test_observer_discovers_both_drivers_and_preserves_timeline(tmp_path: Path) -> None:

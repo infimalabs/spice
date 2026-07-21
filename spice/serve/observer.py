@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import BUILTIN_DRIVERS, driver_for_transcript
+from spice.agent.driver import AgentDriver, BUILTIN_DRIVERS, driver_for_transcript
+from spice.errors import SpiceError
 from spice.agent.identity import canonical_thread_id
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, read_assistant_messages
@@ -21,6 +23,8 @@ _THREAD_ID_RE = re.compile(
     re.IGNORECASE,
 )
 _OBSERVER_ID_CHARS = 10
+OBSERVER_PRIMARY_PRECEDENCE = ("codex", "claude")
+OBSERVER_SIGNAL_PRECEDENCE = ("session-root", "config", "cli")
 
 
 @dataclass(frozen=True)
@@ -107,18 +111,147 @@ class ObserverRegistry:
         return validate_emitter_payload("observer.team_snapshot_payload", payload)
 
 
-def discover_default_observer_roots() -> tuple[Path, ...]:
-    """Return existing built-in driver transcript roots without modifying them."""
+@dataclass(frozen=True)
+class ObserverProviderDetection:
+    name: str
+    roots: tuple[Path, ...]
+    config_present: bool
+    cli_path: str | None
+
+    @property
+    def signals(self) -> tuple[str, ...]:
+        signals = []
+        if self.roots:
+            signals.append("session-root")
+        if self.config_present:
+            signals.append("config")
+        if self.cli_path is not None:
+            signals.append("cli")
+        return tuple(signals)
+
+    @property
+    def rank(self) -> int:
+        for rank, signal in enumerate(reversed(OBSERVER_SIGNAL_PRECEDENCE), start=1):
+            if signal in self.signals:
+                return rank
+        return 0
+
+
+@dataclass(frozen=True)
+class ObserverPrimaryDetection:
+    classification: str
+    primary: str
+    basis: str
+    providers: tuple[ObserverProviderDetection, ...]
+    roots: tuple[Path, ...]
+
+    @property
+    def precedence(self) -> str:
+        signals = ">".join(OBSERVER_SIGNAL_PRECEDENCE)
+        providers = ">".join(OBSERVER_PRIMARY_PRECEDENCE)
+        return f"{signals};{providers}"
+
+    @property
+    def signal_summary(self) -> str:
+        rendered = []
+        for provider in self.providers:
+            signals = ",".join(provider.signals) or "none"
+            rendered.append(f"{provider.name}[{signals}]")
+        return ";".join(rendered)
+
+
+def detect_observer_primary(
+    primary_override: str | None = None,
+) -> ObserverPrimaryDetection:
+    """Classify local agent providers and select one deterministic primary."""
+    drivers = _observer_drivers_in_precedence_order()
+    providers = tuple(_detect_observer_provider(driver) for driver in drivers)
+    detected = tuple(provider for provider in providers if provider.signals)
+    if not detected:
+        raise SpiceError(
+            "spice watch: no Codex or Claude installation detected from session "
+            "roots, config directories, or installed CLIs; manual usage: spice "
+            "watch <session-dir> [<session-dir> ...]"
+        )
+
+    override = str(primary_override or "").strip().lower()
+    if override:
+        selected = next(
+            (provider for provider in providers if provider.name == override), None
+        )
+        expected = ", ".join(OBSERVER_PRIMARY_PRECEDENCE)
+        if selected is None:
+            raise SpiceError(
+                f"spice watch --primary: unknown provider {override!r}; "
+                f"expected one of: {expected}"
+            )
+        if not selected.signals:
+            raise SpiceError(
+                f"spice watch --primary {override}: no {override} session root, "
+                "config directory, or installed CLI was detected"
+            )
+        basis = "override"
+    else:
+        selected = max(detected, key=lambda provider: provider.rank)
+        basis = selected.signals[0]
+
+    if not selected.roots:
+        signals = ",".join(selected.signals)
+        raise SpiceError(
+            f"spice watch: primary={selected.name} was detected via {signals} but "
+            "has no existing session root to watch; create a session or pass an "
+            "explicit session directory"
+        )
+
     roots: list[Path] = []
     seen: set[Path] = set()
-    for driver in BUILTIN_DRIVERS:
-        for candidate in driver.observer_roots():
-            path = candidate.expanduser().resolve(strict=False)
-            if not path.is_dir() or path in seen:
+    ordered_providers = (selected,) + tuple(
+        provider for provider in providers if provider.name != selected.name
+    )
+    for provider in ordered_providers:
+        for root in provider.roots:
+            if root in seen:
                 continue
-            seen.add(path)
-            roots.append(path)
-    return tuple(roots)
+            seen.add(root)
+            roots.append(root)
+
+    classification = "both" if len(detected) > 1 else f"{selected.name.title()}-primary"
+    return ObserverPrimaryDetection(
+        classification=classification,
+        primary=selected.name,
+        basis=basis,
+        providers=providers,
+        roots=tuple(roots),
+    )
+
+
+def _observer_drivers_in_precedence_order() -> tuple[AgentDriver, ...]:
+    by_name = {driver.name: driver for driver in BUILTIN_DRIVERS}
+    if len(BUILTIN_DRIVERS) != len(OBSERVER_PRIMARY_PRECEDENCE) or set(by_name) != set(
+        OBSERVER_PRIMARY_PRECEDENCE
+    ):
+        actual = ", ".join(sorted(by_name))
+        expected = ", ".join(OBSERVER_PRIMARY_PRECEDENCE)
+        raise SpiceError(
+            "observer primary precedence does not match built-in drivers: "
+            f"expected {expected}; found {actual}"
+        )
+    return tuple(by_name[name] for name in OBSERVER_PRIMARY_PRECEDENCE)
+
+
+def _detect_observer_provider(driver: AgentDriver) -> ObserverProviderDetection:
+    roots = tuple(
+        path
+        for candidate in driver.observer_roots()
+        if (path := candidate.expanduser().resolve(strict=False)).is_dir()
+    )
+    config_dir = driver.home().expanduser().resolve(strict=False)
+    return ObserverProviderDetection(
+        name=driver.name,
+        roots=roots,
+        config_present=config_dir.is_dir(),
+        cli_path=shutil.which(driver.default_bin),
+    )
 
 
 def discover_observer_sessions(paths: list[Path]) -> ObserverRegistry:
