@@ -21,7 +21,7 @@ spice is building itself, but it was not created in a vacuum: the loop was born
 from a harsher polyglot environment where many languages, conventions, and
 agent lanes had to survive contact with one another.
 
-![Live steering and semantic ACK loop](docs/screenshots/spice-live-review-steering.png)
+![Live steering and semantic ACK loop](https://raw.githubusercontent.com/infimalabs/spice/main/docs/screenshots/spice-live-review-steering.png)
 
 <sub>Operator steering arrives in the live stream; an assistant ACK retires the
 exact inbox key from the durable filesystem queue.</sub>
@@ -42,8 +42,8 @@ exact inbox key from the durable filesystem queue.</sub>
 - **Observer UI:** `spice watch <session-dir>...` follows existing Codex and
   Claude transcripts without initializing or modifying their directories.
 
-See [docs/overview.md](docs/overview.md) for the operating model and
-[docs/interface.md](docs/interface.md) for the serve UI.
+See [docs/overview.md](https://github.com/infimalabs/spice/blob/main/docs/overview.md) for the operating model and
+[docs/interface.md](https://github.com/infimalabs/spice/blob/main/docs/interface.md) for the serve UI.
 
 ## Posture: a single-operator console
 
@@ -57,11 +57,11 @@ identity — not a limitation to grow out of:
 - **The growth vector is remote reach for one operator**, not multi-user auth.
   Reaching your own fleet from elsewhere is a transport choice — an SSH tunnel
   or a tailnet bind over the same one-token surface (see
-  [single-operator remote reach](docs/design/accepted/single-operator-remote-reach.md)).
+  [single-operator remote reach](https://github.com/infimalabs/spice/blob/main/docs/design/accepted/single-operator-remote-reach.md)).
 - **Multi-user auth is an explicit non-goal.** Do not grow a multi-operator team
   product out of the stdlib server. Many humans may steer one lane, but only
   through the same durable filesystem queue — never privileged per-user channels
-  (see [no-privileged-channel](docs/design/accepted/no-privileged-channel-multi-human.md)).
+  (see [no-privileged-channel](https://github.com/infimalabs/spice/blob/main/docs/design/accepted/no-privileged-channel-multi-human.md)).
 
 ## Start Small
 
@@ -70,7 +70,7 @@ then **steer**, then **fleet**. Start by observing existing agent sessions with
 no repository changes; add constitution gates when the team wants enforceable
 hygiene; bind one agent when direct intervention becomes necessary; move to the
 task-backed fleet only when work needs multiple coordinated lanes. The full
-prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-ladder).
+prerequisite and graduation path is the [entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder).
 
 ## Commands
 
@@ -87,10 +87,10 @@ prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-la
 | Observe foreign sessions read-only | `spice watch <session-dir>...` |
 | Run studies and gates | `spice study ...` / git pre-commit hook |
 
-Configuration lives in [CONFIG.md](CONFIG.md). The design contract lives in
-[DESIGN.md](DESIGN.md). Wrapper command behavior is detailed in
-[docs/cli/wrapper-commands.md](docs/cli/wrapper-commands.md). Stability
-expectations for extensions and command coupling live in [STABILITY.md](STABILITY.md).
+Configuration lives in [CONFIG.md](https://github.com/infimalabs/spice/blob/main/CONFIG.md). The design contract lives in
+[DESIGN.md](https://github.com/infimalabs/spice/blob/main/DESIGN.md). Wrapper command behavior is detailed in
+[docs/cli/wrapper-commands.md](https://github.com/infimalabs/spice/blob/main/docs/cli/wrapper-commands.md). Stability
+expectations for extensions and command coupling live in [STABILITY.md](https://github.com/infimalabs/spice/blob/main/STABILITY.md).
 
 ## Install
 
@@ -135,7 +135,7 @@ rewrite protocol is active; missing, obsolete, or invalid RTK leaves
 speech synthesis are also degradable companions; when unavailable, transcript
 capture, steering, tasks, and the constitution keep working while optional
 feedback or narration is skipped. Runtime, verification, and protocol details
-are in [CONFIG.md](CONFIG.md).
+are in [CONFIG.md](https://github.com/infimalabs/spice/blob/main/CONFIG.md).
 
 The layered `rtk.executable` setting accepts one trusted executable basename or
 absolute path; activation and Doctor probe that exact identity without a prior
@@ -150,7 +150,7 @@ telemetry through activation, Doctor, and bounded stderr diagnostics.
 
 ## Release
 
-Release workflow is documented in [docs/release.md](docs/release.md). Most
+Release workflow is documented in [docs/release.md](https://github.com/infimalabs/spice/blob/main/docs/release.md). Most
 users only need to know that releases are cut from clean synchronized worktrees
 through the repository's mounted `spice release` command.
 
