@@ -23,7 +23,10 @@ from spice.serve.diagnostics import (
     render_team_diagnostics,
     team_diagnostics_payload,
 )
-from spice.serve.observer import discover_default_observer_roots
+from spice.serve.observer import (
+    OBSERVER_PRIMARY_PRECEDENCE,
+    detect_observer_primary,
+)
 
 
 def configure_serve_parser(subparsers: Any) -> None:
@@ -121,6 +124,11 @@ def configure_watch_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "watch",
         help="Observe existing Codex or Claude session directories read-only.",
+        description=(
+            "Observe existing Codex or Claude sessions read-only. With no "
+            "SESSION_DIR, detect the local primary provider and print a "
+            "paste-ready command plus browser URL."
+        ),
     )
     parser.add_argument(
         "session_dirs",
@@ -130,11 +138,11 @@ def configure_watch_parser(subparsers: Any) -> None:
         help="Directory or transcript file to observe; repeat for multiple roots.",
     )
     parser.add_argument(
-        "--discover",
-        action="store_true",
+        "--primary",
+        choices=OBSERVER_PRIMARY_PRECEDENCE,
         help=(
-            "Print a paste-ready watch command and browser URL for existing "
-            "Codex and Claude session roots, then exit."
+            "Force the detected primary provider. The provider must have an "
+            "existing session root."
         ),
     )
     parser.add_argument("--host", default=DEFAULT_SERVE_HOST)
@@ -151,31 +159,23 @@ def configure_watch_parser(subparsers: Any) -> None:
 
 
 def run_watch(args: Any) -> int:
-    if bool(args.discover):
-        return run_watch_discovery(args)
     if not args.session_dirs:
+        return run_watch_detection(args)
+    if args.primary is not None:
         raise SpiceError(
-            "spice watch requires SESSION_DIR... or --discover; manual usage: "
-            "spice watch <session-dir> [<session-dir> ...]"
+            "spice watch --primary is only valid with automatic detection; "
+            "remove explicit SESSION_DIR arguments"
         )
     return run_serve(args)
 
 
-def run_watch_discovery(args: Any) -> int:
-    if args.session_dirs:
-        raise SpiceError(
-            "spice watch --discover does not accept SESSION_DIR arguments; use "
-            "spice watch <session-dir> [<session-dir> ...] for explicit roots"
-        )
-    roots = discover_default_observer_roots()
-    if not roots:
-        raise SpiceError(
-            "spice watch --discover: none detected; manual usage: "
-            "spice watch <session-dir> [<session-dir> ...]"
-        )
+def run_watch_detection(args: Any) -> int:
+    detection = detect_observer_primary(args.primary)
+    roots = detection.roots
     if int(args.port) == 0:
         raise SpiceError(
-            "spice watch --discover requires a fixed --port so the printed URL is exact"
+            "spice watch automatic detection requires a fixed --port so the "
+            "printed URL is exact"
         )
 
     auth_token = serve_auth_token(args)
@@ -206,7 +206,15 @@ def run_watch_discovery(args: Any) -> int:
         url += "?" + urlencode({"token": auth_token})
     print(f"command: {shlex.join(command)}")
     print(f"url: {url}")
-    print(f"spice watch: detected={len(roots)} read_only=true")
+    print(
+        "spice watch: "
+        f"classification={detection.classification} "
+        f"primary={detection.primary} "
+        f"basis={detection.basis} "
+        f"precedence={detection.precedence} "
+        f"signals={detection.signal_summary} "
+        f"roots={len(roots)} read_only=true"
+    )
     return 0
 
 

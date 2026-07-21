@@ -39,8 +39,8 @@ exact inbox key from the durable filesystem queue.</sub>
   internals, and commit-message rules.
 - **Serve UI:** `spice serve` exposes lanes, teams, live transcripts, steering,
   attachments, task routing, and browser-visible diagnostics.
-- **Observer UI:** `spice watch <session-dir>...` follows existing Codex and
-  Claude transcripts without initializing or modifying their directories.
+- **Observer UI:** `spice watch` detects existing Codex and Claude sessions and
+  prints a paste-ready read-only target; explicit session roots bypass detection.
 
 See [docs/overview.md](https://github.com/infimalabs/spice/blob/main/docs/overview.md) for the operating model and
 [docs/interface.md](https://github.com/infimalabs/spice/blob/main/docs/interface.md) for the serve UI.
@@ -82,8 +82,15 @@ fleet** — entering read-only and graduating only when a rung's limit appears.
 no repository, installs no hooks, and never writes to the observed directory.
 
 ```sh
-spice watch <session-dir>...
+spice watch
 ```
+
+With no arguments, Spice detects Codex and Claude from existing session roots,
+config directories, and installed CLIs, then prints the exact read-only command
+and browser URL to use. Detection ranks **session root > config > CLI**, breaks
+ties **Codex > Claude**, and surfaces the classification, selected primary,
+signals, and precedence. Use `--primary codex` or `--primary claude` to force a
+watchable provider, or pass `<session-dir>...` to bypass detection.
 
 **Gates** add pre-commit and commit-message enforcement to a Git repository.
 Everything from here writes to the repository:
@@ -120,7 +127,7 @@ spice task next
 
 | Surface | Command |
 | --- | --- |
-| Discover and watch existing agent sessions | `spice watch --discover` |
+| Detect and watch existing agent sessions | `spice watch` |
 | Install constitution gates only | `spice init --gates` |
 | Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
@@ -128,7 +135,7 @@ spice task next
 | Pull allocator work | `spice task next` |
 | Rehydrate context | `spice session briefing` |
 | Open the operator UI | `spice serve` |
-| Observe foreign sessions read-only | `spice watch <session-dir>...` |
+| Observe explicit session roots read-only | `spice watch <session-dir>...` |
 | Run studies and gates | `spice study ...` / git pre-commit hook |
 
 Configuration lives in [CONFIG.md](https://github.com/infimalabs/spice/blob/main/CONFIG.md). The design contract lives in
