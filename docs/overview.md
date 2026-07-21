@@ -92,22 +92,25 @@ second scheduled, release, or commit-gate surface invokes this standing cohort.
 
 ## Entry Ladder
 
-Spice Harness deliberately reveals one operating commitment at a time: **watch
--> gates -> steer -> fleet**. A newcomer should enter at the first rung whose
-prerequisite is already true, prove that rung useful, and graduate only when its
-named limit appears. The full fleet is the top tier, not the default starting
-point.
+Spice Harness deliberately reveals one operating commitment at a time:
+**watch -> retrospect -> gates -> steer -> fleet**. A newcomer should enter at
+the first rung whose prerequisite is already true, prove that rung useful, and
+graduate only when its named limit appears. The full fleet is the top tier, not
+the default starting point.
 
 | Rung | Prerequisite and entry | Commitment | Next step |
 | --- | --- | --- | --- |
-| **Watch** | Existing Claude Code or Codex sessions; run `spice watch --discover`, or pass known roots with `spice watch <session-dir> [<session-dir> ...]`. | Read-only transcript observation with no repo binding, hooks, shell takeover, steering, or task plane. | Add **gates** when observation reveals repository-shape or hygiene failures that should be enforced automatically. |
+| **Watch** | Existing Claude Code or Codex sessions; run `spice watch --discover`, or pass known roots with `spice watch <session-dir> [<session-dir> ...]`. | Read-only operator/browser transcript observation with no repo binding, hooks, shell takeover, steering, or task plane. | Add **retrospect** when the observed agent needs to read and understand its own past. |
+| **Retrospect** | An existing Claude Code or Codex transcript; run `spice session briefing` for the ambient agent, or `spice session briefing <thread-id-or-transcript>` for an explicit subject. | Read-only agent self-understanding through briefing and session forensics, with no repo binding, hooks, steering, or task plane. | Add **gates** when a recurring finding should become enforced policy. |
 | **Gates** | A Git repository and the installed `spice` CLI; run `spice init --gates`. | Pre-commit and commit-message enforcement, including sticky-flex hysteresis limits, regression-only magic-number ratchets against `HEAD`, taste policy, and configured extensions. No agent skill, wrapper, task plane, or fleet reference guard is installed. | Add **steer** when automated policy can identify a problem but an operator needs to correct agent behavior while it happens. |
 | **Steer** | A gates-proven repository plus one agent worth directing; run full `spice init`, bind it with `spice agent ensure`, open `spice serve`, and keep the lane in **Steer** lifetime. | One manually routed lane with live transcript, durable inbox steering, and semantic ACKs; task allocation is not yet the operating posture. | Add the **fleet** when work must be selected, routed, or reviewed across multiple lanes. |
 | **Fleet** | A successful steered lane, Taskwarrior, and work that benefits from coordination; use `spice task next` and Serve **Drive/Drain** lifetimes. | The full task plane, worktree-bound lanes, team routing, phase-boundary Git synchronization, and review flow. | Stay here while coordination pays for its overhead; this is the top tier. |
 
 The ladder is additive in operating posture, not a demand to install everything
-up front. Gates remain useful without steering, and a single steered lane
-remains useful without allocator-driven fleet operation.
+up front. Watch remains the operator/browser observation surface; Retrospect
+changes the transcript consumer to the agent itself while remaining read-only.
+Gates remain useful without steering, and a single steered lane remains useful
+without allocator-driven fleet operation.
 
 ## Honest Feedback
 

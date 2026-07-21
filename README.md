@@ -65,25 +65,41 @@ identity — not a limitation to grow out of:
 
 ## Start Small
 
-Spice Harness is a progressive-disclosure product: **watch**, then **gates**,
-then **steer**, then **fleet**. Start by observing existing agent sessions with
-no repository changes; add constitution gates when the team wants enforceable
-hygiene; bind one agent when direct intervention becomes necessary; move to the
-task-backed fleet only when work needs multiple coordinated lanes. The full
-prerequisite and graduation path is the [entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder).
+Spice Harness is a progressive-disclosure product:
+**watch -> retrospect -> gates -> steer -> fleet**. Start with an operator
+observing existing agent sessions; let an agent read its own past when it needs
+context; add constitution gates when recurring findings should become
+enforceable hygiene; bind one agent when direct intervention becomes necessary;
+move to the task-backed fleet only when work needs multiple coordinated lanes.
+The full prerequisite and graduation path is the [entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder).
 
 ## Quickstart
 
 First install the `spice` CLI (see [Install](#install)), then follow the
-[entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder) — **watch -> gates -> steer ->
-fleet** — entering read-only and graduating only when a rung's limit appears.
+[entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder) —
+**watch -> retrospect -> gates -> steer -> fleet** — entering read-only and
+graduating only when a rung's limit appears.
 
-**Watch** an existing Claude Code or Codex session. This is read-only: it binds
-no repository, installs no hooks, and never writes to the observed directory.
+**Watch** is the operator/browser observation surface for an existing Claude
+Code or Codex session. It is read-only: it binds no repository, installs no
+hooks, and never writes to the observed directory.
 
 ```sh
 spice watch <session-dir>...
 ```
+
+**Retrospect** lets an existing Claude Code or Codex agent read and understand
+its own transcript. Brief the ambient agent with no argument, or name a
+transcript path or thread ID explicitly:
+
+```sh
+spice session briefing
+spice session briefing <thread-id-or-transcript>
+```
+
+Briefing and session forensics remain read-only: they bind no repository,
+install no hooks, and add no steering or task plane. Add **Gates** when a
+recurring finding should become enforced policy.
 
 **Gates** add pre-commit and commit-message enforcement to a Git repository.
 Everything from here writes to the repository:
@@ -154,8 +170,8 @@ The default install is a uv tool. Operators who deploy from a main tree should
 use the editable form so the installed `spice` command resolves to that tree;
 that editable main tree is the server deployment. Other worktrees remain
 operated trees and do not supply their own runtime. See the
-[Quickstart](#quickstart) for the read-only watch -> gates -> steer -> fleet
-walkthrough.
+[Quickstart](#quickstart) for the watch -> retrospect -> gates -> steer -> fleet
+walkthrough, which starts read-only.
 
 ### Graceful degradation
 
