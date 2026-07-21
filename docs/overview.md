@@ -71,6 +71,9 @@ This repository has one standing mutation invocation: `spice dev doctor` reads
 disposable-checkout mutation engine. It is deliberately absent from pre-commit;
 ordinary commits stay fast, while an explicit whole-repository health check
 reports score regressions or newly unhandled zero-constraint tests.
+Every baseline, collection, and mutant subprocess receives a fresh empty
+`PYTHONPYCACHEPREFIX` plus `PYTHONDONTWRITEBYTECODE=1`; each mutant result records
+that isolation contract and the SHA-256 digest of the exact source bytes tested.
 
 The committed cohort guards configuration precedence, immutable provenance,
 parse-error attribution, recursive merge behavior, and contextualized consumer

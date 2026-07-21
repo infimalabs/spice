@@ -1087,7 +1087,13 @@ def test_mutation_board_flags_zero_constraint_tests():
                 killed=0,
                 survived=1,
                 timed_out=0,
-                results=(mutations.MutationResult(point=point, status="survived"),),
+                results=(
+                    mutations.MutationResult(
+                        point=point,
+                        status="survived",
+                        source_sha256="fixture-sha256",
+                    ),
+                ),
                 zero_constraint_tests=("tests/test_sample.py::test_add",),
             ),
         ),

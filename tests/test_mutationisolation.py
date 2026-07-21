@@ -9,8 +9,13 @@ termination are scavenged on the next invocation without touching live runs.
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import os
+import py_compile
+import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -58,9 +63,20 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def _caller_state(root: Path) -> tuple[dict[str, bytes], str, str]:
+def _caller_state(
+    root: Path,
+) -> tuple[dict[str, bytes], dict[str, tuple[int, int]], str, str]:
+    metadata = {
+        entry.relative_to(root).as_posix(): (
+            stat.S_IMODE(entry.stat().st_mode),
+            entry.stat().st_mtime_ns,
+        )
+        for entry in sorted(root.rglob("*"))
+        if entry.is_file() and ".git" not in entry.relative_to(root).parts
+    }
     return (
         _tree_bytes(root),
+        metadata,
         _git(root, "status", "--porcelain"),
         _git(root, "ls-files", "-s"),
     )
@@ -74,8 +90,17 @@ def _dead_pid() -> int:
 
 def _killing_fake(on_mutant=None):
     """A pytest fake that reads the mutant from the scratch cwd it runs in."""
+    cache_prefixes: set[Path] = set()
 
     def fake_run(command, **kwargs):
+        environment = kwargs["env"]
+        cache_prefix = Path(environment["PYTHONPYCACHEPREFIX"])
+        assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
+        assert cache_prefix.is_dir() is True
+        assert tuple(cache_prefix.iterdir()) == ()
+        prior_count = len(cache_prefixes)
+        cache_prefixes.add(cache_prefix)
+        assert len(cache_prefixes) == prior_count + 1
         if "--collect-only" in command:
             return subprocess.CompletedProcess(
                 command, 0, stdout=f"{KILLING_NODEID}\n", stderr=""
@@ -169,6 +194,14 @@ def test_success_preserves_caller_and_removes_scratch(tmp_path, monkeypatch):
     assert report.killed == 1
     assert report.score == 1.0
     assert report.results[0].killed_by == (KILLING_NODEID,)
+    expected_source = mutations.mutated_text(SAMPLE_SOURCE, 0).encode("utf-8")
+    assert (
+        report.results[0].source_sha256 == hashlib.sha256(expected_source).hexdigest()
+    )
+    assert dict(report.results[0].bytecode_environment) == {
+        "PYTHONPYCACHEPREFIX": "<fresh-empty-directory>",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     assert report.zero_constraint_tests == ()
     assert _caller_state(root) == before
     assert [entry.name for entry in scratch.scratch_parent(root).iterdir()] == []
@@ -190,6 +223,65 @@ def test_survivor_preserves_caller_and_removes_scratch(tmp_path, monkeypatch):
     assert report.score == 0.0
     assert report.zero_constraint_tests == (KILLING_NODEID,)
     assert _caller_state(root) == before
+    assert [entry.name for entry in scratch.scratch_parent(root).iterdir()] == []
+
+
+def test_cold_warm_and_immediate_runs_keep_mutant_identity_and_outcome(
+    tmp_path, monkeypatch
+):
+    root = _seed_project(tmp_path / "repo")
+    source = root / "pkg" / "sample.py"
+    (root / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    test_path = root / "tests" / "test_sample.py"
+    test_path.parent.mkdir()
+    test_path.write_text(
+        "from pkg.sample import add\n\ndef test_add():\n    assert add(3, 2) == 5\n",
+        encoding="utf-8",
+    )
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "add test")
+
+    def run_python_pytest(command, **kwargs):
+        assert command[:3] == ["uv", "run", "pytest"]
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", *command[3:]],
+            cwd=kwargs["cwd"],
+            env=kwargs["env"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    _patch_runners(monkeypatch, run_python_pytest)
+
+    cold = _run_study(root)
+    cache_path = Path(importlib.util.cache_from_source(str(source)))
+    cache_path.parent.mkdir()
+    py_compile.compile(
+        str(source),
+        cfile=str(cache_path),
+        doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    _git(root, "add", "-f", cache_path.relative_to(root).as_posix())
+    _git(root, "commit", "-q", "-m", "seed stale bytecode")
+    warm_state = _caller_state(root)
+    warm = _run_study(root)
+    immediate = _run_study(root)
+
+    def identity(study):
+        result = study.reports[0].results[0]
+        return (
+            result.point.index,
+            result.status,
+            result.source_sha256,
+            tuple(result.bytecode_environment.items()),
+        )
+
+    assert identity(cold) == identity(warm) == identity(immediate)
+    assert cold.reports[0].killed == 1
+    assert _caller_state(root) == warm_state
     assert [entry.name for entry in scratch.scratch_parent(root).iterdir()] == []
 
 
