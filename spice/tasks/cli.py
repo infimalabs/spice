@@ -349,6 +349,14 @@ def _configure_ingest_parser(actions: Any) -> None:
         action="store_true",
         help="Print the complete validated apply plan without writing tasks.",
     )
+    ingest.add_argument(
+        "--infer-ordered-dependencies",
+        action="store_true",
+        help=(
+            "Foot-gun: derive sequential dependencies from numbered list "
+            "position; defaults off, so prefer explicit After: declarations."
+        ),
+    )
     ingest.set_defaults(func=handle)
 
 
@@ -928,6 +936,7 @@ _DISPATCH = {
         project=a.project,
         origin=a.origin,
         dry_run=a.dry_run,
+        infer_ordered_dependencies=a.infer_ordered_dependencies,
     ),
     "done": lambda a: ops.done(
         a.handle,

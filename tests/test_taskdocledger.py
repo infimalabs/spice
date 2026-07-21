@@ -94,7 +94,12 @@ def test_named_goal_renders_an_atx_heading_over_its_leaves() -> None:
 
 
 def test_ordered_run_renders_as_after_edges_not_numbers() -> None:
-    rendered = export_document(parse("1. first\n2. second\n3. third\n"))
+    rendered = export_document(
+        parse(
+            "1. first\n2. second\n3. third\n",
+            infer_ordered_dependencies=True,
+        )
+    )
 
     assert (
         rendered == "- first\n\n- second\n  After: first\n\n- third\n  After: second\n"

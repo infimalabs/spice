@@ -148,8 +148,8 @@ def test_headings_nest_by_level_and_bold_sections_extend_past_h6() -> None:
     assert reset.title == "Reset"
 
 
-def test_list_indent_nests_items_and_ordered_runs_chain() -> None:
-    parser = Parser()
+def test_list_indent_nests_items_and_opted_in_ordered_runs_chain() -> None:
+    parser = Parser(infer_ordered_dependencies=True)
 
     parser.feed(
         "# Root\n"
