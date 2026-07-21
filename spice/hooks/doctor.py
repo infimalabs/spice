@@ -62,6 +62,7 @@ class DoctorCheck:
     status: DoctorStatus
     detail: str
     command: str
+    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -81,11 +82,13 @@ class DoctorReport:
         lines.append(f"  worktree_state_root={worktree_state_root(self.repo_root)}")
         for fix in self.fixes:
             lines.append(f"  fixed {fix}")
-        for check in self.checks:
-            lines.append(
-                f"  {check.status.upper():4} {check.name}: {check.detail} "
-                f"(cmd: {check.command})"
-            )
+        required = [check for check in self.checks if check.required]
+        optional = [check for check in self.checks if not check.required]
+        lines.extend(_check_line(check) for check in required)
+        if optional:
+            lines.append("  optional companions (safe to skip):")
+            lines.extend(_check_line(check) for check in optional)
+        lines.append(_posture_line(required, optional))
         return "\n".join(lines)
 
 
@@ -228,29 +231,31 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
     ):
         located = find_tool(binary)
         if located:
-            checks.append(
-                _ok(label, f"{binary} -> {located}; {note}", "which " + binary)
-            )
+            detail = f"{binary} -> {located}; {note}"
+            check = _ok(label, detail, "which " + binary, required=required)
         elif required:
-            checks.append(_fail(label, f"{binary} missing; {note}", "spice dev doctor"))
+            check = _fail(label, f"{binary} missing; {note}", "spice dev doctor")
         else:
-            checks.append(_warn(label, f"{binary} missing; {note}", "spice dev doctor"))
+            detail = f"optional -- you're fine without it; {binary} missing; {note}"
+            check = _skip(label, detail, "spice dev doctor")
+        checks.append(check)
     return checks
 
 
 def _rtk_check(repo_root: Path) -> DoctorCheck:
     health = probe_rtk_health(repo_root)
+    cmd = health.verification_command()
     detail = (
         f"executable={health.executable!r}; mode={health.mode}; "
         f"state={health.state}; {health.detail}"
     )
     if health.active:
-        return _ok(
-            "tool.rtk",
-            f"{detail}; version={health.version}",
-            health.verification_command(),
-        )
-    return _warn("tool.rtk", detail, health.verification_command())
+        active = f"{detail}; version={health.version}"
+        return _ok("tool.rtk", active, cmd, required=False)
+    if health.state == "missing":
+        skip = f"optional -- you're fine without it; {detail}"
+        return _skip("tool.rtk", skip, cmd)
+    return _warn("tool.rtk", detail, cmd, required=False)
 
 
 def _tts_binary_check_config(repo_root: Path) -> tuple[str, str]:
@@ -948,20 +953,45 @@ def _spice_error_check(
     return _ok(name, "ok", command)
 
 
-def _ok(name: str, detail: str, command: str) -> DoctorCheck:
-    return DoctorCheck(name=name, status="ok", detail=detail, command=command)
+def _check_line(check: DoctorCheck) -> str:
+    return (
+        f"  {check.status.upper():4} {check.name}: {check.detail} "
+        f"(cmd: {check.command})"
+    )
 
 
-def _warn(name: str, detail: str, command: str) -> DoctorCheck:
-    return DoctorCheck(name=name, status="warn", detail=detail, command=command)
+def _posture_line(required: list[DoctorCheck], optional: list[DoctorCheck]) -> str:
+    failed = sum(check.status == "fail" for check in required)
+    if failed:
+        return (
+            f"  attention: {failed} required check(s) failed; "
+            "fix before relying on this worktree"
+        )
+    absent = sum(check.status == "skip" for check in optional)
+    tail = f"; {absent} optional companion(s) absent and safe to skip" if absent else ""
+    return f"  ready: required checks satisfied{tail}"
+
+
+def _ok(name: str, detail: str, command: str, *, required: bool = True) -> DoctorCheck:
+    return DoctorCheck(name, "ok", detail, command, required)
+
+
+def _warn(
+    name: str, detail: str, command: str, *, required: bool = True
+) -> DoctorCheck:
+    return DoctorCheck(name, "warn", detail, command, required)
+
+
+def _skip(name: str, detail: str, command: str) -> DoctorCheck:
+    return DoctorCheck(name, "skip", detail, command, False)
 
 
 def _info(name: str, detail: str, command: str) -> DoctorCheck:
-    return DoctorCheck(name=name, status="info", detail=detail, command=command)
+    return DoctorCheck(name, "info", detail, command)
 
 
 def _fail(name: str, detail: str, command: str) -> DoctorCheck:
-    return DoctorCheck(name=name, status="fail", detail=detail, command=command)
+    return DoctorCheck(name, "fail", detail, command)
 
 
 def _command_problem(result: subprocess.CompletedProcess[str]) -> str:
