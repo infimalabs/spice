@@ -122,14 +122,15 @@ def _task_filter_project_counts(
     ready_uuids: set[str],
     waiting_uuids: set[str],
     blocked_uuids: set[str],
-) -> tuple[dict[str, dict[str, int]], int, int]:
+) -> tuple[dict[str, dict[str, int]], int, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     waiting_count = 0
-    oops_count = 0
+    hidden_counts: dict[str, int] = {}
     for row in rows:
         project = str(row.get("project") or "")
         if task_config.is_hidden_project(project):
-            oops_count += 1
+            stem = task_config.project_stem(project)
+            hidden_counts[stem] = hidden_counts.get(stem, 0) + 1
             continue
         uuid = str(row.get("uuid") or "")
         # Raw status stays ``pending`` for deferred tasks.  The computed
@@ -148,18 +149,25 @@ def _task_filter_project_counts(
             blocked_uuids=blocked_uuids,
         )
         project_counts[state] += 1
-    return counts, waiting_count, oops_count
+    return counts, waiting_count, hidden_counts
 
 
-def _task_filter_system_stem(name: str, count: int, count_field: str) -> dict[str, Any]:
+def _task_filter_system_stem(
+    name: str, count: int, count_field: str | None = None
+) -> dict[str, Any]:
     counts = _empty_task_filter_counts()
     counts["openTaskCount"] = count
     counts["deferredTaskCount"] = count
-    return {"name": name, **counts, "filters": [], count_field: count}
+    stem: dict[str, Any] = {"name": name, **counts, "filters": []}
+    if count_field is not None:
+        stem[count_field] = count
+    return stem
 
 
 def _task_filter_payload_rows(
-    counts: dict[str, dict[str, int]], waiting_count: int, oops_count: int
+    counts: dict[str, dict[str, int]],
+    waiting_count: int,
+    hidden_counts: dict[str, int],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     filters: list[dict[str, Any]] = []
     stems: dict[str, dict[str, Any]] = {}
@@ -181,8 +189,14 @@ def _task_filter_payload_rows(
         stems["waiting"] = _task_filter_system_stem(
             "waiting", waiting_count, "waitingTaskCount"
         )
-    if oops_count:
-        stems["oops"] = _task_filter_system_stem("oops", oops_count, "oopsTaskCount")
+    # Every hidden stem carries its own exact open count instead of collapsing
+    # into one synthetic oops row: `.oops`/`.oops.*` stay on the oops stem while
+    # `.maxim_proposal` and any project-configured hidden stem keep their own
+    # pill. Only the oops stem still emits the dedicated oopsTaskCount signal.
+    oops_stem = task_config.project_stem(task_config.OOPS_PROJECT)
+    for stem_name, count in sorted(hidden_counts.items()):
+        count_field = "oopsTaskCount" if stem_name == oops_stem else None
+        stems[stem_name] = _task_filter_system_stem(stem_name, count, count_field)
     return filters, stems
 
 
@@ -191,10 +205,10 @@ def task_filter_inventory() -> dict[str, Any]:
     revision = task_filter_inventory_revision()
     catalog = task_config.task_project_validation_catalog()
     rows, ready_uuids, waiting_uuids, blocked_uuids = _task_filter_rows()
-    counts, waiting_count, oops_count = _task_filter_project_counts(
+    counts, waiting_count, hidden_counts = _task_filter_project_counts(
         rows, ready_uuids, waiting_uuids, blocked_uuids
     )
-    filters, stems = _task_filter_payload_rows(counts, waiting_count, oops_count)
+    filters, stems = _task_filter_payload_rows(counts, waiting_count, hidden_counts)
     return {
         "revision": revision,
         "filters": filters,

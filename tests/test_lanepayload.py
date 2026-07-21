@@ -865,9 +865,85 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert stems["serve"]["deferredTaskCount"] == 1
     assert stems["task"]["readyTaskCount"] == 1
     assert stems["agent"]["readyTaskCount"] == 1
-    assert stems["oops"]["openTaskCount"] == 4
+    assert stems["oops"] == {
+        "name": "oops",
+        "openTaskCount": 3,
+        "readyTaskCount": 0,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 3,
+        "filters": [],
+        "oopsTaskCount": 3,
+    }
+    assert stems["maxim_proposal"] == {
+        "name": "maxim_proposal",
+        "openTaskCount": 1,
+        "readyTaskCount": 0,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 1,
+        "filters": [],
+    }
     assert stems["waiting"]["openTaskCount"] == 1
     assert stems["waiting"]["deferredTaskCount"] == 1
+
+
+def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    monkeypatch.chdir(repo)
+    (repo / "pyproject.toml").write_text(
+        '[tool.spice.tasks]\nhidden_stems = ["sandbox"]\n',
+        encoding="utf-8",
+    )
+
+    def fake_export(args: list[str]) -> list[dict[str, object]]:
+        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
+        return [
+            {"uuid": "ready-serve", "project": "serve.ui"},
+            {"uuid": "oops-a", "project": ".oops"},
+            {"uuid": "oops-b", "project": ".oops.correctness"},
+            {"uuid": "sandbox-a", "project": ".sandbox"},
+            {"uuid": "sandbox-b", "project": ".sandbox.triage"},
+            {"uuid": "sandbox-c", "project": ".sandbox"},
+        ]
+
+    monkeypatch.setattr(tw, "export", fake_export)
+    inventory = task_filter_inventory()
+    stems = {item["name"]: item for item in inventory["primaryStems"]}
+
+    # The project-configured stem merges onto the built-in hidden stems, so the
+    # catalog and pills carry it alongside oops and maxim_proposal.
+    assert inventory["catalog"]["hiddenStems"] == ["oops", "maxim_proposal", "sandbox"]
+    # Built-in oops keeps its dedicated oopsTaskCount signal for its own tasks...
+    assert stems["oops"] == {
+        "name": "oops",
+        "openTaskCount": 2,
+        "readyTaskCount": 0,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 2,
+        "filters": [],
+        "oopsTaskCount": 2,
+    }
+    # ...while the project-configured sandbox stem carries its own exact open
+    # count on a distinct pill and never borrows the oops signal.
+    assert stems["sandbox"] == {
+        "name": "sandbox",
+        "openTaskCount": 3,
+        "readyTaskCount": 0,
+        "inFlightTaskCount": 0,
+        "blockedTaskCount": 0,
+        "deferredTaskCount": 3,
+        "filters": [],
+    }
 
 
 def test_task_filter_inventory_preserves_all_deferred_project_as_zero_ready(
