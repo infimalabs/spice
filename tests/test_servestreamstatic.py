@@ -88,7 +88,7 @@ def test_static_filter_header_pills_render_models_and_styles():
         "  padding: 0 5px;\n"
     )
     assert (
-        ".filter-pill--active .filter-pill-count { background: var(--team-teal-accent); }"
+        ".filter-pill--active .filter-pill-count { background: var(--filter-pill-draining); }"
         in css
     )
     assert (
