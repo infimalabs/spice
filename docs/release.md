@@ -20,6 +20,14 @@ page-local fixtures are mandatory, while scenarios that create or depend on
 live external state are listed explicitly with a reason and must be run in a
 suitable live lane.
 
+The release command removes ignored `build/` and `dist/` trees before the
+constitution gate and again before assembling artifacts. This prevents files
+deleted from the source tree from surviving in setuptools' reusable build
+directory and entering a release wheel.
+The artifact gate then imports `spice.config.layers` with Python's isolated
+mode before exercising the installed CLI, so checkout paths and `PYTHONPATH`
+cannot mask a broken wheel.
+
 Before `prepare`, the bare `spice release range` command resolves the highest
 version tag merged into the current `HEAD` and previews `latest-tag..HEAD`
 without requiring a future version literal.
