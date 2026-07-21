@@ -15,6 +15,7 @@ from spice.serve.team.ids import (
     thread_actor_id,
     thread_id_for_actor,
 )
+from spice.serve.team.schema import RENEWAL_STATE_PENDING, RENEWAL_STATE_REQUESTED
 from spice.serve.worktree.target import WorktreeTarget
 
 
@@ -93,13 +94,15 @@ def team_actor_for_target(
 
     A target id is only a placeholder before the worktree has a thread. Once a
     real thread exists, any placeholder membership is rewritten to that thread
-    before callers read team facts.
+    before callers read team facts. An active renewal with a real predecessor
+    thread is the exception: an unbound refresh keeps the predecessor in place,
+    and the first real successor bind completes the renewal instead of moving
+    the still-active request onto the successor.
     """
     actor = target_bound_actor(target, thread_id)
-    _promote_team_actor(
+    return _promote_team_actor(
         store, actor, _target_actor_previous_names(store, target, actor)
     )
-    return actor
 
 
 def team_facts_for_target(
@@ -421,17 +424,43 @@ def _promote_team_actor(
     store: ServeTeamStore,
     actor: str,
     previous_names: Iterable[str],
-) -> None:
+) -> str:
     names = [name for name in dict.fromkeys((actor, *previous_names)) if name]
     if not names:
-        return
+        return actor
     target_team_id = store.current_team_for_agent(actor)
     for name in names[1:]:
         team_id = store.current_team_for_agent(name)
         if team_id is None:
             continue
+        renewal = store.renewal_state_for_agent(name)
+        if (
+            renewal is not None
+            and renewal.state in {RENEWAL_STATE_REQUESTED, RENEWAL_STATE_PENDING}
+            and thread_id_for_actor(name)
+        ):
+            successor_thread_id = thread_id_for_actor(actor)
+            if not successor_thread_id:
+                # The predecessor has stopped, but the target is temporarily
+                # unbound. Keeping its slot and renewal row intact lets the
+                # eventual real thread complete this transition exactly once.
+                return name
+            predecessor_thread_id = str(
+                (renewal.predecessor_identity or {}).get("threadId") or ""
+            )
+            store.record_started_renewal(
+                predecessor_agent_id=name,
+                successor_agent_id=actor,
+                ancestor_thread_id=(
+                    renewal.ancestor_thread_id
+                    or predecessor_thread_id
+                    or thread_id_for_actor(name)
+                ),
+            )
+            return actor
         store.assign_agent(target_team_id or team_id, actor, aliases=names[1:])
-        return
+        return actor
+    return actor
 
 
 def _target_actor_previous_names(
