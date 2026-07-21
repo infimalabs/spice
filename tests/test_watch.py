@@ -10,7 +10,10 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from spice.cli.parser import build_parser
+from spice.errors import SpiceError
 from spice.serve import app
 from spice.serve.observer import (
     detect_observer_primary,
@@ -191,6 +194,75 @@ def test_watch_detection_classifies_a_single_claude_provider(
     assert detection.classification == "Claude-primary"
     assert detection.primary == "claude"
     assert detection.signal_summary == "codex[none];claude[session-root,config,cli]"
+
+
+def test_watch_detection_without_any_signal_fails_loudly(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv(CODEX_HOME_ENV, str(tmp_path / "absent-codex-home"))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "absent-claude-home"))
+    monkeypatch.setattr("spice.serve.observer.shutil.which", lambda _binary: None)
+
+    with pytest.raises(SpiceError) as excinfo:
+        detect_observer_primary()
+
+    message = str(excinfo.value)
+    assert "no Codex or Claude installation detected" in message
+    assert "manual usage: spice watch <session-dir>" in message
+
+
+def test_watch_detection_without_a_session_root_fails_loudly(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "absent-claude-home"))
+    monkeypatch.setattr(
+        "spice.serve.observer.shutil.which",
+        lambda binary: "/tools/codex" if binary == "codex" else None,
+    )
+
+    with pytest.raises(SpiceError) as excinfo:
+        detect_observer_primary()
+
+    message = str(excinfo.value)
+    assert "primary=codex" in message
+    assert "has no existing session root to watch" in message
+
+
+def test_watch_detection_rejects_ephemeral_port(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    codex_sessions = tmp_path / "codex-home" / "sessions"
+    claude_projects = tmp_path / "claude-home" / "projects"
+    codex_sessions.mkdir(parents=True)
+    claude_projects.mkdir(parents=True)
+    monkeypatch.setenv(CODEX_HOME_ENV, str(tmp_path / "codex-home"))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "claude-home"))
+    monkeypatch.setattr("spice.serve.observer.shutil.which", lambda _binary: None)
+    args = build_parser().parse_args(["watch", "--port", "0"])
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    assert "requires a fixed --port" in str(excinfo.value)
+
+
+def test_watch_rejects_primary_with_explicit_session_dirs(tmp_path: Path) -> None:
+    args = build_parser().parse_args(
+        ["watch", "one", "two", "--primary", "codex", "--port", "9876"]
+    )
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    assert args.session_dirs == [Path("one"), Path("two")]
+    assert args.primary == "codex"
+    assert "--primary is only valid with automatic detection" in str(excinfo.value)
 
 
 def test_observer_discovers_both_drivers_and_preserves_timeline(tmp_path: Path) -> None:
