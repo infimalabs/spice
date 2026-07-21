@@ -65,7 +65,8 @@ _FIELD_SECTIONS = {
 class Parser:
     """Top-to-bottom first-match classifier with attachment state."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, infer_ordered_dependencies: bool = False) -> None:
+        self.infer_ordered_dependencies = infer_ordered_dependencies
         self.nodes: list[Node] = []
         self.preamble = Node(idx=-1, kind="preamble", title="", line=0)
         self.current: Node | None = None
@@ -505,7 +506,7 @@ class Parser:
         node.checked = checked
         self.list_stack.append((indent, content_col, node, ordered))
         if ordered:
-            if predecessor is not None:
+            if predecessor is not None and self.infer_ordered_dependencies:
                 self.sequence_edges.append((node.idx, predecessor.idx, "after"))
             self.ordered_runs[run_key] = node
 
@@ -811,13 +812,14 @@ class Parser:
     def _build_edges(
         self, root: Node, parentless: list[Node], needs_synthetic: bool
     ) -> list[tuple[int, int, str]]:
-        """Combine containment, ordered chains, and resolved ``After`` edges.
+        """Combine containment, enabled ordered chains, and ``After`` edges.
 
         Containment comes from parenthood; the synthetic root depends on each
-        parentless node; ordered runs and every node's ``After:`` targets (the
-        root now also carrying the preamble's) add dependency edges. An
-        ``After`` edge that merely restates containment is dropped, so the
-        preamble depending on its own section never doubles the tree edge.
+        parentless node; opted-in ordered runs and every node's ``After:``
+        targets (the root now also carrying the preamble's) add dependency
+        edges. An ``After`` edge that merely restates containment is dropped,
+        so the preamble depending on its own section never doubles the tree
+        edge.
         """
         edges: list[tuple[int, int, str]] = []
         containment: set[tuple[int, int]] = set()
@@ -910,8 +912,8 @@ class Parser:
                     stack.pop()
 
 
-def parse(text: str) -> Doc:
-    parser = Parser()
+def parse(text: str, *, infer_ordered_dependencies: bool = False) -> Doc:
+    parser = Parser(infer_ordered_dependencies=infer_ordered_dependencies)
     parser.feed(text.removeprefix("\ufeff"))
     return parser.document()
 

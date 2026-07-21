@@ -144,14 +144,16 @@ depth (spaces; a tab counts as four) nests items: a deeper item is a child
 of the enclosing item. A list's top-level items are children of the current
 heading. Three refinements:
 
-- **Ordered runs start at 1 and chain.** `1.` opens an ordered run; any
-  number continues an open run at the same indent. Each ordered item gains
-  an `after` edge on its predecessor: markdown has exactly one construct
-  whose semantic is sequence, and this is it. A numbered line that neither
-  starts at 1 nor continues an open run is prose (`1985. It was a long
-  night…`), warned. Items captured as acceptance criteria are exempt —
-  criteria are not tasks, so their numbering carries no dependency
-  meaning.
+- **Ordered runs start at 1; dependency inference is opt-in.** `1.` opens an
+  ordered run; any number continues an open run at the same indent. By
+  default, list position adds no `after` edge: numbered siblings remain
+  parallel unless the document declares `After:` explicitly. The
+  `spice task ingest --infer-ordered-dependencies` foot-gun makes each ordered
+  item depend on its predecessor for a document that deliberately uses
+  numbering as execution order. A numbered line that neither starts at 1 nor
+  continues an open run is prose (`1985. It was a long night…`), warned. Items
+  captured as acceptance criteria are exempt — criteria are not tasks, so
+  their numbering carries no dependency meaning.
 - **Checkbox markers are stripped — before every other reading.**
   `- [ ] Fix the parser` titles the node "Fix the parser". A `[x]` is
   discarded with a warning: a task document describes work to create, and
@@ -266,11 +268,13 @@ Legal markdown that carries no task meaning is discarded, not misparsed:
 ### Edge direction
 
 Containment is dependency: a parent node depends on (`after`) each of its
-children. Ordered runs chain siblings; `After:` lines add edges on top.
-Dependencies point from goal toward prerequisite, so:
+children. Explicit `After:` lines add cross-edges. Ordered runs chain siblings
+only when ingest receives `--infer-ordered-dependencies`. Dependencies point
+from goal toward prerequisite, so:
 
-- Leaves are ready immediately; unordered siblings run in parallel.
-- Ordered siblings run in sequence — that is what the numbers say.
+- Leaves are ready immediately; siblings run in parallel unless an explicit
+  `After:` edge or the ordered-inference opt-in sequences them.
+- Numbering alone is presentation and adds no dependency in default ingest.
 - A rollup becomes ready when its last child completes.
 - The root completes last. The graph reads as "to finish the goal, finish
   its sections; to finish a section, finish its items."
@@ -394,10 +398,13 @@ the whole mechanism.
 
 ## Apply Semantics
 
-`spice task ingest PATH --project <project> [--origin <origin>]` — with
-`-` reading stdin, because agents pipe — is **apply**: make the family
-match the document, creating what is missing, preserving what exists,
-touching nothing that work has settled, deleting nothing ever.
+`spice task ingest PATH --project <project> [--origin <origin>]
+[--infer-ordered-dependencies]` — with `-` reading stdin, because agents pipe —
+is **apply**: make the family match the document, creating what is missing,
+preserving what exists, touching nothing that work has settled, deleting
+nothing ever. The ordered-dependency flag defaults off and is deliberately
+labeled a foot-gun: unflagged ingest creates dependency edges only from
+containment and explicit in-document `After:` declarations.
 
 ### The plan
 
@@ -642,11 +649,13 @@ document deserves to lead.
   an imperative, specific, ASCII-bearing title. An H1 naming the goal is
   good practice — it names the root — but a bare list is a complete
   document.
-- **Number what must run in order; `After:` for everything else.**
-  Ordered siblings chain; unordered siblings run in parallel — that is a
-  feature, so only sequence what truly must wait. `After:` says what
-  neither nesting nor numbering can: a shared prerequisite, a diamond, a
-  section that follows its siblings.
+- **Write `After:` for execution order.** Numbering is presentation by default,
+  so siblings run in parallel unless an explicit dependency says otherwise.
+  `--infer-ordered-dependencies` opts the entire ingest into positional chains;
+  it is a foot-gun reserved for a document that deliberately makes every
+  ordered run executable sequence. `After:` remains the reviewable default for
+  a predecessor, shared prerequisite, diamond, or section that follows its
+  siblings.
 - **Give ready work acceptance.** A plain `Acceptance:` line per
   criterion, or a criteria list under one `Acceptance:` intro — both are
   the same statement. A node with no acceptance and no `Flow:` routes to
@@ -745,7 +754,7 @@ Same shape, but the root is now `login-hardening` and carries the
 preamble prose as its description. The H1 names the goal; it does not
 identify the family — the origin does.
 
-### Numbers are sequence
+### Numbers are presentation unless sequence is opted in
 
 ```markdown
 # Deploy 2.0
@@ -763,9 +772,11 @@ deploy-2-0 ─┬─> freeze-main <── cut-the-release-branch <── run-the
             └─> promote-to-fleet
 ```
 
-Four chained steps: each waits for its predecessor, the root waits for
-all. Write dashes when siblings may run in parallel; write numbers when
-they must not.
+Unflagged ingest gives the root four parallel children and no sibling
+dependencies. Passing `--infer-ordered-dependencies` produces the diagram:
+four chained steps where each waits for its predecessor and the root waits for
+all. Prefer explicit `After:` declarations unless every ordered run in the
+document intentionally carries that execution meaning.
 
 ### Cross-edges: what nesting cannot say
 
@@ -1106,7 +1117,7 @@ not have to:
 STRUCTURE   # heading (H1-H6; deeper: bold spans)   Setext over ===/---
             **Bold span** after blank (one level below the real heading)
             - item  * item  + item   (indent nests; content indents under)
-            1. item  (ordered runs start at 1, chain in sequence)
+            1. item  (ordered runs start at 1; chain only under ingest opt-in)
             - [ ] item  (marker strips first; [x] warned)
 FIELDS      Acceptance: <criterion>       (repeat per criterion, or:)
             Acceptance:                   (+ criteria list, blanks only between)

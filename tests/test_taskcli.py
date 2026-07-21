@@ -142,6 +142,8 @@ def test_task_document_cli_help_names_apply_stdin_dry_run_and_family_export(caps
     assert "Markdown path, or - to read standard input." in ingest_help
     assert "--dry-run" in ingest_help
     assert "--origin ORIGIN" in ingest_help
+    assert "--infer-ordered-dependencies" in ingest_help
+    assert "Foot-gun: derive sequential dependencies" in ingest_help
     assert "spice task ingest plan.md --project task.plan" in ingest_help
 
     with pytest.raises(SystemExit):

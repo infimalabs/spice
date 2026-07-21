@@ -1023,13 +1023,17 @@ def ingest_path(
     project: str | None,
     origin: str | None = None,
     dry_run: bool = False,
+    infer_ordered_dependencies: bool = False,
 ) -> str:
     """Read, parse, and apply one task document."""
     actor = tw.canonical_actor(tw.current_actor())
     resolved_project, resolved_origin = resolve_ingest_target(
         actor, project=project, origin=origin
     )
-    document = parse(read_document(str(path)))
+    document = parse(
+        read_document(str(path)),
+        infer_ordered_dependencies=infer_ordered_dependencies,
+    )
     return apply_document(
         document,
         project=resolved_project,

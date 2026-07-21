@@ -790,3 +790,89 @@ def test_cli_ingest_dash_and_ledger_run_the_task_document_dialect(
     ledger_args = build_parser().parse_args(["task", "ledger", root])
     assert task_cli.handle(ledger_args) == 0
     assert capsys.readouterr().out == render_ledger(root)[0]
+
+
+@pytest.mark.parametrize(
+    ("infer_ordered_dependencies", "expected_dependencies"),
+    (
+        (
+            False,
+            {
+                "hardening": frozenset(
+                    {"browser", "init", "mutation", "release-proof"}
+                ),
+                "browser": frozenset(),
+                "mutation": frozenset(),
+                "release-proof": frozenset({"browser"}),
+                "init": frozenset(),
+            },
+        ),
+        (
+            True,
+            {
+                "hardening": frozenset(
+                    {"browser", "init", "mutation", "release-proof"}
+                ),
+                "browser": frozenset(),
+                "mutation": frozenset({"browser"}),
+                "release-proof": frozenset({"browser", "mutation"}),
+                "init": frozenset({"release-proof"}),
+            },
+        ),
+    ),
+    ids=("explicit-after-only", "ordered-inference-opt-in"),
+)
+def test_cli_ingest_numbered_dependencies_require_explicit_opt_in(
+    task_repo,
+    monkeypatch,
+    capsys,
+    infer_ordered_dependencies,
+    expected_dependencies,
+):
+    assert task_repo.is_dir()
+    source = (
+        "# Hardening\n"
+        "Acceptance: hardening complete\n"
+        "Flow: todo\n"
+        "1. Browser\n"
+        "   Acceptance: browser complete\n"
+        "   Flow: todo\n"
+        "2. Mutation\n"
+        "   Acceptance: mutation complete\n"
+        "   Flow: todo\n"
+        "3. Release proof\n"
+        "   Acceptance: release proof complete\n"
+        "   Flow: todo\n"
+        "   After: browser\n"
+        "4. Init\n"
+        "   Acceptance: init complete\n"
+        "   Flow: todo\n"
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(source))
+    command = [
+        "task",
+        "ingest",
+        "-",
+        "--project",
+        "task.unit",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    ]
+    if infer_ordered_dependencies:
+        command.append("--infer-ordered-dependencies")
+    ingest_args = build_parser().parse_args(command)
+
+    assert task_cli.handle(ingest_args) == 0
+    capsys.readouterr()
+    family = apply.load_family_rows("task.unit", f"ack:{ACK_KEY}")
+    slug_by_uuid = {
+        identity.uuid_of(row): str(row[config.TASKDOC_ID_UDA]) for row in family
+    }
+    actual_dependencies = {
+        str(row[config.TASKDOC_ID_UDA]): frozenset(
+            slug_by_uuid[str(dependency)] for dependency in row.get("depends") or ()
+        )
+        for row in family
+    }
+
+    assert actual_dependencies == expected_dependencies
