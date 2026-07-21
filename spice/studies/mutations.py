@@ -12,11 +12,16 @@ outside the scratch root.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import os
 import re
+import stat
 import subprocess
-from collections.abc import Mapping
-from dataclasses import dataclass
+import tempfile
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -33,6 +38,12 @@ STANDING_MUTATION_RATCHET_PATH = Path("tests/mutation-ratchet.json")
 DEFAULT_MAX_MUTANTS_PER_MODULE = 20
 DEFAULT_MUTATION_TIMEOUT_SECONDS = 30
 _FAILED_NODEID_RE = re.compile(r"(tests/[^\s:]+\.py::[^\s]+)")
+BYTECODE_ISOLATION_ENVIRONMENT: Mapping[str, str] = MappingProxyType(
+    {
+        "PYTHONPYCACHEPREFIX": "<fresh-empty-directory>",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -46,7 +57,11 @@ class MutationPoint:
 class MutationResult:
     point: MutationPoint
     status: str
+    source_sha256: str
     killed_by: tuple[str, ...] = ()
+    bytecode_environment: Mapping[str, str] = field(
+        default_factory=lambda: BYTECODE_ISOLATION_ENVIRONMENT
+    )
 
 
 @dataclass(frozen=True)
@@ -350,27 +365,53 @@ def _run_module_mutations(
     timeout_seconds: int,
 ) -> ModuleMutationReport:
     abs_path = root / path
-    original = abs_path.read_text(encoding="utf-8")
+    original_metadata = abs_path.stat()
+    original_bytes = abs_path.read_bytes()
+    original = original_bytes.decode("utf-8")
     points = mutation_points_for_text(original)[: max(0, max_mutants)]
     results: list[MutationResult] = []
     killed_by: set[str] = set()
     try:
         for point in points:
-            abs_path.write_text(mutated_text(original, point.index), encoding="utf-8")
+            source_bytes = mutated_text(original, point.index).encode("utf-8")
+            source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+            abs_path.write_bytes(source_bytes)
             result = _run_pytest(root, test_paths, timeout_seconds=timeout_seconds)
             if result is None:
-                results.append(MutationResult(point=point, status="timeout"))
+                results.append(
+                    MutationResult(
+                        point=point,
+                        status="timeout",
+                        source_sha256=source_sha256,
+                    )
+                )
                 continue
             if result.returncode == 0:
-                results.append(MutationResult(point=point, status="survived"))
+                results.append(
+                    MutationResult(
+                        point=point,
+                        status="survived",
+                        source_sha256=source_sha256,
+                    )
+                )
                 continue
             failed = tuple(sorted(_failed_nodeids(result.stdout + result.stderr)))
             killed_by.update(failed)
             results.append(
-                MutationResult(point=point, status="killed", killed_by=failed)
+                MutationResult(
+                    point=point,
+                    status="killed",
+                    killed_by=failed,
+                    source_sha256=source_sha256,
+                )
             )
     finally:
-        abs_path.write_text(original, encoding="utf-8")
+        abs_path.write_bytes(original_bytes)
+        os.chmod(abs_path, stat.S_IMODE(original_metadata.st_mode))
+        os.utime(
+            abs_path,
+            ns=(original_metadata.st_atime_ns, original_metadata.st_mtime_ns),
+        )
     killed = sum(1 for result in results if result.status == "killed")
     survived = sum(1 for result in results if result.status == "survived")
     timed_out = sum(1 for result in results if result.status == "timeout")
@@ -401,37 +442,41 @@ def _run_pytest(
     root: Path, test_paths: list[Path], *, timeout_seconds: int
 ) -> subprocess.CompletedProcess[str] | None:
     command = ["uv", "run", "pytest", "-q", *[path.as_posix() for path in test_paths]]
-    try:
-        return run_bounded_process_group(
-            command,
-            timeout_seconds=timeout_seconds,
-            phase="tool.study",
-            input_label="mutation baseline pytest",
-            cwd=root,
-            check=False,
-            text=True,
-        )
-    except ProcessDeadlineExceeded:
-        return None
+    with _bytecode_isolated_environment() as environment:
+        try:
+            return run_bounded_process_group(
+                command,
+                timeout_seconds=timeout_seconds,
+                phase="tool.study",
+                input_label="mutation pytest",
+                cwd=root,
+                check=False,
+                text=True,
+                env=environment,
+            )
+        except ProcessDeadlineExceeded:
+            return None
 
 
 def _collect_test_nodeids(root: Path, test_paths: list[Path]) -> set[str]:
-    result = run_tool_command(
-        [
-            "uv",
-            "run",
-            "pytest",
-            "--collect-only",
-            "-q",
-            *[path.as_posix() for path in test_paths],
-        ],
-        cwd=root,
-        policy="study",
-        operation="collect mutation test nodeids",
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    with _bytecode_isolated_environment() as environment:
+        result = run_tool_command(
+            [
+                "uv",
+                "run",
+                "pytest",
+                "--collect-only",
+                "-q",
+                *[path.as_posix() for path in test_paths],
+            ],
+            cwd=root,
+            policy="study",
+            operation="collect mutation test nodeids",
+            capture_output=True,
+            check=False,
+            text=True,
+            env=environment,
+        )
     if result.returncode != 0:
         return set()
     return {
@@ -439,6 +484,19 @@ def _collect_test_nodeids(root: Path, test_paths: list[Path]) -> set[str]:
         for line in result.stdout.splitlines()
         if "::" in line and line.strip().startswith("tests/")
     }
+
+
+@contextmanager
+def _bytecode_isolated_environment() -> Iterator[dict[str, str]]:
+    with tempfile.TemporaryDirectory(prefix="spice-mutation-pycache-") as cache:
+        environment = dict(os.environ)  # env-policy: allow
+        environment.update(
+            {
+                "PYTHONPYCACHEPREFIX": cache,
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        yield environment
 
 
 def _failed_nodeids(output: str) -> set[str]:
