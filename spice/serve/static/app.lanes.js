@@ -624,21 +624,16 @@ function targetChoiceName(target) {
   return targetIdentityDisplayLabel(target.targetIdentity);
 }
 
-function targetChoiceMetadataParts(target) {
+function targetChoiceMetadata(target) {
   const parts = [];
   if (laneStore.hasLane(target.id)) parts.push("open");
   const activity = relativeTime(targetChoiceLastAssistantAt(target));
   if (activity) parts.push(activity.trim());
   else if (!targetIdentityThreadId(target.targetIdentity)) parts.push("never");
-  const statusIndex = parts.length;
   parts.push(targetChoiceStatusLabel(target));
   const pending = targetChoicePendingCount(target);
   if (pending > 0) parts.push(pending + " pending");
-  return { parts, statusIndex };
-}
-
-function targetChoiceMetadata(target) {
-  return targetChoiceMetadataParts(target).parts.join(" · ");
+  return parts.join(" · ");
 }
 
 function targetChoiceDriverIconName(target) {
@@ -673,26 +668,15 @@ function targetChoiceDriverIcon(target, driver, src) {
 }
 
 function renderTargetChoiceMetadata(metadataEl, target) {
-  const { parts, statusIndex } = targetChoiceMetadataParts(target);
+  const metadata = targetChoiceMetadata(target);
   const driver = targetChoiceDriverIconName(target);
   const src = driverIconAssetPath(driver);
   if (!src) {
-    metadataEl.textContent = parts.join(" · ");
+    metadataEl.textContent = metadata;
     return;
   }
   const icon = targetChoiceDriverIcon(target, driver, src);
-  if (statusIndex < 1) {
-    metadataEl.replaceChildren(
-      icon,
-      document.createTextNode(" " + parts.join(" · ")),
-    );
-    return;
-  }
-  metadataEl.replaceChildren(
-    document.createTextNode(parts.slice(0, statusIndex).join(" · ") + " "),
-    icon,
-    document.createTextNode(" " + parts.slice(statusIndex).join(" · ")),
-  );
+  metadataEl.replaceChildren(icon, document.createTextNode(" " + metadata));
 }
 
 function targetChoiceLastAssistantAt(target) {

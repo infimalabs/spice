@@ -144,23 +144,22 @@ function target(overrides = {}) {
 }
 
 const withDriver = target();
-const { parts, statusIndex } = context.targetChoiceMetadataParts(withDriver);
-assert(statusIndex >= 1, "an activity segment precedes the status label");
+const metadata = context.targetChoiceMetadata(withDriver);
+assert(
+  metadata.includes(" · "),
+  "the metadata keeps the middle-dot separator between fields",
+);
 
 const meta = context.document.createElement("span");
 context.renderTargetChoiceMetadata(meta, withDriver);
 
 const icon = meta.querySelector("[data-target-choice-driver-icon]");
 assert(icon, "driver icon renders inside the meta line");
-assert(meta.children.length === 3, "icon splits the meta into text, icon, text");
-assert(meta.children[1] === icon, "the icon sits where the middle dot was");
+assert(meta.children.length === 2, "the meta is the icon then a single text run");
+assert(meta.children[0] === icon, "the driver icon leads the meta line");
 assert(
-  meta.children[0].textContent === parts.slice(0, statusIndex).join(" · ") + " ",
-  "leading text keeps the pre-status fields",
-);
-assert(
-  meta.children[2].textContent === " " + parts.slice(statusIndex).join(" · "),
-  "trailing text keeps the status label",
+  meta.children[1].textContent === " " + metadata,
+  "the timer and status follow the icon with the middle dot intact",
 );
 assert(
   icon.dataset.targetChoiceDriverIcon === "codex",
@@ -196,10 +195,14 @@ assert(
   "the driverless meta is a single text run",
 );
 assert(
-  plainMeta.textContent === parts.join(" · "),
-  "the driverless meta joins parts with the middle dot",
+  plainMeta.textContent === metadata,
+  "the driverless meta joins fields with the middle dot",
 );
 assert(
-  meta.textContent !== plainMeta.textContent,
-  "the driver icon replaces the middle-dot separator in the rendered meta",
+  meta.children.length !== plainMeta.children.length,
+  "the driver row prepends the icon node the driverless row omits",
+);
+assert(
+  meta.textContent.trimStart() === plainMeta.textContent,
+  "the leading icon preserves the same dot-joined fields as the driverless row",
 );
