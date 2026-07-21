@@ -10,7 +10,10 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from spice.cli.parser import build_parser
+from spice.errors import SpiceError
 from spice.serve import app
 from spice.serve.observer import (
     discover_observer_sessions,
@@ -108,6 +111,73 @@ def test_watch_discovery_prints_paste_ready_command_and_token_url_read_only(
         "spice watch: detected=2 read_only=true",
     ]
     assert _directory_snapshot(tmp_path) == before
+
+
+def test_watch_discovery_none_detected_raises_manual_usage_read_only(
+    tmp_path: Path,
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    codex_home.mkdir()
+    claude_home.mkdir()
+    before = _directory_snapshot(tmp_path)
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(claude_home))
+    args = build_parser().parse_args(["watch", "--discover", "--port", "9876"])
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    message = str(excinfo.value)
+    assert "none detected" in message
+    assert "manual usage: spice watch <session-dir>" in message
+    assert capsys.readouterr().out == ""
+    assert _directory_snapshot(tmp_path) == before
+
+
+def test_watch_discovery_rejects_explicit_session_dirs(tmp_path: Path) -> None:
+    args = build_parser().parse_args(
+        ["watch", "--discover", "one", "two", "--port", "9876"]
+    )
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    message = str(excinfo.value)
+    assert args.discover is True
+    assert args.session_dirs == [Path("one"), Path("two")]
+    assert "does not accept SESSION_DIR arguments" in message
+
+
+def test_watch_discovery_rejects_ephemeral_port(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    (codex_home / "sessions").mkdir(parents=True)
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "claude-home"))
+    args = build_parser().parse_args(["watch", "--discover", "--port", "0"])
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    assert "requires a fixed --port" in str(excinfo.value)
+
+
+def test_watch_requires_session_dirs_or_discover(tmp_path: Path) -> None:
+    args = build_parser().parse_args(["watch", "--port", "9876"])
+
+    with pytest.raises(SpiceError) as excinfo:
+        args.func(args)
+
+    message = str(excinfo.value)
+    assert args.session_dirs == []
+    assert args.discover is False
+    assert "requires SESSION_DIR" in message
+    assert "manual usage: spice watch <session-dir>" in message
 
 
 def test_observer_discovers_both_drivers_and_preserves_timeline(tmp_path: Path) -> None:
