@@ -75,7 +75,7 @@ prerequisite and graduation path is the [entry ladder](https://github.com/infima
 ## Quickstart
 
 First install the `spice` CLI (see [Install](#install)), then follow the
-[entry ladder](docs/overview.md#entry-ladder) — **watch -> gates -> steer ->
+[entry ladder](https://github.com/infimalabs/spice/blob/main/docs/overview.md#entry-ladder) — **watch -> gates -> steer ->
 fleet** — entering read-only and graduating only when a rung's limit appears.
 
 **Watch** an existing Claude Code or Codex session. This is read-only: it binds
