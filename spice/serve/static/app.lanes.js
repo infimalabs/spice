@@ -954,15 +954,21 @@ function taskFilterStemPillModel(stem) {
 
 function taskFilterStemPillCountText(model) {
   if (model.label === "oops") return String(model.openTaskCount);
-  let text = String(model.readyTaskCount);
-  if (model.inFlightTaskCount > 0 || model.unavailableTaskCount > 0)
-    text += "/" + model.inFlightTaskCount;
-  if (model.unavailableTaskCount > 0)
-    text += "/" + model.unavailableTaskCount;
-  return text;
+  // Always render the full ready/in-flight/unavailable triple so the pill keeps
+  // a fixed footprint; collapsing zero slots made the width jitter as counts
+  // moved between slots.
+  return [
+    model.readyTaskCount,
+    model.inFlightTaskCount,
+    model.unavailableTaskCount,
+  ].join("/");
 }
 
 function taskFilterStemPillTone(model) {
+  // Saturation tracks the leading populated slot of the ready/in-flight/
+  // unavailable triple: ready work stays fully saturated, in-flight work takes
+  // the half-saturated draining tone, and a 0/0/N pill (only the unavailable
+  // slot populated, or an empty stem) is fully desaturated.
   if (model.readyTaskCount > 0) return "ready";
   if (model.inFlightTaskCount > 0) return "active";
   return "dormant";

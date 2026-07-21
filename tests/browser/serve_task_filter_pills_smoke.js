@@ -197,9 +197,9 @@ function assertInitialPills(pills) {
     tone: "dormant",
     unavailable: "1",
   });
-  assertPill(pills, "tests", { count: "3", tone: "ready" });
+  assertPill(pills, "tests", { count: "3/0/0", tone: "ready" });
   assertPill(pills, "lifecycle", {
-    count: "0/2",
+    count: "0/2/0",
     tone: "active",
     implicit: false,
     unavailable: "0",
@@ -248,7 +248,7 @@ async function runScenario({ page }) {
   await page.screenshot({ path: SCREENSHOT_PATH });
   const resolvedPills = await resolveCliBlocker(page);
   assertPill(resolvedPills, "cli", {
-    count: "1",
+    count: "1/0/0",
     tone: "ready",
     unavailable: "0",
   });
