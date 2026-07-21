@@ -57,7 +57,7 @@ def test_static_filter_header_pills_render_models_and_styles():
         "    model.readyTaskCount,\n"
         "    model.inFlightTaskCount,\n"
         "    model.unavailableTaskCount,\n"
-        '  ].join("/");' in app_lanes
+        '  ].join("·");' in app_lanes
     )
     assert "function taskFilterStemPillTone(model)" in app_lanes
     assert 'if (model.readyTaskCount > 0) return "ready";' in app_lanes
