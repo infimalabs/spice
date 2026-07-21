@@ -566,26 +566,11 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     )
     assert "function laneClaimedTaskLabel(task)" in app_shell
     assert 'task.handle + ", " + task.phase' in app_shell
-    assert "function lanePrimaryComposePlaceholder(lane, member)" in app_shell
-    assert "const host = laneGroupHost(lane);" in app_shell
-    assert (
-        "if (member.targetId !== host.targetId) "
-        "return laneComposePlaceholder(member);" in app_shell
-    )
-    assert 'const agentContext = [label, status].filter(Boolean).join(" · ");' in (
-        app_shell
-    )
-    assert "const nextAction = laneClaimedTaskNextAction(task);" in app_shell
-    assert "function laneClaimedTaskNextAction(task)" in app_shell
-    assert "const maxTitleLength = 48;" in app_shell
-    assert 'return title ? "Next: " + title : "";' in app_shell
-    assert (
-        'return [agentContext, taskLabel, nextAction].filter(Boolean).join("\\n");'
-        in app_shell
-    )
     assert "function laneComposeTaskTooltip(member)" in app_shell
+    assert "const taskLabel = laneClaimedTaskLabel(task);" in app_shell
+    assert 'if (!taskLabel) return "";' in app_shell
     assert (
-        'return [laneClaimedTaskLabel(task), task.title].filter(Boolean).join("\\n");'
+        'return [label, status, taskLabel, task.title].filter(Boolean).join("\\n");'
         in app_shell
     )
     assert "textarea.title = laneComposeTaskTooltip(member);" in app_shell
@@ -606,13 +591,7 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     assert "syncComposerQuoteBand(band, lane, targetId, member, draft);" in app_shell
     assert "createComposerQuoteTextarea(lane, targetId, draft);" in app_shell
     assert (
-        app_shell.count(
-            "textarea.placeholder = lanePrimaryComposePlaceholder(lane, member);"
-        )
-        == 2
-    )
-    assert (
-        app_shell.count("textarea.placeholder = laneComposePlaceholder(member);") == 2
+        app_shell.count("textarea.placeholder = laneComposePlaceholder(member);") == 4
     )
 
 
@@ -769,13 +748,7 @@ def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
     assert 'stack.querySelectorAll("textarea[data-quote-draft-id]")' in sync_body
     assert sync_body.count("const member = laneStore.laneForId(targetId) || lane;") == 2
     assert (
-        sync_body.count("textarea.placeholder = laneComposePlaceholder(member);") == 1
-    )
-    assert (
-        sync_body.count(
-            "textarea.placeholder = lanePrimaryComposePlaceholder(lane, member);"
-        )
-        == 1
+        sync_body.count("textarea.placeholder = laneComposePlaceholder(member);") == 2
     )
 
 

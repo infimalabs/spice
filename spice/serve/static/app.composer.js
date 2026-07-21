@@ -97,7 +97,7 @@ function syncComposerShard(lane, shard, member) {
     textarea = createComposerPrimaryTextarea(lane, member.targetId);
     primary.append(textarea);
   }
-  textarea.placeholder = lanePrimaryComposePlaceholder(lane, member);
+  textarea.placeholder = laneComposePlaceholder(member);
   textarea.title = laneComposeTaskTooltip(member);
   lane.shardTextareas.set(member.targetId, textarea);
 }
@@ -346,28 +346,6 @@ function laneComposePlaceholder(member) {
   return [label, status, claimedTaskLabel].filter(Boolean).join("\n");
 }
 
-function lanePrimaryComposePlaceholder(lane, member) {
-  const host = laneGroupHost(lane);
-  if (member.targetId !== host.targetId) return laneComposePlaceholder(member);
-  const label = laneComposeTargetLabel(member);
-  const status = laneComposePlaceholderStatus(member);
-  const task = laneClaimedTask(member);
-  const taskLabel = laneClaimedTaskLabel(task);
-  if (!taskLabel) return [label, status].filter(Boolean).join("\n");
-  const agentContext = [label, status].filter(Boolean).join(" · ");
-  const nextAction = laneClaimedTaskNextAction(task);
-  return [agentContext, taskLabel, nextAction].filter(Boolean).join("\n");
-}
-
-function laneClaimedTaskNextAction(task) {
-  const maxTitleLength = 48;
-  const title =
-    task.title.length > maxTitleLength
-      ? task.title.slice(0, maxTitleLength - 1).trimEnd() + "…"
-      : task.title;
-  return title ? "Next: " + title : "";
-}
-
 function laneComposeTargetLabel(member) {
   const agent = member.agentName || "";
   const branch = member.branchName || member.targetId || "this branch";
@@ -391,7 +369,11 @@ function laneClaimedTaskLabel(task) {
 
 function laneComposeTaskTooltip(member) {
   const task = laneClaimedTask(member);
-  return [laneClaimedTaskLabel(task), task.title].filter(Boolean).join("\n");
+  const taskLabel = laneClaimedTaskLabel(task);
+  if (!taskLabel) return "";
+  const label = laneComposeTargetLabel(member);
+  const status = laneComposePlaceholderStatus(member);
+  return [label, status, taskLabel, task.title].filter(Boolean).join("\n");
 }
 
 function laneComposePlaceholderStatus(member) {
@@ -407,7 +389,7 @@ function laneComposePlaceholderStatus(member) {
 function syncComposerPlaceholders(lane) {
   for (const [targetId, textarea] of lane.shardTextareas) {
     const member = laneStore.laneForId(targetId) || lane;
-    textarea.placeholder = lanePrimaryComposePlaceholder(lane, member);
+    textarea.placeholder = laneComposePlaceholder(member);
     textarea.title = laneComposeTaskTooltip(member);
     const primary = textarea.closest(".composer-band--primary");
     if (primary) primary.title = textarea.title;
