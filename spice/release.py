@@ -21,6 +21,7 @@ from spice.tasks import config as task_config
 from spice.process.tool import run_tool_command
 
 BUMP_CHOICES = ("minor", "patch")
+PLAYWRIGHT_MCP_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 PYPI_POLL_ATTEMPTS = 20
 PYPI_POLL_SECONDS = 3
 PYPI_URL = "https://pypi.org/pypi/spice-harness/json"
@@ -288,8 +289,13 @@ def run_constitution_gate() -> None:
     run_browser_gate()
 
 
-def run_browser_gate() -> None:
-    run(["node", "tests/browser/run_release_smokes.js"])
+def run_browser_gate(root: Path | None = None) -> None:
+    from spice.agent.driver import write_playwright_mcp_config
+
+    config_path = write_playwright_mcp_config(root or Path.cwd())
+    env = dict(os.environ)  # env-policy: allow
+    env[PLAYWRIGHT_MCP_CONFIG_ENV] = str(config_path)
+    run(["node", "tests/browser/run_release_smokes.js"], env=env)
 
 
 def clean_build_artifacts(root: Path) -> None:

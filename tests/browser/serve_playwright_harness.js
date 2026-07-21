@@ -7,12 +7,7 @@ const { chromium } = require("playwright");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const repoLocalServeCommand = path.join(repoRoot, ".venv", "bin", "spice");
-const defaultPlaywrightConfigPath = path.join(
-  repoRoot,
-  ".spice",
-  "agent",
-  "playwright-mcp.json",
-);
+const playwrightMcpConfigEnv = "SPICE_PLAYWRIGHT_MCP_CONFIG"; // env-policy: allow
 const defaultStartTimeoutMs = 15000;
 // Stopfile-change delivery rides macOS FSEvents, which under sandbox load
 // takes multiple seconds to notice the stop write (~7s observed, with an
@@ -237,8 +232,18 @@ function assertNoBrowserErrors(errors) {
   );
 }
 
+function sharedPlaywrightConfigPath(options = {}) {
+  const configPath =
+    options.playwrightConfigPath || process.env[playwrightMcpConfigEnv]; // env-policy: allow
+  if (configPath) return configPath;
+  throw new Error(
+    "missing shared Playwright config path; run browser validation through " +
+      "the Spice release gate or pass playwrightConfigPath explicitly",
+  );
+}
+
 async function readSharedPlaywrightContextOptions(options = {}) {
-  const configPath = options.playwrightConfigPath || defaultPlaywrightConfigPath;
+  const configPath = sharedPlaywrightConfigPath(options);
   let raw;
   try {
     raw = await fs.readFile(configPath, "utf8");
@@ -247,8 +252,8 @@ async function readSharedPlaywrightContextOptions(options = {}) {
       throw new Error(
         "missing shared Playwright config at " +
           configPath +
-          "; start the agent through spice so browser validation matches the " +
-          "operator system appearance",
+          "; run browser validation through the Spice release gate or pass a " +
+          "populated playwrightConfigPath fixture",
       );
     throw error;
   }
@@ -292,7 +297,7 @@ function rejectColorSchemeOverride(contextOptions, configPath) {
 
 async function serveBrowserContextOptions(options = {}) {
   const callerContextOptions = options.contextOptions || {};
-  const configPath = options.playwrightConfigPath || defaultPlaywrightConfigPath;
+  const configPath = sharedPlaywrightConfigPath(options);
   rejectColorSchemeOverride(callerContextOptions, configPath);
   return {
     ...(await readSharedPlaywrightContextOptions({
@@ -338,10 +343,11 @@ async function withServePage(options, callback) {
 module.exports = {
   assertNoBrowserErrors,
   collectBrowserErrors,
-  defaultPlaywrightConfigPath,
+  playwrightMcpConfigEnv,
   readSharedPlaywrightContextOptions,
   repoRoot,
   serveBrowserContextOptions,
+  sharedPlaywrightConfigPath,
   startServe,
   withServePage,
 };

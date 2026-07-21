@@ -15,7 +15,11 @@ spice release minor           # one-pass bump, validate, commit, publish
 Release validation runs every scratch-safe served-UI Playwright scenario from
 `tests/browser/release_smoke_manifest.js` using the repository's pinned
 `playwright` dependency. Run `npm ci` in the repository before releasing. The
-manifest classifies every `tests/browser/*_smoke.js` file: scratch-server and
+release gate materializes the shared browser configuration through Spice's
+canonical worktree-state resolver and passes its absolute path to the Node
+harness, so a clean checkout does not depend on a prior agent launch or a
+repo-visible config.
+The manifest classifies every `tests/browser/*_smoke.js` file: scratch-server and
 page-local fixtures are mandatory, while scenarios that create or depend on
 live external state are listed explicitly with a reason and must be run in a
 suitable live lane.
