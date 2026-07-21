@@ -529,6 +529,14 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'tone: "ready"' in smoke
     assert 'tone: "active"' in smoke
     assert 'tone: "dormant"' in smoke
+    # The drain-ramp guard reads each tone's rendered color and asserts the
+    # active/draining tone desaturates the ready green at a constant hue toward
+    # the idle gray -- a green->cyan hue shift regression fails the smoke.
+    assert "getComputedStyle(pill).color" in smoke
+    assert "function rgbToHsl(" in smoke
+    assert "assertDrainColorRamp(pills)" in smoke
+    assert "draining pill shifted hue instead of desaturating" in smoke
+    assert "drain ramp saturation did not fall ready>active>dormant" in smoke
     assert 'labels !== "serve,studies,cli,tests,lifecycle"' in smoke
     assert 'inventory.revision = "10000000000000000000000000000";' in smoke
     assert 'inventory.revision = "100000000000000000000000000000";' in smoke

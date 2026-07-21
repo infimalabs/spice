@@ -43,11 +43,20 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
         "  background: color-mix(in srgb, var(--good) 8%, transparent);\n"
     )
     assert "border-color: var(--good);" in ready_rule
+    # The draining/in-flight tone desaturates the ready-green toward the idle
+    # gray at a constant hue: it derives from --good via relative color (hue and
+    # lightness held, saturation halved) rather than the off-hue teal accent, so
+    # the pill washes out instead of drifting green->cyan.
     assert (
-        "background: color-mix(in srgb, var(--team-teal-accent) 8%, transparent);"
+        "--filter-pill-draining: hsl(from var(--good) h calc(s * 0.5) l);"
         in active_rule
     )
-    assert "border-color: var(--team-teal-accent);" in active_rule
+    assert (
+        "background: color-mix(in srgb, var(--filter-pill-draining) 8%, transparent);"
+        in active_rule
+    )
+    assert "border-color: var(--filter-pill-draining);" in active_rule
+    assert "color: var(--filter-pill-draining);" in active_rule
 
 
 def test_global_filter_pills_reject_stale_inventory_resurrection():
