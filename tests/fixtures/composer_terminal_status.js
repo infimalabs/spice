@@ -75,6 +75,45 @@ assert(
   "composer placeholder preserves active running status",
 );
 
+const claimedMember = {
+  agentName: "spice-b",
+  branchName: "main-b",
+  lastRenderedStatusLine: {
+    agentVisualStatus: "running",
+    claimedTask: {
+      handle: "UI-1kF5xdSM",
+      phase: "todo",
+      title:
+        "Show the claimed task even when its deliberately long title must wrap inside the agent card",
+    },
+  },
+};
+assert(
+  context.laneComposePlaceholder(claimedMember) ===
+    "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, todo",
+  "claimed composer placeholder is three high-value comma lines with no Next line or dot join",
+);
+assert(
+  context.laneComposeTaskTooltip(claimedMember) ===
+    "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, todo\n" +
+      "Show the claimed task even when its deliberately long title must wrap inside the agent card",
+  "claimed composer hover carries agent, status, task label, and the full untruncated title",
+);
+
+const unclaimedMember = {
+  agentName: "",
+  branchName: "main-b",
+  lastRenderedStatusLine: { agentVisualStatus: "idle" },
+};
+assert(
+  context.laneComposePlaceholder(unclaimedMember) === "main-b\n0 pending, idle",
+  "unclaimed composer placeholder collapses to branch and status with no task line",
+);
+assert(
+  context.laneComposeTaskTooltip(unclaimedMember) === "",
+  "unclaimed composer hover stays empty when no task is claimed",
+);
+
 const retainedStatus = context.statusLineWithRetainedSummary(
   { lastRenderedStatusLine: terminalStatus },
   { agentProcessStatus: "running" },
