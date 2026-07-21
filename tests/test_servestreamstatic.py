@@ -49,6 +49,16 @@ def test_static_filter_header_pills_render_models_and_styles():
         'pill.querySelector(".filter-pill-count").textContent ='
         "\n      taskFilterStemPillCountText(model);" in app_lanes
     )
+    # The non-oops badge always renders the full ready/in-flight/unavailable
+    # triple so the pill footprint stays fixed instead of jittering as counts
+    # move between slots.
+    assert (
+        "  return [\n"
+        "    model.readyTaskCount,\n"
+        "    model.inFlightTaskCount,\n"
+        "    model.unavailableTaskCount,\n"
+        '  ].join("/");' in app_lanes
+    )
     assert "function taskFilterStemPillTone(model)" in app_lanes
     assert 'if (model.readyTaskCount > 0) return "ready";' in app_lanes
     assert 'if (model.inFlightTaskCount > 0) return "active";' in app_lanes

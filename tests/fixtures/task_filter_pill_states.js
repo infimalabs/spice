@@ -94,8 +94,8 @@ const readyOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(readyOnly) === "3",
-  "ready-only badge omits both zero suffixes",
+  context.taskFilterStemPillCountText(readyOnly) === "3/0/0",
+  "ready-only badge still renders the full triple with zero slots",
 );
 assert(
   context.taskFilterStemPillTone(readyOnly) === "ready",
@@ -112,8 +112,8 @@ const activeOnly = context.taskFilterStemPillModel(
   }),
 );
 assert(
-  context.taskFilterStemPillCountText(activeOnly) === "0/2",
-  "active-only badge keeps claimed work explicit",
+  context.taskFilterStemPillCountText(activeOnly) === "0/2/0",
+  "active-only badge renders the full triple with claimed work in the middle slot",
 );
 assert(
   context.taskFilterStemPillTone(activeOnly) === "active",
@@ -131,11 +131,21 @@ const blockedOnly = context.taskFilterStemPillModel(
 );
 assert(
   context.taskFilterStemPillCountText(blockedOnly) === "0/0/2",
-  "blocked-only badge uses the conditional unavailable count",
+  "blocked-only badge renders the full triple with unavailable work in the last slot",
 );
 assert(
   context.taskFilterStemPillTone(blockedOnly) === "dormant",
-  "blocked-only work receives the dormant treatment",
+  "blocked-only work (0/0/N) receives the fully desaturated dormant treatment",
+);
+
+const readyTone = context.taskFilterStemPillTone(readyOnly);
+const activeTone = context.taskFilterStemPillTone(activeOnly);
+const dormantTone = context.taskFilterStemPillTone(blockedOnly);
+assert(
+  readyTone !== activeTone &&
+    activeTone !== dormantTone &&
+    readyTone !== dormantTone,
+  "each populated slot of the triple selects a distinct saturation tone",
 );
 
 const deferredOnly = context.taskFilterStemPillModel(
@@ -179,8 +189,8 @@ assert(
   "unresolved dependency is unavailable",
 );
 assert(
-  context.taskFilterStemPillCountText(resolvedBlocker) === "1",
-  "resolved dependency moves automatically into ready",
+  context.taskFilterStemPillCountText(resolvedBlocker) === "1/0/0",
+  "resolved dependency moves automatically into the ready slot",
 );
 assert(
   context.taskFilterStemPillTone(unresolvedBlocker) === "dormant",
