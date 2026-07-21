@@ -265,7 +265,7 @@ words = ["delay", "delayed", "delaying", "delays", "poll", "polled", "polling", 
 message = "😊 Respond to the real event, signal, or completion notification through a blocking call, watcher, or callback, or else restructure the flow so nothing remains to be awaited at all!"
 
 [maxims.fallbacks]
-words = ["fall back", "fall backs", "fallback", "fallbacks", "falls back", "option", "optional", "options"]
+words = ["fall back", "fall backs", "fallback", "fallbacks", "falls back"]
 message = "😊 Commit to a single deterministic path and let violated assumptions fail loudly and immediately, reserving an explicit default or documented resolver order strictly for what the contract names outright!"
 
 [maxims.backwards-compat]
