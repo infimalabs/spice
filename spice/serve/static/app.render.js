@@ -375,10 +375,11 @@ function statusLineWithRetainedSummary(lane, statusLine) {
 
 function applyRetainedLaneStatus(lane, rawStatusLine) {
   const statusLine = statusLineWithRetainedSummary(lane, rawStatusLine);
+  const agentVisualStatus = liveAgentVisualStatus(statusLine);
   const liveStatusLine = {
     ...statusLine,
-    agentActivityStatus: liveAgentActivityStatus(statusLine),
-    agentVisualStatus: liveAgentVisualStatus(statusLine),
+    agentActivityStatus: liveAgentActivityStatus(statusLine, agentVisualStatus),
+    agentVisualStatus,
   };
   setAgentStatusPip(
     lane,
@@ -409,7 +410,9 @@ function liveAgentVisualStatus(statusLine) {
   return backendStatus;
 }
 
-function liveAgentActivityStatus(statusLine) {
+function liveAgentActivityStatus(statusLine, visualStatus) {
+  if (visualStatus === "running") return "active";
+  if (visualStatus === "starting") return "active-ish";
   const ageSeconds = relativeAgeSeconds(statusLine.lastAssistantAt);
   if (ageSeconds !== null) {
     if (ageSeconds < activeAssistantSeconds) return "active";
@@ -1245,17 +1248,23 @@ function renderDotSeparator() {
 // ---- relative time --------------------------------------------------------------------
 
 function updateLiveRelativeTimes() {
+  const fusedHosts = new Set();
   for (const element of document.querySelectorAll(
     "[data-relative-timestamp]",
   )) {
     setRelativeTimeText(element);
   }
   for (const lane of laneStore.lanesSnapshot()) {
-    if (lane.latestPayload)
+    if (lane.latestPayload) {
       applyRetainedLaneStatus(lane, lane.latestPayload.statusLine || {});
+      fusedHosts.add(laneGroupHost(lane));
+    }
   }
   updateLiveTargetChoiceMetadata();
-  for (const lane of laneStore.lanesSnapshot()) syncFusedLaneStatusLine(lane);
+  for (const host of fusedHosts) {
+    syncFusedLaneLights(host);
+    syncFusedLaneStatusLine(host);
+  }
 }
 
 function setRelativeTimeText(element) {
