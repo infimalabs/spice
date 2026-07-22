@@ -798,7 +798,13 @@ def _watch_supervised_lane(
                 next_uncaptured_nudge = now + SUPERVISOR_UNCAPTURED_NUDGE_SECONDS
         except Exception:  # best-effort watch: never take down the supervisor
             pass
-        if lane_signal.wait_for_event(SUPERVISOR_CLAIM_RENEWAL_SECONDS):
+        # Pace the next beat against this one's start, not its end. Sleeping a
+        # full interval *after* the work would make the period grow with backend
+        # latency, so the heartbeat would slow down exactly when a loaded host
+        # makes each renewal expensive -- and the lease, a fixed multiple of the
+        # interval, would lapse under the holder while it is still working.
+        idle = SUPERVISOR_CLAIM_RENEWAL_SECONDS - (time.monotonic() - now)
+        if lane_signal.wait_for_event(max(0.0, idle)):
             return
 
 
