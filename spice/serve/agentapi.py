@@ -259,9 +259,10 @@ def ensure_agent_for_available_work(
     Expansion requires two ready tasks unless one candidate has remained ready
     for the starvation interval. READY rows exclude active claims, so this
     fixed threshold starts one lane and leaves one task on the board regardless
-    of how many lanes are already working. This is deliberately a
-    single-candidate decision: a lost claim never falls through to another
-    stale candidate.
+    of how many lanes are already working. Two rows are an immediate capacity
+    signal: they bypass the local retry debounce and automatic-restart hold as
+    well as the lone-row age threshold. This is deliberately a single-candidate
+    decision: a lost claim never falls through to another stale candidate.
 
     The claim rides into the launch it reserves, so the supervisor of an agent
     that never reaches readiness hands the row straight back instead of leaving
@@ -272,10 +273,6 @@ def ensure_agent_for_available_work(
         return _available_work_skip("unbound")
     if agent_status(target.repo_root).running:
         forget_available_work_observations(actor, ready_since_cache)
-        return None
-    if not _ensure_due(
-        target.id, attempt_cache=attempt_cache, retry_seconds=retry_seconds
-    ):
         return None
     with _AVAILABLE_WORK_CLAIM_LOCK:
         if agent_status(target.repo_root).running:
@@ -292,7 +289,17 @@ def ensure_agent_for_available_work(
             ready_since_cache,
             now=now,
         )
-        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and not starved:
+        at_capacity = len(candidates) >= AVAILABLE_WORK_START_THRESHOLD
+        # The retry cache used to run before this snapshot. A one-row pass
+        # therefore hid a second row that arrived inside the debounce window,
+        # even though two READY rows are the exact signal to hand one out now.
+        if not at_capacity and not _ensure_due(
+            target.id,
+            attempt_cache=attempt_cache,
+            retry_seconds=retry_seconds,
+        ):
+            return None
+        if not at_capacity and not starved:
             return _available_work_skip("capacity")
         chosen = candidates[0]
         task_uuid = identity.uuid_of(chosen)
@@ -318,7 +325,10 @@ def ensure_agent_for_available_work(
                 target,
                 fast_mode=fast_mode,
                 force_new=force_new,
-                automatic=True,
+                # Queue pressure is itself the grant to try immediately. A
+                # lone starved row remains an automatic restart and therefore
+                # continues to honor the lane-local rapid-death hold.
+                automatic=not at_capacity,
                 launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
             )
         except Exception:
