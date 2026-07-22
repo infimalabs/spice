@@ -307,6 +307,52 @@ def test_init_repo_root_surfaces_a_launch_failure_before_walking_for_markers(
     assert "git command could not be launched" in str(unlaunchable.value)
 
 
+def test_git_common_dir_tells_an_absent_repository_from_a_failed_git_run(tmp_path):
+    """Git exits 128 for both, so only its own words can carry the difference."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    missing = tmp_path / "missing"
+
+    with pytest.raises(SpiceError) as absent:
+        git_common_dir(plain)
+    with pytest.raises(SpiceError) as failed:
+        git_common_dir(missing)
+
+    absent_message = str(absent.value)
+    failed_message = str(failed.value)
+    assert absent_message == "not inside a git worktree"
+    assert "git command failed" in failed_message
+    assert "--git-common-dir" in failed_message
+    assert str(missing) in failed_message
+    assert "No such file or directory" in failed_message
+    assert failed_message != absent_message
+
+
+def test_git_dir_resolvers_carry_their_own_argv_and_name_a_launch_failure(
+    tmp_path, monkeypatch
+):
+    """Each resolver reports the argv it ran; neither blames the tree for the host."""
+    missing = tmp_path / "missing"
+
+    with pytest.raises(SpiceError) as common_failure:
+        git_common_dir(missing)
+    with pytest.raises(SpiceError) as worktree_failure:
+        git_dir(missing)
+    _refuse_to_launch_git(monkeypatch)
+
+    with pytest.raises(SpiceError) as unlaunchable:
+        git_dir(missing)
+
+    common_message = str(common_failure.value)
+    worktree_message = str(worktree_failure.value)
+    launch_message = str(unlaunchable.value)
+    assert "--git-common-dir" in common_message
+    assert "--git-dir" in worktree_message
+    assert common_message != worktree_message
+    assert "git command could not be launched" in launch_message
+    assert launch_message != worktree_message
+
+
 def _repo_with_linked_worktree(tmp_path: Path) -> Path:
     repo = _initialized_repo(tmp_path / "repo")
     subprocess.run(

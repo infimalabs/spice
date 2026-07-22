@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from spice.agent.lifecycle import WORKTREE_SKILL_RELATIVE_PATH
 from spice.hooks.initplan import (
     InitOperation,
@@ -427,6 +429,44 @@ def test_bare_common_lane_git_and_marker_discovery_match(tmp_path, monkeypatch):
         lane,
         (common / "worktrees" / "lane" / "config.worktree",) * 2,
     )
+
+
+def test_bare_common_lane_plan_names_a_failing_git_rather_than_the_tree(
+    tmp_path, monkeypatch
+):
+    """Under contention this plan reports the git that failed, not a false verdict."""
+    import spice.paths as paths
+    from spice.errors import SpiceError
+
+    seed = _git_init(tmp_path / "seed")
+    (seed / "README.md").write_text("seed\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "seed")
+    common = tmp_path / "common.git"
+    _run(["git", "clone", "--bare", str(seed), str(common)])
+    lane = tmp_path / "lane"
+    _git(common, "worktree", "add", str(lane), "main")
+    healthy = _operation(
+        plan_initialization(lane), "core.bare", InitOperationScope.WORKTREE_GIT_CONFIG
+    )
+
+    def contended(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            list(command),
+            returncode=128,
+            stdout="",
+            stderr="fatal: Unable to create 'index.lock': File exists.\n",
+        )
+
+    monkeypatch.setattr(paths, "run_git_command", contended)
+    with pytest.raises(SpiceError) as contended_failure:
+        plan_initialization(lane)
+
+    message = str(contended_failure.value)
+    assert healthy.scope_path == common / "worktrees" / "lane" / "config.worktree"
+    assert "git command failed" in message
+    assert "--git-common-dir" in message
+    assert "index.lock" in message
 
 
 def test_tracked_custom_skill_is_inventoried_but_preserved(tmp_path):
