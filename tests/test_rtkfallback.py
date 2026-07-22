@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -224,7 +223,19 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executable = "missing-routing-rtk"
-    _configure_rtk(tmp_path, executable)
+    project_root = tmp_path / "project"
+    plain_root = tmp_path / "plain"
+    _configure_rtk(project_root, executable)
+    _configure_rtk(plain_root, executable)
+    # Routing is scoped to a Spice project, and the pyproject marker is the whole
+    # scope: inside one a bare interpreter becomes the project's uv interpreter,
+    # outside one it stays the operator's own python. Running the identical argv
+    # under both roots is what proves the native bypass still routes rather than
+    # merely passing the command through -- a single routed reading cannot tell
+    # those two apart.
+    (project_root / "pyproject.toml").write_text(
+        '[project]\nname = "routed"\nversion = "0"\n', encoding="utf-8"
+    )
     monkeypatch.setattr(
         wrap,
         "build_agent_run_environment",
@@ -248,30 +259,30 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
         child_outcomes.append((command, value))
         return _RecordedProcess()
 
-    direct_exit = wrap.run_agent_command(
-        tmp_path,
-        ["python", "-c", "print('native')"],
-        popen_factory=record,
-        stderr=io.StringIO(),
-    )
-    shell_exit = wrap.run_agent_command(
-        tmp_path,
-        ["zsh", "-c", "git status --short"],
-        popen_factory=record,
-        stderr=io.StringIO(),
-    )
+    def bypass(repo_root: Path, raw_args: list[str]) -> int:
+        return wrap.run_agent_command(
+            repo_root, raw_args, popen_factory=record, stderr=io.StringIO()
+        )
+
+    interpreter_args = ["python", "-c", "print('native')"]
+    routed_exit = bypass(project_root, interpreter_args)
+    unrouted_exit = bypass(plain_root, interpreter_args)
+    shell_exit = bypass(project_root, ["zsh", "-c", "git status --short"])
 
     assert {
-        "exit_codes": [direct_exit, shell_exit],
+        "exit_codes": [routed_exit, unrouted_exit, shell_exit],
         "rtk_environments": rtk_environments,
         "child_outcomes": child_outcomes,
+        "marker_decides": child_outcomes[0][0] != child_outcomes[1][0],
     } == {
-        "exit_codes": [0, 0],
-        "rtk_environments": ["preserved", "preserved"],
+        "exit_codes": [0, 0, 0],
+        "rtk_environments": ["preserved", "preserved", "preserved"],
         "child_outcomes": [
-            ([sys.executable, "-c", "print('native')"], "preserved"),
+            (["uv", "run", "python", "-c", "print('native')"], "preserved"),
+            (["python", "-c", "print('native')"], "preserved"),
             (["zsh", "-c", "git status --short"], "preserved"),
         ],
+        "marker_decides": True,
     }
 
 
