@@ -7,6 +7,7 @@ const screenshotPath = path.join(os.tmpdir(), "spice-structural-status.png");
 const maxStatusTransitionMs = 500;
 const pipRampStates = ["active", "active-ish", "inactive", "unknown"];
 const pipHueToleranceDeg = 8;
+const pipFullSaturationTolerance = 0.01;
 const groupedPipStates = ["active", "active-ish", "inactive", "unknown"];
 
 function parseRgb(value) {
@@ -82,8 +83,14 @@ function assertGroupedPipRamp(groupedPips, colors) {
 function assertPipActivityBase(colors, activityBase) {
   if (colors.active !== activityBase)
     throw new Error(
-      "active pip did not use the top-pill --good base: " +
+      "active pip did not use the full-saturation theme base: " +
         JSON.stringify({ activityBase, colors }),
+    );
+  const active = rgbToHsl(colors.active);
+  if (Math.abs(active.saturation - 1) > pipFullSaturationTolerance)
+    throw new Error(
+      "active pip was not 100% saturated: " +
+        JSON.stringify({ active, activityBase, colors }),
     );
 }
 
@@ -232,7 +239,7 @@ async function runStructuralStatusSmokePage() {
       index: 1,
       kind: "assistant",
       preview: "Working through the event path.",
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(Date.now() - 46 * 1000).toISOString(),
     }),
   );
   const phaseTransition = await applyWatchPayload(
@@ -246,7 +253,7 @@ async function runStructuralStatusSmokePage() {
       index: 2,
       kind: "assistant",
       preview: "Reviewing the integrated change.",
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(Date.now() - 13 * 1000).toISOString(),
     }),
   );
   const activeish = await applyWatchPayload(
@@ -298,7 +305,7 @@ async function runStructuralStatusSmokePage() {
     }),
   );
   const activityProbe = document.createElement("span");
-  activityProbe.style.color = "var(--good)";
+  activityProbe.style.color = "hsl(from var(--good) h 100% l)";
   lane.element.append(activityProbe);
   const activityBase = getComputedStyle(activityProbe).color;
   activityProbe.remove();

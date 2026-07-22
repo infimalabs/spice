@@ -588,13 +588,16 @@ def test_structural_status_smoke_covers_activity_recency_pip_ladder() -> None:
     assert "function assertPipSaturationRamp(colors)" in smoke
     assert "pip activity shifted hue instead of desaturating" in smoke
     assert "pip saturation did not fall active>active-ish>inactive>unknown" in smoke
-    assert 'activityProbe.style.color = "var(--good)"' in smoke
+    assert 'activityProbe.style.color = "hsl(from var(--good) h 100% l)"' in smoke
     assert "function assertGroupedPipRamp(groupedPips, colors)" in smoke
     assert 'querySelectorAll(".lane-light")' in smoke
     assert "const bounds = pip.getBoundingClientRect();" in smoke
     assert "visibility: style.visibility" in smoke
     assert "function assertPipActivityBase(colors, activityBase)" in smoke
-    assert "active pip did not use the top-pill --good base" in smoke
+    assert "active pip did not use the full-saturation theme base" in smoke
+    assert "active pip was not 100% saturated" in smoke
+    assert "new Date(Date.now() - 46 * 1000).toISOString()" in smoke
+    assert "new Date(Date.now() - 13 * 1000).toISOString()" in smoke
     assert 'kind: "presence:function_call"' in smoke
     assert "tool activity without commentary did not refresh the pip" in smoke
     assert "page.screenshot({ path: screenshotPath })" in smoke

@@ -1,10 +1,10 @@
 .agent-status-pip,
 .composer-quote-time[data-agent-status] {
+  --agent-activity-base: hsl(from var(--good) h 100% l);
   --agent-status-color: var(--muted);
 }
 
 .agent-status-pip {
-  --agent-activity-base: var(--good);
   --agent-status-halo-color: color-mix(
     in srgb,
     var(--agent-status-color) 20%,
@@ -14,7 +14,10 @@
   box-shadow: 0 0 0 2px var(--agent-status-halo-color);
 }
 
-/* Any transcript output refreshes the same constant-hue activity ladder.
+/* The top rung keeps --good's theme hue and lightness but is literally fully
+   saturated; every lesser rung descends from that maximum instead of from the
+   intentionally muted --good token. Any transcript output refreshes the same
+   constant-hue activity ladder.
    Lifecycle remains available in data-agent-status for labels; it does not
    make a recently active agent look idle merely because its last text was a
    final response. */
@@ -43,7 +46,9 @@
 }
 
 .composer-quote-time[data-agent-status="starting"] {
-  --agent-status-color: hsl(from var(--good) h calc(s * 0.6667) l);
+  --agent-status-color: hsl(
+    from var(--agent-activity-base) h calc(s * 0.6667) l
+  );
 }
 
 .composer-quote-time[data-agent-status="stopping"],
