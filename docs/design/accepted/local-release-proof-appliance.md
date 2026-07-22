@@ -1,6 +1,6 @@
 # Local Release-Proof Appliance
 
-Status: accepted design, 2026-07-21. Deliverable for
+Status: implemented contract, 2026-07-21. Deliverable for
 `HARDENI-1kFzZX30`.
 
 ## Decision
