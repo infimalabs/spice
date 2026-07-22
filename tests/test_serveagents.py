@@ -1032,12 +1032,22 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     published = threading.Event()
     release_direct_send = threading.Event()
-    background_admitted = threading.Event()
+    background_at_launch_lock = threading.Event()
     background_finished = threading.Event()
     agent_started = threading.Event()
     direct_result: dict[str, object] = {}
     attempts: list[bool] = []
     real_submit = workroutes.submit_steering_message
+    real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
+
+    class ObservedPendingInboxLaunchLock:
+        def __enter__(self):
+            if threading.current_thread().name == "background-launch-evaluation":
+                background_at_launch_lock.set()
+            return real_launch_lock.__enter__()
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return real_launch_lock.__exit__(exc_type, exc_value, traceback)
 
     def pause_after_publication(**kwargs):
         sent = real_submit(**kwargs)
@@ -1070,6 +1080,11 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     monkeypatch.setattr(
         agentapi, "agent_ensure_response_payload", ensure_with_active_refusal
     )
+    monkeypatch.setattr(
+        agentapi,
+        "_PENDING_INBOX_LAUNCH_LOCK",
+        ObservedPendingInboxLaunchLock(),
+    )
 
     def send_directly() -> None:
         direct_result["response"] = work_tree_send_response_payload(
@@ -1077,7 +1092,6 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         )
 
     def evaluate_in_background() -> None:
-        background_admitted.set()
         watch = launch.AvailableWorkWatch(state, events_path=tmp_path / "task-events")
         watch.evaluate()
         background_finished.set()
@@ -1085,9 +1099,16 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     direct_thread = threading.Thread(target=send_directly, daemon=True)
     direct_thread.start()
     assert published.wait(timeout=5.0) is True
-    background_thread = threading.Thread(target=evaluate_in_background, daemon=True)
+    background_thread = threading.Thread(
+        target=evaluate_in_background,
+        name="background-launch-evaluation",
+        daemon=True,
+    )
     background_thread.start()
-    assert background_admitted.wait(timeout=5.0) is True
+    # The watcher is now at the real launch boundary, blocked behind the UI
+    # route's pre-publication acquisition. Releasing the paused route must let
+    # its reentrant automatic=False decision run before the watcher proceeds.
+    assert background_at_launch_lock.wait(timeout=5.0) is True
     release_direct_send.set()
     direct_thread.join(timeout=5.0)
     background_thread.join(timeout=5.0)
