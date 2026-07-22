@@ -75,7 +75,23 @@ def _iso(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def claim_meta(actor: str) -> list[str]:
+@dataclass(frozen=True)
+class ClaimSite:
+    worktree: Path
+    branch: str
+    head: str
+
+
+def current_claim_site() -> ClaimSite:
+    return ClaimSite(
+        worktree=config.repo_root(),
+        branch=tw.current_branch(),
+        head=tw.claim_head(),
+    )
+
+
+def claim_meta(actor: str, *, site: ClaimSite) -> list[str]:
+    claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     at_dt = datetime.now(UTC)
     at = _iso(at_dt)
     until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
@@ -83,7 +99,7 @@ def claim_meta(actor: str) -> list[str]:
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     ambient = ambient_thread()
     if ambient is None:
-        thread = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
+        thread = claim_actor
         turn = thread
     else:
         thread, driver = ambient
@@ -95,13 +111,13 @@ def claim_meta(actor: str) -> list[str]:
         ).strip()  # env-policy: allow
     link = f"spice-session://{thread}?start={start}&end={end}"
     return [
-        f"claim_by:{actor}",
+        f"claim_by:{claim_actor}",
         f"claim_at:{at}",
         f"claim_until:{until}",
         f"claim_thread:{thread}",
-        f"claim_worktree:{config.repo_root()}",
-        f"claim_branch:{tw.current_branch()}",
-        f"claim_head:{tw.claim_head()}",
+        f"claim_worktree:{site.worktree}",
+        f"claim_branch:{site.branch}",
+        f"claim_head:{site.head}",
         f"claim_context_start:{start}",
         f"claim_context_end:{end}",
         f"claim_context_link:{link}",
@@ -364,7 +380,13 @@ def _require_single_active_slot(
     )
 
 
-def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
+def do_claim(
+    uuid: str,
+    actor: str,
+    *,
+    site: ClaimSite,
+    guard_unclaimed: bool = True,
+) -> bool:
     """Atomic claim: set the `start` date AND the claim metadata in one modify.
 
     A single locked write means a crash can never leave an active-but-
@@ -382,7 +404,7 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
         else []
     )
     try:
-        tw.run([uuid, *filters, "modify", *claim_meta(actor), "start:now"])
+        tw.run([uuid, *filters, "modify", *claim_meta(actor, site=site), "start:now"])
     except SpiceError:
         if guard_unclaimed:
             return False
@@ -391,10 +413,10 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
     return True
 
 
-def _renewal_claim_meta(actor: str) -> list[str]:
+def _renewal_claim_meta(actor: str, *, site: ClaimSite) -> list[str]:
     return [
         arg
-        for arg in claim_meta(actor)
+        for arg in claim_meta(actor, site=site)
         if not arg.startswith(("claim_by:", "claim_at:"))
     ]
 
@@ -409,7 +431,9 @@ def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
         return False
 
 
-def _claim_renewal_block(row: dict[str, Any], actor: str) -> ClaimRenewalResult | None:
+def _claim_renewal_block(
+    row: dict[str, Any], actor: str, *, site: ClaimSite
+) -> ClaimRenewalResult | None:
     handle = identity.render_handle(row)
     status = str(row.get("status") or "")
     if status == "deleted":
@@ -427,7 +451,7 @@ def _claim_renewal_block(row: dict[str, Any], actor: str) -> ClaimRenewalResult 
         )
     if not owner or not row.get("start"):
         return ClaimRenewalResult(False, "no_active_claim", handle=handle)
-    if not _claim_worktree_matches(row, config.repo_root()):
+    if not _claim_worktree_matches(row, site.worktree):
         return ClaimRenewalResult(False, "different_worktree", handle=handle)
     return None
 
@@ -460,7 +484,8 @@ def renew_claim(
         return _claim_renewal_missing_result(handle, exc)
     if row is None:
         return ClaimRenewalResult(False, "no_active_claim")
-    blocked = _claim_renewal_block(row, resolved_actor)
+    site = current_claim_site()
+    blocked = _claim_renewal_block(row, resolved_actor, site=site)
     if blocked is not None:
         return blocked
     uuid = identity.uuid_of(row)
@@ -471,9 +496,9 @@ def renew_claim(
                 uuid,
                 "+ACTIVE",
                 f"claim_by.is:{resolved_actor}",
-                f"claim_worktree.is:{config.repo_root()}",
+                f"claim_worktree.is:{site.worktree}",
                 "modify",
-                *_renewal_claim_meta(resolved_actor),
+                *_renewal_claim_meta(resolved_actor, site=site),
             ]
         )
     except SpiceError as exc:
@@ -481,7 +506,7 @@ def renew_claim(
             fresh = identity.resolve(handle_text)
         except SpiceError as resolve_exc:
             return _claim_renewal_missing_result(handle_text, resolve_exc)
-        blocked = _claim_renewal_block(fresh, resolved_actor)
+        blocked = _claim_renewal_block(fresh, resolved_actor, site=site)
         if blocked is not None:
             return blocked
         return ClaimRenewalResult(

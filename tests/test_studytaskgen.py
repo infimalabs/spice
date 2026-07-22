@@ -215,7 +215,11 @@ def test_immediate_study_task_inherits_active_claim_origin(study_task_backend):
         acceptance=["active work can originate study findings"],
     )
     parent_row = identity.resolve(parent)
-    claimstate.do_claim(identity.uuid_of(parent_row), ACTOR)
+    claimstate.do_claim(
+        identity.uuid_of(parent_row),
+        ACTOR,
+        site=claimstate.current_claim_site(),
+    )
 
     child = create_study_tasks(
         [_task_spec("Immediate inherited finding", ("module.py", "finding"))],

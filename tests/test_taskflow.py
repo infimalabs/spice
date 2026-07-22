@@ -15,7 +15,17 @@ from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.sessions import learnings
-from spice.tasks import alloc, claimstate, create, gitsync, identity, ops, render, tw
+from spice.tasks import (
+    alloc,
+    claimstate,
+    config,
+    create,
+    gitsync,
+    identity,
+    ops,
+    render,
+    tw,
+)
 from tests.test_tasks import (
     ACTOR_A,
     _configure_git_identity,
@@ -223,6 +233,34 @@ def test_task_add_claim_creates_and_claims_clean_task(task_repo):
     assert bool(row["start"])
 
 
+def test_do_claim_records_explicit_cross_worktree_site(task_repo):
+    handle = create.add(
+        "Claim work in a different lane",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        acceptance=["claim metadata identifies the target lane"],
+    )
+    row = identity.resolve(handle)
+    target_site = claimstate.ClaimSite(
+        task_repo.parent / "worktree-b",
+        "main-b",
+        "target-head-b",
+    )
+
+    claimed = claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=target_site,
+    )
+    fresh = identity.resolve(handle)
+
+    assert claimed is True
+    assert config.repo_root() == task_repo
+    assert Path(fresh["claim_worktree"]) == target_site.worktree
+    assert fresh["claim_branch"] == target_site.branch
+    assert fresh["claim_head"] == target_site.head
+
+
 def test_task_capture_rejects_handle_with_new_task_fields(remote_task_repo):
     handle = create.add(
         "Existing task",
@@ -343,6 +381,8 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
 
     assert handle in claimed.splitlines()
     assert claimed_row["claim_by"] == ACTOR_A
+    assert Path(claimed_row["claim_worktree"]) == task_repo
+    assert claimed_row["claim_branch"] == _git(task_repo, "branch", "--show-current")
     assert claimed_row["claim_head"] == head
 
     done_output = ops.done(handle, validation=["pytest task flow passed"])
@@ -1031,7 +1071,7 @@ def test_active_claim_phase_reports_claimed_task_phase(task_repo):
     assert claimstate.active_claim_phase("") == ""
 
 
-def test_renew_claim_refreshes_stale_own_active_claim(task_repo):
+def test_renew_claim_refreshes_stale_own_active_claim(task_repo, monkeypatch):
     handle = create.add(
         "Renew my active claim",
         project="task.unit",
@@ -1054,6 +1094,12 @@ def test_renew_claim_refreshes_stale_own_active_claim(task_repo):
         ]
     )
     stale = identity.resolve(handle)
+    renewal_site = claimstate.ClaimSite(
+        task_repo,
+        "renewal-branch",
+        "renewal-head",
+    )
+    monkeypatch.setattr(claimstate, "current_claim_site", lambda: renewal_site)
 
     result = claimstate.renew_claim(handle)
     fresh = identity.resolve(handle)
@@ -1066,6 +1112,9 @@ def test_renew_claim_refreshes_stale_own_active_claim(task_repo):
     assert fresh["claim_by"] == ACTOR_A
     assert fresh["claim_at"] == claimed["claim_at"]
     assert fresh["phase"] == claimed["phase"]
+    assert Path(fresh["claim_worktree"]) == renewal_site.worktree
+    assert fresh["claim_branch"] == renewal_site.branch
+    assert fresh["claim_head"] == renewal_site.head
     assert fresh["claim_context_turn"] == "turn-a"
     assert fresh["claim_context_link"].startswith(f"spice-session://{ACTOR_A}?")
 

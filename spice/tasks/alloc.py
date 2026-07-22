@@ -277,9 +277,13 @@ def _claim_first(
 ) -> dict[str, Any] | None:
     from spice.tasks import claimstate
 
+    site = claimstate.current_claim_site()
     for chosen in order(candidates, actor, claimed_rows, active_rows):
         if not claimstate.do_claim(
-            identity.uuid_of(chosen), actor, guard_unclaimed=guard_unclaimed
+            identity.uuid_of(chosen),
+            actor,
+            site=site,
+            guard_unclaimed=guard_unclaimed,
         ):
             # lost the race to a concurrent agent; fall through to the next one
             continue
@@ -369,9 +373,15 @@ def _take_over_stale(
 ) -> dict[str, Any] | None:
     from spice.tasks import claimstate
 
+    site = claimstate.current_claim_site()
     for chosen in order(candidates, actor, [], active_rows):
         previous = str(chosen.get("claim_by") or "")
-        claimstate.do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
+        claimstate.do_claim(
+            identity.uuid_of(chosen),
+            actor,
+            site=site,
+            guard_unclaimed=False,
+        )
         fresh = identity.resolve(identity.render_handle(chosen))
         if str(fresh.get("claim_by") or "") != actor:
             # lost the takeover race to a concurrent agent; try the next one

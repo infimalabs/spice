@@ -456,7 +456,10 @@ def _add_result(
     if claim:
         if created:
             claimstate.do_claim(
-                identity.uuid_of(created[0]), actor, guard_unclaimed=False
+                identity.uuid_of(created[0]),
+                actor,
+                site=claimstate.current_claim_site(),
+                guard_unclaimed=False,
             )
     key = identity.key_for(resolved_project, title)
     result = TaskAddResult(

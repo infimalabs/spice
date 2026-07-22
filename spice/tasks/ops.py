@@ -37,6 +37,7 @@ from spice.tasks.claimstate import (
     _require_single_active_slot,
     _task_continuation_contract,
     annotate,
+    current_claim_site,
     do_claim,
     phase_index,
     phases_of,
@@ -72,7 +73,12 @@ def claim(handle: str, *, steal: bool = False) -> str:
     # tree to the current baseline before the claim records its commit.
     is_repair = owner == actor and bool(row.get("start"))
     notes = [] if is_repair else gitsync.prepare_for_claim().notes
-    if not do_claim(uuid, actor, guard_unclaimed=guarded):
+    if not do_claim(
+        uuid,
+        actor,
+        site=current_claim_site(),
+        guard_unclaimed=guarded,
+    ):
         raise SpiceError(
             "claim lost a race: task became active before this claim landed; "
             "run task next again"
@@ -411,7 +417,12 @@ def capture(
     handle_text = identity.render_handle(row)
     # Deliberately skip gitsync.prepare_for_claim: its baseline fast-forward
     # would discard the very loose commits capture exists to preserve.
-    do_claim(identity.uuid_of(row), actor, guard_unclaimed=False)
+    do_claim(
+        identity.uuid_of(row),
+        actor,
+        site=current_claim_site(),
+        guard_unclaimed=False,
+    )
     noun = "commit" if ahead == 1 else "commits"
     captured = f"captured {ahead} loose {noun} into {handle_text}"
     if complete:
