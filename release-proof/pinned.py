@@ -259,7 +259,6 @@ def run_pinned_proof(
     """Run every release gate from one immutable snapshot and bind the proof."""
     root = root.resolve(strict=True)
     artifacts = artifacts.resolve()
-    artifacts.mkdir(parents=True, exist_ok=True)
     failures = FailureArtifactStore(artifacts)
     boundary = _identity(root, failures)
     snapshot, identities = materialize(root, workspace.resolve(strict=True), failures)
@@ -288,6 +287,7 @@ def run_pinned_proof(
         "evidence": _receipt_evidence(artifacts),
         "host": _host_identity(),
     }
+    artifacts.mkdir(parents=True, exist_ok=True)
     _write_json(artifacts / BINDING_NAME, binding)
     return binding
 

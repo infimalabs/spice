@@ -43,7 +43,7 @@ def _stub_rehearsal(monkeypatch, during_gates=lambda: None) -> dict[str, object]
 
     def rehearse(_snapshot: Path, artifacts: Path) -> dict[str, object]:
         during_gates()
-        artifacts.mkdir(parents=True, exist_ok=True)
+        artifacts.mkdir(parents=True)
         (artifacts / "release-proof.json").write_text(
             json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
         )
