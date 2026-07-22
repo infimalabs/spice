@@ -19,6 +19,8 @@ SOURCE_INITIALIZER = PROJECT_ROOT / "release-proof" / "init-source.py"
 CONTAINERFILE = PROJECT_ROOT / "release-proof" / "Containerfile"
 TOOLCHAIN_DECLARATION = PROJECT_ROOT / "release-proof" / "toolchain.json"
 REHEARSAL_SCRIPT = PROJECT_ROOT / "release-proof" / "rehearse.py"
+EVIDENCE_SCRIPT = PROJECT_ROOT / "release-proof" / "evidence.py"
+HOSTNATIVE_SCRIPT = PROJECT_ROOT / "release-proof" / "hostnative.py"
 BASE_IMAGE = "mcr.microsoft.com/playwright:v1.61.0-noble"
 BASE_DIGEST = "sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a"
 
@@ -35,6 +37,34 @@ def _load_rehearsal() -> Any:
 
 
 REHEARSAL = _load_rehearsal()
+
+
+def _load_evidence() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "spice_release_proof_evidence", EVIDENCE_SCRIPT
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load release evidence: {EVIDENCE_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+EVIDENCE = _load_evidence()
+
+
+def _load_hostnative() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "spice_release_proof_hostnative", HOSTNATIVE_SCRIPT
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load host-native proof: {HOSTNATIVE_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+HOSTNATIVE = _load_hostnative()
 
 
 def _git(repository: Path, *arguments: str, environment=None) -> str:
@@ -395,6 +425,133 @@ def test_rehearsal_materializes_only_the_committed_source_boundary(tmp_path):
     )
 
 
+def test_failure_artifacts_are_deterministic_bounded_and_secret_redacted(tmp_path):
+    store = EVIDENCE.FailureArtifactStore(tmp_path)
+    environment = {
+        "PATH": os.environ["PATH"],  # env-policy: allow
+        "SERVICE_TOKEN": "environment-secret-value",
+    }
+    token_url = "https://user:pass@example.test/api?access_token=url-secret&safe=yes"
+
+    for index in range(EVIDENCE.MAX_FAILURE_ARTIFACTS + 3):
+        store.record(
+            "browser gate",
+            ["probe", token_url],
+            index + 1,
+            "environment-secret-value\n" + ("x" * EVIDENCE.MAX_FAILURE_BYTES),
+            f"request failed: {token_url}\n",
+            environment=environment,
+        )
+
+    files = sorted((tmp_path / EVIDENCE.FAILURE_DIRNAME).glob("*.log"))
+    last = files[-1].read_text(encoding="utf-8")
+    assert (
+        len(files),
+        files[0].name,
+        files[-1].name,
+        max(path.stat().st_size for path in files) <= EVIDENCE.MAX_FAILURE_BYTES,
+    ) == (
+        EVIDENCE.MAX_FAILURE_ARTIFACTS,
+        "01-browser-gate.log",
+        "08-overflow.log",
+        True,
+    )
+    assert (
+        "environment-secret-value" in last,
+        "url-secret" in last,
+        "user:pass" in last,
+        "<redacted-env:SERVICE_TOKEN>" in last,
+        "access_token=%3Credacted%3E" in last,
+    ) == (False, False, False, True, True)
+
+
+def test_pytest_count_evidence_uses_the_final_summary():
+    output = (
+        "bringing up nodes...\n"
+        "................................\n"
+        "998 passed, 4 skipped, 2 xfailed, 7 deselected in 12.34s\n"
+    )
+
+    assert EVIDENCE.parse_pytest_counts(output) == {
+        "passed": 998,
+        "skipped": 4,
+        "xfailed": 2,
+        "deselected": 7,
+        "total": 1004,
+    }
+
+
+def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
+    tmp_path, monkeypatch
+):
+    evidence_dir = tmp_path / "artifacts"
+    evidence_dir.mkdir()
+    container_path = evidence_dir / "release-proof.json"
+    container_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "claim_boundary": {"operating_system": "linux"},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    container_before = container_path.read_bytes()
+
+    def host_command(command, **_kwargs):
+        if command[0] == "uv":
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="2 passed, 9 deselected in 0.25s\n",
+                stderr="",
+            )
+        audio = Path(command[2])
+        audio.write_bytes(b"FORM\x00\x00native speech")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(HOSTNATIVE.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(HOSTNATIVE.platform, "release", lambda: "25.5.0")
+    monkeypatch.setattr(HOSTNATIVE.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(HOSTNATIVE.select, "kqueue", object(), raising=False)
+    monkeypatch.setattr(HOSTNATIVE, "_run_command", host_command)
+    monkeypatch.setattr(
+        HOSTNATIVE,
+        "_appearance",
+        lambda _root, _failures: {"status": "passed", "style": "dark"},
+    )
+
+    report = HOSTNATIVE.collect_host_native_evidence(PROJECT_ROOT, evidence_dir)
+
+    assert report["claim_boundary"] == {
+        "operating_system": "macos",
+        "container_operating_system": "linux",
+        "container_evidence_unchanged": True,
+    }
+    assert report["checks"] == {
+        "kqueue-or-fsevents": {
+            "status": "passed",
+            "backend": "kqueue",
+            "tests": {"passed": 2, "deselected": 9, "total": 2},
+        },
+        "appearance": {"status": "passed", "style": "dark"},
+        "speech": {
+            "status": "passed",
+            "backend": "/usr/bin/say",
+            "bytes": len(b"FORM\x00\x00native speech"),
+            "sha256": hashlib.sha256(b"FORM\x00\x00native speech").hexdigest(),
+        },
+    }
+    assert (
+        container_path.read_bytes(),
+        json.loads(
+            (evidence_dir / "release-proof-macos.json").read_text(encoding="utf-8")
+        ),
+    ) == (container_before, report)
+
+
 def test_mutation_rehearsal_requires_the_exact_committed_cohort(tmp_path):
     ratchet = tmp_path / "tests" / "mutation-ratchet.json"
     ratchet.parent.mkdir()
@@ -499,33 +656,29 @@ def test_wheel_member_comparison_catalogs_every_exact_delta(tmp_path):
 def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     tmp_path, monkeypatch
 ):
-    root = tmp_path / "source"
-    git_dir = root / ".git"
-    git_dir.mkdir(parents=True)
-    (root / "pyproject.toml").write_text(
-        '[project]\nname = "spice-harness"\nversion = "9.8.7"\n',
-        encoding="utf-8",
-    )
-    (git_dir / "release-proof-identities.json").write_text(
-        json.dumps({"schema_version": 1, "source": {}, "synthetic": {}}),
-        encoding="utf-8",
-    )
-    (git_dir / "release-proof-toolchain.json").write_text(
-        json.dumps({"schema_version": 1, "resolved": {}}),
-        encoding="utf-8",
-    )
-    artifacts = tmp_path / "artifacts"
+    root, artifacts = _release_receipt_fixture(tmp_path)
     carried: list[tuple[str, Path]] = []
     rebuilt_hashes: list[str] = []
 
     monkeypatch.setattr(
         REHEARSAL,
         "_run_source_gates",
-        lambda _root: {"spice/config/layers.py": {"killed": 13, "mutants": 20}},
+        lambda _root, _scratch, _failures: {
+            "python": {"passed": 999, "total": 999},
+            "ruff": {"passed": True},
+            "browser": {
+                "schemaVersion": 1,
+                "counts": {"failed": 0, "passed": 45, "skipped": 1, "total": 46},
+                "scenarios": [{"path": "serve_smoke.js", "status": "passed"}],
+                "externalState": [
+                    {"path": "live_smoke.js", "reason": "requires live state"}
+                ],
+            },
+            "mutation": {"spice/config/layers.py": {"killed": 13, "mutants": 20}},
+        },
     )
 
-    def build_canonical(_root, artifact_dir, version):
-        artifact_dir.mkdir()
+    def build_canonical(_root, artifact_dir, version, _failures):
         sdist = artifact_dir / f"spice_harness-{version}.tar.gz"
         wheel = artifact_dir / f"spice_harness-{version}-py3-none-any.whl"
         sdist.write_bytes(b"canonical sdist\n")
@@ -536,10 +689,10 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         )
         return sdist, wheel
 
-    def validate_installed(_root, wheel, _version, _scratch):
+    def validate_installed(_root, wheel, _version, _scratch, _failures):
         carried.append(("installed", wheel))
 
-    def rebuild_from_sdist(sdist, version, scratch):
+    def rebuild_from_sdist(sdist, version, scratch, _failures):
         carried.append(("rebuilt", sdist))
         rebuilt = scratch / f"spice_harness-{version}-py3-none-any.whl"
         _write_test_wheel(
@@ -568,31 +721,75 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     wheel = artifacts / "spice_harness-9.8.7-py3-none-any.whl"
 
     assert carried == [("installed", wheel), ("rebuilt", sdist)]
+    _assert_release_receipt(receipt, artifacts, sdist, wheel, rebuilt_hashes[0])
+
+
+def _release_receipt_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "source"
+    git_dir = root / ".git"
+    git_dir.mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "spice-harness"\nversion = "9.8.7"\n',
+        encoding="utf-8",
+    )
+    (git_dir / "release-proof-identities.json").write_text(
+        json.dumps({"schema_version": 1, "source": {}, "synthetic": {}}),
+        encoding="utf-8",
+    )
+    (git_dir / "release-proof-toolchain.json").write_text(
+        json.dumps({"schema_version": 1, "resolved": {}}),
+        encoding="utf-8",
+    )
+    return root, tmp_path / "artifacts"
+
+
+def _assert_release_receipt(
+    receipt,
+    artifacts: Path,
+    sdist: Path,
+    wheel: Path,
+    rebuilt_hash: str,
+) -> None:
     assert receipt["artifacts"] == {
         "sdist": {"filename": sdist.name, "sha256": _test_sha256(sdist)},
         "wheel": {"filename": wheel.name, "sha256": _test_sha256(wheel)},
         "installed_wheel_sha256": _test_sha256(wheel),
         "sdist_rebuilt_from_sha256": _test_sha256(sdist),
     }
-    assert receipt["wheel_member_comparison"] == {
+    assert receipt["content_comparison"] == {
         "canonical_members": 1,
         "rebuilt_members": 1,
         "mismatches": [],
-        "rebuilt_wheel_sha256": rebuilt_hashes[0],
+        "rebuilt_wheel_sha256": rebuilt_hash,
         "outer_archive_reproducibility": "deferred",
     }
     assert (
-        _test_sha256(wheel) == rebuilt_hashes[0],
-        receipt["checks"],
+        _test_sha256(wheel) == rebuilt_hash,
+        receipt["artifact_rehearsal"]["checks"],
     ) == (False, list(REHEARSAL.CHECKS))
+    assert receipt["tests"] == {
+        "python": {"passed": 999, "total": 999},
+        "ruff": {"passed": True},
+    }
+    assert receipt["browser"]["counts"] == {
+        "failed": 0,
+        "passed": 45,
+        "skipped": 1,
+        "total": 46,
+    }
+    assert receipt["claim_boundary"] == {
+        "operating_system": "linux",
+        "host_native_companion": "release-proof-macos.json",
+        "host_native_checks": ["kqueue-or-fsevents", "appearance", "speech"],
+    }
     assert tuple(sorted(path.name for path in artifacts.iterdir())) == (
-        "rehearsal.json",
+        "release-proof.json",
         wheel.name,
         sdist.name,
     )
-    assert json.loads((artifacts / "rehearsal.json").read_text(encoding="utf-8")) == (
-        receipt
-    )
+    assert json.loads(
+        (artifacts / "release-proof.json").read_text(encoding="utf-8")
+    ) == (receipt)
 
 
 def test_container_declares_immutable_base_and_complete_resolved_toolchain():

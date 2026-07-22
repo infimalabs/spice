@@ -35,7 +35,23 @@ creates `/proof/artifacts`. It materializes committed `HEAD` into a fresh build
 tree so ignored host residue cannot enter either artifact, builds the canonical
 sdist and wheel exactly once, checks both with Twine, installs that exact wheel
 into a fresh virtual environment for import and console-command probes, then
-rebuilds a comparison wheel from that exact sdist. `rehearsal.json` records the
-carried artifact digests and every member-level comparison. ZIP container-byte
-reproducibility is explicitly deferred; any missing, extra, or content-changed
-wheel member is reported by path and SHA-256.
+rebuilds a comparison wheel from that exact sdist. `release-proof.json` records
+the source identity, toolchain, test counts, browser scenarios, mutation cohort,
+carried artifact digests, rehearsal checks, and every member-level comparison.
+ZIP container-byte reproducibility is explicitly deferred; any missing, extra,
+or content-changed wheel member is reported by path and SHA-256.
+
+Failed gates write deterministic logs under `artifacts/failures`, capped at
+eight files and 64 KiB per file. Token-bearing URL fields and values from
+credential-like environment names are redacted before persistence.
+
+The container claim remains Linux-only. On macOS, after exporting the container
+artifacts into one directory, run:
+
+```sh
+python3 release-proof/hostnative.py --evidence-dir /path/to/artifacts
+```
+
+The companion proves native kqueue behavior, system appearance lookup, and
+speech synthesis, then writes `release-proof-macos.json` beside the unchanged
+Linux `release-proof.json`.
