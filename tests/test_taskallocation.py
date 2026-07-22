@@ -172,6 +172,67 @@ def test_renew_claim_uses_longest_requested_lease_in_either_order(
     )
 
 
+def test_renew_claim_without_a_duration_preserves_the_recorded_short_lease(
+    task_repo, monkeypatch
+):
+    handle = create.add(
+        "Preserve the recorded short renewal lease",
+        project="task.unit",
+        origin="ack:1kG8Nvjl",
+        acceptance=["implicit renewal preserves the recorded lease policy"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=2.0,
+    )
+    monkeypatch.setattr(claimstate, "current_claim_site", lambda: site)
+
+    result = claimstate.renew_claim(handle, actor=ACTOR_A)
+
+    renewed = identity.resolve(handle)
+    assert result.renewed is True
+    assert renewed["claim_lease_seconds"] == "2"
+
+
+@pytest.mark.parametrize("recorded_value", ["", "unreadable"])
+def test_renew_claim_reestablishes_an_unreadable_lease_from_the_explicit_request(
+    task_repo, monkeypatch, recorded_value
+):
+    handle = create.add(
+        "Reestablish an unreadable claim lease",
+        project="task.unit",
+        origin="ack:1kG8Nvjl",
+        acceptance=["the explicit renewal duration becomes the recorded policy"],
+    )
+    row = identity.resolve(handle)
+    uuid = identity.uuid_of(row)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        uuid,
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=2.0,
+    )
+    tw.run([uuid, "modify", f"claim_lease_seconds:{recorded_value}"])
+    monkeypatch.setattr(claimstate, "current_claim_site", lambda: site)
+
+    result = claimstate.renew_claim(
+        handle,
+        actor=ACTOR_A,
+        lease_seconds=2.0,
+    )
+
+    renewed = identity.resolve(handle)
+    assert result.renewed is True
+    assert renewed["claim_lease_seconds"] == "2"
+
+
 def test_renew_claim_keeps_title_when_shared_taskrc_lacks_lease_uda(
     task_repo, monkeypatch
 ):
