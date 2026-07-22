@@ -937,7 +937,11 @@ def _release_unready_launch_claim(
     still inside `require_supervisor_started` and sees the exit itself.
 
     Cleanup runs on the terminal path a startup failure already travels, so it
-    reports its own failures rather than raising over the launch's.
+    reports its own failures rather than raising over the launch's. Which side
+    of the handback a failure lands on decides how it reads: before the row goes
+    back the reservation really does survive, while after it the row is already
+    allocatable and only the witness file is stale, so that outcome names the
+    release it earned and carries the write fault beside it.
     """
     if launch_claim is None:
         return ""
@@ -949,17 +953,22 @@ def _release_unready_launch_claim(
             return ""
         if str(state.get("startup_status") or "") == AGENT_STARTUP_READY:
             return ""
-        released = claimstate.release_claim(launch_claim.uuid, launch_claim.actor)
+        result = claimstate.release_claim(launch_claim.uuid, launch_claim.actor)
     except Exception as exc:
-        # Both the state read and claim-witness retirement perform filesystem
-        # I/O. This terminal cleanup boundary must preserve the launch's own
-        # outcome even when those operations fail outside SpiceError.
-        released = False
-        outcome = f"kept: {exc}"
-    else:
-        outcome = "released" if released else "kept: owned elsewhere now"
+        # The state read is filesystem I/O and the release can still raise on a
+        # Taskwarrior fault. This terminal cleanup boundary must preserve the
+        # launch's own outcome even when those fail outside SpiceError, and
+        # nothing reached the board, so the reservation genuinely stands.
+        _note_launch_claim_outcome(log_path, launch_claim, f"kept: {exc}")
+        return ""
+    if not result.released:
+        _note_launch_claim_outcome(log_path, launch_claim, "kept: owned elsewhere now")
+        return ""
+    outcome = "released"
+    if result.witness_error:
+        outcome = f"released, witness unwritten: {result.witness_error}"
     _note_launch_claim_outcome(log_path, launch_claim, outcome)
-    return launch_claim.uuid if released else ""
+    return launch_claim.uuid
 
 
 def _note_launch_claim_outcome(

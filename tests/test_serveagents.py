@@ -23,6 +23,7 @@ from spice.serve import agentapi, launch, workroutes
 from spice.serve.payload import wire
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import identity
+from spice.tasks.claimstate import ClaimReleaseResult
 from tests.test_servehelpers import (
     THREAD_A,
     _patch_agent_status,
@@ -393,7 +394,9 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     monkeypatch.setattr(
         agentapi.claimstate,
         "release_claim",
-        lambda *_args, **_kwargs: trace.append("release") or True,
+        lambda *_args, **_kwargs: (
+            trace.append("release") or ClaimReleaseResult(released=True)
+        ),
     )
 
     payload = agentapi.ensure_agent_for_available_work(
@@ -578,7 +581,11 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(agentapi.claimstate, "release_claim", lambda *_args: True)
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "release_claim",
+        lambda *_args: ClaimReleaseResult(released=True),
+    )
 
     payloads = [
         agentapi.ensure_agent_for_available_work(
@@ -825,7 +832,9 @@ def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch
     monkeypatch.setattr(
         agentapi.claimstate,
         "release_claim",
-        lambda task_uuid, actor: released.append((task_uuid, actor)) or True,
+        lambda task_uuid, actor: (
+            released.append((task_uuid, actor)) or ClaimReleaseResult(released=True)
+        ),
     )
     monkeypatch.setattr(
         agentapi,

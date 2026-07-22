@@ -275,6 +275,18 @@ class ClaimRenewalResult:
 
 
 @dataclass(frozen=True)
+class ClaimReleaseResult:
+    """Whether the row went back on the board, and what the witness cost.
+
+    The two are separate answers because they land at separate moments, and a
+    caller reporting a release needs the one the allocator can see.
+    """
+
+    released: bool
+    witness_error: str = ""
+
+
+@dataclass(frozen=True)
 class ClaimWitness:
     active: bool
     actor: str
@@ -811,8 +823,17 @@ def _renewal_claim_meta(
     ]
 
 
-def release_claim(uuid: str, actor: str) -> bool:
-    """Release only the exact active claim still owned by ``actor``."""
+def release_claim(uuid: str, actor: str) -> ClaimReleaseResult:
+    """Release only the exact active claim still owned by ``actor``.
+
+    The modify is the release: the moment it lands the task is allocatable
+    again, and no later failure can take that back. Retiring the witness is a
+    second write to a second place, so a filesystem fault there is reported
+    beside the release rather than raised over it -- raising would tell every
+    caller the row is still reserved when it is already back on the board, and
+    a launch handing back a reservation it never held is exactly the report an
+    operator chases.
+    """
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     rows = tw.export([uuid])
     claim_worktree = (
@@ -832,9 +853,15 @@ def release_claim(uuid: str, actor: str) -> bool:
             ]
         )
     except SpiceError:
-        return False
-    retire_claim_witness(claim_worktree, claim_actor, uuid=uuid)
-    return True
+        return ClaimReleaseResult(released=False)
+    try:
+        retire_claim_witness(claim_worktree, claim_actor, uuid=uuid)
+    except OSError as exc:
+        # The witness is a file: `atomic_write_json` is the only leaf here that
+        # touches anything but memory, and its side-channel notify already
+        # swallows its own socket errors.
+        return ClaimReleaseResult(released=True, witness_error=str(exc))
+    return ClaimReleaseResult(released=True)
 
 
 def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:

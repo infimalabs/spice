@@ -366,7 +366,8 @@ def ensure_agent_for_available_work(
             # restart guard. The task returns to the board still carrying every
             # second it has waited, because that age is a property of the row
             # rather than of anyone watching it.
-            payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+            release = claimstate.release_claim(task_uuid, actor)
+            payload["claimReleased"] = release.released
         return payload
 
 

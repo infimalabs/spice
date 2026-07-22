@@ -158,7 +158,7 @@ def rtk_usage_nudge() -> str | None:
 def unclaim(handle: str | None = None) -> str:
     row = resolve_claim_target(handle, action="unclaim")
     uuid = identity.uuid_of(row)
-    if not release_claim(uuid, tw.current_actor()):
+    if not release_claim(uuid, tw.current_actor()).released:
         raise SpiceError(
             f"cannot unclaim {identity.render_handle(row)}: active claim is not yours"
         )
