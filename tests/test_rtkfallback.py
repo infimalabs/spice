@@ -223,19 +223,8 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executable = "missing-routing-rtk"
-    project_root = tmp_path / "project"
-    plain_root = tmp_path / "plain"
-    _configure_rtk(project_root, executable)
-    _configure_rtk(plain_root, executable)
-    # Routing is scoped to a Spice project, and the pyproject marker is the whole
-    # scope: inside one a bare interpreter becomes the project's uv interpreter,
-    # outside one it stays the operator's own python. Running the identical argv
-    # under both roots is what proves the native bypass still routes rather than
-    # merely passing the command through -- a single routed reading cannot tell
-    # those two apart.
-    (project_root / "pyproject.toml").write_text(
-        '[project]\nname = "routed"\nversion = "0"\n', encoding="utf-8"
-    )
+    _configure_rtk(tmp_path, executable)
+    _route_project_python(tmp_path)
     monkeypatch.setattr(
         wrap,
         "build_agent_run_environment",
@@ -259,30 +248,61 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
         child_outcomes.append((command, value))
         return _RecordedProcess()
 
-    def bypass(repo_root: Path, raw_args: list[str]) -> int:
-        return wrap.run_agent_command(
-            repo_root, raw_args, popen_factory=record, stderr=io.StringIO()
-        )
-
-    interpreter_args = ["python", "-c", "print('native')"]
-    routed_exit = bypass(project_root, interpreter_args)
-    unrouted_exit = bypass(plain_root, interpreter_args)
-    shell_exit = bypass(project_root, ["zsh", "-c", "git status --short"])
+    direct_exit = wrap.run_agent_command(
+        tmp_path,
+        ["python", "-c", "print('native')"],
+        popen_factory=record,
+        stderr=io.StringIO(),
+    )
+    shell_exit = wrap.run_agent_command(
+        tmp_path,
+        ["zsh", "-c", "git status --short"],
+        popen_factory=record,
+        stderr=io.StringIO(),
+    )
 
     assert {
-        "exit_codes": [routed_exit, unrouted_exit, shell_exit],
+        "exit_codes": [direct_exit, shell_exit],
         "rtk_environments": rtk_environments,
         "child_outcomes": child_outcomes,
-        "marker_decides": child_outcomes[0][0] != child_outcomes[1][0],
     } == {
-        "exit_codes": [0, 0, 0],
-        "rtk_environments": ["preserved", "preserved", "preserved"],
+        "exit_codes": [0, 0],
+        "rtk_environments": ["preserved", "preserved"],
         "child_outcomes": [
-            (["uv", "run", "python", "-c", "print('native')"], "preserved"),
-            (["python", "-c", "print('native')"], "preserved"),
+            ([*wrap.UV_PYTHON_COMMAND, "-c", "print('native')"], "preserved"),
             (["zsh", "-c", "git status --short"], "preserved"),
         ],
-        "marker_decides": True,
+    }
+
+
+def test_native_bypass_passes_python_through_outside_a_routing_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = "missing-passthrough-rtk"
+    _configure_rtk(tmp_path, executable)
+    monkeypatch.setattr(
+        wrap,
+        "build_agent_run_environment",
+        lambda _raw_args, **_kwargs: {wrap.RTK_DB_PATH_ENV: "preserved"},
+    )
+    wrap._rtk_warned_keys.clear()
+    child_commands: list[list[str]] = []
+
+    def missing_rtk(_command: list[str], **_kwargs: object) -> object:
+        raise FileNotFoundError(2, "missing", executable)
+
+    _isolate_agent_run(monkeypatch, missing_rtk)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["python", "-c", "print('native')"],
+        popen_factory=lambda command, **_kwargs: _record_child(child_commands, command),
+        stderr=io.StringIO(),
+    )
+
+    assert {"exit_code": exit_code, "child_commands": child_commands} == {
+        "exit_code": 0,
+        "child_commands": [["python", "-c", "print('native')"]],
     }
 
 
@@ -356,6 +376,10 @@ def _configure_rtk(repo_root: Path, executable: str) -> None:
         values.RTK_KEY,
         {values.RTK_EXECUTABLE_KEY: executable},
     )
+
+
+def _route_project_python(repo_root: Path) -> None:
+    (repo_root / "pyproject.toml").write_text('[project]\nname = "routing-probe"\n')
 
 
 def _isolate_agent_run(
