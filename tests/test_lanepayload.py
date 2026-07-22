@@ -586,8 +586,9 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
 ):
     claude_home = tmp_path / "claude"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
-    older = "2026-06-10T12:00:00.000Z"
-    latest = "2026-06-10T12:01:00.000Z"
+    latest_at = datetime.now(UTC)
+    older = _stamp(latest_at - timedelta(minutes=1))
+    latest = _stamp(latest_at)
     transcript = (
         claude_home
         / "projects"
@@ -650,6 +651,7 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
 
     assert items[0].kind == "presence:function_call"
     assert line["lastAssistantAt"] == latest
+    assert line["activityStatus"] == "active"
     assert line["preview"] == "Bash: ls"
     assert line["latestActivityPreview"] == "Bash: ls"
     assert line["latestMessagePreview"] == "older answer"
