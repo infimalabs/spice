@@ -14,6 +14,7 @@ from spice.tasks import (
     claimstate,
     config,
     create,
+    graph,
     identity,
     ops,
     render,
@@ -74,6 +75,32 @@ def _configure_task_read_parsers(actions: Any) -> None:
     )
     sizing.set_defaults(func=handle)
 
+    _configure_task_list_parser(actions)
+
+    show = actions.add_parser(
+        "show",
+        help="Render a task execution packet.",
+        recovery_examples=("spice task show TASK-1k4Q5gJw",),
+    )
+    show.add_argument("handle")
+    show.set_defaults(func=handle)
+
+    _configure_task_graph_parser(actions)
+
+    ledger = actions.add_parser(
+        "ledger",
+        help="Export a task family as normal-form markdown.",
+        description="Export a task family as normal-form markdown.",
+        epilog="Example: spice task ledger TASK-1k4Q5gJw",
+        recovery_examples=("spice task ledger TASK-1k4Q5gJw",),
+    )
+    ledger.add_argument("handle")
+    ledger.set_defaults(func=handle)
+
+    _configure_artifact_parser(actions)
+
+
+def _configure_task_list_parser(actions: Any) -> None:
     ls = actions.add_parser(
         "list",
         help="List tasks in the actor route, an explicit project, or globally.",
@@ -127,26 +154,6 @@ def _configure_task_read_parsers(actions: Any) -> None:
         ),
     )
     ls.set_defaults(func=handle)
-
-    show = actions.add_parser(
-        "show",
-        help="Render a task execution packet.",
-        recovery_examples=("spice task show TASK-1k4Q5gJw",),
-    )
-    show.add_argument("handle")
-    show.set_defaults(func=handle)
-
-    ledger = actions.add_parser(
-        "ledger",
-        help="Export a task family as normal-form markdown.",
-        description="Export a task family as normal-form markdown.",
-        epilog="Example: spice task ledger TASK-1k4Q5gJw",
-        recovery_examples=("spice task ledger TASK-1k4Q5gJw",),
-    )
-    ledger.add_argument("handle")
-    ledger.set_defaults(func=handle)
-
-    _configure_artifact_parser(actions)
 
 
 def _configure_artifact_parser(actions: Any) -> None:
@@ -209,6 +216,22 @@ def _configure_artifact_parser(actions: Any) -> None:
     prune.add_argument("--older-than")
     prune.add_argument("--apply", action="store_true")
     prune.set_defaults(func=handle)
+
+
+def _configure_task_graph_parser(actions: Any) -> None:
+    graph_cmd = actions.add_parser(
+        "graph",
+        help="Emit a board graph as mermaid.",
+        description=(
+            "Emit one of the graphs the board carries as mermaid source: the "
+            "origin forest, the dependency DAG, the review network, or the "
+            "phase ladder. Output renders unmodified."
+        ),
+        epilog="Example: spice task graph review",
+        recovery_examples=("spice task graph review",),
+    )
+    graph_cmd.add_argument("view", choices=graph.VIEWS)
+    graph_cmd.set_defaults(func=handle)
 
 
 def _configure_task_phase_parsers(actions: Any) -> None:
@@ -929,6 +952,7 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
+    "graph": lambda a: graph.render(a.view),
     "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(
