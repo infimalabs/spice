@@ -10,7 +10,11 @@ from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
 from spice.serve.payload import identity
-from spice.serve.agentapi import sent_steering_payload, sent_steering_response_payload
+from spice.serve.agentapi import (
+    pending_inbox_launch_lock,
+    sent_steering_payload,
+    sent_steering_response_payload,
+)
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
@@ -64,9 +68,14 @@ def work_tree_send_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    response, status = _work_tree_send_response_payload(
-        state, target, payload, ensure_agent_before_reply=True
-    )
+    # Hold the same reentrant guard as every background pending-inbox decision
+    # before the item becomes visible and through the direct automatic=False
+    # ensure. Suppressing this send's event alone cannot stop a watcher already
+    # evaluating for another event from entering the publication-to-ensure gap.
+    with pending_inbox_launch_lock():
+        response, status = _work_tree_send_response_payload(
+            state, target, payload, ensure_agent_before_reply=True
+        )
     return (
         validate_emitter_payload(
             "workroutes.work_tree_send_response_payload", response

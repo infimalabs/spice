@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Sequence
@@ -52,6 +54,18 @@ AVAILABLE_WORK_STARVATION_SECONDS = 3.0 * 60.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
+# The synchronous UI route acquires this before publishing its inbox item and
+# re-enters it for the explicit launch decision. Background inventory/watcher
+# decisions enter it here, so they cannot consume or dead-letter that item in
+# the publication-to-explicit-ensure gap.
+_PENDING_INBOX_LAUNCH_LOCK = threading.RLock()
+
+
+@contextmanager
+def pending_inbox_launch_lock() -> Iterator[None]:
+    """Serialize publication grants and pending-inbox launch decisions."""
+    with _PENDING_INBOX_LAUNCH_LOCK:
+        yield
 
 
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
@@ -219,6 +233,26 @@ def ensure_agent_for_pending_inbox(
     Inbox steering must never sit unheard: a send to an off lane brings the lane's
     agent up (or its renewed successor, under `force_new`).
     """
+    with pending_inbox_launch_lock():
+        return _ensure_agent_for_pending_inbox_locked(
+            target,
+            attempt_cache=attempt_cache,
+            retry_seconds=retry_seconds,
+            fast_mode=fast_mode,
+            force_new=force_new,
+            automatic=automatic,
+        )
+
+
+def _ensure_agent_for_pending_inbox_locked(
+    target: WorktreeTarget,
+    *,
+    attempt_cache: dict[str, float] | None,
+    retry_seconds: float,
+    fast_mode: bool,
+    force_new: bool,
+    automatic: bool,
+) -> dict[str, Any] | None:
     operator_items = pending_operator_inbox_items(target.repo_root)
     pending_count = len(operator_items)
     if pending_count <= 0:
