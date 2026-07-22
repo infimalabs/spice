@@ -67,7 +67,9 @@ def claim(handle: str, *, steal: bool = False) -> str:
     _require_single_active_slot(actor, action="task claim", target=row)
     owner = str(row.get("claim_by") or "")
     if owner and owner != actor and not steal:
-        raise SpiceError(f"use --steal to take it; task already claimed by {owner}")
+        raise SpiceError(
+            f"use --steal to take the task; it is already claimed by {owner}"
+        )
     if row.get("start") and not owner and not steal:
         raise SpiceError(
             "use --steal to repair ownership; task is ACTIVE but has no claim_by"
@@ -186,9 +188,10 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         rendered = identity.render_handle(row)
         if target is None and alloc.is_oops(row):
             raise SpiceError(
-                f"claim it in place with `spice task claim {rendered}` because "
-                "it is already in plan mode, then create and connect public "
-                f"child tasks; cannot wake deferred oops triage task: {rendered}"
+                "claim the deferred oops triage task in place with "
+                f"`spice task claim {rendered}` because it is already in plan "
+                "mode, then create and connect public child tasks; cannot wake "
+                f"it: {rendered}"
             )
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")

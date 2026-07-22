@@ -400,11 +400,15 @@ def test_serve_refuses_non_loopback_bind_without_opt_in(monkeypatch) -> None:
             )
         )
 
-    message = str(exc_info.value)
-    assert "refuses to bind" in message
-    assert "http://0.0.0.0:8765" in message
-    assert "--allow-insecure-bind" in message
-    assert "--auth-token TOKEN" in message
+    # Pinned whole rather than by substring: substrings pass no matter which
+    # half leads, so they cannot tell the repair-first order from its inverse.
+    assert str(exc_info.value) == (
+        "use --allow-insecure-bind to expose the no-auth control surface "
+        "deliberately or --auth-token TOKEN to require a token; spice serve "
+        "refuses to bind it to exposed address http://0.0.0.0:8765. On "
+        "wildcard binds, WebSocket Origin checks degrade to "
+        "Origin-equals-Host, so the token is the operative defense."
+    )
 
 
 def test_serve_warns_when_insecure_non_loopback_bind_allowed(
