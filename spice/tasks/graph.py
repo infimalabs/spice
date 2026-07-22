@@ -130,11 +130,12 @@ def phase_edges(rows: list[TaskRow]) -> Counter[tuple[str, str]]:
             index += 1
         if not ladder:
             continue
-        edges[("(filed)", ladder[0])] += 1
-        for before, after in zip(ladder, ladder[1:], strict=False):
+        reached = ladder[: int(row.get("phase_i") or 0) + 1]
+        edges[("(filed)", reached[0])] += 1
+        for before, after in zip(reached, reached[1:], strict=False):
             edges[(before, after)] += 1
         if str(row.get("status") or "") == "completed":
-            edges[(ladder[-1], "(completed)")] += 1
+            edges[(reached[-1], "(completed)")] += 1
     return edges
 
 
@@ -215,12 +216,13 @@ def render_review(rows: list[TaskRow]) -> str:
         "Review network: who reviews whose work",
         f"{sum(edges.values())} reviews across {len(edges)} lane pairs.",
     )
-    lines.append("sankey-beta")
-    lines.append("")
+    if not edges:
+        return "\n".join(
+            [*lines, "flowchart LR", '  empty["no reviews on this board"]']
+        )
+    lines.extend(("sankey-beta", ""))
     for (reviewer, author), count in edges.most_common():
         lines.append(f"{reviewer} reviews,{author} authored,{count}")
-    if not edges:
-        lines.append("no reviews,no reviews,0")
     return "\n".join(lines)
 
 
@@ -230,12 +232,13 @@ def render_phase(rows: list[TaskRow]) -> str:
         "Phase ladder: the route tasks actually walked",
         f"{sum(edges.values())} transitions across {len(rows)} tasks.",
     )
-    lines.append("sankey-beta")
-    lines.append("")
+    if not edges:
+        return "\n".join(
+            [*lines, "flowchart LR", '  empty["no phase history on this board"]']
+        )
+    lines.extend(("sankey-beta", ""))
     for (before, after), count in edges.most_common():
         lines.append(f"{before},{after},{count}")
-    if not edges:
-        lines.append("(filed),(filed),0")
     return "\n".join(lines)
 
 
