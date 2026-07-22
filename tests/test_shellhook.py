@@ -423,14 +423,14 @@ def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
         groups={
             "spice-dev": {
                 "pytest": {"argv": ["python", "-m", "pytest"]},
-                "task": {"argv": ["spice", "task"]},
+                "pre-commit": {"argv": ["spice", "dev", "pre-commit"]},
                 "summary": {"argv": ["rtk", "summary"]},
             }
         },
     )
 
     assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset(
-        {"pytest", "task"}
+        {"pytest", "pre-commit"}
     )
 
 

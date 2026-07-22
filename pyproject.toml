@@ -99,9 +99,6 @@ argv = ["spice", "dev", "pre-commit"]
 [tool.spice.wrappers.spice-dev.pytest]
 argv = ["spice", "dev", "pytest"]
 
-[tool.spice.wrappers.spice-dev.task]
-argv = ["spice", "task"]
-
 # The "common" group is inherited from the layered global default. It owns all
 # grep and RTK behavior, including driver-scoped extended-regexp defaults. The
 # repository-local spice-dev group contains only this checkout's development
