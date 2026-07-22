@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -525,9 +526,56 @@ def _finalize_deinitialization(
     report = _completed_report(receipt, recovery_path)
     if recovery_path is not None:
         _write_recovery_report(recovery_path, report)
+    _cleanup_introduced_containers(receipt)
     _unlink(initialization_receipt_path(receipt.repo_root))
+    _cleanup_introduced_containers(receipt)
     _unlink(deinitialization_receipt_path(receipt.repo_root))
     return report
+
+
+def _cleanup_introduced_containers(receipt: DeinitializationReceipt) -> None:
+    operations = tuple(item.operation for item in receipt.initialization.operations)
+    scope_paths = {
+        operation.scope_path
+        for operation in operations
+        if operation.introduced_scope_path
+    }
+    for path in sorted(scope_paths, key=str):
+        _unlink_empty_regular_file(path)
+
+    relative_directories = {
+        relative
+        for operation in operations
+        for relative in operation.introduced_parent_directories
+    }
+    for relative in sorted(
+        relative_directories,
+        key=lambda value: (len(Path(value).parts), value),
+        reverse=True,
+    ):
+        _remove_empty_directory(receipt.repo_root / relative)
+
+
+def _unlink_empty_regular_file(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(metadata.st_mode) and metadata.st_size == 0:
+        path.unlink()
+
+
+def _remove_empty_directory(path: Path) -> None:
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno in {errno.ENOTEMPTY, errno.EEXIST, errno.ENOTDIR}:
+            return
+        raise SpiceError(
+            f"could not remove initialization directory {path}: {exc}"
+        ) from exc
 
 
 def _completed_report(
