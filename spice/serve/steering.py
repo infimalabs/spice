@@ -40,6 +40,7 @@ def submit_steering_message(
     attachments: Any = None,
     controls: Sequence[str] = (),
     target_repo_root: Path | None,
+    wake_server: bool = True,
 ) -> SentSteeringMessage:
     if target_repo_root is None:
         raise RuntimeError("No target worktree is selected.")
@@ -58,6 +59,7 @@ def submit_steering_message(
         composed,
         attachments=prepared_attachments,
         dedupe_pending_text=True,
+        wake_server=wake_server,
     )
     key = inbox_item_key(path.name)
     return SentSteeringMessage(

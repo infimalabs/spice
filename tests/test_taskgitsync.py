@@ -985,10 +985,127 @@ def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
 
     assert outcome == GitsyncOutcome(
         "rejected",
-        "cannot launch agent: the relationship to origin/main could not be "
-        "inspected; repair Git and retry\n"
+        "repair Git and retry; cannot launch agent: the relationship to "
+        "origin/main could not be inspected\n"
         "could not inspect relationship to origin/main (git exit 128)\n"
         "cannot inspect",
+    )
+
+
+def test_prepare_for_agent_launch_refuses_an_uninspectable_working_tree(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = plumbing.run
+
+    def fail_status(repo_root, *args):
+        if args[:2] == ("status", "--porcelain"):
+            return subprocess.CompletedProcess(list(args), 128, "", "cannot stat")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(plumbing, "run", fail_status)
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
+
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "repair Git and retry; cannot launch agent: the working tree state "
+        "could not be inspected\n"
+        "could not inspect working tree for agent launch (git exit 128)\n"
+        "cannot stat",
+    )
+
+
+def test_prepare_for_agent_launch_refuses_a_baseline_missing_after_fetch(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    real_read = plumbing.read
+
+    def lose_baseline(repo_root, *args):
+        if args == ("rev-parse", "origin/main"):
+            return ""
+        return real_read(repo_root, *args)
+
+    monkeypatch.setattr(plumbing, "read", lose_baseline)
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
+
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "repair branch tracking and retry; cannot launch agent: baseline "
+        "origin/main was not found after fetching origin",
+    )
+
+
+def test_prepare_for_agent_launch_refuses_a_failed_fast_forward(tmp_path, monkeypatch):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = plumbing.run
+
+    def fail_fast_forward(repo_root, *args):
+        if args[:2] == ("merge", "--ff-only"):
+            return subprocess.CompletedProcess(list(args), 1, "", "cannot fast-forward")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(plumbing, "run", fail_fast_forward)
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
+
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "repair the branch and retry; cannot launch agent: the working tree "
+        "could not fast-forward to origin/main\n"
+        "could not fast-forward agent launch to origin/main (git exit 1)\n"
+        "cannot fast-forward",
+    )
+
+
+def test_prepare_for_claim_refuses_a_dirty_working_tree(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_claim(repo))
+
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "commit or clear the working tree first; cannot start new work",
+    )
+
+
+def test_prepare_for_claim_refuses_unrecorded_local_commits(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    (repo / "local.txt").write_text("local work\n", encoding="utf-8")
+    _run(repo, "git", "add", "local.txt")
+    _run(repo, "git", "commit", "-m", "local work")
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_claim(repo))
+
+    # The repair names the commits it acts on; leading with "capture or clear
+    # them" would point the pronoun at a subject that now trails it.
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "capture or clear the local commits first; cannot start new work: the "
+        "branch has 1 local commit(s) not yet recorded by a completed task",
+    )
+
+
+def test_prepare_for_claim_refuses_an_unclean_baseline_update(tmp_path, monkeypatch):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = plumbing.run
+
+    def fail_fast_forward(repo_root, *args):
+        if args[:2] == ("merge", "--ff-only"):
+            return subprocess.CompletedProcess(list(args), 1, "", "cannot fast-forward")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(plumbing, "run", fail_fast_forward)
+
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_claim(repo))
+
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "resolve local git state first; cannot start new work: the working "
+        "tree could not be brought to the current baseline cleanly",
     )
 
 

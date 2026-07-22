@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,8 +42,10 @@ from spice.mail.attachments import (
 from spice.locking import bounded_exclusive_lock
 from spice.paths import (
     STATE_DIRNAME,
+    atomic_write_text,
     fsync_directory,
     worktree_inbox_dir,
+    worktree_runtime_state_root,
 )
 from spice.tasks import identity
 
@@ -53,6 +56,7 @@ INBOX_ARCHIVE_DEFAULT_LIMIT = 6
 INBOX_COLLISION_MAX = 1000
 INBOX_PUBLISH_LOCK_NAME = ".publish.lock"
 INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS = 10.0
+INBOX_EVENT_FILENAME = "inbox-events"
 _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
 MINUTES_PER_HOUR = 60
@@ -163,6 +167,18 @@ class InboxResendAttempt:
 
 def inbox_dir(repo_root: Path | str) -> Path:
     return worktree_inbox_dir(Path(repo_root))
+
+
+def inbox_event_path(repo_root: Path | str) -> Path:
+    """Lane-local token changed only after an inbox mutation is publishable."""
+    return worktree_runtime_state_root(Path(repo_root)) / INBOX_EVENT_FILENAME
+
+
+def ensure_inbox_event_file(repo_root: Path | str) -> Path:
+    path = inbox_event_path(repo_root)
+    if not path.exists():
+        atomic_write_text(path, "0 bootstrap\n", write_if_changed=True)
+    return path
 
 
 def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
@@ -737,6 +753,7 @@ def write_inbox_item(
     *,
     attachments: Sequence[InboxAttachmentInput] = (),
     dedupe_pending_text: bool = False,
+    wake_server: bool = True,
 ) -> Path:
     if repo_root is None:
         raise RuntimeError("Unable to resolve git repo root for inbox send")
@@ -762,7 +779,7 @@ def write_inbox_item(
                 os.fsync(handle.fileno())
             target_path = _atomic_publish_inbox_item(tmp_path, directory / target_name)
             write_inbox_attachments(target_path, attachments, repo_root=repo_root)
-            notify_inbox_changed(repo_root)
+            notify_inbox_changed(repo_root, wake_server=wake_server)
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
@@ -794,9 +811,12 @@ def _pending_inbox_path_with_text(directory: Path, text: str) -> Path | None:
     return None
 
 
-def notify_inbox_changed(repo_root: Path | None) -> None:
+def notify_inbox_changed(repo_root: Path | None, *, wake_server: bool = True) -> None:
     from spice.agent.sidechannelnotify import notify_agent_side_channel
 
+    if repo_root is not None and wake_server:
+        token = f"{time.time_ns()} {os.getpid()} inbox\n"
+        atomic_write_text(inbox_event_path(repo_root), token, write_if_changed=True)
     notify_agent_side_channel(repo_root)
 
 

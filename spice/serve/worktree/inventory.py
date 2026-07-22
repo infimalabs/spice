@@ -115,9 +115,17 @@ def _work_tree_payload(
     }
 
 
+def ensure_work_tree_agent(
+    state: Any, target: WorktreeTarget, thread_id: str
+) -> tuple[str, str, bool, dict[str, Any] | None]:
+    """Public server-owned entry point for the inventory launch decision."""
+    return _ensure_work_tree_agent(state, target, thread_id)
+
+
 def _ensure_work_tree_agent(
     state: Any, target: WorktreeTarget, thread_id: str
 ) -> tuple[str, str, bool, dict[str, Any] | None]:
+    """Run the shared pending-inbox and available-work launch decision."""
     predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
     renew_intent = bool(
         thread_id
