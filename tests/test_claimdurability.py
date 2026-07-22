@@ -9,7 +9,7 @@ longer owns.
 from __future__ import annotations
 
 import shutil
-from threading import Event, Thread
+from threading import Event, Thread, Timer
 
 import pytest
 
@@ -24,10 +24,10 @@ pytestmark = pytest.mark.skipif(
 
 __all__ = ["task_repo"]
 
-LAPSED_DEADLINE = "2020-01-01T00:00:00.000000Z"
 SHORT_LEASE_SECONDS = 2.0
 SHORT_RENEWAL_SECONDS = SHORT_LEASE_SECONDS / 4
 LONG_OPERATION_SECONDS = SHORT_LEASE_SECONDS * 1.5
+LEASE_EXPIRY_GRACE_SECONDS = SHORT_RENEWAL_SECONDS
 UNIT_ROUTE = {"filter": ["project:task.unit"], "lifetime": "Drive"}
 
 
@@ -48,11 +48,16 @@ def _route_peer_allocator(monkeypatch) -> None:
     )
 
 
-def _lapse_lease(handle: str) -> str:
-    """Starve the heartbeat the way a loaded host does, leaving the row stale."""
-    uuid = identity.uuid_of(identity.resolve(handle))
-    tw.run([uuid, "modify", f"claim_until:{LAPSED_DEADLINE}"])
-    return uuid
+def _wait_for_claim_lease_to_expire(handle: str) -> None:
+    """Let a real shortened lease elapse without polling or editing its deadline."""
+    elapsed = Event()
+    timer = Timer(SHORT_LEASE_SECONDS + LEASE_EXPIRY_GRACE_SECONDS, elapsed.set)
+    timer.start()
+    try:
+        assert elapsed.wait(15.0)
+    finally:
+        timer.cancel()
+    assert identity.resolve(handle)["claim_until"] < tw.now_iso()
 
 
 def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
@@ -85,8 +90,9 @@ def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
     # beyond the lease; only the durable witness can identify the lost row.
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
     assert held == {}
+    monkeypatch.setattr(claimstate.config, "CLAIM_TTL_SECONDS", SHORT_LEASE_SECONDS)
     ops.claim(handle)
-    _lapse_lease(handle)
+    _wait_for_claim_lease_to_expire(handle)
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
     taken = alloc.next_task()
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
@@ -195,12 +201,13 @@ def test_backend_failure_keeps_exact_witness_until_takeover_is_loud(
         priority="medium",
         acceptance=["a retryable renewal failure cannot erase claim identity"],
     )
-    ops.claim(handle)
     log_path = task_repo / "supervisor.log"
     feedback = _capture_feedback(monkeypatch)
     reported: dict[str, str] = {}
     held: dict[str, str] = {}
     real_renew = claimstate.renew_claim
+    monkeypatch.setattr(claimstate.config, "CLAIM_TTL_SECONDS", SHORT_LEASE_SECONDS)
+    ops.claim(handle)
     monkeypatch.setattr(
         claimstate,
         "renew_claim",
@@ -212,7 +219,7 @@ def test_backend_failure_keeps_exact_witness_until_takeover_is_loud(
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
     witness_after_failure = claimstate.read_claim_witness(task_repo, ACTOR_A)
     monkeypatch.setattr(claimstate, "renew_claim", real_renew)
-    _lapse_lease(handle)
+    _wait_for_claim_lease_to_expire(handle)
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
     assert identity.render_handle(alloc.next_task() or {}) == handle
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
