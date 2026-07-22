@@ -88,10 +88,11 @@ def _write_transcript(driver_home: Path, thread_id: str, name: str) -> Path:
     return path
 
 
-def _write_state(worktree_root: Path, thread_id: str) -> None:
-    # An authoritative-but-stopped state (pid 0) binds the thread to the lane so
-    # serve resolves and renders it, while process_status stays idle: a completed
-    # conversation, never a live process to steer.
+def _write_state(worktree_root: Path, thread_id: str, agent_pid: int) -> None:
+    # The ordinary watcher probe passes pid 0 for an authoritative-but-stopped
+    # lane. The accepted-submit probe passes one harmless detached Node sentinel
+    # (pid == process group id) for every lane, so the durable inbox write sees
+    # an already-running agent and never launches a real driver process.
     write_agent_state(
         worktree_root,
         {
@@ -105,13 +106,13 @@ def _write_state(worktree_root: Path, thread_id: str) -> None:
             "model": "claude-opus-4-8",
             "reasoning_effort": "",
             "service_tier": "",
-            "pid": 0,
-            "process_group_id": 0,
+            "pid": agent_pid,
+            "process_group_id": agent_pid,
         },
     )
 
 
-def seed(root: Path, lane_count: int) -> dict:
+def seed(root: Path, lane_count: int, *, agent_pid: int = 0) -> dict:
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     repo_root = root / "repo"
@@ -146,7 +147,7 @@ def seed(root: Path, lane_count: int) -> dict:
         # shared with the base repo.
         set_scope_section(worktree, WORKTREE_SOURCE, "agent", {"driver": "claude"})
         thread_id = _thread_id(index)
-        _write_state(worktree, thread_id)
+        _write_state(worktree, thread_id, agent_pid)
         _write_transcript(driver_home, thread_id, worktree.name)
         lanes.append(
             {
@@ -208,8 +209,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--lanes", type=int, default=8)
+    parser.add_argument("--agent-pid", type=int, default=0)
     args = parser.parse_args()
-    print(json.dumps(seed(args.root, args.lanes)))
+    print(json.dumps(seed(args.root, args.lanes, agent_pid=args.agent_pid)))
     return 0
 
 

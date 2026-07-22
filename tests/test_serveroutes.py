@@ -729,18 +729,7 @@ def test_livebus_mutation_adapters_preserve_live_routes_without_override(
     ]
 
 
-def test_livebus_routes_send_task_drain_team_command_and_history_requests():
-    target = _BusTarget(id="lane")
-    connection = _Connection()
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    def messages_payload(_target, **kwargs):
-        calls.append(("messages", kwargs))
-        return {"messages": [{"key": "m1"}], "statusLine": {}}
-
-    callbacks = _route_test_livebus_callbacks(target, calls, messages_payload)
-    session = LiveBusSession(connection, callbacks)
-
+def _dispatch_livebus_route_requests(session: LiveBusSession) -> None:
     session._handle_lane_send(
         {
             "type": "lane.send",
@@ -772,14 +761,19 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             "query": {"limit": 9, "before": "oldest", "threadId": "thread"},
         }
     )
-    # lane.history replies on the read pool, unlike the three synchronous
-    # handlers above; drain the detached chain so its lane.payload frame is
-    # observed in send order regardless of pool timing.
-    session._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
-    send_timing = connection.sent[0]["result"].pop("serverTiming")
-    submission = connection.sent[0]["result"].pop("submission")
-    completed_send_timing = connection.sent.pop(1)
+
+
+def _assert_livebus_send_completion(connection: _Connection) -> dict[str, Any]:
+    send_result = next(
+        frame for frame in connection.sent if frame.get("type") == "lane.sendResult"
+    )
+    send_timing = send_result["result"].pop("serverTiming")
+    submission = send_result["result"].pop("submission")
+    completed_timing = next(
+        frame for frame in connection.sent if frame.get("type") == "lane.sendTiming"
+    )
     assert list(send_timing) == [
+        "mutationQueueMs",
         "targetResolveMs",
         "sendPayloadMs",
         "totalBeforeReplyMs",
@@ -789,9 +783,9 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
     assert all(value >= 0.0 for value in send_timing.values())
     assert submission["stage"] == "accepted"
     assert submission["stages"]["accepted"]["source"] == "inbox-write"
-    assert completed_send_timing["type"] == "lane.sendTiming"
-    assert completed_send_timing["requestId"] == "send-1"
-    assert set(completed_send_timing["serverTiming"]) == {
+    assert completed_timing["requestId"] == "send-1"
+    assert set(completed_timing["serverTiming"]) == {
+        "mutationQueueMs",
         "targetResolveMs",
         "sendPayloadMs",
         "totalBeforeReplyMs",
@@ -800,24 +794,36 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
         "replyWriteMs",
         "totalMs",
     }
-    assert all(value >= 0.0 for value in completed_send_timing["serverTiming"].values())
-    assert connection.sent == [
-        {
-            "type": "lane.sendResult",
-            "result": {"ok": True, "key": "inbox-key"},
-            "requestId": "send-1",
-        },
-        {
+    assert all(value >= 0.0 for value in completed_timing["serverTiming"].values())
+    assert send_result == {
+        "type": "lane.sendResult",
+        "result": {"ok": True, "key": "inbox-key"},
+        "requestId": "send-1",
+    }
+    return send_result
+
+
+def _assert_livebus_route_results(
+    connection: _Connection, send_result: dict[str, Any]
+) -> None:
+    frames_by_request = {
+        frame["requestId"]: frame
+        for frame in connection.sent
+        if frame.get("type") != "lane.sendTiming"
+    }
+    assert frames_by_request == {
+        "send-1": send_result,
+        "drain-1": {
             "type": "lane.taskDrainResult",
             "result": valid_wire_payload("TaskDrainResult"),
             "requestId": "drain-1",
         },
-        {
+        "team-1": {
             "type": "teams.commandResult",
             "result": {"ok": True, "revision": 2},
             "requestId": "team-1",
         },
-        {
+        "history-1": {
             "type": "lane.payload",
             "payload": valid_lane_payload(
                 messages=[{"key": "m1"}],
@@ -825,20 +831,47 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             ),
             "requestId": "history-1",
         },
-    ]
-    # The history read carries the connection's per-client cursor id; assert it
-    # is present, then compare the rest of the kwargs exactly.
+    }
+
+
+def _assert_livebus_route_calls(calls: list[tuple[str, dict[str, Any]]]) -> None:
     history_kwargs = next(kw for kind, kw in calls if kind == "messages")
     assert isinstance(history_kwargs.pop("client_id", None), str)
-    assert calls == [
-        ("send", {"text": "hello"}),
-        ("taskDrain", {"replaceTaskFilters": True}),
-        ("teamCommand", {"command": "createTeam"}),
-        (
-            "messages",
-            {"limit": 9, "before": "oldest", "expected_thread_id": "thread"},
-        ),
-    ]
+    assert {kind: payload for kind, payload in calls} == {
+        "send": {"text": "hello"},
+        "taskDrain": {"replaceTaskFilters": True},
+        "teamCommand": {"command": "createTeam"},
+        "messages": {
+            "limit": 9,
+            "before": "oldest",
+            "expected_thread_id": "thread",
+        },
+    }
+
+
+def test_livebus_routes_send_task_drain_team_command_and_history_requests():
+    target = _BusTarget(id="lane")
+    connection = _Connection()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def messages_payload(_target, **kwargs):
+        calls.append(("messages", kwargs))
+        return {"messages": [{"key": "m1"}], "statusLine": {}}
+
+    session = LiveBusSession(
+        connection,
+        _route_test_livebus_callbacks(target, calls, messages_payload),
+    )
+    _dispatch_livebus_route_requests(session)
+    # Read and mutation responses use independent pools; drain both real
+    # completion surfaces before checking correlated frames.
+    session._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+    session._await_pending_mutations(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+    assert len(connection.sent) == 5
+
+    send_result = _assert_livebus_send_completion(connection)
+    _assert_livebus_route_results(connection, send_result)
+    _assert_livebus_route_calls(calls)
 
 
 def test_livebus_routes_metric_series_requests():

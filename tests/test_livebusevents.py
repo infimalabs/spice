@@ -18,7 +18,7 @@ from spice.agent import lifecycle
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
 from spice.mail.replies import append_reply_record, reply_log_path
-from spice.serve import agentapi, app, livebus, messages as message_reader
+from spice.serve import agentapi, app, livebus, livebuswatch, messages as message_reader
 from spice.serve.app import ServeState
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.payload import identity, lane, message
@@ -69,7 +69,7 @@ def test_existing_watch_paths_returns_existing_input_paths(tmp_path):
     parent.mkdir()
     missing = parent / "missing.txt"
 
-    assert livebus._existing_watch_paths((parent, missing)) == (parent,)
+    assert livebuswatch._existing_watch_paths((parent, missing)) == (parent,)
 
 
 def test_lane_watch_paths_include_agent_state_file(tmp_path):
@@ -210,7 +210,7 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
 def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_count(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(livebuswatch, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".spice").mkdir()
@@ -350,7 +350,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     # operator board's bootstrap lock while the subscription deadline runs.
     isolated_task_backend = tmp_path / "task-backend"
     task_config.set_backend(str(isolated_task_backend))
-    monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(livebuswatch, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
     repo = tmp_path / "repo"
     repo.mkdir()
     transcript = tmp_path / "rollout.jsonl"
@@ -418,6 +418,7 @@ def _assert_send_ack_and_timing(connection: _Connection) -> None:
     assert send_result["result"]["ok"] is True
     assert send_result["result"]["key"] == "inbox-key"
     assert set(send_result["result"]["serverTiming"]) == {
+        "mutationQueueMs",
         "targetResolveMs",
         "sendPayloadMs",
         "totalBeforeReplyMs",
@@ -427,6 +428,7 @@ def _assert_send_ack_and_timing(connection: _Connection) -> None:
     assert send_timing["type"] == "lane.sendTiming"
     assert send_timing["requestId"] == "send-1"
     assert set(send_timing["serverTiming"]) == {
+        "mutationQueueMs",
         "targetResolveMs",
         "sendPayloadMs",
         "totalBeforeReplyMs",
@@ -680,8 +682,8 @@ def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path, monkeypatc
             return 1
         raise AssertionError(f"unexpected select attribute {name}")
 
-    monkeypatch.setattr(livebus, "_select_attr", select_attr)
-    watch = livebus._KqueueWatch()
+    monkeypatch.setattr(livebuswatch, "_select_attr", select_attr)
+    watch = livebuswatch._KqueueWatch()
     try:
         assert watch.wait((tmp_path / "a",), stop, activated=activated) is False
         armed = watch._kqueue
@@ -696,7 +698,7 @@ def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path, monkeypatc
             for call in queues[0].calls
         ] == [
             (1, 0, 0, False),
-            (0, 1, livebus.LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S, True),
+            (0, 1, livebuswatch.LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S, True),
         ]
 
         watch._arm((tmp_path / "a",))
@@ -751,10 +753,10 @@ def test_kqueue_watch_rearms_atomic_replacement_before_return(tmp_path, monkeypa
             return lambda descriptor, **_kwargs: ("watch", descriptor)
         return constants[name]
 
-    monkeypatch.setattr(livebus, "_select_attr", select_attr)
-    monkeypatch.setattr(livebus, "_KQUEUE_VNODE_FFLAGS", 15)
-    monkeypatch.setattr(livebus, "_KQUEUE_INVALIDATING_FFLAGS", 12)
-    watch = livebus._KqueueWatch()
+    monkeypatch.setattr(livebuswatch, "_select_attr", select_attr)
+    monkeypatch.setattr(livebuswatch, "_KQUEUE_VNODE_FFLAGS", 15)
+    monkeypatch.setattr(livebuswatch, "_KQUEUE_INVALIDATING_FFLAGS", 12)
+    watch = livebuswatch._KqueueWatch()
     try:
         assert watch.wait((watched,), Event()) is True
         assert len(queues) == 2
@@ -779,13 +781,15 @@ def test_watchfiles_activation_follows_native_ready_yield(tmp_path, monkeypatch)
         yield {(1, str(watched / "task-event"))}
 
     monkeypatch.setattr(
-        livebus,
+        livebuswatch,
         "import_module",
         lambda name: SimpleNamespace(watch=watch) if name == "watchfiles" else None,
     )
 
     assert (
-        livebus._wait_for_change_watchfiles((watched,), Event(), activated=activated)
+        livebuswatch._wait_for_change_watchfiles(
+            (watched,), Event(), activated=activated
+        )
         is True
     )
     assert activation_during_yields == [False, True]
@@ -802,7 +806,7 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
     no transcript append follows — so the lane watcher must wake on it and
     push the full messages payload carrying the reply card (UI-1kBrG3Lw).
     """
-    monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(livebuswatch, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)

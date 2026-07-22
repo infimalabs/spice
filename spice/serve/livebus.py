@@ -13,20 +13,23 @@ appends through a held-open handle), watchfiles covers Linux/Windows.
 from __future__ import annotations
 
 import json
-import os
-import select
 import time
 import uuid
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from importlib import import_module
 from pathlib import Path
 from queue import Queue
 from threading import Event, Lock, Thread, Timer
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 from spice.serve.messages import TranscriptResolution
+from spice.serve.livebusmutation import LiveBusMutationMixin
+from spice.serve.livebuswatch import (
+    LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S,
+    _KqueueWatch,
+    wait_for_change,
+)
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_live_bus_frame, validate_wire_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
@@ -51,41 +54,6 @@ PENDING_LANE_PAYLOAD_KEYS = (
 )
 
 
-def _select_has_attrs(*names: str) -> bool:
-    return all(hasattr(select, name) for name in names)
-
-
-def _select_attr(name: str) -> Any:
-    return getattr(select, name)
-
-
-_HAVE_KQUEUE = _select_has_attrs(
-    "kqueue",
-    "kevent",
-    "KQ_FILTER_VNODE",
-    "KQ_EV_ADD",
-    "KQ_EV_CLEAR",
-    "KQ_NOTE_WRITE",
-    "KQ_NOTE_EXTEND",
-    "KQ_NOTE_DELETE",
-    "KQ_NOTE_RENAME",
-)
-_KQUEUE_VNODE_FFLAGS: Any = 0
-_KQUEUE_INVALIDATING_FFLAGS: Any = 0
-if _HAVE_KQUEUE:
-    _KQUEUE_VNODE_FFLAGS = (
-        _select_attr("KQ_NOTE_WRITE")
-        | _select_attr("KQ_NOTE_EXTEND")
-        | _select_attr("KQ_NOTE_DELETE")
-        | _select_attr("KQ_NOTE_RENAME")
-    )
-    _KQUEUE_INVALIDATING_FFLAGS = _select_attr("KQ_NOTE_DELETE") | _select_attr(
-        "KQ_NOTE_RENAME"
-    )
-# kqueue blocks until a vnode event arrives; this bounds how long a cancelled
-# watcher waits before noticing its stop flag. It is a wakeup interval, not a
-# filesystem poll.
-LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S = 1.0
 LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
 LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S = 5.0
 LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S = 15.0
@@ -182,7 +150,7 @@ class _LaneSubscription:
     background_dirty: bool = False
 
 
-class LiveBusSession:
+class LiveBusSession(LiveBusMutationMixin):
     def __init__(
         self, connection: WebSocketConnection, callbacks: LiveBusCallbacks
     ) -> None:
@@ -206,8 +174,6 @@ class LiveBusSession:
         # responsive — replies still carry the requestId the client matches on.
         self._metrics_queue: Queue[dict[str, Any] | None] = Queue()
         self._metrics_worker: Thread | None = None
-        self._send_followup_queue: Queue[tuple[Any, dict[str, Any]] | None] = Queue()
-        self._send_followup_worker: Thread | None = None
         # A subscribe's blocking completion -- waiting out watcher activation and
         # reading the initial batch payload -- drains here off the dispatch
         # thread. Only the cheap bookkeeping (replacement, baseline signature,
@@ -231,6 +197,7 @@ class LiveBusSession:
         self._read_queues: dict[tuple[str, str], deque[Callable[[], None]]] = {}
         self._read_active: set[tuple[str, str]] = set()
         self._read_futures: set[Future[None]] = set()
+        self._init_mutation_state()
         self._submission_tracker = SubmissionLifecycleTracker()
 
     def run(self) -> None:
@@ -261,14 +228,11 @@ class LiveBusSession:
         self.subscriptions.clear()
         if self.callbacks.drop_client_cursors is not None:
             self.callbacks.drop_client_cursors(self.client_id)
+        self._teardown_mutations(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
         if self._metrics_worker is not None:
             self._metrics_queue.put(None)
             self._metrics_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._metrics_worker = None
-        if self._send_followup_worker is not None:
-            self._send_followup_queue.put(None)
-            self._send_followup_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
-            self._send_followup_worker = None
         if self._subscribe_worker is not None:
             # Stopping the subscriptions above set every watcher_activated, so a
             # parked completion unblocks; drain it before the pool it computes on
@@ -770,94 +734,6 @@ class LiveBusSession:
     def _handle_lane_history(self, message: dict[str, Any]) -> None:
         self._handle_lane_refresh(message)
 
-    def _handle_lane_send(self, message: dict[str, Any]) -> None:
-        received_at = time.perf_counter()
-        target = self._require_target(message)
-        if target is None:
-            return
-        target_resolved_at = time.perf_counter()
-        payload = message.get("payload") or {}
-        send_payload_started_at = time.perf_counter()
-        result, _status = self.callbacks.send_payload(target, payload)
-        send_payload_finished_at = time.perf_counter()
-        server_timing = _lane_send_server_timing(
-            received_at=received_at,
-            target_resolved_at=target_resolved_at,
-            send_payload_started_at=send_payload_started_at,
-            send_payload_finished_at=send_payload_finished_at,
-        )
-        result = {
-            **result,
-            "serverTiming": server_timing,
-        }
-        submission_key = str(result.get("key") or "")
-        if result.get("ok") is True and submission_key:
-            result["submission"] = self._submission_tracker.accept(
-                target_id=target.id,
-                key=submission_key,
-                evidence=str(result.get("path") or submission_key),
-            )
-        reply_timing = self._reply(
-            message,
-            {"type": "lane.sendResult", "result": result},
-            before_send=lambda wait_ms: server_timing.update(
-                {"replyLockWaitMs": wait_ms}
-            ),
-        )
-        request_id = message.get("requestId")
-        if isinstance(request_id, str) and request_id:
-            self._send(
-                {
-                    "type": "lane.sendTiming",
-                    "requestId": request_id,
-                    "serverTiming": {
-                        **server_timing,
-                        "replyLockHoldMs": reply_timing.lock_hold_ms,
-                        "replyWriteMs": reply_timing.write_ms,
-                        "totalMs": _elapsed_ms(received_at, reply_timing.finished_at),
-                    },
-                }
-            )
-        if result.get("ok") is True:
-            self._queue_lane_send_followup(target, payload)
-
-    def _queue_lane_send_followup(self, target: Any, payload: dict[str, Any]) -> None:
-        if self.callbacks.send_followup_payload is None:
-            return
-        if self._send_followup_worker is None:
-            self._send_followup_worker = Thread(
-                target=self._send_followup_loop,
-                name="spice-live-bus-send-followup",
-                daemon=True,
-            )
-            self._send_followup_worker.start()
-        self._send_followup_queue.put((target, dict(payload)))
-
-    def _send_followup_loop(self) -> None:
-        send_followup_payload = self.callbacks.send_followup_payload
-        if send_followup_payload is None:
-            return
-        while True:
-            item = self._send_followup_queue.get()
-            if item is None:
-                return
-            target, send_payload = item
-            try:
-                payload = send_followup_payload(target, send_payload)
-            except Exception as exc:
-                payload = {"error": str(exc), "messages": [], "statusLine": {}}
-            try:
-                self._send(
-                    {
-                        "type": "lane.payload",
-                        "targetId": target.id,
-                        "source": "send",
-                        "payload": payload,
-                    }
-                )
-            except (OSError, WebSocketProtocolError, WebSocketDisconnect):
-                return
-
     def _handle_lane_task_drain(self, message: dict[str, Any]) -> None:
         target = self._require_target(message)
         if target is None:
@@ -1090,327 +966,8 @@ def _pending_lane_payload(target: Any) -> dict[str, Any]:
     return validate_wire_payload("PendingLanePayload", payload)
 
 
-def _lane_send_server_timing(
-    *,
-    received_at: float,
-    target_resolved_at: float,
-    send_payload_started_at: float,
-    send_payload_finished_at: float,
-) -> dict[str, float]:
-    payload = {
-        "targetResolveMs": _elapsed_ms(received_at, target_resolved_at),
-        "sendPayloadMs": _elapsed_ms(send_payload_started_at, send_payload_finished_at),
-        "totalBeforeReplyMs": _elapsed_ms(received_at, send_payload_finished_at),
-    }
-    return validate_wire_payload("ServerTiming", payload)
-
-
 def _elapsed_ms(start: float, end: float) -> float:
     return max(0.0, (end - start) * _MS_PER_SECOND)
-
-
-def wait_for_change(
-    paths: tuple[Path, ...],
-    stop: Event,
-    watch: _KqueueWatch | None = None,
-    *,
-    activated: Event | None = None,
-) -> bool:
-    """Block until a watched path changes or `stop` is set.
-
-    A `watch` keeps the kqueue armed across calls so a change that fires
-    between calls — e.g. while the caller is pushing a payload — is kernel
-    queued and delivered on the next call instead of being lost in a reopen
-    gap. Without one (or off kqueue) the watch is opened per call. `activated`
-    is published only after the selected watcher has accepted observable paths.
-
-    Public because the lane watchers are not the only thing in serve that has
-    to wait on a file: `spice.serve.launch` waits on the task event token the
-    same way. Callers outside this module supply their own `stop`, which is
-    also how they bound the wait — set it from a deadline and this returns
-    False when that deadline arrives rather than only on a change.
-    """
-    watch_paths = _existing_watch_paths(paths)
-    if not watch_paths:
-        raise RuntimeError("file watch has no observable paths")
-    if _HAVE_KQUEUE:
-        if watch is not None:
-            return watch.wait(watch_paths, stop, activated=activated)
-        return _wait_for_change_kqueue(watch_paths, stop, activated=activated)
-    return _wait_for_change_watchfiles(watch_paths, stop, activated=activated)
-
-
-class FileChangeWatch:
-    """A native file watch that remains armed between bounded waits.
-
-    The scheduler has useful work to do between waits, but a filesystem event
-    can arrive while that work is running.  Keeping the kqueue or watchfiles
-    iterator alive makes that event pending for the next ``wait`` instead of
-    reopening the backend after the work and leaving an observe-before-arm
-    gap.  ``timeout`` bounds only the blocking call; it never closes the
-    underlying native watch.
-    """
-
-    def __init__(self) -> None:
-        self._kqueue = _KqueueWatch() if _HAVE_KQUEUE else None
-        self._watchfiles_paths: tuple[Path, ...] = ()
-        self._watchfiles_stop: Event | None = None
-        self._watchfiles_changes: Any = None
-
-    def wait(
-        self,
-        paths: tuple[Path, ...],
-        stop: Event,
-        *,
-        timeout: float | None = None,
-        activated: Event | None = None,
-    ) -> bool:
-        """Wait for one change while preserving native registration on return."""
-        watch_paths = _existing_watch_paths(paths)
-        if not watch_paths:
-            raise RuntimeError("file watch has no observable paths")
-        if self._kqueue is not None:
-            return self._kqueue.wait(
-                watch_paths,
-                stop,
-                timeout=timeout,
-                activated=activated,
-            )
-        return self._wait_watchfiles(
-            watch_paths,
-            stop,
-            timeout=timeout,
-            activated=activated,
-        )
-
-    def _wait_watchfiles(
-        self,
-        paths: tuple[Path, ...],
-        stop: Event,
-        *,
-        timeout: float | None,
-        activated: Event | None,
-    ) -> bool:
-        if paths != self._watchfiles_paths or stop is not self._watchfiles_stop:
-            self._close_watchfiles()
-            module = import_module("watchfiles")
-            watch = cast(Callable[..., Any], getattr(module, "watch"))
-            self._watchfiles_changes = watch(
-                *paths,
-                stop_event=stop,
-                rust_timeout=int(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S * _MS_PER_SECOND),
-                yield_on_timeout=True,
-            )
-            self._watchfiles_paths = paths
-            self._watchfiles_stop = stop
-
-        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
-        while not stop.is_set():
-            try:
-                observed = next(self._watchfiles_changes)
-            except StopIteration:
-                self._close_watchfiles()
-                if stop.is_set():
-                    return False
-                raise RuntimeError("file watcher stopped before cancellation") from None
-            if activated is not None:
-                # The first yield follows construction of RustNotify.  Leaving
-                # the generator suspended here keeps that native watch alive.
-                activated.set()
-            if observed:
-                return True
-            if deadline is not None and time.monotonic() >= deadline:
-                return False
-        return False
-
-    def _close_watchfiles(self) -> None:
-        if self._watchfiles_changes is not None:
-            self._watchfiles_changes.close()
-        self._watchfiles_paths = ()
-        self._watchfiles_stop = None
-        self._watchfiles_changes = None
-
-    def close(self) -> None:
-        """Release the selected backend's native resources."""
-        if self._kqueue is not None:
-            self._kqueue.close()
-        self._close_watchfiles()
-
-
-class _KqueueWatch:
-    """A kqueue VNODE watch kept armed across waits.
-
-    The fd set and kqueue are rebuilt only when the watched paths change;
-    otherwise the same armed kqueue is reused, so vnode events that fire while
-    the caller is between waits stay queued in the kernel and surface on the
-    next wait. Not a poll: each wait blocks on `kqueue.control`.
-    """
-
-    def __init__(self) -> None:
-        self._paths: tuple[Path, ...] = ()
-        self._descriptors: list[int] = []
-        self._kqueue: Any = None
-        self._events: list[Any] = []
-
-    def wait(
-        self,
-        paths: tuple[Path, ...],
-        stop: Event,
-        *,
-        timeout: float | None = None,
-        activated: Event | None = None,
-    ) -> bool:
-        self._arm(paths)
-        if not self._events:
-            raise RuntimeError("lane watcher could not open observable paths")
-        if activated is not None:
-            activated.set()
-        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
-        while not stop.is_set():
-            wait_seconds = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
-                    return False
-                wait_seconds = min(wait_seconds, remaining)
-            triggered = self._kqueue.control([], len(self._events), wait_seconds)
-            if triggered:
-                if any(
-                    getattr(event, "fflags", 0) & _KQUEUE_INVALIDATING_FFLAGS
-                    for event in triggered
-                ):
-                    # Atomic replace reports rename/delete on the descriptor
-                    # for the unlinked old inode. Rebuild immediately on the
-                    # same path names so the replacement inode is observable
-                    # while the caller computes and pushes this change.
-                    self.close()
-                    self._arm(paths)
-                    if not self._events:
-                        raise RuntimeError(
-                            "lane watcher could not rearm invalidated paths"
-                        )
-                return True
-        return False
-
-    def _arm(self, paths: tuple[Path, ...]) -> None:
-        if paths == self._paths and self._kqueue is not None:
-            return
-        self.close()
-        self._paths = paths
-        descriptors: list[int] = []
-        for path in paths:
-            try:
-                descriptors.append(os.open(path, os.O_RDONLY))
-            except OSError:
-                continue
-        if not descriptors:
-            return
-        self._descriptors = descriptors
-        self._kqueue = _select_attr("kqueue")()
-        self._events = [
-            _select_attr("kevent")(
-                descriptor,
-                filter=_select_attr("KQ_FILTER_VNODE"),
-                flags=_select_attr("KQ_EV_ADD") | _select_attr("KQ_EV_CLEAR"),
-                fflags=_KQUEUE_VNODE_FFLAGS,
-            )
-            for descriptor in descriptors
-        ]
-        # Submit the changelist separately from the first blocking wait. Only
-        # after this call returns can the activation marker truthfully promise
-        # that subsequent filesystem edits are observable by the kernel queue.
-        self._kqueue.control(self._events, 0, 0)
-
-    def close(self) -> None:
-        if self._kqueue is not None:
-            self._kqueue.close()
-            self._kqueue = None
-        for descriptor in self._descriptors:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
-        self._descriptors = []
-        self._events = []
-        self._paths = ()
-
-
-def _existing_watch_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
-    result: list[Path] = []
-    seen: set[Path] = set()
-    for path in paths:
-        if not path.exists() or path in seen:
-            continue
-        seen.add(path)
-        result.append(path)
-    return tuple(result)
-
-
-def _wait_for_change_kqueue(
-    paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
-) -> bool:
-    import os
-
-    descriptors: list[int] = []
-    try:
-        for path in paths:
-            try:
-                descriptors.append(os.open(path, os.O_RDONLY))
-            except OSError:
-                continue
-        if not descriptors:
-            raise RuntimeError("lane watcher could not open observable paths")
-        kqueue = _select_attr("kqueue")()
-        try:
-            events = [
-                _select_attr("kevent")(
-                    descriptor,
-                    filter=_select_attr("KQ_FILTER_VNODE"),
-                    flags=_select_attr("KQ_EV_ADD") | _select_attr("KQ_EV_CLEAR"),
-                    fflags=_KQUEUE_VNODE_FFLAGS,
-                )
-                for descriptor in descriptors
-            ]
-            kqueue.control(events, 0, 0)
-            if activated is not None:
-                activated.set()
-            while not stop.is_set():
-                triggered = kqueue.control(
-                    [], len(events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
-                )
-                if triggered:
-                    return True
-            return False
-        finally:
-            kqueue.close()
-    finally:
-        for descriptor in descriptors:
-            os.close(descriptor)
-
-
-def _wait_for_change_watchfiles(
-    paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
-) -> bool:
-    module = import_module("watchfiles")
-    watch = cast(Callable[..., Any], getattr(module, "watch"))
-
-    changes = watch(
-        *paths,
-        stop_event=stop,
-        rust_timeout=int(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S * _MS_PER_SECOND),
-        yield_on_timeout=True,
-    )
-    for observed in changes:
-        if activated is not None and not activated.is_set():
-            # The generator creates RustNotify before its first event/timeout;
-            # it stays open across yields, so this is a native-ready signal and
-            # does not introduce a reopen interval before subsequent changes.
-            activated.set()
-        if observed:
-            return True
-    if activated is not None and not activated.is_set():
-        raise RuntimeError("lane watcher stopped before native registration")
-    return False
 
 
 def _bounded_int(value: Any, default: int) -> int:

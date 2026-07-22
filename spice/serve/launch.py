@@ -28,7 +28,7 @@ from typing import Any
 
 from spice.mail.inbox import ensure_inbox_event_file
 from spice.serve.agentapi import AVAILABLE_WORK_STARVATION_SECONDS
-from spice.serve.livebus import FileChangeWatch
+from spice.serve.livebuswatch import FileChangeWatch
 from spice.serve.payload.identity import resolve_thread_id_for_target
 from spice.serve.worktree.inventory import ensure_work_tree_agent
 from spice.tasks import config

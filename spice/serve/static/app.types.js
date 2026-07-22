@@ -649,6 +649,7 @@
 
 /**
  * @typedef {Object} ServerTiming
+ * @property {number=} mutationQueueMs
  * @property {number=} targetResolveMs
  * @property {number=} sendPayloadMs
  * @property {number=} totalBeforeReplyMs
