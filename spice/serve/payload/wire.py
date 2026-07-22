@@ -377,6 +377,8 @@ WIRE_OBJECTS = (
             "processGroupId": INTEGER,
             "threadId": STRING,
             "serviceTier": STRING,
+            "readyAt": STRING,
+            "startupFailure": STRING,
             "prompt": STRING,
             "logPath": STRING,
             "failure": STRING,
@@ -409,7 +411,11 @@ WIRE_OBJECTS = (
             "bindingStatus": STRING,
             "bindingError": STRING,
         },
-        {"restartRefusal": _ref("RestartRefusal")},
+        {
+            "restartRefusal": _ref("RestartRefusal"),
+            "readyAt": STRING,
+            "startupFailure": STRING,
+        },
     ),
     _object(
         "LanePayload",

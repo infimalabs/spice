@@ -15,6 +15,20 @@
   --agent-status-halo-color: color-mix(in srgb, #2f9e44 18%, transparent);
 }
 
+.agent-status-pip[data-agent-status="starting"],
+.composer-quote-time[data-agent-status="starting"] {
+  --agent-status-color: #3b82f6;
+  --agent-status-halo-color: color-mix(in srgb, #3b82f6 20%, transparent);
+}
+
+.agent-status-pip[data-agent-status="stopping"],
+.composer-quote-time[data-agent-status="stopping"],
+.agent-status-pip[data-agent-status="startup-stalled"],
+.composer-quote-time[data-agent-status="startup-stalled"] {
+  --agent-status-color: #d64545;
+  --agent-status-halo-color: color-mix(in srgb, #d64545 20%, transparent);
+}
+
 .agent-status-pip[data-agent-status="running-stale"],
 .composer-quote-time[data-agent-status="running-stale"] {
   --agent-status-color: #d99a00;

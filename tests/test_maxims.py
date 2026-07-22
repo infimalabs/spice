@@ -586,10 +586,14 @@ def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
     )
     process = _FakeProcess(stdout=io.StringIO("codex\nalpha beta\nexec\n"))
     log_path = repo / "supervisor.log"
+    activities: list[str] = []
 
-    watchdog._tee_agent_stdout(process, repo, log_path)
+    watchdog._tee_agent_stdout(
+        process, repo, log_path, lambda: activities.append("activity")
+    )
 
     items = collect_inbox_items(repo)
+    assert activities == ["activity", "activity"]
     assert [item.name for item in items] == ["1jNXjwdF.txt"]
     assert "operator steering" in items[0].text
     assert "spice maxim supervisor cleanup discarded inbox:" in log_path.read_text(

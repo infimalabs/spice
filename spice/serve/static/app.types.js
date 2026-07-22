@@ -345,6 +345,8 @@
  * @property {number=} processGroupId
  * @property {string=} threadId
  * @property {string=} serviceTier
+ * @property {string=} readyAt
+ * @property {string=} startupFailure
  * @property {string=} prompt
  * @property {string=} logPath
  * @property {string=} failure
@@ -376,6 +378,8 @@
  * @property {string} bindingStatus
  * @property {string} bindingError
  * @property {RestartRefusal=} restartRefusal
+ * @property {string=} readyAt
+ * @property {string=} startupFailure
  */
 
 /**

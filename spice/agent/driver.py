@@ -73,6 +73,9 @@ class AgentDriver:
     stdout_section_markers: frozenset[str]
     stdout_compaction_marker: str
     session_id_pattern: re.Pattern[str]
+    # Additional marker-format sections that prove first-turn activity even
+    # when the agent calls a tool before emitting prose.
+    stdout_activity_markers: frozenset[str] = frozenset()
     default_context_window: int = 0
     out_of_credits_patterns: tuple[re.Pattern[str], ...] = ()
     # How the supervisor reassembles assistant messages from `exec` stdout:
@@ -1154,6 +1157,7 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     ),
     stdout_compaction_marker="context compacted",
     session_id_pattern=re.compile(r"^session id:\s*(\S+)\s*$", re.MULTILINE),
+    stdout_activity_markers=frozenset({"context compacted", "exec"}),
     out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
     post_tool_hook=PostToolHookCapability(
         config_surface="Codex config.toml hooks.PostToolUse",

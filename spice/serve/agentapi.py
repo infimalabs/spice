@@ -48,6 +48,8 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
         "model": status.model,
         "effort": status.reasoning_effort,
         "serviceTier": status.service_tier,
+        "readyAt": str(getattr(status, "ready_at", "") or ""),
+        "startupFailure": str(getattr(status, "startup_failure", "") or ""),
         "launchable": not status.running,
         "bindingStatus": "mismatch"
         if binding_error
@@ -110,6 +112,8 @@ def agent_ensure_payload(result: Any) -> dict[str, Any]:
         "processGroupId": result.status.process_group_id or 0,
         "threadId": result.status.thread_id,
         "serviceTier": result.status.service_tier,
+        "readyAt": str(getattr(result.status, "ready_at", "") or ""),
+        "startupFailure": str(getattr(result.status, "startup_failure", "") or ""),
         "prompt": result.prompt,
         "logPath": str(result.log_path) if result.log_path else "",
     }

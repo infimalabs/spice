@@ -569,6 +569,19 @@ def test_static_relative_times_are_monospace_and_padded():
     assert "font-variant-numeric: tabular-nums;" in css
 
 
+def test_static_agent_status_distinguishes_starting_and_startup_stalled():
+    css = _serve_css_text()
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+
+    assert 'if (status === "starting") return "agent starting";' in app_render
+    assert (
+        'if (status === "startup-stalled") return "agent startup stalled";'
+        in app_render
+    )
+    assert '[data-agent-status="starting"]' in css
+    assert '[data-agent-status="startup-stalled"]' in css
+
+
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
     app_shell = _shell_and_composer_text()
 

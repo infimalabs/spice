@@ -62,10 +62,11 @@ def launch_refusal(
 ) -> dict[str, Any] | None:
     """Why automatic restarts are refused right now, or None when they may run.
 
-    Message-agnostic by design: only how long launches lived and the recorded
-    rate-limit reset horizon matter — never the failure text or classified
-    kind. The trailing run of journal outcomes that each died under
-    RAPID_DEATH_LIFETIME_SECONDS is the signal; once it reaches
+    Message-agnostic by design: launch lifetime and the recorded rate-limit
+    reset horizon are the ordinary signals, never failure prose. A trailing
+    outcome that died under RAPID_DEATH_LIFETIME_SECONDS counts as rapid; a
+    supervised ``startup-stalled`` classification also counts because its
+    intentional readiness grace can exceed that threshold. Once the run reaches
     RAPID_DEATH_REFUSAL_THRESHOLD, automatic ensures hold off until
     RAPID_DEATH_REFUSAL_WINDOW_SECONDS pass the newest death — or until the
     largest recorded reset epoch, when the account itself named the retry
@@ -77,7 +78,8 @@ def launch_refusal(
         lifetime = outcome.get("lifetime_seconds")
         if not isinstance(lifetime, (int, float)):
             break
-        if float(lifetime) >= RAPID_DEATH_LIFETIME_SECONDS:
+        startup_stalled = outcome.get("failure_kind") == "startup-stalled"
+        if float(lifetime) >= RAPID_DEATH_LIFETIME_SECONDS and not startup_stalled:
             break
         rapid.append(outcome)
     if len(rapid) < RAPID_DEATH_REFUSAL_THRESHOLD:
@@ -141,12 +143,17 @@ def supervised_launch_outcome(
     started_at: str,
     lifetime_seconds: float,
     exit_code: int | None,
+    failure_kind: str = "",
 ) -> dict[str, Any]:
     scan = scan_launch_log(repo_root, log_path)
-    kind = str(scan.get("kind") or "") or agent_process_failure_kind(
-        repo_root,
-        exit_code=int(exit_code or 0),
-        output=tail_text(log_path, STARTUP_LOG_TAIL_BYTES),
+    kind = (
+        failure_kind
+        or str(scan.get("kind") or "")
+        or agent_process_failure_kind(
+            repo_root,
+            exit_code=int(exit_code or 0),
+            output=tail_text(log_path, STARTUP_LOG_TAIL_BYTES),
+        )
     )
     outcome: dict[str, Any] = {
         "thread_id": thread_id,
