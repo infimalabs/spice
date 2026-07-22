@@ -44,6 +44,7 @@ STATE_GITIGNORE_CONTENT = (
 HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
 INIT_RECEIPT_RELATIVE_PATH = Path(STATE_DIRNAME) / "init-receipt.json"
 INIT_RECEIPT_MODE = 0o600
+UNINIT_RECEIPT_FILENAME = "spice-uninit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
 FILE_MODE_MAX = 0o7777
 
@@ -69,6 +70,7 @@ class InitOperationScope(StrEnum):
 class InitReceiptStatus(StrEnum):
     APPLYING = "applying"
     COMPLETE = "complete"
+    UNINITIALIZING = "uninitializing"
 
 
 @dataclass(frozen=True)
@@ -327,14 +329,24 @@ def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None
             f"could not read initialization receipt {path}: {exc}"
         ) from exc
     try:
-        return _receipt_from_payload(payload)
+        return initialization_receipt_from_payload(payload)
     except (KeyError, TypeError, ValueError) as exc:
         raise SpiceError(f"invalid initialization receipt {path}: {exc}") from exc
 
 
 def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
     """Apply one plan with an atomically updated receipt after every operation."""
+    if (git_dir(plan.repo_root) / UNINIT_RECEIPT_FILENAME).is_file():
+        raise SpiceError(
+            "initialization cannot run while an interrupted uninitialization "
+            "receipt is active; run `spice uninit` to resume it"
+        )
     existing = load_initialization_receipt(plan.repo_root)
+    if existing is not None and existing.status is InitReceiptStatus.UNINITIALIZING:
+        raise SpiceError(
+            "initialization cannot run while an interrupted uninitialization "
+            "receipt is active; run `spice uninit` to resume it"
+        )
     receipt = _receipt_for_plan(plan, existing)
     plan_by_key = {
         _operation_key(operation): operation for operation in plan.operations
@@ -363,7 +375,7 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
     ):
         return existing
 
-    _write_initialization_receipt(receipt)
+    write_initialization_receipt(receipt)
     operations = list(receipt.operations)
     positions = {
         _operation_key(receipt_operation.operation): index
@@ -379,7 +391,7 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
         if not operations[position].completed:
             operations[position] = replace(operations[position], completed=True)
             receipt = replace(receipt, operations=tuple(operations))
-            _write_initialization_receipt(receipt)
+            write_initialization_receipt(receipt)
 
     status = (
         InitReceiptStatus.COMPLETE
@@ -387,7 +399,7 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
         else InitReceiptStatus.APPLYING
     )
     receipt = replace(receipt, status=status, operations=tuple(operations))
-    _write_initialization_receipt(receipt)
+    write_initialization_receipt(receipt)
     return receipt
 
 
@@ -508,7 +520,9 @@ def _operation_from_payload(payload: dict[str, object]) -> InitOperation:
     )
 
 
-def _receipt_from_payload(payload: dict[str, object]) -> InitializationReceipt:
+def initialization_receipt_from_payload(
+    payload: dict[str, object],
+) -> InitializationReceipt:
     if payload["schema_version"] != 1:
         raise ValueError(f"unsupported schema version {payload['schema_version']!r}")
     plan_schema_version = _required_int(payload["plan_schema_version"])
@@ -630,7 +644,7 @@ def _merge_receipt_operation(
     return InitReceiptOperation(operation=operation, completed=completed)
 
 
-def _write_initialization_receipt(receipt: InitializationReceipt) -> None:
+def write_initialization_receipt(receipt: InitializationReceipt) -> None:
     path = initialization_receipt_path(receipt.repo_root)
     content = (
         json.dumps(

@@ -124,6 +124,10 @@ reference guard. Commit normally to run the gates, or invoke the staged gate
 directly with `spice dev pre-commit`. Add `--json` to either dry-run form for
 the same ordered operations as a versioned machine-readable plan. Apply stores
 its interruption-safe ownership receipt under `.spice/init-receipt.json`.
+Run `spice uninit` to reverse that receipt in exact reverse order. Spice restores
+only files, modes, and scoped Git values that still match its recorded output;
+`spice uninit --json` reports edited or shared values with a Git-private
+recovery handle.
 
 **Steer** materializes the full steering and fleet surfaces. `spice init` writes
 the agent skill, shell wrapper, and steering surfaces into the repo, and
@@ -151,6 +155,7 @@ spice task next
 | Preview repository initialization | `spice init --dry-run [--json]` |
 | Install constitution gates only | `spice init --gates` |
 | Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
+| Safely reverse initialized state | `spice uninit [--json]` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Pull allocator work | `spice task next` |
