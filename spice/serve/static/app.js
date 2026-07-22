@@ -215,6 +215,18 @@ function applyGlobalSettingsPayload(settings) {
 // broken init in silence.
 const serveLifecycle = { state: "booting", reason: "" };
 /** @type {any} */ (window).__spiceServeLifecycle = serveLifecycle;
+const liveRelativeTimeDiagnostics = {
+  startedAt: 0,
+  lastTickAt: 0,
+  tickCount: 0,
+  lastGapMs: 0,
+  maxGapMs: 0,
+  lastDurationMs: 0,
+  maxDurationMs: 0,
+};
+/** @type {any} */ (window).__spiceRelativeTimeDiagnostics =
+  liveRelativeTimeDiagnostics;
+let liveRelativeTimeTimer = null;
 
 function setServeLifecycle(state, reason = "") {
   serveLifecycle.state = state;
@@ -227,8 +239,43 @@ function serveLifecycleFailureReason(error) {
   return message || "serve initialization failed";
 }
 
+function runLiveRelativeTimeTick() {
+  const tickAt = Date.now();
+  const startedAt = performance.now();
+  const previousTickAt = liveRelativeTimeDiagnostics.lastTickAt;
+  const gapMs = previousTickAt ? tickAt - previousTickAt : 0;
+  updateLiveRelativeTimes();
+  const durationMs = performance.now() - startedAt;
+  liveRelativeTimeDiagnostics.lastTickAt = tickAt;
+  liveRelativeTimeDiagnostics.tickCount += 1;
+  liveRelativeTimeDiagnostics.lastGapMs = gapMs;
+  liveRelativeTimeDiagnostics.maxGapMs = Math.max(
+    liveRelativeTimeDiagnostics.maxGapMs,
+    gapMs,
+  );
+  liveRelativeTimeDiagnostics.lastDurationMs = durationMs;
+  liveRelativeTimeDiagnostics.maxDurationMs = Math.max(
+    liveRelativeTimeDiagnostics.maxDurationMs,
+    durationMs,
+  );
+}
+
+function startLiveRelativeTimeTicker() {
+  if (liveRelativeTimeTimer !== null) return;
+  liveRelativeTimeDiagnostics.startedAt = Date.now();
+  runLiveRelativeTimeTick();
+  liveRelativeTimeTimer = setInterval(
+    runLiveRelativeTimeTick,
+    relativeTimeTickMs,
+  );
+}
+
 async function init() {
   installLiveBusLaneFocusTracking();
+  // Relative ages are a browser-local clock. Start it before any server work so
+  // slow target discovery or topology reads cannot freeze already-visible time
+  // labels until the next payload happens to repaint them.
+  startLiveRelativeTimeTicker();
   try {
     await connectLiveBus();
     await refreshServerTopology();
@@ -241,7 +288,6 @@ async function init() {
     return;
   }
   setServeLifecycle("ready");
-  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);
 }
 
 window.addEventListener("error", (event) => {
