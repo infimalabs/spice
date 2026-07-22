@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Sequence
 
@@ -248,7 +249,6 @@ def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
     thread_id: str,
-    ready_since_cache: dict[tuple[str, str], float] | None = None,
     attempt_cache: dict[str, float] | None = None,
     retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
@@ -256,7 +256,7 @@ def ensure_agent_for_available_work(
 ) -> dict[str, Any] | None:
     """Claim one task as a stopped lane's actor, then start only that lane.
 
-    Expansion requires two ready tasks unless one candidate has remained ready
+    Expansion requires two ready tasks unless one candidate has been waiting
     for the starvation interval. READY rows exclude active claims, so this
     fixed threshold starts one lane and leaves one task on the board regardless
     of how many lanes are already working. Two rows are an immediate capacity
@@ -275,26 +275,16 @@ def ensure_agent_for_available_work(
     if not actor:
         return _available_work_skip("unbound")
     if agent_status(target.repo_root).running:
-        forget_available_work_observations(actor, ready_since_cache)
         return None
     with _AVAILABLE_WORK_CLAIM_LOCK:
         if agent_status(target.repo_root).running:
-            forget_available_work_observations(actor, ready_since_cache)
             return None
         candidates = alloc.ordered_visible_ready_rows(actor)
         if not candidates:
-            forget_available_work_observations(actor, ready_since_cache)
             return None
-        now = time.monotonic()
-        starved = _observe_available_work_candidates(
-            actor,
-            candidates,
-            ready_since_cache,
-            now=now,
-            wall_now=time.time(),
-        )
-        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and not starved:
-            return _available_work_skip("capacity")
+        remaining = available_work_next_deadline(candidates, now=datetime.now(UTC))
+        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and remaining > 0.0:
+            return _available_work_skip("capacity", retry_after_seconds=remaining)
         # Read after the board, not before it: a pass that declines above spends
         # nothing here, so a second row arriving mid-interval finds the interval
         # unspent and dispatches on arrival. What it does bound is attempts,
@@ -335,97 +325,50 @@ def ensure_agent_for_available_work(
             )
         except Exception:
             claimstate.release_claim(task_uuid, actor)
-            forget_available_work_observation(actor, task_uuid, ready_since_cache)
             raise
         payload.update({"trigger": "available-work", "taskHandle": handle})
         if payload.get("ok") is False:
             # The launch was attempted and refused -- out of credits, or the
             # restart guard. Releasing its claim is a new READY transition;
-            # release_claim stamps that durable origin, and dropping this
-            # projection makes the next event-driven evaluation read it.
+            # release_claim stamps that durable origin for the next watcher
+            # evaluation.
             payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
-            forget_available_work_observation(actor, task_uuid, ready_since_cache)
-            return payload
-        # Only a lane that actually started stops being a reason to watch this
-        # task: its claim takes the row out of READY.
-        forget_available_work_observation(actor, task_uuid, ready_since_cache)
         return payload
 
 
-def _observe_available_work_candidates(
-    actor: str,
-    candidates: Sequence[dict[str, Any]],
-    ready_since_cache: dict[tuple[str, str], float] | None,
-    *,
-    now: float,
-    wall_now: float,
-) -> bool:
-    if ready_since_cache is None:
-        return False
-    candidate_keys = {(actor, identity.uuid_of(row)) for row in candidates}
-    for key in tuple(ready_since_cache):
-        if key[0] == actor and key not in candidate_keys:
-            ready_since_cache.pop(key, None)
-    candidates_by_key = {(actor, identity.uuid_of(row)): row for row in candidates}
-    for key, row in candidates_by_key.items():
-        age = max(0.0, wall_now - readiness.queue_ready_epoch(row))
-        # The durable task stamp is authoritative. Re-project it on every read
-        # so a later READY transition refreshes this monotonic deadline even
-        # when the server process and its cache survived the transition.
-        ready_since_cache[key] = now - age
-    return any(
-        now - ready_since_cache[key] >= AVAILABLE_WORK_STARVATION_SECONDS
-        for key in candidate_keys
-    )
+def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> float:
+    """How long this task has been waiting for a lane, read off the row itself.
+
+    The durable origin is the task's current READY transition, not the moment
+    the task was conceived. Native Taskwarrior timestamps cover the initial
+    transition, while Spice's ``ready_at`` UDA records later entries into READY.
+    The inception stamp remains only a compatibility fallback for legacy rows.
+    """
+    return max(0.0, now.timestamp() - readiness.queue_ready_epoch(row))
 
 
 def available_work_next_deadline(
-    ready_since_cache: dict[tuple[str, str], float] | None,
+    candidates: Sequence[dict[str, Any]],
     *,
-    now: float,
+    now: datetime,
     starvation_seconds: float = AVAILABLE_WORK_STARVATION_SECONDS,
 ) -> float:
-    """Seconds until the oldest candidate on watch reaches the starvation escape.
+    """Seconds until the oldest candidate reaches the starvation escape.
 
-    With nothing on watch the answer is the whole interval, which is the longest
-    a task filed a moment from now could have to wait. Read under the claim lock
-    that owns the cache, so a start happening in another thread cannot resize the
-    mapping mid-read.
+    Zero or less means the escape is already open. With no candidates the answer
+    is the whole interval, which is the longest a task filed a moment from now
+    could have to wait.
     """
-    with _AVAILABLE_WORK_CLAIM_LOCK:
-        oldest = (
-            min(ready_since_cache.values(), default=None) if ready_since_cache else None
-        )
-    if oldest is None:
-        return starvation_seconds
-    return starvation_seconds - (now - oldest)
+    oldest = max(
+        (available_work_queue_age_seconds(row, now=now) for row in candidates),
+        default=0.0,
+    )
+    return starvation_seconds - oldest
 
 
-def forget_available_work_observation(
-    actor: str,
-    task_uuid: str,
-    ready_since_cache: dict[tuple[str, str], float] | None,
-) -> None:
-    resolved_actor = canonical_thread_id(actor)
-    if ready_since_cache is not None and resolved_actor:
-        with _AVAILABLE_WORK_CLAIM_LOCK:
-            ready_since_cache.pop((resolved_actor, task_uuid), None)
-
-
-def forget_available_work_observations(
-    actor: str,
-    ready_since_cache: dict[tuple[str, str], float] | None,
-) -> None:
-    resolved_actor = canonical_thread_id(actor)
-    if ready_since_cache is None or not resolved_actor:
-        return
-    with _AVAILABLE_WORK_CLAIM_LOCK:
-        for key in tuple(ready_since_cache):
-            if key[0] == resolved_actor:
-                ready_since_cache.pop(key, None)
-
-
-def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any]:
+def _available_work_skip(
+    reason: str, *, task_handle: str = "", retry_after_seconds: float | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": True,
         "action": "skipped",
@@ -434,6 +377,8 @@ def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any
     }
     if task_handle:
         payload["taskHandle"] = task_handle
+    if retry_after_seconds is not None:
+        payload["retryAfterSeconds"] = retry_after_seconds
     return payload
 
 

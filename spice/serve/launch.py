@@ -16,19 +16,18 @@ further will be written on its behalf, and the bound is what lets that age arriv
 
 Starting still runs through the inventory's shared launch decision -- the same
 pending-inbox retry/renewal behavior and the same available-work claim lock,
-ready-since observations, and retry gate -- so a wake here and an inventory
-build in a request thread converge on the same guarded operations.
+starvation escape, and retry gate -- so a wake here and an inventory build in a
+request thread converge on the same guarded operations.
 """
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
 from spice.mail.inbox import ensure_inbox_event_file
-from spice.serve.agentapi import available_work_next_deadline
+from spice.serve.agentapi import AVAILABLE_WORK_STARVATION_SECONDS
 from spice.serve.livebus import FileChangeWatch
 from spice.serve.payload.identity import resolve_thread_id_for_target
 from spice.serve.worktree.inventory import ensure_work_tree_agent
@@ -137,10 +136,17 @@ class AvailableWorkWatch:
     def evaluate(self) -> float:
         """Start lanes for steering or Drain work, then bound the next look."""
         state = self._state
+        # Nothing declined for capacity means nothing is waiting on an age to
+        # arrive, and the whole interval is the longest a task filed a moment
+        # from now could have to wait.
+        remaining = AVAILABLE_WORK_STARVATION_SECONDS
         for target in state.worktree_targets():
             thread_id = resolve_thread_id_for_target(state, target) or ""
-            ensure_work_tree_agent(state, target, thread_id)
-        remaining = available_work_next_deadline(
-            state.available_work_ready_since, now=time.monotonic()
-        )
+            *_, agent_ensure = ensure_work_tree_agent(state, target, thread_id)
+            # The lane that declined is the one holding the oldest candidate's
+            # deadline: it already read the rows under the claim lock, so the
+            # wake it needs rides back out with the refusal instead of costing
+            # this thread a second export of the same board.
+            if agent_ensure is not None and "retryAfterSeconds" in agent_ensure:
+                remaining = min(remaining, float(agent_ensure["retryAfterSeconds"]))
         return max(remaining, AVAILABLE_WORK_WATCH_MIN_SECONDS)
