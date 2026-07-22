@@ -84,6 +84,7 @@ from spice.serve.workroutes import (
     work_tree_task_drain_response_payload,
 )
 from spice.serve.worktree.target import (
+    WorktreeDiscoveryError,
     WorktreeTarget,
     discover_serve_worktrees,
 )
@@ -151,6 +152,13 @@ class ServeState:
         self.cache_lock = Lock()
         self.cached_thread_ids: dict[str, str] = {}
         self.cached_targets: list[WorktreeTarget] | None = None
+        # `cached_targets` is cleared by every invalidate_targets() -- which the
+        # live-bus targets push does before each build -- so it is empty exactly
+        # when discovery fails. `last_known_targets` survives invalidation and is
+        # what keeps a transient `git worktree list` failure from shipping a
+        # short workTrees list that the client reads as "those lanes are gone".
+        self.last_known_targets: list[WorktreeTarget] = []
+        self.targets_discovery_error = ""
         self.rollout_cursors: dict[tuple[str, str], RolloutCursor] = {}
         self.pending_agent_ensure_attempts: dict[str, float] = {}
         self.http_request_counts: dict[tuple[str, str], int] = {}
@@ -187,13 +195,28 @@ class ServeState:
         with self.cache_lock:
             if self.cached_targets is not None:
                 return self.cached_targets
-        targets = discover_serve_worktrees(
-            cwd=self.anchor_root, fallback_roots=[self.anchor_root]
-        )
+        try:
+            targets = discover_serve_worktrees(
+                cwd=self.anchor_root, fallback_roots=[self.anchor_root]
+            )
+        except WorktreeDiscoveryError as exc:
+            # Hold the last list we actually observed and report the failure;
+            # do not cache it, so the next build retries discovery.
+            with self.cache_lock:
+                self.targets_discovery_error = str(exc)
+                return list(self.last_known_targets)
         with self.cache_lock:
+            self.targets_discovery_error = ""
+            self.last_known_targets = list(targets)
             if self.cached_targets is None:
                 self.cached_targets = targets
             return self.cached_targets
+
+    def targets_discovery_errors(self) -> list[str]:
+        with self.cache_lock:
+            return (
+                [self.targets_discovery_error] if self.targets_discovery_error else []
+            )
 
     def invalidate_targets(self) -> None:
         with self.cache_lock:

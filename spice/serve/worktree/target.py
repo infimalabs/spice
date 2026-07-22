@@ -7,10 +7,15 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.errors import SpiceError
 from spice.worktrees import WorktreeRecord, list_worktrees
 
 _WORKTREE_ID_RE = re.compile(r"[^a-z0-9]+")
 _WORKTREE_ID_DIGEST_CHARS = 8
+
+
+class WorktreeDiscoveryError(SpiceError):
+    """Raised when the registered worktree list could not be read at all."""
 
 
 @dataclass(frozen=True)
@@ -108,10 +113,13 @@ def read_worktree_branch_name(repo_root: Path) -> str:
 
 
 def _registered_worktree_records(cwd: Path) -> list[WorktreeRecord]:
+    # A failed `git worktree list` is not an empty repository. Swallowing it
+    # into [] made every lane look deleted, and the client closes lanes that
+    # have no target -- destroying live state over a transient git error.
     try:
         return list_worktrees(cwd=cwd)
-    except RuntimeError:
-        return []
+    except RuntimeError as exc:
+        raise WorktreeDiscoveryError(str(exc)) from exc
 
 
 def _target_from_record(record: WorktreeRecord) -> WorktreeTarget:

@@ -15,8 +15,10 @@ from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
+from spice.serve.worktree import target
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config
+from spice.worktrees import WorktreeRecord
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_A = f"thread:{THREAD_A}"
@@ -198,6 +200,59 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
     assert result["route"]["taskFilters"] == ["serve.ui"]
     assert result["route"]["lifetime"] == "Drain"
     assert [member.agent_id for member in members] == [ACTOR_A]
+
+
+def test_worktree_discovery_failure_keeps_prior_targets_and_reports_it(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
+    _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
+    monkeypatch.setattr(
+        target,
+        "list_worktrees",
+        lambda **_kwargs: [WorktreeRecord(path=repo, branch="refs/heads/main")],
+    )
+
+    healthy = inventory.work_trees_payload(state)
+
+    def refuse_to_list(**_kwargs):
+        raise RuntimeError("could not list git worktrees from repo")
+
+    monkeypatch.setattr(target, "list_worktrees", refuse_to_list)
+    # The live-bus targets push invalidates before every build, so the failure
+    # lands with the per-build cache already cleared -- exactly the window in
+    # which discovery used to collapse to [] and the client closed every lane.
+    state.invalidate_targets()
+    degraded = inventory.work_trees_payload(state)
+
+    healthy_ids = [tree["id"] for tree in healthy["workTrees"]]
+    assert healthy_ids == sorted(healthy_ids)
+    assert len(healthy_ids) == 2
+    assert healthy.get("targetsDiscoveryErrors", []) == []
+    # The failed listing keeps the worktrees it last observed, so the payload
+    # stays the same size and the client is told why rather than shown a gap.
+    assert [tree["id"] for tree in degraded["workTrees"]] == healthy_ids
+    assert degraded["defaultTargetId"] == healthy["defaultTargetId"]
+    assert degraded["targetsDiscoveryErrors"] == [
+        "could not list git worktrees from repo"
+    ]
+
+    # Recovery is immediate: the next successful listing resumes enumeration
+    # and clears the reported failure.
+    monkeypatch.setattr(
+        target,
+        "list_worktrees",
+        lambda **_kwargs: [WorktreeRecord(path=repo, branch="refs/heads/main")],
+    )
+    state.invalidate_targets()
+    recovered = inventory.work_trees_payload(state)
+
+    assert [tree["id"] for tree in recovered["workTrees"]] == healthy_ids
+    assert recovered.get("targetsDiscoveryErrors", []) == []
 
 
 def _repo(tmp_path: Path) -> Path:

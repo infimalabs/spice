@@ -548,7 +548,7 @@ WIRE_OBJECTS = (
             "defaultTargetId": STRING,
             "taskFilterInventory": _ref("TaskFilterInventory"),
         },
-        {"observerErrors": STRINGS},
+        {"observerErrors": STRINGS, "targetsDiscoveryErrors": STRINGS},
     ),
     _object("TeamGlobalSettings", {"fastMode": BOOLEAN}, {"observerMode": BOOLEAN}),
     _object(

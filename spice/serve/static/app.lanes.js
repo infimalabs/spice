@@ -50,6 +50,16 @@ function refreshTargets() {
 
 /** @param {TargetsPayload} payload */
 function applyTargetsPayload(payload) {
+  // A payload whose discovery failed never enumerated the worktrees, so its
+  // workTrees list is not evidence about which lanes still exist. Leave the
+  // target store and every lane untouched and report the failure: closing a
+  // lane destroys it -- DOM, live-bus subscription, observers, and the stored
+  // lane with its knownMessages -- and would dissolve a fused run.
+  const discoveryErrors = payload.targetsDiscoveryErrors || [];
+  if (discoveryErrors.length) {
+    setGlobalTransientError(discoveryErrors[0]);
+    return;
+  }
   laneStore.replaceTargets(payload.workTrees || []);
   targetsLoaded = true;
   syncObserverNotice(payload.observerErrors || []);

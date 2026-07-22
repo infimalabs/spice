@@ -43,6 +43,7 @@ const releaseSafe = [
   { path: "serve_structural_status_smoke.js", serial: true },
   { path: "serve_submission_lifecycle_smoke.js", serial: true },
   { path: "serve_submit_latency_smoke.js", serial: true },
+  { path: "serve_targets_discovery_failure_smoke.js" },
   { path: "serve_task_filter_hidden_stems_live_smoke.js" },
   { path: "serve_task_filter_pills_smoke.js" },
   { path: "serve_team_metrics_smoke.js" },
