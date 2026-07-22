@@ -353,6 +353,7 @@
  * @property {string=} error
  * @property {string=} trigger
  * @property {string=} reason
+ * @property {number=} retryAfterSeconds
  * @property {string=} taskHandle
  * @property {boolean=} claimReleased
  * @property {RestartRefusal=} restartRefusal - driver-specific launch refusal facts
