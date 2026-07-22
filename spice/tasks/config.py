@@ -326,6 +326,7 @@ _EVIDENCE = [
     "done_head",
     "done_merge_head",
     "done_ref",
+    "done_local_commits",
     "done_upstream",
     "done_upstream_head",
 ]

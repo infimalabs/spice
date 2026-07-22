@@ -55,6 +55,7 @@ def test_task_capture_mints_task_over_loose_then_done_captures_it(remote_task_re
 
     assert f"advanced {handle} -> review" in done_output
     assert review_row["done_head"] == loose
+    assert str(review_row["done_local_commits"]) == "1"
     assert (
         _git(remote_task_repo, "ls-remote", "origin", "refs/heads/main").split()[0]
         == review_row["done_merge_head"]
@@ -356,6 +357,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert review_row["done_head"] == head
     assert review_row["done_merge_head"] == head
     assert review_row["done_ref"] == head
+    assert str(review_row["done_local_commits"]) == "0"
 
     with pytest.raises(SpiceError, match="authored the review"):
         ops.claim(handle)
@@ -377,6 +379,56 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_by"] == ACTOR_A
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
+
+
+def test_empty_phase_review_packet_ignores_concurrent_baseline_commit(
+    remote_task_repo, tmp_path
+):
+    handle = create.add(
+        "Verify an umbrella without local edits",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["empty phase review packets identify an empty local range"],
+    )
+    ops.claim(handle)
+    phase_head = _git(remote_task_repo, "rev-parse", "HEAD")
+    remote_url = _git(remote_task_repo, "remote", "get-url", "origin")
+    peer = tmp_path / "review-peer"
+    _run(tmp_path, "git", "clone", remote_url, str(peer))
+    _configure_git_identity(peer)
+    (peer / "peer.txt").write_text("unrelated peer work\n", encoding="utf-8")
+    _run(peer, "git", "add", "peer.txt")
+    _run(peer, "git", "commit", "-m", "unrelated peer work")
+    _run(peer, "git", "push", "origin", "main")
+    peer_head = _git(peer, "rev-parse", "HEAD")
+
+    done_output = ops.done(handle, validation=["umbrella verified without edits"])
+    review_row = identity.resolve(handle)
+    packet = render.render_show(handle)
+
+    assert f"advanced {handle} -> review" in done_output
+    assert review_row["done_head"] == phase_head
+    assert review_row["done_merge_head"] == peer_head
+    assert str(review_row["done_local_commits"]) == "0"
+    assert (
+        f"review_commit {phase_head} "
+        "(task phase head unchanged; no local commit)" in packet
+    )
+    assert f"review_diff_base {phase_head} (done_head; zero local commits)" in packet
+    assert f"review_diff_head {phase_head} (done_head; unchanged)" in packet
+    assert (
+        "review_diff_command "
+        f"git diff --stat --patch {phase_head}..{phase_head}" in packet
+    )
+    assert (
+        f"review_baseline_commit {peer_head} "
+        "(baseline advanced independently after empty task phase)" in packet
+    )
+    assert (
+        "review_diff_note task completion recorded zero local commits; the "
+        "baseline commit is context only and is not task work" in packet
+    )
 
 
 def test_task_done_surfaces_git_sync_note(task_repo, monkeypatch):

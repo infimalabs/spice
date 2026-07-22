@@ -186,10 +186,14 @@ def commits_ahead_of_baseline(repo_root: Path | None = None) -> int:
     """
     root = repo_root or config.repo_root()
     resolved = _resolve_target(root)
+    return _commits_ahead_of_target(root, resolved)
+
+
+def _commits_ahead_of_target(repo_root: Path, resolved: tuple[str, str] | None) -> int:
     if resolved is None:
         return 0
     _, baseline = resolved
-    ahead = _read(root, "rev-list", "--count", f"{baseline}..HEAD")
+    ahead = _read(repo_root, "rev-list", "--count", f"{baseline}..HEAD")
     try:
         return int(ahead)
     except ValueError:
@@ -367,15 +371,24 @@ def integrate_and_publish(
     wordingreview.require_integrate_allowed(label, meta)
     agent_head = _read(root, "rev-parse", "HEAD")
     resolved = _resolve_target(root)
+    local_commits = _commits_ahead_of_target(root, resolved)
     if resolved is None:
-        return SyncResult(uda_args=_capture(agent_head, agent_head, "", ""))
+        return SyncResult(
+            uda_args=_capture(agent_head, agent_head, "", "", local_commits)
+        )
     remote, baseline = resolved
 
     upstream_head = _fetch_upstream_head(root, remote, baseline)
     if agent_head == upstream_head:
         # Nothing to integrate; the baseline already holds this state.
         return SyncResult(
-            uda_args=_capture(agent_head, agent_head, baseline, upstream_head)
+            uda_args=_capture(
+                agent_head,
+                agent_head,
+                baseline,
+                upstream_head,
+                local_commits,
+            )
         )
 
     message = _compose_message(label, meta)
@@ -410,7 +423,13 @@ def integrate_and_publish(
     )
     return SyncResult(
         notes=[tree_same_note] if tree_same_note else [],
-        uda_args=_capture(agent_head, merge_head, baseline, upstream_head),
+        uda_args=_capture(
+            agent_head,
+            merge_head,
+            baseline,
+            upstream_head,
+            local_commits,
+        ),
     )
 
 
@@ -1340,12 +1359,17 @@ def _synthesize_merge(
 
 
 def _capture(
-    agent_head: str, merge_head: str, upstream: str, upstream_head: str
+    agent_head: str,
+    merge_head: str,
+    upstream: str,
+    upstream_head: str,
+    local_commits: int,
 ) -> list[str]:
     args = [
         f"done_head:{agent_head}",
         f"done_merge_head:{merge_head}",
         f"done_ref:{merge_head}",
+        f"done_local_commits:{local_commits}",
     ]
     if upstream:
         args.append(f"done_upstream:{upstream}")

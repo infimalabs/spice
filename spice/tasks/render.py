@@ -360,6 +360,28 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
         raise SpiceError("task done_ref requires done_head and done_merge_head")
     if review_ref != merge_head:
         raise SpiceError("task done_ref must match done_merge_head")
+    local_commits = _f(row, "done_local_commits")
+    upstream = _f(row, "done_upstream")
+    if upstream and local_commits == "0":
+        baseline_state = (
+            "baseline advanced independently after empty task phase"
+            if review_ref != agent_head
+            else "unchanged baseline after empty task phase"
+        )
+        return [
+            (
+                f"review_commit {agent_head} "
+                "(task phase head unchanged; no local commit)"
+            ),
+            f"review_diff_base {agent_head} (done_head; zero local commits)",
+            f"review_diff_head {agent_head} (done_head; unchanged)",
+            (f"review_diff_command git diff --stat --patch {agent_head}..{agent_head}"),
+            f"review_baseline_commit {review_ref} ({baseline_state})",
+            (
+                "review_diff_note task completion recorded zero local commits; "
+                "the baseline commit is context only and is not task work"
+            ),
+        ]
     if merge_head != agent_head:
         upstream_head = _f(row, "done_upstream_head")
         diff_base = upstream_head or f"{review_ref}^1"
