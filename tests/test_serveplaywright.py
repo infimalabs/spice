@@ -571,6 +571,21 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert "page.screenshot(" in smoke
 
 
+def test_structural_status_smoke_covers_constant_hue_pip_desaturation() -> None:
+    smoke = (ROOT / "browser" / "serve_structural_status_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"running",\n  "starting",\n  "stopping"' in smoke
+    assert '"running-stale",\n  "idle"' in smoke
+    assert "getComputedStyle(lane.pipEl).backgroundColor" in smoke
+    assert "function assertPipSaturationRamp(colors)" in smoke
+    assert "pip status shifted hue instead of desaturating" in smoke
+    assert "pip saturation did not fall running>starting>stopping>stale>idle" in smoke
+    assert "startup-stalled pip diverged from the stopping ramp step" in smoke
+    assert "page.screenshot({ path: screenshotPath })" in smoke
+
+
 # The serve browser smokes that source their target/team wire shape from the
 # shared payload_factory authority. serve_structural_status is deliberately
 # absent: it exercises a variable-version watch/status payload with no
