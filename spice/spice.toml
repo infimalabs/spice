@@ -42,7 +42,7 @@ match = [
   # the driver-scoped search_operands routes below inject -r so a bare directory
   # operand recurses through native grep, which runs the intended search
   # correctly without ever translating a grep short flag against rg's dialect.
-  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "-g", "--glob", "--glob=*"], argv = ["rg"] },
+  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "--pcre2", "-g", "--glob", "--glob=*"], argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
   # refuses (exit 1) or silently binds the directory operand as the pattern

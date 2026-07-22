@@ -408,12 +408,13 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    tool = bin_dir / "rtk"
-    tool.write_text(
-        f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
-        encoding="utf-8",
-    )
-    tool.chmod(0o755)
+    for name in ("rtk", "rg"):
+        tool = bin_dir / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
     script = "\n".join(
         [
             "set -u",
@@ -426,6 +427,8 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
             "rtk grep -C 2 needle source.txt",
             "rtk grep --context needle source.txt",
             "rtk grep -e needle source.txt",
+            "rtk grep -n '--dry-run|uninit'",
+            "rtk grep --pcre2 '\\d+' source.txt",
             "rtk grep needle",
             "rtk grep -n needle",
             "rtk grep -A 2 needle",
@@ -458,6 +461,8 @@ def test_rtk_grep_route_adds_recursive_mode_for_search_operands(tmp_path, shell_
         "rtk:grep -E -r -C 2 needle source.txt",
         "rtk:grep -E -r --context needle source.txt",
         "rtk:grep -E -r -e needle source.txt",
+        "rtk:grep -E -r -n -e --dry-run|uninit",
+        "rg:--pcre2 \\d+ source.txt",
         "rtk:grep -E needle",
         "rtk:grep -E -n needle",
         "rtk:grep -E -A 2 needle",

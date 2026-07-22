@@ -123,7 +123,7 @@ def builtin_common_wrapper_lines(
         '  if [ "${1-}" = grep ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
-        "        --files|--type|--type=*|--no-heading|-g|--glob|--glob=*)",
+        ("        --files|--type|--type=*|--no-heading|--pcre2|-g|--glob|--glob=*)"),
         "          shift",
         '          command rg "$@"',
         "          return",
