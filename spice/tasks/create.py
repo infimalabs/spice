@@ -57,6 +57,20 @@ class TaskAddResult:
     wording_matches: tuple[TaskWordingMatch, ...] = ()
 
 
+@dataclass(frozen=True)
+class TaskAddPreparation:
+    """A fully resolved task creation that has not written a task row."""
+
+    args: tuple[str, ...]
+    actor: str
+    claim: bool
+    incepted: str
+    project: str
+    system_project: bool
+    title: str
+    wording_matches: tuple[TaskWordingMatch, ...] = ()
+
+
 def detect_suspect_wording(
     *,
     title: str,
@@ -357,7 +371,7 @@ def _build_add_args(
     return args
 
 
-def _add_result(
+def prepare_add_one(
     *,
     title: str,
     description: str | None = None,
@@ -379,7 +393,8 @@ def _add_result(
     system_project: bool = False,
     actor_override: str | None = None,
     creation_surface: str | None = None,
-) -> TaskAddResult:
+) -> TaskAddPreparation:
+    """Resolve every deterministic task-creation decision before the row write."""
     title = _task_title(title)
     body = _task_description(description)
     resolved_wait = _resolved_wait(wait=wait, deferred=deferred, claim=claim)
@@ -388,8 +403,8 @@ def _add_result(
     resolved_origin = resolved_task_origin(origin, actor)
     if claim:
         claimstate._require_single_active_slot(actor, action="task add --claim")
-        # Match a normal claim's baseline check before creating the task row.
-        # If this fails, task add --claim must not leave unclaimed work behind.
+        # Preserve the claim boundary's ordering: the current baseline must be
+        # visible before project flow and the final Taskwarrior argv resolve.
         gitsync.prepare_for_claim()
     routed_flow = _creation_flow_policy(
         flow=flow,
@@ -445,32 +460,105 @@ def _add_result(
         creation_surface=creation_surface,
         origin=resolved_origin,
     )
-    tw.run(args)
-    created = tw.export([f"incepted.is:{incepted}"]) if wording_matches or claim else []
-    if wording_matches and not system_project and created:
+    return TaskAddPreparation(
+        args=tuple(args),
+        actor=actor,
+        claim=claim,
+        incepted=incepted,
+        project=resolved_project,
+        system_project=system_project,
+        title=title,
+        wording_matches=wording_matches,
+    )
+
+
+def _commit_add_result(prepared: TaskAddPreparation) -> TaskAddResult:
+    """Write one task whose deterministic validation has already completed."""
+    tw.run(list(prepared.args))
+    created = (
+        tw.export([f"incepted.is:{prepared.incepted}"])
+        if prepared.wording_matches or prepared.claim
+        else []
+    )
+    if prepared.wording_matches and not prepared.system_project and created:
         claimstate.annotate(
             identity.uuid_of(created[0]),
-            _suspect_wording_annotation(wording_matches),
+            _suspect_wording_annotation(prepared.wording_matches),
         )
-    route_feedback = projectsubs._subscribe_created_project(resolved_project, actor)
-    if claim:
+    route_feedback = projectsubs._subscribe_created_project(
+        prepared.project, prepared.actor
+    )
+    if prepared.claim:
         if created:
             claimstate.do_claim(
                 identity.uuid_of(created[0]),
-                actor,
+                prepared.actor,
                 site=claimstate.current_claim_site(),
                 context_thread=None,
                 lease_seconds=None,
                 guard_unclaimed=False,
             )
-    key = identity.key_for(resolved_project, title)
-    result = TaskAddResult(
-        handle=f"{key}-{incepted}",
-        project=resolved_project,
+    key = identity.key_for(prepared.project, prepared.title)
+    return TaskAddResult(
+        handle=f"{key}-{prepared.incepted}",
+        project=prepared.project,
         route_feedback=route_feedback,
-        wording_matches=wording_matches,
+        wording_matches=prepared.wording_matches,
     )
-    return result
+
+
+def commit_prepared_add(prepared: TaskAddPreparation) -> str:
+    """Create one task from the exact preparation that was validated."""
+    return _commit_add_result(prepared).handle
+
+
+def _add_result(
+    *,
+    title: str,
+    description: str | None = None,
+    project: str | None,
+    priority: str,
+    flow: list[str] | None,
+    tags: list[str],
+    after: list[str],
+    acceptance: list[str],
+    wait: str | None,
+    claim: bool,
+    deferred: bool = False,
+    scheduled: str | None = None,
+    until: str | None = None,
+    due: str | None = None,
+    origin: str | None = None,
+    extra: list[str] | None = None,
+    existing: set[str] | None = None,
+    system_project: bool = False,
+    actor_override: str | None = None,
+    creation_surface: str | None = None,
+) -> TaskAddResult:
+    return _commit_add_result(
+        prepare_add_one(
+            title=title,
+            description=description,
+            project=project,
+            priority=priority,
+            flow=flow,
+            tags=tags,
+            after=after,
+            acceptance=acceptance,
+            wait=wait,
+            claim=claim,
+            deferred=deferred,
+            scheduled=scheduled,
+            until=until,
+            due=due,
+            origin=origin,
+            extra=extra,
+            existing=existing,
+            system_project=system_project,
+            actor_override=actor_override,
+            creation_surface=creation_surface,
+        )
+    )
 
 
 def add_one(

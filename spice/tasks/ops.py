@@ -11,7 +11,7 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 from spice.config.values import configured_rtk_executable
 from spice.errors import SpiceError
@@ -51,6 +51,9 @@ from spice.tasks.projectsubs import (
     _subscribe_created_project,
     _subscribe_woken_project,
 )
+
+if TYPE_CHECKING:
+    from spice.tasks.create import TaskAddBatchRequest, TaskAddPreparation
 
 # ---- claim --------------------------------------------------------------
 
@@ -767,6 +770,18 @@ def review(
     targets = [
         _resolve_followup_target(name, after_uuid=uuid) for name in followup or []
     ]
+    reviewed_handle = identity.render_handle(row)
+    existing = {str(task.get("incepted") or "") for task in tw.export()}
+    prepared_followups = [
+        _prepare_followup(
+            request,
+            after_uuid=uuid,
+            after_handle=reviewed_handle,
+            existing=existing,
+            creation_surface=creation_surface,
+        )
+        for request in requests
+    ]
     at = tw.now_iso()
     modify = [
         uuid,
@@ -779,16 +794,7 @@ def review(
         modify.append(f"review_note:{note}")
     tw.run(modify)
     annotate(uuid, f"review: finding={finding}; by={actor}")
-    reviewed_handle = identity.render_handle(row)
-    spawned = [
-        _spawn_followup(
-            request,
-            after_uuid=uuid,
-            after_handle=reviewed_handle,
-            creation_surface=creation_surface,
-        )
-        for request in requests
-    ]
+    spawned = [create.commit_prepared_add(prepared) for prepared in prepared_followups]
     linked = [
         _link_existing_followup(target, after_uuid=uuid, after_handle=reviewed_handle)
         for target in targets
@@ -855,17 +861,18 @@ def next_task_drain_line(
     return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"
 
 
-def _spawn_followup(
-    request: Any,
+def _prepare_followup(
+    request: TaskAddBatchRequest,
     *,
     after_uuid: str,
     after_handle: str,
+    existing: set[str],
     creation_surface: str | None = None,
-) -> str:
-    """Create one already-parsed follow-up record."""
+) -> TaskAddPreparation:
+    """Resolve one follow-up into the exact creation that will be committed."""
     from spice.tasks import create
 
-    return create.add_one(
+    return create.prepare_add_one(
         title=request.title,
         description=request.description,
         project=request.project,
@@ -882,6 +889,7 @@ def _spawn_followup(
         # origin= field in the spec wins.
         origin=request.origin or f"task:{after_handle}",
         extra=[f"depends:{after_uuid}"],
+        existing=existing,
         creation_surface=creation_surface,
     )
 
