@@ -122,7 +122,13 @@ def handle_agent(args: argparse.Namespace) -> int:
         return 0
     repo_root = require_repo_root()
     if action == "show":
-        print(render_agent_status(lifecycle.agent_status(repo_root)))
+        status = lifecycle.agent_status(repo_root)
+        print(
+            render_agent_status(
+                status,
+                output_observation=lifecycle.agent_output_observation(status),
+            )
+        )
         return 0
     if action == "activation":
         print(render_activation_packet(repo_root))
@@ -238,7 +244,7 @@ def _print_reply_outcomes(label, content_by_key, retired, canonical_key) -> None
         print(f"{label} {key}: {'retired' if matched else 'no pending item matched'}")
 
 
-def render_agent_status(status: Any) -> str:
+def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
     lines = [
         f"worktree={status.repo_root}",
         f"status={status.process_status}",
@@ -256,6 +262,14 @@ def render_agent_status(status: Any) -> str:
         lines.append(f"ready_at={status.ready_at}")
     if getattr(status, "startup_failure", ""):
         lines.append(f"startup_failure={status.startup_failure}")
+    if output_observation is not None:
+        lines.append(f"output_status={output_observation.status}")
+        if output_observation.age_seconds is not None:
+            lines.append(f"last_output_age={output_observation.age_seconds}s")
+        lines.append(f"last_output_at={output_observation.last_output_at or '-'}")
+        lines.append(f"output_source={output_observation.source or '-'}")
+        if output_observation.path is not None:
+            lines.append(f"output_path={output_observation.path}")
     lines.extend(
         [
             f"skill={status.prompt_skill_path or '-'}",
