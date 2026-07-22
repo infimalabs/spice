@@ -15,6 +15,7 @@ import pytest
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     PINNED,
+    REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
     _git,
@@ -301,11 +302,7 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     )
 
     gate = PINNED.toolchain_gate(snapshot, _executable_interpreter(snapshot))
-    recorded = json.loads(
-        PINNED.git_private_path(snapshot, PINNED.TOOLCHAIN_RECORD_NAME).read_text(
-            encoding="utf-8"
-        )
-    )
+    recorded = REHEARSAL._load_git_private_json(snapshot, PINNED.TOOLCHAIN_RECORD_NAME)
 
     assert (gate["gate"], gate["status"], gate["detail"]) == (
         "declared-toolchain",
@@ -336,8 +333,8 @@ def test_toolchain_gate_round_trips_its_record_from_a_linked_worktree(tmp_path):
     )
 
     gate = PINNED.toolchain_gate(linked, _executable_interpreter(linked))
-    record = PINNED.git_private_path(linked, PINNED.TOOLCHAIN_RECORD_NAME)
-    recorded = json.loads(record.read_text(encoding="utf-8"))
+    record = REHEARSAL.git_private_path(linked, PINNED.TOOLCHAIN_RECORD_NAME)
+    recorded = REHEARSAL._load_git_private_json(linked, PINNED.TOOLCHAIN_RECORD_NAME)
 
     assert (linked / ".git").is_file()
     assert record.is_file()
