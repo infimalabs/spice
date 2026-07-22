@@ -18,7 +18,17 @@ from spice.serve.team.store import (
     TeamConfig,
 )
 from spice.serve.team.ids import thread_actor_id
-from spice.tasks import alloc, claimstate, config, create, identity, ops, render, tw
+from spice.tasks import (
+    alloc,
+    claimstate,
+    config,
+    create,
+    identity,
+    ops,
+    readiness,
+    render,
+    tw,
+)
 from tests.test_teamstorehelpers import store_global_revision
 
 pytestmark = pytest.mark.skipif(
@@ -350,6 +360,69 @@ def test_task_depends_repeated_after_handle_lands_one_native_edge(task_repo):
     row = identity.resolve(handle)
     assert result == handle
     assert row["depends"] == [dep_uuid]
+
+
+def test_dependency_completion_stamps_queue_age_at_ready_transition(
+    task_repo, monkeypatch
+):
+    blocker = create.add(
+        "Dependency completed much later",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo"],
+    )
+    planned = create.add(
+        "Long-planned work enters the queue later",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        after=[blocker],
+    )
+    before = identity.resolve(planned)
+    transition = "2099-01-02T03:04:05.000000Z"
+    monkeypatch.setattr(tw, "now_iso", lambda: transition)
+
+    completed = ops._advance(identity.resolve(blocker))
+
+    ready = identity.resolve(planned)
+    assert completed == f"completed {blocker}"
+    assert str(before.get(config.TASK_READY_AT_UDA) or "") == ""
+    assert ready[config.TASK_READY_AT_UDA] == transition
+    assert (
+        readiness.queue_ready_epoch(ready)
+        > identity.incepted_datetime(str(ready["incepted"])).timestamp()
+    )
+    assert planned in _ready_handles()
+
+
+def test_queue_age_refreshes_each_time_task_reenters_ready(task_repo, monkeypatch):
+    task = create.add(
+        "Task that leaves and reenters the queue",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    blocker = create.add(
+        "Temporary queue blocker",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    ops.depends(task, [blocker])
+    dependency_release = "2099-02-03T04:05:06.000000Z"
+    monkeypatch.setattr(tw, "now_iso", lambda: dependency_release)
+
+    ops.depends(task, [], not_after=[blocker])
+
+    first_ready = identity.resolve(task)
+    assert first_ready[config.TASK_READY_AT_UDA] == dependency_release
+    ops.claim(task)
+    claimed = identity.resolve(task)
+    assert str(claimed.get(config.TASK_READY_AT_UDA) or "") == ""
+
+    claim_release = "2099-03-04T05:06:07.000000Z"
+    monkeypatch.setattr(tw, "now_iso", lambda: claim_release)
+    ops.unclaim(task)
+
+    second_ready = identity.resolve(task)
+    assert second_ready[config.TASK_READY_AT_UDA] == claim_release
 
 
 def test_task_delete_allows_unclaimed_task(task_repo):

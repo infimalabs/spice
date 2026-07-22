@@ -23,7 +23,7 @@ from spice.process.tool import run_tool_command
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records as session_records
 from spice.sessions import resolve as session_resolve
-from spice.tasks import alloc, config, identity, reviewfeedback, tw
+from spice.tasks import alloc, config, identity, readiness, reviewfeedback, tw
 from spice.tasks.git import boundaries
 from spice.tasks.claimstate import (
     CLAIM_CLEAR,
@@ -203,6 +203,7 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     if target is not None:
         base_mods.append(f"project:{target}")
     mods_by_uuid: dict[str, tuple[str, ...]] = {}
+    woke_at = tw.now_iso()
     for row in rows:
         # Waking starts the SLA clock deferred creation suspended, through
         # the same due-calculation seam ordinary creation uses; a due already
@@ -212,7 +213,14 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
             if str(row.get("due") or "")
             else create.sla_due_args(None, str(row.get("priority") or ""))
         )
-        mods_by_uuid[identity.uuid_of(row)] = (*base_mods, *due_mods)
+        mods_by_uuid[identity.uuid_of(row)] = (
+            *base_mods,
+            *due_mods,
+            readiness.transition_arg(
+                at=woke_at,
+                ready=readiness.ready_after_clearing_wait(row, at=woke_at),
+            ),
+        )
     groups: dict[tuple[str, ...], list[str]] = {}
     for uuid, mods in mods_by_uuid.items():
         groups.setdefault(mods, []).append(uuid)
@@ -492,8 +500,11 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
     handle = identity.render_handle(row)
     actor = str(row.get("claim_by") or "").strip() or tw.current_actor()
     claim_worktree = Path(str(row.get("claim_worktree") or config.repo_root()))
+    transitioned_at = tw.now_iso()
     if index + 1 >= len(phases):
         project = str(row.get("project") or "")
+        dependents = readiness.dependents_becoming_ready(uuid, at=transitioned_at)
+        readiness.prepare_ready_rows(dependents, at=transitioned_at)
         tw.run([uuid, "done"])
         retire_claim_witness(claim_worktree, actor, uuid=uuid, handle=handle)
         _record_task_lifecycle_event(uuid, "complete", actor)
@@ -509,6 +520,10 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         f"phase:{nxt}",
         "start:",
         *CLAIM_CLEAR,
+        readiness.transition_arg(
+            at=transitioned_at,
+            ready=readiness.ready_when_inactive(uuid),
+        ),
     ]
     if nxt == "review":
         author = review_author or str(row.get("claim_by") or "") or tw.current_actor()
@@ -913,6 +928,8 @@ def _link_existing_followup(
     row: dict[str, Any], *, after_uuid: str, after_handle: str
 ) -> str:
     uuid = identity.uuid_of(row)
+    was_ready = readiness.is_ready(uuid)
+    changed_at = tw.now_iso()
     try:
         tw.run([uuid, "modify", f"depends:{after_uuid}"])
     except SpiceError as exc:
@@ -920,6 +937,7 @@ def _link_existing_followup(
             f"could not link existing review follow-up {identity.render_handle(row)} "
             "(would it create a cycle?)"
         ) from exc
+    readiness.reconcile_transition(uuid, was_ready=was_ready, at=changed_at)
     annotate(uuid, f"review follow-up depends on {after_handle}")
     return identity.render_handle(row)
 
@@ -1005,6 +1023,8 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
     changes = [f"depends:-{dep_uuid}" for dep_uuid, _ in removals]
     changes += [f"depends:{dep_uuid}" for dep_uuid, _ in additions]
     if changes:
+        ready_before = readiness.is_ready(uuid)
+        changed_at = tw.now_iso()
         # One modify carries every edge change: Taskwarrior validates the
         # final dependency set and applies or refuses the batch wholesale,
         # so a refused re-point cannot strand the task with edges removed
@@ -1018,6 +1038,7 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
                     f"could not add dependency on {targets} (would it create a cycle?)"
                 ) from exc
             raise
+        readiness.reconcile_transition(uuid, was_ready=ready_before, at=changed_at)
     return rendered
 
 

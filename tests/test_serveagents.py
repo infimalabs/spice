@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 from http import HTTPStatus
 from types import SimpleNamespace
 
@@ -34,6 +35,11 @@ from tests.test_taskgitsync import _advance_upstream, _repo_with_upstream, _run
 # left one minute into a candidate's wait.
 LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
 ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
+READY_AT_EPOCH = "19700101T001640Z"
+
+
+def _ready_candidate(task_uuid: str, *, ready_at: str = READY_AT_EPOCH) -> dict:
+    return {"uuid": task_uuid, "ready_at": ready_at}
 
 
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
@@ -242,7 +248,7 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[tuple[str, object]] = []
-    candidates = [{"uuid": "task-a"}, {"uuid": "task-spare"}]
+    candidates = [_ready_candidate("task-a"), _ready_candidate("task-spare")]
 
     monkeypatch.setattr(
         agentapi.alloc,
@@ -317,7 +323,10 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-raced"}, {"uuid": "task-next"}],
+        lambda _actor: [
+            _ready_candidate("task-raced"),
+            _ready_candidate("task-next"),
+        ],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -352,7 +361,10 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-failed"}, {"uuid": "task-spare"}],
+        lambda _actor: [
+            _ready_candidate("task-failed"),
+            _ready_candidate("task-spare"),
+        ],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -403,7 +415,7 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
         agentapi.WorktreeTarget("lane-b", repo_b, "lane-b", "main-b"),
     ]
     actors = [THREAD_A, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
-    candidates = [{"uuid": "task-a"}, {"uuid": "task-b"}]
+    candidates = [_ready_candidate("task-a"), _ready_candidate("task-b")]
     claims: dict[str, str] = {}
     starts: list[str] = []
     results: list[dict[str, object] | None] = []
@@ -460,7 +472,7 @@ def test_second_ready_task_bypasses_debounce_age_and_restart_hold(
 ):
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    candidates = [{"uuid": "task-a"}]
+    candidates = [_ready_candidate("task-a")]
     claims: list[str] = []
     launch_policies: list[str] = []
     attempt_cache: dict[str, float] = {}
@@ -492,7 +504,7 @@ def test_second_ready_task_bypasses_debounce_age_and_restart_hold(
         thread_id=THREAD_A,
         attempt_cache=attempt_cache,
     )
-    candidates.append({"uuid": "task-b"})
+    candidates.append(_ready_candidate("task-b"))
     at_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
@@ -520,11 +532,13 @@ def test_available_work_starvation_escape_starts_old_ready_task(tmp_path, monkey
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     ready_since: dict[tuple[str, str], float] = {}
     observed_times = iter([0.0, agentapi.AVAILABLE_WORK_STARVATION_SECONDS])
+    wall_times = iter([1000.0, 1180.0])
     monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(agentapi.time, "time", lambda: next(wall_times))
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-old"}],
+        lambda _actor: [_ready_candidate("task-old")],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -565,16 +579,30 @@ def test_available_work_starvation_escape_starts_old_ready_task(tmp_path, monkey
 
 
 def test_available_work_single_fresh_task_leaves_the_board_alone(tmp_path, monkeypatch):
-    """One task filed a moment ago is the case the threshold exists to decline."""
+    """A long-planned task freshly READY starts its clock at that transition."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     claims: list[str] = []
     ready_since: dict[tuple[str, str], float] = {}
     monkeypatch.setattr(agentapi.time, "monotonic", lambda: 0.0)
+    fresh_ready_at = "2099-01-02T03:04:05.000000Z"
+    fresh_epoch = (
+        datetime.fromisoformat(fresh_ready_at.replace("Z", "+00:00"))
+        .astimezone(UTC)
+        .timestamp()
+    )
+    monkeypatch.setattr(agentapi.time, "time", lambda: fresh_epoch)
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-only"}],
+        lambda _actor: [
+            {
+                **_ready_candidate("task-only", ready_at=fresh_ready_at),
+                # This valid historical identity predates the READY transition
+                # by decades; using inception would start the lane immediately.
+                "incepted": "1k4vPpg5",
+            }
+        ],
     )
     monkeypatch.setattr(
         agentapi.claimstate,
@@ -612,11 +640,13 @@ def test_available_work_lone_task_starts_a_lane_after_three_minutes(
     # Literal seconds, not the constant: reading the constant would keep this
     # green at any interval, and three minutes is the property under test.
     observed_times = iter([0.0, 180.0])
+    wall_times = iter([1000.0, 1180.0])
     monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(agentapi.time, "time", lambda: next(wall_times))
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-alone"}],
+        lambda _actor: [_ready_candidate("task-alone")],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -651,18 +681,22 @@ def test_available_work_lone_task_starts_a_lane_after_three_minutes(
     assert ready_since == {}
 
 
-def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch):
-    """A launch the provider refuses returns the task at the age it had earned."""
+def test_available_work_refused_launch_starts_a_new_ready_interval(
+    tmp_path, monkeypatch
+):
+    """A refused launch returns the row through a fresh READY transition."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     ready_since: dict[tuple[str, str], float] = {}
     released: list[tuple[str, str]] = []
     observed_times = iter([0.0, 180.0])
+    wall_times = iter([1000.0, 1180.0])
     monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(agentapi.time, "time", lambda: next(wall_times))
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-broke"}],
+        lambda _actor: [_ready_candidate("task-broke")],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -708,9 +742,9 @@ def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch
         "claimReleased": True,
     }
     assert released == [("task-broke", THREAD_A)]
-    # Still three minutes old, so the next attempt is immediate rather than
-    # another full interval away, and the age remains readable as evidence.
-    assert ready_since == {(THREAD_A, "task-broke"): 0.0}
+    # release_claim owns the new durable stamp in production; this process-local
+    # projection stays empty until the task-event wake reads that transition.
+    assert ready_since == {}
 
 
 def test_available_work_next_deadline_counts_down_from_the_oldest_candidate(tmp_path):
@@ -730,11 +764,13 @@ def test_available_work_ready_age_resets_after_task_leaves_backlog(
 ):
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    candidates = [{"uuid": "task-returned"}]
+    candidates = [_ready_candidate("task-returned")]
     ready_since: dict[tuple[str, str], float] = {}
     reappeared_at = agentapi.AVAILABLE_WORK_STARVATION_SECONDS + 1.0
     observed_times = iter([0.0, reappeared_at])
+    wall_times = iter([1000.0, 1181.0])
     monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(agentapi.time, "time", lambda: next(wall_times))
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -754,7 +790,7 @@ def test_available_work_ready_age_resets_after_task_leaves_backlog(
         ready_since_cache=ready_since,
         retry_seconds=0.0,
     )
-    candidates.append({"uuid": "task-returned"})
+    candidates.append(_ready_candidate("task-returned", ready_at="19700101T001941Z"))
     reappeared = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,

@@ -27,7 +27,7 @@ from spice.agent.sidechannelnotify import (
 )
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
-from spice.tasks import config, identity, tw
+from spice.tasks import config, identity, readiness, tw
 from spice.tasks.git import boundaries
 
 CLAIM_WITNESS_FILE = "claim-witness.json"
@@ -656,6 +656,7 @@ def do_claim(
                 *filters,
                 "modify",
                 *metadata,
+                f"{config.TASK_READY_AT_UDA}:",
                 "start:now",
             ]
         )
@@ -813,6 +814,8 @@ def _renewal_claim_meta(
 
 def release_claim(uuid: str, actor: str) -> bool:
     """Release only the exact active claim still owned by ``actor``."""
+    released_at = tw.now_iso()
+    ready_after_release = readiness.ready_when_inactive(uuid)
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     rows = tw.export([uuid])
     claim_worktree = (
@@ -829,6 +832,10 @@ def release_claim(uuid: str, actor: str) -> bool:
                 "modify",
                 "start:",
                 *CLAIM_CLEAR,
+                readiness.transition_arg(
+                    at=released_at,
+                    ready=ready_after_release,
+                ),
             ]
         )
     except SpiceError:

@@ -35,7 +35,7 @@ from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import alloc, claimstate, identity
+from spice.tasks import alloc, claimstate, identity, readiness
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
@@ -288,6 +288,7 @@ def ensure_agent_for_available_work(
             candidates,
             ready_since_cache,
             now=now,
+            wall_now=time.time(),
         )
         at_capacity = len(candidates) >= AVAILABLE_WORK_START_THRESHOLD
         # The retry cache used to run before this snapshot. A one-row pass
@@ -333,17 +334,16 @@ def ensure_agent_for_available_work(
             )
         except Exception:
             claimstate.release_claim(task_uuid, actor)
+            forget_available_work_observation(actor, task_uuid, ready_since_cache)
             raise
         payload.update({"trigger": "available-work", "taskHandle": handle})
         if payload.get("ok") is False:
             # The launch was attempted and refused -- out of credits, or the
-            # restart guard. The task returns to the board, so it keeps the
-            # ready-since observation it had earned: how long it has been
-            # starving is the evidence that says whether this lane is merely
-            # idle or has been unable to start for an hour, and rereading it as
-            # freshly ready would both erase that and make it serve the whole
-            # interval again before the next attempt.
+            # restart guard. Releasing its claim is a new READY transition;
+            # release_claim stamps that durable origin, and dropping this
+            # projection makes the next event-driven evaluation read it.
             payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+            forget_available_work_observation(actor, task_uuid, ready_since_cache)
             return payload
         # Only a lane that actually started stops being a reason to watch this
         # task: its claim takes the row out of READY.
@@ -357,6 +357,7 @@ def _observe_available_work_candidates(
     ready_since_cache: dict[tuple[str, str], float] | None,
     *,
     now: float,
+    wall_now: float,
 ) -> bool:
     if ready_since_cache is None:
         return False
@@ -364,8 +365,13 @@ def _observe_available_work_candidates(
     for key in tuple(ready_since_cache):
         if key[0] == actor and key not in candidate_keys:
             ready_since_cache.pop(key, None)
-    for key in candidate_keys:
-        ready_since_cache.setdefault(key, now)
+    candidates_by_key = {(actor, identity.uuid_of(row)): row for row in candidates}
+    for key, row in candidates_by_key.items():
+        age = max(0.0, wall_now - readiness.queue_ready_epoch(row))
+        # The durable task stamp is authoritative. Re-project it on every read
+        # so a later READY transition refreshes this monotonic deadline even
+        # when the server process and its cache survived the transition.
+        ready_since_cache[key] = now - age
     return any(
         now - ready_since_cache[key] >= AVAILABLE_WORK_STARVATION_SECONDS
         for key in candidate_keys
