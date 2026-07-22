@@ -15,7 +15,6 @@ from spice.tasks import (
     claimstate,
     config,
     effort,
-    eventwait,
     identity,
     lanes,
     ops,
@@ -587,54 +586,16 @@ def render_status() -> str:
     return "\n".join(lines)
 
 
-def render_next(*, wait: bool = False) -> str:
-    renewal = claimstate.renew_claim()
-    if not wait:
-        return _render_next_result(renewal, alloc.next_task())
+def render_next() -> str:
+    """Allocate once and report the outcome. Allocation never blocks.
 
-    baseline = eventwait.task_event_token()
-    while True:
-        row = alloc.next_task()
-        if row is not None:
-            return _render_next_result(renewal, row)
-        current = eventwait.task_event_token()
-        if current != baseline:
-            baseline = current
-            continue
-        peer_deadline = alloc.live_peer_claim_deadline()
-        # A peer lease may have lapsed by time alone since the allocation above.
-        # A lapse writes nothing -- no task event, no inbox entry -- so the token
-        # cannot witness it; allocation is the only observer that re-reads the
-        # clock. This snapshot cannot report the lapse either: it drops the
-        # lapsed claim, which reads as None only when that peer was the last one
-        # and as a live sibling's later deadline whenever one remains. So run
-        # allocation again before committing to either outcome, and claim the
-        # stale takeover this lane just became eligible for instead of sleeping
-        # past it or reporting terminal empty.
-        takeover = alloc.next_task()
-        if takeover is not None:
-            return _render_next_result(renewal, takeover)
-        # The token still guards the event-visible race the clock cannot
-        # explain: a peer releasing work between those two allocations.
-        current = eventwait.task_event_token()
-        if current != baseline:
-            baseline = current
-            continue
-        if peer_deadline is None:
-            return _render_next_result(renewal, None)
-        wake = eventwait.wait_for_allocator_event(baseline, peer_deadline)
-        baseline = wake.task_token
-        if wake.kind in ("task", "deadline"):
-            continue
-        if wake.kind == "steering":
-            return "\n".join(
-                [
-                    claimstate.claim_renewal_status_line(renewal),
-                    "allocator wait interrupted by pending steering; "
-                    "run spice session briefing",
-                ]
-            )
-        raise SpiceError(f"unknown allocator wake kind: {wake.kind!r}")
+    A lane with nothing to do says so and ends the turn; the agent is woken
+    again by steering or by serve, not by an in-process sleep. Blocking here
+    held the turn open against a peer's lease deadline, which made the agent
+    unreachable for the whole wait and put the harness's liveness on the
+    allocator's clock rather than on the session loop.
+    """
+    return _render_next_result(claimstate.renew_claim(), alloc.next_task())
 
 
 def _render_next_result(

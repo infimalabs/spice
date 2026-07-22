@@ -65,17 +65,16 @@ namespaces = true
 "spice.tasks.graphs" = ["*.js"]
 
 [dependency-groups]
+# build, setuptools, twine and wheel drive the release proof's artifact chain,
+# so they are pinned to the exact versions release-proof/toolchain.json
+# declares -- the host run and the container run must agree byte-for-byte on
+# the packaging toolchain, and the rehearsal's preflight refuses any drift.
 dev = [
+    "build==1.3.0",
     "pyright>=1.1",
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "pytest-xdist>=3.6",
-]
-# The release proof builds and checks artifacts with these, so they are pinned
-# to the exact versions release-proof/toolchain.json declares -- the host run
-# and the container run must agree byte-for-byte on the packaging toolchain.
-release = [
-    "build==1.3.0",
     "setuptools==80.9.0",
     "twine==6.1.0",
     "wheel==0.45.1",

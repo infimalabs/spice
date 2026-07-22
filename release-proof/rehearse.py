@@ -36,8 +36,6 @@ HASH_CHUNK_BYTES = 1024 * 1024
 PYTHON_GATE_COMMAND = ("uv", "run", "--locked", "pytest")
 RUFF_GATE_COMMAND = ("uv", "run", "--locked", "ruff", "check", ".")
 TOOLCHAIN_DECLARATION_PATH = "release-proof/toolchain.json"
-PACKAGING_TOOLCHAIN_GROUP = "release"
-PACKAGING_TOOLCHAIN_PINS = ("build", "setuptools", "twine", "wheel")
 BROWSER_GATE_COMMAND = ("node", "tests/browser/run_release_smokes.js")
 MUTATION_GATE_COMMAND = (
     "uv",
@@ -57,6 +55,15 @@ MUTATION_GATE_COMMAND = (
     "tests/mutation-ratchet.json",
     "--json",
 )
+# Import target -> distribution whose pin the toolchain declaration carries.
+# `build` keeps its command line in a submodule, so the probe imports
+# `build.__main__` while the version is read against the distribution name.
+PACKAGING_TOOLCHAIN = {
+    "build.__main__": "build",
+    "setuptools": "setuptools",
+    "twine": "twine",
+    "wheel": "wheel",
+}
 PLAYWRIGHT_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
@@ -142,82 +149,6 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def packaging_command(project: Path, *arguments: str) -> tuple[str, ...]:
-    """Run a pinned packaging tool from the project's locked environment.
-
-    The artifact steps deliberately work outside the source tree, so the
-    project is named rather than discovered: ``--project`` steers discovery
-    only and leaves the working directory where the caller put it.
-    """
-    return (
-        "uv",
-        "run",
-        "--project",
-        str(project),
-        "--locked",
-        "--group",
-        PACKAGING_TOOLCHAIN_GROUP,
-        "python",
-        *arguments,
-    )
-
-
-def _declared_packaging_pins(root: Path) -> dict[str, str]:
-    declaration = json.loads(
-        (root / TOOLCHAIN_DECLARATION_PATH).read_text(encoding="utf-8")
-    )
-    pinned = declaration["pinned"]
-    return {name: str(pinned[name]) for name in PACKAGING_TOOLCHAIN_PINS}
-
-
-def verify_packaging_toolchain(
-    root: Path,
-    failures: FailureArtifactStore | None = None,
-) -> dict[str, str]:
-    """Resolve the pinned packaging toolchain before any gate spends time.
-
-    Every artifact-chain step needs build, setuptools, twine and wheel, and
-    they arrive from the same locked environment the source gates already use.
-    Proving that up front turns a missing or drifted dependency into a named
-    failure in seconds, instead of one that lands only after the test, browser
-    and mutation gates have already run.
-    """
-    expected = _declared_packaging_pins(root)
-    if shutil.which("uv") is None:
-        raise RehearsalError(
-            "the release rehearsal drives its packaging toolchain through uv, "
-            "which is not on PATH; install uv and rerun (declared pins: "
-            f"{json.dumps(expected, sort_keys=True)})"
-        )
-    names = ", ".join(repr(name) for name in PACKAGING_TOOLCHAIN_PINS)
-    expression = (
-        "import json; from importlib.metadata import version; "
-        f"print(json.dumps({{name: version(name) for name in ({names},)}}))"
-    )
-    completed = _run(
-        packaging_command(root, "-c", expression),
-        cwd=root,
-        capture=True,
-        failures=failures,
-        gate="packaging-toolchain",
-    )
-    resolved = {
-        name: str(value) for name, value in json.loads(completed.stdout).items()
-    }
-    if resolved != expected:
-        drifted = sorted(
-            name for name in expected if resolved.get(name) != expected[name]
-        )
-        raise RehearsalError(
-            "packaging toolchain differs from "
-            f"{TOOLCHAIN_DECLARATION_PATH} for {', '.join(drifted)}:\n"
-            + json.dumps(
-                {"declared": expected, "resolved": resolved}, indent=2, sort_keys=True
-            )
-        )
-    return resolved
 
 
 def _project_version(root: Path) -> str:
@@ -372,17 +303,105 @@ def _materialize_committed_source(root: Path, scratch: Path) -> Path:
     return source
 
 
+def packaging_python_command(project_root: Path) -> tuple[str, ...]:
+    """Drive packaging tools from the same locked toolchain as every other gate.
+
+    ``-P`` keeps the working directory off ``sys.path`` so a stray ``build``
+    directory beside the invocation cannot shadow the real distribution.
+    """
+    return ("uv", "run", "--locked", "--project", str(project_root), "python", "-P")
+
+
+def declared_packaging_pins(project_root: Path) -> dict[str, str]:
+    """Read the packaging versions the toolchain declaration pins."""
+    declaration = json.loads(
+        (project_root / TOOLCHAIN_DECLARATION_PATH).read_text(encoding="utf-8")
+    )
+    pinned = declaration["pinned"]
+    return {name: str(pinned[name]) for name in PACKAGING_TOOLCHAIN.values()}
+
+
+def verify_packaging_toolchain(
+    project_root: Path,
+    failures: FailureArtifactStore | None = None,
+) -> dict[str, str]:
+    """Fail before the long gates when the packaging toolchain is unusable.
+
+    Returns the resolved versions so the caller can record what it proved. Each
+    module is probed separately and reported by name, because a mid-run
+    ``No module named build`` after the suite, browser, and mutation gates
+    costs several minutes and hides which dependency is actually absent. The
+    resolved versions are then held against the toolchain declaration, so a
+    host run and a container run cannot quietly build their artifacts from
+    different packaging tools.
+    """
+    if shutil.which("uv") is None:
+        raise RehearsalError(
+            "the release rehearsal drives its packaging toolchain through uv, "
+            "which is not on PATH; install uv and re-run so the artifact chain "
+            "uses the same locked toolchain as every other gate."
+        )
+    probe = (
+        "import importlib, json\n"
+        "from importlib.metadata import PackageNotFoundError, version\n"
+        f"targets = {dict(PACKAGING_TOOLCHAIN)!r}\n"
+        "missing = []\n"
+        "resolved = {}\n"
+        "for module, distribution in targets.items():\n"
+        "    try:\n"
+        "        importlib.import_module(module)\n"
+        "        resolved[distribution] = version(distribution)\n"
+        "    except (ImportError, PackageNotFoundError):\n"
+        "        missing.append(module)\n"
+        "print(json.dumps({'missing': missing, 'resolved': resolved}))\n"
+    )
+    completed = _run(
+        [*packaging_python_command(project_root), "-c", probe],
+        cwd=project_root,
+        capture=True,
+        failures=failures,
+        gate="packaging-toolchain",
+    )
+    report = json.loads(completed.stdout)
+    missing = report["missing"]
+    if missing:
+        raise RehearsalError(
+            "packaging toolchain is unusable from the locked environment: "
+            f"{', '.join(missing)} failed to import under "
+            f"`{shlex.join(packaging_python_command(project_root))}`. Add each "
+            f"one to the project's dev dependency group at the version "
+            f"{TOOLCHAIN_DECLARATION_PATH} declares and re-run `uv lock` so the "
+            "artifact chain uses the same locked toolchain as every other gate."
+        )
+    resolved = {name: str(value) for name, value in report["resolved"].items()}
+    declared = declared_packaging_pins(project_root)
+    if resolved != declared:
+        drifted = sorted(
+            name for name in declared if resolved.get(name) != declared[name]
+        )
+        raise RehearsalError(
+            "packaging toolchain differs from "
+            f"{TOOLCHAIN_DECLARATION_PATH} for {', '.join(drifted)}:\n"
+            + json.dumps(
+                {"declared": declared, "resolved": resolved}, indent=2, sort_keys=True
+            )
+        )
+    return resolved
+
+
 def _build_canonical_artifacts(
-    project: Path,
     root: Path,
     artifact_dir: Path,
     version: str,
     failures: FailureArtifactStore | None = None,
+    *,
+    project_root: Path | None = None,
 ) -> tuple[Path, Path]:
+    packaging_python = packaging_python_command(project_root or root)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     _run(
-        packaging_command(
-            project,
+        [
+            *packaging_python,
             "-m",
             "build",
             "--no-isolation",
@@ -390,14 +409,14 @@ def _build_canonical_artifacts(
             "--outdir",
             str(artifact_dir),
             str(root),
-        ),
+        ],
         cwd=artifact_dir,
         failures=failures,
         gate="build-sdist",
     )
     _run(
-        packaging_command(
-            project,
+        [
+            *packaging_python,
             "-m",
             "build",
             "--no-isolation",
@@ -405,7 +424,7 @@ def _build_canonical_artifacts(
             "--outdir",
             str(artifact_dir),
             str(root),
-        ),
+        ],
         cwd=artifact_dir,
         failures=failures,
         gate="build-wheel",
@@ -420,7 +439,7 @@ def _build_canonical_artifacts(
             f"resolved={resolved!r}"
         )
     _run(
-        packaging_command(project, "-m", "twine", "check", str(sdist), str(wheel)),
+        [*packaging_python, "-m", "twine", "check", str(sdist), str(wheel)],
         cwd=artifact_dir,
         failures=failures,
         gate="metadata",
@@ -512,18 +531,19 @@ def _extract_sdist(sdist: Path, destination: Path, version: str) -> Path:
 
 
 def _rebuild_wheel_from_sdist(
-    project: Path,
     sdist: Path,
     version: str,
     scratch: Path,
     failures: FailureArtifactStore | None = None,
+    *,
+    project_root: Path | None = None,
 ) -> Path:
     source = _extract_sdist(sdist, scratch / "sdist", version)
     rebuilt_dir = scratch / "rebuilt"
     rebuilt_dir.mkdir()
     _run(
-        packaging_command(
-            project,
+        [
+            *packaging_python_command(project_root or source),
             "-m",
             "build",
             "--no-isolation",
@@ -531,7 +551,7 @@ def _rebuild_wheel_from_sdist(
             "--outdir",
             str(rebuilt_dir),
             str(source),
-        ),
+        ],
         cwd=rebuilt_dir,
         failures=failures,
         gate="sdist-rebuild",
@@ -613,10 +633,12 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         gate_evidence = _run_source_gates(root, scratch, failures)
         source = _materialize_committed_source(root, scratch)
         sdist, wheel = _build_canonical_artifacts(
-            root, source, artifact_dir, version, failures
+            source, artifact_dir, version, failures, project_root=root
         )
         _validate_installed_wheel(root, wheel, version, scratch, failures)
-        rebuilt = _rebuild_wheel_from_sdist(root, sdist, version, scratch, failures)
+        rebuilt = _rebuild_wheel_from_sdist(
+            sdist, version, scratch, failures, project_root=root
+        )
         mismatches = wheel_member_mismatches(wheel, rebuilt)
         if mismatches:
             raise RehearsalError(
@@ -646,7 +668,6 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
             root, "release-proof-identities.json"
         ),
         "toolchain": _load_git_private_json(root, "release-proof-toolchain.json"),
-        "packaging_toolchain": packaging,
         "tests": {
             "python": gate_evidence["python"],
             "ruff": gate_evidence["ruff"],
@@ -670,6 +691,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         "artifact_rehearsal": {
             "checks": list(CHECKS),
             "installed_wheel_sha256": wheel_sha256,
+            "packaging_toolchain": packaging,
             "sdist_rebuilt_from_sha256": sdist_sha256,
         },
         "content_comparison": {

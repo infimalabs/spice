@@ -695,13 +695,11 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "build" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
-]
-release = [
-    { name = "build" },
     { name = "setuptools" },
     { name = "twine" },
     { name = "wheel" },
@@ -719,13 +717,11 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "build", specifier = "==1.3.0" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "pytest-xdist", specifier = ">=3.6" },
-]
-release = [
-    { name = "build", specifier = "==1.3.0" },
     { name = "setuptools", specifier = "==80.9.0" },
     { name = "twine", specifier = "==6.1.0" },
     { name = "wheel", specifier = "==0.45.1" },
