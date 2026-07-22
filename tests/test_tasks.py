@@ -974,6 +974,57 @@ def test_unclean_review_passes_followups_to_feedback_bridge(task_repo, monkeypat
     ) in output
 
 
+def test_review_rejects_a_bad_followup_record_before_creating_any(
+    task_repo, monkeypatch
+):
+    """One malformed record leaves the board exactly as it found it."""
+    handle = _review_claim(task_repo, monkeypatch)
+    before = sorted(str(row.get("uuid") or "") for row in tw.export())
+
+    with pytest.raises(SpiceError) as rejected:
+        ops.review(
+            handle,
+            finding="changes",
+            note="needs coverage",
+            then=[
+                "title=Well formed record | project=task.unit | "
+                "acceptance=The first record carries everything it needs",
+                "acceptance=The second record carries no title at all",
+            ],
+        )
+
+    row = identity.resolve(handle)
+    assert sorted(str(r.get("uuid") or "") for r in tw.export()) == before
+    assert row["phase"] == "review"
+    assert str(row.get("review_by") or "") == ""
+    assert str(row.get("review_finding") or "") == ""
+    assert "line 2: missing required field 'title'" in str(rejected.value)
+
+
+def test_review_spawns_every_record_when_all_of_them_parse(task_repo, monkeypatch):
+    """The rejection guard leaves multi-record creation working."""
+    handle = _review_claim(task_repo, monkeypatch)
+
+    output = ops.review(
+        handle,
+        finding="changes",
+        note="needs coverage",
+        then=[
+            "title=First follow-up | project=task.unit | "
+            "acceptance=The first record lands",
+            "title=Second follow-up | project=task.unit | "
+            "acceptance=The second record lands",
+        ],
+    )
+    spawned = [
+        line.split()[1] for line in output.splitlines() if line.startswith("spawned ")
+    ]
+    titles = [identity.resolve(each)["description"] for each in spawned]
+
+    assert titles == ["First follow-up", "Second follow-up"]
+    assert spawned[0] != spawned[1]
+
+
 def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     handle = _review_claim(task_repo, monkeypatch)
     reviewed_uuid = identity.uuid_of(identity.resolve(handle))
