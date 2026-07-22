@@ -14,16 +14,15 @@ from typing import cast
 
 import pytest
 
+from tests.test_releasepackaging import DECLARED_PACKAGING_PINS, TOOLCHAIN_RELATIVE_PATH
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
-    DECLARED_PACKAGING_PINS,
     EVIDENCE,
     HOSTNATIVE,
     PROJECT_ROOT,
     REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
-    TOOLCHAIN_RELATIVE_PATH,
     _file_inventory,
     _git,
     _source_repository,

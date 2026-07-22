@@ -16,13 +16,22 @@ from pathlib import Path
 import pytest
 
 from tests.test_releaseproofhelpers import (
-    DECLARED_PACKAGING_PINS,
-    PYPROJECT,
+    PROJECT_ROOT,
     REHEARSAL,
     TOOLCHAIN_DECLARATION,
-    TOOLCHAIN_RELATIVE_PATH,
     _write_test_wheel,
 )
+
+TOOLCHAIN_RELATIVE_PATH = "release-proof/toolchain.json"
+PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+# The packaging pins fixtures declare, held apart from the real declaration so
+# a fixture keeps stating what it expects even as the real pins move.
+DECLARED_PACKAGING_PINS = {
+    "build": "1.3.0",
+    "setuptools": "80.9.0",
+    "twine": "6.1.0",
+    "wheel": "0.45.1",
+}
 
 
 def test_locked_packaging_pins_match_the_container_toolchain_declaration():
