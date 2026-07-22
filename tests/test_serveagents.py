@@ -38,16 +38,6 @@ from tests.test_taskgitsync import _advance_upstream, _repo_with_upstream, _run
 # left one minute into a candidate's wait.
 LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
 ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
-
-
-def _ready_candidate(task_uuid: str) -> dict:
-    ready_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    return {"uuid": task_uuid, "ready_at": ready_at}
-
-
-# A wait long enough that no plausible test runtime reaches the escape, so a
-# row built as fresh is still fresh by the time the decision reads it.
-WELL_SHORT_OF_THE_ESCAPE_SECONDS = 60.0
 # The tolerance for a countdown measured against the real clock: these rows are
 # stamped moments before the call that reads them.
 ESCAPE_COUNTDOWN_TOLERANCE_SECONDS = 5.0
@@ -273,7 +263,7 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[tuple[str, object]] = []
-    candidates = [_ready_candidate("task-a"), _ready_candidate("task-spare")]
+    candidates = [_ready_row("task-a"), _ready_row("task-spare")]
 
     monkeypatch.setattr(
         agentapi.alloc,
@@ -313,7 +303,7 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
         "action": "start",
         "threadId": THREAD_A,
         "trigger": "available-work",
-        "taskHandle": "task-a",
+        "taskHandle": identity.render_handle(candidates[0]),
     }
     assert [event[0] for event in trace] == ["select", "claim", "start"]
     assert trace[0] == ("select", THREAD_A)
@@ -345,13 +335,11 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[str] = []
+    candidates = [_ready_row("task-raced"), _ready_row("task-next")]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [
-            _ready_candidate("task-raced"),
-            _ready_candidate("task-next"),
-        ],
+        lambda _actor: candidates,
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -372,7 +360,7 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
         "action": "skipped",
         "trigger": "available-work",
         "reason": "claim-lost",
-        "taskHandle": "task-raced",
+        "taskHandle": identity.render_handle(candidates[0]),
     }
     assert trace == ["claim-raced"]
 
@@ -383,13 +371,11 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[str] = []
+    candidates = [_ready_row("task-failed"), _ready_row("task-spare")]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [
-            _ready_candidate("task-failed"),
-            _ready_candidate("task-spare"),
-        ],
+        lambda _actor: candidates,
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -423,7 +409,7 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
         "ok": False,
         "error": "launch failed",
         "trigger": "available-work",
-        "taskHandle": "task-failed",
+        "taskHandle": identity.render_handle(candidates[0]),
         "claimReleased": True,
     }
 
@@ -440,7 +426,7 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
         agentapi.WorktreeTarget("lane-b", repo_b, "lane-b", "main-b"),
     ]
     actors = [THREAD_A, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
-    candidates = [_ready_candidate("task-a"), _ready_candidate("task-b")]
+    candidates = [_ready_row("task-a"), _ready_row("task-b")]
     claims: dict[str, str] = {}
     starts: list[str] = []
     results: list[dict[str, object] | None] = []
@@ -570,6 +556,7 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     launches = 0
+    candidates = [_ready_row("task-a"), _ready_row("task-b")]
 
     def fake_start_agent(repo_root, **_kwargs):
         nonlocal launches
@@ -589,7 +576,7 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [_ready_candidate("task-a"), _ready_candidate("task-b")],
+        lambda _actor: candidates,
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -618,7 +605,9 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     # Refusing costs the board nothing: each held pass hands its reservation
     # back, so the row stays ready for whoever can actually run it.
     assert [payload["claimReleased"] for payload in held] == [True, True, True]
-    assert [payload["taskHandle"] for payload in held] == ["task-a"] * 3
+    assert [payload["taskHandle"] for payload in held] == [
+        identity.render_handle(candidates[0])
+    ] * 3
     assert (
         held[0]["restartRefusal"]["consecutive_rapid_deaths"]
         == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
@@ -633,10 +622,11 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     attempt_cache: dict[str, float] = {}
     starts: list[str] = []
+    candidates = [_ready_row("task-a"), _ready_row("task-b")]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [_ready_candidate("task-a"), _ready_candidate("task-b")],
+        lambda _actor: candidates,
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -664,7 +654,7 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
         "ok": True,
         "action": "start",
         "trigger": "available-work",
-        "taskHandle": "task-a",
+        "taskHandle": identity.render_handle(candidates[0]),
     }
     assert immediately_again == {
         "ok": True,
@@ -799,38 +789,6 @@ def test_available_work_age_outlives_the_process_that_first_saw_the_task(
     }
 
 
-def test_available_work_legacy_inception_fallback_waits_on_threshold(
-    tmp_path, monkeypatch
-):
-    """A legacy row without ``ready_at`` retains its inception fallback."""
-    target = _target(_repo(tmp_path))
-    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    claims: list[str] = []
-    incepted = identity.encode_width(identity.epoch_millis(datetime.now(UTC)))
-    monkeypatch.setattr(
-        agentapi.alloc,
-        "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-legacy", "incepted": incepted}],
-    )
-    monkeypatch.setattr(
-        agentapi.claimstate,
-        "do_claim",
-        lambda task_uuid, *_args, **_kwargs: claims.append(task_uuid) or True,
-    )
-
-    skipped = agentapi.ensure_agent_for_available_work(
-        target,
-        thread_id=THREAD_A,
-        retry_seconds=0.0,
-    )
-
-    assert skipped["reason"] == "capacity"
-    assert skipped["retryAfterSeconds"] == pytest.approx(
-        LONE_TASK_ESCAPE_SECONDS, abs=ESCAPE_COUNTDOWN_TOLERANCE_SECONDS
-    )
-    assert claims == []
-
-
 def test_available_work_refused_launch_starts_a_new_ready_interval(
     tmp_path, monkeypatch
 ):
@@ -903,7 +861,7 @@ def test_available_work_next_deadline_counts_down_from_the_oldest_candidate():
     """The watcher's bound is what is left of the oldest candidate's interval."""
     now = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
     aged = [
-        {"incepted": identity.encode_width(identity.epoch_millis(now - age))}
+        {"ready_at": (now - age).isoformat().replace("+00:00", "Z")}
         for age in (timedelta(minutes=1), timedelta(seconds=5))
     ]
 
