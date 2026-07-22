@@ -302,12 +302,7 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     )
 
     gate = PINNED.toolchain_gate(snapshot, _executable_interpreter(snapshot))
-    # Read the record where a plain repository keeps it, rather than through the
-    # resolver the gate itself used -- so a record written to the wrong place
-    # still fails here. The linked-worktree round trip covers the resolved case.
-    recorded = json.loads(
-        (snapshot / ".git" / PINNED.TOOLCHAIN_RECORD_NAME).read_text(encoding="utf-8")
-    )
+    recorded = REHEARSAL._load_git_private_json(snapshot, PINNED.TOOLCHAIN_RECORD_NAME)
 
     assert (gate["gate"], gate["status"], gate["detail"]) == (
         "declared-toolchain",
