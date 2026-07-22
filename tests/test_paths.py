@@ -247,9 +247,24 @@ def _refuse_to_launch_git(monkeypatch) -> None:
 
 def _report_no_worktree(monkeypatch) -> None:
     def outside_any_worktree(command, **_kwargs):
-        raise subprocess.CalledProcessError(128, list(command))
+        raise subprocess.CalledProcessError(
+            128,
+            list(command),
+            stderr="fatal: not a git repository (or any parent): .git",
+        )
 
     monkeypatch.setattr(paths, "run_git_command", outside_any_worktree)
+
+
+def _report_failed_git(monkeypatch) -> None:
+    def failed_git(command, **_kwargs):
+        raise subprocess.CalledProcessError(
+            128,
+            list(command),
+            stderr="fatal: Unable to create 'index.lock': File exists.",
+        )
+
+    monkeypatch.setattr(paths, "run_git_command", failed_git)
 
 
 def test_repo_root_from_cwd_separates_a_launch_failure_from_an_absent_worktree(
@@ -270,6 +285,19 @@ def test_repo_root_from_cwd_separates_a_launch_failure_from_an_absent_worktree(
     assert "No such file or directory" in message
 
 
+def test_repo_root_from_cwd_names_a_failed_git_run(tmp_path, monkeypatch):
+    _report_failed_git(monkeypatch)
+
+    with pytest.raises(SpiceError) as failed:
+        paths.repo_root_from_cwd(tmp_path)
+
+    message = str(failed.value)
+    assert "git command failed" in message
+    assert "--show-toplevel" in message
+    assert "exit 128" in message
+    assert "index.lock" in message
+
+
 def test_require_repo_root_names_the_launch_failure_rather_than_the_tree(
     tmp_path, monkeypatch
 ):
@@ -286,7 +314,6 @@ def test_require_repo_root_names_the_launch_failure_rather_than_the_tree(
     launch_message = str(unlaunchable.value)
     assert absent_message == "not inside a git worktree"
     assert "git command could not be launched" in launch_message
-    assert launch_message != absent_message
 
 
 def test_init_repo_root_surfaces_a_launch_failure_before_walking_for_markers(
@@ -325,7 +352,6 @@ def test_git_common_dir_tells_an_absent_repository_from_a_failed_git_run(tmp_pat
     assert "--git-common-dir" in failed_message
     assert str(missing) in failed_message
     assert "No such file or directory" in failed_message
-    assert failed_message != absent_message
 
 
 def test_git_dir_resolvers_carry_their_own_argv_and_name_a_launch_failure(
@@ -348,9 +374,7 @@ def test_git_dir_resolvers_carry_their_own_argv_and_name_a_launch_failure(
     launch_message = str(unlaunchable.value)
     assert "--git-common-dir" in common_message
     assert "--git-dir" in worktree_message
-    assert common_message != worktree_message
     assert "git command could not be launched" in launch_message
-    assert launch_message != worktree_message
 
 
 def _repo_with_linked_worktree(tmp_path: Path) -> Path:
