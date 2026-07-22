@@ -385,6 +385,7 @@ WIRE_OBJECTS = (
             "error": STRING,
             "trigger": STRING,
             "reason": STRING,
+            "retryAfterSeconds": NUMBER,
             "taskHandle": STRING,
             "claimReleased": BOOLEAN,
             "restartRefusal": _ref("RestartRefusal"),

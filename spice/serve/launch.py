@@ -15,19 +15,18 @@ change to wake on but an age to reach: nothing further will be written on its
 behalf, and the bound is what lets that age arrive.
 
 Starting is still `agentapi.ensure_agent_for_available_work` and nothing else --
-same claim lock, same ready-since observations, same retry gate -- so a wake here
-and an inventory build in a request thread cannot both start a lane for one task.
+same claim lock, same starvation escape, same retry gate -- so a wake here and an
+inventory build in a request thread cannot both start a lane for one task.
 """
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from threading import Event, Thread, Timer
 from typing import Any
 
 from spice.serve.agentapi import (
-    available_work_next_deadline,
+    AVAILABLE_WORK_STARVATION_SECONDS,
     ensure_agent_for_available_work,
 )
 from spice.serve.livebus import wait_for_change
@@ -105,21 +104,27 @@ class AvailableWorkWatch:
     def evaluate(self) -> float:
         """Start every stopped Drain lane that has work, and answer when to look again."""
         state = self._state
+        # Nothing declined for capacity means nothing is waiting on an age to
+        # arrive, and the whole interval is the longest a task filed a moment
+        # from now could have to wait.
+        remaining = AVAILABLE_WORK_STARVATION_SECONDS
         for target in state.worktree_targets():
             thread_id = resolve_thread_id_for_target(state, target) or ""
             facts = team_facts_for_target(state.team_store, target, thread_id)
             if facts.get("lifetime") != "Drain":
                 continue
-            ensure_agent_for_available_work(
+            payload = ensure_agent_for_available_work(
                 target,
                 thread_id=thread_id,
-                ready_since_cache=state.available_work_ready_since,
                 attempt_cache=state.pending_agent_ensure_attempts,
                 fast_mode=bool(state.team_store.global_fast_mode_enabled()),
             )
-        remaining = available_work_next_deadline(
-            state.available_work_ready_since, now=time.monotonic()
-        )
+            # The lane that declined is the one holding the oldest candidate's
+            # deadline: it already read the rows under the claim lock, so the
+            # wake it needs rides back out with the refusal instead of costing
+            # this thread a second export of the same board.
+            if payload is not None and "retryAfterSeconds" in payload:
+                remaining = min(remaining, float(payload["retryAfterSeconds"]))
         return max(remaining, AVAILABLE_WORK_WATCH_MIN_SECONDS)
 
     def _wait(self, timeout: float) -> None:

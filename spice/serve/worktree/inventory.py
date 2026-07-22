@@ -8,7 +8,6 @@ from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve.agentapi import (
     ensure_agent_for_available_work,
     ensure_agent_for_pending_inbox,
-    forget_available_work_observations,
 )
 from spice.serve.payload.identity import (
     _agent_name_for_target,
@@ -139,16 +138,12 @@ def _ensure_work_tree_agent(
     }
     agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
-    ready_since_cache = getattr(state, "available_work_ready_since", None)
     if agent_ensure is None and team_facts.get("lifetime") == "Drain":
         agent_ensure = ensure_agent_for_available_work(
             target,
             thread_id=thread_id,
-            ready_since_cache=ready_since_cache,
             **ensure_kwargs,
         )
-    elif team_facts.get("lifetime") != "Drain":
-        forget_available_work_observations(thread_id, ready_since_cache)
     ensured_thread_id = record_started_renewal_from_ensure(
         state.team_store,
         predecessor_agent_id=predecessor_actor,
