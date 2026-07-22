@@ -203,10 +203,11 @@ def init_repo_root(cwd: Path | None = None) -> Path:
         return root
     marker_root = _linked_worktree_marker_root(cwd or Path.cwd())
     if marker_root is not None:
-        # A linked checkout whose common Git dir is bare cannot satisfy
-        # ``--show-toplevel`` until initialization applies its worktree-local
-        # ``core.bare=false`` operation.  The marker itself identifies the
-        # root without mutating Git config during discovery or dry-run.
+        # Git has run and reported no worktree; launch failures and time-outs
+        # raise before this explicit fallback. Git versions differ on whether a
+        # linked worktree under a bare common dir satisfies ``--show-toplevel``
+        # before initialization writes ``core.bare=false``, so its marker must
+        # yield the same root and plan as the primary resolver.
         return marker_root
     return require_repo_root(cwd)
 
