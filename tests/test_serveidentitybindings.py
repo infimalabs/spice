@@ -75,9 +75,10 @@ def test_rebound_pointer_survives_stale_cleanup_interleaving(tmp_path, monkeypat
     _write_idle_binding(lane_a, started_at="2026-07-22T19:04:22.000000Z")
     _write_idle_binding(lane_c, started_at="2026-07-22T19:22:19.000000Z")
     real_fingerprint = bindings._pointer_fingerprint
-    fingerprint_calls = 0
+    real_clear_stale_binding = bindings._clear_stale_binding
     writer_done = Event()
     writer: Thread | None = None
+    clearing_rebound_lane = False
 
     def rebind_lane_a() -> None:
         _write_idle_binding(
@@ -88,10 +89,9 @@ def test_rebound_pointer_survives_stale_cleanup_interleaving(tmp_path, monkeypat
         writer_done.set()
 
     def interleaved_fingerprint(stat):
-        nonlocal fingerprint_calls, writer
-        fingerprint_calls += 1
+        nonlocal writer
         fingerprint = real_fingerprint(stat)
-        if fingerprint_calls == 3:
+        if clearing_rebound_lane and writer is None:
             writer = Thread(target=rebind_lane_a, daemon=True)
             writer.start()
             # The old code lets the writer finish inside this window and then
@@ -100,7 +100,24 @@ def test_rebound_pointer_survives_stale_cleanup_interleaving(tmp_path, monkeypat
             writer_done.wait(1.0)
         return fingerprint
 
+    def instrumented_clear_stale_binding(thread_id, binding) -> None:
+        # Open the window across the revalidation of the one pointer this writer
+        # replaces. Counting fingerprints to reach that moment instead spends the
+        # ordinal on calls this fixture does not own: bind a third lane and the
+        # third fingerprint is discovery, so the writer lands before any cleanup
+        # and the run dies on the reconciler's own changed-pointer guard --
+        # red against correct code, and no race run either way.
+        nonlocal clearing_rebound_lane
+        clearing_rebound_lane = binding.target.repo_root.resolve() == lane_a.resolve()
+        try:
+            real_clear_stale_binding(thread_id, binding)
+        finally:
+            clearing_rebound_lane = False
+
     monkeypatch.setattr(bindings, "_pointer_fingerprint", interleaved_fingerprint)
+    monkeypatch.setattr(
+        bindings, "_clear_stale_binding", instrumented_clear_stale_binding
+    )
     state = ServeState(anchor_root=lane_a)
 
     state.worktree_targets()

@@ -9,7 +9,7 @@ from os import PathLike
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import claimstate, config, create, identity, tw
+from spice.tasks import claimstate, config, create, identity, readiness, tw
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import Doc, Node
 from spice.tasks.taskdoc import read_document
@@ -908,9 +908,13 @@ def _execute_edge_change(
     rows_by_slug[change.source] = fresh
     if _is_settled(fresh):
         return False
+    uuid = identity.uuid_of(fresh)
+    was_ready = readiness.is_ready(uuid)
+    changed_at = tw.now_iso()
     target_uuid = identity.uuid_of(rows_by_slug[change.target])
     modifier = f"depends:-{target_uuid}" if drop else f"depends:{target_uuid}"
-    tw.run([identity.uuid_of(fresh), "modify", modifier])
+    tw.run([uuid, "modify", modifier])
+    readiness.reconcile_transition(uuid, was_ready=was_ready, at=changed_at)
     return True
 
 

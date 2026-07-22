@@ -27,7 +27,7 @@ from spice.agent.sidechannelnotify import (
 )
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
-from spice.tasks import config, identity, tw
+from spice.tasks import config, identity, readiness, tw
 from spice.tasks.git import boundaries
 
 CLAIM_WITNESS_FILE = "claim-witness.json"
@@ -668,6 +668,7 @@ def do_claim(
                 *filters,
                 "modify",
                 *metadata,
+                f"{config.TASK_READY_AT_UDA}:",
                 "start:now",
             ]
         )
@@ -826,14 +827,17 @@ def _renewal_claim_meta(
 def release_claim(uuid: str, actor: str) -> ClaimReleaseResult:
     """Release only the exact active claim still owned by ``actor``.
 
-    The modify is the release: the moment it lands the task is allocatable
-    again, and no later failure can take that back. Retiring the witness is a
-    second write to a second place, so a filesystem fault there is reported
-    beside the release rather than raised over it -- raising would tell every
-    caller the row is still reserved when it is already back on the board, and
-    a launch handing back a reservation it never held is exactly the report an
-    operator chases.
+    The modify is the release: it clears the claim and stamps the row's new
+    READY transition in one write, so the moment it lands the task is
+    allocatable again and no later failure can take that back. Retiring the
+    witness is a second write to a second place, so a filesystem fault there is
+    reported beside the release rather than raised over it -- raising would tell
+    every caller the row is still reserved when it is already back on the board,
+    and a launch handing back a reservation it never held is exactly the report
+    an operator chases.
     """
+    released_at = tw.now_iso()
+    ready_after_release = readiness.ready_when_inactive(uuid)
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     rows = tw.export([uuid])
     claim_worktree = (
@@ -850,6 +854,10 @@ def release_claim(uuid: str, actor: str) -> ClaimReleaseResult:
                 "modify",
                 "start:",
                 *CLAIM_CLEAR,
+                readiness.transition_arg(
+                    at=released_at,
+                    ready=ready_after_release,
+                ),
             ]
         )
     except SpiceError:

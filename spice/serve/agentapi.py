@@ -38,7 +38,7 @@ from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import alloc, claimstate, identity
+from spice.tasks import alloc, claimstate, identity, readiness
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
@@ -363,9 +363,9 @@ def ensure_agent_for_available_work(
         payload.update({"trigger": "available-work", "taskHandle": handle})
         if payload.get("ok") is False:
             # The launch was attempted and refused -- out of credits, or the
-            # restart guard. The task returns to the board still carrying every
-            # second it has waited, because that age is a property of the row
-            # rather than of anyone watching it.
+            # restart guard. Releasing its claim is a new READY transition;
+            # release_claim stamps that durable origin for the next watcher
+            # evaluation, and answers separately for the row and its witness.
             release = claimstate.release_claim(task_uuid, actor)
             payload["claimReleased"] = release.released
         return payload
@@ -374,26 +374,12 @@ def ensure_agent_for_available_work(
 def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> float:
     """How long this task has been waiting for a lane, read off the row itself.
 
-    The waiting is measured from `incepted`: the base52 stamp minted the moment
-    the task was thought of, stored on every row, and never rewritten. Serve
-    restarts constantly, so an age kept in process memory against a process
-    clock is reset by every restart -- a task that waited an hour reads as
-    freshly ready to the next server and starts the whole interval over. An age
-    the row carries survives that, and survives being handed to a different
-    server entirely.
-
-    Inception is not the moment the task entered READY: a task can be planned
-    long before it is boarded, and one that has only just become allocatable can
-    already read as starving. That direction is the safe one -- this age only
-    ever releases the two-task threshold early, never holds a start back.
-
-    A row with no stamp cannot be aged, so it waits on the threshold like any
-    other candidate instead of decoding to the epoch and starving instantly.
+    The durable origin is the task's current READY transition, not the moment
+    the task was conceived. Native Taskwarrior timestamps cover the initial
+    transition, while Spice's ``ready_at`` UDA records later entries into READY.
+    The inception stamp remains only a compatibility fallback for legacy rows.
     """
-    incepted = str(row.get("incepted") or "").strip()
-    if not identity.INCEPTED_RE.match(incepted):
-        return 0.0
-    return (now - identity.incepted_datetime(incepted)).total_seconds()
+    return max(0.0, now.timestamp() - readiness.queue_ready_epoch(row))
 
 
 def available_work_next_deadline(

@@ -39,6 +39,13 @@ from tests.test_taskgitsync import _advance_upstream, _repo_with_upstream, _run
 # left one minute into a candidate's wait.
 LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
 ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
+
+
+def _ready_candidate(task_uuid: str) -> dict:
+    ready_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return {"uuid": task_uuid, "ready_at": ready_at}
+
+
 # A wait long enough that no plausible test runtime reaches the escape, so a
 # row built as fresh is still fresh by the time the decision reads it.
 WELL_SHORT_OF_THE_ESCAPE_SECONDS = 60.0
@@ -52,11 +59,13 @@ CAPACITY_RETRY_SECONDS = 5.0
 
 
 def _ready_row(uuid: str, *, waiting_seconds: float = 0.0) -> dict[str, str]:
-    """A ready row carrying the inception stamp its queue age is read from."""
-    incepted = identity.encode_width(
-        identity.epoch_millis(datetime.now(UTC) - timedelta(seconds=waiting_seconds))
-    )
-    return {"uuid": uuid, "incepted": incepted, "project": "serve.queue"}
+    """A ready row carrying its current durable queue-age origin."""
+    ready_at = datetime.now(UTC) - timedelta(seconds=waiting_seconds)
+    return {
+        "uuid": uuid,
+        "ready_at": ready_at.isoformat().replace("+00:00", "Z"),
+        "project": "serve.queue",
+    }
 
 
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
@@ -265,7 +274,7 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[tuple[str, object]] = []
-    candidates = [{"uuid": "task-a"}, {"uuid": "task-spare"}]
+    candidates = [_ready_candidate("task-a"), _ready_candidate("task-spare")]
 
     monkeypatch.setattr(
         agentapi.alloc,
@@ -340,7 +349,10 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-raced"}, {"uuid": "task-next"}],
+        lambda _actor: [
+            _ready_candidate("task-raced"),
+            _ready_candidate("task-next"),
+        ],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -375,7 +387,10 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-failed"}, {"uuid": "task-spare"}],
+        lambda _actor: [
+            _ready_candidate("task-failed"),
+            _ready_candidate("task-spare"),
+        ],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(
@@ -428,7 +443,7 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
         agentapi.WorktreeTarget("lane-b", repo_b, "lane-b", "main-b"),
     ]
     actors = [THREAD_A, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
-    candidates = [{"uuid": "task-a"}, {"uuid": "task-b"}]
+    candidates = [_ready_candidate("task-a"), _ready_candidate("task-b")]
     claims: dict[str, str] = {}
     starts: list[str] = []
     results: list[dict[str, object] | None] = []
@@ -577,7 +592,7 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-a"}, {"uuid": "task-b"}],
+        lambda _actor: [_ready_candidate("task-a"), _ready_candidate("task-b")],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -628,7 +643,7 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-a"}, {"uuid": "task-b"}],
+        lambda _actor: [_ready_candidate("task-a"), _ready_candidate("task-b")],
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
@@ -668,14 +683,20 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
 
 
 def test_available_work_single_fresh_task_leaves_the_board_alone(tmp_path, monkeypatch):
-    """One task filed a moment ago is the case the threshold exists to decline."""
+    """A long-planned task freshly READY starts its clock at that transition."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     claims: list[str] = []
+    fresh = {
+        **_ready_row("task-only"),
+        # This valid historical identity predates the READY transition by
+        # years; using inception would start the lane immediately.
+        "incepted": "1k4vPpg5",
+    }
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [_ready_row("task-only")],
+        lambda _actor: [fresh],
     )
     monkeypatch.setattr(
         agentapi.claimstate,
@@ -785,21 +806,18 @@ def test_available_work_age_outlives_the_process_that_first_saw_the_task(
     }
 
 
-def test_available_work_unstamped_row_waits_on_the_threshold(tmp_path, monkeypatch):
-    """A row with no inception stamp has no age, so it waits for a second task.
-
-    The stamp decodes as a base52 integer, and an absent one would decode to
-    the epoch: every unstamped row would read as decades starved and start a
-    lane by itself. Having no age is the honest answer, and the threshold is
-    what covers it.
-    """
+def test_available_work_legacy_inception_fallback_waits_on_threshold(
+    tmp_path, monkeypatch
+):
+    """A legacy row without ``ready_at`` retains its inception fallback."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     claims: list[str] = []
+    incepted = identity.encode_width(identity.epoch_millis(datetime.now(UTC)))
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
-        lambda _actor: [{"uuid": "task-unstamped"}],
+        lambda _actor: [{"uuid": "task-legacy", "incepted": incepted}],
     )
     monkeypatch.setattr(
         agentapi.claimstate,
@@ -814,12 +832,16 @@ def test_available_work_unstamped_row_waits_on_the_threshold(tmp_path, monkeypat
     )
 
     assert skipped["reason"] == "capacity"
-    assert skipped["retryAfterSeconds"] == LONE_TASK_ESCAPE_SECONDS
+    assert skipped["retryAfterSeconds"] == pytest.approx(
+        LONE_TASK_ESCAPE_SECONDS, abs=ESCAPE_COUNTDOWN_TOLERANCE_SECONDS
+    )
     assert claims == []
 
 
-def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch):
-    """A launch the provider refuses returns the task at the age it had earned."""
+def test_available_work_refused_launch_starts_a_new_ready_interval(
+    tmp_path, monkeypatch
+):
+    """A refused launch returns the row through a fresh READY transition."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     released: list[tuple[str, str]] = []
@@ -829,12 +851,14 @@ def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch
     )
     monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
     monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
+
+    def release_with_fresh_ready_stamp(task_uuid, actor):
+        released.append((task_uuid, actor))
+        broke["ready_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        return ClaimReleaseResult(released=True)
+
     monkeypatch.setattr(
-        agentapi.claimstate,
-        "release_claim",
-        lambda task_uuid, actor: (
-            released.append((task_uuid, actor)) or ClaimReleaseResult(released=True)
-        ),
+        agentapi.claimstate, "release_claim", release_with_fresh_ready_stamp
     )
     monkeypatch.setattr(
         agentapi,
@@ -870,10 +894,16 @@ def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch
         "taskHandle": identity.render_handle(broke),
         "claimReleased": True,
     }
-    # Handing the row back cannot rewind its wait, so the very next pass tries
-    # again immediately instead of serving another whole interval first.
-    assert retried == refused
-    assert released == [("task-broke", THREAD_A)] * 2
+    assert released == [("task-broke", THREAD_A)]
+    assert retried == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "capacity",
+        "retryAfterSeconds": pytest.approx(
+            LONE_TASK_ESCAPE_SECONDS, abs=ESCAPE_COUNTDOWN_TOLERANCE_SECONDS
+        ),
+    }
 
 
 def test_available_work_next_deadline_counts_down_from_the_oldest_candidate():
@@ -891,15 +921,10 @@ def test_available_work_next_deadline_counts_down_from_the_oldest_candidate():
     assert watched == ESCAPE_REMAINING_AFTER_ONE_MINUTE
 
 
-def test_available_work_age_survives_a_task_leaving_and_rejoining_the_backlog(
+def test_available_work_age_refreshes_when_task_rejoins_the_backlog(
     tmp_path, monkeypatch
 ):
-    """A task claimed, released, and returned to the board is not made new again.
-
-    Rows leave READY whenever someone claims them, so a task that loses its
-    lane and comes back would restart its wait under an observed age -- the
-    board's oldest work would be its least likely to start.
-    """
+    """A task's later READY interval does not inherit its earlier queue age."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     returning = _ready_row("task-returned", waiting_seconds=LONE_TASK_ESCAPE_SECONDS)
@@ -917,12 +942,18 @@ def test_available_work_age_survives_a_task_leaving_and_rejoining_the_backlog(
         lambda *_args, **_kwargs: ({"ok": True, "action": "start"}, HTTPStatus.OK),
     )
 
+    first_interval = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        retry_seconds=0.0,
+    )
     candidates.clear()
     absent = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
         retry_seconds=0.0,
     )
+    returning["ready_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     candidates.append(returning)
     rejoined = agentapi.ensure_agent_for_available_work(
         target,
@@ -930,13 +961,17 @@ def test_available_work_age_survives_a_task_leaving_and_rejoining_the_backlog(
         retry_seconds=0.0,
     )
 
-    assert absent is None
-    assert rejoined == {
+    assert first_interval == {
         "ok": True,
         "action": "start",
         "trigger": "available-work",
         "taskHandle": identity.render_handle(returning),
     }
+    assert absent is None
+    assert rejoined["reason"] == "capacity"
+    assert rejoined["retryAfterSeconds"] == pytest.approx(
+        LONE_TASK_ESCAPE_SECONDS, abs=ESCAPE_COUNTDOWN_TOLERANCE_SECONDS
+    )
 
 
 def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
@@ -1041,12 +1076,22 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     published = threading.Event()
     release_direct_send = threading.Event()
-    background_admitted = threading.Event()
+    background_at_launch_lock = threading.Event()
     background_finished = threading.Event()
     agent_started = threading.Event()
     direct_result: dict[str, object] = {}
     attempts: list[bool] = []
     real_submit = workroutes.submit_steering_message
+    real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
+
+    class ObservedPendingInboxLaunchLock:
+        def __enter__(self):
+            if threading.current_thread().name == "background-launch-evaluation":
+                background_at_launch_lock.set()
+            return real_launch_lock.__enter__()
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return real_launch_lock.__exit__(exc_type, exc_value, traceback)
 
     def pause_after_publication(**kwargs):
         sent = real_submit(**kwargs)
@@ -1079,6 +1124,11 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     monkeypatch.setattr(
         agentapi, "agent_ensure_response_payload", ensure_with_active_refusal
     )
+    monkeypatch.setattr(
+        agentapi,
+        "_PENDING_INBOX_LAUNCH_LOCK",
+        ObservedPendingInboxLaunchLock(),
+    )
 
     def send_directly() -> None:
         direct_result["response"] = work_tree_send_response_payload(
@@ -1086,7 +1136,6 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         )
 
     def evaluate_in_background() -> None:
-        background_admitted.set()
         watch = launch.AvailableWorkWatch(state, events_path=tmp_path / "task-events")
         watch.evaluate()
         background_finished.set()
@@ -1094,9 +1143,16 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     direct_thread = threading.Thread(target=send_directly, daemon=True)
     direct_thread.start()
     assert published.wait(timeout=5.0) is True
-    background_thread = threading.Thread(target=evaluate_in_background, daemon=True)
+    background_thread = threading.Thread(
+        target=evaluate_in_background,
+        name="background-launch-evaluation",
+        daemon=True,
+    )
     background_thread.start()
-    assert background_admitted.wait(timeout=5.0) is True
+    # The watcher is now at the real launch boundary, blocked behind the UI
+    # route's pre-publication acquisition. Releasing the paused route must let
+    # its reentrant automatic=False decision run before the watcher proceeds.
+    assert background_at_launch_lock.wait(timeout=5.0) is True
     release_direct_send.set()
     direct_thread.join(timeout=5.0)
     background_thread.join(timeout=5.0)
