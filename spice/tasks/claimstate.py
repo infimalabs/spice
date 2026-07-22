@@ -132,20 +132,32 @@ def claim_meta(
             driver.current_turn_id(os.environ) or thread
         ).strip()  # env-policy: allow
     link = f"spice-session://{thread}?start={start}&end={end}"
-    return [
-        f"claim_by:{claim_actor}",
-        f"claim_at:{at}",
-        f"claim_until:{until}",
-        f"claim_thread:{thread}",
-        f"claim_worktree:{site.worktree}",
-        f"claim_branch:{site.branch}",
-        f"claim_head:{site.head}",
-        f"claim_lease_seconds:{resolved_lease_seconds:g}",
-        f"claim_context_start:{start}",
-        f"claim_context_end:{end}",
-        f"claim_context_link:{link}",
-        f"claim_context_turn:{turn}",
-    ]
+    return _validated_claim_meta(
+        [
+            f"claim_by:{claim_actor}",
+            f"claim_at:{at}",
+            f"claim_until:{until}",
+            f"claim_thread:{thread}",
+            f"claim_worktree:{site.worktree}",
+            f"claim_branch:{site.branch}",
+            f"claim_head:{site.head}",
+            f"claim_lease_seconds:{resolved_lease_seconds:g}",
+            f"claim_context_start:{start}",
+            f"claim_context_end:{end}",
+            f"claim_context_link:{link}",
+            f"claim_context_turn:{turn}",
+        ]
+    )
+
+
+def _validated_claim_meta(args: list[str]) -> list[str]:
+    registered = config.uda_schema()
+    for arg in args:
+        key, separator, _value = arg.partition(":")
+        if separator and key in registered:
+            continue
+        raise SpiceError(f"claim metadata key {key!r} is not a registered UDA")
+    return args
 
 
 def _resolved_claim_lease_seconds(lease_seconds: float | None) -> float:
@@ -595,18 +607,19 @@ def do_claim(
         if guard_unclaimed
         else []
     )
+    metadata = claim_meta(
+        actor,
+        site=site,
+        context_thread=context_thread,
+        lease_seconds=lease_seconds,
+    )
     try:
         tw.run(
             [
                 uuid,
                 *filters,
                 "modify",
-                *claim_meta(
-                    actor,
-                    site=site,
-                    context_thread=context_thread,
-                    lease_seconds=lease_seconds,
-                ),
+                *metadata,
                 "start:now",
             ]
         )
@@ -639,6 +652,12 @@ def take_over_stale_claim(
     prior_until = expected_until.strip()
     if not prior_actor or not prior_until:
         return False
+    metadata = claim_meta(
+        actor,
+        site=site,
+        context_thread=context_thread,
+        lease_seconds=lease_seconds,
+    )
     try:
         tw.run(
             [
@@ -652,12 +671,7 @@ def take_over_stale_claim(
                 "status:waiting",
                 ")",
                 "modify",
-                *claim_meta(
-                    actor,
-                    site=site,
-                    context_thread=context_thread,
-                    lease_seconds=lease_seconds,
-                ),
+                *metadata,
                 "start:now",
             ]
         )
@@ -861,6 +875,11 @@ def renew_claim(
         return blocked
     uuid = identity.uuid_of(row)
     handle_text = identity.render_handle(row)
+    metadata = _renewal_claim_meta(
+        resolved_actor,
+        site=site,
+        lease_seconds=_effective_claim_lease_seconds(row, lease_seconds),
+    )
     try:
         tw.run(
             [
@@ -869,11 +888,7 @@ def renew_claim(
                 f"claim_by.is:{resolved_actor}",
                 f"claim_worktree.is:{site.worktree}",
                 "modify",
-                *_renewal_claim_meta(
-                    resolved_actor,
-                    site=site,
-                    lease_seconds=_effective_claim_lease_seconds(row, lease_seconds),
-                ),
+                *metadata,
             ]
         )
     except SpiceError as exc:

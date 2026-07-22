@@ -55,6 +55,62 @@ def test_do_claim_records_explicit_cross_worktree_site(task_repo):
     assert fresh["claim_lease_seconds"] == "60"
 
 
+@pytest.mark.parametrize("operation", ["claim", "carry", "renewal"])
+def test_claim_write_paths_refuse_unregistered_metadata_before_modify(
+    task_repo, monkeypatch, operation
+):
+    title = f"Keep the task title during rejected {operation} metadata"
+    description = "The claim metadata validation must run before task modify."
+    handle = create.add(
+        title,
+        description=description,
+        project="task.unit",
+        origin="ack:1kG8MvT3",
+        acceptance=["an unregistered claim field cannot rewrite task text"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    if operation in {"carry", "renewal"}:
+        assert (
+            claimstate.do_claim(
+                identity.uuid_of(row),
+                ACTOR_A,
+                site=site,
+                context_thread=ACTOR_A,
+                lease_seconds=60.0,
+            )
+            is True
+        )
+
+    real_uda_schema = config.uda_schema
+    schema_without_context_turn = real_uda_schema()
+    schema_without_context_turn.pop("claim_context_turn")
+    monkeypatch.setattr(config, "uda_schema", lambda: schema_without_context_turn)
+
+    with pytest.raises(
+        SpiceError,
+        match="claim metadata key 'claim_context_turn' is not a registered UDA",
+    ):
+        if operation == "claim":
+            claimstate.do_claim(
+                identity.uuid_of(row),
+                ACTOR_A,
+                site=site,
+                context_thread=ACTOR_A,
+                lease_seconds=60.0,
+                guard_unclaimed=False,
+            )
+        elif operation == "carry":
+            claimstate.carry_claim(ACTOR_A, PEER_ACTOR, site=site)
+        else:
+            claimstate.renew_claim(handle, actor=ACTOR_A, lease_seconds=60.0)
+
+    monkeypatch.setattr(config, "uda_schema", real_uda_schema)
+    fresh = identity.resolve(handle)
+    assert fresh["description"] == title
+    assert fresh["task_description"] == description
+
+
 @pytest.mark.parametrize(
     (
         "initial_lease",
