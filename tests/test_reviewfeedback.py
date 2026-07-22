@@ -174,3 +174,44 @@ def test_clean_review_feedback_does_not_emit_or_annotate(tmp_path, monkeypatch):
     assert result.status == "clean"
     assert pending_inbox_count(tmp_path / "repo-a") == 0
     assert calls == []
+
+
+def test_review_feedback_refuses_delivery_to_the_emitting_tree(tmp_path, monkeypatch):
+    tree = tmp_path / "repo-a"
+    calls = _patch_targets(
+        monkeypatch,
+        cwd=tree,
+        targets=[(tree, True, "agent-a")],
+    )
+
+    result = reviewfeedback.emit_review_feedback(
+        _reviewed_row(),
+        finding="changes",
+        note="needs work",
+        followups=["FOLLOW-1"],
+        reviewer="agent-b",
+        reviewed_at="2026-01-02T00:00:00Z",
+    )
+
+    assert result.status == "self-tree"
+    assert result.target_repo_root == str(tree.resolve())
+    assert pending_inbox_count(tree) == 0
+    assert calls[0][1] == "annotate"
+    assert "self-tree" in calls[0][-1]
+
+
+def test_review_feedback_target_selection_compares_trees_and_nothing_else(tmp_path):
+    emitting = tmp_path / "repo-e"
+    peer = tmp_path / "repo-f"
+
+    refused = reviewfeedback._select_target([emitting], emitting)
+    delivered = reviewfeedback._select_target([peer], emitting)
+    peer_preferred = reviewfeedback._select_target(sorted([emitting, peer]), emitting)
+
+    assert refused.status == "self-tree"
+    assert refused.repo_root == str(emitting)
+    assert delivered.status == "delivered"
+    assert delivered.repo_root == str(peer)
+    assert peer_preferred.status == "delivered"
+    assert peer_preferred.repo_root == str(peer)
+    assert refused.status != delivered.status

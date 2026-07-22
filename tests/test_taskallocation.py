@@ -583,3 +583,66 @@ def test_renew_claim_reports_backend_failure(monkeypatch):
 
     assert result.reason == "backend_error"
     assert result.detail == "backend offline"
+
+
+def _cross_lane_review(monkeypatch) -> str:
+    """File a task as one lane, work its todo phase as another.
+
+    The lanes disagree on purpose: `origin_thread` (rendered as
+    creator_context) stays with the filing lane while `review_author` records
+    the lane that produced the work. A guard that compares the creator passes
+    this case, so it is the shape the refusal has to be proven against.
+    """
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    handle = create.add(
+        "Cross-lane handoff",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        flow=["todo", "review"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    assert identity.render_handle(alloc.next_task() or {}) == handle
+    ops.done(handle, validation=["todo phase complete"])
+    return handle
+
+
+def test_task_next_refuses_a_review_the_asking_actor_authored(task_repo, monkeypatch):
+    handle = _cross_lane_review(monkeypatch)
+    reviewable = identity.resolve(handle)
+
+    refused = alloc.next_task()
+    unclaimed = identity.resolve(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    reviewer_assignment = alloc.next_task()
+
+    assert (
+        reviewable["phase"],
+        reviewable["review_author"],
+        reviewable["origin_thread"],
+    ) == ("review", ACTOR_A, PEER_ACTOR)
+    assert refused is None
+    assert str(unclaimed.get("claim_by") or "") == ""
+    assert identity.render_handle(reviewer_assignment or {}) == handle
+    assert reviewer_assignment["claim_by"] == PEER_ACTOR
+
+
+def test_ready_surface_hides_a_review_from_its_author_and_keeps_it_for_peers(
+    task_repo, monkeypatch
+):
+    handle = _cross_lane_review(monkeypatch)
+
+    author_ready = [
+        identity.render_handle(row) for row in alloc.visible_ready_rows(ACTOR_A)
+    ]
+    peer_ready = [
+        identity.render_handle(row) for row in alloc.visible_ready_rows(PEER_ACTOR)
+    ]
+
+    assert author_ready == []
+    assert peer_ready == [handle]
+    assert author_ready != peer_ready

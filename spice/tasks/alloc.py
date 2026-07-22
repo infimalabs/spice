@@ -4,6 +4,10 @@ Native urgency ranks first (computed by Taskwarrior under the actor's rc
 overrides — anti-self-review plus any lane overlay). Within the top urgency
 band, `task next` avoids cells a peer is actively on (spread) and prefers the
 smallest move from the actor's last cell (stick).
+
+A review the actor authored is not merely outranked by that coefficient — it is
+dropped from every candidate set, so a quiet board cannot hand an author their
+own review.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from spice.mail.inbox import (
     inbox_item_key,
     write_inbox_item,
 )
-from spice.tasks import config, gitsync, identity, lanes, tw
+from spice.tasks import claimstate, config, gitsync, identity, lanes, tw
 
 ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
 BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
@@ -189,7 +193,10 @@ def visible_rows_with_scope(
 
 def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
     rows = visible_rows(actor, ["status:pending", "+READY", "-ACTIVE"])
-    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
+    return _allocatable(
+        [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")],
+        actor,
+    )
 
 
 def ordered_visible_ready_rows(actor: str) -> list[dict[str, Any]]:
@@ -282,8 +289,26 @@ def _candidate_rows(
     )
 
 
-def _unclaimed_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
+def _allocatable(rows: list[dict[str, Any]], actor: str) -> list[dict[str, Any]]:
+    """Drop rows this actor may not be handed, whatever else recommends them.
+
+    A review authored by this actor is refused outright rather than merely
+    deprioritized by `ANTI_SELF_REVIEW`: a coefficient only loses while some
+    other work outranks it, so on a quiet board the author gets their own
+    review back. Refusing here leaves the row unclaimed and available to a
+    different reviewer, and the actor falls through to other work or to an
+    explicit no-available-tasks answer.
+    """
+    return [r for r in rows if not claimstate.is_same_author_review(r, actor)]
+
+
+def _unclaimed_actionable(
+    rows: list[dict[str, Any]], actor: str
+) -> list[dict[str, Any]]:
+    return _allocatable(
+        [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")],
+        actor,
+    )
 
 
 def _claim_first(
@@ -294,8 +319,6 @@ def _claim_first(
     *,
     guard_unclaimed: bool,
 ) -> dict[str, Any] | None:
-    from spice.tasks import claimstate
-
     site = claimstate.current_claim_site()
     for chosen in order(candidates, actor, claimed_rows, active_rows):
         if not claimstate.do_claim(
@@ -336,7 +359,7 @@ def next_task() -> dict[str, Any] | None:
         )
         if _is_open_task(r)
     ]
-    repair_candidates = _unclaimed_actionable(scoped_active)
+    repair_candidates = _unclaimed_actionable(scoped_active, actor)
     if repair_candidates:
         repaired = _claim_first(
             repair_candidates, actor, [], active_rows, guard_unclaimed=False
@@ -344,7 +367,8 @@ def next_task() -> dict[str, Any] | None:
         if repaired is not None:
             return repaired
     candidates = _unclaimed_actionable(
-        _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin)
+        _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin),
+        actor,
     )
     if candidates:
         # We intend to claim: bring the tree to the current baseline once
@@ -375,17 +399,16 @@ def _stale_takeover_candidates(
     authored stay off-limits even when stale.
     """
     now = tw.now_iso()
-    return [
-        r
-        for r in scoped_active
-        if not is_hidden(r)
-        and str(r.get("claim_by") or "") not in ("", actor)
-        and _is_stale_claim(r, now)
-        and not (
-            str(r.get("phase") or "") == "review"
-            and str(r.get("review_author") or "") == actor
-        )
-    ]
+    return _allocatable(
+        [
+            r
+            for r in scoped_active
+            if not is_hidden(r)
+            and str(r.get("claim_by") or "") not in ("", actor)
+            and _is_stale_claim(r, now)
+        ],
+        actor,
+    )
 
 
 def _take_over_stale(
@@ -393,8 +416,6 @@ def _take_over_stale(
     actor: str,
     active_rows: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    from spice.tasks import claimstate
-
     site = claimstate.current_claim_site()
     for chosen in order(candidates, actor, [], active_rows):
         previous = str(chosen.get("claim_by") or "")

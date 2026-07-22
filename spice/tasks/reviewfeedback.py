@@ -55,9 +55,13 @@ def emit_review_feedback(
         result = ReviewFeedbackResult("target-inactive", "review_author is empty")
         _record_feedback_status(reviewed_row, result)
         return result
-    target = _resolve_active_author_target(review_author)
+    target = _resolve_active_author_target(review_author, config.repo_root())
     if target.status != "delivered":
-        result = ReviewFeedbackResult(target.status, target.detail)
+        result = ReviewFeedbackResult(
+            target.status,
+            target.detail,
+            target_repo_root=target.repo_root,
+        )
         _record_feedback_status(reviewed_row, result)
         return result
     body = _feedback_body(
@@ -87,9 +91,12 @@ class _TargetResolution:
     repo_root: str = ""
 
 
-def _resolve_active_author_target(review_author: str) -> _TargetResolution:
+def _resolve_active_author_target(
+    review_author: str,
+    emitting_tree: Path,
+) -> _TargetResolution:
     try:
-        records = list_worktrees(cwd=config.repo_root())
+        records = list_worktrees(cwd=emitting_tree)
     except RuntimeError as exc:
         return _TargetResolution("target-inactive", f"worktree discovery failed: {exc}")
     matches: list[Path] = []
@@ -105,22 +112,40 @@ def _resolve_active_author_target(review_author: str) -> _TargetResolution:
             continue
         if author_keys & _actor_keys(status.thread_id):
             matches.append(record.path.resolve())
-    unique = sorted({path for path in matches})
-    if len(unique) == 1:
+    return _select_target(sorted({path for path in matches}), emitting_tree)
+
+
+def _select_target(
+    candidates: list[Path],
+    emitting_tree: Path,
+) -> _TargetResolution:
+    """Pick the delivery tree, never the tree the review was emitted from.
+
+    The refusal is a comparison between two paths. It consults no actor and no
+    task identifier, so it holds even when the task was filed by one lane and
+    worked by another, which is exactly the shape an identity comparison misses.
+    """
+    emitting = emitting_tree.resolve()
+    elsewhere = [path for path in candidates if path != emitting]
+    if len(elsewhere) == 1:
         return _TargetResolution(
             "delivered",
             "active author target resolved",
-            str(unique[0]),
+            str(elsewhere[0]),
         )
-    if not unique:
+    if elsewhere:
         return _TargetResolution(
-            "target-inactive", "no active target for review_author"
+            "target-ambiguous",
+            "multiple active targets for review_author: "
+            + ", ".join(path.as_posix() for path in elsewhere),
         )
-    return _TargetResolution(
-        "target-ambiguous",
-        "multiple active targets for review_author: "
-        + ", ".join(path.as_posix() for path in unique),
-    )
+    if candidates:
+        return _TargetResolution(
+            "self-tree",
+            "the only active author target is the emitting tree",
+            str(emitting),
+        )
+    return _TargetResolution("target-inactive", "no active target for review_author")
 
 
 def _agent_status(repo_root: Path) -> Any:

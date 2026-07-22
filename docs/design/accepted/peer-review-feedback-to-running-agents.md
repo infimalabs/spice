@@ -39,8 +39,10 @@ Spice already has the key pieces:
   `review_at`, `review_finding`, and `review_note`, and requires follow-up
   tracking for non-clean findings.
 - Anti-self-review is already policy, not etiquette. `spice/tasks/alloc.py`
-  applies a negative urgency coefficient for tasks authored by the current
-  actor, and `spice/tasks/ops.py` blocks manual same-author review claims.
+  refuses to hand an actor a review phase whose `review_author` is that actor
+  (the negative urgency coefficient only orders the board; the refusal is what
+  holds on a quiet one), and `spice/tasks/ops.py` blocks manual same-author
+  review claims.
 - Inbox steering is durable and transcript-retired. `spice/mail/inbox.py`
   stores pending items under `.spice/inbox`, reads never clear them, and ACK is
   the normal retirement path.
@@ -86,8 +88,12 @@ The exact text can change, but the invariants should not:
 - the item is ACKed in the transcript like any other inbox item;
 - the message points at follow-up handles rather than embedding a new task
   contract in prose;
-- the delivery outcome is recorded as `delivered`, `target-inactive`, or
-  `target-ambiguous`;
+- feedback never lands in the tree that emitted it: the resolver compares the
+  candidate tree against the emitting tree and refuses when they are equal,
+  which needs no actor or task identifier and so survives a task filed by one
+  lane and worked by another;
+- the delivery outcome is recorded as `delivered`, `self-tree`,
+  `target-inactive`, or `target-ambiguous`;
 - delivery failure does not undo `spice task review` after the review has
   already been recorded, but it must leave a visible diagnostic.
 
