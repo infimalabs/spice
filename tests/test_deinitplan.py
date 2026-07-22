@@ -1,4 +1,4 @@
-"""Ownership-safe uninitialization and recovery contracts."""
+"""Ownership-safe deinitialization and recovery contracts."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ from spice.hooks.initplan import (
     load_initialization_receipt,
     plan_initialization,
 )
-from spice.hooks.uninitplan import (
-    UninitOutcome,
-    UninitializationReceipt,
-    load_uninitialization_receipt,
-    uninitialization_receipt_path,
-    uninitialize_repository,
+from spice.hooks.deinitplan import (
+    DeinitOutcome,
+    DeinitializationReceipt,
+    load_deinitialization_receipt,
+    deinitialization_receipt_path,
+    deinitialize_repository,
 )
 from spice.paths import git_common_dir, git_dir
 
@@ -40,7 +40,7 @@ def test_full_cli_round_trip_restores_whole_tree_and_git_config_identity(tmp_pat
     _run([sys.executable, "-m", "spice", "init", "--dry-run"], cwd=repo)
     after_preview = (_worktree_identity(repo), _git_config_identity(repo))
     _run([sys.executable, "-m", "spice", "init"], cwd=repo)
-    _run([sys.executable, "-m", "spice", "uninit"], cwd=repo)
+    _run([sys.executable, "-m", "spice", "deinit"], cwd=repo)
     after_reversal = (_worktree_identity(repo), _git_config_identity(repo))
 
     assert (after_preview, after_reversal) == (
@@ -58,12 +58,12 @@ def test_round_trip_preserves_preexisting_empty_initialization_containers(tmp_pa
     before = (_worktree_identity(repo), _git_config_identity(repo))
 
     apply_initialization_plan(plan_initialization(repo))
-    uninitialize_repository(repo)
+    deinitialize_repository(repo)
 
     assert (_worktree_identity(repo), _git_config_identity(repo)) == before
 
 
-def test_uninit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
+def test_deinit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     tmp_path,
 ):
     repo = _git_init(tmp_path / "repo")
@@ -75,14 +75,14 @@ def test_uninit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
     apply_initialization_plan(plan)
 
-    report = uninitialize_repository(repo)
+    report = deinitialize_repository(repo)
 
     assert report["status"] == "complete"
     assert [item["target"] for item in report["operations"]] == [
         operation.target for operation in reversed(plan.operations)
     ]
     assert {item["outcome"] for item in report["operations"]} == {
-        UninitOutcome.RESTORED.value
+        DeinitOutcome.RESTORED.value
     }
     assert (hook.read_text(encoding="utf-8"), stat.S_IMODE(hook.stat().st_mode)) == (
         "#!/bin/sh\necho legacy\n",
@@ -92,13 +92,13 @@ def test_uninit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     assert _git_config(repo, "extensions.worktreeConfig") is None
     assert (
         initialization_receipt_path(repo).exists(),
-        uninitialization_receipt_path(repo).exists(),
+        deinitialization_receipt_path(repo).exists(),
         (repo / ".spice/.gitignore").exists(),
         (repo / ".spice/hooks/commit-msg").exists(),
     ) == (False, False, False, False)
 
     after_first = _tree_identity(repo)
-    repeated = uninitialize_repository(repo)
+    repeated = deinitialize_repository(repo)
 
     assert repeated == {
         "schema_version": 1,
@@ -111,7 +111,7 @@ def test_uninit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     assert _tree_identity(repo) == after_first
 
 
-def test_uninit_preserves_divergent_file_and_config_with_recovery_handles(tmp_path):
+def test_deinit_preserves_divergent_file_and_config_with_recovery_handles(tmp_path):
     repo = _git_init(tmp_path / "repo")
     apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
     hook = repo / ".spice/hooks/pre-commit"
@@ -119,13 +119,13 @@ def test_uninit_preserves_divergent_file_and_config_with_recovery_handles(tmp_pa
     hook.chmod(0o744)
     _git(repo, "config", "--worktree", "core.hooksPath", ".operator-hooks")
 
-    report = uninitialize_repository(repo)
+    report = deinitialize_repository(repo)
     residues = report["residues"]
 
     assert [(item["target"], item["outcome"]) for item in residues] == [
-        ("core.hooksPath", UninitOutcome.RETAINED_DIVERGED.value),
-        (".spice/hooks/pre-commit", UninitOutcome.RETAINED_DIVERGED.value),
-        ("extensions.worktreeConfig", UninitOutcome.RETAINED_SHARED.value),
+        ("core.hooksPath", DeinitOutcome.RETAINED_DIVERGED.value),
+        (".spice/hooks/pre-commit", DeinitOutcome.RETAINED_DIVERGED.value),
+        ("extensions.worktreeConfig", DeinitOutcome.RETAINED_SHARED.value),
     ]
     assert (
         hook.read_text(encoding="utf-8"),
@@ -143,7 +143,7 @@ def test_uninit_preserves_divergent_file_and_config_with_recovery_handles(tmp_pa
     assert (initialization_receipt_path(repo).exists(),) == (False,)
 
 
-def test_common_config_ownership_moves_to_a_live_worktree_until_final_uninit(
+def test_common_config_ownership_moves_to_a_live_worktree_until_final_deinit(
     tmp_path,
 ):
     primary = _git_init(tmp_path / "primary")
@@ -166,7 +166,7 @@ def test_common_config_ownership_moves_to_a_live_worktree_until_final_uninit(
         plan_initialization(secondary, InitializationMode.GATES_ONLY)
     )
 
-    first_report = uninitialize_repository(primary)
+    first_report = deinitialize_repository(primary)
     receiver = load_initialization_receipt(secondary)
     assert isinstance(receiver, InitializationReceipt)
     transferred = next(
@@ -185,7 +185,7 @@ def test_common_config_ownership_moves_to_a_live_worktree_until_final_uninit(
     ] == [("extensions.worktreeConfig", str(secondary.resolve()))]
     assert (transferred.previous_value, transferred.introduced) == (None, True)
 
-    second_report = uninitialize_repository(secondary)
+    second_report = deinitialize_repository(secondary)
 
     assert (
         _git_config_file(
@@ -196,15 +196,15 @@ def test_common_config_ownership_moves_to_a_live_worktree_until_final_uninit(
     assert second_report["residues"] == []
 
 
-def test_interrupted_uninit_resumes_from_the_durable_reverse_receipt(
+def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
     tmp_path, monkeypatch
 ):
-    import spice.hooks.uninitplan as uninitplan
+    import spice.hooks.deinitplan as deinitplan
 
     repo = _git_init(tmp_path / "repo")
     plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
     apply_initialization_plan(plan)
-    real_write = uninitplan.write_uninitialization_receipt
+    real_write = deinitplan.write_deinitialization_receipt
     writes = 0
 
     def interrupt_after_first_reversal(receipt):
@@ -215,16 +215,16 @@ def test_interrupted_uninit_resumes_from_the_durable_reverse_receipt(
             raise RuntimeError("simulated interruption")
 
     monkeypatch.setattr(
-        uninitplan,
-        "write_uninitialization_receipt",
+        deinitplan,
+        "write_deinitialization_receipt",
         interrupt_after_first_reversal,
     )
     with pytest.raises(RuntimeError, match="simulated interruption"):
-        uninitialize_repository(repo)
+        deinitialize_repository(repo)
 
-    interrupted = load_uninitialization_receipt(repo)
+    interrupted = load_deinitialization_receipt(repo)
     initialization = load_initialization_receipt(repo)
-    assert isinstance(interrupted, UninitializationReceipt)
+    assert isinstance(interrupted, DeinitializationReceipt)
     assert isinstance(initialization, InitializationReceipt)
     assert (
         interrupted.status.value,
@@ -233,17 +233,17 @@ def test_interrupted_uninit_resumes_from_the_durable_reverse_receipt(
     ) == (
         "reversing",
         (True, False, False, False, False, False),
-        InitReceiptStatus.UNINITIALIZING,
+        InitReceiptStatus.DEINITIALIZING,
     )
-    with pytest.raises(SpiceError, match="run `spice uninit`"):
+    with pytest.raises(SpiceError, match="run `spice deinit`"):
         apply_initialization_plan(plan_initialization(repo))
 
     monkeypatch.setattr(
-        uninitplan,
-        "write_uninitialization_receipt",
+        deinitplan,
+        "write_deinitialization_receipt",
         real_write,
     )
-    report = uninitialize_repository(repo)
+    report = deinitialize_repository(repo)
 
     assert report["status"] == "complete"
     assert [item["target"] for item in report["operations"]] == [
@@ -251,16 +251,16 @@ def test_interrupted_uninit_resumes_from_the_durable_reverse_receipt(
     ]
     assert (
         initialization_receipt_path(repo).exists(),
-        uninitialization_receipt_path(repo).exists(),
+        deinitialization_receipt_path(repo).exists(),
     ) == (False, False)
 
 
-def test_uninit_json_cli_emits_the_structured_report(tmp_path):
+def test_deinit_json_cli_emits_the_structured_report(tmp_path):
     repo = _git_init(tmp_path / "repo")
     apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
 
     completed = _run(
-        [sys.executable, "-m", "spice", "uninit", "--json"],
+        [sys.executable, "-m", "spice", "deinit", "--json"],
         cwd=repo,
     )
     report = json.loads(completed.stdout)

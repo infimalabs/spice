@@ -15,7 +15,7 @@ from typing import Literal, TypedDict
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
     INIT_RECEIPT_MODE,
-    UNINIT_RECEIPT_FILENAME,
+    DEINIT_RECEIPT_FILENAME,
     InitOperation,
     InitOperationKind,
     InitOperationScope,
@@ -30,18 +30,18 @@ from spice.hooks.initplan import (
 from spice.paths import atomic_write_text, git_dir
 from spice.process.git import run_git_command
 
-UNINIT_SCHEMA_VERSION = 1
-RECOVERY_DIRNAME = "spice-uninit-recovery"
+DEINIT_SCHEMA_VERSION = 1
+RECOVERY_DIRNAME = "spice-deinit-recovery"
 RECOVERY_DIGEST_LENGTH = 16
 HASH_CHUNK_BYTES = 1024 * 1024
 
 
-class UninitReceiptStatus(StrEnum):
+class DeinitReceiptStatus(StrEnum):
     REVERSING = "reversing"
     COMPLETE = "complete"
 
 
-class UninitOutcome(StrEnum):
+class DeinitOutcome(StrEnum):
     RESTORED = "restored"
     ALREADY_RESTORED = "already-restored"
     RETAINED_DIVERGED = "retained-diverged"
@@ -50,15 +50,15 @@ class UninitOutcome(StrEnum):
 
 
 RETAINED_OUTCOMES = frozenset(
-    {UninitOutcome.RETAINED_DIVERGED, UninitOutcome.RETAINED_SHARED}
+    {DeinitOutcome.RETAINED_DIVERGED, DeinitOutcome.RETAINED_SHARED}
 )
 
 
 @dataclass(frozen=True)
-class UninitOperationState:
+class DeinitOperationState:
     initialization_index: int
     completed: bool = False
-    outcome: UninitOutcome | None = None
+    outcome: DeinitOutcome | None = None
     observed_kind: str | None = None
     observed_value: str | None = None
     observed_mode: int | None = None
@@ -67,12 +67,12 @@ class UninitOperationState:
 
 
 @dataclass(frozen=True)
-class UninitializationReceipt:
+class DeinitializationReceipt:
     repo_root: Path
     initialization: InitializationReceipt
-    status: UninitReceiptStatus
-    operations: tuple[UninitOperationState, ...]
-    schema_version: int = UNINIT_SCHEMA_VERSION
+    status: DeinitReceiptStatus
+    operations: tuple[DeinitOperationState, ...]
+    schema_version: int = DEINIT_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ class FileObservation:
     sha256: str | None
 
 
-class UninitializationReportOperation(TypedDict):
+class DeinitializationReportOperation(TypedDict):
     order: int
     kind: str
     target: str
@@ -97,42 +97,42 @@ class UninitializationReportOperation(TypedDict):
     recovery_handle: str | None
 
 
-class UninitializationReport(TypedDict):
+class DeinitializationReport(TypedDict):
     schema_version: int
     repository: str
     status: Literal["complete", "not-initialized"]
-    operations: list[UninitializationReportOperation]
-    residues: list[UninitializationReportOperation]
+    operations: list[DeinitializationReportOperation]
+    residues: list[DeinitializationReportOperation]
     recovery_handle: str | None
 
 
-def uninitialization_receipt_path(repo_root: Path) -> Path:
-    return git_dir(repo_root.expanduser().resolve()) / UNINIT_RECEIPT_FILENAME
+def deinitialization_receipt_path(repo_root: Path) -> Path:
+    return git_dir(repo_root.expanduser().resolve()) / DEINIT_RECEIPT_FILENAME
 
 
-def load_uninitialization_receipt(
+def load_deinitialization_receipt(
     repo_root: Path,
-) -> UninitializationReceipt | None:
-    path = uninitialization_receipt_path(repo_root)
+) -> DeinitializationReceipt | None:
+    path = deinitialization_receipt_path(repo_root)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, json.JSONDecodeError) as exc:
         raise SpiceError(
-            f"could not read uninitialization receipt {path}: {exc}"
+            f"could not read deinitialization receipt {path}: {exc}"
         ) from exc
     try:
-        return _uninitialization_receipt_from_payload(payload)
+        return _deinitialization_receipt_from_payload(payload)
     except (KeyError, TypeError, ValueError) as exc:
-        raise SpiceError(f"invalid uninitialization receipt {path}: {exc}") from exc
+        raise SpiceError(f"invalid deinitialization receipt {path}: {exc}") from exc
 
 
-def write_uninitialization_receipt(receipt: UninitializationReceipt) -> None:
-    path = uninitialization_receipt_path(receipt.repo_root)
+def write_deinitialization_receipt(receipt: DeinitializationReceipt) -> None:
+    path = deinitialization_receipt_path(receipt.repo_root)
     content = (
         json.dumps(
-            uninitialization_receipt_payload(receipt),
+            deinitialization_receipt_payload(receipt),
             indent=2,
             sort_keys=True,
         )
@@ -142,8 +142,8 @@ def write_uninitialization_receipt(receipt: UninitializationReceipt) -> None:
     path.chmod(INIT_RECEIPT_MODE)
 
 
-def uninitialization_receipt_payload(
-    receipt: UninitializationReceipt,
+def deinitialization_receipt_payload(
+    receipt: DeinitializationReceipt,
 ) -> dict[str, object]:
     return {
         "schema_version": receipt.schema_version,
@@ -168,10 +168,10 @@ def uninitialization_receipt_payload(
     }
 
 
-def uninitialize_repository(repo_root: Path) -> UninitializationReport:
+def deinitialize_repository(repo_root: Path) -> DeinitializationReport:
     """Reverse one initialization receipt and return its structured report."""
     resolved_root = repo_root.expanduser().resolve()
-    reversal = load_uninitialization_receipt(resolved_root)
+    reversal = load_deinitialization_receipt(resolved_root)
     if reversal is None:
         initialization = load_initialization_receipt(resolved_root)
         if initialization is None:
@@ -181,17 +181,17 @@ def uninitialize_repository(repo_root: Path) -> UninitializationReport:
                 "initialization receipt belongs to a different repository: "
                 f"{initialization.repo_root}"
             )
-        reversal = _new_uninitialization_receipt(initialization)
-        write_uninitialization_receipt(reversal)
+        reversal = _new_deinitialization_receipt(initialization)
+        write_deinitialization_receipt(reversal)
         write_initialization_receipt(reversal.initialization)
 
     if reversal.repo_root != resolved_root:
         raise SpiceError(
-            "uninitialization receipt belongs to a different repository: "
+            "deinitialization receipt belongs to a different repository: "
             f"{reversal.repo_root}"
         )
-    if reversal.status is UninitReceiptStatus.COMPLETE:
-        return _finalize_uninitialization(reversal)
+    if reversal.status is DeinitReceiptStatus.COMPLETE:
+        return _finalize_deinitialization(reversal)
 
     states = list(reversal.operations)
     for position, state in enumerate(states):
@@ -207,16 +207,16 @@ def uninitialize_repository(repo_root: Path) -> UninitializationReport:
             reversal,
         )
         reversal = replace(reversal, operations=tuple(states))
-        write_uninitialization_receipt(reversal)
+        write_deinitialization_receipt(reversal)
 
-    reversal = replace(reversal, status=UninitReceiptStatus.COMPLETE)
-    write_uninitialization_receipt(reversal)
-    return _finalize_uninitialization(reversal)
+    reversal = replace(reversal, status=DeinitReceiptStatus.COMPLETE)
+    write_deinitialization_receipt(reversal)
+    return _finalize_deinitialization(reversal)
 
 
-def uninitialization_report_rows(report: UninitializationReport) -> list[str]:
+def deinitialization_report_rows(report: DeinitializationReport) -> list[str]:
     rows = [
-        f"uninitialization status={report['status']} repository={report['repository']}"
+        f"deinitialization status={report['status']} repository={report['repository']}"
     ]
     for item in report["operations"]:
         row = f"{item['outcome']} {item['kind']} {item['target']}"
@@ -230,16 +230,16 @@ def uninitialization_report_rows(report: UninitializationReport) -> list[str]:
     return rows
 
 
-def _new_uninitialization_receipt(
+def _new_deinitialization_receipt(
     initialization: InitializationReceipt,
-) -> UninitializationReceipt:
-    owned = replace(initialization, status=InitReceiptStatus.UNINITIALIZING)
-    return UninitializationReceipt(
+) -> DeinitializationReceipt:
+    owned = replace(initialization, status=InitReceiptStatus.DEINITIALIZING)
+    return DeinitializationReceipt(
         repo_root=initialization.repo_root,
         initialization=owned,
-        status=UninitReceiptStatus.REVERSING,
+        status=DeinitReceiptStatus.REVERSING,
         operations=tuple(
-            UninitOperationState(initialization_index=index)
+            DeinitOperationState(initialization_index=index)
             for index in reversed(range(len(initialization.operations)))
         ),
     )
@@ -249,8 +249,8 @@ def _reverse_operation(
     repo_root: Path,
     operation: InitOperation,
     initialization_index: int,
-    receipt: UninitializationReceipt,
-) -> UninitOperationState:
+    receipt: DeinitializationReceipt,
+) -> DeinitOperationState:
     if operation.kind is InitOperationKind.FILE:
         return _reverse_file_operation(repo_root, operation, initialization_index)
     return _reverse_config_operation(
@@ -265,19 +265,19 @@ def _reverse_file_operation(
     repo_root: Path,
     operation: InitOperation,
     initialization_index: int,
-) -> UninitOperationState:
+) -> DeinitOperationState:
     observed = _observe_file(repo_root / operation.target)
     if not operation.managed:
         return _file_outcome(
-            initialization_index, UninitOutcome.PRESERVED_UNMANAGED, observed
+            initialization_index, DeinitOutcome.PRESERVED_UNMANAGED, observed
         )
     if _file_matches(observed, operation.previous_value, operation.previous_mode):
         return _file_outcome(
-            initialization_index, UninitOutcome.ALREADY_RESTORED, observed
+            initialization_index, DeinitOutcome.ALREADY_RESTORED, observed
         )
     if not _file_matches(observed, operation.generated_value, operation.generated_mode):
         return _file_outcome(
-            initialization_index, UninitOutcome.RETAINED_DIVERGED, observed
+            initialization_index, DeinitOutcome.RETAINED_DIVERGED, observed
         )
 
     target = repo_root / operation.target
@@ -287,50 +287,50 @@ def _reverse_file_operation(
         atomic_write_text(target, operation.previous_value, write_if_changed=True)
         if operation.previous_mode is not None:
             target.chmod(operation.previous_mode)
-    return _file_outcome(initialization_index, UninitOutcome.RESTORED, observed)
+    return _file_outcome(initialization_index, DeinitOutcome.RESTORED, observed)
 
 
 def _reverse_config_operation(
     repo_root: Path,
     operation: InitOperation,
     initialization_index: int,
-    receipt: UninitializationReceipt,
-) -> UninitOperationState:
+    receipt: DeinitializationReceipt,
+) -> DeinitOperationState:
     observed = _git_config_file_get(operation.scope_path, operation.target)
     if not operation.managed:
         return _config_outcome(
-            initialization_index, UninitOutcome.PRESERVED_UNMANAGED, observed
+            initialization_index, DeinitOutcome.PRESERVED_UNMANAGED, observed
         )
     if observed == operation.previous_value:
         return _config_outcome(
-            initialization_index, UninitOutcome.ALREADY_RESTORED, observed
+            initialization_index, DeinitOutcome.ALREADY_RESTORED, observed
         )
     if observed != operation.generated_value:
         return _config_outcome(
-            initialization_index, UninitOutcome.RETAINED_DIVERGED, observed
+            initialization_index, DeinitOutcome.RETAINED_DIVERGED, observed
         )
     if operation.scope is InitOperationScope.COMMON_GIT_CONFIG:
         shared_owner = _transfer_common_ownership(repo_root, operation)
         if shared_owner is not None:
             return _config_outcome(
                 initialization_index,
-                UninitOutcome.RETAINED_SHARED,
+                DeinitOutcome.RETAINED_SHARED,
                 observed,
                 shared_owner=str(shared_owner),
             )
         if _retained_worktree_config_requires_common_setting(receipt):
             return _config_outcome(
                 initialization_index,
-                UninitOutcome.RETAINED_SHARED,
+                DeinitOutcome.RETAINED_SHARED,
                 observed,
                 shared_owner=str(repo_root),
             )
     _restore_git_config(operation)
-    return _config_outcome(initialization_index, UninitOutcome.RESTORED, observed)
+    return _config_outcome(initialization_index, DeinitOutcome.RESTORED, observed)
 
 
 def _retained_worktree_config_requires_common_setting(
-    receipt: UninitializationReceipt,
+    receipt: DeinitializationReceipt,
 ) -> bool:
     for state in receipt.operations:
         if state.outcome not in RETAINED_OUTCOMES:
@@ -382,10 +382,10 @@ def _file_matches(
 
 def _file_outcome(
     initialization_index: int,
-    outcome: UninitOutcome,
+    outcome: DeinitOutcome,
     observed: FileObservation,
-) -> UninitOperationState:
-    return UninitOperationState(
+) -> DeinitOperationState:
+    return DeinitOperationState(
         initialization_index=initialization_index,
         completed=True,
         outcome=outcome,
@@ -397,12 +397,12 @@ def _file_outcome(
 
 def _config_outcome(
     initialization_index: int,
-    outcome: UninitOutcome,
+    outcome: DeinitOutcome,
     observed: str | None,
     *,
     shared_owner: str | None = None,
-) -> UninitOperationState:
-    return UninitOperationState(
+) -> DeinitOperationState:
+    return DeinitOperationState(
         initialization_index=initialization_index,
         completed=True,
         outcome=outcome,
@@ -439,7 +439,7 @@ def _other_common_owners(
         if owner_root == repo_root:
             continue
         receipt = load_initialization_receipt(owner_root)
-        if receipt is None or receipt.status is InitReceiptStatus.UNINITIALIZING:
+        if receipt is None or receipt.status is InitReceiptStatus.DEINITIALIZING:
             continue
         for position, receipt_operation in enumerate(receipt.operations):
             candidate = receipt_operation.operation
@@ -516,9 +516,9 @@ def _restore_git_config(operation: InitOperation) -> None:
     )
 
 
-def _finalize_uninitialization(
-    receipt: UninitializationReceipt,
-) -> UninitializationReport:
+def _finalize_deinitialization(
+    receipt: DeinitializationReceipt,
+) -> DeinitializationReport:
     retained = tuple(
         state for state in receipt.operations if state.outcome in RETAINED_OUTCOMES
     )
@@ -529,11 +529,11 @@ def _finalize_uninitialization(
     _cleanup_introduced_containers(receipt)
     _unlink(initialization_receipt_path(receipt.repo_root))
     _cleanup_introduced_containers(receipt)
-    _unlink(uninitialization_receipt_path(receipt.repo_root))
+    _unlink(deinitialization_receipt_path(receipt.repo_root))
     return report
 
 
-def _cleanup_introduced_containers(receipt: UninitializationReceipt) -> None:
+def _cleanup_introduced_containers(receipt: DeinitializationReceipt) -> None:
     operations = tuple(item.operation for item in receipt.initialization.operations)
     scope_paths = {
         operation.scope_path
@@ -579,16 +579,16 @@ def _remove_empty_directory(path: Path) -> None:
 
 
 def _completed_report(
-    receipt: UninitializationReceipt,
+    receipt: DeinitializationReceipt,
     recovery_path: Path | None,
-) -> UninitializationReport:
-    operations: list[UninitializationReportOperation] = []
-    residues: list[UninitializationReportOperation] = []
+) -> DeinitializationReport:
+    operations: list[DeinitializationReportOperation] = []
+    residues: list[DeinitializationReportOperation] = []
     for order, state in enumerate(receipt.operations, start=1):
         operation = receipt.initialization.operations[
             state.initialization_index
         ].operation
-        item: UninitializationReportOperation = {
+        item: DeinitializationReportOperation = {
             "order": order,
             "kind": operation.kind.value,
             "target": operation.target,
@@ -606,7 +606,7 @@ def _completed_report(
             residues.append(item)
         operations.append(item)
     return {
-        "schema_version": UNINIT_SCHEMA_VERSION,
+        "schema_version": DEINIT_SCHEMA_VERSION,
         "repository": str(receipt.repo_root),
         "status": "complete",
         "operations": operations,
@@ -615,9 +615,9 @@ def _completed_report(
     }
 
 
-def _not_initialized_report(repo_root: Path) -> UninitializationReport:
+def _not_initialized_report(repo_root: Path) -> DeinitializationReport:
     return {
-        "schema_version": UNINIT_SCHEMA_VERSION,
+        "schema_version": DEINIT_SCHEMA_VERSION,
         "repository": str(repo_root),
         "status": "not-initialized",
         "operations": [],
@@ -626,17 +626,17 @@ def _not_initialized_report(repo_root: Path) -> UninitializationReport:
     }
 
 
-def _recovery_path(receipt: UninitializationReceipt) -> Path:
+def _recovery_path(receipt: DeinitializationReceipt) -> Path:
     encoded = json.dumps(
-        uninitialization_receipt_payload(receipt),
+        deinitialization_receipt_payload(receipt),
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()[:RECOVERY_DIGEST_LENGTH]
-    return git_dir(receipt.repo_root) / RECOVERY_DIRNAME / f"uninit-{digest}.json"
+    return git_dir(receipt.repo_root) / RECOVERY_DIRNAME / f"deinit-{digest}.json"
 
 
-def _write_recovery_report(path: Path, report: UninitializationReport) -> None:
+def _write_recovery_report(path: Path, report: DeinitializationReport) -> None:
     content = json.dumps(report, indent=2, sort_keys=True) + "\n"
     atomic_write_text(path, content, write_if_changed=True)
     path.chmod(INIT_RECEIPT_MODE)
@@ -649,10 +649,10 @@ def _unlink(path: Path) -> None:
         raise SpiceError(f"could not remove completed receipt {path}: {exc}") from exc
 
 
-def _uninitialization_receipt_from_payload(
+def _deinitialization_receipt_from_payload(
     payload: dict[str, object],
-) -> UninitializationReceipt:
-    if payload["schema_version"] != UNINIT_SCHEMA_VERSION:
+) -> DeinitializationReceipt:
+    if payload["schema_version"] != DEINIT_SCHEMA_VERSION:
         raise ValueError(f"unsupported schema version {payload['schema_version']!r}")
     initialization_payload = payload["initialization_receipt"]
     if not isinstance(initialization_payload, dict):
@@ -662,40 +662,40 @@ def _uninitialization_receipt_from_payload(
     if not isinstance(operation_payloads, list):
         raise TypeError("operations must be a list")
     operations = tuple(
-        _uninit_operation_from_payload(item) for item in operation_payloads
+        _deinit_operation_from_payload(item) for item in operation_payloads
     )
     expected = tuple(reversed(range(len(initialization.operations))))
     if tuple(state.initialization_index for state in operations) != expected:
-        raise ValueError("uninitialization operations are not in exact reverse order")
-    status = UninitReceiptStatus(_required_string(payload["status"]))
-    if status is UninitReceiptStatus.COMPLETE and any(
+        raise ValueError("deinitialization operations are not in exact reverse order")
+    status = DeinitReceiptStatus(_required_string(payload["status"]))
+    if status is DeinitReceiptStatus.COMPLETE and any(
         not state.completed for state in operations
     ):
         raise ValueError(
-            "complete uninitialization receipt contains unfinished operations"
+            "complete deinitialization receipt contains unfinished operations"
         )
-    return UninitializationReceipt(
+    return DeinitializationReceipt(
         repo_root=Path(_required_string(payload["repository"])).expanduser().resolve(),
         initialization=initialization,
         status=status,
         operations=operations,
-        schema_version=UNINIT_SCHEMA_VERSION,
+        schema_version=DEINIT_SCHEMA_VERSION,
     )
 
 
-def _uninit_operation_from_payload(payload: object) -> UninitOperationState:
+def _deinit_operation_from_payload(payload: object) -> DeinitOperationState:
     if not isinstance(payload, dict):
-        raise TypeError("uninitialization operation must be an object")
+        raise TypeError("deinitialization operation must be an object")
     completed = payload.get("completed")
     if not isinstance(completed, bool):
-        raise TypeError("uninitialization operation completion must be boolean")
+        raise TypeError("deinitialization operation completion must be boolean")
     raw_outcome = payload.get("outcome")
     outcome = (
-        None if raw_outcome is None else UninitOutcome(_required_string(raw_outcome))
+        None if raw_outcome is None else DeinitOutcome(_required_string(raw_outcome))
     )
     if completed != (outcome is not None):
-        raise ValueError("uninitialization completion and outcome must agree")
-    return UninitOperationState(
+        raise ValueError("deinitialization completion and outcome must agree")
+    return DeinitOperationState(
         initialization_index=_required_int(payload["initialization_index"]),
         completed=completed,
         outcome=outcome,

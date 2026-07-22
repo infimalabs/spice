@@ -107,16 +107,16 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
     )
     init.set_defaults(func=handle_init)
 
-    uninit = subparsers.add_parser(
-        "uninit",
+    deinit = subparsers.add_parser(
+        "deinit",
         help="Reverse Spice-owned initialization state without overwriting edits.",
     )
-    uninit.add_argument(
+    deinit.add_argument(
         "--json",
         action="store_true",
         help="Emit the versioned reversal and residue report as JSON.",
     )
-    uninit.set_defaults(func=handle_uninit)
+    deinit.set_defaults(func=handle_deinit)
 
 
 def _configure_commit_parsers(actions: Any) -> None:
@@ -182,17 +182,17 @@ def handle_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_uninit(args: argparse.Namespace) -> int:
-    from spice.hooks.uninitplan import (
-        uninitialization_report_rows,
-        uninitialize_repository,
+def handle_deinit(args: argparse.Namespace) -> int:
+    from spice.hooks.deinitplan import (
+        deinitialization_report_rows,
+        deinitialize_repository,
     )
 
-    report = uninitialize_repository(init_repo_root())
+    report = deinitialize_repository(init_repo_root())
     if bool(args.json):
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
-        for row in uninitialization_report_rows(report):
+        for row in deinitialization_report_rows(report):
             print(row)
     return 0
 

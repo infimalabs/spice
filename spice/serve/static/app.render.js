@@ -410,8 +410,11 @@ function setAgentStatusPip(lane, status) {
 }
 
 function agentStatusLabel(status) {
+  if (status === "starting") return "agent starting";
   if (status === "running") return "agent running";
   if (status === "running-stale") return "agent running, quiet";
+  if (status === "stopping") return "agent stopping after startup stall";
+  if (status === "startup-stalled") return "agent startup stalled";
   if (status === "idle") return "agent idle";
   if (status === "stopped") return "agent stopped";
   if (status === "unstarted") return "agent unstarted";

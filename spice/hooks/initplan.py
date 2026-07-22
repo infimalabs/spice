@@ -44,7 +44,7 @@ STATE_GITIGNORE_CONTENT = (
 HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
 INIT_RECEIPT_RELATIVE_PATH = Path(STATE_DIRNAME) / "init-receipt.json"
 INIT_RECEIPT_MODE = 0o600
-UNINIT_RECEIPT_FILENAME = "spice-uninit-receipt.json"
+DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
 FILE_MODE_MAX = 0o7777
 
@@ -70,7 +70,7 @@ class InitOperationScope(StrEnum):
 class InitReceiptStatus(StrEnum):
     APPLYING = "applying"
     COMPLETE = "complete"
-    UNINITIALIZING = "uninitializing"
+    DEINITIALIZING = "deinitializing"
 
 
 @dataclass(frozen=True)
@@ -338,16 +338,16 @@ def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None
 
 def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
     """Apply one plan with an atomically updated receipt after every operation."""
-    if (git_dir(plan.repo_root) / UNINIT_RECEIPT_FILENAME).is_file():
+    if (git_dir(plan.repo_root) / DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
-            "initialization cannot run while an interrupted uninitialization "
-            "receipt is active; run `spice uninit` to resume it"
+            "initialization cannot run while an interrupted deinitialization "
+            "receipt is active; run `spice deinit` to resume it"
         )
     existing = load_initialization_receipt(plan.repo_root)
-    if existing is not None and existing.status is InitReceiptStatus.UNINITIALIZING:
+    if existing is not None and existing.status is InitReceiptStatus.DEINITIALIZING:
         raise SpiceError(
-            "initialization cannot run while an interrupted uninitialization "
-            "receipt is active; run `spice uninit` to resume it"
+            "initialization cannot run while an interrupted deinitialization "
+            "receipt is active; run `spice deinit` to resume it"
         )
     receipt = _receipt_for_plan(plan, existing)
     plan_by_key = {
