@@ -1,0 +1,75 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "usage: scripts/release-proof-source OUTPUT_DIRECTORY" >&2
+    exit 2
+fi
+
+repository=$(git rev-parse --show-toplevel)
+repository=$(cd "$repository" && pwd -P)
+worktree_state=$(git -C "$repository" status --porcelain=v1 --untracked-files=all)
+if [ -n "$worktree_state" ]; then
+    echo "release proof requires a clean worktree" >&2
+    printf '%s\n' "$worktree_state" >&2
+    exit 1
+fi
+
+output=$1
+if [ -e "$output" ]; then
+    echo "release-proof output already exists: $output" >&2
+    exit 1
+fi
+
+output_parent=$(dirname "$output")
+output_name=$(basename "$output")
+mkdir -p "$output_parent"
+output_parent=$(cd "$output_parent" && pwd -P)
+output="$output_parent/$output_name"
+case "$output/" in
+    "$repository/"*)
+        echo "release-proof output must be outside the source worktree: $output" >&2
+        exit 1
+        ;;
+esac
+
+source_commit=$(git -C "$repository" rev-parse 'HEAD^{commit}')
+reserved_path=$(
+    git -C "$repository" ls-tree --name-only "$source_commit" -- .release-proof
+)
+if [ -n "$reserved_path" ]; then
+    echo "tracked HEAD owns reserved release-proof path: .release-proof" >&2
+    exit 1
+fi
+
+source_tree=$(git -C "$repository" rev-parse "$source_commit^{tree}")
+source_commit_epoch=$(git -C "$repository" show -s --format=%ct "$source_commit")
+
+staging=$(mktemp -d "$output_parent/.${output_name}.tmp.XXXXXX")
+archive=""
+
+cleanup() {
+    if [ -n "$staging" ]; then
+        rm -rf -- "$staging"
+    fi
+    if [ -n "$archive" ]; then
+        rm -f -- "$archive"
+    fi
+}
+trap cleanup EXIT HUP INT TERM
+
+archive=$(mktemp "$output_parent/.${output_name}.archive.XXXXXX")
+git -C "$repository" archive --format=tar --output="$archive" "$source_commit"
+tar -xf "$archive" -C "$staging"
+rm -f -- "$archive"
+archive=""
+
+provenance="$staging/.release-proof/source.json"
+mkdir -p "$(dirname "$provenance")"
+
+printf '{\n  "schema_version": 1,\n  "source": {\n    "commit": "%s",\n    "tree": "%s",\n    "commit_epoch": %s\n  }\n}\n' \
+    "$source_commit" "$source_tree" "$source_commit_epoch" >"$provenance"
+
+mv "$staging" "$output"
+staging=""
+printf '%s\n' "$output"
