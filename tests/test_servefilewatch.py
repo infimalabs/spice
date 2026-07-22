@@ -19,6 +19,11 @@ _REAL_SERVE_UNTIL_USES_KQUEUE = serve_filewatch.serve_until_uses_kqueue
 @pytest.fixture(autouse=True)
 def _select_watchfiles_for_mocked_unit_watchers(monkeypatch) -> None:
     monkeypatch.setattr(serve_filewatch, "serve_until_uses_kqueue", lambda: False)
+    # These cases exercise the serve-until file watcher.  Running the
+    # independent available-work scheduler against the real checkout lets its
+    # repository scan outlive an immediately-stopped fake HTTP server and leak
+    # output into the next test; that scheduler has its own lifecycle suite.
+    monkeypatch.setattr(serve_app, "start_available_work_watch", lambda _state: None)
 
 
 class FakeServer:
