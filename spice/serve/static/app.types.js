@@ -503,6 +503,7 @@
  * @property {string} defaultTargetId
  * @property {TaskFilterInventory} taskFilterInventory
  * @property {Array.<string>=} observerErrors
+ * @property {Array.<string>=} targetsDiscoveryErrors
  */
 
 /**

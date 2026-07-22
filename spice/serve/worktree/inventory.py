@@ -35,13 +35,20 @@ from spice.serve.worktree.target import WorktreeTarget
 def work_trees_payload(state: Any) -> dict[str, Any]:
     targets = state.worktree_targets()
     inventory = task_filter_inventory()
-    payload = {
+    payload: dict[str, Any] = {
         "workTrees": [
             _work_tree_payload(state, target, inventory) for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
         "taskFilterInventory": inventory,
     }
+    # A discovery failure must reach the client, which otherwise reads a short
+    # workTrees list as proof those worktrees were removed and closes the lanes.
+    # This is its own field rather than observerErrors: observer mode carries
+    # unrelated errors there, and the client keys lane closure off this one.
+    errors = state.targets_discovery_errors()
+    if errors:
+        payload["targetsDiscoveryErrors"] = errors
     return validate_emitter_payload("worktree.inventory.work_trees_payload", payload)
 
 

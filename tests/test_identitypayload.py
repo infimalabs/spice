@@ -121,6 +121,9 @@ class _InventoryState(_State):
     def worktree_targets(self) -> list[_Target]:
         return [self._target]
 
+    def targets_discovery_errors(self) -> list[str]:
+        return []
+
 
 def _stamp(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
