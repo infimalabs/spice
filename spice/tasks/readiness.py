@@ -130,8 +130,10 @@ def queue_ready_epoch(row: dict[str, Any]) -> float:
     """Resolve the one durable origin used for starvation age.
 
     ``ready_at`` is authoritative for a later transition and malformed values
-    fail loudly. A row without it is on its first READY interval, so native
-    creation and timed-blocker stamps determine the origin.
+    fail loudly.  A row without it is on its first READY interval (or predates
+    the UDA), so native creation and timed-blocker stamps determine the origin.
+    Inception is the explicitly permitted legacy fallback when native entry is
+    unavailable; it can only open the escape early.
     """
     explicit = str(row.get(config.TASK_READY_AT_UDA) or "").strip()
     if explicit:
@@ -145,8 +147,16 @@ def queue_ready_epoch(row: dict[str, Any]) -> float:
     if origins:
         return max(origins)
 
+    incepted = str(row.get("incepted") or "").strip()
+    if incepted:
+        try:
+            return identity.incepted_datetime(incepted).timestamp()
+        except (OverflowError, ValueError) as exc:
+            raise SpiceError(
+                f"task has malformed incepted stamp: {incepted!r}"
+            ) from exc
     raise SpiceError(
-        "READY task is missing ready_at, entry, wait, and scheduled queue-age origins"
+        "READY task is missing ready_at, entry, and incepted queue-age origins"
     )
 
 
