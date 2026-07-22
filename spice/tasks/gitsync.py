@@ -35,6 +35,7 @@ from pathlib import Path
 from spice.errors import SpiceError
 from spice.process.git import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
 from spice.paths import atomic_write_text
+from spice.studies.suiteseam import run_suite_seam_gate
 from spice.tasks import config, identity, wordingreview
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
@@ -363,7 +364,9 @@ def integrate_and_publish(
     :class:`MergeConflict` with the tree left mid-merge for the agent to
     resolve and commit. A resolution that still contains conflict markers is
     refused before anything publishes, as is a landing whose first-parent
-    diff changes baseline paths outside the task's own commits. With no
+    diff changes baseline paths outside the task's own commits, as is a
+    landing that touches a declared suite seam while the whole suite is red
+    on the merged tree. With no
     configured remote this records the local HEAD and performs no network or
     history mutation.
     """
@@ -539,6 +542,9 @@ def _publish_integrated_task(
         merge_head=merge_head,
         agent_head=agent_head,
     )
+    _refuse_red_suite_landing(
+        repo_root, label=label, upstream_head=upstream_head, agent_head=agent_head
+    )
     branch = baseline.split("/", 1)[1]
     return _publish_task_merge(
         repo_root,
@@ -652,6 +658,14 @@ def _retry_publish_after_race(
             label=label,
             upstream_head=fresh_upstream_head,
             merge_head=retry_head,
+            agent_head=agent_head,
+        )
+        # The race merged a peer's work into this landing, so the tree that was
+        # green a moment ago is not the tree about to be pushed.
+        _refuse_red_suite_landing(
+            repo_root,
+            label=label,
+            upstream_head=fresh_upstream_head,
             agent_head=agent_head,
         )
         retry_push = _run(repo_root, "push", remote, f"{retry_head}:{branch}")
@@ -1141,6 +1155,23 @@ def _task_footprint_paths(
         f"{upstream_head}..{agent_head}",
     )
     return {line for line in listing.splitlines() if line}
+
+
+def _refuse_red_suite_landing(
+    repo_root: Path, *, label: str, upstream_head: str, agent_head: str
+) -> None:
+    """Refuse a landing that reaches the whole suite while the whole suite is red.
+
+    HEAD already holds the integrated tree, so this is the one moment the
+    branch's real content can be tested before it becomes the branch. A lane's
+    own tree cannot stand in for it: the lane verified a subset of the tests,
+    against a baseline the other lanes have since moved.
+    """
+    run_suite_seam_gate(
+        repo_root,
+        sorted(_task_footprint_paths(repo_root, upstream_head, agent_head)),
+        label=label,
+    )
 
 
 def _refuse_out_of_scope_landing(

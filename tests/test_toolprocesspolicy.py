@@ -44,6 +44,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
         "spice/tasks/graphs/handout.py:generate:capture=true",
     },
     "study": {"spice/studies/mutations.py:_collect_test_nodeids:capture=true"},
+    "suite": {"spice/studies/suiteseam.py:_measure_suite:capture=true"},
     "typecheck": {
         "spice/serve/typecheck.py:_run_serve_web_typecheck_argv:capture=true",
         "spice/studies/typecheck.py:_uv_project_interpreter:capture=true",

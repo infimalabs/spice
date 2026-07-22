@@ -15,6 +15,7 @@ ToolPolicy = Literal[
     "probe",
     "release",
     "study",
+    "suite",
     "typecheck",
 ]
 
@@ -24,6 +25,10 @@ HOOK_TOOL_TIMEOUT_SECONDS = 300.0
 PROBE_TOOL_TIMEOUT_SECONDS = 5.0
 RELEASE_TOOL_TIMEOUT_SECONDS = 300.0
 STUDY_TOOL_TIMEOUT_SECONDS = 120.0
+# A whole test suite is the longest-running tool the harness drives; this budget
+# is a stall backstop for a suite that hangs, not a target any suite should
+# approach.
+SUITE_TOOL_TIMEOUT_SECONDS = 900.0
 TYPECHECK_TOOL_TIMEOUT_SECONDS = 300.0
 
 TOOL_POLICY_TIMEOUT_SECONDS: dict[ToolPolicy, float] = {
@@ -33,6 +38,7 @@ TOOL_POLICY_TIMEOUT_SECONDS: dict[ToolPolicy, float] = {
     "probe": PROBE_TOOL_TIMEOUT_SECONDS,
     "release": RELEASE_TOOL_TIMEOUT_SECONDS,
     "study": STUDY_TOOL_TIMEOUT_SECONDS,
+    "suite": SUITE_TOOL_TIMEOUT_SECONDS,
     "typecheck": TYPECHECK_TOOL_TIMEOUT_SECONDS,
 }
 
