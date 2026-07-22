@@ -83,6 +83,7 @@ from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
+from spice.serve.worktree.bindings import reconcile_target_thread_bindings
 from spice.serve.worktree.target import (
     WorktreeDiscoveryError,
     WorktreeTarget,
@@ -150,8 +151,13 @@ class ServeState:
         self.auth_token = auth_token
         self.observer = observer
         self.cache_lock = Lock()
+        self.thread_binding_lock = Lock()
         self.cached_thread_ids: dict[str, str] = {}
         self.cached_targets: list[WorktreeTarget] | None = None
+        # Only discovery proves that target roots are registered worktrees with
+        # lane-local git state. Tests and observer adapters may inject synthetic
+        # targets into the cache; those have no thread pointers to reconcile.
+        self.cached_targets_registered = False
         # `cached_targets` is cleared by every invalidate_targets() -- which the
         # live-bus targets push does before each build -- so it is empty exactly
         # when discovery fails. `last_known_targets` survives invalidation and is
@@ -195,7 +201,17 @@ class ServeState:
             return self.observer.targets
         with self.cache_lock:
             if self.cached_targets is not None:
-                return self.cached_targets
+                targets = self.cached_targets
+                registered = self.cached_targets_registered
+            else:
+                targets = None
+                registered = False
+        if targets is not None:
+            return (
+                self._reconcile_target_thread_bindings(targets)
+                if registered
+                else targets
+            )
         try:
             targets = discover_serve_worktrees(
                 cwd=self.anchor_root, fallback_roots=[self.anchor_root]
@@ -205,13 +221,23 @@ class ServeState:
             # do not cache it, so the next build retries discovery.
             with self.cache_lock:
                 self.targets_discovery_error = str(exc)
-                return list(self.last_known_targets)
+                targets = list(self.last_known_targets)
+            return self._reconcile_target_thread_bindings(targets)
         with self.cache_lock:
             self.targets_discovery_error = ""
             self.last_known_targets = list(targets)
             if self.cached_targets is None:
                 self.cached_targets = targets
-            return self.cached_targets
+                self.cached_targets_registered = True
+            cached_targets = self.cached_targets
+        return self._reconcile_target_thread_bindings(cached_targets)
+
+    def _reconcile_target_thread_bindings(
+        self, targets: list[WorktreeTarget]
+    ) -> list[WorktreeTarget]:
+        with self.thread_binding_lock:
+            reconcile_target_thread_bindings(targets)
+        return targets
 
     def targets_discovery_errors(self) -> list[str]:
         with self.cache_lock:
@@ -222,6 +248,7 @@ class ServeState:
     def invalidate_targets(self) -> None:
         with self.cache_lock:
             self.cached_targets = None
+            self.cached_targets_registered = False
 
     def record_http_request(self, method: str, path: str) -> None:
         key = (method.upper(), serve_metrics_path_template(path))
