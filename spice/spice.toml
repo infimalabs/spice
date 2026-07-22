@@ -92,7 +92,6 @@ hotspot_limit = 20
 [policy.taste.words]
 'hallucinat*' = "confabulate"
 master = "main, primary, or leader"
-'adopt*' = "capture"
 'orphan*' = "loose"
 whitelist = "allowlist"
 whitelists = "allowlists"

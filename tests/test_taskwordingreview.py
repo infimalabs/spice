@@ -54,7 +54,7 @@ def test_plan_phase_done_blocks_suspect_wording_marker(task_repo):
 def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
     results = create.add_batch_results(
         [
-            "TASK title=Adopting inline task | project=task.unit | "
+            "TASK title=Orphaning inline task | project=task.unit | "
             "acceptance=Inline task still needs self-correction | "
             "origin=ack:1jN54zJJ"
         ],
@@ -65,7 +65,7 @@ def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
         str(item.get("description") or "") for item in row.get("annotations") or []
     ]
 
-    assert row["description"] == "Adopting inline task"
+    assert row["description"] == "Orphaning inline task"
     assert row["phase"] == "plan"
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
@@ -132,7 +132,7 @@ def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
         finding="changes",
         note="description current; needs a follow-up",
         then=[
-            "title=Adopting review follow-up | project=task.unit | "
+            "title=Orphaning review follow-up | project=task.unit | "
             "acceptance=Follow-up must self-correct before implementation"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
@@ -146,7 +146,7 @@ def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
     ]
 
     assert identity.resolve(reviewed)["status"] == "completed"
-    assert row["description"] == "Adopting review follow-up"
+    assert row["description"] == "Orphaning review follow-up"
     assert row["phase"] == "plan"
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
@@ -240,7 +240,7 @@ def test_reword_rejects_inactive_task(task_repo):
 
 def test_reword_from_claimed_plan_parent_clears_child_marker(task_repo):
     parent = _clean_plan_parent()
-    child = _suspect_unclaimed_child("Adopting connected child")
+    child = _suspect_unclaimed_child("Orphaning connected child")
     ops.depends(parent, [child])
     ops.claim(parent)
 
@@ -276,10 +276,10 @@ def test_task_modify_acceptance_suspect_wording_sets_review_marker(task_repo):
         acceptance=["clean criterion"],
     )
 
-    ops.modify(handle, acceptance=["adopting the legacy rows"])
+    ops.modify(handle, acceptance=["orphaning the legacy rows"])
 
     row = identity.resolve(handle)
-    assert row["acceptance"] == "adopting the legacy rows"
+    assert row["acceptance"] == "orphaning the legacy rows"
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     annotations = [
         str(entry.get("description") or "") for entry in row.get("annotations") or []
@@ -289,7 +289,7 @@ def test_task_modify_acceptance_suspect_wording_sets_review_marker(task_repo):
 
 def _suspect_plan_task_with_accepted_child() -> str:
     handle = create.add(
-        "Adopting plan parent",
+        "Orphaning plan parent",
         project="task.unit",
         origin="ack:1jN54zJJ",
         acceptance=["parent bookend acceptance exists"],

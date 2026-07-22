@@ -305,7 +305,7 @@ def test_cli_surface_batch_missing_acceptance_honors_explicit_flow(task_repo):
 def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_repo):
     handles = create.add_batch(
         [
-            "title=Adopting explicit plan batch | project=task.unit | "
+            "title=Orphaning explicit plan batch | project=task.unit | "
             "flow=todo,plan,review | acceptance=Explicit flow is intentional | "
             "origin=ack:1jN54zJJ"
         ],
@@ -314,13 +314,13 @@ def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_rep
     row = identity.resolve(handles[0])
     annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
 
-    assert row["description"] == "Adopting explicit plan batch"
+    assert row["description"] == "Orphaning explicit plan batch"
     assert row["phase"] == "todo"
     assert claimstate.phases_of(row) == ["todo", "plan", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row["origin"] == "ack:1jN54zJJ"
     assert any(
-        "adopting" in ann and "self-correction required" in ann for ann in annotations
+        "orphaning" in ann and "self-correction required" in ann for ann in annotations
     )
 
 
@@ -382,15 +382,15 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
 
 def test_add_batch_results_carry_suspect_wording_matches(task_repo):
     results = create.add_batch_results(
-        ["TASK title=Adopting batch | project=task.unit | origin=ack:1jN54zJJ"]
+        ["TASK title=Orphaning batch | project=task.unit | origin=ack:1jN54zJJ"]
     )
 
     assert results[0].wording_matches == (
         create.TaskWordingMatch(
             source="title",
-            matched="adopting",
+            matched="orphaning",
             trigger_family="taste",
-            reason="consider 'capture'",
+            reason="consider 'loose'",
         ),
     )
 

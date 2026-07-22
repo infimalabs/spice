@@ -4,7 +4,7 @@ The study nudges writing toward better taste: each configured word maps to a
 suggestion. An empty suggestion means "remove or rephrase; it adds no value";
 a non-empty one is the preferred alternative. Matching is case-insensitive
 over tracked text files; a key is whole-word, or a stem covering every
-inflection when it ends with ``*`` (``adopt*`` catches adopt/adopted/adoption).
+inflection when it ends with ``*`` (``migrat*`` catches migrate/migrated/migration).
 """
 
 from __future__ import annotations

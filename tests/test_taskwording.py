@@ -25,18 +25,20 @@ def repo(tmp_path):
     return _init_repo(tmp_path / "repo")
 
 
-def test_taste_word_match_records_source_word_and_reason(repo):
+def test_default_taste_policy_allows_adopt_family_and_matches_orphan_family(repo):
     matches = create.detect_suspect_wording(
-        title="Adopting the plan",
+        title="Adopt the orphaned plan",
+        description="The team adopted the plan yesterday.",
+        acceptance=["Adopting the plan produces an adoption record."],
         repo_root=repo,
     )
 
     assert matches == (
         create.TaskWordingMatch(
             source="title",
-            matched="adopting",
+            matched="orphaned",
             trigger_family="taste",
-            reason="consider 'capture'",
+            reason="consider 'loose'",
         ),
     )
 

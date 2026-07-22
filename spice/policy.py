@@ -46,8 +46,8 @@ COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = None
 
 # --- taste ----------------------------------------------------------------------
 # Low-value or poor-taste words mapped to a suggestion (empty = rephrase). A
-# trailing ``*`` is a stem that matches every inflection (``adopt*`` ->
-# adopt/adopted/adoption); a bare key is whole-word. Repos merge their own words
+# trailing ``*`` is a stem that matches every inflection (``migrat*`` ->
+# migrate/migrated/migration); a bare key is whole-word. Repos merge their own words
 # over these defaults under [tool.spice.policy.taste].
 TASTE_WORD_SUGGESTIONS: dict[str, str] = {
     str(key): str(value)
