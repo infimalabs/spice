@@ -418,7 +418,7 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
             project="task.unit",
             origin="ack:1jN54zJJ",
             priority="medium",
-            wait=config.OOPS_WAIT,
+            wait=config.DEFERRED_WAIT,
         )
         for index in range(4)
     ]
@@ -445,7 +445,7 @@ def test_task_wake_rejects_batch_without_partial_clear(task_repo):
         project="task.unit",
         origin="ack:1jN54zJJ",
         priority="medium",
-        wait=config.OOPS_WAIT,
+        wait=config.DEFERRED_WAIT,
     )
     claimed = create.add(
         "Wake batch claimed task",
@@ -561,7 +561,7 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
         project="task.unit",
         origin="ack:1jN54zJJ",
         priority="medium",
-        wait=config.OOPS_WAIT,
+        wait=config.DEFERRED_WAIT,
         acceptance=["drive wake subscribes delayed work"],
     )
     store = ServeTeamStore()
@@ -592,7 +592,7 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
         project="task.unit",
         origin="ack:1jN54zJJ",
         priority="medium",
-        wait=config.OOPS_WAIT,
+        wait=config.DEFERRED_WAIT,
         acceptance=["drain wake subscribes delayed work"],
     )
     assert store.team_config(team.team_id).task_filters == ()
@@ -619,7 +619,7 @@ def test_steer_wake_keeps_preparation_only_boundary(task_repo):
         project="task.unit",
         origin="ack:1jN54zJJ",
         priority="medium",
-        wait=config.OOPS_WAIT,
+        wait=config.DEFERRED_WAIT,
         acceptance=["steer wake remains preparation only"],
     )
     before = store_global_revision(store)

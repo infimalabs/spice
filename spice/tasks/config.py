@@ -62,7 +62,8 @@ TASKDOC_PARENT_UDA = "taskdoc_parent"
 TASKDOC_SYSTEM_UDAS = frozenset({TASKDOC_ID_UDA, TASKDOC_PARENT_UDA})
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
-OOPS_WAIT = defaults.string("tasks", "oops_wait")
+DEFERRED_WAIT = defaults.string("tasks", "deferred_wait")
+OOPS_WAIT_SECONDS = defaults.integer("tasks", "oops_wait_seconds")
 OOPS_PROJECT = f".{defaults.string('tasks', 'oops_hidden_stem')}"
 MAXIM_PROPOSAL_PROJECT = f".{MAXIM_PROPOSAL_HIDDEN_STEM}"
 

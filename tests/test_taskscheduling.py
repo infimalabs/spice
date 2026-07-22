@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import config, create, identity, tw
+from spice.tasks import alloc, config, create, identity, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -26,6 +26,7 @@ TZ_UTC = "UTC"
 # America/Chicago 2026-03-08 spring-forward transition.
 CST_INSTANT = datetime(2026, 3, 7, 18, 0, 0, 123456, tzinfo=UTC)
 CDT_INSTANT = datetime(2026, 7, 10, 18, 0, 0, 654321, tzinfo=UTC)
+OOPS_INSTANT = datetime(2026, 7, 10, 18, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -74,6 +75,28 @@ def test_canonical_utc_handles_utc_and_chicago_across_dst():
     assert tw.canonical_utc(cdt_noon) == "20260309T170000Z"
     assert tw.canonical_utc(cst_noon.astimezone(UTC)) == "20260307T180000Z"
     assert tw.canonical_utc(cdt_noon.astimezone(UTC)) == "20260309T170000Z"
+
+
+def test_oops_wait_is_exactly_one_week_from_canonical_inception(task_repo, monkeypatch):
+    inception_millis = int(OOPS_INSTANT.timestamp() * identity.MILLIS_PER_SECOND)
+    monkeypatch.setattr(
+        identity,
+        "epoch_millis",
+        lambda when=None: inception_millis,
+    )
+
+    created = ops.oops("One-week oops wait", origin=ORIGIN)
+    row = identity.resolve(created.split()[1])
+    waiting_at = datetime.strptime(str(row["wait"]), tw.TW_DATETIME_FORMAT).replace(
+        tzinfo=UTC
+    )
+
+    assert waiting_at - identity.incepted_datetime(str(row["incepted"])) == timedelta(
+        days=7
+    )
+    assert identity.uuid_of(row) in {
+        identity.uuid_of(oops_row) for oops_row in alloc.oops_rows()
+    }
 
 
 def test_sla_due_stores_creation_plus_interval_under_chicago(task_repo, monkeypatch):
