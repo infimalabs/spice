@@ -130,6 +130,7 @@ def run_agent_command(
     popen_factory: ProcessFactory = subprocess.Popen,
     stderr: TextIO = sys.stderr,
 ) -> int:
+    bind_ambient_thread_for_shell_stage(repo_root, stderr=stderr)
     initial_inbox_signature = emit_initial_side_channel_payload(
         repo_root, stderr=stderr
     )
@@ -169,6 +170,30 @@ def run_agent_command(
         return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
     finally:
         join_agent_side_channel_watch(watch_thread)
+
+
+def bind_ambient_thread_for_shell_stage(
+    repo_root: Path | None, *, stderr: TextIO = sys.stderr
+) -> None:
+    """Record the worktree's driver thread id as the agent's shell passes through.
+
+    This is what lets a lane be discovered by session id without the agent ever
+    running `spice agent activation`: every command it issues arrives here, and
+    the first one binds the worktree.
+
+    Degradation matches `emit_initial_side_channel_payload` below. The shell
+    stage sits in front of every command an agent runs, so unusable spice state
+    has to surface as a warning rather than take the agent's shell down.
+    """
+    if repo_root is None:
+        return
+    from spice.agent.lifecyclebinding import bind_ambient_agent_thread
+
+    try:
+        bind_ambient_agent_thread(repo_root)
+    except Exception as exc:  # thread binding failure is non-fatal
+        stderr.write(f"spice thread binding unavailable: {exc}\n")
+        stderr.flush()
 
 
 def emit_initial_side_channel_payload(

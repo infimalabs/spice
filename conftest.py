@@ -17,3 +17,14 @@ os.environ["SPICE_AGENT_DRIVER"] = "codex"  # env-policy: allow
 # never inherit a lane's self-tracking shadow.
 for _name in [_n for _n in os.environ if _n.startswith("GIT_")]:  # env-policy: allow
     del os.environ[_name]  # env-policy: allow
+
+# That agent shell also exports its own driver thread id, and identity resolution
+# scans every driver rather than only the pinned one -- so a suite pinned to Codex
+# still sees a live Claude session id and adopts it. Left in place it makes the
+# running lane the ambient actor: tw.current_actor() prefers it over the sentinel,
+# and claim_meta() stamps it onto claims tests believe are unowned. Scrub from the
+# driver table so the set stays correct as drivers are added.
+from spice.agent.driver import all_drivers  # noqa: E402
+
+for _driver in all_drivers():
+    os.environ.pop(_driver.thread_id_env, None)  # env-policy: allow

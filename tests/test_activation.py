@@ -53,7 +53,7 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
 
     monkeypatch.setattr("spice.agent.rtkhealth.probe_rtk_health", probe)
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        "spice.agent.lifecycle.bind_ambient_agent_thread",
         lambda _repo: events.append("bind") or SimpleNamespace(thread_id="actor-a"),
     )
     monkeypatch.setattr(
@@ -191,7 +191,7 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
     seen: dict[str, str | None] = {}
 
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        "spice.agent.lifecycle.bind_ambient_agent_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
     monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
@@ -244,7 +244,7 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         _advance_upstream(tmp_path)
 
         monkeypatch.setattr(
-            "spice.agent.lifecycle.bind_ambient_agent_activation",
+            "spice.agent.lifecycle.bind_ambient_agent_thread",
             lambda _repo: SimpleNamespace(thread_id=ACTOR),
         )
         monkeypatch.setattr(
@@ -271,7 +271,7 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
 
 def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        "spice.agent.lifecycle.bind_ambient_agent_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
     monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
