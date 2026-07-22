@@ -159,19 +159,30 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     ]
 
 
-@pytest.mark.parametrize("condition", ["dirty", "ahead", "diverged"])
+@pytest.mark.parametrize("condition", ["dirty", "ahead", "diverged", "fetch-failed"])
 def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
     tmp_path, monkeypatch, condition
 ):
     repo = _repo_with_upstream(tmp_path)
     target = _target(repo)
     (repo / ".git" / "info" / "exclude").write_text(".spice/\n", encoding="utf-8")
-    (repo / "local.txt").write_text("local work\n", encoding="utf-8")
-    if condition in {"ahead", "diverged"}:
-        _run(repo, "git", "add", "local.txt")
-        _run(repo, "git", "commit", "-m", "local work")
-        if condition == "diverged":
-            _advance_upstream(tmp_path)
+    original_head = _run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+    if condition == "fetch-failed":
+        _run(
+            repo,
+            "git",
+            "remote",
+            "set-url",
+            "origin",
+            str(tmp_path / "missing-remote.git"),
+        )
+    else:
+        (repo / "local.txt").write_text("local work\n", encoding="utf-8")
+        if condition in {"ahead", "diverged"}:
+            _run(repo, "git", "add", "local.txt")
+            _run(repo, "git", "commit", "-m", "local work")
+            if condition == "diverged":
+                _advance_upstream(tmp_path)
     write_inbox_item(
         repo,
         "1kLaunch.txt",
@@ -212,6 +223,9 @@ def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
     assert launch_notes == [f"skipped:{condition}"]
     assert [item.name for item in collect_inbox_items(repo)] == ["1kLaunch.txt"]
     assert [(item.repo_root, item.action) for item in spawned] == [(repo, "start")]
+    if condition == "fetch-failed":
+        assert _run(repo, "git", "rev-parse", "HEAD").stdout.strip() == original_head
+        assert _run(repo, "git", "status", "--porcelain").stdout.strip() == ""
 
 
 def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monkeypatch):

@@ -15,8 +15,9 @@ control-plane boundaries:
 * **agent launch** (`prepare_for_agent_launch`): fetch and opportunistically
   fast-forward a clean, uncommitted lane immediately before its supervisor or
   native harness starts. Dirty or locally committed work stays untouched and
-  starts with an explicit skip reason, so the agent that can repair it is never
-  locked out by its own checkout.
+  starts with an explicit skip reason. A remote that cannot be fetched also
+  leaves the checkout untouched and starts the agent that can repair it, so a
+  lane is never locked out by either its own checkout or an unavailable remote.
 
 The default baseline is the current branch's user-managed merge target on the
 conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
@@ -278,8 +279,9 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
     can update the checkout before ``python -m spice`` and the native harness
     import from it. Fetching is read-only with respect to user work. A dirty,
     ahead, or divergent lane keeps that work intact and starts the agent that
-    can reconcile it; each condition returns an explicit skip note. Failures to
-    fetch or inspect Git state still refuse because no safe fact was established.
+    can reconcile it; each condition returns an explicit skip note. A failed
+    fetch is equally non-mutating and starts with its own skip note. Failures to
+    inspect local Git state still refuse because no safe fact was established.
     """
     root = repo_root or config.repo_root()
     resolved = _resolve_target(root)
@@ -288,11 +290,7 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
     remote, baseline = resolved
     fetched = _run(root, "fetch", remote)
     if fetched.returncode != 0:
-        raise SpiceError(
-            "cannot launch agent: the current baseline could not be fetched; "
-            "fix the remote or credentials and retry\n"
-            + _fail(f"fetch {remote} for agent launch", fetched)
-        )
+        return SyncResult(notes=["skipped:fetch-failed"])
     if not _read(root, "rev-parse", baseline):
         raise SpiceError(
             f"cannot launch agent: baseline {baseline} was not found after "
@@ -303,7 +301,11 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
     try:
         behind, ahead = _ahead_behind(root, baseline)
     except SpiceError as exc:
-        raise SpiceError(f"cannot launch agent: {exc}; repair Git and retry") from exc
+        headline, separator, git_failure = str(exc).partition("\n")
+        message = f"cannot launch agent: {headline}; repair Git and retry"
+        if separator:
+            message += f"\n{git_failure}"
+        raise SpiceError(message) from exc
     if ahead:
         if behind:
             return SyncResult(notes=["skipped:diverged"])
@@ -334,14 +336,15 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     the same rules (clean tree, zero commits ahead, fast-forward-only) but
     never raises, so activation always succeeds. Every outcome is reported as
     a note rather than a silent no-op: ``current`` when already up to date,
-    or ``skipped:<dirty|ahead|diverged|no-remote>`` for each safe no-op, so a
-    non-advance is observable in the activation packet instead of invisible.
+    or a specific ``skipped:`` note for each safe no-op, so a non-advance is
+    observable in the activation packet instead of invisible. A missing remote,
+    failed fetch, and uninspectable baseline remain three distinct outcomes.
     """
     root = repo_root or config.repo_root()
     try:
         resolved = _resolve_target(root)
     except SpiceError:
-        return SyncResult(notes=["skipped:no-remote"])
+        return SyncResult(notes=["skipped:baseline-uninspectable"])
     if resolved is None:
         return SyncResult(notes=["skipped:no-remote"])
     remote, baseline = resolved
@@ -349,13 +352,13 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
         return SyncResult(notes=["skipped:dirty"])
     fetched = _run(root, "fetch", remote)
     if fetched.returncode != 0:
-        return SyncResult(notes=["skipped:no-remote"])
+        return SyncResult(notes=["skipped:fetch-failed"])
     if not _read(root, "rev-parse", baseline):
-        return SyncResult(notes=["skipped:no-remote"])
+        return SyncResult(notes=["skipped:baseline-uninspectable"])
     try:
         behind, ahead = _ahead_behind(root, baseline)
     except SpiceError:
-        return SyncResult(notes=["skipped:no-remote"])
+        return SyncResult(notes=["skipped:baseline-uninspectable"])
     if ahead:
         return SyncResult(notes=["skipped:diverged" if behind else "skipped:ahead"])
     before = _read(root, "rev-parse", "HEAD")
