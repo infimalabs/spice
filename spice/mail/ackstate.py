@@ -103,7 +103,11 @@ def record_acked_inbox_items(
     if not rows:
         return []
     path = ack_state_database_path(repo_root)
-    with sqlite_connection(path, ensure_parent=True) as connection:
+    with sqlite_connection(
+        path,
+        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+        ensure_parent=True,
+    ) as connection:
         _ensure_schema(connection)
         connection.executemany(
             """
@@ -127,11 +131,16 @@ def record_acked_inbox_items(
 
 
 def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
+    """Read archived steering without taking a schema/write lock.
+
+    Schema creation and migration belong to :func:`record_acked_inbox_items`,
+    the store's write boundary. Steady-state readers share this database across
+    every worktree and must remain query-only.
+    """
     path = ack_state_database_path(repo_root)
     if not path.is_file():
         return []
     with sqlite_connection(path) as connection:
-        _ensure_schema(connection)
         rows = connection.execute(
             """
             SELECT key, inbox_name, text, attachments_json, lineage_json,
@@ -157,7 +166,6 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(f"PRAGMA busy_timeout = {ACK_STATE_SQLITE_BUSY_TIMEOUT_MS}")
     connection.execute(ACK_STATE_TABLE_SQL)
     _ensure_column(
         connection,

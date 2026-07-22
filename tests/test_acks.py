@@ -2,10 +2,14 @@
 
 import io
 import json
+import sqlite3
 import subprocess
+from contextlib import contextmanager
+from threading import Event, Thread
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
+from spice.mail import ackstate
 from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.ackarchive import (
@@ -456,6 +460,146 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
         (record.key, record.inbox_name, record.text, record.disposition)
         for record in records
     ] == [(KEY_A, name, text, ACK_DISPOSITION_ACKED)]
+
+
+def test_ack_state_records_reads_through_a_query_only_connection(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    record_acked_inbox_items(
+        tmp_path,
+        [AckStateWrite(key=KEY_A, inbox_name=f"{KEY_A}.txt", text="archived")],
+    )
+    real_connection = ackstate.sqlite_connection
+    query_only_modes: list[int] = []
+    statement_kinds: list[str] = []
+
+    @contextmanager
+    def query_only_connection(*args, **kwargs):
+        with real_connection(*args, **kwargs) as connection:
+            connection.execute("PRAGMA query_only = ON")
+            query_only_modes.append(
+                int(connection.execute("PRAGMA query_only").fetchone()[0])
+            )
+            connection.set_trace_callback(
+                lambda statement: statement_kinds.append(
+                    statement.lstrip().split(None, 1)[0].upper()
+                )
+            )
+            yield connection
+
+    monkeypatch.setattr(ackstate, "sqlite_connection", query_only_connection)
+
+    records = ackstate.ack_state_records(tmp_path)
+
+    assert query_only_modes == [1]
+    assert statement_kinds == ["SELECT"]
+    assert [record.key for record in records] == [KEY_A]
+
+
+def test_ack_archival_failure_keeps_key_pending_and_publishes_feedback(
+    tmp_path, monkeypatch
+):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    header = f"ACK {KEY_A}: keep this key retryable."
+    write_inbox_item(
+        tmp_path,
+        name,
+        compose_inbox_text(body="retry after store failure", priority=None, stop=False),
+    )
+    feedback: list[tuple[str, dict[str, object]]] = []
+
+    def locked_store(_repo, _message):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(watchdog, "summarize_ack_archival", locked_store)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_side_channel_feedback",
+        lambda _repo, kind, **fields: feedback.append((kind, fields)),
+    )
+    log = io.StringIO()
+
+    watchdog._publish_ack_feedback(tmp_path, header, log)
+
+    assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
+    assert feedback == [
+        (
+            "ack.error",
+            {"keys": [KEY_A], "error": "database is locked"},
+        )
+    ]
+    assert "spice ack archival supervisor error: database is locked" in log.getvalue()
+
+
+def test_ack_write_waits_for_shared_writer_then_archives_original_header(
+    tmp_path, monkeypatch
+):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    header = f"ACK {KEY_A}: archived after the writer released."
+    write_inbox_item(
+        tmp_path,
+        name,
+        compose_inbox_text(body="shared writer contention", priority=None, stop=False),
+    )
+    record_acked_inbox_items(
+        tmp_path,
+        [AckStateWrite(key=KEY_B, inbox_name=f"{KEY_B}.txt", text="seed schema")],
+    )
+    database_path = ack_state_database_path(tmp_path)
+    holder = sqlite3.connect(database_path)
+    holder.execute("BEGIN IMMEDIATE")
+    insert_started = Event()
+    finished = Event()
+    real_connection = ackstate.sqlite_connection
+    configured_timeouts: list[int | None] = []
+    outcomes: list[AckArchivalSummary | Exception] = []
+
+    @contextmanager
+    def observed_connection(*args, **kwargs):
+        configured_timeouts.append(kwargs.get("busy_timeout_ms"))
+        with real_connection(*args, **kwargs) as connection:
+            connection.set_trace_callback(
+                lambda statement: (
+                    insert_started.set()
+                    if statement.lstrip()
+                    .upper()
+                    .startswith("INSERT INTO ACKED_INBOX_ITEMS")
+                    else None
+                )
+            )
+            yield connection
+
+    def archive_header() -> None:
+        try:
+            outcomes.append(summarize_ack_archival(tmp_path, header))
+        except Exception as exc:
+            outcomes.append(exc)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(ackstate, "sqlite_connection", observed_connection)
+    worker = Thread(target=archive_header)
+    worker.start()
+    try:
+        assert insert_started.wait(timeout=2.0) is True
+        assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
+    finally:
+        holder.commit()
+        holder.close()
+    assert finished.wait(timeout=2.0) is True
+    worker.join()
+
+    assert configured_timeouts == [None, ackstate.ACK_STATE_SQLITE_BUSY_TIMEOUT_MS]
+    assert outcomes == [
+        AckArchivalSummary(archived=[KEY_A], already_acked=[], unmatched=[])
+    ]
+    archived = {item.name: item.text for item in collect_acked_inbox_items(tmp_path)}
+    assert archived[name] == compose_inbox_text(
+        body="shared writer contention", priority=None, stop=False
+    )
+    records = {record.key: record for record in ackstate.ack_state_records(tmp_path)}
+    assert records[KEY_A].ack_text == header
 
 
 def test_summarize_ack_archival_retires_lineage_record_by_exact_key(

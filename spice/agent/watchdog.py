@@ -44,7 +44,10 @@ from spice.agent.maximmetrics import (
 )
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
 from spice.mail.ackarchive import summarize_ack_archival, summarize_nack_archival
-from spice.mail.ackgrammar import extract_task_batch_lines_from_text
+from spice.mail.ackgrammar import (
+    extract_ack_keys_from_text,
+    extract_task_batch_lines_from_text,
+)
 from spice.mail.inbox import (
     discard_inbox_items,
     notify_inbox_changed,
@@ -355,6 +358,13 @@ def _publish_ack_feedback(
     except Exception as exc:  # surface-and-survive: archival must not crash the loop
         log_handle.write(f"spice ack archival supervisor error: {exc}\n")
         log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "ack.error",
+            keys=list(dict.fromkeys(extract_ack_keys_from_text(message_text))),
+            error=str(exc),
+        )
         return
     for kind, keys in (
         ("ack.archived", ack_summary.archived),
