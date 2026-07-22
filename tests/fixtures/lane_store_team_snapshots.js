@@ -162,3 +162,83 @@ assert(
     }),
   "team reconciliation returns the exact materialization change set",
 );
+
+// Retention and membership are one decision. Starting an idle agent renews its
+// thread, so the team names the member under a thread actor the lane and its
+// target do not carry yet; that member is unresolvable for exactly one refresh.
+// The store keeps such a lane open -- and must keep it in the run too. Dropping
+// it takes every card it owns out of the fused host's merged stream, and a run
+// that falls under two dissolves the fusion outright.
+const retentionStore = new ServeLaneStore();
+retentionStore.replaceTargets(["alpha", "beta", "gamma"].map(target));
+for (const targetId of ["alpha", "beta", "gamma"])
+  retentionStore.registerLane(lane(targetId));
+retentionStore.applyLaneGroups([["alpha", "beta", "gamma"]], {
+  isLaneOpen: () => {
+    return true;
+  },
+});
+const renewing = retentionStore.applyTeamSnapshot(
+  snapshot(2, [
+    {
+      teamId: "main",
+      members: [
+        { agentId: "target:alpha" },
+        { agentId: "thread:beta-next" },
+        { agentId: "thread:gamma-next" },
+      ],
+    },
+  ]),
+  {
+    resolveMember(member) {
+      return member.agentId === "target:alpha" ? { targetId: "alpha" } : {};
+    },
+    unresolvedLaneTargetIds() {
+      return ["beta", "gamma"];
+    },
+  },
+);
+assert(
+  JSON.stringify(renewing.groupRuns) ===
+    JSON.stringify([["alpha", "beta", "gamma"]]),
+  "a transiently unresolved member keeps its prior seat in the team's run",
+);
+
+// Prior seat, not the tail: member order is composer order and drives accent
+// colour, so a retained lane re-entering at the end would reshuffle and recolour
+// the composers on every transient refresh.
+const seatStore = new ServeLaneStore();
+seatStore.replaceTargets(["alpha", "beta", "gamma"].map(target));
+for (const targetId of ["alpha", "beta", "gamma"])
+  seatStore.registerLane(lane(targetId));
+seatStore.applyLaneGroups([["beta", "alpha", "gamma"]], {
+  isLaneOpen: () => {
+    return true;
+  },
+});
+const seated = seatStore.applyTeamSnapshot(
+  snapshot(2, [
+    {
+      teamId: "main",
+      members: [
+        { agentId: "thread:beta-next" },
+        { agentId: "target:alpha" },
+        { agentId: "target:gamma" },
+      ],
+    },
+  ]),
+  {
+    resolveMember(member) {
+      if (member.agentId === "target:alpha") return { targetId: "alpha" };
+      if (member.agentId === "target:gamma") return { targetId: "gamma" };
+      return {};
+    },
+    unresolvedLaneTargetIds() {
+      return ["beta"];
+    },
+  },
+);
+assert(
+  JSON.stringify(seated.groupRuns) === JSON.stringify([["beta", "alpha", "gamma"]]),
+  "a retained lane re-enters at the seat it held, not at the tail",
+);

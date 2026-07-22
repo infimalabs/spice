@@ -452,6 +452,32 @@ def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> 
     assert "result.siblingFreshRenderCount !== 1" in smoke
 
 
+def test_serve_lane_group_retention_smoke_asserts_transient_refresh_keeps_cards() -> (
+    None
+):
+    smoke = (ROOT / "browser" / "serve_lane_group_retention_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # The transient the operator sees: a renewing agent's new thread reaches the
+    # team snapshot before the lane or its target, so the member is unresolvable
+    # for exactly one refresh. Two at once, because the browser's single-stale-
+    # slot fallback deliberately refuses to guess between two candidates.
+    assert '{ agentId: "thread:beta-next" }' in smoke
+    assert '{ agentId: "thread:gamma-next" }' in smoke
+    # A retained lane keeps its seat in the run, so every observable the refresh
+    # could disturb reads identical across it: merged cards, composer order,
+    # visible host, and the lattice extent that makes a collapse visible.
+    assert "transient refresh dropped merged cards from the fused host" in smoke
+    assert "transient refresh changed the group's composer order" in smoke
+    assert "transient refresh moved the visible host" in smoke
+    assert "transient refresh collapsed the mosaic extent" in smoke
+    assert 'renewing.planeKeys.join(",") !== settled.planeKeys.join(",")' in smoke
+    assert "renewing.extentHeight !== settled.extentHeight" in smoke
+
+
 def test_serve_lane_prefs_local_smoke_asserts_hint_scoped_interface_prefs() -> None:
     smoke = (ROOT / "browser" / "serve_lane_prefs_local_smoke.js").read_text(
         encoding="utf-8"
@@ -623,6 +649,7 @@ PAYLOAD_FACTORY_SMOKES = (
     "serve_lanes_batch_subscribe_smoke.js",
     "serve_mosaic_single_settle_smoke.js",
     "serve_identity_smoke.js",
+    "serve_lane_group_retention_smoke.js",
 )
 
 # A migrated smoke reaches the authority through one of these public tokens:

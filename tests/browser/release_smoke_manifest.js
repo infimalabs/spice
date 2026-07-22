@@ -10,6 +10,7 @@ const releaseSafe = [
   { path: "serve_composer_typing_latency_smoke.js", serial: true },
   { path: "serve_fresh_startup_import_shell_smoke.js" },
   { path: "serve_identity_smoke.js" },
+  { path: "serve_lane_group_retention_smoke.js" },
   { path: "serve_lane_prefs_local_smoke.js" },
   { path: "serve_lane_reload_smoke.js" },
   { path: "serve_lanes_batch_subscribe_smoke.js" },
