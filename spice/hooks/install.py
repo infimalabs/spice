@@ -59,17 +59,3 @@ def materialize_state_gitignore(repo_root: Path) -> bool:
     except OSError:
         return False
     return True
-
-
-def init_repo(repo_root: Path) -> list[str]:
-    """`spice init`: hooks, skill copy, state scaffolding."""
-    plan = plan_initialization(repo_root, InitializationMode.FULL)
-    apply_initialization_plan(plan)
-    return initialization_detail_rows(plan, include_ready=True)
-
-
-def init_gates_repo(repo_root: Path) -> list[str]:
-    """`spice init --gates`: constitution hooks and local gate state only."""
-    plan = plan_initialization(repo_root, InitializationMode.GATES_ONLY)
-    apply_initialization_plan(plan)
-    return initialization_detail_rows(plan, include_ready=True)

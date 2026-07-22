@@ -14,12 +14,13 @@ import pytest
 from spice.cli.mounts import MOUNTED_COMMAND_ENV, VISIBLE_PROG_ENV
 from spice.errors import SpiceError
 from spice.hooks import precommit
-from spice.hooks.install import (
-    hooks_dir,
-    init_gates_repo,
-    init_repo,
-    install_hooks_for_repo,
+from spice.hooks.initplan import (
+    InitializationMode,
+    apply_initialization_plan,
+    initialization_detail_rows,
+    plan_initialization,
 )
+from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.studies.localpaths import (
     render_local_path_board,
     scan_local_path_literals,
@@ -408,7 +409,7 @@ def test_init_repo_reports_generated_worktree_skill_ignore(tmp_path):
 
     repo = _git_init(tmp_path / "repo")
 
-    rows = init_repo(repo)
+    rows = _initialize(repo)
 
     assert f"skill_ignore={WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH.as_posix()}" in rows
     assert (
@@ -419,10 +420,10 @@ def test_init_repo_reports_generated_worktree_skill_ignore(tmp_path):
     assert _git(repo, "status", "--short").stdout == ""
 
 
-def test_init_gates_repo_installs_constitution_without_fleet_assets(tmp_path):
+def test_gates_only_initialization_installs_constitution_without_fleet_assets(tmp_path):
     repo = _git_init(tmp_path / "repo")
 
-    rows = init_gates_repo(repo)
+    rows = _initialize(repo, InitializationMode.GATES_ONLY)
 
     installed = sorted(path.name for path in hooks_dir(repo).iterdir())
     assert installed == ["commit-msg", "pre-commit"]
@@ -466,7 +467,7 @@ def test_init_gates_cli_is_a_standalone_entry(tmp_path, monkeypatch):
 
 def test_init_gates_first_commit_passes_without_taskwarrior(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
-    init_gates_repo(repo)
+    _initialize(repo, InitializationMode.GATES_ONLY)
     _write_repo_file(repo, "README.md", "Concrete repository documentation.\n")
     _git(repo, "add", "README.md")
     monkeypatch.setenv("PYTHONPATH", _stale_spice_namespace_path(tmp_path))
@@ -486,7 +487,7 @@ def test_init_repo_generates_state_gitignore(tmp_path):
 
     repo = _git_init(tmp_path / "repo")
 
-    rows = init_repo(repo)
+    rows = _initialize(repo)
 
     assert "state_ignore=.spice/.gitignore" in rows
     assert (repo / ".spice" / ".gitignore").read_text(
@@ -504,7 +505,7 @@ def test_init_repo_keeps_bare_common_linked_worktree_non_bare(tmp_path):
     lane = tmp_path / "lane"
     _git(source, "worktree", "add", str(lane), "main")
 
-    rows = init_repo(lane)
+    rows = _initialize(lane)
     status = _git(lane, "status", "--short")
 
     assert "core.hooksPath=.spice/hooks" in rows
@@ -549,6 +550,15 @@ def test_install_hooks_writes_ambient_spice_shims_for_spice_checkout(tmp_path):
     assert (hooks_dir(repo) / "commit-msg").read_text(
         encoding="utf-8"
     ) == _expected_hook_content('dev commit-msg "$1"')
+
+
+def _initialize(
+    repo: Path,
+    mode: InitializationMode = InitializationMode.FULL,
+) -> list[str]:
+    plan = plan_initialization(repo, mode)
+    apply_initialization_plan(plan)
+    return initialization_detail_rows(plan, include_ready=True)
 
 
 def _expected_hook_content(args: str) -> str:

@@ -113,6 +113,7 @@ Everything from here writes to the repository:
 
 ```sh
 cd /path/to/your/repo
+spice init --gates --dry-run  # previews every file, mode, and Git-config change
 spice init --gates      # writes to the repo: constitution gates only
 ```
 
@@ -120,13 +121,16 @@ This installs the `pre-commit` constitution (sticky-flex limits, regression-only
 magic-number ratchets, taste policy, and configured extensions) plus
 commit-message hygiene, with no task plane, shell wrapper, agent skill, or fleet
 reference guard. Commit normally to run the gates, or invoke the staged gate
-directly with `spice dev pre-commit`.
+directly with `spice dev pre-commit`. Add `--json` to either dry-run form for
+the same ordered operations as a versioned machine-readable plan. Apply stores
+its interruption-safe ownership receipt under `.spice/init-receipt.json`.
 
 **Steer** materializes the full steering and fleet surfaces. `spice init` writes
 the agent skill, shell wrapper, and steering surfaces into the repo, and
 `spice doctor` verifies them:
 
 ```sh
+spice init --dry-run  # previews steering + fleet initialization
 spice init      # writes to the repo: steering + fleet surfaces
 spice doctor
 ```
@@ -144,6 +148,7 @@ spice task next
 | Surface | Command |
 | --- | --- |
 | Detect and watch existing agent sessions | `spice watch` |
+| Preview repository initialization | `spice init --dry-run [--json]` |
 | Install constitution gates only | `spice init --gates` |
 | Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |

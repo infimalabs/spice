@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 from spice.agent.lifecycle import WORKTREE_SKILL_RELATIVE_PATH
@@ -11,9 +13,17 @@ from spice.hooks.initplan import (
     InitOperation,
     InitOperationKind,
     InitOperationScope,
+    INIT_RECEIPT_MODE,
+    OWNERSHIP_DIGEST_BYTES,
+    InitReceiptStatus,
     InitializationMode,
     InitializationPlan,
     apply_initialization_plan,
+    initialization_plan_payload,
+    initialization_preview_rows,
+    initialization_receipt_path,
+    initialization_receipt_payload,
+    load_initialization_receipt,
     plan_initialization,
 )
 
@@ -60,10 +70,12 @@ def test_full_plan_is_ordered_complete_deterministic_and_side_effect_free(tmp_pa
         ".agents/skills/spice/.gitignore": 0o600,
         ".agents/skills/spice/SKILL.md": 0o600,
     }
-    assert {len(operation.ownership_digest) for operation in plan.operations} == {64}
+    assert {len(operation.ownership_digest) for operation in plan.operations} == {
+        OWNERSHIP_DIGEST_BYTES * 2
+    }
     assert {
         len(bytes.fromhex(operation.ownership_digest)) for operation in plan.operations
-    } == {32}
+    } == {OWNERSHIP_DIGEST_BYTES}
 
 
 def test_apply_consumes_the_existing_plan_and_realizes_every_managed_operation(
@@ -75,7 +87,8 @@ def test_apply_consumes_the_existing_plan_and_realizes_every_managed_operation(
 
     result = apply_initialization_plan(plan)
 
-    assert result is None
+    assert result.status is InitReceiptStatus.COMPLETE
+    assert {operation.completed for operation in result.operations} == {True}
     assert plan.operations == planned_operations
     assert tuple(_realized_value(repo, operation) for operation in plan.operations) == (
         tuple(operation.generated_value for operation in plan.operations)
@@ -118,7 +131,142 @@ def test_gates_only_plan_uses_the_same_model_for_its_bounded_surface(tmp_path):
         ".spice/.gitignore",
         ".spice/hooks/commit-msg",
         ".spice/hooks/pre-commit",
+        ".spice/init-receipt.json",
     )
+
+
+def test_human_and_json_dry_run_share_one_plan_and_leave_identical_bytes(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo)
+    before = _tree_identity(repo)
+
+    human = _run([sys.executable, "-m", "spice", "init", "--dry-run"], cwd=repo)
+    after_human = _tree_identity(repo)
+    machine = _run(
+        [sys.executable, "-m", "spice", "init", "--dry-run", "--json"],
+        cwd=repo,
+    )
+    after_machine = _tree_identity(repo)
+
+    assert human.stdout.splitlines() == initialization_preview_rows(plan)
+    assert json.loads(machine.stdout) == initialization_plan_payload(plan)
+    assert (before, after_human, after_machine) == (before, before, before)
+
+
+def test_apply_writes_complete_private_receipt_with_every_planned_field(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
+
+    receipt = apply_initialization_plan(plan)
+    receipt_path = initialization_receipt_path(repo)
+    stored = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    assert receipt.status is InitReceiptStatus.COMPLETE
+    assert stored == initialization_receipt_payload(receipt)
+    assert stat.S_IMODE(receipt_path.stat().st_mode) == INIT_RECEIPT_MODE
+    assert tuple(
+        (
+            operation.operation.target,
+            operation.operation.previous_value,
+            operation.operation.generated_value,
+            operation.operation.previous_mode,
+            operation.operation.generated_mode,
+            operation.operation.ownership_digest,
+            operation.operation.scope.value,
+            operation.operation.initialization_mode.value,
+            operation.completed,
+        )
+        for operation in receipt.operations
+    ) == tuple(
+        (
+            operation.target,
+            operation.previous_value,
+            operation.generated_value,
+            operation.previous_mode,
+            operation.generated_mode,
+            operation.ownership_digest,
+            operation.scope.value,
+            operation.initialization_mode.value,
+            True,
+        )
+        for operation in plan.operations
+    )
+
+
+def test_repeated_apply_preserves_the_complete_receipt_and_repository_bytes(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    first = apply_initialization_plan(plan_initialization(repo))
+    after_first = _tree_identity(repo)
+
+    second = apply_initialization_plan(plan_initialization(repo))
+    after_second = _tree_identity(repo)
+
+    assert second == first
+    assert (after_first, after_second) == (after_first, after_first)
+
+
+def test_gates_receipt_promotes_to_full_without_losing_first_introduction(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    gates = apply_initialization_plan(
+        plan_initialization(repo, InitializationMode.GATES_ONLY)
+    )
+
+    full = apply_initialization_plan(plan_initialization(repo, InitializationMode.FULL))
+    by_target = {
+        receipt_operation.operation.target: receipt_operation.operation
+        for receipt_operation in full.operations
+    }
+
+    assert (gates.mode, full.mode, full.status) == (
+        InitializationMode.GATES_ONLY,
+        InitializationMode.FULL,
+        InitReceiptStatus.COMPLETE,
+    )
+    assert (
+        by_target["extensions.worktreeConfig"].previous_value,
+        by_target["extensions.worktreeConfig"].initialization_mode,
+        by_target[".spice/hooks/reference-transaction"].previous_value,
+        by_target[".spice/hooks/reference-transaction"].initialization_mode,
+    ) == (None, InitializationMode.GATES_ONLY, None, InitializationMode.FULL)
+
+
+def test_apply_resumes_incomplete_receipt_and_preserves_original_file_provenance(
+    tmp_path,
+):
+    repo = _git_init(tmp_path / "repo")
+    hook = repo / ".spice/hooks/pre-commit"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
+    hook.chmod(0o700)
+    first = apply_initialization_plan(plan_initialization(repo))
+    receipt_path = initialization_receipt_path(repo)
+    interrupted = initialization_receipt_payload(first)
+    interrupted["status"] = InitReceiptStatus.APPLYING.value
+    for operation in interrupted["operations"]:
+        if operation["target"] == ".spice/hooks/pre-commit":
+            operation["completed"] = False
+    receipt_path.write_text(
+        json.dumps(interrupted, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    hook.unlink()
+
+    resumed = apply_initialization_plan(plan_initialization(repo))
+    stored = load_initialization_receipt(repo)
+    pre_commit = next(
+        operation.operation
+        for operation in resumed.operations
+        if operation.operation.target == ".spice/hooks/pre-commit"
+    )
+
+    assert resumed.status is InitReceiptStatus.COMPLETE
+    assert stored == resumed
+    assert (pre_commit.previous_value, pre_commit.previous_mode) == (
+        "#!/bin/sh\necho custom\n",
+        0o700,
+    )
+    assert hook.read_text(encoding="utf-8") == pre_commit.generated_value
+    assert stat.S_IMODE(hook.stat().st_mode) == pre_commit.generated_mode
 
 
 def test_custom_common_hooks_path_is_preserved_as_effective_prior_state(tmp_path):
@@ -282,6 +430,19 @@ def _git_config_file(path: Path, key: str) -> str:
     return _run(["git", "config", "--file", str(path), "--get", key]).stdout.strip()
 
 
+def _tree_identity(root: Path) -> tuple[tuple[str, int, bytes], ...]:
+    return tuple(
+        (
+            path.relative_to(root).as_posix(),
+            stat.S_IMODE(path.stat().st_mode),
+            path.read_bytes(),
+        )
+        for path in sorted(
+            candidate for candidate in root.rglob("*") if candidate.is_file()
+        )
+    )
+
+
 def _git_init(repo: Path) -> Path:
     _run(["git", "init", "-b", "main", str(repo)])
     _git(repo, "config", "user.email", "test@example.com")
@@ -293,10 +454,13 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return _run(["git", "-C", str(repo), *args])
 
 
-def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         check=True,
         capture_output=True,
+        cwd=cwd,
         text=True,
     )
