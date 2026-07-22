@@ -89,36 +89,53 @@ def require_repo_root(cwd: Path | None = None) -> Path:
     return root
 
 
-def git_common_dir(root: Path) -> Path:
-    """The shared git dir for every worktree of one repository."""
+# git reports "no repository here" and every other fatal with the same exit
+# code, so only its own words separate them. This is the sentence it uses for
+# the one fact that is a statement about `root` rather than about the run.
+GIT_NO_REPOSITORY_STDERR_MARKER = "not a git repository"
+
+
+def _resolve_git_dir(root: Path, flag: str) -> Path:
+    """Ask git for one of its directory paths, keeping the failures distinct.
+
+    Three unrelated facts can end this call: git reporting no repository, git
+    running and failing for some other reason, and git never starting. Only the
+    first is an answer about ``root``. Reporting the other two as "not inside a
+    git worktree" states something false about the repository and hides the
+    real fault, and callers that degrade quietly on that sentence -- the side
+    channel socket lookup, the ack archive -- would silently do nothing instead
+    of surfacing a broken environment.
+    """
     from spice.errors import SpiceError
 
-    result = run_git_command(
-        ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    argv = ["git", "-C", str(root), "rev-parse", flag]
+    try:
+        result = run_git_command(argv, capture_output=True, check=False, text=True)
+    except OSError as exc:
+        raise SpiceError(
+            f"git command could not be launched: {shlex.join(argv)}: "
+            f"{exc.strerror or exc}; check that git is installed and on PATH"
+        ) from exc
     if result.returncode != 0:
-        raise SpiceError("not inside a git worktree")
+        stderr = (result.stderr or "").strip()
+        if GIT_NO_REPOSITORY_STDERR_MARKER in stderr:
+            raise SpiceError("not inside a git worktree")
+        raise SpiceError(
+            f"git command failed: {shlex.join(argv)}: exit {result.returncode}: "
+            f"{stderr or 'no stderr'}"
+        )
     raw = Path(result.stdout.strip())
     return (raw if raw.is_absolute() else root / raw).resolve()
+
+
+def git_common_dir(root: Path) -> Path:
+    """The shared git dir for every worktree of one repository."""
+    return _resolve_git_dir(root, "--git-common-dir")
 
 
 def git_dir(root: Path) -> Path:
     """The git dir for this specific worktree."""
-    from spice.errors import SpiceError
-
-    result = run_git_command(
-        ["git", "-C", str(root), "rev-parse", "--git-dir"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SpiceError("not inside a git worktree")
-    raw = Path(result.stdout.strip())
-    return (raw if raw.is_absolute() else root / raw).resolve()
+    return _resolve_git_dir(root, "--git-dir")
 
 
 def shared_state_root(repo_root: Path) -> Path:
