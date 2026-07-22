@@ -502,7 +502,6 @@ class ServeTeamStore(
     ) -> None:
         agent_id = _normalized_id(agent_id, "agent_id")
         alias_ids = _agent_alias_ids(agent_id, aliases)
-        previous_team_ids: list[str] = []
         for alias_id in alias_ids:
             if alias_id != agent_id:
                 self._rewrite_renewal_agent_locked(
@@ -516,27 +515,9 @@ class ServeTeamStore(
                     connection, alias_id, agent_id
                 )
                 self._rewrite_directive_stats_locked(connection, alias_id, agent_id)
-        # A renewal successor (or a placeholder promoted to its real thread)
-        # arrives carrying its predecessor's id as an alias that already holds a
-        # visible slot in this same team. The roster is ordered by position, so
-        # reusing the predecessor's position keeps the successor in that slot;
-        # a genuinely new agent appends to the end and gets a fresh joined_at.
-        inherited_position: int | None = None
-        for alias_id in alias_ids:
-            previous_rows = connection.execute(
-                "SELECT team_id, position FROM memberships WHERE agent_id = ?",
-                (alias_id,),
-            ).fetchall()
-            for row in previous_rows:
-                if row["team_id"] not in previous_team_ids:
-                    previous_team_ids.append(row["team_id"])
-                if row["team_id"] == team_id:
-                    position = int(row["position"] or 0)
-                    if inherited_position is None or position < inherited_position:
-                        inherited_position = position
-            connection.execute(
-                "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
-            )
+        inherited_position, previous_team_ids = self._vacate_assigned_slots_locked(
+            connection, team_id, agent_id, alias_ids
+        )
         if inherited_position is None:
             # Genuinely new member (no alias already holds a slot here), so
             # this grows the team -- enforce the ceiling. Renewal successors
@@ -562,14 +543,66 @@ class ServeTeamStore(
                 inherited_position,
             ),
         )
-        self._close_empty_teams_locked(
-            connection,
-            [
-                previous_team_id
-                for previous_team_id in previous_team_ids
-                if previous_team_id != team_id
-            ],
+        self._close_empty_teams_locked(connection, previous_team_ids)
+
+    def _vacate_assigned_slots_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        alias_ids: list[str],
+    ) -> tuple[int | None, list[str]]:
+        """Free the slots this assignment takes over; report the position it inherits.
+
+        An alias is another name the same lane already answers to, so it is only
+        ever a way to find a slot that lane already holds. Exactly two such
+        slots belong to this assignment. One is held in this very team: a
+        renewal successor (or a placeholder promoted to its real thread) takes
+        that position instead of appending, which keeps it in the predecessor's
+        visible slot on a roster ordered by position. The other is held in the
+        team the lane is leaving -- the first team any of its names sits in, its
+        own id first, the same precedence `_remove_agent_locked` uses to decide
+        which team a client meant.
+
+        A lane can hold a slot under one of its other names in some third team.
+        That team is a bystander: this assignment neither leaves it nor joins
+        it, so it keeps every member it had. Only the id actually being seated
+        is freed everywhere, because the insert that follows is the one place
+        that id now lives.
+
+        Returns the position to inherit here (None when there is none to
+        inherit) and the teams this vacated, which may now be empty.
+        """
+        slots = [
+            (alias_id, str(row["team_id"]), int(row["position"] or 0))
+            for alias_id in alias_ids
+            for row in connection.execute(
+                "SELECT team_id, position FROM memberships WHERE agent_id = ?",
+                (alias_id,),
+            ).fetchall()
+        ]
+        held_here = [
+            position for _, slot_team, position in slots if slot_team == team_id
+        ]
+        departed_team_id = next(
+            (slot_team for _, slot_team, _ in slots if slot_team != team_id), None
         )
+        previous_team_ids: list[str] = []
+        for alias_id, slot_team, _ in slots:
+            vacated = (
+                slot_team == team_id
+                or slot_team == departed_team_id
+                or alias_id == agent_id
+            )
+            if not vacated:
+                continue
+            connection.execute(
+                "DELETE FROM memberships WHERE agent_id = ? AND team_id = ?",
+                (alias_id, slot_team),
+            )
+            if slot_team != team_id and slot_team not in previous_team_ids:
+                previous_team_ids.append(slot_team)
+        return (min(held_here) if held_here else None, previous_team_ids)
 
     def _close_empty_teams_locked(
         self, connection: sqlite3.Connection, team_ids: Iterable[str]
@@ -606,8 +639,12 @@ class ServeTeamStore(
         if row is None or row["team_id"] != team_id:
             raise SpiceError(f"agent {agent_id} is not assigned to team {team_id}")
         for alias_id in alias_ids:
+            # Scoped to the named team: the aliases resolved which slot in it
+            # the client meant, and a slot the same lane holds in another team
+            # is that team's business, not this removal's.
             connection.execute(
-                "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
+                "DELETE FROM memberships WHERE agent_id = ? AND team_id = ?",
+                (alias_id, team_id),
             )
             connection.execute("DELETE FROM renewals WHERE agent_id = ?", (alias_id,))
         self._close_empty_teams_locked(connection, [team_id])
