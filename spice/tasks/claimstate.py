@@ -90,15 +90,24 @@ def current_claim_site() -> ClaimSite:
     )
 
 
-def claim_meta(actor: str, *, site: ClaimSite) -> list[str]:
+def claim_meta(
+    actor: str,
+    *,
+    site: ClaimSite,
+    context_thread: str | None,
+) -> list[str]:
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     at_dt = datetime.now(UTC)
     at = _iso(at_dt)
     until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
     start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
-    ambient = ambient_thread()
-    if ambient is None:
+    explicit_context = tw.canonical_actor(context_thread or "")
+    ambient = None if explicit_context else ambient_thread()
+    if explicit_context:
+        thread = explicit_context
+        turn = thread
+    elif ambient is None:
         thread = claim_actor
         turn = thread
     else:
@@ -176,6 +185,21 @@ class ClaimRenewalResult:
     claim_until: str = ""
     detail: str = ""
     uuid: str = ""
+
+
+@dataclass(frozen=True)
+class ClaimCarryResult:
+    carried: bool
+    reason: str
+    handle: str = ""
+    claim_until: str = ""
+    uuid: str = ""
+
+
+def claim_carry_status_line(result: ClaimCarryResult) -> str:
+    if result.carried:
+        return f"claim_carry=carried {result.handle} until {result.claim_until}"
+    return f"claim_carry=skipped {result.reason}"
 
 
 CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error"})
@@ -404,7 +428,15 @@ def do_claim(
         else []
     )
     try:
-        tw.run([uuid, *filters, "modify", *claim_meta(actor, site=site), "start:now"])
+        tw.run(
+            [
+                uuid,
+                *filters,
+                "modify",
+                *claim_meta(actor, site=site, context_thread=None),
+                "start:now",
+            ]
+        )
     except SpiceError:
         if guard_unclaimed:
             return False
@@ -413,10 +445,85 @@ def do_claim(
     return True
 
 
+def carry_claim(
+    predecessor: str,
+    successor: str,
+    *,
+    site: ClaimSite,
+) -> ClaimCarryResult:
+    """Move one active claim to a renewal successor without restarting it."""
+    prior_actor = tw.canonical_actor(predecessor)
+    next_actor = tw.canonical_actor(successor)
+    if not prior_actor:
+        return ClaimCarryResult(False, "no_predecessor")
+    if prior_actor == next_actor:
+        return ClaimCarryResult(False, "same_actor")
+
+    predecessor_claims = tw.export(["status.any:", f"claim_by.is:{prior_actor}"])
+    if not predecessor_claims:
+        return ClaimCarryResult(False, "no_predecessor_claim")
+    if len(predecessor_claims) != 1:
+        raise SpiceError(
+            "claim carry requires exactly one predecessor claim; "
+            f"{prior_actor} owns {len(predecessor_claims)} rows"
+        )
+
+    row = predecessor_claims[0]
+    handle = identity.render_handle(row)
+    _require_pending(row, "claim carry")
+    if not row.get("start"):
+        raise SpiceError(f"claim carry requires native ACTIVE state on {handle}")
+    _require_single_active_slot(next_actor, action="claim carry", target=row)
+
+    carry_meta = [
+        arg
+        for arg in claim_meta(
+            next_actor,
+            site=site,
+            context_thread=next_actor,
+        )
+        if not arg.startswith("claim_at:")
+    ]
+    uuid = identity.uuid_of(row)
+    try:
+        tw.run(
+            [
+                uuid,
+                "+ACTIVE",
+                f"claim_by.is:{prior_actor}",
+                "(",
+                "status:pending",
+                "or",
+                "status:waiting",
+                ")",
+                "modify",
+                *carry_meta,
+            ]
+        )
+    except SpiceError as exc:
+        raise SpiceError(
+            f"claim carry lost the active predecessor claim on {handle}: {exc}"
+        ) from exc
+
+    fresh = identity.resolve(handle)
+    if str(fresh.get("claim_by") or "") != next_actor or not fresh.get("start"):
+        raise SpiceError(
+            f"claim carry did not seat {next_actor} on active task {handle}"
+        )
+    _record_task_lifecycle_event(uuid, "claim", next_actor)
+    return ClaimCarryResult(
+        True,
+        "carried",
+        handle=identity.render_handle(fresh),
+        claim_until=str(fresh.get("claim_until") or ""),
+        uuid=uuid,
+    )
+
+
 def _renewal_claim_meta(actor: str, *, site: ClaimSite) -> list[str]:
     return [
         arg
-        for arg in claim_meta(actor, site=site)
+        for arg in claim_meta(actor, site=site, context_thread=None)
         if not arg.startswith(("claim_by:", "claim_at:"))
     ]
 

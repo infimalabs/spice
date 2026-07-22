@@ -262,6 +262,8 @@ def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
         lines.append(f"ready_at={status.ready_at}")
     if getattr(status, "startup_failure", ""):
         lines.append(f"startup_failure={status.startup_failure}")
+    if getattr(status, "claim_carry", ""):
+        lines.append(status.claim_carry)
     if output_observation is not None:
         lines.append(f"output_status={output_observation.status}")
         if output_observation.age_seconds is not None:

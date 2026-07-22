@@ -24,7 +24,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any, cast
@@ -112,7 +112,7 @@ from spice.config.values import (
     configured_agent_personality,
 )
 from spice.errors import SpiceError
-from spice.process.git import git_probe
+from spice.process.git import git_probe, git_read
 from spice.process.groups import (
     PROCESS_GROUP_TERMINATION_BOUND_SECONDS,
     popen_new_process_group_kwargs,
@@ -1020,5 +1020,19 @@ def import_agent(
             "log_path": "",
         },
     )
+    from spice.tasks import claimstate
+
+    claim_carry = claimstate.carry_claim(
+        predecessor,
+        thread_id,
+        site=claimstate.ClaimSite(
+            repo_root.resolve(),
+            git_read(repo_root, "branch", "--show-current"),
+            git_read(repo_root, "rev-parse", "HEAD"),
+        ),
+    )
     _carry_team_membership(predecessor, thread_id, driver)
-    return agent_status(repo_root)
+    return replace(
+        agent_status(repo_root),
+        claim_carry=claimstate.claim_carry_status_line(claim_carry),
+    )

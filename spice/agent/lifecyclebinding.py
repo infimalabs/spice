@@ -86,6 +86,7 @@ class AgentStatus:
     log_path: Path | None
     prompt_skill_path: Path | None
     command: tuple[str, ...]
+    claim_carry: str = ""
 
     @property
     def running(self) -> bool:

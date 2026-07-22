@@ -107,7 +107,7 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     )
     site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third", site=site)
+    claim = claimstate.claim_meta("actor-third", site=site, context_thread=None)
 
     assert "claim_thread:thread-third" in claim
     assert "claim_context_turn:turn-third" in claim
@@ -136,7 +136,7 @@ def test_claim_meta_uses_actor_as_thread_without_ambient(tmp_path, monkeypatch):
     monkeypatch.setattr(claimstate, "ambient_thread", lambda: None)
     site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third", site=site)
+    claim = claimstate.claim_meta("actor-third", site=site, context_thread=None)
 
     assert "claim_by:actorthird" in claim
     assert "claim_thread:actorthird" in claim
