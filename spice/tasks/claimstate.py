@@ -486,6 +486,54 @@ def do_claim(
     return True
 
 
+def take_over_stale_claim(
+    uuid: str,
+    actor: str,
+    *,
+    expected_owner: str,
+    expected_until: str,
+    site: ClaimSite,
+    context_thread: str | None,
+    lease_seconds: float | None,
+) -> bool:
+    """Replace exactly the stale claim observed by the allocator.
+
+    The owner and deadline form a compare-and-swap guard. A concurrent
+    allocator that selected the same exported row cannot overwrite the fresh
+    owner or lease installed by the winner.
+    """
+    prior_actor = tw.canonical_actor(expected_owner)
+    prior_until = expected_until.strip()
+    if not prior_actor or not prior_until:
+        return False
+    try:
+        tw.run(
+            [
+                uuid,
+                "+ACTIVE",
+                f"claim_by.is:{prior_actor}",
+                f"claim_until.is:{prior_until}",
+                "(",
+                "status:pending",
+                "or",
+                "status:waiting",
+                ")",
+                "modify",
+                *claim_meta(
+                    actor,
+                    site=site,
+                    context_thread=context_thread,
+                    lease_seconds=lease_seconds,
+                ),
+                "start:now",
+            ]
+        )
+    except SpiceError:
+        return False
+    _record_task_lifecycle_event(uuid, "claim", actor)
+    return True
+
+
 def carry_claim(
     predecessor: str,
     successor: str,
