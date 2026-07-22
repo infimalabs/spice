@@ -38,6 +38,21 @@ pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
 )
 
+# Refusals in spice/tasks/claimstate.py are repair-first: the executable repair
+# leads, the diagnostic follows. These spell the repair half out so a message
+# that slips back to diagnostic-first fails on order, not just on wording.
+CAPTURE_RECOVERY_REPAIR = (
+    "run `spice task capture --project task.unit --origin task:{handle} "
+    '--done --validation "..."` to capture already-committed work into a new '
+    "task, or discard local work or hand off the current state before continuing"
+)
+PLAN_PHASE_REPAIR = (
+    "add child tasks with acceptance and native dependencies, then run "
+    "`spice task done` with a clean tree and zero local implementation "
+    "commits, and claim an implementation child task before creating, "
+    "capturing, or landing code"
+)
+
 __all__ = ["remote_task_repo", "task_repo"]
 
 
@@ -141,11 +156,12 @@ def test_task_capture_deleted_handle_points_to_new_capture_task(remote_task_repo
         ops.capture(handle)
 
     message = str(exc_info.value)
-    assert f"cannot capture a deleted task: {handle}" in message
-    assert "discard local work" in message
-    assert "hand off" in message
-    assert "do not capture the deleted handle" in message
-    assert f"spice task capture --project task.unit --origin task:{handle}" in message
+    repair = CAPTURE_RECOVERY_REPAIR.format(handle=handle)
+    diagnostic = (
+        f"cannot capture a deleted task: {handle}, and the deleted handle "
+        "itself cannot be captured."
+    )
+    assert message == f"{repair}; {diagnostic}"
 
 
 def test_task_capture_other_claimed_handle_points_to_new_capture_task(
@@ -167,10 +183,9 @@ def test_task_capture_other_claimed_handle_points_to_new_capture_task(
         ops.capture(handle)
 
     message = str(exc_info.value)
-    assert f"cannot capture {handle}: task already claimed by {PEER_ACTOR}" in message
-    assert "discard local work" in message
-    assert "hand off" in message
-    assert f"spice task capture --project task.unit --origin task:{handle}" in message
+    repair = CAPTURE_RECOVERY_REPAIR.format(handle=handle)
+    diagnostic = f"cannot capture {handle}: task already claimed by {PEER_ACTOR}."
+    assert message == f"{repair}; {diagnostic}"
 
 
 def test_task_done_deleted_claim_points_to_recovery_paths(remote_task_repo):
@@ -189,10 +204,12 @@ def test_task_done_deleted_claim_points_to_recovery_paths(remote_task_repo):
         ops.done(handle, validation=["loose work validated"])
 
     message = str(exc_info.value)
-    assert f"cannot complete a deleted task: {handle}" in message
-    assert "discard local work" in message
-    assert "hand off" in message
-    assert f"spice task capture --project task.unit --origin task:{handle}" in message
+    repair = CAPTURE_RECOVERY_REPAIR.format(handle=handle)
+    diagnostic = (
+        f"cannot complete a deleted task: {handle}, and the deleted handle "
+        "itself cannot be captured."
+    )
+    assert message == f"{repair}; {diagnostic}"
 
 
 def test_task_capture_refuses_when_no_loose_commit(remote_task_repo):
@@ -228,6 +245,88 @@ def test_task_add_claim_creates_and_claims_clean_task(task_repo):
 
     assert row["claim_by"] == ACTOR_A
     assert bool(row["start"])
+
+
+def test_task_done_half_released_claim_leads_with_the_reclaim_step(task_repo):
+    handle = create.add(
+        "Claim metadata outlived its ACTIVE state",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    tw.run([identity.uuid_of(identity.resolve(handle)), "modify", "start:"])
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.done(handle, validation=["refusal lands before any state change"])
+
+    assert str(exc_info.value) == (
+        f"run `spice task claim {handle}` to repair the claim; "
+        f"complete requires native ACTIVE state on {handle}"
+    )
+
+
+def test_task_done_ownerless_active_row_leads_with_the_steal_step(task_repo):
+    handle = create.add(
+        "ACTIVE row lost its owner",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    tw.run([identity.uuid_of(identity.resolve(handle)), "modify", "claim_by:"])
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.done(handle, validation=["refusal lands before any state change"])
+
+    assert str(exc_info.value) == (
+        f"run `spice task claim {handle} --steal` to repair ownership; "
+        f"complete blocked: {handle} is ACTIVE but has no claim_by"
+    )
+
+
+def test_task_claim_second_slot_leads_with_unclaiming_the_held_task(task_repo):
+    held = create.add(
+        "First claim owns the slot",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    other = create.add(
+        "Second claim has to wait",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.claim(other)
+
+    assert str(exc_info.value) == (
+        f"run `spice task unclaim {held}` (or complete it) before "
+        f"claiming {other}; task claim would create multiple active "
+        f"claims for {ACTOR_A}"
+    )
+
+
+def test_task_add_claim_second_slot_leads_with_unclaiming_the_held_task(task_repo):
+    held = create.add(
+        "First claim owns the slot",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        create.add(
+            "New task cannot open a second slot",
+            project="task.unit",
+            origin="ack:1jN54zJJ",
+            claim=True,
+        )
+
+    assert str(exc_info.value) == (
+        f"run `spice task unclaim {held}` (or complete it) before "
+        f"claiming new work; task add --claim would create multiple active "
+        f"claims for {ACTOR_A}"
+    )
 
 
 def test_task_capture_rejects_handle_with_new_task_fields(remote_task_repo):
@@ -368,8 +467,14 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert review_row["done_ref"] == head
     assert str(review_row["done_local_commits"]) == "0"
 
-    with pytest.raises(SpiceError, match="authored the review"):
+    with pytest.raises(SpiceError) as claim_exc:
         ops.claim(handle)
+
+    assert str(claim_exc.value) == (
+        "run `spice task next` for work you can claim, and leave this row for "
+        f"another actor; cannot manually claim {handle}: this thread authored "
+        "the review"
+    )
 
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
@@ -762,9 +867,10 @@ def test_pre_commit_blocks_active_plan_phase_claim(task_repo):
         precommit._run_plan_phase_mutation_guard(task_repo)
 
     message = str(exc_info.value)
-    assert "git commit blocked" in message
-    assert f"{handle} is in plan phase" in message
-    assert "Plan phase output is board state" in message
+    diagnostic = (
+        f"git commit blocked: {handle} is in plan phase, whose output is board state."
+    )
+    assert message == f"{PLAN_PHASE_REPAIR}; {diagnostic}"
 
 
 def test_task_capture_blocks_plan_phase_loose_commit(remote_task_repo):
@@ -776,9 +882,10 @@ def test_task_capture_blocks_plan_phase_loose_commit(remote_task_repo):
         ops.capture(project="task.unit", origin="ack:1jN54zJJ")
 
     message = str(exc_info.value)
-    assert "task capture blocked" in message
-    assert f"{handle} is in plan phase" in message
-    assert "Claim an implementation child task" in message
+    diagnostic = (
+        f"task capture blocked: {handle} is in plan phase, whose output is board state."
+    )
+    assert message == f"{PLAN_PHASE_REPAIR}; {diagnostic}"
 
 
 def test_task_done_blocks_plan_phase_local_commits(remote_task_repo):

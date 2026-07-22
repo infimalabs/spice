@@ -228,11 +228,16 @@ def test_reword_rejects_non_owner(task_repo, monkeypatch):
 def test_reword_rejects_inactive_task(task_repo):
     handle = _suspect_plan_task_with_accepted_child()
 
-    with pytest.raises(SpiceError, match="reword requires a claim"):
+    with pytest.raises(SpiceError) as exc_info:
         wordingreview.reword(
             handle,
             reason="inactive task cannot clear marker",
         )
+
+    assert str(exc_info.value) == (
+        f"run `spice task next` (or `spice task claim {handle}`) first; "
+        "reword requires a claim"
+    )
 
     row = identity.resolve(handle)
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"

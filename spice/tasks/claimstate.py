@@ -2,6 +2,12 @@
 
 Leaf module: ops (and anything else) imports from here; nothing here
 imports ops, so guards stay usable from any task surface without cycles.
+
+Refusal messages are repair-first: every refusal that can name a way out
+leads with the executable repair step, then `; `, then the diagnostic that
+explains it. An agent reading a refusal mid-task needs the command before
+the explanation, so a new refusal carrying repair guidance follows the same
+order. Refusals with no repair to offer stay a bare diagnostic.
 """
 
 from __future__ import annotations
@@ -232,12 +238,11 @@ def _deleted_task_recovery_message(row: dict[str, Any], action: str) -> str:
     handle = identity.render_handle(row)
     project = str(row.get("project") or "").strip() or "<project>"
     return (
-        f"cannot {action} a deleted task: {handle}. "
-        "If deletion invalidated local work, discard local work or hand off the "
-        "current state before continuing. If you already committed work, do not "
-        "capture the deleted handle; capture into a new task with "
-        f"`spice task capture --project {project} --origin task:{handle} "
-        '--done --validation "..."`.'
+        f"run `spice task capture --project {project} --origin task:{handle} "
+        '--done --validation "..."` to capture already-committed work into a new '
+        "task, or discard local work or hand off the current state before "
+        f"continuing; cannot {action} a deleted task: {handle}, and the deleted "
+        "handle itself cannot be captured."
     )
 
 
@@ -245,12 +250,10 @@ def _claimed_task_capture_recovery_message(row: dict[str, Any], owner: str) -> s
     handle = identity.render_handle(row)
     project = str(row.get("project") or "").strip() or "<project>"
     return (
-        f"cannot capture {handle}: task already claimed by {owner}. "
-        "If this is a duplicate or canonical task owned by another agent, discard "
-        "local work or hand off the current state before continuing. If you "
-        "already committed work, capture into a new task with "
-        f"`spice task capture --project {project} --origin task:{handle} "
-        '--done --validation "..."`.'
+        f"run `spice task capture --project {project} --origin task:{handle} "
+        '--done --validation "..."` to capture already-committed work into a new '
+        "task, or discard local work or hand off the current state before "
+        f"continuing; cannot capture {handle}: task already claimed by {owner}."
     )
 
 
@@ -458,18 +461,19 @@ def _require_owner(row: dict[str, Any], actor: str, action: str) -> None:
     handle = identity.render_handle(row)
     if owner == actor:
         raise SpiceError(
-            f"{action} requires native ACTIVE state on {handle}; "
-            "run `spice task claim <handle>` to repair the claim"
+            f"run `spice task claim {handle}` to repair the claim; "
+            f"{action} requires native ACTIVE state on {handle}"
         )
     if active and not owner:
         raise SpiceError(
-            f"{action} blocked: {handle} is ACTIVE but has no claim_by; "
-            "run `spice task claim <handle> --steal` to repair ownership"
+            f"run `spice task claim {handle} --steal` to repair ownership; "
+            f"{action} blocked: {handle} is ACTIVE but has no claim_by"
         )
     if owner:
         raise SpiceError(f"task claimed by {owner}; not yours to {action}")
     raise SpiceError(
-        f"{action} requires a claim; run `spice task next` (or `task claim`) first"
+        f"run `spice task next` (or `spice task claim {handle}`) first; "
+        f"{action} requires a claim"
     )
 
 
@@ -493,8 +497,9 @@ def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
         return
     handle = identity.render_handle(row)
     raise SpiceError(
-        f"cannot manually claim {handle}: this thread authored the review; "
-        "leave it for another actor"
+        "run `spice task next` for work you can claim, and leave this row for "
+        f"another actor; cannot manually claim {handle}: this thread authored "
+        "the review"
     )
 
 
@@ -542,11 +547,11 @@ def _raise_plan_phase_implementation_block(
     handle = identity.render_handle(row)
     suffix = f" {detail}" if detail else ""
     raise SpiceError(
-        f"{action} blocked: {handle} is in plan phase.{suffix} "
-        "Plan phase output is board state: add child tasks with acceptance and "
-        "native dependencies, then run `spice task done` with a clean tree and "
-        "zero local implementation commits. Claim an implementation child task "
-        "before creating, capturing, or landing code."
+        "add child tasks with acceptance and native dependencies, then run "
+        "`spice task done` with a clean tree and zero local implementation "
+        "commits, and claim an implementation child task before creating, "
+        f"capturing, or landing code; {action} blocked: {handle} is in plan "
+        f"phase, whose output is board state.{suffix}"
     )
 
 
@@ -602,12 +607,14 @@ def _require_single_active_slot(
     if target:
         target_handle = identity.render_handle(target)
         raise SpiceError(
-            f"{action} would create multiple active claims for {actor}; "
-            f"complete or unclaim {active_handle} before claiming {target_handle}"
+            f"run `spice task unclaim {active_handle}` (or complete it) before "
+            f"claiming {target_handle}; {action} would create multiple active "
+            f"claims for {actor}"
         )
     raise SpiceError(
-        f"{action} would create multiple active claims for {actor}; "
-        f"complete or unclaim {active_handle} before claiming new work"
+        f"run `spice task unclaim {active_handle}` (or complete it) before "
+        f"claiming new work; {action} would create multiple active claims "
+        f"for {actor}"
     )
 
 
