@@ -562,10 +562,12 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
 
     captured: list[str] = []
     compactions: list[int] = []
+    activities: list[str] = []
     scanner = JsonStdoutScanner(
         captured.append,
         CLAUDE_DRIVER.normalize_transcript_line,
         on_compaction=lambda: compactions.append(1),
+        on_activity=lambda: activities.append("activity"),
     )
     scanner.process_line(
         '{"type":"assistant","message":{"role":"assistant",'
@@ -579,6 +581,7 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
     scanner.close()
     assert captured == ["hello operator"]
     assert len(compactions) == 1
+    assert activities == ["activity", "activity"]
 
 
 def test_claude_json_stdout_scanner_flags_text_starvation_once_per_streak():

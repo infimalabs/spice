@@ -251,9 +251,17 @@ def render_agent_status(status: Any) -> str:
             f"service_tier={status.service_tier or '-'}"
         ),
         f"started_at={status.started_at or '-'}",
-        f"skill={status.prompt_skill_path or '-'}",
-        f"log={status.log_path or '-'}",
     ]
+    if getattr(status, "ready_at", ""):
+        lines.append(f"ready_at={status.ready_at}")
+    if getattr(status, "startup_failure", ""):
+        lines.append(f"startup_failure={status.startup_failure}")
+    lines.extend(
+        [
+            f"skill={status.prompt_skill_path or '-'}",
+            f"log={status.log_path or '-'}",
+        ]
+    )
     return "\n".join(lines)
 
 

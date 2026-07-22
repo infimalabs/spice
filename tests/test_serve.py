@@ -9,6 +9,7 @@ import socket
 import threading
 from http import HTTPStatus
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -637,6 +638,55 @@ def test_agent_status_payload_surfaces_restart_refusal(tmp_path, monkeypatch):
         == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
     )
     assert payload["launchable"] is True
+
+
+def test_agent_status_payload_distinguishes_starting_and_startup_stalled(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    status = SimpleNamespace(
+        repo_root=repo,
+        process_status="starting",
+        pid=123,
+        process_group_id=123,
+        thread_id=THREAD_A,
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="",
+        ready_at="",
+        startup_failure="",
+        running=True,
+        command=("codex", "exec", "--cd", str(repo)),
+    )
+    monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
+
+    starting = agentapi.agent_status_payload(target)
+    assert {
+        "status": starting["status"],
+        "launchable": starting["launchable"],
+        "startupFailure": starting["startupFailure"],
+    } == {
+        "status": "starting",
+        "launchable": False,
+        "startupFailure": "",
+    }
+
+    status.process_status = lifecycle.AGENT_FAILURE_STARTUP_STALLED
+    status.pid = 0
+    status.process_group_id = 0
+    status.startup_failure = "agent startup stalled after 120s"
+    status.running = False
+    stalled = agentapi.agent_status_payload(target)
+    assert {
+        "status": stalled["status"],
+        "launchable": stalled["launchable"],
+        "startupFailure": stalled["startupFailure"],
+    } == {
+        "status": "startup-stalled",
+        "launchable": True,
+        "startupFailure": "agent startup stalled after 120s",
+    }
 
 
 def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkeypatch):

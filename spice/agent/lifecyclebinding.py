@@ -50,6 +50,9 @@ WORKTREE_SKILL_GITIGNORE_CONTENT = (
 PACKAGED_SKILL_RESOURCE = ("spice.agent", "SKILL.md")
 AGENT_STATE_FILE = "state.json"
 AGENT_LOCK_FILE = "ensure.lock"
+AGENT_STARTUP_STARTING = "starting"
+AGENT_STARTUP_READY = "ready"
+AGENT_STARTUP_STALLED = "startup-stalled"
 SUPERVISOR_ENVIRONMENT_SCRUB_NAMES = (
     "VIRTUAL_ENV",
     "UV_PROJECT_ENVIRONMENT",
@@ -70,12 +73,18 @@ class AgentStatus:
     reasoning_effort: str
     service_tier: str
     started_at: str
+    ready_at: str
+    startup_failure: str
     log_path: Path | None
     prompt_skill_path: Path | None
     command: tuple[str, ...]
 
     @property
     def running(self) -> bool:
+        return self.process_status in {"starting", "running", "stopping"}
+
+    @property
+    def ready(self) -> bool:
         return self.process_status == "running"
 
 
@@ -105,6 +114,8 @@ def agent_status(repo_root: Path) -> AgentStatus:
         reasoning_effort=str(agent_state.get("reasoning_effort") or ""),
         service_tier=str(agent_state.get("service_tier") or ""),
         started_at=str(agent_state.get("started_at") or ""),
+        ready_at=str(agent_state.get("ready_at") or ""),
+        startup_failure=str(agent_state.get("startup_failure") or ""),
         log_path=state_path_value(agent_state.get("log_path")),
         prompt_skill_path=skill_path,
         command=command,
@@ -311,9 +322,16 @@ def agent_process_status(
     *, running: bool, state: dict[str, Any], thread_id: str
 ) -> str:
     if running:
+        startup_status = str(state.get("startup_status") or "")
+        if startup_status == AGENT_STARTUP_STARTING:
+            return "starting"
+        if startup_status == AGENT_STARTUP_STALLED:
+            return "stopping"
         return "running"
     if not state:
         return "unstarted"
+    if str(state.get("startup_status") or "") == AGENT_STARTUP_STALLED:
+        return AGENT_STARTUP_STALLED
     return "idle" if thread_id else "stopped"
 
 

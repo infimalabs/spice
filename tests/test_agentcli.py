@@ -233,6 +233,29 @@ def test_agent_show_renders_bound_agent_state_through_real_parser(
     assert calls == [tmp_path]
 
 
+def test_agent_show_renders_startup_stall_diagnostic(tmp_path):
+    status = SimpleNamespace(
+        repo_root=tmp_path,
+        process_status="startup-stalled",
+        pid=123,
+        process_group_id=123,
+        thread_id="thread-agent",
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="",
+        started_at="2026-07-03T00:00:00Z",
+        ready_at="",
+        startup_failure="no driver-defined first activity within 120s",
+        prompt_skill_path=tmp_path / "skill.md",
+        log_path=tmp_path / "agent.log",
+    )
+
+    rendered = agent_cli.render_agent_status(status)
+
+    assert "status=startup-stalled" in rendered
+    assert "startup_failure=no driver-defined first activity within 120s" in rendered
+
+
 def test_agent_command_mentions_match_parser_surface():
     repo_root = Path(__file__).resolve().parents[1]
     parser_verbs = _agent_parser_verbs()
@@ -715,7 +738,7 @@ def test_agent_import_refuses_over_a_running_agent(tmp_path, monkeypatch):
         lifecycle,
         "agent_status",
         lambda _root: SimpleNamespace(
-            process_status="running", thread_id="live", pid=4321
+            process_status="running", running=True, thread_id="live", pid=4321
         ),
     )
     with pytest.raises(SpiceError, match="already running"):

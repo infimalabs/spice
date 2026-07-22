@@ -62,6 +62,9 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     AGENT_ENSURE_LOCK_TIMEOUT_SECONDS,
     AGENT_LOCK_FILE,
     AGENT_STATE_FILE,
+    AGENT_STARTUP_READY,
+    AGENT_STARTUP_STALLED,
+    AGENT_STARTUP_STARTING,
     PACKAGED_SKILL_RESOURCE,
     SUPERVISOR_ENVIRONMENT_SCRUB_NAMES,
     WORKTREE_SKILL_GITIGNORE_CONTENT,
@@ -95,7 +98,11 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     worktree_skill_path,
     write_agent_state,
 )
-from spice.agent.watchdog import spawn_supervised_agent
+from spice.agent.watchdog import (
+    AgentStartupSignal,
+    spawn_supervised_agent,
+    startup_signal_for_supervised_thread,
+)
 from spice.config.values import (
     configured_agent_effort,
     configured_agent_model,
@@ -106,13 +113,17 @@ from spice.process.git import git_probe
 from spice.process.groups import (
     popen_new_process_group_kwargs,
     process_id_is_running,
+    terminate_process_group,
 )
 from spice.tasks import gitsync
 
 STARTUP_GRACE_SECONDS = 0.25
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
+FIRST_ACTIVITY_GRACE_SECONDS = 120.0
+STARTUP_WATCH_JOIN_SECONDS = 3.0
 AGENT_FAILURE_OUT_OF_CREDITS = "out-of-credits"
 AGENT_FAILURE_RESTART_REFUSED = "restart-refused"
+AGENT_FAILURE_STARTUP_STALLED = AGENT_STARTUP_STALLED
 
 
 class AgentOutOfCreditsError(SpiceError):
@@ -343,6 +354,7 @@ def build_agent_state(
     prompt_skill_path: Path,
     log_path: Path,
     fast_mode: bool,
+    startup_status: str = AGENT_STARTUP_READY,
 ) -> dict[str, Any]:
     return {
         "pid": process.pid,
@@ -358,6 +370,9 @@ def build_agent_state(
         "prompt_skill_path": str(prompt_skill_path),
         "log_path": str(log_path),
         "fast_mode": fast_mode,
+        "startup_status": startup_status,
+        "ready_at": utc_now() if startup_status == AGENT_STARTUP_READY else "",
+        "startup_failure": "",
     }
 
 
@@ -654,6 +669,67 @@ def _watch_supervised_lane(
             pass
 
 
+def _transition_agent_startup_state(
+    repo_root: Path,
+    process: subprocess.Popen[str],
+    *,
+    startup_status: str,
+    ready_at: str = "",
+    startup_failure: str = "",
+) -> bool:
+    """Update startup state only while this supervisor still owns the binding."""
+    state = read_agent_state(repo_root)
+    if state_int(state.get("pid")) != process.pid:
+        return False
+    state["startup_status"] = startup_status
+    state["ready_at"] = ready_at
+    state["startup_failure"] = startup_failure
+    write_agent_state(repo_root, state)
+    return True
+
+
+def _watch_agent_startup(
+    repo_root: Path,
+    process: subprocess.Popen[str],
+    log_path: Path,
+    signal: AgentStartupSignal,
+    stalled: Event,
+    *,
+    grace_seconds: float = FIRST_ACTIVITY_GRACE_SECONDS,
+) -> None:
+    outcome = signal.wait(grace_seconds)
+    if outcome == "activity":
+        if process.poll() is None:
+            _transition_agent_startup_state(
+                repo_root,
+                process,
+                startup_status=AGENT_STARTUP_READY,
+                ready_at=utc_now(),
+            )
+        return
+    if outcome == "finished":
+        return
+    if process.poll() is not None:
+        return
+    detail = (
+        "agent startup stalled: no driver-defined first activity within "
+        f"{grace_seconds:g}s"
+    )
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(f"{detail}\n")
+        log_handle.flush()
+    stalled.set()
+    try:
+        terminate_process_group(process)
+    finally:
+        _transition_agent_startup_state(
+            repo_root,
+            process,
+            startup_status=AGENT_STARTUP_STALLED,
+            startup_failure=detail,
+        )
+
+
 def run_agent_supervisor(args: argparse.Namespace) -> int:
     from spice.agent.sidechannel import AgentSideChannelServer
 
@@ -667,12 +743,14 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
         launch_clock = time.monotonic()
         started_thread_id = str(args.resume_thread_id or "")
         exit_code: int | None = None
+        startup_stalled = Event()
         process, stdout_thread = spawn_supervised_agent(
             command,
             cwd=repo_root,
             log_path=log_path,
             env=env,
         )
+        startup_signal = startup_signal_for_supervised_thread(stdout_thread)
         try:
             require_started_process(process, log_path, repo_root=repo_root)
             started_thread_id = started_agent_thread_id(
@@ -693,9 +771,24 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 prompt_skill_path=prompt_skill_path,
                 log_path=log_path,
                 fast_mode=bool(getattr(args, "fast_mode", False)),
+                startup_status=AGENT_STARTUP_STARTING,
             )
             state["supervisor_pid"] = os.getpid()
             write_agent_state(repo_root, state)
+            startup_watch = Thread(
+                target=_watch_agent_startup,
+                args=(
+                    repo_root,
+                    process,
+                    log_path,
+                    startup_signal,
+                    startup_stalled,
+                ),
+                kwargs={"grace_seconds": FIRST_ACTIVITY_GRACE_SECONDS},
+                name=f"spice-startup-watch-{started_thread_id or process.pid}",
+                daemon=True,
+            )
+            startup_watch.start()
             stop_watch = Event()
             lane_watch = Thread(
                 target=_watch_supervised_lane,
@@ -708,7 +801,9 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 exit_code = process.wait()
             finally:
                 stop_watch.set()
+                startup_signal.note_finished()
                 stdout_thread.join(timeout=1.0)
+                startup_watch.join(timeout=STARTUP_WATCH_JOIN_SECONDS)
                 lane_watch.join(timeout=1.0)
         finally:
             # Every supervised launch leaves a terminal outcome — including a
@@ -723,6 +818,11 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                     started_at=started_at,
                     lifetime_seconds=time.monotonic() - launch_clock,
                     exit_code=process.poll() if exit_code is None else exit_code,
+                    failure_kind=(
+                        AGENT_FAILURE_STARTUP_STALLED
+                        if startup_stalled.is_set()
+                        else ""
+                    ),
                 ),
             )
     return int(exit_code or 0)
@@ -878,7 +978,7 @@ def import_agent(
             "dashless hex (e.g. f2249a9f-b996-41e2-9e18-54cb381cc634)"
         )
     running = agent_status(repo_root)
-    if running.process_status == "running":
+    if running.running:
         raise SpiceError(
             "refusing to import over the agent already running on this worktree "
             f"(thread {running.thread_id or '-'}, pid {running.pid}); "
