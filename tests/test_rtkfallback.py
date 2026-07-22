@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -225,6 +224,7 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
 ) -> None:
     executable = "missing-routing-rtk"
     _configure_rtk(tmp_path, executable)
+    _route_project_python(tmp_path)
     monkeypatch.setattr(
         wrap,
         "build_agent_run_environment",
@@ -269,9 +269,40 @@ def test_native_bypass_preserves_worktree_routing_and_child_environment(
         "exit_codes": [0, 0],
         "rtk_environments": ["preserved", "preserved"],
         "child_outcomes": [
-            ([sys.executable, "-c", "print('native')"], "preserved"),
+            ([*wrap.UV_PYTHON_COMMAND, "-c", "print('native')"], "preserved"),
             (["zsh", "-c", "git status --short"], "preserved"),
         ],
+    }
+
+
+def test_native_bypass_passes_python_through_outside_a_routing_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = "missing-passthrough-rtk"
+    _configure_rtk(tmp_path, executable)
+    monkeypatch.setattr(
+        wrap,
+        "build_agent_run_environment",
+        lambda _raw_args, **_kwargs: {wrap.RTK_DB_PATH_ENV: "preserved"},
+    )
+    wrap._rtk_warned_keys.clear()
+    child_commands: list[list[str]] = []
+
+    def missing_rtk(_command: list[str], **_kwargs: object) -> object:
+        raise FileNotFoundError(2, "missing", executable)
+
+    _isolate_agent_run(monkeypatch, missing_rtk)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["python", "-c", "print('native')"],
+        popen_factory=lambda command, **_kwargs: _record_child(child_commands, command),
+        stderr=io.StringIO(),
+    )
+
+    assert {"exit_code": exit_code, "child_commands": child_commands} == {
+        "exit_code": 0,
+        "child_commands": [["python", "-c", "print('native')"]],
     }
 
 
@@ -345,6 +376,10 @@ def _configure_rtk(repo_root: Path, executable: str) -> None:
         values.RTK_KEY,
         {values.RTK_EXECUTABLE_KEY: executable},
     )
+
+
+def _route_project_python(repo_root: Path) -> None:
+    (repo_root / "pyproject.toml").write_text('[project]\nname = "routing-probe"\n')
 
 
 def _isolate_agent_run(
