@@ -8,7 +8,11 @@ from pathlib import Path
 
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import AgentStatus, agent_status
-from spice.agent.paths import agent_thread_pointer_path, read_agent_thread_pointer
+from spice.agent.paths import (
+    agent_thread_pointer_lock,
+    agent_thread_pointer_path,
+    read_agent_thread_pointer,
+)
 from spice.errors import SpiceError
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -135,20 +139,24 @@ def _ambiguous_binding_error(
 
 
 def _clear_stale_binding(thread_id: str, binding: _TargetThreadBinding) -> None:
-    current = read_agent_thread_pointer(binding.target.repo_root)
-    try:
-        stat = binding.pointer_path.stat()
-    except FileNotFoundError:
-        return
-    if (
-        current != thread_id
-        or _pointer_fingerprint(stat) != binding.pointer_fingerprint
-    ):
-        raise SpiceError(
-            "retry the serve target refresh after the agent binding settles; "
-            f"thread pointer changed while clearing stale target {binding.target.id}"
-        )
-    binding.pointer_path.unlink()
+    # Revalidate and unlink while holding the same lock as atomic pointer
+    # replacement. Otherwise a writer can replace the verified inode in the
+    # check-to-unlink gap and have its new binding deleted as stale.
+    with agent_thread_pointer_lock(binding.target.repo_root):
+        current = read_agent_thread_pointer(binding.target.repo_root)
+        try:
+            stat = binding.pointer_path.stat()
+        except FileNotFoundError:
+            return
+        if (
+            current != thread_id
+            or _pointer_fingerprint(stat) != binding.pointer_fingerprint
+        ):
+            raise SpiceError(
+                "retry the serve target refresh after the agent binding settles; "
+                f"thread pointer changed while clearing stale target {binding.target.id}"
+            )
+        binding.pointer_path.unlink()
 
 
 def _pointer_fingerprint(stat: object) -> tuple[int, int, int, int]:
