@@ -335,7 +335,7 @@ def test_task_delete_parser_accepts_force_claimed():
     assert args.force_claimed is True
 
 
-def test_task_edit_renames_title_without_changing_description_body(task_repo):
+def test_task_modify_renames_title_without_changing_description_body(task_repo):
     original_body = "body remains separate from the Taskwarrior title"
     handle = create.add(
         "Original task title",
@@ -345,7 +345,7 @@ def test_task_edit_renames_title_without_changing_description_body(task_repo):
     )
 
     args = build_parser().parse_args(
-        ["task", "edit", handle, "--title", "Renamed task title"]
+        ["task", "modify", handle, "--title", "Renamed task title"]
     )
     assert args.func(args) == 0
 
@@ -354,7 +354,9 @@ def test_task_edit_renames_title_without_changing_description_body(task_repo):
     assert str(row.get("task_description")) == original_body
 
 
-def test_task_edit_rewrites_title_description_and_priority_together(task_repo, capsys):
+def test_task_modify_rewrites_title_description_and_priority_together(
+    task_repo, capsys
+):
     handle = create.add(
         "Refresh my description",
         project="task.unit",
@@ -367,7 +369,7 @@ def test_task_edit_rewrites_title_description_and_priority_together(task_repo, c
     args = build_parser().parse_args(
         [
             "task",
-            "edit",
+            "modify",
             handle,
             "--title",
             "Landed mechanism task",
@@ -390,11 +392,11 @@ def test_task_edit_rewrites_title_description_and_priority_together(task_repo, c
     assert f"description {new_text}" in capsys.readouterr().out
 
 
-def test_task_edit_help_documents_title_and_description(capsys):
+def test_task_modify_help_documents_title_and_description(capsys):
     parser = build_parser()
 
     with pytest.raises(SystemExit):
-        parser.parse_args(["task", "edit", "--help"])
+        parser.parse_args(["task", "modify", "--help"])
 
     help_text = capsys.readouterr().out
     assert "--title TITLE" in help_text

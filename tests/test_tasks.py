@@ -83,7 +83,7 @@ def _ready_handles() -> set[str]:
     }
 
 
-def test_task_edit_changes_priority_in_place(task_repo):
+def test_task_modify_changes_priority_in_place(task_repo):
     handle = create.add(
         "Bump me",
         project="task.unit",
@@ -92,12 +92,12 @@ def test_task_edit_changes_priority_in_place(task_repo):
     )
     assert identity.resolve(handle)["priority"] == "L"
 
-    ops.edit(handle, priority="high")
+    ops.modify(handle, priority="high")
 
     assert identity.resolve(handle)["priority"] == "H"
 
 
-def test_task_edit_reassigns_project_in_place(task_repo):
+def test_task_modify_reassigns_project_in_place(task_repo):
     handle = create.add(
         "Move me",
         project="task.unit",
@@ -105,12 +105,12 @@ def test_task_edit_reassigns_project_in_place(task_repo):
         priority="medium",
     )
 
-    ops.edit(handle, project="task.moved")
+    ops.modify(handle, project="task.moved")
 
     assert identity.resolve(handle)["project"] == "task.moved"
 
 
-def test_task_edit_requires_at_least_one_field(task_repo):
+def test_task_modify_requires_at_least_one_field(task_repo):
     handle = create.add(
         "Leave me",
         project="task.unit",
@@ -118,10 +118,10 @@ def test_task_edit_requires_at_least_one_field(task_repo):
         priority="medium",
     )
     with pytest.raises(SpiceError):
-        ops.edit(handle)
+        ops.modify(handle)
 
 
-def test_task_edit_replaces_acceptance_in_place(task_repo):
+def test_task_modify_replaces_acceptance_in_place(task_repo):
     handle = create.add(
         "Reword my acceptance",
         project="task.unit",
@@ -129,20 +129,20 @@ def test_task_edit_replaces_acceptance_in_place(task_repo):
         acceptance=["original criterion"],
     )
 
-    ops.edit(handle, acceptance=["first bookend", "second bookend"])
+    ops.modify(handle, acceptance=["first bookend", "second bookend"])
 
     assert identity.resolve(handle)["acceptance"] == "first bookend | second bookend"
 
 
-def test_task_edit_acceptance_unsticks_plan_phase(task_repo):
+def test_task_modify_acceptance_unsticks_plan_phase(task_repo):
     handle = create.add(
-        "Plan gains bookend acceptance via edit",
+        "Plan gains bookend acceptance via modify",
         project="task.unit",
         origin="ack:1jN54zJJ",
         flow=["plan", "todo", "review"],
     )
     child = create.add(
-        "Unaccepted child for edited plan",
+        "Unaccepted child for modified plan",
         project="task.unit",
         origin="ack:1jN54zJJ",
     )
@@ -151,28 +151,28 @@ def test_task_edit_acceptance_unsticks_plan_phase(task_repo):
     with pytest.raises(SpiceError, match="current task or connect at least one"):
         ops.done(handle, validation=["plan attempted without acceptance"])
 
-    ops.edit(handle, acceptance=["plan bookend added via edit"])
+    ops.modify(handle, acceptance=["plan bookend added via modify"])
     output = ops.done(handle, validation=["plan board populated"])
 
     row = identity.resolve(handle)
     assert f"advanced {handle} -> todo" in output
     assert row["phase"] == "todo"
-    assert row["acceptance"] == "plan bookend added via edit"
+    assert row["acceptance"] == "plan bookend added via modify"
 
 
-def test_task_edit_acceptance_rejects_completed_task(task_repo):
+def test_task_modify_acceptance_rejects_completed_task(task_repo):
     handle = create.add(
-        "Complete before acceptance edit",
+        "Complete before acceptance modify",
         project="task.unit",
         origin="ack:1jN54zJJ",
         flow=["todo"],
         acceptance=["complete once"],
     )
     ops.claim(handle)
-    ops.done(handle, validation=["completed ahead of the edit attempt"])
+    ops.done(handle, validation=["completed ahead of the modify attempt"])
 
-    with pytest.raises(SpiceError, match="cannot edit acceptance for a completed"):
-        ops.edit(handle, acceptance=["late criterion"])
+    with pytest.raises(SpiceError, match="cannot modify acceptance for a completed"):
+        ops.modify(handle, acceptance=["late criterion"])
 
 
 def _rendered_dependency_handles(handle: str) -> list[str]:

@@ -232,7 +232,7 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def edit(
+def modify(
     handle: str,
     *,
     title: str | None = None,
@@ -265,7 +265,7 @@ def edit(
         and acceptance is None
     ):
         raise SpiceError(
-            "task edit needs --title, --priority, --project, --description, "
+            "task modify needs --title, --priority, --project, --description, "
             "and/or --acceptance"
         )
     row = identity.resolve(handle)
@@ -273,9 +273,9 @@ def edit(
     mods: list[str] = []
     task_title = ""
     if title is not None:
-        task_title = create._task_title(title, context="task edit --title: ")
+        task_title = create._task_title(title, context="task modify --title: ")
         if not task_title:
-            raise SpiceError("task edit --title needs non-empty text")
+            raise SpiceError("task modify --title needs non-empty text")
         mods.append(f"description:{task_title}")
     if priority is not None:
         mods.append(f"priority:{config.map_priority(priority)}")
@@ -285,17 +285,17 @@ def edit(
         mods.append(f"project:{resolved_project}")
     body = ""
     if description is not None:
-        _require_pending(row, "edit description for")
+        _require_pending(row, "modify description for")
         body = create._task_description(description)
         if not body:
-            raise SpiceError("task edit --description needs non-empty text")
+            raise SpiceError("task modify --description needs non-empty text")
         mods.append(f"task_description:{body}")
     items: list[str] = []
     if acceptance is not None:
-        _require_pending(row, "edit acceptance for")
+        _require_pending(row, "modify acceptance for")
         items = [item.strip() for item in acceptance if item.strip()]
         if not items:
-            raise SpiceError("task edit --acceptance needs at least one entry")
+            raise SpiceError("task modify --acceptance needs at least one entry")
         mods.append(f"acceptance:{' | '.join(items)}")
     wording_matches: tuple = ()
     if task_title or body or items:
@@ -309,7 +309,7 @@ def edit(
     tw.run([uuid, "modify", *mods])
     if wording_matches:
         annotate(uuid, create._suspect_wording_annotation(wording_matches))
-    lines = [f"edited {identity.render_handle(row)}: {' '.join(mods)}"]
+    lines = [f"modified {identity.render_handle(row)}: {' '.join(mods)}"]
     if resolved_project is not None:
         lines.append(
             _subscribe_created_project(

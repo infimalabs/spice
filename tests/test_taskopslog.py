@@ -119,14 +119,14 @@ def test_connector_opens_the_one_resolved_database(tmp_path, monkeypatch):
     assert resolved == [databases[0]]
 
 
-def test_contract_mutations_track_edits_exactly(task_repo):
+def test_contract_mutations_track_modifications_exactly(task_repo):
     handle = _claimed_task(priority="L")
     uuid = identity.uuid_of(identity.resolve(handle))
     baseline = opslog.claim_baseline_id(uuid, ACTOR_A)
 
-    ops.edit(handle, title="Retitled opslog probe")
-    ops.edit(handle, acceptance=["sharpened criterion"])
-    ops.edit(handle, description="claim probe body rewritten")
+    ops.modify(handle, title="Retitled opslog probe")
+    ops.modify(handle, acceptance=["sharpened criterion"])
+    ops.modify(handle, description="claim probe body rewritten")
     tw.run([uuid, "modify", "priority:H"])
 
     cursor, mutations = opslog.contract_mutations_since(uuid, baseline)
@@ -153,7 +153,7 @@ def test_renewal_cycle_reports_no_contract_mutations(task_repo):
     assert cursor > baseline
 
 
-def test_claim_baseline_reports_only_post_claim_edits(task_repo):
+def test_claim_baseline_reports_only_post_claim_modifications(task_repo):
     handle = create.add(
         "Baseline probe task",
         project="task.unit",
@@ -161,9 +161,9 @@ def test_claim_baseline_reports_only_post_claim_edits(task_repo):
         acceptance=["initial criterion"],
         priority="L",
     )
-    ops.edit(handle, acceptance=["pre-claim rewrite"])
+    ops.modify(handle, acceptance=["pre-claim rewrite"])
     ops.claim(handle)
-    ops.edit(handle, acceptance=["post-claim rewrite"])
+    ops.modify(handle, acceptance=["post-claim rewrite"])
 
     uuid = identity.uuid_of(identity.resolve(handle))
     baseline = opslog.claim_baseline_id(uuid, ACTOR_A)
@@ -190,7 +190,7 @@ def test_supervisor_notice_names_changed_fields_and_renotices(task_repo, monkeyp
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
     quiet_pass = list(calls)
 
-    ops.edit(handle, acceptance=["sharpened criterion"])
+    ops.modify(handle, acceptance=["sharpened criterion"])
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
 
     tw.run([uuid, "modify", "priority:H"])
@@ -228,7 +228,7 @@ def test_supervisor_notice_reports_one_claimed_project_move(task_repo, monkeypat
     cursors: dict[str, int] = {}
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
 
-    ops.edit(handle, project="serve.unit")
+    ops.modify(handle, project="serve.unit")
     moved_handle = identity.render_handle(identity.resolve(handle))
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
@@ -246,7 +246,7 @@ def test_supervisor_notice_reports_one_claimed_project_move(task_repo, monkeypat
     )
 
 
-def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
+def test_show_version_equals_ops_log_tail_and_modify_increases_it(task_repo):
     handle = _claimed_task(priority="L")
     uuid = identity.uuid_of(identity.resolve(handle))
 
@@ -262,7 +262,7 @@ def test_show_version_equals_ops_log_tail_and_edit_increases_it(task_repo):
     assert shown == int(tail)
     assert shown > 0
 
-    ops.edit(handle, acceptance=["sharpened criterion"])
+    ops.modify(handle, acceptance=["sharpened criterion"])
     assert _shown_version(handle) > shown
 
 
