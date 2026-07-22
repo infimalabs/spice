@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -34,6 +35,7 @@ EXIT_FAILURE = 2
 HASH_CHUNK_BYTES = 1024 * 1024
 PYTHON_GATE_COMMAND = ("uv", "run", "--locked", "pytest")
 RUFF_GATE_COMMAND = ("uv", "run", "--locked", "ruff", "check", ".")
+TOOLCHAIN_DECLARATION_PATH = "release-proof/toolchain.json"
 BROWSER_GATE_COMMAND = ("node", "tests/browser/run_release_smokes.js")
 MUTATION_GATE_COMMAND = (
     "uv",
@@ -53,7 +55,15 @@ MUTATION_GATE_COMMAND = (
     "tests/mutation-ratchet.json",
     "--json",
 )
-PACKAGING_MODULES = ("build.__main__", "setuptools", "twine", "wheel")
+# Import target -> distribution whose pin the toolchain declaration carries.
+# `build` keeps its command line in a submodule, so the probe imports
+# `build.__main__` while the version is read against the distribution name.
+PACKAGING_TOOLCHAIN = {
+    "build.__main__": "build",
+    "setuptools": "setuptools",
+    "twine": "twine",
+    "wheel": "wheel",
+}
 GIT_PRIVATE_RECORD_PRODUCERS = {
     "release-proof-identities.json": "release-proof/init-source.py",
     "release-proof-toolchain.json": "release-proof/toolchain.py",
@@ -63,11 +73,11 @@ RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
 MUTATION_COUNT_FIELDS = ("killed", "mutants", "score", "survived", "timed_out")
 CHECKS = (
+    "packaging-toolchain",
     "python",
     "ruff",
     "browser-release-manifest",
     "deterministic-mutation-cohort",
-    "packaging-toolchain",
     "build-sdist",
     "build-wheel",
     "metadata",
@@ -306,27 +316,48 @@ def packaging_python_command(project_root: Path) -> tuple[str, ...]:
     return ("uv", "run", "--locked", "--project", str(project_root), "python", "-P")
 
 
+def declared_packaging_pins(project_root: Path) -> dict[str, str]:
+    """Read the packaging versions the toolchain declaration pins."""
+    declaration = json.loads(
+        (project_root / TOOLCHAIN_DECLARATION_PATH).read_text(encoding="utf-8")
+    )
+    pinned = declaration["pinned"]
+    return {name: str(pinned[name]) for name in PACKAGING_TOOLCHAIN.values()}
+
+
 def verify_packaging_toolchain(
     project_root: Path,
     failures: FailureArtifactStore | None = None,
-) -> list[str]:
+) -> dict[str, str]:
     """Fail before the long gates when the packaging toolchain is unusable.
 
-    Returns the imported modules so the caller can record what it proved. Each
+    Returns the resolved versions so the caller can record what it proved. Each
     module is probed separately and reported by name, because a mid-run
     ``No module named build`` after the suite, browser, and mutation gates
-    costs several minutes and hides which dependency is actually absent.
+    costs several minutes and hides which dependency is actually absent. The
+    resolved versions are then held against the toolchain declaration, so a
+    host run and a container run cannot quietly build their artifacts from
+    different packaging tools.
     """
+    if shutil.which("uv") is None:
+        raise RehearsalError(
+            "the release rehearsal drives its packaging toolchain through uv, "
+            "which is not on PATH; install uv and re-run so the artifact chain "
+            "uses the same locked toolchain as every other gate."
+        )
     probe = (
-        "import importlib\n"
-        f"modules = {list(PACKAGING_MODULES)!r}\n"
+        "import importlib, json\n"
+        "from importlib.metadata import PackageNotFoundError, version\n"
+        f"targets = {dict(PACKAGING_TOOLCHAIN)!r}\n"
         "missing = []\n"
-        "for module in modules:\n"
+        "resolved = {}\n"
+        "for module, distribution in targets.items():\n"
         "    try:\n"
         "        importlib.import_module(module)\n"
-        "    except ImportError:\n"
+        "        resolved[distribution] = version(distribution)\n"
+        "    except (ImportError, PackageNotFoundError):\n"
         "        missing.append(module)\n"
-        "print(' '.join(missing))\n"
+        "print(json.dumps({'missing': missing, 'resolved': resolved}))\n"
     )
     completed = _run(
         [*packaging_python_command(project_root), "-c", probe],
@@ -335,17 +366,31 @@ def verify_packaging_toolchain(
         failures=failures,
         gate="packaging-toolchain",
     )
-    missing = completed.stdout.split()
+    report = json.loads(completed.stdout)
+    missing = report["missing"]
     if missing:
         raise RehearsalError(
             "packaging toolchain is unusable from the locked environment: "
             f"{', '.join(missing)} failed to import under "
             f"`{shlex.join(packaging_python_command(project_root))}`. Add each "
-            "one to the project's dev dependency group and re-run `uv lock` so "
-            "the artifact chain uses the same locked toolchain as every other "
-            "gate."
+            f"one to the project's dev dependency group at the version "
+            f"{TOOLCHAIN_DECLARATION_PATH} declares and re-run `uv lock` so the "
+            "artifact chain uses the same locked toolchain as every other gate."
         )
-    return list(PACKAGING_MODULES)
+    resolved = {name: str(value) for name, value in report["resolved"].items()}
+    declared = declared_packaging_pins(project_root)
+    if resolved != declared:
+        drifted = sorted(
+            name for name in declared if resolved.get(name) != declared[name]
+        )
+        raise RehearsalError(
+            "packaging toolchain differs from "
+            f"{TOOLCHAIN_DECLARATION_PATH} for {', '.join(drifted)}:\n"
+            + json.dumps(
+                {"declared": declared, "resolved": resolved}, indent=2, sort_keys=True
+            )
+        )
+    return resolved
 
 
 def _build_canonical_artifacts(
@@ -611,8 +656,8 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
     artifact_dir = artifact_dir.resolve()
     artifact_dir.mkdir(parents=True, exist_ok=False)
     failures = FailureArtifactStore(artifact_dir)
+    packaging = verify_packaging_toolchain(root, failures)
     version = _project_version(root)
-    packaging_modules = verify_packaging_toolchain(root, failures)
     with tempfile.TemporaryDirectory(prefix="spice-release-rehearsal-") as raw:
         scratch = Path(raw)
         gate_evidence = _run_source_gates(root, scratch, failures)
@@ -676,7 +721,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         "artifact_rehearsal": {
             "checks": list(CHECKS),
             "installed_wheel_sha256": wheel_sha256,
-            "packaging_modules": packaging_modules,
+            "packaging_toolchain": packaging,
             "sdist_rebuilt_from_sha256": sdist_sha256,
         },
         "content_comparison": {

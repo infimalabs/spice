@@ -14,7 +14,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_EXPORTER = PROJECT_ROOT / "scripts" / "release-proof-source"
 SOURCE_INITIALIZER = PROJECT_ROOT / "release-proof" / "init-source.py"
 CONTAINERFILE = PROJECT_ROOT / "release-proof" / "Containerfile"
-TOOLCHAIN_DECLARATION = PROJECT_ROOT / "release-proof" / "toolchain.json"
+TOOLCHAIN_RELATIVE_PATH = "release-proof/toolchain.json"
+TOOLCHAIN_DECLARATION = PROJECT_ROOT / TOOLCHAIN_RELATIVE_PATH
+PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+# The packaging pins fixtures declare, held apart from the real declaration so
+# a fixture keeps stating what it expects even as the real pins move.
+DECLARED_PACKAGING_PINS = {
+    "build": "1.3.0",
+    "setuptools": "80.9.0",
+    "twine": "6.1.0",
+    "wheel": "0.45.1",
+}
 REHEARSAL_SCRIPT = PROJECT_ROOT / "release-proof" / "rehearse.py"
 EVIDENCE_SCRIPT = PROJECT_ROOT / "release-proof" / "evidence.py"
 HOSTNATIVE_SCRIPT = PROJECT_ROOT / "release-proof" / "hostnative.py"
