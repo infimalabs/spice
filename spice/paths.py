@@ -7,6 +7,7 @@ import errno
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -55,16 +56,26 @@ def _worktree_backend_key(repo_root: Path) -> str:
 
 
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
-    """Resolve the enclosing git worktree root, or None outside git."""
+    """Resolve the enclosing git worktree root, or None outside git.
+
+    None is an answer git gave: it ran, looked, and reported no worktree. A git
+    that could not be launched answered nothing at all, so it raises rather
+    than returning None -- otherwise a broken environment is indistinguishable
+    from an ordinary directory to every caller, and the tree takes the blame
+    for it.
+    """
+    from spice.errors import SpiceError
+
+    argv = ["git", "-C", str(cwd or Path.cwd()), "rev-parse", "--show-toplevel"]
     try:
-        result = run_git_command(
-            ["git", "-C", str(cwd or Path.cwd()), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-    except (OSError, CalledProcessError):
+        result = run_git_command(argv, capture_output=True, check=True, text=True)
+    except CalledProcessError:
         return None
+    except OSError as exc:
+        raise SpiceError(
+            f"git command could not be launched: {shlex.join(argv)}: "
+            f"{exc.strerror or exc}; check that git is installed and on PATH"
+        ) from exc
     raw = result.stdout.strip()
     return Path(raw) if raw else None
 

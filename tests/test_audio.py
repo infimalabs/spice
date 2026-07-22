@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import time
@@ -252,7 +253,7 @@ def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):
         encoding="utf-8",
     )
     executable.chmod(0o755)
-    monkeypatch.setenv("PATH", str(executable_dir))
+    monkeypatch.setenv("PATH", str(executable_dir), prepend=os.pathsep)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 

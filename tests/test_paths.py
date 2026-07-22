@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import spice.paths as paths
+from spice.errors import SpiceError
 from spice.paths import (
     atomic_write_json,
     atomic_write_text,
@@ -235,6 +236,75 @@ def test_canonical_state_roots_support_bare_common_dir_ending_dot_git(tmp_path):
     assert worktree_state_path(linked, "agents/thread/state.json") == (
         git_dir(linked) / ".spice" / "agents" / "thread" / "state.json"
     )
+
+
+def _refuse_to_launch_git(monkeypatch) -> None:
+    def unlaunchable(_command, **_kwargs):
+        raise OSError(errno.ENOENT, "No such file or directory")
+
+    monkeypatch.setattr(paths, "run_git_command", unlaunchable)
+
+
+def _report_no_worktree(monkeypatch) -> None:
+    def outside_any_worktree(command, **_kwargs):
+        raise subprocess.CalledProcessError(128, list(command))
+
+    monkeypatch.setattr(paths, "run_git_command", outside_any_worktree)
+
+
+def test_repo_root_from_cwd_separates_a_launch_failure_from_an_absent_worktree(
+    tmp_path, monkeypatch
+):
+    """A git that never started said nothing about whether this is a worktree."""
+    _report_no_worktree(monkeypatch)
+    absent = paths.repo_root_from_cwd(tmp_path)
+    _refuse_to_launch_git(monkeypatch)
+
+    with pytest.raises(SpiceError) as unlaunchable:
+        paths.repo_root_from_cwd(tmp_path)
+
+    message = str(unlaunchable.value)
+    assert absent is None
+    assert "git command could not be launched" in message
+    assert str(tmp_path) in message
+    assert "No such file or directory" in message
+
+
+def test_require_repo_root_names_the_launch_failure_rather_than_the_tree(
+    tmp_path, monkeypatch
+):
+    """The two conditions reach the caller as two different sentences."""
+    _report_no_worktree(monkeypatch)
+    with pytest.raises(SpiceError) as absent:
+        paths.require_repo_root(tmp_path)
+    _refuse_to_launch_git(monkeypatch)
+
+    with pytest.raises(SpiceError) as unlaunchable:
+        paths.require_repo_root(tmp_path)
+
+    absent_message = str(absent.value)
+    launch_message = str(unlaunchable.value)
+    assert absent_message == "not inside a git worktree"
+    assert "git command could not be launched" in launch_message
+    assert launch_message != absent_message
+
+
+def test_init_repo_root_surfaces_a_launch_failure_before_walking_for_markers(
+    tmp_path, monkeypatch
+):
+    """The marker walk answers for a bare common dir, never for a broken git."""
+    from spice.hooks import cli as hookcli
+
+    (tmp_path / ".git").write_text(f"gitdir: {tmp_path / 'common'}\n", encoding="utf-8")
+    _report_no_worktree(monkeypatch)
+    walked = hookcli.init_repo_root(tmp_path)
+    _refuse_to_launch_git(monkeypatch)
+
+    with pytest.raises(SpiceError) as unlaunchable:
+        hookcli.init_repo_root(tmp_path)
+
+    assert walked == tmp_path.resolve()
+    assert "git command could not be launched" in str(unlaunchable.value)
 
 
 def _repo_with_linked_worktree(tmp_path: Path) -> Path:
