@@ -225,6 +225,61 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     ]
 
 
+def test_moving_an_agent_leaves_a_bystander_teams_roster_intact(tmp_path):
+    # The client sends every id form its lane answers to, and one of those
+    # forms can still hold a slot in a team this move is neither leaving nor
+    # joining. That team is a bystander: it keeps every member it had, at the
+    # positions it had them, and stays open.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["thread:agent-a"])
+    bystander = store.create_team(members=["target:target-a", "thread:agent-keep"])
+    destination = store.create_team(members=["thread:agent-c"])
+
+    store.assign_agent(
+        destination.team_id, "thread:agent-a", aliases=["target:target-a"]
+    )
+
+    open_members = {
+        team.team_id: [member.agent_id for member in team.members]
+        for team in store.team_snapshot().teams
+    }
+    assert open_members == {
+        bystander.team_id: ["target:target-a", "thread:agent-keep"],
+        destination.team_id: ["thread:agent-c", "thread:agent-a"],
+    }
+    assert store.current_team_for_agent("target:target-a") == bystander.team_id
+    assert store.current_team_for_agent("thread:agent-a") == destination.team_id
+    with store.connect() as connection:
+        statuses = dict(
+            connection.execute("SELECT team_id, status FROM teams").fetchall()
+        )
+    # The team the move emptied is the only one retired -- closed, then pruned
+    # by the snapshot above for having carried no activity.
+    assert statuses == {bystander.team_id: "open", destination.team_id: "open"}
+
+
+def test_removing_an_agent_leaves_a_bystander_teams_roster_intact(tmp_path):
+    # Same bystander rule on the removal path: the aliases resolve which slot
+    # in the named team the client meant, and reach no further than that team.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["thread:agent-a", "thread:agent-b"])
+    bystander = store.create_team(members=["target:target-a", "thread:agent-keep"])
+
+    store_remove_agent(
+        store, team.team_id, "thread:agent-a", aliases=["target:target-a"]
+    )
+
+    open_members = {
+        state.team_id: [member.agent_id for member in state.members]
+        for state in store.team_snapshot().teams
+    }
+    assert open_members == {
+        team.team_id: ["thread:agent-b"],
+        bystander.team_id: ["target:target-a", "thread:agent-keep"],
+    }
+    assert store.current_team_for_agent("target:target-a") == bystander.team_id
+
+
 def test_team_membership_is_capped_at_six_across_growth_paths(tmp_path):
     # A team renders six accent slots; every growth path must refuse a
     # seventh so a merge or a driver-switch append can never exceed what the
