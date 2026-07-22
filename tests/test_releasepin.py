@@ -333,8 +333,8 @@ def test_toolchain_gate_round_trips_its_record_from_a_linked_worktree(tmp_path):
     )
 
     gate = PINNED.toolchain_gate(linked, _executable_interpreter(linked))
-    record = REHEARSAL.git_private_path(linked, "release-proof-toolchain.json")
-    recorded = REHEARSAL._load_git_private_json(linked, "release-proof-toolchain.json")
+    record = REHEARSAL.git_private_path(linked, PINNED.TOOLCHAIN_RECORD_NAME)
+    recorded = REHEARSAL._load_git_private_json(linked, PINNED.TOOLCHAIN_RECORD_NAME)
 
     assert (linked / ".git").is_file()
     assert record.is_file()

@@ -68,6 +68,14 @@ carried artifact digests, rehearsal checks, and every member-level comparison.
 ZIP container-byte reproducibility is explicitly deferred; any missing, extra,
 or content-changed wheel member is reported by path and SHA-256.
 
+A direct host invocation of `rehearse.py` exercises the same artifact chain but
+does not manufacture the container-only source-identity or resolved-toolchain
+records. Its receipt marks both records as absent and labels the claim boundary
+`host-artifact-rehearsal`; the container appliance remains the only path that
+can emit the full Linux release claim. Git-private records follow the checkout's
+`.git` directory or required `gitdir:` pointer, so linked worktrees use their
+real Git directory instead of treating the marker file as a directory.
+
 Failed gates write deterministic logs capped at eight files and 64 KiB per
 file. Userinfo and sensitive query or fragment URL values, plus values from
 credential-like environment names, are redacted before persistence.
