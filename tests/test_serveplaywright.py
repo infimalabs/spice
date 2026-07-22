@@ -157,7 +157,9 @@ def test_serve_fresh_startup_import_shell_smoke_asserts_stale_hint_reset() -> No
     assert "withServePage(" in smoke
     assert "installStaleOpenLaneHints" in smoke
     assert "page.reload" in smoke
-    assert "waitForImportShell(page)" in smoke
+    # The wait threads the caller's options through, so the import-shell budget
+    # scales with the harness lifecycle budget instead of a pinned literal.
+    assert "waitForImportShell(page, options)" in smoke
     assert "assertEqual(\n        afterReload.storedConfig," in smoke
     assert '"[]"' in smoke
     assert "fresh startup topology must settle on the import shell" in smoke
