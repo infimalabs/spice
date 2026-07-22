@@ -1,12 +1,39 @@
-# Release-proof source boundary
+# Local release-proof appliance
 
-This directory is the hermetic input layer for the local Docker or Podman
-release proof. From a clean worktree, create a new context with:
+Install and start either Docker or Podman, check out the clean commit to prove,
+then run exactly one local command:
 
 ```sh
-scripts/release-proof-source /tmp/spice-release-proof-context
+scripts/release-proof --engine docker --output /tmp/spice-release-proof
+# or: --engine podman
 ```
 
+The output path must not exist and must be outside the worktree. Success writes
+exactly the tested wheel, tested source distribution, and Linux
+`release-proof.json`; on macOS it also writes the source-bound
+`release-proof-macos.json`. The command validates the complete file inventory,
+regular-file types, source commit and tree, schema, byte sizes, and SHA-256
+digests before publishing the directory atomically.
+
+Failure exits nonzero and, whenever the output path is safe to create, writes
+only `release-proof-failure.json` plus bounded redacted logs under `failures/`.
+The status names the failed phase, selected engine and version, source identity
+when known, exact run-scoped cleanup outcome, and each diagnostic's size and
+SHA-256. An unsafe or pre-existing output is never overwritten; that preflight
+status is emitted as JSON on stderr instead.
+
+The command uses the shared Docker/Podman lifecycle `build`, `create`, `cp`,
+`container rm`, and `image rm`. It never starts the scratch artifact carrier,
+mounts a source directory, passes a container-engine socket, reads files from
+the operator home into the context, accepts a credential/build-argument option,
+logs in, pushes, uploads, or prunes. Publication and signing remain separate
+credential-bearing operations over the already validated output directory.
+
+## Source and Linux boundary
+
+`scripts/release-proof-source` is the appliance's lower-level hermetic input
+step. The orchestrator invokes it in a private temporary directory; it can also
+be inspected directly with `scripts/release-proof-source OUTPUT_DIRECTORY`.
 The exporter expands `git archive HEAD`, so ignored and untracked checkout
 state never enters the context. The new output directory must be outside the
 source worktree and may not already exist. The exporter records the original
@@ -41,12 +68,15 @@ carried artifact digests, rehearsal checks, and every member-level comparison.
 ZIP container-byte reproducibility is explicitly deferred; any missing, extra,
 or content-changed wheel member is reported by path and SHA-256.
 
-Failed gates write deterministic logs under `artifacts/failures`, capped at
-eight files and 64 KiB per file. Token-bearing URL fields and values from
-credential-like environment names are redacted before persistence.
+Failed gates write deterministic logs capped at eight files and 64 KiB per
+file. Userinfo and sensitive query or fragment URL values, plus values from
+credential-like environment names, are redacted before persistence.
 
-The container claim remains Linux-only. On macOS, after exporting the container
-artifacts into one directory, run:
+## Host-native macOS remainder
+
+The container claim remains Linux-only. On macOS the public appliance command
+automatically runs the companion after the Linux artifacts validate. The
+companion remains directly inspectable with:
 
 ```sh
 python3 release-proof/hostnative.py --evidence-dir /path/to/artifacts

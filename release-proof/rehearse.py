@@ -569,8 +569,16 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         "browser": gate_evidence["browser"],
         "mutation": gate_evidence["mutation"],
         "artifacts": {
-            "sdist": {"filename": sdist.name, "sha256": sdist_sha256},
-            "wheel": {"filename": wheel.name, "sha256": wheel_sha256},
+            "sdist": {
+                "filename": sdist.name,
+                "bytes": sdist.stat().st_size,
+                "sha256": sdist_sha256,
+            },
+            "wheel": {
+                "filename": wheel.name,
+                "bytes": wheel.stat().st_size,
+                "sha256": wheel_sha256,
+            },
             "installed_wheel_sha256": wheel_sha256,
             "sdist_rebuilt_from_sha256": sdist_sha256,
         },
