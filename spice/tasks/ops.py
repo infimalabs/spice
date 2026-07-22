@@ -752,6 +752,21 @@ def review(
     actor = tw.current_actor()
     _require_owner(row, actor, "review")
     uuid = identity.uuid_of(row)
+    # Parse every follow-up record and resolve every link target before the
+    # first write, the way ``parse_add_batch`` validates a whole batch before
+    # creating any line. Rejecting a record mid-loop used to leave the records
+    # ahead of it already on the board, beside a review finding that had also
+    # already landed, so one failed invocation produced orphan follow-ups that
+    # the retry then duplicated.
+    from spice.tasks import create
+
+    requests = [
+        create.parse_task_batch_request(spec, require_project=False, index=position)
+        for position, spec in enumerate(then or [], start=1)
+    ]
+    targets = [
+        _resolve_followup_target(name, after_uuid=uuid) for name in followup or []
+    ]
     at = tw.now_iso()
     modify = [
         uuid,
@@ -765,23 +780,19 @@ def review(
     tw.run(modify)
     annotate(uuid, f"review: finding={finding}; by={actor}")
     reviewed_handle = identity.render_handle(row)
-    spawned: list[str] = []
-    for spec in then or []:
-        spawned.append(
-            _spawn_followup(
-                spec,
-                after_uuid=uuid,
-                after_handle=reviewed_handle,
-                creation_surface=creation_surface,
-            )
+    spawned = [
+        _spawn_followup(
+            request,
+            after_uuid=uuid,
+            after_handle=reviewed_handle,
+            creation_surface=creation_surface,
         )
-    linked: list[str] = []
-    for followup_handle in followup or []:
-        linked.append(
-            _link_existing_followup(
-                followup_handle, after_uuid=uuid, after_handle=reviewed_handle
-            )
-        )
+        for request in requests
+    ]
+    linked = [
+        _link_existing_followup(target, after_uuid=uuid, after_handle=reviewed_handle)
+        for target in targets
+    ]
     sync = gitsync.integrate_and_publish(
         identity.render_handle(row),
         meta=_publish_meta(row, actor, [note or ""]),
@@ -845,15 +856,15 @@ def next_task_drain_line(
 
 
 def _spawn_followup(
-    spec: str,
+    request: Any,
     *,
     after_uuid: str,
     after_handle: str,
     creation_surface: str | None = None,
 ) -> str:
+    """Create one already-parsed follow-up record."""
     from spice.tasks import create
 
-    request = create.parse_task_batch_request(spec, require_project=False)
     return create.add_one(
         title=request.title,
         description=request.description,
@@ -875,11 +886,18 @@ def _spawn_followup(
     )
 
 
-def _link_existing_followup(handle: str, *, after_uuid: str, after_handle: str) -> str:
+def _resolve_followup_target(handle: str, *, after_uuid: str) -> dict[str, Any]:
+    """Resolve one link target in the validation pass, before anything is written."""
     row = identity.resolve(handle)
-    uuid = identity.uuid_of(row)
-    if uuid == after_uuid:
+    if identity.uuid_of(row) == after_uuid:
         raise SpiceError("a review follow-up cannot be the reviewed task itself")
+    return row
+
+
+def _link_existing_followup(
+    row: dict[str, Any], *, after_uuid: str, after_handle: str
+) -> str:
+    uuid = identity.uuid_of(row)
     try:
         tw.run([uuid, "modify", f"depends:{after_uuid}"])
     except SpiceError as exc:

@@ -728,10 +728,16 @@ def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
 
 
 def parse_task_batch_request(
-    raw: str, *, require_project: bool = True
+    raw: str, *, require_project: bool = True, index: int = 1
 ) -> TaskAddBatchRequest:
-    """Parse one task field record for CLI, inline, or review-follow-up use."""
-    request, errors = _parse_add_batch_request(raw, 1, require_project=require_project)
+    """Parse one task field record for CLI, inline, or review-follow-up use.
+
+    Callers holding several records pass the record's position as ``index`` so
+    the diagnostic names the one that failed; a lone record stays ``line 1``.
+    """
+    request, errors = _parse_add_batch_request(
+        raw, index, require_project=require_project
+    )
     if errors:
         raise SpiceError("task field record rejected:\n" + "\n".join(errors))
     if request is None:
