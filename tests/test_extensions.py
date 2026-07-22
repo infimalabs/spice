@@ -37,16 +37,16 @@ def test_extension_entry_points_query_fixture_wheel_groups_without_importing(
 
     assert discovered == {
         SPICE_DRIVER_ENTRY_POINT_GROUP: {
-            "codex": "spiceextensiondriver:SHADOW_CODEX_DRIVER",
-            "toy": "spiceextensiondriver:TOY_DRIVER",
+            "codex": "test_spiceextensiondriver:SHADOW_CODEX_DRIVER",
+            "toy": "test_spiceextensiondriver:TOY_DRIVER",
         },
         SPICE_STUDY_ENTRY_POINT_GROUP: {
-            "file-loc": "spiceextensionstudy:shadow_file_loc_study",
-            "toy-study": "spiceextensionstudy:run_toy_study",
+            "file-loc": "test_spiceextensionstudy:shadow_file_loc_study",
+            "toy-study": "test_spiceextensionstudy:run_toy_study",
         },
         SPICE_WRAPPER_ENTRY_POINT_GROUP: {
-            "spice-dev": "spiceextensionwrapper:shadow_spice_dev_wrapper_spec",
-            "toy-wrapper": "spiceextensionwrapper:toy_wrapper_spec",
+            "spice-dev": "test_spiceextensionwrapper:shadow_spice_dev_wrapper_spec",
+            "toy-wrapper": "test_spiceextensionwrapper:toy_wrapper_spec",
         },
     }
 
@@ -91,8 +91,8 @@ def test_extension_entry_points_reject_duplicate_extension_names_deterministical
     assert str(exc_info.value) == (
         "duplicate extension entry point group 'spice.drivers' entry 'codex'; "
         "providers: "
-        "spice-extension-fixture:spiceextensiondriver:SHADOW_CODEX_DRIVER, "
-        "spice-extension-fixture:spiceextensiondriver:SHADOW_CODEX_DRIVER"
+        "spice-extension-fixture:test_spiceextensiondriver:SHADOW_CODEX_DRIVER, "
+        "spice-extension-fixture:test_spiceextensiondriver:SHADOW_CODEX_DRIVER"
     )
 
 
@@ -115,7 +115,7 @@ def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
         tmp_path,
         entry_points={
             SPICE_DRIVER_ENTRY_POINT_GROUP: {
-                "toy": "spiceextensiondriver:TOY_DRIVER",
+                "toy": "test_spiceextensiondriver:TOY_DRIVER",
             }
         },
     )

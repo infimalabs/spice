@@ -17,7 +17,7 @@ from tests.test_extensionhelpers import build_fixture_wheel
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 TOY_WRAPPER_ENTRY_POINTS = {
     shellhook.WRAPPER_ENTRY_POINT_GROUP: {
-        "toy-wrapper": "spiceextensionwrapper:toy_wrapper_spec",
+        "toy-wrapper": "test_spiceextensionwrapper:toy_wrapper_spec",
     }
 }
 
