@@ -189,14 +189,15 @@ env_names = [
 # module is a collected test_*.py file under the configured test roots, and
 # reach follows imports wherever they appear, including inside function bodies,
 # because a deferred import binds two modules just as tightly once the process
-# runs. Measured that way on this tree, every path below is
-# reached by at least 183 of 219 test modules (83.6%) while the widest module
-# left undeclared, spice/config/pyproject.py, sits at 159 (72.6%), so the set
-# is a band the import graph already separates rather than a tuned threshold.
-# test_this_repository_declares_exactly_the_widest_reaching_modules holds that
-# break and prints the ranking when it moves. The gap between that reach and a
-# lane's own view of its change is the whole problem: spice/tasks/tw.py is
-# named by 23 test modules and reached by 183, so on 2026-07-22 a lane
+# runs. Measured that way, every path below belongs to a leading band: the
+# narrowest declared path still reaches more test modules than the widest path
+# left undeclared. The live command is the source of the point-in-time counts;
+# copying them here would let this explanation drift whenever the test graph
+# grows. test_this_repository_declares_exactly_the_widest_reaching_modules
+# holds the break and prints the ranking when it moves. The gap between that
+# reach and a lane's own view of its change is the whole problem:
+# spice/tasks/tw.py can be named directly by only a small slice of the suite
+# while remaining in the transitively reached band, so on 2026-07-22 a lane
 # verified 120 task tests, believed that covered it, and landed a red branch
 # anyway.
 #
