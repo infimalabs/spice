@@ -199,9 +199,20 @@ class AgentSideChannelServer:
                 return
             while not self._stopping.is_set():
                 try:
-                    readable, _, _ = select.select([connection, wake_reader], [], [])
+                    readable, _, _ = select.select(
+                        [connection, wake_reader],
+                        [],
+                        [],
+                        working_state_injector.seconds_until_refresh(),
+                    )
                 except OSError:
                     return
+                if not readable:
+                    try:
+                        emit()
+                    except OSError:
+                        return
+                    continue
                 if connection in readable and _connection_has_closed(connection):
                     return
                 if wake_reader in readable:

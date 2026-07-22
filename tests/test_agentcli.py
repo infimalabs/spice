@@ -46,6 +46,7 @@ from spice.tasks import config as task_config
 
 
 WORKING_STATE_ELAPSED_SECONDS = 90
+WORKING_STATE_REMAINING_SECONDS = 601
 
 ACK_MIRROR_ACTOR = "feedfacefeedfacefeedfacefeedface"
 
@@ -614,6 +615,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
         datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
         + WORKING_STATE_ELAPSED_SECONDS
     )
+    claim_until = datetime.fromtimestamp(now + WORKING_STATE_REMAINING_SECONDS, UTC)
     monkeypatch.setenv(DRIVER.thread_id_env, actor)
 
     def fake_export(args=None):
@@ -622,6 +624,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
             {
                 "claim_at": claim_at.isoformat().replace("+00:00", "Z"),
                 "claim_by": actor,
+                "claim_until": claim_until.isoformat().replace("+00:00", "Z"),
                 "claim_worktree": str(tmp_path),
                 "description": "Collect working-state snapshot",
                 "incepted": "00000001",
@@ -658,6 +661,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
     assert snapshot.claim_handle == "METER-00000001"
     assert snapshot.claim_phase == "todo"
     assert snapshot.claim_elapsed_seconds == WORKING_STATE_ELAPSED_SECONDS
+    assert snapshot.claim_remaining_seconds == WORKING_STATE_REMAINING_SECONDS
     assert snapshot.last_maxim_bag == "fallbacks"
     assert snapshot.has_fields()
 
@@ -735,6 +739,96 @@ def test_working_state_injector_renders_and_suppresses_one_line_sentence(tmp_pat
         assert line.startswith("🌶️ ")
         assert "\n" not in line
         assert line.count(".") == 1
+
+
+def test_working_state_claim_lease_warnings_cross_thresholds_and_repeat(tmp_path):
+    now = [0.0]
+    snapshot = [
+        wrap.WorkingStateSnapshot(
+            claim_handle="CLAIMS-00000001",
+            claim_phase="todo",
+            claim_elapsed_seconds=30,
+            claim_remaining_seconds=601,
+        )
+    ]
+    stderr = io.StringIO()
+    injector = wrap.AgentWorkingStateInjector(
+        tmp_path,
+        stderr=stderr,
+        time_factory=lambda: now[0],
+        snapshot_factory=lambda _repo: snapshot[0],
+    )
+
+    injector.inject(force=True)
+    assert injector.seconds_until_refresh() == 2.0
+
+    now[0] = 2.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        claim_handle="CLAIMS-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=32,
+        claim_remaining_seconds=599,
+    )
+    injector.inject(force=False)
+    assert injector.seconds_until_refresh() == wrap.CLAIM_LEASE_WARNING_REPEAT_SECONDS
+
+    now[0] = 121.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        claim_handle="CLAIMS-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=151,
+        claim_remaining_seconds=480,
+    )
+    injector.inject(force=False)
+    now[0] = 122.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        claim_handle="CLAIMS-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=152,
+        claim_remaining_seconds=479,
+    )
+    injector.inject(force=False)
+
+    now[0] = 123.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        claim_handle="CLAIMS-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=153,
+        claim_remaining_seconds=299,
+    )
+    injector.inject(force=False)
+    now[0] = 124.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        claim_handle="CLAIMS-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=154,
+        claim_remaining_seconds=59,
+    )
+    injector.inject(force=False)
+
+    assert stderr.getvalue().splitlines() == [
+        "🌶️ Working state: claim CLAIMS-00000001 todo for 30s.",
+        (
+            "🌶️ Working state: claim CLAIMS-00000001 todo for 32s; "
+            "CLAIM LEASE WARNING: CLAIMS-00000001 has 599s remaining; "
+            "run spice task reclaim CLAIMS-00000001."
+        ),
+        (
+            "🌶️ Working state: claim CLAIMS-00000001 todo for 152s; "
+            "CLAIM LEASE WARNING: CLAIMS-00000001 has 479s remaining; "
+            "run spice task reclaim CLAIMS-00000001."
+        ),
+        (
+            "🌶️ Working state: claim CLAIMS-00000001 todo for 153s; "
+            "CLAIM LEASE URGENT: CLAIMS-00000001 has 299s remaining; "
+            "run spice task reclaim CLAIMS-00000001."
+        ),
+        (
+            "🌶️ Working state: claim CLAIMS-00000001 todo for 154s; "
+            "CLAIM LEASE CRITICAL: CLAIMS-00000001 has 59s remaining; "
+            "run spice task reclaim CLAIMS-00000001."
+        ),
+    ]
 
 
 def _init_git_repo(path: Path) -> None:
