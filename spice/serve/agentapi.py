@@ -385,14 +385,8 @@ def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> f
     long before it is boarded, and one that has only just become allocatable can
     already read as starving. That direction is the safe one -- this age only
     ever releases the two-task threshold early, never holds a start back.
-
-    A row with no stamp cannot be aged, so it waits on the threshold like any
-    other candidate instead of decoding to the epoch and starving instantly.
     """
-    incepted = str(row.get("incepted") or "").strip()
-    if not identity.INCEPTED_RE.match(incepted):
-        return 0.0
-    return (now - identity.incepted_datetime(incepted)).total_seconds()
+    return (now - identity.incepted_datetime(str(row["incepted"]))).total_seconds()
 
 
 def available_work_next_deadline(
