@@ -221,15 +221,15 @@ class LiveBusSession:
         # Batched subscribes fan their payload computes out here so N lanes
         # arrive together in one reply frame instead of trickling in serially.
         self._payload_pool: ThreadPoolExecutor | None = None
-        # Single read-only verbs (refresh/history) route their
-        # heavy messages_payload compute + reply onto that pool, one FIFO chain
-        # per target: two queued reads for a lane apply in request order while
-        # distinct lanes overlap up to the pool's width. Only one chain runs
-        # per target at a time (guarded by _read_active), so the queue never
-        # needs cross-thread reordering.
+        # Heavy read-only verbs route their compute + reply onto that pool:
+        # target inventory uses one connection-wide FIFO chain, while lane
+        # refresh/history use one chain per target. Two reads on a chain apply
+        # in request order while independent chains overlap up to the pool's
+        # width. Only one worker drains each chain at a time (guarded by
+        # _read_active), so the queue never needs cross-thread reordering.
         self._read_lock = Lock()
-        self._read_queues: dict[str, deque[Callable[[], None]]] = {}
-        self._read_active: set[str] = set()
+        self._read_queues: dict[tuple[str, str], deque[Callable[[], None]]] = {}
+        self._read_active: set[tuple[str, str]] = set()
         self._read_futures: set[Future[None]] = set()
         self._submission_tracker = SubmissionLifecycleTracker()
 
@@ -404,10 +404,24 @@ class LiveBusSession:
                 self._frame_telemetry.clear()
 
     def _handle_targets_refresh(self, message: dict[str, Any]) -> None:
-        self._reply(
-            message,
-            {"type": "targets.payload", "payload": self.callbacks.work_trees_payload()},
-        )
+        def job() -> None:
+            try:
+                frame: dict[str, Any] = {
+                    "type": "targets.payload",
+                    "payload": self.callbacks.work_trees_payload(),
+                }
+            except Exception as exc:  # mirror _dispatch: surface, never wedge
+                frame = {"type": "bus.error", "error": str(exc)}
+            try:
+                self._reply(message, frame)
+            except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+                pass  # peer vanished mid-inventory; the chain still drains
+
+        # work_trees_payload can traverse every lane and start pending agents.
+        # Keep that inventory off the socket's sole dispatch thread so later
+        # team mutations and lane sends are received and acknowledged while it
+        # computes. Repeated inventories remain FIFO on their own chain.
+        self._enqueue_read_job(("global", "targets"), job)
 
     def _handle_teams_refresh(self, message: dict[str, Any]) -> None:
         query = message.get("query") or {}
@@ -635,27 +649,29 @@ class LiveBusSession:
             except (OSError, WebSocketProtocolError, WebSocketDisconnect):
                 pass  # peer vanished mid-read; the chain still drains cleanly
 
-        self._enqueue_read_job(target.id, job)
+        self._enqueue_read_job(("target", target.id), job)
 
-    def _enqueue_read_job(self, target_id: str, job: Callable[[], None]) -> None:
+    def _enqueue_read_job(
+        self, chain_key: tuple[str, str], job: Callable[[], None]
+    ) -> None:
         with self._read_lock:
-            self._read_queues.setdefault(target_id, deque()).append(job)
-            if target_id in self._read_active:
-                return  # a chain is already draining this target FIFO
-            self._read_active.add(target_id)
+            self._read_queues.setdefault(chain_key, deque()).append(job)
+            if chain_key in self._read_active:
+                return  # a worker is already draining this chain's FIFO
+            self._read_active.add(chain_key)
             # The chain blocks on _read_lock on entry, so it cannot finish (and
             # fire the done callback inline) while this call still holds the lock.
-            future = self._payload_executor().submit(self._drain_read_chain, target_id)
+            future = self._payload_executor().submit(self._drain_read_chain, chain_key)
             self._read_futures.add(future)
             future.add_done_callback(self._forget_read_future)
 
-    def _drain_read_chain(self, target_id: str) -> None:
+    def _drain_read_chain(self, chain_key: tuple[str, str]) -> None:
         while True:
             with self._read_lock:
-                queue = self._read_queues.get(target_id)
+                queue = self._read_queues.get(chain_key)
                 if not queue:
-                    self._read_queues.pop(target_id, None)
-                    self._read_active.discard(target_id)
+                    self._read_queues.pop(chain_key, None)
+                    self._read_active.discard(chain_key)
                     return
                 job = queue.popleft()
             job()  # self-contained: computes, replies, swallows send errors
