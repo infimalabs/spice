@@ -458,8 +458,18 @@ def test_ensure_agent_starts_fresh_when_the_bound_thread_has_no_local_conversati
     monkeypatch.setattr(claimstate, "active_claim_phase", lambda _actor: "")
 
     dead_thread = "019f880685c07312b89f6bfc6cdd0bb5"
+    unknown_thread = "3c1d7e045a2b4f6c8d9e0a1b2c3d4e5f"
+    unknown_dashed = "3c1d7e04-5a2b-4f6c-8d9e-0a1b2c3d4e5f"
     live_thread = "768bcba1a66f4d229ce7bcf65b5d16aa"
     live_dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
+    # A partial/legacy transcript exists globally but cannot establish which
+    # cwd can resume it. It must be just as safe as the entirely absent one.
+    unknown_project = config_dir / "projects" / "-unknown"
+    unknown_project.mkdir(parents=True)
+    (unknown_project / f"{unknown_dashed}.jsonl").write_text(
+        json.dumps({"type": "queue-operation"}) + "\n",
+        encoding="utf-8",
+    )
     # A genuinely resumable session for this same worktree: its transcript
     # records this worktree's own cwd, so `--resume` can reach it.
     project = config_dir / "projects" / "-live"
@@ -483,12 +493,17 @@ def test_ensure_agent_starts_fresh_when_the_bound_thread_has_no_local_conversati
     )
 
     stale = lifecycle.ensure_agent(tmp_path, dry_run=True)
+    bound_thread[0] = unknown_thread
+    unknown = lifecycle.ensure_agent(tmp_path, dry_run=True)
     bound_thread[0] = live_thread
     resumable = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    # Same worktree, two bound threads: the dead one self-heals to a fresh start,
-    # the live one still resumes -- the guard discriminates by local reach.
-    assert stale.action != resumable.action
-    assert stale.action == "would-start"
+    # Same worktree, three bound threads: missing and cwd-unknown conversations
+    # self-heal to fresh starts; the proven-local one still resumes.
+    assert (stale.action, unknown.action, "--resume" in unknown.command) == (
+        "would-start",
+        "would-start",
+        False,
+    )
     assert resumable.action == "would-resume"
     assert resumable.command[resumable.command.index("--resume") + 1] == live_dashed
