@@ -15,6 +15,7 @@ import pytest
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     PINNED,
+    REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
     _git,
@@ -301,8 +302,11 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     )
 
     gate = PINNED.toolchain_gate(snapshot, _executable_interpreter(snapshot))
+    # Read the record where a plain repository keeps it, rather than through the
+    # resolver the gate itself used -- so a record written to the wrong place
+    # still fails here. The linked-worktree round trip covers the resolved case.
     recorded = json.loads(
-        (snapshot / PINNED.TOOLCHAIN_RECORD_RELATIVE).read_text(encoding="utf-8")
+        (snapshot / ".git" / PINNED.TOOLCHAIN_RECORD_NAME).read_text(encoding="utf-8")
     )
 
     assert (gate["gate"], gate["status"], gate["detail"]) == (
@@ -333,7 +337,7 @@ def test_toolchain_gate_round_trips_its_record_from_a_linked_worktree(tmp_path):
         encoding="utf-8",
     )
 
-    gate = PINNED.toolchain_gate(linked)
+    gate = PINNED.toolchain_gate(linked, _executable_interpreter(linked))
     record = REHEARSAL.git_private_path(linked, "release-proof-toolchain.json")
     recorded = REHEARSAL._load_git_private_json(linked, "release-proof-toolchain.json")
 
