@@ -67,10 +67,10 @@ def claim(handle: str, *, steal: bool = False) -> str:
     _require_single_active_slot(actor, action="task claim", target=row)
     owner = str(row.get("claim_by") or "")
     if owner and owner != actor and not steal:
-        raise SpiceError(f"task already claimed by {owner}; use --steal to take it")
+        raise SpiceError(f"use --steal to take it; task already claimed by {owner}")
     if row.get("start") and not owner and not steal:
         raise SpiceError(
-            "task is ACTIVE but has no claim_by; use --steal to repair ownership"
+            "use --steal to repair ownership; task is ACTIVE but has no claim_by"
         )
     uuid = identity.uuid_of(row)
     guarded = not steal and owner != actor
@@ -87,8 +87,8 @@ def claim(handle: str, *, steal: bool = False) -> str:
         guard_unclaimed=guarded,
     ):
         raise SpiceError(
-            "claim lost a race: task became active before this claim landed; "
-            "run task next again"
+            "run task next again; claim lost a race: task became active "
+            "before this claim landed"
         )
     if owner and owner != actor:
         annotate(uuid, f"claim stolen: {owner} -> {actor}")
@@ -186,10 +186,9 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         rendered = identity.render_handle(row)
         if target is None and alloc.is_oops(row):
             raise SpiceError(
-                f"cannot wake deferred oops triage task: {rendered}; "
                 f"claim it in place with `spice task claim {rendered}` because "
                 "it is already in plan mode, then create and connect public "
-                "child tasks"
+                f"child tasks; cannot wake deferred oops triage task: {rendered}"
             )
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
@@ -1070,9 +1069,8 @@ def delete(handle: str, reason: str, *, force_claimed: bool = False) -> str:
     rendered = identity.render_handle(row)
     if live_claim and not force_claimed:
         raise SpiceError(
-            f"cannot delete {rendered}: live claim held by "
-            f"{_live_claim_text(live_claim)}; rerun with --force-claimed to "
-            "override"
+            "rerun with --force-claimed to override; cannot delete "
+            f"{rendered}: live claim held by {_live_claim_text(live_claim)}"
         )
     uuid = identity.uuid_of(row)
     project = str(row.get("project") or "")

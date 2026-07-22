@@ -340,14 +340,14 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
     """Apply one plan with an atomically updated receipt after every operation."""
     if (git_dir(plan.repo_root) / DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
-            "initialization cannot run while an interrupted deinitialization "
-            "receipt is active; run `spice deinit` to resume it"
+            "run `spice deinit` to resume the interrupted deinitialization; "
+            "initialization cannot run while its receipt is active"
         )
     existing = load_initialization_receipt(plan.repo_root)
     if existing is not None and existing.status is InitReceiptStatus.DEINITIALIZING:
         raise SpiceError(
-            "initialization cannot run while an interrupted deinitialization "
-            "receipt is active; run `spice deinit` to resume it"
+            "run `spice deinit` to resume the interrupted deinitialization; "
+            "initialization cannot run while its receipt is active"
         )
     receipt = _receipt_for_plan(plan, existing)
     plan_by_key = {

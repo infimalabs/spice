@@ -23,10 +23,10 @@ def require_plan_phase_marker_cleared(row: dict[str, Any]) -> None:
         return
     handle = identity.render_handle(row)
     raise SpiceError(
-        f"task done blocked: {handle} still requires suspect-wording "
-        "self-correction. Enrich the plan and acceptance criteria, then run "
+        "enrich the plan and acceptance criteria, then run "
         f'`spice task reword {handle} --reason "..."` before '
-        "advancing out of plan."
+        f"advancing out of plan; task done blocked: {handle} still requires "
+        "suspect-wording self-correction"
     )
 
 

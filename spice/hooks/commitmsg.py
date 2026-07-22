@@ -150,10 +150,10 @@ def validate_commit_message_text(
     if failures:
         detail = "\n".join(f"- {failure}" for failure in failures)
         raise SpiceError(
+            "use a message file for multi-line commits, e.g. "
+            "`git commit -F /tmp/commit-message.txt`; "
             "commit message hygiene failed:\n"
-            f"{detail}\n"
-            "Use a message file for multi-line commits, e.g. "
-            "`git commit -F /tmp/commit-message.txt`."
+            f"{detail}"
         )
 
 

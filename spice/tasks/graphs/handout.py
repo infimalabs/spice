@@ -26,8 +26,8 @@ def _module_root() -> Path:
         ).is_file():
             return modules
     raise SpiceError(
-        "board handout rendering requires the repository Node dependencies; "
-        "run npm install before spice task handout"
+        "run npm install before spice task handout; board handout rendering "
+        "requires the repository Node dependencies"
     )
 
 

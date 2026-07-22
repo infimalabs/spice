@@ -38,9 +38,9 @@ pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
 )
 
-# Refusals in spice/tasks/claimstate.py are repair-first: the executable repair
-# leads, the diagnostic follows. These spell the repair half out so a message
-# that slips back to diagnostic-first fails on order, not just on wording.
+# Refusals are repair-first (see spice/errors.py): the executable repair leads,
+# the diagnostic follows. These spell the repair half out so a message that
+# slips back to diagnostic-first fails on order, not just on wording.
 CAPTURE_RECOVERY_REPAIR = (
     "run `spice task capture --project task.unit --origin task:{handle} "
     '--done --validation "..."` to capture already-committed work into a new '
@@ -280,6 +280,69 @@ def test_task_done_ownerless_active_row_leads_with_the_steal_step(task_repo):
     assert str(exc_info.value) == (
         f"run `spice task claim {handle} --steal` to repair ownership; "
         f"complete blocked: {handle} is ACTIVE but has no claim_by"
+    )
+
+
+def test_task_claim_ownerless_active_row_leads_with_the_steal_flag(task_repo):
+    handle = create.add(
+        "ACTIVE row lost its owner before anyone reclaimed it",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    tw.run([identity.uuid_of(identity.resolve(handle)), "modify", "claim_by:"])
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.claim(handle)
+
+    assert str(exc_info.value) == (
+        "use --steal to repair ownership; task is ACTIVE but has no claim_by"
+    )
+
+
+def test_task_claim_peer_owned_row_leads_with_the_steal_flag(
+    remote_task_repo, monkeypatch
+):
+    handle = create.add(
+        "Peer owns this row first",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.claim(handle)
+
+    assert str(exc_info.value) == (
+        f"use --steal to take it; task already claimed by {PEER_ACTOR}"
+    )
+
+
+def test_task_delete_live_claim_leads_with_the_force_flag(
+    remote_task_repo, monkeypatch
+):
+    handle = create.add(
+        "Live claim guards its own deletion",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    row = identity.resolve(handle)
+    live = (
+        f"claim_by={row['claim_by']} claim_thread={row['claim_thread']} "
+        f"claim_until={row['claim_until']}"
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.delete(handle, reason="duplicate")
+
+    assert str(exc_info.value) == (
+        "rerun with --force-claimed to override; "
+        f"cannot delete {handle}: live claim held by {live}"
     )
 
 

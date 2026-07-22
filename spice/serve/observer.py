@@ -198,9 +198,9 @@ def detect_observer_primary(
     if not selected.roots:
         signals = ",".join(selected.signals)
         raise SpiceError(
-            f"spice watch: primary={selected.name} was detected via {signals} but "
-            "has no existing session root to watch; create a session or pass an "
-            "explicit session directory"
+            "create a session or pass an explicit session directory; spice "
+            f"watch: primary={selected.name} was detected via {signals} but "
+            "has no existing session root to watch"
         )
 
     roots: list[Path] = []

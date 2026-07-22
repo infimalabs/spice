@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.errors import SpiceError
 from spice.tasks import alloc, claimstate, config, create, identity, ops, render, tw
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -284,6 +285,24 @@ def test_deferred_explicit_due_stays_exact_through_wake(task_repo):
     assert after["due"] == before["due"]
     assert after["wait"] == ""
     assert handle in _ready_handles()
+
+
+def test_wake_bare_oops_leads_with_claiming_it_in_place(task_repo):
+    created = ops.oops(
+        "Bare wake of an oops has a repair",
+        description="triage stays in plan mode",
+        origin="ack:1jN54zJJ",
+    )
+    handle = created.split()[1]
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.wake([handle])
+
+    assert str(exc_info.value) == (
+        f"claim it in place with `spice task claim {handle}` because it is "
+        "already in plan mode, then create and connect public child tasks; "
+        f"cannot wake deferred oops triage task: {handle}"
+    )
 
 
 def test_wake_into_promotion_starts_sla_clock(task_repo):

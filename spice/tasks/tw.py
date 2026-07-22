@@ -40,7 +40,7 @@ def _uda_schema_overrides() -> list[str]:
 
 def require_task_binary() -> None:
     if not shutil.which("task"):
-        raise SpiceError("Taskwarrior binary not found; install `task` first")
+        raise SpiceError("install `task` first; Taskwarrior binary not found")
 
 
 def run(

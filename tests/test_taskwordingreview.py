@@ -43,9 +43,12 @@ def test_plan_phase_done_blocks_suspect_wording_marker(task_repo):
 
     row = identity.resolve(handle)
     message = str(exc_info.value)
-    assert "task done blocked" in message
-    assert "still requires suspect-wording self-correction" in message
-    assert "spice task reword" in message
+    assert message == (
+        "enrich the plan and acceptance criteria, then run "
+        f'`spice task reword {handle} --reason "..."` before advancing out of '
+        f"plan; task done blocked: {handle} still requires suspect-wording "
+        "self-correction"
+    )
     assert row["phase"] == "plan"
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert not str(row.get("validation") or "")

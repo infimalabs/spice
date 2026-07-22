@@ -219,9 +219,9 @@ def _load_env_policy_baseline(
     path = root / baseline
     if not path.is_file():
         raise SpiceError(
-            "[tool.spice.policy.env_access] baseline file not found: "
-            f"{baseline}; run `spice study env-policy --write-baseline {baseline}` "
-            "or remove the baseline setting"
+            f"run `spice study env-policy --write-baseline {baseline}` or "
+            "remove the baseline setting; [tool.spice.policy.env_access] "
+            f"baseline file not found: {baseline}"
         )
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
