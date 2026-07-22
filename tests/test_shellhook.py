@@ -330,9 +330,7 @@ def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_p
     assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
 
 
-def test_agent_run_keeps_python_module_wrapper_on_ambient_interpreter(
-    tmp_path, monkeypatch
-):
+def test_agent_run_routes_python_module_wrapper_through_uv(tmp_path, monkeypatch):
     if shutil.which("zsh") is None:
         pytest.skip("zsh is required for the end-to-end child shell")
     rtk = write_fake_rewriting_rtk(tmp_path)
@@ -341,10 +339,6 @@ def test_agent_run_keeps_python_module_wrapper_on_ambient_interpreter(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
-    )
-    subprocess.run(
-        [sys.executable, "-m", "venv", "--without-pip", str(tmp_path / ".venv")],
-        check=True,
     )
     (tmp_path / "test_probe.py").write_text(
         "import sys\n\n\ndef test_probe():\n"
@@ -355,6 +349,16 @@ def test_agent_run_keeps_python_module_wrapper_on_ambient_interpreter(
     home.mkdir()
     operator_bin = tmp_path / "operator-bin"
     operator_bin.mkdir()
+    uv_trace = tmp_path / "uv-trace.txt"
+    uv = operator_bin / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(uv_trace))}\n"
+        "shift 2\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
     ambient_python = operator_bin / "python"
     ambient_python.write_text(
         f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
@@ -406,11 +410,12 @@ def test_agent_run_keeps_python_module_wrapper_on_ambient_interpreter(
     )
 
     output = stdout_path.read_text(encoding="utf-8")
-    venv_python = tmp_path.resolve() / ".venv" / "bin" / "python"
     assert exit_code == 0
     assert "1 passed" in output
     assert f"probe-executable={sys.executable}" in output
-    assert len({sys.executable, str(venv_python)}) == 2
+    assert uv_trace.read_text(encoding="utf-8").splitlines() == [
+        "run python -m pytest -s test_probe.py"
+    ]
     assert executed == [["zsh", "-c", "pytest -s test_probe.py"]]
     assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
     assert executed[0][2] != control[2]
@@ -497,10 +502,11 @@ def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
     assert calls == [("proxy", "git", "status")]
 
 
-def test_wrapper_routes_python_commands_through_deployment_interpreter(
-    tmp_path, monkeypatch
-):
+def test_wrapper_routes_project_python_commands_through_uv(tmp_path, monkeypatch):
     write_spice_product_shape(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
 
     python_command = wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
@@ -509,22 +515,37 @@ def test_wrapper_routes_python_commands_through_deployment_interpreter(
         ["python3", "-m", "pip", "--version"], repo_root=tmp_path
     )
 
-    assert python_command == [sys.executable, "-m", "pip", "--version"]
-    assert python3_command == [sys.executable, "-m", "pip", "--version"]
+    assert python_command == ["uv", "run", "python", "-m", "pip", "--version"]
+    assert python3_command == ["uv", "run", "python", "-m", "pip", "--version"]
 
 
-def test_wrapper_does_not_python_route_proxy_argv(tmp_path):
+def test_wrapper_routes_only_bare_project_python_argv(tmp_path):
     write_spice_product_shape(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
 
     assert wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
-    ) == [sys.executable, "-m", "pip", "--version"]
+    ) == ["uv", "run", "python", "-m", "pip", "--version"]
+    assert wrap.build_agent_run_command(
+        ["uv", "run", "python", "-m", "pip", "--version"], repo_root=tmp_path
+    ) == ["uv", "run", "python", "-m", "pip", "--version"]
     assert wrap.build_agent_run_command(
         ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
     ) == ["proxy", "python", "-m", "pip", "--version"]
+    assert wrap.build_agent_run_command(["git", "status"], repo_root=tmp_path) == [
+        "git",
+        "status",
+    ]
 
 
-def test_wrapper_ignores_active_virtualenv_for_python_route(tmp_path, monkeypatch):
+def test_wrapper_routes_project_python_through_uv_with_active_virtualenv(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
     venv_python = tmp_path / "active-env" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -534,12 +555,17 @@ def test_wrapper_ignores_active_virtualenv_for_python_route(tmp_path, monkeypatc
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
     ) == [
-        sys.executable,
+        "uv",
+        "run",
+        "python",
         "--version",
     ]
 
 
-def test_wrapper_ignores_repo_venv_for_python_route(tmp_path, monkeypatch):
+def test_wrapper_routes_project_python_through_uv_with_repo_venv(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
     venv_python = tmp_path / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -549,19 +575,19 @@ def test_wrapper_ignores_repo_venv_for_python_route(tmp_path, monkeypatch):
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
     ) == [
-        sys.executable,
+        "uv",
+        "run",
+        "python",
         "--version",
     ]
 
 
-def test_wrapper_routes_python_without_repo_venv_to_deployment_interpreter(
-    tmp_path, monkeypatch
-):
+def test_wrapper_preserves_native_python_without_project_marker(tmp_path, monkeypatch):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     command = wrap.build_agent_run_command(["python", "--version"], repo_root=tmp_path)
 
-    assert command == [sys.executable, "--version"]
+    assert command == ["python", "--version"]
 
 
 def test_wrapper_plain_commands_do_not_inject_worktree_spice_pythonpath(

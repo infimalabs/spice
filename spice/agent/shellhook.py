@@ -65,6 +65,8 @@ SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
 CONFIG_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 RTK_CANONICAL_EXECUTABLE = "rtk"
+PROJECT_PYTHON_COMMANDS = ("python", "python3")
+UV_PYTHON_COMMAND = ("uv", "run", "python")
 
 
 class _SelectedAgentWrapperGroup(NamedTuple):
@@ -81,7 +83,9 @@ def apply_shell_steering_environment(
     env = dict(base_env)
     env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
     env.update(taskwarrior_runtime_environment(base_env=env, repo_root=repo_root))
-    env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(render_agent_wrapper_lines(repo_root))
+    env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(
+        render_shell_runtime_wrapper_lines(repo_root)
+    )
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)
@@ -229,6 +233,41 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
         return _render_agent_wrapper_lines(repo_root)
     except SpiceError as exc:
         raise contextualize_config_error(repo_root, exc, "wrappers") from exc
+
+
+def render_shell_runtime_wrapper_lines(repo_root: Path) -> list[str]:
+    return [
+        *render_agent_wrapper_lines(repo_root),
+        *render_project_python_wrapper_lines(repo_root),
+    ]
+
+
+def render_project_python_wrapper_lines(repo_root: Path) -> list[str]:
+    resolved_root = repo_root.resolve()
+    if not project_routes_python(resolved_root):
+        return []
+    project_pattern = shell_quote(str(resolved_root) + os.sep) + "*"
+    uv_command = " ".join(shell_command_word(word) for word in UV_PYTHON_COMMAND)
+    lines: list[str] = []
+    for command_name in PROJECT_PYTHON_COMMANDS:
+        lines.extend(
+            [
+                "",
+                f"{command_name}() {{",
+                "  local _spice_python_cwd",
+                '  _spice_python_cwd="$(pwd -P)"',
+                '  case "$_spice_python_cwd/" in',
+                f'    {project_pattern}) command {uv_command} "$@" ;;',
+                f'    *) command {command_name} "$@" ;;',
+                "  esac",
+                "}",
+            ]
+        )
+    return lines
+
+
+def project_routes_python(repo_root: Path | None) -> bool:
+    return repo_root is not None and (repo_root / "pyproject.toml").is_file()
 
 
 def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:

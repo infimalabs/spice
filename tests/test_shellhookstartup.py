@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
@@ -493,6 +494,83 @@ def test_agent_shell_preserves_ambient_python_and_spice(tmp_path, shell_name):
         "ambient-python:one",
         "ambient-python3:two",
         "global-spice:three",
+    ]
+
+
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_agent_shell_routes_project_python_through_uv_only_inside_project(
+    tmp_path, shell_name
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    operator_bin = tmp_path / "operator-bin"
+    operator_bin.mkdir()
+    executables = {
+        operator_bin / "uv": "uv",
+        operator_bin / "python": "ambient-python",
+        operator_bin / "python3": "ambient-python3",
+        operator_bin / "spice": "global-spice",
+    }
+    for path, label in executables.items():
+        path.write_text(
+            "#!/bin/sh\n"
+            f"printf '{label}'\n"
+            'for arg in "$@"; do printf " <%s>" "$arg"; done\n'
+            "printf '\\n'\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+    base_env = {
+        "HOME": str(home),
+        "PATH": str(operator_bin)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
+    }
+    env = shellhook.apply_shell_steering_environment(project, base_env=base_env)
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    if shell_name == "zsh":
+        env[shellhook.ZDOTDIR_ENV] = str(static_hook_dir)
+    else:
+        env[shellhook.BASH_ENV_ENV] = str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+
+    completed = subprocess.run(
+        [
+            shell,
+            "-c",
+            (
+                'python one "two words"; '
+                "python3 three; "
+                "uv run python explicit; "
+                "spice control; "
+                f"cd {shlex.quote(str(outside))}; "
+                "python native; "
+                "python3 native3"
+            ),
+        ],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+
+    assert completed.stdout.splitlines() == [
+        "uv <run> <python> <one> <two words>",
+        "uv <run> <python> <three>",
+        "uv <run> <python> <explicit>",
+        "global-spice <control>",
+        "ambient-python <native>",
+        "ambient-python3 <native3>",
     ]
 
 
