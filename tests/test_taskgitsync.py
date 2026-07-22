@@ -841,51 +841,52 @@ def test_prepare_for_agent_launch_accepts_current_local_only_tree(tmp_path):
     assert gitsync.prepare_for_agent_launch(repo).notes == ["current:local-only"]
 
 
-def test_prepare_for_agent_launch_preserves_dirty_user_work(tmp_path):
+def test_prepare_for_agent_launch_skips_dirty_user_work(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
     _run(repo, "git", "add", "dirty.txt")
 
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    result = gitsync.prepare_for_agent_launch(repo)
 
-    assert outcome.state == "rejected"
-    assert "working tree is dirty" in outcome.message
+    assert result.notes == ["skipped:dirty"]
     assert (repo / "dirty.txt").read_text(encoding="utf-8") == "uncommitted\n"
 
 
-def test_prepare_for_agent_launch_routes_ahead_work_to_task_control_plane(tmp_path):
+def test_prepare_for_agent_launch_skips_ahead_work_for_the_agent(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     (repo / "ahead.txt").write_text("local commit\n", encoding="utf-8")
     _run(repo, "git", "add", "ahead.txt")
     _run(repo, "git", "commit", "-m", "ahead of baseline")
+    local_head = _git(repo, "rev-parse", "HEAD")
 
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    result = gitsync.prepare_for_agent_launch(repo)
 
-    assert outcome.state == "rejected"
-    assert "not recorded by a completed task" in outcome.message
+    assert result.notes == ["skipped:ahead"]
+    assert _git(repo, "rev-parse", "HEAD") == local_head
 
 
-def test_prepare_for_agent_launch_reports_divergent_tree_recovery(tmp_path):
+def test_prepare_for_agent_launch_skips_diverged_work_for_the_agent(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     (repo / "local.txt").write_text("local commit\n", encoding="utf-8")
     _run(repo, "git", "add", "local.txt")
     _run(repo, "git", "commit", "-m", "local work")
+    local_head = _git(repo, "rev-parse", "HEAD")
     _advance_upstream(tmp_path)
 
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    result = gitsync.prepare_for_agent_launch(repo)
 
-    assert outcome.state == "rejected"
-    assert "branch has diverged" in outcome.message
-    assert "task Git control plane" in outcome.message
+    assert result.notes == ["skipped:diverged"]
+    assert _git(repo, "rev-parse", "HEAD") == local_head
+    assert _git(repo, "log", "-1", "--format=%s") == "local work"
 
 
-def test_prepare_for_agent_launch_fast_forwards_to_upstream_then_refuses_divergence(
+def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
     tmp_path,
 ):
     # The serve pre-supervisor-launch autoupdate is `prepare_for_agent_launch`
     # (start_agent -> here, before the supervisor spawns). It must behave like
     # `git merge --ff-only --quiet @{u}`: advance strictly to the tracked
-    # upstream, and refuse anything that would need a merge commit or a rewind.
+    # upstream, and leave anything that needs a merge to the agent it starts.
     repo = _repo_with_upstream(tmp_path)
     _advance_upstream(tmp_path)
 
@@ -910,12 +911,11 @@ def test_prepare_for_agent_launch_fast_forwards_to_upstream_then_refuses_diverge
     _run(peer, "git", "push", "origin", "main")
     diverged_head = _git(repo, "rev-parse", "HEAD")
 
-    # Non-fast-forward: the launch refuses loudly and leaves HEAD exactly where
-    # it was -- the local commit is still the tip, no merge commit was created,
-    # and no half-finished merge state is left behind.
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
-    assert outcome.state == "rejected"
-    assert "branch has diverged" in outcome.message
+    # Non-fast-forward: the launch skips its update and leaves HEAD exactly
+    # where it was -- the local commit is still the tip, no merge commit was
+    # created, and no half-finished merge state is left behind.
+    result = gitsync.prepare_for_agent_launch(repo)
+    assert result.notes == ["skipped:diverged"]
     assert _git(repo, "rev-parse", "HEAD") == diverged_head
     assert _git(repo, "log", "-1", "--format=%s") == "local work"
     assert _git(repo, "rev-list", "--merges", "HEAD") == ""
@@ -938,6 +938,26 @@ def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
     assert outcome.state == "rejected"
     assert "current baseline could not be fetched" in outcome.message
     assert "offline" in outcome.message
+
+
+def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = gitsync._run
+
+    def fail_relationship(repo_root, *args):
+        if args[:3] == ("rev-list", "--left-right", "--count"):
+            return subprocess.CompletedProcess(list(args), 128, "", "cannot inspect")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", fail_relationship)
+
+    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+
+    assert outcome.state == "rejected"
+    assert "relationship to origin/main could not be inspected" in outcome.message
+    assert "cannot inspect" in outcome.message
 
 
 def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path):
@@ -963,17 +983,12 @@ def test_fast_forward_if_safe_reports_skipped_no_remote(tmp_path):
     assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:no-remote"]
 
 
-def test_fast_forward_if_safe_reports_skipped_diverged(tmp_path, monkeypatch):
+def test_fast_forward_if_safe_reports_skipped_diverged(tmp_path):
     repo = _repo_with_upstream(tmp_path)
+    (repo / "local.txt").write_text("local commit\n", encoding="utf-8")
+    _run(repo, "git", "add", "local.txt")
+    _run(repo, "git", "commit", "-m", "local work")
     _advance_upstream(tmp_path)
-    real_run = gitsync._run
-
-    def fail_merge(repo_root, *args):
-        if "merge" in args:
-            return subprocess.CompletedProcess(list(args), 1)
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(gitsync, "_run", fail_merge)
 
     assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:diverged"]
 

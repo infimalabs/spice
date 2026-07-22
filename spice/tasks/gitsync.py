@@ -12,10 +12,11 @@ control-plane boundaries:
   from the local line. A real content
   conflict is the one and only thing surfaced to the agent — framed as an
   overlap with the baseline, never as a sync with an upstream.
-* **agent launch** (`prepare_for_agent_launch`): fetch and fast-forward a clean,
-  uncommitted lane immediately before its supervisor or native harness starts,
-  so long-lived processes never import a checkout that was already stale when
-  they launched.
+* **agent launch** (`prepare_for_agent_launch`): fetch and opportunistically
+  fast-forward a clean, uncommitted lane immediately before its supervisor or
+  native harness starts. Dirty or locally committed work stays untouched and
+  starts with an explicit skip reason, so the agent that can repair it is never
+  locked out by its own checkout.
 
 The default baseline is the current branch's user-managed merge target on the
 conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
@@ -178,6 +179,34 @@ def _worktree_dirty(repo_root: Path) -> bool:
     return _read(repo_root, "status", "--porcelain") != ""
 
 
+def _agent_launch_worktree_dirty(repo_root: Path) -> bool:
+    completed = _run(repo_root, "status", "--porcelain")
+    if completed.returncode != 0:
+        raise SpiceError(
+            "cannot launch agent: the working tree state could not be inspected; "
+            "repair Git and retry\n"
+            + _fail("inspect working tree for agent launch", completed)
+        )
+    return bool(completed.stdout.strip())
+
+
+def _ahead_behind(repo_root: Path, baseline: str) -> tuple[int, int]:
+    completed = _run(
+        repo_root, "rev-list", "--left-right", "--count", f"{baseline}...HEAD"
+    )
+    try:
+        behind_text, ahead_text = completed.stdout.split()
+        behind, ahead = int(behind_text), int(ahead_text)
+    except (AttributeError, TypeError, ValueError):
+        behind = ahead = -1
+    if completed.returncode != 0 or behind < 0 or ahead < 0:
+        raise SpiceError(
+            f"the relationship to {baseline} could not be inspected\n"
+            + _fail(f"inspect relationship to {baseline}", completed)
+        )
+    return behind, ahead
+
+
 def commits_ahead_of_baseline(repo_root: Path | None = None) -> int:
     """Count local commits ahead of the task baseline.
 
@@ -243,13 +272,14 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
 
 
 def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
-    """Strictly synchronize a lane immediately before its agent process starts.
+    """Update a startable lane immediately before its agent process starts.
 
     Launch is the last boundary at which the globally installed control plane
     can update the checkout before ``python -m spice`` and the native harness
-    import from it. Fetching is read-only with respect to user work; any dirty,
-    ahead, divergent, or unverifiable state refuses the launch instead of
-    starting a process from a checkout that is known to be stale.
+    import from it. Fetching is read-only with respect to user work. A dirty,
+    ahead, or divergent lane keeps that work intact and starts the agent that
+    can reconcile it; each condition returns an explicit skip note. Failures to
+    fetch or inspect Git state still refuse because no safe fact was established.
     """
     root = repo_root or config.repo_root()
     resolved = _resolve_target(root)
@@ -268,27 +298,16 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
             f"cannot launch agent: baseline {baseline} was not found after "
             f"fetching {remote}; repair branch tracking and retry"
         )
-    if _worktree_dirty(root):
-        raise SpiceError(
-            "cannot launch agent: the working tree is dirty; commit or clear "
-            "the user-owned changes before retrying"
-        )
-    counts = _read(root, "rev-list", "--left-right", "--count", f"{baseline}...HEAD")
+    if _agent_launch_worktree_dirty(root):
+        return SyncResult(notes=["skipped:dirty"])
     try:
-        behind_text, ahead_text = counts.split()
-        behind, ahead = int(behind_text), int(ahead_text)
-    except (TypeError, ValueError):
-        behind = ahead = 0
+        behind, ahead = _ahead_behind(root, baseline)
+    except SpiceError as exc:
+        raise SpiceError(f"cannot launch agent: {exc}; repair Git and retry") from exc
     if ahead:
         if behind:
-            raise SpiceError(
-                f"cannot launch agent: the branch has diverged from {baseline}; "
-                "resolve the branch through the task Git control plane and retry"
-            )
-        raise SpiceError(
-            f"cannot launch agent: the branch has {ahead} local commit(s) not "
-            "recorded by a completed task; capture or complete that work and retry"
-        )
+            return SyncResult(notes=["skipped:diverged"])
+        return SyncResult(notes=["skipped:ahead"])
     before = _read(root, "rev-parse", "HEAD")
     completed = _run(root, "merge", "--ff-only", baseline)
     if completed.returncode != 0:
@@ -328,13 +347,18 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     remote, baseline = resolved
     if _worktree_dirty(root):
         return SyncResult(notes=["skipped:dirty"])
-    ahead = _read(root, "rev-list", "--count", f"{baseline}..HEAD")
-    if ahead and ahead != "0":
-        return SyncResult(notes=["skipped:ahead"])
-    before = _read(root, "rev-parse", "HEAD")
-    _run(root, "fetch", remote)
+    fetched = _run(root, "fetch", remote)
+    if fetched.returncode != 0:
+        return SyncResult(notes=["skipped:no-remote"])
     if not _read(root, "rev-parse", baseline):
         return SyncResult(notes=["skipped:no-remote"])
+    try:
+        behind, ahead = _ahead_behind(root, baseline)
+    except SpiceError:
+        return SyncResult(notes=["skipped:no-remote"])
+    if ahead:
+        return SyncResult(notes=["skipped:diverged" if behind else "skipped:ahead"])
+    before = _read(root, "rev-parse", "HEAD")
     if _run(root, "merge", "--ff-only", baseline).returncode != 0:
         return SyncResult(notes=["skipped:diverged"])
     after = _read(root, "rev-parse", "HEAD")
