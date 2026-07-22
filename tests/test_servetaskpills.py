@@ -43,6 +43,7 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     implicit_rule = _between(css, ".filter-pill--implicit {", "}")
     saturated_rule = _between(css, ".filter-pill--saturated {", "}")
     active_rule = _between(css, ".filter-pill--active {", "}")
+    assigned_rule = _between(css, ".filter-pill--assigned {", "}")
     dormant_rule = _between(css, ".filter-pill--dormant {", "}")
     idle_rule = _between(css, ".filter-pill--idle {", "}")
 
@@ -55,14 +56,13 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     )
     # The saturated end of the ramp is the full ready-green.
     assert "border-color: var(--good);" in saturated_rule
-    # The mid-ramp tones desaturate the ready-green toward the idle gray at a
-    # constant hue: each derives from --good via relative color (hue and
-    # lightness held, only saturation stepped down) rather than the off-hue teal
-    # accent, so the pill washes out instead of drifting green->cyan. Active work
-    # holds ~75% saturation; dormant drops to ~25%; uncovered-but-ready idle is
-    # the neutral endpoint.
+    # The four colored rungs are evenly spaced against the fifth, fully idle
+    # endpoint. Each mid-ramp tone mixes the ready green toward --muted by its
+    # rung weight, making active/assigned/dormant visibly 75/50/25% ready rather
+    # than multiplying the ready color's already-partial HSL saturation.
     assert (
-        "--filter-pill-tone: hsl(from var(--good) h calc(s * 0.75) l);" in active_rule
+        "--filter-pill-tone: color-mix(in srgb, var(--good) 75%, var(--muted));"
+        in active_rule
     )
     assert (
         "background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);"
@@ -71,7 +71,12 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     assert "border-color: var(--filter-pill-tone);" in active_rule
     assert "color: var(--filter-pill-tone);" in active_rule
     assert (
-        "--filter-pill-tone: hsl(from var(--good) h calc(s * 0.25) l);" in dormant_rule
+        "--filter-pill-tone: color-mix(in srgb, var(--good) 50%, var(--muted));"
+        in assigned_rule
+    )
+    assert (
+        "--filter-pill-tone: color-mix(in srgb, var(--good) 25%, var(--muted));"
+        in dormant_rule
     )
     assert "border-color: var(--filter-pill-tone);" in dormant_rule
     assert "color: var(--filter-pill-tone);" in dormant_rule
