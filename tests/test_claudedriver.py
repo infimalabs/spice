@@ -646,6 +646,84 @@ def test_claude_json_stdout_scanner_text_resets_starvation_streak():
     assert starvations == [TEXT_STARVATION_THRESHOLD]
 
 
+def test_claude_normalizes_the_in_flight_compaction_status_lines():
+    # Verbatim from a resume that compacted a 57.6MB transcript: the CLI
+    # narrates the compaction on bare status lines, and the boundary event the
+    # supervisor used to watch for never arrives while it is still running.
+    started = {
+        "type": "system",
+        "subtype": "status",
+        "status": "compacting",
+        "timestamp": "t",
+    }
+    settled = {
+        "type": "system",
+        "subtype": "status",
+        "status": None,
+        "compact_result": "failed",
+        "compact_error": "aborted",
+        "timestamp": "t",
+    }
+    requesting = {"type": "system", "subtype": "status", "status": "requesting"}
+    assert CLAUDE_DRIVER.normalize_transcript_line(started) == {
+        "type": "compacting",
+        "timestamp": "t",
+        "payload": {"active": True},
+    }
+    assert CLAUDE_DRIVER.normalize_transcript_line(settled) == {
+        "type": "compacting",
+        "timestamp": "t",
+        "payload": {"active": False},
+    }
+    assert CLAUDE_DRIVER.normalize_transcript_line(requesting) is None
+
+
+def test_claude_json_stdout_scanner_reports_compaction_apart_from_activity():
+    from spice.agent.watchdog import JsonStdoutScanner
+
+    observed: list[str] = []
+    scanner = JsonStdoutScanner(
+        lambda text: observed.append(f"message:{text}"),
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=lambda: observed.append("compacted"),
+        on_activity=lambda: observed.append("activity"),
+        on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
+    )
+    # The exact stdout sequence of the stalled launch, then the assistant turn
+    # a surviving compaction goes on to produce.
+    scanner.process_line('{"type":"system","subtype":"status","status":"requesting"}')
+    scanner.process_line('{"type":"system","subtype":"status","status":"compacting"}')
+    scanner.process_line(
+        '{"type":"system","subtype":"status","status":null,"compact_result":"success"}'
+    )
+    scanner.process_line(
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"text","text":"back from compaction"}]}}'
+    )
+    scanner.close()
+    assert observed == [
+        "compacting:True",
+        "compacting:False",
+        "activity",
+        "message:back from compaction",
+    ]
+
+
+def test_claude_json_stdout_scanner_settles_compaction_on_a_boundary():
+    from spice.agent.watchdog import JsonStdoutScanner
+
+    observed: list[str] = []
+    scanner = JsonStdoutScanner(
+        lambda _text: None,
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=lambda: observed.append("compacted"),
+        on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
+    )
+    scanner.process_line('{"type":"system","subtype":"compact_boundary"}')
+    scanner.close()
+    assert observed == ["compacted", "compacting:False"]
+
+
 def test_claude_normalizes_compaction_and_skips_app_records():
     boundary = {"type": "system", "subtype": "compact_boundary", "timestamp": "t"}
     assert CLAUDE_DRIVER.normalize_transcript_line(boundary)["type"] == "compacted"
