@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.serve import launch
+from spice.serve import launch, livebus
 from spice.serve.worktree.target import WorktreeTarget
 
 # Spelled out here rather than read from the scheduler: reading the production
@@ -164,6 +164,78 @@ def test_watch_looks_again_when_the_task_board_changes(tmp_path, monkeypatch):
         watch.cancel()
         watch.join()
 
+    assert len(looks) >= 2
+
+
+def test_watch_preserves_a_task_event_written_during_scheduler_evaluation(
+    tmp_path, monkeypatch
+):
+    """Native registration stays live while the scheduler reads the board."""
+    events = _events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
+    looked_twice = threading.Event()
+    looks: list[int] = []
+
+    def evaluate() -> float:
+        looks.append(len(looks))
+        if len(looks) == 1:
+            # This is the old observe-before-arm gap: evaluation has begun,
+            # but the subsequent wait has not.
+            events.write_text("1 changed-during-evaluation\n", encoding="utf-8")
+        if len(looks) >= 2:
+            looked_twice.set()
+        return 3600.0
+
+    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch.start()
+    try:
+        assert looked_twice.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(looks) >= 2
+
+
+def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch):
+    """The non-kqueue backend uses one native iterator across evaluations."""
+    events = _events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
+    looked_twice = threading.Event()
+    native_calls: list[dict] = []
+    looks: list[int] = []
+
+    def native_watch(*paths, **options):
+        native_calls.append({"paths": paths, **options})
+        yield set()  # native registration is now live
+        yield {(1, str(events))}  # the write made by the first evaluation
+        options["stop_event"].wait(timeout=15.0)
+
+    def evaluate() -> float:
+        looks.append(len(looks))
+        if len(looks) == 1:
+            events.write_text("1 watchfiles-evaluation\n", encoding="utf-8")
+        if len(looks) >= 2:
+            looked_twice.set()
+        return 3600.0
+
+    monkeypatch.setattr(livebus, "_HAVE_KQUEUE", False)
+    monkeypatch.setattr(
+        livebus,
+        "import_module",
+        lambda name: (
+            SimpleNamespace(watch=native_watch) if name == "watchfiles" else None
+        ),
+    )
+    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch.start()
+    try:
+        assert looked_twice.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(native_calls) == 1
     assert len(looks) >= 2
 
 
