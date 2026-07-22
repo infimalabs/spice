@@ -9,6 +9,7 @@ longer owns.
 from __future__ import annotations
 
 import shutil
+from threading import Event, Thread
 
 import pytest
 
@@ -25,6 +26,8 @@ __all__ = ["task_repo"]
 
 LAPSED_DEADLINE = "2020-01-01T00:00:00.000000Z"
 SHORT_LEASE_SECONDS = 2.0
+SHORT_RENEWAL_SECONDS = SHORT_LEASE_SECONDS / 4
+LONG_OPERATION_SECONDS = SHORT_LEASE_SECONDS * 1.5
 UNIT_ROUTE = {"filter": ["project:task.unit"], "lifetime": "Drive"}
 
 
@@ -52,7 +55,7 @@ def _lapse_lease(handle: str) -> str:
     return uuid
 
 
-def test_supervisor_heartbeat_names_the_peer_that_took_a_working_claim(
+def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
     task_repo, monkeypatch
 ):
     """The probe: a claim leaves the lane mid-work and the holder must hear it."""
@@ -64,18 +67,41 @@ def test_supervisor_heartbeat_names_the_peer_that_took_a_working_claim(
         priority="medium",
         acceptance=["the holder hears that its claim left the lane"],
     )
-    ops.claim(handle)
     log_path = task_repo / "supervisor.log"
-    feedback = _capture_feedback(monkeypatch)
+    feedback: list[tuple[str, dict[str, object]]] = []
+    loss_reported = Event()
+
+    def capture_loss(_repo, _log, kind, **fields):
+        if kind.startswith("claim.renewal-"):
+            feedback.append((kind, fields))
+            loss_reported.set()
+
+    monkeypatch.setattr(watchdog, "publish_supervisor_feedback", capture_loss)
     reported: dict[str, str] = {}
     held: dict[str, str] = {}
 
+    # A quiet beat happens before the agent claims. This fresh/restarted
+    # supervisor has never held the row in memory when the host then starves
+    # beyond the lease; only the durable witness can identify the lost row.
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
+    assert held == {}
+    ops.claim(handle)
     _lapse_lease(handle)
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
     taken = alloc.next_task()
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
+    signal = lifecycle.SupervisorLaneSignal()
+    watcher = Thread(
+        target=lifecycle._watch_supervised_lane,
+        args=(task_repo, ACTOR_A, log_path, _AliveProcess(), signal),
+        daemon=True,
+    )
+    watcher.start()
+    try:
+        assert loss_reported.wait(15.0)
+    finally:
+        signal.stop()
+        watcher.join(timeout=2.0)
 
     assert identity.render_handle(taken or {}) == handle
     assert identity.resolve(handle)["claim_by"] == PEER_ACTOR
@@ -114,22 +140,95 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
     )
     log_path = task_repo / "supervisor.log"
     feedback = _capture_feedback(monkeypatch)
-    held: dict[str, str] = {}
 
-    # The operation is still running: the agent issues nothing, and its lease
-    # has already elapsed. Only the supervisor's own beat can save the row.
-    lapsed = _lapse_lease(handle)
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, {}, held)
-    renewed = identity.resolve(handle)
-    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    peer_assignment = alloc.next_task()
+    monkeypatch.setattr(
+        lifecycle, "SUPERVISOR_CLAIM_RENEWAL_SECONDS", SHORT_RENEWAL_SECONDS
+    )
+    monkeypatch.setattr(
+        lifecycle, "SUPERVISOR_CLAIM_LEASE_SECONDS", SHORT_LEASE_SECONDS
+    )
+    first_renewal = Event()
+    original_renew = lifecycle._renew_supervised_claim
 
-    assert identity.uuid_of(renewed) == lapsed
+    def observed_renewal(*args, **kwargs):
+        original_renew(*args, **kwargs)
+        first_renewal.set()
+
+    monkeypatch.setattr(lifecycle, "_renew_supervised_claim", observed_renewal)
+    signal = lifecycle.SupervisorLaneSignal()
+    process = _AliveProcess()
+    watcher = Thread(
+        target=lifecycle._watch_supervised_lane,
+        args=(task_repo, ACTOR_A, log_path, process, signal),
+        daemon=True,
+    )
+    watcher.start()
+    try:
+        assert first_renewal.wait(15.0)
+
+        # This is the long command: the agent blocks and issues no Spice command
+        # while the independent supervisor timer renews more than once.
+        operation = Event()
+        operation.wait(LONG_OPERATION_SECONDS)
+        monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+        peer_assignment = alloc.next_task()
+        renewed = identity.resolve(handle)
+    finally:
+        signal.stop()
+        watcher.join(timeout=2.0)
+
     assert renewed["claim_by"] == ACTOR_A
     assert renewed["claim_until"] > tw.now_iso()
     assert peer_assignment is None
     assert feedback == []
-    assert held == {"handle": handle}
+    assert LONG_OPERATION_SECONDS > SHORT_LEASE_SECONDS
+
+
+def test_backend_failure_keeps_exact_witness_until_takeover_is_loud(
+    task_repo, monkeypatch
+):
+    _route_peer_allocator(monkeypatch)
+    handle = create.add(
+        "Backend fails between claim and takeover",
+        project="task.unit",
+        origin="ack:1kG4pGxs",
+        priority="medium",
+        acceptance=["a retryable renewal failure cannot erase claim identity"],
+    )
+    ops.claim(handle)
+    log_path = task_repo / "supervisor.log"
+    feedback = _capture_feedback(monkeypatch)
+    reported: dict[str, str] = {}
+    held: dict[str, str] = {}
+    real_renew = claimstate.renew_claim
+    monkeypatch.setattr(
+        claimstate,
+        "renew_claim",
+        lambda *_args, **_kwargs: claimstate.ClaimRenewalResult(
+            False, "backend_error", handle=handle, detail="backend unavailable"
+        ),
+    )
+
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
+    witness_after_failure = claimstate.read_claim_witness(task_repo, ACTOR_A)
+    monkeypatch.setattr(claimstate, "renew_claim", real_renew)
+    _lapse_lease(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    assert identity.render_handle(alloc.next_task() or {}) == handle
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
+
+    assert witness_after_failure is not None and witness_after_failure.active
+    assert [kind for kind, _fields in feedback] == [
+        "claim.renewal-failed",
+        "claim.renewal-skipped",
+    ]
+    assert feedback[-1] == (
+        "claim.renewal-skipped",
+        {"reason": "claimed_by_other", "handle": handle, "detail": PEER_ACTOR},
+    )
+    retired = claimstate.read_claim_witness(task_repo, ACTOR_A)
+    assert retired is not None and retired.active is False
 
 
 def test_heartbeat_stays_quiet_when_the_agent_advances_its_own_phase(
@@ -153,10 +252,20 @@ def test_heartbeat_stays_quiet_when_the_agent_advances_its_own_phase(
     ops.done(handle, validation=["phase advanced by its own holder"])
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, {}, held)
 
-    assert advanced == {"handle": handle}
+    assert advanced == {
+        "handle": handle,
+        "uuid": identity.uuid_of(identity.resolve(handle)),
+    }
     assert identity.resolve(handle)["phase"] == "review"
     assert feedback == []
     assert held == {}
+    retired = claimstate.read_claim_witness(task_repo, ACTOR_A)
+    assert retired is not None and retired.active is False
+
+
+class _AliveProcess:
+    def poll(self):
+        return None
 
 
 def test_heartbeat_reports_a_claim_that_moved_to_another_worktree(
@@ -187,6 +296,8 @@ def test_heartbeat_reports_a_claim_that_moved_to_another_worktree(
         )
     ]
     assert held == {}
+    retired = claimstate.read_claim_witness(task_repo, ACTOR_A)
+    assert retired is not None and not retired.active
 
 
 def test_heartbeat_stays_quiet_for_a_lane_that_never_held_a_claim(

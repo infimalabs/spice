@@ -19,9 +19,12 @@ import tempfile
 import time
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import TextIO, cast
+from typing import Callable, TextIO, cast
 
-from spice.agent.sidechannelnotify import SIDE_CHANNEL_NOTIFY_EVENT
+from spice.agent.sidechannelnotify import (
+    SIDE_CHANNEL_CLAIM_EVENT,
+    SIDE_CHANNEL_NOTIFY_EVENT,
+)
 from spice.agent.wrap import (
     AGENT_RUN_INBOX_REPEAT_SECONDS,
     AgentInboxInjector,
@@ -48,8 +51,11 @@ class AgentSideChannelServer:
     def __init__(
         self,
         repo_root: Path,
+        *,
+        on_claim: Callable[[], None] | None = None,
     ) -> None:
         self.repo_root = repo_root
+        self.on_claim = on_claim
         self.socket_marker_path = side_channel_marker_path(repo_root)
         socket_name = f"spice-agent-side-{os.getpid()}.sock"
         self.socket_path = Path(tempfile.gettempdir()) / socket_name
@@ -126,6 +132,11 @@ class AgentSideChannelServer:
                 return
             payload = parse_side_channel_hello(line)
             if payload:
+                if payload.get(SIDE_CHANNEL_NOTIFY_EVENT) == SIDE_CHANNEL_CLAIM_EVENT:
+                    if self.on_claim is not None:
+                        self.on_claim()
+                    self._wake_streams()
+                    return
                 if SIDE_CHANNEL_NOTIFY_EVENT in payload:
                     self._wake_streams()
                     return

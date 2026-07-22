@@ -16,6 +16,7 @@ from spice.mail.feedback import supervisor_feedback_line
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
 SIDE_CHANNEL_NOTICE_EVENT = "notice"
+SIDE_CHANNEL_CLAIM_EVENT = "claim"
 # Inbox publication fires this notify while holding the publish file lock. A
 # wedged supervisor socket must not hold that lock, so the connect+send carry
 # this budget and degrade to a dropped notification (an OSError subclass caught

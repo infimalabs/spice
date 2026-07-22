@@ -1051,6 +1051,23 @@ def test_side_channel_notice_queue_consumes_once(tmp_path):
     assert second == []
 
 
+def test_side_channel_claim_event_wakes_supervisor_callback(tmp_path):
+    claim_changed = Event()
+    observed: list[str] = []
+
+    def on_claim() -> None:
+        observed.append(sidechannelnotify.SIDE_CHANNEL_CLAIM_EVENT)
+        claim_changed.set()
+
+    with sidechannel.AgentSideChannelServer(tmp_path, on_claim=on_claim):
+        sidechannelnotify.notify_agent_side_channel(
+            tmp_path, event=sidechannelnotify.SIDE_CHANNEL_CLAIM_EVENT
+        )
+        assert claim_changed.wait(2.0)
+
+    assert observed == [sidechannelnotify.SIDE_CHANNEL_CLAIM_EVENT]
+
+
 def test_side_channel_watch_streams_queued_notice_after_initial_payload(
     tmp_path, monkeypatch
 ):
