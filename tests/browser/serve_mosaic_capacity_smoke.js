@@ -62,6 +62,13 @@ async function measureWideViewportWiring(page) {
   return page.evaluate(() => {
     const teamId = "mosaic-capacity-wiring-smoke-team";
     const targetId = emptyTeamTargetId(teamId);
+    // Sandbox serve discovers real sibling-agent lanes off cwd (task-backend
+    // does not isolate); once init reaches ready they share #swimlanes and
+    // halve this fixture's measured width. Close every other lane so the
+    // fixture owns the container and its geometry reflects the viewport, not
+    // a split of it -- deterministic regardless of when topology settled.
+    for (const other of laneStore.lanesSnapshot())
+      if (other.targetId !== targetId) closeLaneCore(other);
     if (!laneStore.hasLane(targetId))
       addEmptyTeamLane({ teamId, revision: 1, config: {} });
     const lane = laneStore.laneForId(targetId);
@@ -124,6 +131,10 @@ async function measureSkylineSpread(page) {
   return page.evaluate((cardCount) => {
     const teamId = "mosaic-capacity-skyline-smoke-team";
     const targetId = emptyTeamTargetId(teamId);
+    // Same sandbox-lane isolation as measureWideViewportWiring above: the
+    // fixture must own #swimlanes so its render span is the viewport's alone.
+    for (const other of laneStore.lanesSnapshot())
+      if (other.targetId !== targetId) closeLaneCore(other);
     if (!laneStore.hasLane(targetId))
       addEmptyTeamLane({ teamId, revision: 1, config: {} });
     const lane = laneStore.laneForId(targetId);

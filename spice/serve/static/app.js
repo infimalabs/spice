@@ -206,10 +206,41 @@ function applyGlobalSettingsPayload(settings) {
   configureLiveBusLanes();
 }
 
+// Serve app lifecycle: booting -> ready | failed. `ready` is reached only once
+// the live bus is connected and the initial topology refresh (targets + team
+// snapshot) has applied, so the page is genuinely usable -- not merely
+// navigated. The browser harness and isolated-lane fixture wait on this instead
+// of guessing from navigation timing or a first-lane DOM appearance, and a
+// `failed` state carries a product-owned reason so nothing proceeds past a
+// broken init in silence.
+const serveLifecycle = { state: "booting", reason: "" };
+/** @type {any} */ (window).__spiceServeLifecycle = serveLifecycle;
+
+function setServeLifecycle(state, reason = "") {
+  serveLifecycle.state = state;
+  serveLifecycle.reason = reason;
+}
+
+function serveLifecycleFailureReason(error) {
+  const message =
+    error && error.message ? String(error.message) : String(error || "");
+  return message || "serve initialization failed";
+}
+
 async function init() {
   installLiveBusLaneFocusTracking();
-  await connectLiveBus();
-  await refreshServerTopology();
+  try {
+    await connectLiveBus();
+    await refreshServerTopology();
+  } catch (error) {
+    setServeLifecycle("failed", serveLifecycleFailureReason(error));
+    throw error;
+  }
+  if (!targetsLoaded) {
+    setServeLifecycle("failed", "initial topology refresh did not complete");
+    return;
+  }
+  setServeLifecycle("ready");
   setInterval(updateLiveRelativeTimes, relativeTimeTickMs);
 }
 

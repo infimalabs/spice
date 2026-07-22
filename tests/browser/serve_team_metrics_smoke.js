@@ -104,6 +104,14 @@ async function setupMetricsSmokePage() {
   };
   const sourcePanel = makeMetricsSmokePanel("source");
   const destPanel = makeMetricsSmokePanel("dest");
+  // Sandbox serve discovers real sibling-agent lanes off cwd (task-backend
+  // does not isolate); once init reaches ready they share #swimlanes and
+  // squeeze these two panels into a three-way split. Close real lanes and
+  // clear their target inventory so the panels split the viewport alone, as
+  // readMetricsSmokeLayout asserts. The liveBusRequest stub above absorbs the
+  // unsubscribe each close emits.
+  for (const other of laneStore.lanesSnapshot()) closeLaneCore(other);
+  laneStore.replaceTargets([]);
   lanesEl.append(sourcePanel.panel, destPanel.panel);
   const source = makeMetricsSmokeLane(
     sourcePanel.panel,
