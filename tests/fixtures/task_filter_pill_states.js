@@ -43,9 +43,7 @@ vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
 const laneStore = vm.runInContext("laneStore", context);
-laneStore.replaceTargets([
-  { id: "lane-a", agentProcessStatus: "running" },
-]);
+laneStore.replaceTargets([{ id: "lane-a", agentProcessStatus: "running" }]);
 laneStore.registerLane(lane);
 
 function assert(condition, message) {
@@ -60,151 +58,184 @@ function stem(counts) {
   };
 }
 
-const mixed = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 5,
-    readyTaskCount: 2,
-    inFlightTaskCount: 1,
-    blockedTaskCount: 1,
-    deferredTaskCount: 1,
-  }),
-);
+// Toggle whether the running, boundary-dissolving Drain lane covers the public
+// stems. A running lane makes every public stem "covered" (an agent could pull
+// from it); stopping the lane leaves the stems uncovered, so the same task state
+// resolves to the idle/dormant gray floor instead of the saturated band.
+function setCoverage(running) {
+  const status = running ? "running" : "stopped";
+  lane.lastRenderedStatusLine.agentProcessStatus = status;
+  laneStore.replaceTargets([{ id: "lane-a", agentProcessStatus: status }]);
+}
+
+function model(counts) {
+  return context.taskFilterStemPillModel(stem(counts));
+}
+function tone(counts) {
+  return context.taskFilterStemPillTone(model(counts));
+}
+
+const READY_MIX = {
+  openTaskCount: 5,
+  readyTaskCount: 2,
+  inFlightTaskCount: 1,
+  blockedTaskCount: 1,
+  deferredTaskCount: 1,
+};
+const READY_ONLY = {
+  openTaskCount: 3,
+  readyTaskCount: 3,
+  inFlightTaskCount: 0,
+  blockedTaskCount: 0,
+  deferredTaskCount: 0,
+};
+const ACTIVE_ONLY = {
+  openTaskCount: 2,
+  readyTaskCount: 0,
+  inFlightTaskCount: 2,
+  blockedTaskCount: 0,
+  deferredTaskCount: 0,
+};
+const BLOCKED_ONLY = {
+  openTaskCount: 2,
+  readyTaskCount: 0,
+  inFlightTaskCount: 0,
+  blockedTaskCount: 2,
+  deferredTaskCount: 0,
+};
+const DEFERRED_ONLY = {
+  openTaskCount: 2,
+  readyTaskCount: 0,
+  inFlightTaskCount: 0,
+  blockedTaskCount: 0,
+  deferredTaskCount: 2,
+};
+
+// ---- badge text is independent of coverage: the ready/in-flight/unavailable
+// triple always renders with a fixed footprint so the pill never jitters. ----
+setCoverage(true);
+const mixed = model(READY_MIX);
 assert(
   context.taskFilterStemPillCountText(mixed) === "2·1·2",
   "mixed badge labels ready, active, and unavailable work",
 );
 assert(
-  context.taskFilterStemPillTone(mixed) === "ready",
-  "mixed work receives the ready treatment",
+  mixed.unavailableTaskCount === 2,
+  "blocked and deferred work combine as unavailable",
 );
-assert(mixed.unavailableTaskCount === 2, "blocked and deferred work combine as unavailable");
 assert(
   mixed.title ===
     "2 ready, 1 active/in flight, 1 blocked, 1 deferred; 5 open across serve.*; ready work drained by 1",
   "mixed hover exposes the complete state breakdown",
 );
-
-const readyOnly = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 3,
-    readyTaskCount: 3,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 0,
-    deferredTaskCount: 0,
-  }),
-);
 assert(
-  context.taskFilterStemPillCountText(readyOnly) === "3·0·0",
+  context.taskFilterStemPillCountText(model(READY_ONLY)) === "3·0·0",
   "ready-only badge still renders the full triple with zero slots",
 );
 assert(
-  context.taskFilterStemPillTone(readyOnly) === "ready",
-  "ready-only work receives the ready treatment",
-);
-
-const activeOnly = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 2,
-    readyTaskCount: 0,
-    inFlightTaskCount: 2,
-    blockedTaskCount: 0,
-    deferredTaskCount: 0,
-  }),
+  context.taskFilterStemPillCountText(model(ACTIVE_ONLY)) === "0·2·0",
+  "active-only badge renders claimed work in the middle slot",
 );
 assert(
-  context.taskFilterStemPillCountText(activeOnly) === "0·2·0",
-  "active-only badge renders the full triple with claimed work in the middle slot",
+  context.taskFilterStemPillCountText(model(BLOCKED_ONLY)) === "0·0·2",
+  "blocked-only badge renders unavailable work in the last slot",
 );
 assert(
-  context.taskFilterStemPillTone(activeOnly) === "active",
-  "active-only work receives a distinct live treatment",
-);
-
-const blockedOnly = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 2,
-    readyTaskCount: 0,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 2,
-    deferredTaskCount: 0,
-  }),
-);
-assert(
-  context.taskFilterStemPillCountText(blockedOnly) === "0·0·2",
-  "blocked-only badge renders the full triple with unavailable work in the last slot",
-);
-assert(
-  context.taskFilterStemPillTone(blockedOnly) === "dormant",
-  "blocked-only work (0/0/N) receives the fully desaturated dormant treatment",
-);
-
-const readyTone = context.taskFilterStemPillTone(readyOnly);
-const activeTone = context.taskFilterStemPillTone(activeOnly);
-const dormantTone = context.taskFilterStemPillTone(blockedOnly);
-assert(
-  readyTone !== activeTone &&
-    activeTone !== dormantTone &&
-    readyTone !== dormantTone,
-  "each populated slot of the triple selects a distinct saturation tone",
-);
-
-const deferredOnly = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 2,
-    readyTaskCount: 0,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 0,
-    deferredTaskCount: 2,
-  }),
-);
-assert(
-  context.taskFilterStemPillCountText(deferredOnly) === "0·0·2",
+  context.taskFilterStemPillCountText(model(DEFERRED_ONLY)) === "0·0·2",
   "deferred-only badge uses the same glance-level unavailable count",
 );
 assert(
-  context.taskFilterStemPillTone(deferredOnly) === "dormant",
-  "deferred-only work receives the dormant treatment",
-);
-
-const unresolvedBlocker = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 1,
-    readyTaskCount: 0,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 1,
-    deferredTaskCount: 0,
-  }),
-);
-const resolvedBlocker = context.taskFilterStemPillModel(
-  stem({
-    openTaskCount: 1,
-    readyTaskCount: 1,
-    inFlightTaskCount: 0,
-    blockedTaskCount: 0,
-    deferredTaskCount: 0,
-  }),
-);
-assert(
-  context.taskFilterStemPillCountText(unresolvedBlocker) === "0·0·1",
+  context.taskFilterStemPillCountText(
+    model({
+      openTaskCount: 1,
+      readyTaskCount: 0,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 1,
+      deferredTaskCount: 0,
+    }),
+  ) === "0·0·1",
   "unresolved dependency is unavailable",
 );
 assert(
-  context.taskFilterStemPillCountText(resolvedBlocker) === "1·0·0",
+  context.taskFilterStemPillCountText(
+    model({
+      openTaskCount: 1,
+      readyTaskCount: 1,
+      inFlightTaskCount: 0,
+      blockedTaskCount: 0,
+      deferredTaskCount: 0,
+    }),
+  ) === "1·0·0",
   "resolved dependency moves automatically into the ready slot",
 );
+
+// ---- covered: a running agent is assigned to (or can pull from) the stem, so
+// the ramp climbs assigned -> active -> saturated as work moves, and even a
+// fully-blocked stem stays lit because an agent is camped on it. ----
+setCoverage(true);
 assert(
-  context.taskFilterStemPillTone(unresolvedBlocker) === "dormant",
-  "unresolved dependency starts dormant",
+  tone(READY_MIX) === "saturated",
+  "a covered stem with ready work is fully saturated",
 );
 assert(
-  context.taskFilterStemPillTone(resolvedBlocker) === "ready",
-  "resolved dependency receives the ready treatment",
+  tone(READY_ONLY) === "saturated",
+  "covered ready-only work is fully saturated",
+);
+assert(
+  tone(ACTIVE_ONLY) === "active",
+  "covered in-flight work with no ready backlog takes the active step",
+);
+assert(
+  tone(BLOCKED_ONLY) === "assigned",
+  "a covered but fully-blocked stem stays lit as legitimately blocked, not dormant",
+);
+assert(
+  tone(DEFERRED_ONLY) === "assigned",
+  "a covered stem with only deferred work is still legitimately covered",
+);
+const saturatedTone = tone(READY_ONLY);
+const activeTone = tone(ACTIVE_ONLY);
+const assignedTone = tone(BLOCKED_ONLY);
+assert(
+  saturatedTone !== activeTone &&
+    activeTone !== assignedTone &&
+    saturatedTone !== assignedTone,
+  "each covered work state selects a distinct saturation step",
 );
 
+// ---- uncovered: no running agent is assigned to the stem. Ready work reads as
+// idle (waiting for an agent) and everything-blocked reads as dormant, so an
+// uncovered stem is visibly distinct from a covered one at the same task state.
+setCoverage(false);
+const idleTone = tone(READY_ONLY);
+const dormantTone = tone(BLOCKED_ONLY);
+assert(
+  idleTone === "idle",
+  "uncovered ready work desaturates to the idle waiting step",
+);
+assert(
+  dormantTone === "dormant",
+  "uncovered fully-blocked work falls to the neutral dormant floor",
+);
+assert(idleTone !== dormantTone, "idle and dormant are distinct steps");
+assert(
+  idleTone !== saturatedTone,
+  "the same ready work reads idle when uncovered and saturated when covered",
+);
+assert(
+  assignedTone !== dormantTone,
+  "a fully-blocked stem reads assigned when covered and dormant when not",
+);
+
+// Restore coverage for the hidden-stem / inventory checks below.
+setCoverage(true);
+
 // Hidden stems (marked from catalog.hiddenStems) are never handed out, so their
-// badge collapses to a single open count and they ride the saturation ramp. The
-// private agent channel IS handed out (moves through phases), so it keeps the
-// full public triple. Project-defined hidden stems behave exactly like oops.
+// coverage never advances and their badge collapses to a single open count. The
+// dashed system marker plus the warn accent (applied in CSS) keep a non-empty
+// deferred bucket standing out; the tone itself stays dormant. The private agent
+// channel IS handed out (moves through phases), so it keeps the full triple and
+// rides the coverage ramp. Project-defined hidden stems behave exactly like oops.
 const oopsPill = context.taskFilterStemPillModel({
   name: "oops",
   filters: [],
@@ -221,11 +252,11 @@ assert(
 );
 assert(
   context.taskFilterStemPillTone(oopsPill) === "dormant",
-  "an idle hidden stem desaturates to dormant instead of a pinned accent",
+  "a never-covered hidden stem resolves to the dormant tone (its warn accent is applied in CSS)",
 );
 assert(
   oopsPill.classes.includes("filter-pill--system"),
-  "hidden stems carry the dashed system marker",
+  "hidden stems carry the dashed system marker that pins the warn accent",
 );
 
 const maximPill = context.taskFilterStemPillModel({
@@ -261,9 +292,13 @@ assert(
   context.taskFilterStemPillCountText(agentPill) === "2·1·0",
   "the private agent channel keeps the public triple because its tasks move through phases",
 );
+// The private agent channel sits out boundary dissolution, so the public Drain
+// lane does not cover it; ready private work with no lane assigned to it reads
+// idle (unattended), not saturated -- it would only climb the ramp if a lane
+// were specifically assigned to the agent filter.
 assert(
-  context.taskFilterStemPillTone(agentPill) === "ready",
-  "the agent channel reacts to the saturation ramp like a public stem",
+  context.taskFilterStemPillTone(agentPill) === "idle",
+  "the private agent channel with unattended ready work reads idle, not saturated",
 );
 assert(
   agentPill.classes.includes("filter-pill--private"),

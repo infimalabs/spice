@@ -880,7 +880,7 @@ function renderFilterPills() {
     const classes = ["filter-pill", ...model.classes];
     const tone = taskFilterStemPillTone(model);
     if (
-      tone === "ready" &&
+      model.readyTaskCount > 0 &&
       model.drainability.boundaryDissolved &&
       model.drainability.drainable
     )
@@ -984,13 +984,21 @@ function taskFilterStemPillCountText(model) {
 }
 
 function taskFilterStemPillTone(model) {
-  // Saturation tracks the leading populated slot of the ready/in-flight/
-  // unavailable triple: ready work stays fully saturated, in-flight work takes
-  // the half-saturated draining tone, and a 0/0/N pill (only the unavailable
-  // slot populated, or an empty stem) is fully desaturated.
-  if (model.readyTaskCount > 0) return "ready";
+  // Saturation encodes agent coverage of the stem -- whether a running agent is
+  // assigned to it (or, under a boundary-dissolving drive/drain lifetime, able
+  // to pull from it) -- layered with how much of its work is moving. A stem an
+  // agent is camped on reads saturated even when every task is blocked, so a
+  // legitimately-blocked-but-covered stem stays visibly distinct from one that
+  // simply has no agent assigned; ready work with no agent on it desaturates to
+  // the idle gray floor. The ramp climbs in even ~25% steps: dormant (uncovered,
+  // nothing ready) -> idle (uncovered, ready waiting) -> assigned (covered, all
+  // blocked) -> active (covered, work in flight) -> saturated (covered, ready to
+  // pull).
+  const covered = model.drainability.count > 0;
+  if (!covered) return model.readyTaskCount > 0 ? "idle" : "dormant";
+  if (model.readyTaskCount > 0) return "saturated";
   if (model.inFlightTaskCount > 0) return "active";
-  return "dormant";
+  return "assigned";
 }
 
 function taskFilterStemPillTitle(label, counts, drainability) {

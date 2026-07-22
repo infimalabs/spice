@@ -528,17 +528,38 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'count: "0·2·0"' in smoke
     assert 'count: "1·0·0"' in smoke
     assert 'title:\n      "0 ready, 0 active/in flight' in smoke
-    assert 'tone: "ready"' in smoke
+    # Saturation encodes agent coverage layered with work: a covered stem climbs
+    # saturated -> active -> assigned, an uncovered-but-ready stem reads idle, and
+    # nothing-movable-uncovered rests on dormant.
+    assert 'tone: "saturated"' in smoke
     assert 'tone: "active"' in smoke
+    assert 'tone: "assigned"' in smoke
+    assert 'tone: "idle"' in smoke
     assert 'tone: "dormant"' in smoke
-    # The drain-ramp guard reads each tone's rendered color and asserts the
-    # active/draining tone desaturates the ready green at a constant hue toward
-    # the idle gray -- a green->cyan hue shift regression fails the smoke.
+    # The coverage ramp guard reads each tone's rendered color and asserts the
+    # covered saturated->active->assigned steps plus the uncovered idle floor form
+    # one constant-hue --good desaturation -- a green->cyan hue shift regression
+    # fails the smoke.
     assert "getComputedStyle(pill).color" in smoke
     assert "function rgbToHsl(" in smoke
-    assert "assertDrainColorRamp(pills)" in smoke
-    assert "draining pill shifted hue instead of desaturating" in smoke
-    assert "drain ramp saturation did not fall ready>active>dormant" in smoke
+    assert "assertCoverageSaturationRamp(pills)" in smoke
+    assert "coverage ramp step shifted hue instead of desaturating" in smoke
+    assert (
+        "coverage ramp saturation did not fall saturated>active>assigned>idle" in smoke
+    )
+    # Dropping coverage (stopping the lane) desaturates the same ready work off
+    # saturated, and hidden stems keep the restored warn accent instead of
+    # collapsing onto the neutral public dormant gray.
+    assert "async function dropCoverage(page)" in smoke
+    assert "assertHiddenWarnAccent(pills)" in smoke
+    assert "hidden stem desaturated to gray instead of the warn accent" in smoke
+    assert (
+        "uncovered serve did not desaturate below its covered saturated tone" in smoke
+    )
+    assert (
+        "hidden oops pill collapsed onto the public dormant gray instead of warn"
+        in smoke
+    )
     assert (
         'labels !== "serve,studies,cli,tests,lifecycle,agent,oops,maxim_proposal"'
         in smoke

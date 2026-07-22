@@ -247,28 +247,48 @@ button.primary:hover {
   padding: 2px 10px;
   white-space: nowrap;
 }
-.filter-pill--ready { border-color: var(--good); color: var(--good); }
+/* Constant-hue saturation ramp in even ~25% steps. A pill's saturation encodes
+   how strongly the stem is covered and moving -- not merely whether ready tasks
+   exist -- so ready work with no agent assigned reads as nearly-desaturated idle
+   rather than a false full green, and a stem an agent is camped on stays lit
+   even when every task is blocked. Every step holds --good's hue and lightness
+   and lowers only saturation (relative color), so dormant -> idle -> assigned ->
+   active -> saturated is one monotonic desaturating ramp with no green->cyan
+   drift; idle is the lowest green step and dormant drops off it to the neutral
+   --muted floor. */
+.filter-pill--saturated { border-color: var(--good); color: var(--good); }
 .filter-pill--active {
-  /* Draining/in-flight work reads as the ready hue washed out toward the idle
-     gray -- saturation drops while hue and lightness hold, so there is no
-     green->cyan drift. Relative color keeps --good's hue/lightness and lowers
-     only saturation, making ready -> active -> dormant one constant-hue,
-     monotonically desaturating ramp that ends at the neutral idle --muted. */
-  --filter-pill-draining: hsl(from var(--good) h calc(s * 0.5) l);
-  background: color-mix(in srgb, var(--filter-pill-draining) 8%, transparent);
-  border-color: var(--filter-pill-draining);
-  color: var(--filter-pill-draining);
+  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.75) l);
+  background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);
+  border-color: var(--filter-pill-tone);
+  color: var(--filter-pill-tone);
+}
+.filter-pill--assigned {
+  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.5) l);
+  background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);
+  border-color: var(--filter-pill-tone);
+  color: var(--filter-pill-tone);
+}
+.filter-pill--idle {
+  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.25) l);
+  border-color: var(--filter-pill-tone);
+  color: var(--filter-pill-tone);
 }
 .filter-pill--dormant { color: var(--muted); }
 .filter-pill--implicit {
   background: color-mix(in srgb, var(--good) 8%, transparent);
 }
-/* Hidden stems (agent = private, oops = system) are marked only by the dashed
-   border; their text color rides the shared ready/active/dormant saturation
-   ramp like every other pill instead of a pinned accent, so an idle oops bucket
-   desaturates to the dormant gray rather than standing out in --warn. */
 .filter-pill--private,
 .filter-pill--system { border-style: dashed; }
+/* Hidden/system stems (oops, maxim_proposal, project-configured additions) are
+   never handed out, so their coverage ramp never advances. Rather than collapse
+   to the neutral dormant gray, they carry the warn hue -- the dashed border
+   marks them hidden, the amber marks a non-empty deferred/triage bucket so it
+   stands out at a glance the way it did before its accent was dropped. */
+.filter-pill--system {
+  border-color: var(--warn);
+  color: var(--warn);
+}
 .filter-pill-count {
   background: var(--accent);
   border-radius: var(--pill-radius);
@@ -278,8 +298,11 @@ button.primary:hover {
   font-size: 9px;
   padding: 0 5px;
 }
-.filter-pill--active .filter-pill-count { background: var(--filter-pill-draining); }
+.filter-pill--active .filter-pill-count,
+.filter-pill--assigned .filter-pill-count,
+.filter-pill--idle .filter-pill-count { background: var(--filter-pill-tone); }
 .filter-pill--dormant .filter-pill-count { background: var(--muted); }
+.filter-pill--system .filter-pill-count { background: var(--warn); }
 
 /* ---- swimlanes ---- */
 .swimlanes {

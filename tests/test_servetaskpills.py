@@ -41,8 +41,9 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()
     implicit_rule = _between(css, ".filter-pill--implicit {", "}")
-    ready_rule = _between(css, ".filter-pill--ready {", "}")
+    saturated_rule = _between(css, ".filter-pill--saturated {", "}")
     active_rule = _between(css, ".filter-pill--active {", "}")
+    idle_rule = _between(css, ".filter-pill--idle {", "}")
 
     assert "model.drainability.boundaryDissolved" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
@@ -50,21 +51,25 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
         implicit_rule == ".filter-pill--implicit {\n"
         "  background: color-mix(in srgb, var(--good) 8%, transparent);\n"
     )
-    assert "border-color: var(--good);" in ready_rule
-    # The draining/in-flight tone desaturates the ready-green toward the idle
-    # gray at a constant hue: it derives from --good via relative color (hue and
-    # lightness held, saturation halved) rather than the off-hue teal accent, so
-    # the pill washes out instead of drifting green->cyan.
+    # The saturated end of the ramp is the full ready-green.
+    assert "border-color: var(--good);" in saturated_rule
+    # The mid-ramp tones desaturate the ready-green toward the idle gray at a
+    # constant hue: each derives from --good via relative color (hue and
+    # lightness held, only saturation stepped down) rather than the off-hue teal
+    # accent, so the pill washes out instead of drifting green->cyan. Active work
+    # holds ~75% saturation; the uncovered-but-ready idle floor drops to ~25%.
     assert (
-        "--filter-pill-draining: hsl(from var(--good) h calc(s * 0.5) l);"
-        in active_rule
+        "--filter-pill-tone: hsl(from var(--good) h calc(s * 0.75) l);" in active_rule
     )
     assert (
-        "background: color-mix(in srgb, var(--filter-pill-draining) 8%, transparent);"
+        "background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);"
         in active_rule
     )
-    assert "border-color: var(--filter-pill-draining);" in active_rule
-    assert "color: var(--filter-pill-draining);" in active_rule
+    assert "border-color: var(--filter-pill-tone);" in active_rule
+    assert "color: var(--filter-pill-tone);" in active_rule
+    assert "--filter-pill-tone: hsl(from var(--good) h calc(s * 0.25) l);" in idle_rule
+    assert "border-color: var(--filter-pill-tone);" in idle_rule
+    assert "color: var(--filter-pill-tone);" in idle_rule
 
 
 def test_global_filter_pills_reject_stale_inventory_resurrection():

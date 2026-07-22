@@ -5,6 +5,10 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const SCREENSHOT_PATH = path.join(os.tmpdir(), "spice-task-filter-pills.png");
 
+// The tone classes the ramp can land on, ordered from the fully-saturated
+// coverage-plus-ready top down to the neutral dormant floor.
+const PILL_TONES = ["saturated", "active", "assigned", "idle", "dormant"];
+
 function assertPill(pills, label, expected) {
   const pill = pills.find((item) => item.label === label);
   if (!pill) throw new Error("missing " + label + " pill: " + JSON.stringify(pills));
@@ -18,7 +22,7 @@ function assertPill(pills, label, expected) {
 
 // getComputedStyle returns the resolved tone color as `rgb(...)`/`rgba(...)`
 // (or a `color(srgb ...)` fallback with 0-1 channels); recover its HSL so the
-// drain ramp can be checked in hue/saturation terms.
+// saturation ramp can be checked in hue/saturation terms.
 function parseRgb(value) {
   const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
   if (channels.length < 3) throw new Error("unparseable color: " + value);
@@ -46,40 +50,75 @@ function rgbToHsl(value) {
 
 function toneColor(pills, label) {
   const pill = pills.find((item) => item.label === label);
-  if (!pill) throw new Error("missing " + label + " pill for drain ramp");
+  if (!pill) throw new Error("missing " + label + " pill for saturation ramp");
   return rgbToHsl(pill.color);
 }
 
-// The drain pill's ready -> active(draining) -> dormant(idle) progression must
-// vary saturation only at a constant hue: the ready green washes out toward the
-// neutral idle gray with no green->cyan hue shift. `serve`/`tests` render ready
-// (green), `lifecycle` renders active/draining, `studies`/`cli` render
-// dormant/idle. A regression that reintroduces an off-hue accent (e.g. the old
-// teal) moves the active hue away from the ready hue and fails here.
-const DRAIN_RAMP_HUE_TOLERANCE_DEG = 8;
-const DRAIN_RAMP_IDLE_MAX_SATURATION = 0.2;
+// Saturation encodes agent coverage layered with work flow. A running,
+// boundary-dissolving Drain lane covers every public stem, so under it the ramp
+// climbs saturated (covered + ready) -> active (covered + in flight) -> assigned
+// (covered, all blocked/deferred) -> idle (uncovered but ready) purely by
+// stepping saturation down a constant --good hue: the ready green washes toward
+// the neutral gray with no green->cyan hue shift. `serve` renders saturated,
+// `lifecycle` active, `studies` assigned, and the private `agent` channel (which
+// sits out boundary dissolution) renders the still-lower idle green. A
+// regression that reintroduces an off-hue accent moves a step's hue off the
+// ready hue and fails here.
+const RAMP_HUE_TOLERANCE_DEG = 8;
+const DORMANT_MAX_SATURATION = 0.2;
+// Hidden/system stems recover the warn accent: an orange/red hue well away from
+// the green ramp, with real saturation rather than the desaturated gray floor.
+const WARN_HUE_MAX_DEG = 60;
+const WARN_MIN_SATURATION = 0.2;
+const RAMP_HUE_DIVERGENCE_DEG = 60;
 
-function assertDrainColorRamp(pills) {
-  const ready = toneColor(pills, "serve");
+function assertCoverageSaturationRamp(pills) {
+  const saturated = toneColor(pills, "serve");
   const active = toneColor(pills, "lifecycle");
-  const dormant = toneColor(pills, "studies");
-  const ramp = { ready, active, dormant };
-  if (Math.abs(active.hue - ready.hue) > DRAIN_RAMP_HUE_TOLERANCE_DEG)
-    throw new Error(
-      "draining pill shifted hue instead of desaturating: " +
-        JSON.stringify(ramp),
-    );
-  if (!(ready.saturation > active.saturation && active.saturation > dormant.saturation))
-    throw new Error(
-      "drain ramp saturation did not fall ready>active>dormant: " +
-        JSON.stringify(ramp),
-    );
-  if (dormant.saturation > DRAIN_RAMP_IDLE_MAX_SATURATION)
-    throw new Error(
-      "idle/dormant pill is not a neutral gray endpoint: " +
-        JSON.stringify(ramp),
-    );
+  const assigned = toneColor(pills, "studies");
+  const idle = toneColor(pills, "agent");
+  const ramp = { saturated, active, assigned, idle };
+  const steps = [saturated, active, assigned, idle];
+  for (const step of steps) {
+    if (Math.abs(step.hue - saturated.hue) > RAMP_HUE_TOLERANCE_DEG)
+      throw new Error(
+        "coverage ramp step shifted hue instead of desaturating: " +
+          JSON.stringify(ramp),
+      );
+  }
+  for (let index = 1; index < steps.length; index += 1) {
+    if (!(steps[index - 1].saturation > steps[index].saturation))
+      throw new Error(
+        "coverage ramp saturation did not fall saturated>active>assigned>idle: " +
+          JSON.stringify(ramp),
+      );
+  }
   return ramp;
+}
+
+function assertHiddenWarnAccent(pills) {
+  const green = toneColor(pills, "serve");
+  const accents = {};
+  for (const label of ["oops", "maxim_proposal"]) {
+    const warn = toneColor(pills, label);
+    accents[label] = warn;
+    if (warn.saturation < WARN_MIN_SATURATION)
+      throw new Error(
+        label + " hidden stem desaturated to gray instead of the warn accent: " +
+          JSON.stringify(warn),
+      );
+    if (warn.hue > WARN_HUE_MAX_DEG)
+      throw new Error(
+        label + " hidden stem is not in the warn/orange hue band: " +
+          JSON.stringify(warn),
+      );
+    if (Math.abs(warn.hue - green.hue) < RAMP_HUE_DIVERGENCE_DEG)
+      throw new Error(
+        label + " hidden accent did not diverge from the green coverage ramp: " +
+          JSON.stringify({ warn, green }),
+      );
+  }
+  return accents;
 }
 
 function initialInventory() {
@@ -178,11 +217,11 @@ function initialInventory() {
 }
 
 async function readPills(page) {
-  return page.evaluate(() =>
+  return page.evaluate((tones) =>
     Array.from(document.querySelectorAll(".filter-pill")).map((pill) => ({
       label: pill.querySelector(".filter-pill-label")?.textContent || "",
       count: pill.querySelector(".filter-pill-count")?.textContent || "",
-      tone: ["ready", "active", "dormant"].find((value) =>
+      tone: tones.find((value) =>
         pill.classList.contains("filter-pill--" + value),
       ),
       implicit: pill.classList.contains("filter-pill--implicit"),
@@ -191,7 +230,7 @@ async function readPills(page) {
       color: getComputedStyle(pill).color,
       borderStyle: getComputedStyle(pill).borderTopStyle,
     })),
-  );
+  PILL_TONES);
 }
 
 async function installInitialState(page) {
@@ -209,24 +248,31 @@ async function installInitialState(page) {
 }
 
 function assertInitialPills(pills) {
+  // Covered: the running Drain lane camps on every public stem, so the ramp
+  // climbs with how much of each stem's work is moving.
   assertPill(pills, "serve", {
     count: "2·1·2",
-    tone: "ready",
+    tone: "saturated",
     implicit: true,
     unavailable: "2",
   });
+  // A covered stem with only deferred work stays lit as legitimately assigned,
+  // not dormant -- the operator can see an agent is on it even when nothing is
+  // ready to pull.
   assertPill(pills, "studies", {
     count: "0·0·3",
-    tone: "dormant",
+    tone: "assigned",
     title:
       "0 ready, 0 active/in flight, 0 blocked, 3 deferred; 3 open across studies.*; no task currently movable",
   });
+  // A covered but fully-blocked stem is likewise assigned, distinguishing a
+  // legitimately-blocked agent from one with no work assigned at all.
   assertPill(pills, "cli", {
     count: "0·0·1",
-    tone: "dormant",
+    tone: "assigned",
     unavailable: "1",
   });
-  assertPill(pills, "tests", { count: "3·0·0", tone: "ready" });
+  assertPill(pills, "tests", { count: "3·0·0", tone: "saturated" });
   assertPill(pills, "lifecycle", {
     count: "0·2·0",
     tone: "active",
@@ -234,15 +280,18 @@ function assertInitialPills(pills) {
     unavailable: "0",
   });
   // The private agent channel is handed out, so its tasks move through phases and
-  // it keeps the public triple while carrying only the dashed private marker.
+  // it keeps the public triple; it sits out boundary dissolution, so the public
+  // Drain lane does not cover it and its ready work reads as the idle green floor
+  // rather than saturated, behind the dashed private marker.
   assertPill(pills, "agent", {
     count: "2·1·0",
-    tone: "ready",
+    tone: "idle",
     borderStyle: "dashed",
   });
   // Hidden stems (built-in oops and project-defined maxim_proposal) are never
-  // handed out, so their badges collapse to a single open count and they ride the
-  // saturation ramp down to dormant behind the same dashed marker.
+  // handed out, so their badges collapse to a single open count and they rest on
+  // the dormant tone -- but the dashed system marker repaints them in the warn
+  // accent so unattended triage still stands out.
   assertPill(pills, "oops", {
     count: "2",
     tone: "dormant",
@@ -256,24 +305,6 @@ function assertInitialPills(pills) {
   const serveBorder = pills.find((pill) => pill.label === "serve")?.borderStyle;
   if (serveBorder !== "solid")
     throw new Error("public serve pill lost its solid border: " + serveBorder);
-  // An idle hidden pill desaturates to the same dormant color a public idle pill
-  // resolves to -- proof the old --warn accent pin is gone and hidden pills now
-  // ride the shared ramp instead of standing out.
-  const studiesColor = pills.find((pill) => pill.label === "studies")?.color;
-  const oopsColor = pills.find((pill) => pill.label === "oops")?.color;
-  const maximColor = pills.find(
-    (pill) => pill.label === "maxim_proposal",
-  )?.color;
-  if (oopsColor !== studiesColor)
-    throw new Error(
-      "idle hidden oops pill did not match the public dormant color: " +
-        JSON.stringify({ oopsColor, studiesColor }),
-    );
-  if (maximColor !== studiesColor)
-    throw new Error(
-      "idle hidden maxim_proposal pill did not match the public dormant color: " +
-        JSON.stringify({ maximColor, studiesColor }),
-    );
   const labels = pills.map((pill) => pill.label).join(",");
   if (labels !== "serve,studies,cli,tests,lifecycle,agent,oops,maxim_proposal")
     throw new Error("unexpected header pills: " + labels);
@@ -295,6 +326,55 @@ async function resolveCliBlocker(page) {
   return readPills(page);
 }
 
+// Stop the covering lane so no agent is assigned to any public stem. Coverage,
+// not task state, is what changes: the same ready work that read saturated now
+// desaturates to the idle floor, and a stem with nothing movable falls all the
+// way to the neutral dormant gray.
+async function dropCoverage(page) {
+  await page.evaluate(() => {
+    const lane = resolveIsolatedLane("task-filter-pill-smoke");
+    lane.lastRenderedStatusLine = { agentProcessStatus: "stopped" };
+    renderFilterPills();
+  });
+  return readPills(page);
+}
+
+function assertUncoveredPills(pills, coveredRamp, warnAccents) {
+  // Ready work with no agent on it drops from saturated to the idle waiting step.
+  assertPill(pills, "serve", { tone: "idle", implicit: false });
+  assertPill(pills, "tests", { tone: "idle" });
+  // The cli blocker was resolved earlier, so it has ready work but, uncovered,
+  // reads idle rather than saturated.
+  assertPill(pills, "cli", { tone: "idle" });
+  // Nothing movable and no agent assigned falls to the neutral dormant floor.
+  assertPill(pills, "studies", { tone: "dormant" });
+  assertPill(pills, "lifecycle", { tone: "dormant" });
+
+  const serveIdle = toneColor(pills, "serve");
+  if (!(serveIdle.saturation < coveredRamp.saturated.saturation))
+    throw new Error(
+      "uncovered serve did not desaturate below its covered saturated tone: " +
+        JSON.stringify({ serveIdle, covered: coveredRamp.saturated }),
+    );
+  const studiesDormant = toneColor(pills, "studies");
+  if (studiesDormant.saturation > DORMANT_MAX_SATURATION)
+    throw new Error(
+      "uncovered dormant stem is not a neutral gray endpoint: " +
+        JSON.stringify(studiesDormant),
+    );
+  // Hidden stems keep the warn accent regardless of coverage; it must stay
+  // distinct from the neutral dormant gray a public stem falls to.
+  const stillWarn = assertHiddenWarnAccent(pills);
+  const oopsColor = pills.find((pill) => pill.label === "oops")?.color;
+  const studiesColor = pills.find((pill) => pill.label === "studies")?.color;
+  if (oopsColor === studiesColor)
+    throw new Error(
+      "hidden oops pill collapsed onto the public dormant gray instead of warn: " +
+        JSON.stringify({ oopsColor, studiesColor }),
+    );
+  return { stillWarn, warnAccents };
+}
+
 async function clearInventory(page) {
   return page.evaluate(() => {
     const lane = resolveIsolatedLane("task-filter-pill-smoke");
@@ -314,22 +394,28 @@ async function clearInventory(page) {
 async function runScenario({ page }) {
   const pills = await installInitialState(page);
   assertInitialPills(pills);
-  const drainRamp = assertDrainColorRamp(pills);
+  const coverageRamp = assertCoverageSaturationRamp(pills);
+  const warnAccents = assertHiddenWarnAccent(pills);
   await page.screenshot({ path: SCREENSHOT_PATH });
   const resolvedPills = await resolveCliBlocker(page);
   assertPill(resolvedPills, "cli", {
     count: "1·0·0",
-    tone: "ready",
+    tone: "saturated",
     unavailable: "0",
   });
+  const uncoveredPills = await dropCoverage(page);
+  const uncovered = assertUncoveredPills(uncoveredPills, coverageRamp, warnAccents);
   const emptyState = await clearInventory(page);
   if (emptyState.ariaHidden !== "true" || emptyState.pillCount !== 0)
     throw new Error("empty inventory mismatch: " + JSON.stringify(emptyState));
   return {
     pills,
     resolvedPills,
+    uncoveredPills,
+    uncovered,
     emptyState,
-    drainRamp,
+    coverageRamp,
+    warnAccents,
     screenshotPath: SCREENSHOT_PATH,
   };
 }
