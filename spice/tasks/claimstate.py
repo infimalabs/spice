@@ -174,11 +174,28 @@ def _resolved_claim_lease_seconds(lease_seconds: float | None) -> float:
 def _row_claim_lease_seconds(row: dict[str, Any]) -> float:
     raw = str(row.get("claim_lease_seconds") or "").strip()
     if not raw:
-        raise SpiceError("active claim has no recorded lease duration")
+        raise SpiceError(
+            _claim_lease_repair_message(
+                row, "active claim has no recorded lease duration"
+            )
+        )
     try:
         return _resolved_claim_lease_seconds(float(raw))
     except (SpiceError, ValueError) as exc:
-        raise SpiceError(f"active claim has unreadable lease duration {raw!r}") from exc
+        raise SpiceError(
+            _claim_lease_repair_message(
+                row, f"active claim has unreadable lease duration {raw!r}"
+            )
+        ) from exc
+
+
+def _claim_lease_repair_message(row: dict[str, Any], diagnostic: str) -> str:
+    handle = identity.render_handle(row)
+    suggested_lease = _resolved_claim_lease_seconds(None)
+    return (
+        f"run `spice task reclaim {handle} --lease-seconds {suggested_lease:g}` "
+        f"to repair the claim; {diagnostic}"
+    )
 
 
 def _effective_claim_lease_seconds(
