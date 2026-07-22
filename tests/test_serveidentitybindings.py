@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from threading import Event, Thread
 
 from spice.agent.lifecycle import agent_status, write_agent_state
-from spice.agent.paths import agent_thread_state_dir
+from spice.agent.paths import (
+    agent_thread_state_dir,
+    read_agent_thread_pointer,
+)
 from spice.serve.app import ServeState
 from spice.serve.payload.identity import (
     serve_agent_identity_payload,
@@ -15,6 +19,7 @@ from spice.serve.payload.identity import (
 from spice.serve.team.store import ServeTeamStore
 
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+REBOUND_THREAD_ID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
 def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
@@ -62,6 +67,54 @@ def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
     ] == [target_a.id, target_c.id]
 
 
+def test_rebound_pointer_survives_stale_cleanup_interleaving(tmp_path, monkeypatch):
+    """A writer replacing the verified pathname cannot be deleted as stale."""
+    from spice.serve.worktree import bindings
+
+    lane_a, lane_c = _linked_worktrees(tmp_path)
+    _write_idle_binding(lane_a, started_at="2026-07-22T19:04:22.000000Z")
+    _write_idle_binding(lane_c, started_at="2026-07-22T19:22:19.000000Z")
+    real_fingerprint = bindings._pointer_fingerprint
+    fingerprint_calls = 0
+    writer_done = Event()
+    writer: Thread | None = None
+
+    def rebind_lane_a() -> None:
+        _write_idle_binding(
+            lane_a,
+            started_at="2026-07-22T19:23:00.000000Z",
+            thread_id=REBOUND_THREAD_ID,
+        )
+        writer_done.set()
+
+    def interleaved_fingerprint(stat):
+        nonlocal fingerprint_calls, writer
+        fingerprint_calls += 1
+        fingerprint = real_fingerprint(stat)
+        if fingerprint_calls == 3:
+            writer = Thread(target=rebind_lane_a, daemon=True)
+            writer.start()
+            # The old code lets the writer finish inside this window and then
+            # unlinks its replacement. The locked writer waits here until stale
+            # cleanup removes only the snapshotted inode and releases the lock.
+            writer_done.wait(1.0)
+        return fingerprint
+
+    monkeypatch.setattr(bindings, "_pointer_fingerprint", interleaved_fingerprint)
+    state = ServeState(anchor_root=lane_a)
+
+    state.worktree_targets()
+    assert writer is not None
+    writer.join(timeout=2.0)
+    assert read_agent_thread_pointer(lane_a) == REBOUND_THREAD_ID
+
+    state.worktree_targets()
+    assert [agent_status(root).thread_id for root in (lane_a, lane_c)] == [
+        REBOUND_THREAD_ID,
+        THREAD_ID,
+    ]
+
+
 def _linked_worktrees(tmp_path: Path) -> tuple[Path, Path]:
     lane_a = tmp_path / "lane-a"
     lane_c = tmp_path / "lane-c"
@@ -82,7 +135,9 @@ def _linked_worktrees(tmp_path: Path) -> tuple[Path, Path]:
     return lane_a, lane_c
 
 
-def _write_idle_binding(repo_root: Path, *, started_at: str) -> None:
+def _write_idle_binding(
+    repo_root: Path, *, started_at: str, thread_id: str = THREAD_ID
+) -> None:
     write_agent_state(
         repo_root,
         {
@@ -95,7 +150,7 @@ def _write_idle_binding(repo_root: Path, *, started_at: str) -> None:
             "model": "gpt-5.6-sol",
             "reasoning_effort": "xhigh",
             "service_tier": "",
-            "thread_id": THREAD_ID,
+            "thread_id": thread_id,
             "prompt_skill_path": str(repo_root / ".agents/skills/spice/SKILL.md"),
             "log_path": "",
         },
