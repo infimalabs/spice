@@ -46,6 +46,8 @@ from spice.tasks import claimstate
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
+# Long enough to be an unmistakable share of one 20-second beat.
+RENEWAL_COST_SECONDS = 5.0
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
@@ -991,12 +993,18 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
     nudges: list[tuple[Path, str, Path]] = []
     stop = _StopAfterOneIteration()
     process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=None)
+    # A renewal costs real wall clock on a loaded host. The beat is paced from
+    # its own start, so that cost comes out of the idle budget rather than
+    # being added on top of it.
+    clock = _AdvancingClock(cost=RENEWAL_COST_SECONDS)
+    monkeypatch.setattr(lifecycle.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(
         lifecycle,
         "_renew_supervised_claim",
         lambda repo_root, thread_id, log_path, _reported, _cursors, _held: (
-            renewals.append((repo_root, thread_id, log_path))
-        ),
+            renewals.append((repo_root, thread_id, log_path)),
+            clock.spend(),
+        )[0],
     )
     monkeypatch.setattr(
         lifecycle,
@@ -1010,7 +1018,9 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
 
     assert renewals == [(tmp_path, "thread-a", log_path)]
     assert nudges == [(tmp_path, "thread-a", log_path)]
-    assert stop.waits[0] == lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
+    assert stop.waits[0] == (
+        lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS - RENEWAL_COST_SECONDS
+    )
     assert (
         lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
         == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
@@ -1373,6 +1383,20 @@ class _StopAfterOneIteration:
     def wait_for_event(self, seconds: float) -> bool:
         self.waits.append(seconds)
         return True
+
+
+class _AdvancingClock:
+    """A monotonic clock that only moves when the watched work spends it."""
+
+    def __init__(self, cost: float) -> None:
+        self.cost = cost
+        self.reading = 0.0
+
+    def monotonic(self) -> float:
+        return self.reading
+
+    def spend(self) -> None:
+        self.reading += self.cost
 
 
 class _FakeSideChannel:
