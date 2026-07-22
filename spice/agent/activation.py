@@ -79,11 +79,12 @@ def activation_command_surface_lines(*, rtk_active: bool) -> list[str]:
         ),
         "session=spice session briefing",
         "task_status=spice task status",
-        "task_next=spice task next",
+        "task_next=spice task next --wait",
         (
             "task_drain_contract=drive/drain lanes are not done after a task "
-            "phase boundary; run spice task next and keep working until no "
-            "allocator-selected work remains or a real blocker exists"
+            "phase boundary; run spice task next --wait so active peer work "
+            "wakes allocation through the task event, and keep working until "
+            "no allocator-selected work remains or a real blocker exists"
         ),
         (
             "task_steer_contract=steer lanes treat allocator continuation as "

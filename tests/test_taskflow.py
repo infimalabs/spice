@@ -45,6 +45,36 @@ pytestmark = pytest.mark.skipif(
 __all__ = ["remote_task_repo", "task_repo"]
 
 
+def test_live_peer_claim_deadline_selects_earliest_future_peer(monkeypatch):
+    monkeypatch.setattr(alloc.tw, "now_iso", lambda: "2026-07-22T08:00:00Z")
+    monkeypatch.setattr(
+        alloc,
+        "visible_active_rows",
+        lambda _actor: [
+            {
+                "claim_by": PEER_ACTOR,
+                "claim_until": "2026-07-22T08:10:00Z",
+            },
+            {
+                "claim_by": ACTOR_A,
+                "claim_until": "2026-07-22T08:05:00Z",
+            },
+            {
+                "claim_by": PEER_ACTOR,
+                "claim_until": "2026-07-22T07:55:00Z",
+            },
+            {
+                "claim_by": PEER_ACTOR,
+                "claim_until": "2026-07-22T08:03:00Z",
+            },
+        ],
+    )
+
+    deadline = alloc.live_peer_claim_deadline(ACTOR_A)
+
+    assert deadline == "2026-07-22T08:03:00Z"
+
+
 def test_task_capture_mints_task_over_loose_then_done_captures_it(remote_task_repo):
     loose = _make_loose_commit(remote_task_repo, subject="loose fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1

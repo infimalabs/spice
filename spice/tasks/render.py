@@ -15,6 +15,7 @@ from spice.tasks import (
     claimstate,
     config,
     effort,
+    eventwait,
     identity,
     lanes,
     ops,
@@ -586,9 +587,48 @@ def render_status() -> str:
     return "\n".join(lines)
 
 
-def render_next() -> str:
+def render_next(*, wait: bool = False) -> str:
     renewal = claimstate.renew_claim()
-    row = alloc.next_task()
+    if not wait:
+        return _render_next_result(renewal, alloc.next_task())
+
+    baseline = eventwait.task_event_token()
+    while True:
+        row = alloc.next_task()
+        if row is not None:
+            return _render_next_result(renewal, row)
+        current = eventwait.task_event_token()
+        if current != baseline:
+            baseline = current
+            continue
+        peer_deadline = alloc.live_peer_claim_deadline()
+        if peer_deadline is None:
+            # Close the final race between the peer-work snapshot and the
+            # terminal empty decision.
+            current = eventwait.task_event_token()
+            if current != baseline:
+                baseline = current
+                continue
+            return _render_next_result(renewal, None)
+        wake = eventwait.wait_for_allocator_event(baseline, peer_deadline)
+        baseline = wake.task_token
+        if wake.kind in ("task", "deadline"):
+            continue
+        if wake.kind == "steering":
+            return "\n".join(
+                [
+                    claimstate.claim_renewal_status_line(renewal),
+                    "allocator wait interrupted by pending steering; "
+                    "run spice session briefing",
+                ]
+            )
+        raise SpiceError(f"unknown allocator wake kind: {wake.kind!r}")
+
+
+def _render_next_result(
+    renewal: claimstate.ClaimRenewalResult,
+    row: dict[str, Any] | None,
+) -> str:
     if not row:
         return "\n".join(
             [

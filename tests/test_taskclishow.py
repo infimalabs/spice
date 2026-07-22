@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.cli.entry import SIGINT_EXIT_CODE, main as cli_main
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.tasks import (
@@ -15,6 +16,7 @@ from spice.tasks import (
     config,
     create,
     effort,
+    eventwait,
     identity,
     render,
     tw,
@@ -436,6 +438,157 @@ def test_task_next_reports_failed_claim_renewal_detail(monkeypatch):
             "no available tasks; run spice task status",
         ]
     )
+
+
+def test_task_next_wait_reallocates_after_task_event(monkeypatch):
+    row = _row(
+        "Assigned after event",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update({"phase_i": "0", "urgency": "9.2"})
+    candidates = iter((None, row))
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: next(candidates))
+    monkeypatch.setattr(
+        render.alloc,
+        "live_peer_claim_deadline",
+        lambda: "2026-06-12T08:05:00Z",
+    )
+    monkeypatch.setattr(render.eventwait, "task_event_token", lambda: "event-a")
+    monkeypatch.setattr(
+        render.eventwait,
+        "wait_for_allocator_event",
+        lambda _baseline, _deadline: eventwait.AllocatorWake("task", "event-b"),
+    )
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo"])
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next(wait=True)
+
+    assert "next task:\nTASK-test [todo] P:M task.render Assigned after event" in output
+
+
+def test_task_next_wait_returns_terminal_empty_state(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(
+        render.alloc,
+        "next_task",
+        lambda: calls.append("next") or None,
+    )
+    monkeypatch.setattr(
+        render.alloc,
+        "live_peer_claim_deadline",
+        lambda: calls.append("peer") or None,
+    )
+    monkeypatch.setattr(
+        render.eventwait,
+        "task_event_token",
+        lambda: calls.append("token") or "stable",
+    )
+
+    output = render.render_next(wait=True)
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=skipped no_active_claim",
+            "no available tasks; run spice task status",
+        ]
+    )
+    assert calls == ["token", "next", "token", "peer", "token"]
+
+
+def test_task_next_wait_yields_to_pending_steering(monkeypatch):
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+    monkeypatch.setattr(
+        render.alloc,
+        "live_peer_claim_deadline",
+        lambda: "2026-06-12T08:05:00Z",
+    )
+    monkeypatch.setattr(render.eventwait, "task_event_token", lambda: "event-a")
+    monkeypatch.setattr(
+        render.eventwait,
+        "wait_for_allocator_event",
+        lambda _baseline, _deadline: eventwait.AllocatorWake("steering", "event-a"),
+    )
+
+    output = render.render_next(wait=True)
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=skipped no_active_claim",
+            "allocator wait interrupted by pending steering; "
+            "run spice session briefing",
+        ]
+    )
+
+
+def test_task_next_wait_rechecks_at_peer_claim_deadline(monkeypatch):
+    calls: list[str] = []
+    peer_deadlines = iter(("2026-06-12T08:05:00Z", None))
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: calls.append("next") or None)
+    monkeypatch.setattr(
+        render.alloc,
+        "live_peer_claim_deadline",
+        lambda: calls.append("peer") or next(peer_deadlines),
+    )
+    monkeypatch.setattr(render.eventwait, "task_event_token", lambda: "event-a")
+    monkeypatch.setattr(
+        render.eventwait,
+        "wait_for_allocator_event",
+        lambda _baseline, _deadline: eventwait.AllocatorWake("deadline", "event-a"),
+    )
+
+    output = render.render_next(wait=True)
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=skipped no_active_claim",
+            "no available tasks; run spice task status",
+        ]
+    )
+    assert calls == ["next", "peer", "next", "peer"]
+
+
+def test_task_next_wait_interrupt_exits_through_cli_boundary(monkeypatch, capsys):
+    wait_flags: list[bool] = []
+
+    def interrupt(*, wait: bool) -> str:
+        wait_flags.append(wait)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(render, "render_next", interrupt)
+
+    code = cli_main(["task", "next", "--wait"])
+
+    assert code == SIGINT_EXIT_CODE
+    assert wait_flags == [True]
+    assert capsys.readouterr().err == "spice: interrupted\n"
 
 
 def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):

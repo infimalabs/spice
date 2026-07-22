@@ -79,12 +79,13 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
 
     assert PHASE_OWNERSHIP in done_output.splitlines()
     assert (
-        "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment; "
+        "next: YOU ARE NOT DONE. Run spice task next --wait for reviewer "
+        "assignment; "
         "self-review only if next assigns it"
     ) in done_output
     assert KEEP_DRAINING in done_output
     assert (
-        "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment"
+        "next: YOU ARE NOT DONE. Run spice task next --wait for reviewer assignment"
         in render.render_show(handle)
     )
 
@@ -94,7 +95,8 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     review_output = ops.review(handle, finding="clean", note="description current")
 
     assert (
-        f"next: YOU ARE NOT DONE. Run spice task next; {KEEP_DRAINING}" in review_output
+        f"next: YOU ARE NOT DONE. Run spice task next --wait; {KEEP_DRAINING}"
+        in review_output
     )
 
 
