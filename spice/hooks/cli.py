@@ -135,12 +135,11 @@ def init_repo_root(cwd: Path | None = None) -> Path:
         return root
     marker_root = _linked_worktree_marker_root(cwd or Path.cwd())
     if marker_root is not None:
-        from spice.hooks.install import enable_worktree_config
-
-        enable_worktree_config(marker_root)
-        root = repo_root_from_cwd(marker_root)
-        if root is not None:
-            return root
+        # A linked checkout whose common Git dir is bare cannot satisfy
+        # ``--show-toplevel`` until initialization applies its worktree-local
+        # ``core.bare=false`` operation.  The marker itself identifies the
+        # root without mutating Git config during discovery or dry-run.
+        return marker_root
     return require_repo_root(cwd)
 
 

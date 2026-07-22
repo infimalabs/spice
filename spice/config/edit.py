@@ -225,12 +225,3 @@ def git_worktree_config_get(repo_root: Path, key: str) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
-
-
-def git_worktree_config_set(repo_root: Path, key: str, value: str) -> None:
-    """Set a real Git worktree config value (settings Git itself owns)."""
-    run_git_command(
-        ["git", "-C", str(repo_root), "config", "--worktree", key, value],
-        check=True,
-        capture_output=True,
-    )
