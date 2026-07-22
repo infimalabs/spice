@@ -1001,6 +1001,45 @@ def test_review_rejects_a_bad_followup_record_before_creating_any(
     assert "line 2: missing required field 'title'" in str(rejected.value)
 
 
+def test_review_rejects_a_parser_clean_followup_record_before_creating_any(
+    task_repo, monkeypatch
+):
+    """A record the parser accepts still writes nothing when creation rejects it.
+
+    Review follow-ups parse with require_project false, so an omitted project
+    survives the parse pass and is only refused deeper in, where a private
+    project needs Steer lifetime. That rejection is context-dependent and the
+    parser cannot see it, so preparation has to resolve every record before the
+    review mutation or a well-formed earlier record lands beside a failure.
+    """
+    handle = _review_claim(task_repo, monkeypatch)
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drain"},
+    )
+    before = sorted(str(row.get("uuid") or "") for row in tw.export())
+
+    with pytest.raises(SpiceError) as rejected:
+        ops.review(
+            handle,
+            finding="changes",
+            note="needs coverage",
+            then=[
+                "title=Well formed record | project=task.unit | "
+                "acceptance=The first record carries everything it needs",
+                "title=Parser-clean record | "
+                "acceptance=The second record omits the project it needs",
+            ],
+        )
+
+    row = identity.resolve(handle)
+    assert sorted(str(r.get("uuid") or "") for r in tw.export()) == before
+    assert row["phase"] == "review"
+    assert str(row.get("review_by") or "") == ""
+    assert str(row.get("review_finding") or "") == ""
+    assert "requires Steer lifetime (got Drain)" in str(rejected.value)
+
+
 def test_review_spawns_every_record_when_all_of_them_parse(task_repo, monkeypatch):
     """The rejection guard leaves multi-record creation working."""
     handle = _review_claim(task_repo, monkeypatch)
