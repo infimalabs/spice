@@ -41,12 +41,13 @@ def _stub_rehearsal(monkeypatch, during_gates=lambda: None) -> dict[str, object]
     """Stand in for the long rehearsal and publish a receipt it can be bound to."""
     receipt = {"schema_version": 1, "tests": {"python": {"passed": 7, "total": 7}}}
 
-    def rehearse(_snapshot: Path, artifacts: Path) -> None:
+    def rehearse(_snapshot: Path, artifacts: Path) -> dict[str, object]:
         during_gates()
         artifacts.mkdir(parents=True, exist_ok=True)
         (artifacts / "release-proof.json").write_text(
             json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
         )
+        return {"gate": "rehearsal", "status": "ran", "exit_code": 0}
 
     monkeypatch.setattr(PINNED, "rehearse_pinned", rehearse)
     monkeypatch.setattr(
@@ -58,6 +59,11 @@ def _stub_rehearsal(monkeypatch, during_gates=lambda: None) -> dict[str, object]
         PINNED,
         "toolchain_gate",
         lambda _snapshot: {"gate": "declared-toolchain", "status": "ran"},
+    )
+    monkeypatch.setattr(
+        PINNED,
+        "appliance_gate",
+        lambda: {"gate": "container-appliance", "status": "not-run"},
     )
     return receipt
 
@@ -91,6 +97,7 @@ def test_pinned_proof_binds_every_gate_to_the_exported_boundary_commit(
         "bytes": (artifacts / "release-proof.json").stat().st_size,
         "sha256": _test_sha256(artifacts / "release-proof.json"),
     }
+    assert (binding["failed"], binding["not_run"]) == ([], ["container-appliance"])
     assert (snapshot / "payload.txt").read_text(encoding="utf-8") == (
         "tracked release source\n"
     )
@@ -142,6 +149,43 @@ def test_pinned_proof_survives_the_origin_advancing_while_the_gates_run(
         False,
         "",
     )
+
+
+def test_pinned_proof_publishes_a_binding_for_a_red_gate_and_names_the_not_run(
+    tmp_path, monkeypatch
+):
+    repository, boundary = _pinned_repository(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    artifacts = tmp_path / "artifacts"
+    _stub_rehearsal(monkeypatch)
+    monkeypatch.setattr(
+        PINNED,
+        "rehearse_pinned",
+        lambda _snapshot, artifacts: {
+            "gate": "rehearsal",
+            "status": "failed",
+            "exit_code": 2,
+        },
+    )
+
+    binding = PINNED.run_pinned_proof(repository, artifacts, workspace)
+    published = json.loads(
+        (artifacts / "release-proof-binding.json").read_text(encoding="utf-8")
+    )
+
+    assert binding["failed"] == ["rehearsal"]
+    assert binding["not_run"] == ["container-appliance"]
+    assert binding["evidence"] == {
+        "filename": "release-proof.json",
+        "status": "absent",
+    }
+    assert binding["boundary"] == {
+        "commit": boundary["commit"],
+        "tree": boundary["tree"],
+    }
+    assert binding["snapshot"]["before"] == binding["snapshot"]["after"]
+    assert published == binding
 
 
 def test_pinned_proof_refuses_evidence_that_is_not_bound_to_the_boundary():

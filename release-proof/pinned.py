@@ -116,12 +116,29 @@ def verify_boundary(
     return source
 
 
+def _failed_gate(
+    name: str,
+    command: list[str],
+    detail: str,
+) -> dict[str, object]:
+    """Record a gate that ran against the pinned snapshot and came back red."""
+    return {
+        "gate": name,
+        "status": "failed",
+        "command": command,
+        "detail": redact_text(detail, dict(os.environ)),  # env-policy: allow
+    }
+
+
 def provision_gate(
     snapshot: Path,
     failures: FailureArtifactStore,
 ) -> dict[str, object]:
     """Install the browser toolchain the pinned lockfile declares."""
-    _run(PROVISION_COMMAND, cwd=snapshot, failures=failures, gate="npm-ci")
+    try:
+        _run(PROVISION_COMMAND, cwd=snapshot, failures=failures, gate="npm-ci")
+    except RehearsalError as exc:
+        return _failed_gate("browser-toolchain", list(PROVISION_COMMAND), str(exc))
     return {
         "gate": "browser-toolchain",
         "status": "ran",
@@ -180,7 +197,7 @@ def appliance_gate(which=shutil.which) -> dict[str, object]:
     }
 
 
-def rehearse_pinned(snapshot: Path, artifacts: Path) -> None:
+def rehearse_pinned(snapshot: Path, artifacts: Path) -> dict[str, object]:
     """Run the snapshot's own rehearsal so the harness is pinned too."""
     command = [
         sys.executable,
@@ -190,11 +207,16 @@ def rehearse_pinned(snapshot: Path, artifacts: Path) -> None:
     ]
     print(f"+ {shlex.join(command)}", flush=True)
     completed = subprocess.run(command, check=False, cwd=snapshot)
-    if completed.returncode != 0:
-        raise PinError(
-            f"pinned rehearsal failed with exit code {completed.returncode}; "
-            f"diagnostics live under {artifacts / FAILURE_DIRNAME}"
-        )
+    if completed.returncode == 0:
+        return {"gate": "rehearsal", "status": "ran", "exit_code": 0}
+    failure = _failed_gate(
+        "rehearsal",
+        command,
+        f"the pinned rehearsal exited {completed.returncode}",
+    )
+    failure["exit_code"] = completed.returncode
+    failure["diagnostics"] = str(artifacts / FAILURE_DIRNAME)
+    return failure
 
 
 def _host_identity() -> dict[str, str]:
@@ -207,11 +229,17 @@ def _host_identity() -> dict[str, str]:
 
 def _receipt_evidence(artifacts: Path) -> dict[str, object]:
     receipt = artifacts / RECEIPT_NAME
+    if not receipt.exists():
+        return {"filename": RECEIPT_NAME, "status": "absent"}
     return {
         "filename": RECEIPT_NAME,
         "bytes": receipt.stat().st_size,
         "sha256": _sha256(receipt),
     }
+
+
+def _gate_names(gates: list[dict[str, object]], status: str) -> list[str]:
+    return sorted(str(gate["gate"]) for gate in gates if gate.get("status") == status)
 
 
 def _bind_identity(before: dict[str, str], after: dict[str, str]) -> dict[str, str]:
@@ -231,6 +259,7 @@ def run_pinned_proof(
     """Run every release gate from one immutable snapshot and bind the proof."""
     root = root.resolve(strict=True)
     artifacts = artifacts.resolve()
+    artifacts.mkdir(parents=True, exist_ok=True)
     failures = FailureArtifactStore(artifacts)
     boundary = _identity(root, failures)
     snapshot, identities = materialize(root, workspace.resolve(strict=True), failures)
@@ -240,12 +269,14 @@ def run_pinned_proof(
         provision_gate(snapshot, failures),
         toolchain_gate(snapshot),
         appliance_gate(),
+        rehearse_pinned(snapshot, artifacts),
     ]
-    rehearse_pinned(snapshot, artifacts)
     after = _bind_identity(before, _identity(snapshot, failures))
     binding: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "boundary": boundary,
+        "not_run": _gate_names(gates, "not-run"),
+        "failed": _gate_names(gates, "failed"),
         "snapshot": {
             "path": str(snapshot),
             "before": before,
@@ -296,6 +327,13 @@ def main() -> int:
         print(f"release-proof pinned proof: {safe_error}", file=sys.stderr)
         return EXIT_FAILURE
     print(json.dumps(binding, sort_keys=True))
+    if binding["failed"]:
+        print(
+            f"release-proof pinned proof: red gates {binding['failed']} are bound to "
+            f"{binding['boundary']}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
     return 0
 
 
