@@ -6,7 +6,9 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+from spice.mail.inbox import pending_operator_inbox_items, write_inbox_item
 from spice.serve import launch, livebus
+from spice.serve.worktree import inventory
 from spice.serve.worktree.target import WorktreeTarget
 
 # Spelled out here rather than read from the scheduler: reading the production
@@ -46,12 +48,22 @@ def _patch_lanes(monkeypatch, lifetimes: dict[str, str], ensured: list[tuple]) -
         lambda _state, target: f"thread-{target.id}",
     )
     monkeypatch.setattr(
-        launch,
+        inventory,
+        "team_actor_for_target",
+        lambda _store, _target, _thread: "",
+    )
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_pending_inbox",
+        lambda _target, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        inventory,
         "team_facts_for_target",
         lambda _store, target, _thread: {"lifetime": lifetimes[target.id]},
     )
     monkeypatch.setattr(
-        launch,
+        inventory,
         "ensure_agent_for_available_work",
         lambda target, **kwargs: ensured.append((target.id, kwargs["thread_id"])),
     )
@@ -165,6 +177,36 @@ def test_watch_looks_again_when_the_task_board_changes(tmp_path, monkeypatch):
         watch.join()
 
     assert len(looks) >= 2
+
+
+def test_watch_looks_again_when_pending_inbox_is_published(tmp_path, monkeypatch):
+    """A non-HTTP publish starts an off lane without an inventory request."""
+    target = _target("off-lane", tmp_path)
+    _patch_lanes(monkeypatch, {target.id: "Burst"}, [])
+    watch = launch.AvailableWorkWatch(
+        _state([target]), events_path=_events_file(tmp_path)
+    )
+    launch_attempted = threading.Event()
+    checks: list[int] = []
+
+    def ensure_pending(_target, **_kwargs):
+        checks.append(len(checks))
+        if pending_operator_inbox_items(target.repo_root):
+            launch_attempted.set()
+            return {}
+        return None
+
+    monkeypatch.setattr(inventory, "ensure_agent_for_pending_inbox", ensure_pending)
+    watch.start()
+    try:
+        assert watch.armed.wait(timeout=15.0) is True
+        write_inbox_item(target.repo_root, "operator.txt", "start this lane")
+        assert launch_attempted.wait(timeout=2.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(checks) >= 2
 
 
 def test_watch_preserves_a_task_event_written_during_scheduler_evaluation(

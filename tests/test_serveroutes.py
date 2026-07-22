@@ -16,6 +16,7 @@ from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
+    inbox_event_path,
     inbox_payload_rows,
     inbox_request_body,
     parse_inbox_payload,
@@ -142,6 +143,7 @@ def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
     assert payload["pendingInboxKeys"] == [payload["key"]]
     assert payload["pendingInboxRevision"]
     assert payload["pendingInboxVersion"] > 0
+    assert inbox_event_path(repo).read_text(encoding="utf-8").endswith(" inbox\n")
     assert inbox_request_body(items[0].text) == (
         "> > quoted context\n> > with newline\n\nwake this lane"
     )

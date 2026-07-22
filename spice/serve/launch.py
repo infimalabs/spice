@@ -6,17 +6,18 @@ asks for it. A board holding one ready task and one idle lane is exactly the
 board nobody is looking at, so the lane that should have started was waiting on a
 browser event rather than on the work.
 
-This gives the decision its own signal. Every task mutation rewrites the task
-backend's event token (`spice.tasks.config.mark_task_backend_changed`) -- the
-same file the lane watchers already wake on -- so a task entering READY is a
-write to one known path, and this thread blocks on that path. The wait is bounded
-by the starvation escape's own deadline, because a lone ready task is not a
-change to wake on but an age to reach: nothing further will be written on its
-behalf, and the bound is what lets that age arrive.
+This gives the decisions their own signal. Every task mutation rewrites the task
+backend's event token (`spice.tasks.config.mark_task_backend_changed`), and every
+completed inbox mutation rewrites its lane-local inbox event token. This thread
+keeps all of those paths armed before it evaluates either pending steering or
+available work. The wait is bounded by the starvation escape's own deadline,
+because a lone ready task is not a change to wake on but an age to reach: nothing
+further will be written on its behalf, and the bound is what lets that age arrive.
 
-Starting is still `agentapi.ensure_agent_for_available_work` and nothing else --
-same claim lock, same ready-since observations, same retry gate -- so a wake here
-and an inventory build in a request thread cannot both start a lane for one task.
+Starting still runs through the inventory's shared launch decision -- the same
+pending-inbox retry/renewal behavior and the same available-work claim lock,
+ready-since observations, and retry gate -- so a wake here and an inventory
+build in a request thread converge on the same guarded operations.
 """
 
 from __future__ import annotations
@@ -26,15 +27,11 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
-from spice.serve.agentapi import (
-    available_work_next_deadline,
-    ensure_agent_for_available_work,
-)
+from spice.mail.inbox import ensure_inbox_event_file
+from spice.serve.agentapi import available_work_next_deadline
 from spice.serve.livebus import FileChangeWatch
-from spice.serve.payload.identity import (
-    resolve_thread_id_for_target,
-    team_facts_for_target,
-)
+from spice.serve.payload.identity import resolve_thread_id_for_target
+from spice.serve.worktree.inventory import ensure_work_tree_agent
 from spice.tasks import config
 
 AVAILABLE_WORK_WATCH_THREAD_NAME = "spice-serve-available-work-watch"
@@ -46,7 +43,7 @@ AVAILABLE_WORK_WATCH_MIN_SECONDS = 1.0
 
 
 def start_available_work_watch(state: Any) -> AvailableWorkWatch | None:
-    """Run the available-work decision on its own signal for as long as serve runs.
+    """Run server-owned launch decisions for as long as serve runs.
 
     Observer mode owns no lanes and cannot start one, so it gets no watcher.
     """
@@ -58,7 +55,7 @@ def start_available_work_watch(state: Any) -> AvailableWorkWatch | None:
 
 
 class AvailableWorkWatch:
-    """The wake loop that starts stopped Drain lanes."""
+    """The wake loop that starts lanes for steering or Drain work."""
 
     def __init__(self, state: Any, *, events_path: Path | None = None) -> None:
         self._state = state
@@ -89,18 +86,32 @@ class AvailableWorkWatch:
     def _run(self) -> None:
         watch = FileChangeWatch()
         try:
+            watch_paths = self._watch_paths()
             # Arm before the first evaluation.  A zero bound returns as soon as
             # native registration is known to be live, without closing it.
             watch.wait(
-                (self._events_path,),
+                watch_paths,
                 self._stop,
                 timeout=0.0,
                 activated=self.armed,
             )
             while not self._stop.is_set():
                 timeout = self.evaluate()
+                refreshed_paths = self._watch_paths()
+                if refreshed_paths != watch_paths:
+                    watch_paths = refreshed_paths
+                    watch.wait(
+                        watch_paths,
+                        self._stop,
+                        timeout=0.0,
+                        activated=self.armed,
+                    )
+                    # The new paths were discovered by the evaluation above.
+                    # Re-evaluate after arming them so a publication in that
+                    # discovery-to-registration interval cannot be stranded.
+                    continue
                 watch.wait(
-                    (self._events_path,),
+                    watch_paths,
                     self._stop,
                     timeout=timeout,
                     activated=self.armed,
@@ -114,21 +125,21 @@ class AvailableWorkWatch:
         finally:
             watch.close()
 
+    def _watch_paths(self) -> tuple[Path, ...]:
+        return (
+            self._events_path,
+            *(
+                ensure_inbox_event_file(target.repo_root)
+                for target in self._state.worktree_targets()
+            ),
+        )
+
     def evaluate(self) -> float:
-        """Start every stopped Drain lane that has work, and answer when to look again."""
+        """Start lanes for steering or Drain work, then bound the next look."""
         state = self._state
         for target in state.worktree_targets():
             thread_id = resolve_thread_id_for_target(state, target) or ""
-            facts = team_facts_for_target(state.team_store, target, thread_id)
-            if facts.get("lifetime") != "Drain":
-                continue
-            ensure_agent_for_available_work(
-                target,
-                thread_id=thread_id,
-                ready_since_cache=state.available_work_ready_since,
-                attempt_cache=state.pending_agent_ensure_attempts,
-                fast_mode=bool(state.team_store.global_fast_mode_enabled()),
-            )
+            ensure_work_tree_agent(state, target, thread_id)
         remaining = available_work_next_deadline(
             state.available_work_ready_since, now=time.monotonic()
         )
