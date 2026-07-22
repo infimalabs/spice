@@ -13,6 +13,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_EXPORTER = PROJECT_ROOT / "scripts" / "release-proof-source"
 SOURCE_INITIALIZER = PROJECT_ROOT / "release-proof" / "init-source.py"
@@ -465,6 +467,22 @@ def test_failure_artifacts_are_deterministic_bounded_and_secret_redacted(tmp_pat
     ) == (False, False, False, True, True)
 
 
+def test_url_credentials_redact_userinfo_query_and_fragment_values():
+    diagnostic = (
+        "request="
+        "https://user:pass@example.test/callback?api_key=query-secret&safe=yes"
+        "#/route?access_token=fragment-secret&state=ok\n"
+        "redirect=https://example.test/done#token=second-fragment&tab=summary"
+    )
+
+    assert EVIDENCE.redact_text(diagnostic, {}) == (
+        "request="
+        "https://<redacted>@example.test/callback?api_key=%3Credacted%3E&safe=yes"
+        "#/route?access_token=%3Credacted%3E&state=ok\n"
+        "redirect=https://example.test/done#token=%3Credacted%3E&tab=summary"
+    )
+
+
 def test_pytest_count_evidence_uses_the_final_summary():
     output = (
         "bringing up nodes...\n"
@@ -487,11 +505,24 @@ def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
     evidence_dir = tmp_path / "artifacts"
     evidence_dir.mkdir()
     container_path = evidence_dir / "release-proof.json"
+    source_commit = _git(PROJECT_ROOT, "rev-parse", "HEAD^{commit}")
     container_path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "claim_boundary": {"operating_system": "linux"},
+                "source_identity": {
+                    "schema_version": 1,
+                    "source": {
+                        "commit": source_commit,
+                        "tree": "0" * len(source_commit),
+                        "commit_epoch": 1,
+                    },
+                    "synthetic": {
+                        "commit": "1" * len(source_commit),
+                        "tree": "2" * len(source_commit),
+                    },
+                },
             },
             sort_keys=True,
         )
@@ -501,11 +532,11 @@ def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
     container_before = container_path.read_bytes()
 
     def host_command(command, **_kwargs):
-        if command[0] == "uv":
+        if command[0] == "git":
             return subprocess.CompletedProcess(
                 command,
                 0,
-                stdout="2 passed, 9 deselected in 0.25s\n",
+                stdout=source_commit + "\n",
                 stderr="",
             )
         audio = Path(command[2])
@@ -519,6 +550,18 @@ def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
     monkeypatch.setattr(HOSTNATIVE, "_run_command", host_command)
     monkeypatch.setattr(
         HOSTNATIVE,
+        "_probe_kqueue_event",
+        lambda: {
+            "status": "passed",
+            "backend": "kqueue",
+            "production_path": "spice.serve.livebus._KqueueWatch",
+            "event": "filesystem-write",
+            "timeout_seconds": 5.0,
+            "elapsed_ms": 12.5,
+        },
+    )
+    monkeypatch.setattr(
+        HOSTNATIVE,
         "_appearance",
         lambda _root, _failures: {"status": "passed", "style": "dark"},
     )
@@ -530,11 +573,19 @@ def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
         "container_operating_system": "linux",
         "container_evidence_unchanged": True,
     }
+    assert report["source_identity"] == {
+        "agreement": "exact",
+        "checkout_head": source_commit,
+        "container_source_commit": source_commit,
+    }
     assert report["checks"] == {
         "kqueue-or-fsevents": {
             "status": "passed",
             "backend": "kqueue",
-            "tests": {"passed": 2, "deselected": 9, "total": 2},
+            "production_path": "spice.serve.livebus._KqueueWatch",
+            "event": "filesystem-write",
+            "timeout_seconds": 5.0,
+            "elapsed_ms": 12.5,
         },
         "appearance": {"status": "passed", "style": "dark"},
         "speech": {
@@ -550,6 +601,28 @@ def test_host_native_companion_records_macos_beside_unchanged_linux_proof(
             (evidence_dir / "release-proof-macos.json").read_text(encoding="utf-8")
         ),
     ) == (container_before, report)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires native kqueue")
+def test_host_native_probe_observes_a_real_bounded_kqueue_event():
+    result = HOSTNATIVE._probe_kqueue_event()
+
+    assert result["status"] == "passed"
+    assert result["backend"] == "kqueue"
+    assert result["production_path"] == "spice.serve.livebus._KqueueWatch"
+    assert result["event"] == "filesystem-write"
+    assert result["timeout_seconds"] == HOSTNATIVE.KQUEUE_EVENT_TIMEOUT_SECONDS
+    assert (
+        0
+        <= result["elapsed_ms"]
+        <= (
+            (
+                HOSTNATIVE.KQUEUE_EVENT_TIMEOUT_SECONDS
+                + HOSTNATIVE.LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
+            )
+            * 1000
+        )
+    )
 
 
 def test_mutation_rehearsal_requires_the_exact_committed_cohort(tmp_path):

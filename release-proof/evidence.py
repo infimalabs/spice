@@ -139,24 +139,46 @@ def _redact_url_match(match: re.Match[str]) -> str:
         raw = raw[:-1]
     try:
         parsed = urlsplit(raw)
-        hostname = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port is not None else ""
     except ValueError:
         return "<redacted-url>" + trailing
-    netloc = f"<redacted>@{hostname}{port}" if parsed.username else parsed.netloc
-    query = urlencode(
+    netloc = (
+        f"<redacted>@{parsed.netloc.rsplit('@', 1)[1]}"
+        if "@" in parsed.netloc
+        else parsed.netloc
+    )
+    return (
+        urlunsplit(
+            (
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                _redact_url_pairs(parsed.query),
+                _redact_url_fragment(parsed.fragment),
+            )
+        )
+        + trailing
+    )
+
+
+def _redact_url_pairs(value: str) -> str:
+    return urlencode(
         [
             (
                 name,
-                "<redacted>" if _sensitive_url_name(name) else value,
+                "<redacted>" if _sensitive_url_name(name) else item_value,
             )
-            for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+            for name, item_value in parse_qsl(value, keep_blank_values=True)
         ]
     )
-    return (
-        urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
-        + trailing
-    )
+
+
+def _redact_url_fragment(fragment: str) -> str:
+    if "?" in fragment:
+        route, separator, query = fragment.partition("?")
+        return route + separator + _redact_url_pairs(query)
+    if "=" in fragment:
+        return _redact_url_pairs(fragment)
+    return fragment
 
 
 def _sensitive_url_name(name: str) -> bool:

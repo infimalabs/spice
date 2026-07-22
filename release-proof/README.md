@@ -52,6 +52,8 @@ artifacts into one directory, run:
 python3 release-proof/hostnative.py --evidence-dir /path/to/artifacts
 ```
 
-The companion proves native kqueue behavior, system appearance lookup, and
-speech synthesis, then writes `release-proof-macos.json` beside the unchanged
-Linux `release-proof.json`.
+The companion requires the checkout's full `HEAD` to equal
+`release-proof.json`'s original source commit. It drives a real, bounded
+filesystem write through the production kqueue watcher, probes system
+appearance and speech synthesis, then writes the matching source identity and
+results to `release-proof-macos.json` beside the byte-unchanged Linux report.
