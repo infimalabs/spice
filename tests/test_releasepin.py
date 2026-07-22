@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import shlex
 import shutil
 import sys
@@ -14,7 +15,6 @@ import pytest
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     PINNED,
-    REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
     _git,
@@ -301,8 +301,8 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     )
 
     gate = PINNED.toolchain_gate(snapshot, _executable_interpreter(snapshot))
-    recorded = REHEARSAL._load_git_private_json(
-        snapshot, "release-proof-toolchain.json"
+    recorded = json.loads(
+        (snapshot / PINNED.TOOLCHAIN_RECORD_RELATIVE).read_text(encoding="utf-8")
     )
 
     assert (gate["gate"], gate["status"], gate["detail"]) == (
@@ -313,6 +313,11 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     assert gate["reason"] == (
         "the declared release-proof toolchain does not resolve here"
     )
+    assert gate["host"] == {
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+        "system": platform.system().casefold(),
+    }
     assert recorded == gate
 
 
