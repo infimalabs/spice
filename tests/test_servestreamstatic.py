@@ -115,7 +115,7 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "gap: 4px;" in filter_pill_rule
     assert filter_count_rule == (
         ".filter-pill-count {\n"
-        "  background: var(--accent);\n"
+        "  background: var(--good);\n"
         "  border-radius: var(--pill-radius);\n"
         "  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--button-accent-fg) 24%, transparent);\n"
         "  color: var(--button-accent-fg);\n"
@@ -1175,7 +1175,7 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert maxim_badge_rule == (
         ".badge.maxim-badge {\n  --message-badge-accent: var(--maxim-accent);\n"
     )
-    assert "background: var(--accent);" in filter_count_rule
+    assert "background: var(--good);" in filter_count_rule
     assert "background: var(--accent);" in chip_count_rule
     assert css[final_css_start:final_css_end] == (
         ".messages article.final {\n"

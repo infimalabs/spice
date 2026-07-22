@@ -1,6 +1,6 @@
 .agent-status-pip,
 .composer-quote-time[data-agent-status] {
-  --agent-activity-base: hsl(from var(--good) h 100% l);
+  --agent-activity-base: var(--good);
   --agent-status-color: var(--muted);
 }
 
@@ -14,11 +14,12 @@
   box-shadow: 0 0 0 2px var(--agent-status-halo-color);
 }
 
-/* Match the top-level stem pills' five semantic rungs while keeping the vivid
-   running endpoint: running 100%, starting 75%, running-quiet 50%,
-   stopping/stalled 25%, then the muted idle floor. Activity provides the
-   fallback tone; known lifecycle states cap it so an idle final cannot remain
-   green merely because its transcript timestamp is recent. */
+/* Match the top-level stem pills' five semantic rungs while keeping the shared
+   ready-green endpoint: running uses 100% of that color's saturation, starting
+   75%, running-quiet 50%, stopping/stalled 25%, then the muted idle floor.
+   Activity provides the fallback tone; known lifecycle states cap it so an
+   idle final cannot remain green merely because its transcript timestamp is
+   recent. */
 .agent-status-pip[data-agent-activity="active"] {
   --agent-status-color: var(--agent-activity-base);
 }
@@ -67,7 +68,7 @@
 }
 
 .composer-quote-time[data-agent-status="running"] {
-  --agent-status-color: #2f9e44;
+  --agent-status-color: var(--agent-activity-base);
 }
 
 .composer-quote-time[data-agent-status="starting"] {

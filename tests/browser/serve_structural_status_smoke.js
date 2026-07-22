@@ -13,7 +13,6 @@ const pipRampStates = [
   "idle",
 ];
 const pipHueToleranceDeg = 8;
-const pipFullSaturationTolerance = 0.01;
 const pipStepTolerance = 0.02;
 const pipIdleSaturationMaximum = 0.1;
 const groupedPipStates = [
@@ -73,7 +72,10 @@ function assertPipSaturationRamp(colors) {
           JSON.stringify(ramp),
       );
   }
-  const expectedSaturations = [1, 0.75, 0.5, 0.25];
+  const readySaturation = ramp.running.saturation;
+  const expectedSaturations = [1, 0.75, 0.5, 0.25].map(
+    (step) => readySaturation * step,
+  );
   for (let index = 0; index < expectedSaturations.length; index += 1) {
     const state = pipRampStates[index];
     if (
@@ -81,7 +83,7 @@ function assertPipSaturationRamp(colors) {
       pipStepTolerance
     )
       throw new Error(
-        "pip lifecycle rung missed its 25-point saturation step: " +
+        "pip lifecycle rung missed its proportional 25% saturation step: " +
           JSON.stringify(ramp),
       );
   }
@@ -120,12 +122,6 @@ function assertPipLifecycleEndpoints(colors, runningBase, idleBase) {
     throw new Error(
       "pip lifecycle endpoints diverged from running and idle theme bases: " +
         JSON.stringify({ runningBase, idleBase, colors }),
-    );
-  const running = rgbToHsl(colors.running);
-  if (Math.abs(running.saturation - 1) > pipFullSaturationTolerance)
-    throw new Error(
-      "running pip was not 100% saturated: " +
-        JSON.stringify({ running, runningBase, colors }),
     );
 }
 
@@ -350,7 +346,7 @@ async function runStructuralStatusSmokePage() {
     }),
   );
   const runningProbe = document.createElement("span");
-  runningProbe.style.color = "hsl(from var(--good) h 100% l)";
+  runningProbe.style.color = "var(--good)";
   lane.element.append(runningProbe);
   const runningBase = getComputedStyle(runningProbe).color;
   runningProbe.remove();
@@ -444,6 +440,12 @@ async function runStructuralStatusSmokePage() {
   lane.element.append(startingHeaderProbe);
   const startingHeaderColor = getComputedStyle(startingHeaderProbe).color;
   startingHeaderProbe.remove();
+  const runningHeaderProbe = document.createElement("span");
+  runningHeaderProbe.className = "composer-quote-time";
+  runningHeaderProbe.dataset.agentStatus = "running";
+  lane.element.append(runningHeaderProbe);
+  const runningHeaderColor = getComputedStyle(runningHeaderProbe).color;
+  runningHeaderProbe.remove();
   return {
     active,
     activeish,
@@ -455,6 +457,7 @@ async function runStructuralStatusSmokePage() {
     phaseTransition,
     pipColors,
     runningBase,
+    runningHeaderColor,
     startingHeaderColor,
     toolActivity,
   };
@@ -487,6 +490,18 @@ function assertPipStatusResult(result) {
         JSON.stringify({
           starting: result.pipColors.starting,
           startingHeaderColor: result.startingHeaderColor,
+        }),
+    );
+  if (
+    result.runningHeaderColor !== result.runningBase ||
+    result.runningHeaderColor !== result.pipColors.running
+  )
+    throw new Error(
+      "running pip and relative time did not use the shared ready green: " +
+        JSON.stringify({
+          pip: result.pipColors.running,
+          ready: result.runningBase,
+          relativeTime: result.runningHeaderColor,
         }),
     );
   for (const snapshot of [result.activeish, result.final, result.afterRelativeTick]) {

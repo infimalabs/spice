@@ -72,7 +72,16 @@ const WARN_HUE_MAX_DEG = 60;
 const WARN_MIN_SATURATION = 0.2;
 const RAMP_HUE_DIVERGENCE_DEG = 60;
 
-function assertCoverageSaturationRamp(pills) {
+function assertCoverageSaturationRamp(pills, readyGreen) {
+  const saturatedPill = pills.find((item) => item.label === "serve");
+  if (
+    saturatedPill.color !== readyGreen ||
+    saturatedPill.countColor !== readyGreen
+  )
+    throw new Error(
+      "fully-ready pill and count did not use the shared ready green: " +
+        JSON.stringify({ saturatedPill, readyGreen }),
+    );
   const saturated = toneColor(pills, "serve");
   const active = toneColor(pills, "lifecycle");
   const assigned = toneColor(pills, "studies");
@@ -230,9 +239,23 @@ async function readPills(page) {
       unavailable: pill.dataset.unavailableTaskCount,
       title: pill.title,
       color: getComputedStyle(pill).color,
+      countColor: getComputedStyle(
+        pill.querySelector(".filter-pill-count"),
+      ).backgroundColor,
       borderStyle: getComputedStyle(pill).borderTopStyle,
     })),
   PILL_TONES);
+}
+
+async function readReadyGreen(page) {
+  return page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--good)";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
 }
 
 async function installInitialState(page) {
@@ -414,8 +437,9 @@ async function clearInventory(page) {
 
 async function runScenario({ page }) {
   const pills = await installInitialState(page);
+  const readyGreen = await readReadyGreen(page);
   assertInitialPills(pills);
-  const coverageRamp = assertCoverageSaturationRamp(pills);
+  const coverageRamp = assertCoverageSaturationRamp(pills, readyGreen);
   const warnAccents = assertHiddenWarnAccent(pills);
   await page.screenshot({ path: SCREENSHOT_PATH });
   const resolvedPills = await resolveCliBlocker(page);
@@ -436,6 +460,7 @@ async function runScenario({ page }) {
     uncovered,
     emptyState,
     coverageRamp,
+    readyGreen,
     warnAccents,
     screenshotPath: SCREENSHOT_PATH,
   };

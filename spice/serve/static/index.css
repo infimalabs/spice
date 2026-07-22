@@ -23,7 +23,9 @@
   --team-plum-accent: #8a4fbf;
   --control-max-accent: var(--say-accent);
   --maxim-accent: var(--say-accent);
-  --good: var(--accent);
+  /* The ready endpoint is shared by fully-ready task pills, running pips, and
+     running relative times so these status surfaces read as one green. */
+  --good: #2f9e44;
   --warn: #b3402a;
   --control: #ffffff;
   --button-accent-fg: #ffffff;
@@ -290,7 +292,7 @@ button.primary:hover {
   color: var(--warn);
 }
 .filter-pill-count {
-  background: var(--accent);
+  background: var(--good);
   border-radius: var(--pill-radius);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--button-accent-fg) 24%, transparent);
   color: var(--button-accent-fg);
