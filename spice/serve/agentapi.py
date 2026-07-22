@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Sequence
 
@@ -282,7 +283,6 @@ def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
     thread_id: str,
-    ready_since_cache: dict[tuple[str, str], float] | None = None,
     attempt_cache: dict[str, float] | None = None,
     retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
@@ -290,13 +290,16 @@ def ensure_agent_for_available_work(
 ) -> dict[str, Any] | None:
     """Claim one task as a stopped lane's actor, then start only that lane.
 
-    Expansion requires two ready tasks unless one candidate has remained ready
+    Expansion requires two ready tasks unless one candidate has been waiting
     for the starvation interval. READY rows exclude active claims, so this
     fixed threshold starts one lane and leaves one task on the board regardless
     of how many lanes are already working. Two rows are an immediate capacity
-    signal: they bypass the local retry debounce and automatic-restart hold as
-    well as the lone-row age threshold. This is deliberately a single-candidate
-    decision: a lost claim never falls through to another stale candidate.
+    signal: they skip the lone-row age threshold and need not wait out an
+    interval spent by an earlier pass. They are not a reason to relaunch a lane
+    whose launches keep dying -- queue pressure is a demand for a working
+    agent, and the rapid-death hold is the standing answer that this lane is
+    not one. This is deliberately a single-candidate decision: a lost claim
+    never falls through to another stale candidate.
 
     The claim rides into the launch it reserves, so the supervisor of an agent
     that never reaches readiness hands the row straight back instead of leaving
@@ -306,35 +309,27 @@ def ensure_agent_for_available_work(
     if not actor:
         return _available_work_skip("unbound")
     if agent_status(target.repo_root).running:
-        forget_available_work_observations(actor, ready_since_cache)
         return None
     with _AVAILABLE_WORK_CLAIM_LOCK:
         if agent_status(target.repo_root).running:
-            forget_available_work_observations(actor, ready_since_cache)
             return None
         candidates = alloc.ordered_visible_ready_rows(actor)
         if not candidates:
-            forget_available_work_observations(actor, ready_since_cache)
             return None
-        now = time.monotonic()
-        starved = _observe_available_work_candidates(
-            actor,
-            candidates,
-            ready_since_cache,
-            now=now,
-        )
-        at_capacity = len(candidates) >= AVAILABLE_WORK_START_THRESHOLD
-        # The retry cache used to run before this snapshot. A one-row pass
-        # therefore hid a second row that arrived inside the debounce window,
-        # even though two READY rows are the exact signal to hand one out now.
-        if not at_capacity and not _ensure_due(
+        remaining = available_work_next_deadline(candidates, now=datetime.now(UTC))
+        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and remaining > 0.0:
+            return _available_work_skip("capacity", retry_after_seconds=remaining)
+        # Read after the board, not before it: a pass that declines above spends
+        # nothing here, so a second row arriving mid-interval finds the interval
+        # unspent and dispatches on arrival. What it does bound is attempts,
+        # which is what keeps a launch that dies on contact from being retried
+        # as fast as its own failure hands the rows back.
+        if not _ensure_due(
             target.id,
             attempt_cache=attempt_cache,
             retry_seconds=retry_seconds,
         ):
-            return None
-        if not at_capacity and not starved:
-            return _available_work_skip("capacity")
+            return _available_work_skip("retry-wait")
         chosen = candidates[0]
         task_uuid = identity.uuid_of(chosen)
         handle = identity.render_handle(chosen)
@@ -359,10 +354,7 @@ def ensure_agent_for_available_work(
                 target,
                 fast_mode=fast_mode,
                 force_new=force_new,
-                # Queue pressure is itself the grant to try immediately. A
-                # lone starved row remains an automatic restart and therefore
-                # continues to honor the lane-local rapid-death hold.
-                automatic=not at_capacity,
+                automatic=True,
                 launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
             )
         except Exception:
@@ -371,88 +363,60 @@ def ensure_agent_for_available_work(
         payload.update({"trigger": "available-work", "taskHandle": handle})
         if payload.get("ok") is False:
             # The launch was attempted and refused -- out of credits, or the
-            # restart guard. The task returns to the board, so it keeps the
-            # ready-since observation it had earned: how long it has been
-            # starving is the evidence that says whether this lane is merely
-            # idle or has been unable to start for an hour, and rereading it as
-            # freshly ready would both erase that and make it serve the whole
-            # interval again before the next attempt.
+            # restart guard. The task returns to the board still carrying every
+            # second it has waited, because that age is a property of the row
+            # rather than of anyone watching it.
             payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
-            return payload
-        # Only a lane that actually started stops being a reason to watch this
-        # task: its claim takes the row out of READY.
-        forget_available_work_observation(actor, task_uuid, ready_since_cache)
         return payload
 
 
-def _observe_available_work_candidates(
-    actor: str,
-    candidates: Sequence[dict[str, Any]],
-    ready_since_cache: dict[tuple[str, str], float] | None,
-    *,
-    now: float,
-) -> bool:
-    if ready_since_cache is None:
-        return False
-    candidate_keys = {(actor, identity.uuid_of(row)) for row in candidates}
-    for key in tuple(ready_since_cache):
-        if key[0] == actor and key not in candidate_keys:
-            ready_since_cache.pop(key, None)
-    for key in candidate_keys:
-        ready_since_cache.setdefault(key, now)
-    return any(
-        now - ready_since_cache[key] >= AVAILABLE_WORK_STARVATION_SECONDS
-        for key in candidate_keys
-    )
+def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> float:
+    """How long this task has been waiting for a lane, read off the row itself.
+
+    The waiting is measured from `incepted`: the base52 stamp minted the moment
+    the task was thought of, stored on every row, and never rewritten. Serve
+    restarts constantly, so an age kept in process memory against a process
+    clock is reset by every restart -- a task that waited an hour reads as
+    freshly ready to the next server and starts the whole interval over. An age
+    the row carries survives that, and survives being handed to a different
+    server entirely.
+
+    Inception is not the moment the task entered READY: a task can be planned
+    long before it is boarded, and one that has only just become allocatable can
+    already read as starving. That direction is the safe one -- this age only
+    ever releases the two-task threshold early, never holds a start back.
+
+    A row with no stamp cannot be aged, so it waits on the threshold like any
+    other candidate instead of decoding to the epoch and starving instantly.
+    """
+    incepted = str(row.get("incepted") or "").strip()
+    if not identity.INCEPTED_RE.match(incepted):
+        return 0.0
+    return (now - identity.incepted_datetime(incepted)).total_seconds()
 
 
 def available_work_next_deadline(
-    ready_since_cache: dict[tuple[str, str], float] | None,
+    candidates: Sequence[dict[str, Any]],
     *,
-    now: float,
+    now: datetime,
     starvation_seconds: float = AVAILABLE_WORK_STARVATION_SECONDS,
 ) -> float:
-    """Seconds until the oldest candidate on watch reaches the starvation escape.
+    """Seconds until the oldest candidate reaches the starvation escape.
 
-    With nothing on watch the answer is the whole interval, which is the longest
-    a task filed a moment from now could have to wait. Read under the claim lock
-    that owns the cache, so a start happening in another thread cannot resize the
-    mapping mid-read.
+    Zero or less means the escape is already open. With no candidates the answer
+    is the whole interval, which is the longest a task filed a moment from now
+    could have to wait.
     """
-    with _AVAILABLE_WORK_CLAIM_LOCK:
-        oldest = (
-            min(ready_since_cache.values(), default=None) if ready_since_cache else None
-        )
-    if oldest is None:
-        return starvation_seconds
-    return starvation_seconds - (now - oldest)
+    oldest = max(
+        (available_work_queue_age_seconds(row, now=now) for row in candidates),
+        default=0.0,
+    )
+    return starvation_seconds - oldest
 
 
-def forget_available_work_observation(
-    actor: str,
-    task_uuid: str,
-    ready_since_cache: dict[tuple[str, str], float] | None,
-) -> None:
-    resolved_actor = canonical_thread_id(actor)
-    if ready_since_cache is not None and resolved_actor:
-        with _AVAILABLE_WORK_CLAIM_LOCK:
-            ready_since_cache.pop((resolved_actor, task_uuid), None)
-
-
-def forget_available_work_observations(
-    actor: str,
-    ready_since_cache: dict[tuple[str, str], float] | None,
-) -> None:
-    resolved_actor = canonical_thread_id(actor)
-    if ready_since_cache is None or not resolved_actor:
-        return
-    with _AVAILABLE_WORK_CLAIM_LOCK:
-        for key in tuple(ready_since_cache):
-            if key[0] == resolved_actor:
-                ready_since_cache.pop(key, None)
-
-
-def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any]:
+def _available_work_skip(
+    reason: str, *, task_handle: str = "", retry_after_seconds: float | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": True,
         "action": "skipped",
@@ -461,6 +425,8 @@ def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any
     }
     if task_handle:
         payload["taskHandle"] = task_handle
+    if retry_after_seconds is not None:
+        payload["retryAfterSeconds"] = retry_after_seconds
     return payload
 
 

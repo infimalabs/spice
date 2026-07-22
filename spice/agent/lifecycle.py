@@ -950,7 +950,10 @@ def _release_unready_launch_claim(
         if str(state.get("startup_status") or "") == AGENT_STARTUP_READY:
             return ""
         released = claimstate.release_claim(launch_claim.uuid, launch_claim.actor)
-    except SpiceError as exc:
+    except Exception as exc:
+        # Both the state read and claim-witness retirement perform filesystem
+        # I/O. This terminal cleanup boundary must preserve the launch's own
+        # outcome even when those operations fail outside SpiceError.
         released = False
         outcome = f"kept: {exc}"
     else:

@@ -85,7 +85,6 @@ def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
     assert observed == [
         {
             "thread_id": THREAD_A,
-            "ready_since_cache": state.available_work_ready_since,
             "attempt_cache": state.pending_agent_ensure_attempts,
             "fast_mode": False,
             "force_new": False,

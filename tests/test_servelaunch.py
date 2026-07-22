@@ -17,6 +17,9 @@ from spice.serve.worktree.target import WorktreeTarget
 # minute into a candidate's wait.
 LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
 ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
+# A deadline already behind us: the lane declining it has been waiting past its
+# escape, so the only thing left to decide is how soon to act.
+ESCAPE_ALREADY_EXPIRED_SECONDS = -20.0
 
 
 def _target(name: str, tmp_path: Path) -> WorktreeTarget:
@@ -30,7 +33,6 @@ def _state(targets: list[WorktreeTarget]) -> SimpleNamespace:
         observer_mode=False,
         worktree_targets=lambda: list(targets),
         team_store=SimpleNamespace(global_fast_mode_enabled=lambda: False),
-        available_work_ready_since={},
         pending_agent_ensure_attempts={},
     )
 
@@ -41,7 +43,13 @@ def _events_file(tmp_path: Path) -> Path:
     return events
 
 
-def _patch_lanes(monkeypatch, lifetimes: dict[str, str], ensured: list[tuple]) -> None:
+def _patch_lanes(
+    monkeypatch,
+    lifetimes: dict[str, str],
+    ensured: list[tuple],
+    *,
+    declined: dict | None = None,
+) -> None:
     monkeypatch.setattr(
         launch,
         "resolve_thread_id_for_target",
@@ -62,11 +70,23 @@ def _patch_lanes(monkeypatch, lifetimes: dict[str, str], ensured: list[tuple]) -
         "team_facts_for_target",
         lambda _store, target, _thread: {"lifetime": lifetimes[target.id]},
     )
-    monkeypatch.setattr(
-        inventory,
-        "ensure_agent_for_available_work",
-        lambda target, **kwargs: ensured.append((target.id, kwargs["thread_id"])),
-    )
+
+    def ensure(target, **kwargs):
+        ensured.append((target.id, kwargs["thread_id"]))
+        return declined
+
+    monkeypatch.setattr(inventory, "ensure_agent_for_available_work", ensure)
+
+
+def _capacity_decline(retry_after_seconds: float) -> dict:
+    """The refusal a lane returns while its oldest candidate is still waiting."""
+    return {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "capacity",
+        "retryAfterSeconds": retry_after_seconds,
+    }
 
 
 def test_observer_mode_runs_no_available_work_watch():
@@ -89,21 +109,31 @@ def test_evaluate_offers_work_to_drain_lanes_only(tmp_path, monkeypatch):
     remaining = watch.evaluate()
 
     assert ensured == [("drain", "thread-drain")]
-    # Nothing is on watch yet, so the next look is a whole interval out.
+    # No lane declined for capacity, so nothing is waiting on an age to arrive
+    # and the next look is a whole interval out.
     assert remaining == LONE_TASK_ESCAPE_SECONDS
 
 
 def test_evaluate_shortens_its_bound_to_the_oldest_candidates_escape(
     tmp_path, monkeypatch
 ):
-    """The next wake lands when the oldest candidate reaches three minutes."""
+    """The next wake lands when the oldest candidate reaches three minutes.
+
+    The lane that declined already read its rows under the claim lock, so the
+    countdown rides back out with the refusal rather than costing this thread a
+    second look at the same board.
+    """
     drain = _target("drain", tmp_path)
     ensured: list[tuple] = []
-    _patch_lanes(monkeypatch, {"drain": "Drain"}, ensured)
-    monkeypatch.setattr(launch.time, "monotonic", lambda: 1000.0)
-    state = _state([drain])
-    state.available_work_ready_since = {("thread-drain", "task-old"): 940.0}
-    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    _patch_lanes(
+        monkeypatch,
+        {"drain": "Drain"},
+        ensured,
+        declined=_capacity_decline(ESCAPE_REMAINING_AFTER_ONE_MINUTE),
+    )
+    watch = launch.AvailableWorkWatch(
+        _state([drain]), events_path=_events_file(tmp_path)
+    )
 
     remaining = watch.evaluate()
 
@@ -114,11 +144,15 @@ def test_evaluate_keeps_a_floor_under_an_expired_escape(tmp_path, monkeypatch):
     """A candidate already past its escape still leaves room to act on it."""
     drain = _target("drain", tmp_path)
     ensured: list[tuple] = []
-    _patch_lanes(monkeypatch, {"drain": "Drain"}, ensured)
-    monkeypatch.setattr(launch.time, "monotonic", lambda: 1000.0)
-    state = _state([drain])
-    state.available_work_ready_since = {("thread-drain", "task-stuck"): 500.0}
-    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    _patch_lanes(
+        monkeypatch,
+        {"drain": "Drain"},
+        ensured,
+        declined=_capacity_decline(ESCAPE_ALREADY_EXPIRED_SECONDS),
+    )
+    watch = launch.AvailableWorkWatch(
+        _state([drain]), events_path=_events_file(tmp_path)
+    )
 
     remaining = watch.evaluate()
 
