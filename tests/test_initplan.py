@@ -104,6 +104,23 @@ def test_apply_consumes_the_existing_plan_and_realizes_every_managed_operation(
     )
 
 
+def test_full_plan_materializes_in_place_oops_triage_guidance(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo)
+    skill = _operation(
+        plan,
+        WORKTREE_SKILL_RELATIVE_PATH.as_posix(),
+        InitOperationScope.WORKTREE_FILE,
+    )
+    content = str(skill.generated_value)
+
+    assert "spice task claim <handle>" in content
+    assert "Oops rows already use the plan flow" in content
+    assert "origin=task:<oops-handle>" in content
+    assert "spice task depends <oops-handle> --after <child...>" in content
+    assert "without a separate wake-path write" in content
+
+
 def test_gates_only_plan_uses_the_same_model_for_its_bounded_surface(tmp_path):
     repo = _git_init(tmp_path / "repo")
 
