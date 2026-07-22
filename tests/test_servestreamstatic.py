@@ -73,9 +73,18 @@ def test_static_filter_header_pills_render_models_and_styles():
         '  ].join("·");' in app_lanes
     )
     assert "function taskFilterStemPillTone(model)" in app_lanes
-    assert 'if (model.readyTaskCount > 0) return "ready";' in app_lanes
+    # Saturation encodes agent coverage first, then work flow: an uncovered stem
+    # sits on the gray floor (idle when ready work waits, dormant when nothing is
+    # movable); a covered stem climbs assigned -> active -> saturated so a
+    # legitimately-blocked-but-covered stem stays visibly lit.
+    assert "const covered = model.drainability.count > 0;" in app_lanes
+    assert (
+        'if (!covered) return model.readyTaskCount > 0 ? "idle" : "dormant";'
+        in app_lanes
+    )
+    assert 'if (model.readyTaskCount > 0) return "saturated";' in app_lanes
     assert 'if (model.inFlightTaskCount > 0) return "active";' in app_lanes
-    assert 'return "dormant";' in app_lanes
+    assert 'return "assigned";' in app_lanes
     assert 'classes.push("filter-pill--" + tone);' in app_lanes
     assert 'classes.push("filter-pill--private");' in app_lanes
     assert 'classes.push("filter-pill--system");' in app_lanes
@@ -114,13 +123,18 @@ def test_static_filter_header_pills_render_models_and_styles():
         "  font-size: 9px;\n"
         "  padding: 0 5px;\n"
     )
+    # The mid-ramp badges track their pill's derived tone; the dormant floor uses
+    # the neutral gray; hidden/system stems recover the warn accent on the badge.
     assert (
-        ".filter-pill--active .filter-pill-count { background: var(--filter-pill-draining); }"
+        ".filter-pill--active .filter-pill-count,\n"
+        ".filter-pill--assigned .filter-pill-count,\n"
+        ".filter-pill--idle .filter-pill-count { background: var(--filter-pill-tone); }"
         in css
     )
     assert (
         ".filter-pill--dormant .filter-pill-count { background: var(--muted); }" in css
     )
+    assert ".filter-pill--system .filter-pill-count { background: var(--warn); }" in css
     assert ".filter-pill--implicit {" in css
     assert (
         ".filter-pill--private,\n.filter-pill--system { border-style: dashed; }" in css
