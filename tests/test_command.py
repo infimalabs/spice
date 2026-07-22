@@ -946,6 +946,47 @@ def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
     assert (empty_payload, empty_signature) == ("", ())
 
 
+def test_side_channel_repeats_critical_claim_warning_on_lease_timer(
+    tmp_path, monkeypatch
+):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wrap, "CLAIM_LEASE_CRITICAL_REPEAT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: wrap.WorkingStateSnapshot(
+            claim_handle="CLAIMS-00000002",
+            claim_phase="todo",
+            claim_elapsed_seconds=90,
+            claim_remaining_seconds=59,
+        ),
+    )
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+            },
+        )
+        thread.start()
+
+        def two_warnings():
+            output = stderr.getvalue()
+            return output if output.count("CLAIM LEASE CRITICAL") >= 2 else ""
+
+        output = _eventually(two_warnings, contains="CLAIM LEASE CRITICAL")
+
+    thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+    assert output.count("CLAIM LEASE CRITICAL") >= 2
+    assert "CLAIMS-00000002 has 59s remaining" in output
+    assert "run spice task reclaim CLAIMS-00000002" in output
+    assert not thread.is_alive()
+
+
 def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch):
     stderr = io.StringIO()
     monkeypatch.chdir(tmp_path)

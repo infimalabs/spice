@@ -64,6 +64,10 @@ PACKAGING_TOOLCHAIN = {
     "twine": "twine",
     "wheel": "wheel",
 }
+GIT_PRIVATE_RECORD_PRODUCERS = {
+    "release-proof-identities.json": "release-proof/init-source.py",
+    "release-proof-toolchain.json": "release-proof/toolchain.py",
+}
 PLAYWRIGHT_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
@@ -604,15 +608,41 @@ def wheel_member_mismatches(canonical: Path, rebuilt: Path) -> list[dict[str, st
     return mismatches
 
 
+def git_private_path(root: Path, name: str) -> Path:
+    """Resolve a Git-private record the way init-source.py writes it.
+
+    A linked worktree keeps a ``.git`` file holding a gitdir pointer, so
+    joining ``.git`` as a directory raises ``Not a directory`` there. Asking
+    Git for the path works for both layouts.
+    """
+    resolved = Path(
+        _run(
+            ["git", "rev-parse", "--git-path", name],
+            cwd=root,
+            capture=True,
+            gate="git-private-path",
+        ).stdout.strip()
+    )
+    return resolved if resolved.is_absolute() else root / resolved
+
+
 def _load_git_private_json(root: Path, name: str) -> dict[str, Any]:
-    path = root / ".git" / name
+    path = git_private_path(root, name)
+    if not path.is_file():
+        producer = GIT_PRIVATE_RECORD_PRODUCERS[name]
+        raise RehearsalError(
+            f"missing Git-private proof record {name} at {path}; "
+            f"{producer} writes it during the release-proof container build, "
+            "so a host checkout that has not run that build cannot emit a "
+            "receipt for artifacts it otherwise proved"
+        )
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise RehearsalError(f"invalid Git-private proof record: {path}")
     return payload
 
 
-def _write_receipt(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -703,7 +733,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         },
         "failure_diagnostics": failure_policy_payload(),
     }
-    _write_receipt(artifact_dir / RECEIPT_NAME, receipt)
+    _write_json(artifact_dir / RECEIPT_NAME, receipt)
     return receipt
 
 

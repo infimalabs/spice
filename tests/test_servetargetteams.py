@@ -6,6 +6,8 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from spice.serve import agentapi, app, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
@@ -22,6 +24,61 @@ from spice.worktrees import WorktreeRecord
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_A = f"thread:{THREAD_A}"
+
+
+@pytest.mark.parametrize(
+    ("lifetime", "expected_ensure"),
+    [
+        ("Drain", {"ok": True, "trigger": "available-work"}),
+        ("Drive", None),
+        ("Steer", None),
+    ],
+)
+def test_available_work_expansion_is_scoped_to_drain_lifetime(
+    tmp_path, monkeypatch, lifetime, expected_ensure
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    state.team_store.create_team(
+        config=TeamConfig(lifetime=lifetime),
+        members=[ACTOR_A],
+    )
+    _patch_payload_dependencies(monkeypatch, thread_id=THREAD_A, running=False)
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: {"ok": True, "trigger": "available-work"},
+    )
+
+    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+
+    assert result[3] == expected_ensure
+
+
+def test_operator_wake_bypasses_steer_available_work_gate(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    state.team_store.create_team(
+        config=TeamConfig(lifetime="Steer"),
+        members=[ACTOR_A],
+    )
+    _patch_payload_dependencies(monkeypatch, thread_id=THREAD_A, running=False)
+    operator_wake = {
+        "ok": True,
+        "trigger": "pending-inbox",
+        "threadId": THREAD_A,
+    }
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: operator_wake,
+    )
+
+    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+
+    assert result[3] == operator_wake
 
 
 def test_unstarted_target_id_membership_is_visible_in_target_payload(
