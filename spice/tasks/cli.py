@@ -507,7 +507,7 @@ def _configure_edit_parser(actions: Any) -> None:
         recovery_examples=("spice task edit TASK-1k4Q5gJw --priority high",),
     )
     edit.add_argument("handle")
-    edit.add_argument("--priority", help="high/medium/low/none or H/M/L.")
+    edit.add_argument("--priority", help="critical/high/medium/low/none or C/H/M/L.")
     edit.add_argument("--project", help="Reassign to an assignable dotted project.")
     edit.add_argument(
         "--description",
@@ -687,7 +687,7 @@ def _configure_add_content_arguments(add: Any) -> None:
     add.add_argument(
         "--priority",
         default=config.DEFAULT_PRIORITY,
-        help="Native Taskwarrior priority: high/medium/low/none or H/M/L.",
+        help="Native Taskwarrior priority: critical/high/medium/low/none or C/H/M/L.",
     )
     add.add_argument(
         "--flow",
@@ -748,7 +748,7 @@ def _configure_oops_parser(actions: Any) -> None:
     oops.add_argument(
         "--severity",
         default="medium",
-        help="Severity: critical/high/medium/low or H/M/L.",
+        help="Severity: critical/high/medium/low or C/H/M/L.",
     )
     oops.add_argument("--kind", default="")
     oops.add_argument("--surface", default="")

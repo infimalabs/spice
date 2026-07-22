@@ -180,7 +180,7 @@ ledger writes the bare canonical label. The field set is closed:
 | --- | --- | --- |
 | `Acceptance:` | one criterion; repeat the line per criterion | `Acceptance criteria`, `Success criteria`, `Done when`, `Definition of done`, `AC` |
 | `After:` | one or more slugs or titles, comma-separated; repeatable; forward references welcome | `Depends on`, `Blocked by`, `Prerequisites` |
-| `Priority:` | `high`, `medium`, `low`, `none`; anything else refuses | — |
+| `Priority:` | `critical`, `high`, `medium`, `low`, `none`; anything else refuses | — |
 | `Flow:` | comma-separated phases from the approved set (`design`, `plan`, `todo`, `verify`, `review`); an unapproved phase refuses | — |
 | `Due:` | a date the board's date parser accepts | `Deadline` |
 | `Tags:` | comma- or space-separated tags | `Labels` |
@@ -592,7 +592,7 @@ Everything that can fail fails loudly, completely, and before any write:
 | `title collides with the synthetic root: <title> (line <n>); rename or nest it` | a parentless task titled `Document root` in a document that needs the synthetic root |
 | `unknown After target: <target> (line <n>)` | `After:` names no node in the document |
 | `ambiguous After target: <target> (title is duplicated; use a qualified slug)` | a bare `After:` target names a duplicated title |
-| `invalid priority: <value>` | `Priority:` outside `high`/`medium`/`low`/`none` |
+| `invalid priority: <value>` | `Priority:` outside `critical`/`high`/`medium`/`low`/`none` |
 | `invalid flow phase: <phase>` | `Flow:` names an unapproved phase |
 | `dependency cycle at <slug>` | cycle in the document graph or the post-state graph |
 | `acceptance criterion on <slug> contains '\|'` | a criterion the row surface's pipe join cannot round-trip; escape or reword |
@@ -1122,7 +1122,7 @@ STRUCTURE   # heading (H1-H6; deeper: bold spans)   Setext over ===/---
 FIELDS      Acceptance: <criterion>       (repeat per criterion, or:)
             Acceptance:                   (+ criteria list, blanks only between)
             After: <slug-or-title>[, ...] (cross-edges; forward refs ok)
-            Priority: high|medium|low|none      Flow: <phase>[, ...]
+            Priority: critical|high|medium|low|none      Flow: <phase>[, ...]
             Due: <date>                         Tags: <tag>[, ...]
             labels case-insensitive; **emphasis** tolerated; synonyms:
             acceptance criteria/success criteria/done when/definition of

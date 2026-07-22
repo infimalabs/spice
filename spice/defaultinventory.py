@@ -65,6 +65,7 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.tasks.config.OOPS_DEFAULT_FLOW": "tasks.oops_default_flow",
     "spice.tasks.config.DEFAULT_PRIORITY": "tasks.default_priority",
     "spice.tasks.config.PRIORITY_MAP": "tasks.priority",
+    "spice.tasks.config.PRIORITY_URGENCY": "tasks.priority_urgency",
     "spice.tasks.config.SEVERITY_PRIORITY": "tasks.severity_priority",
     "spice.tasks.config.SEVERITIES": "tasks.severities",
     "spice.tasks.config.SEVERITY_SHORTHANDS": "tasks.severity_shorthands",

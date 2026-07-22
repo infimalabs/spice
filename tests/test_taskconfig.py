@@ -327,6 +327,53 @@ def test_design_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
     assert "design" in config.task_project_validation_catalog()["approvedPhases"]
 
 
+def test_critical_priority_is_a_distinct_top_level_across_task_surfaces() -> None:
+    assert config.PRIORITY_URGENCY == {
+        "C": 8.1,
+        "H": 6.0,
+        "M": 3.9,
+        "L": 1.8,
+    }
+    assert config.uda_schema()["priority"] == {
+        "type": "string",
+        "label": "Priority",
+        "values": "C,H,M,L,",
+    }
+    assert config.map_priority("critical") == "C"
+    assert config.map_priority("C") == "C"
+    assert config.map_severity("C") == "critical"
+    assert config.SEVERITY_PRIORITY["critical"] == "C"
+    assert config.SLA_DUE_SECONDS["C"] == config.SLA_DUE_SECONDS["H"]
+
+
+@pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
+def test_taskwarrior_accepts_critical_above_high_priority(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    backend = tmp_path / "priority-backend"
+    monkeypatch.chdir(repo)
+    config.set_backend(str(backend))
+    try:
+        taskrc = config.bootstrap()
+        lines = taskrc.read_text(encoding="utf-8").splitlines()
+        tw.run(["add", "critical priority probe", "priority:C"])
+        tw.run(["add", "high priority probe", "priority:H"])
+        rows = {str(row["description"]): row for row in tw.export()}
+
+        assert "uda.priority.label=Priority" in lines
+        assert "uda.priority.values=C,H,M,L," in lines
+        assert "urgency.uda.priority.C.coefficient=8.1" in lines
+        assert "urgency.uda.priority.H.coefficient=6.0" in lines
+        assert rows["critical priority probe"]["priority"] == "C"
+        assert rows["high priority probe"]["priority"] == "H"
+        assert float(rows["critical priority probe"]["urgency"]) > float(
+            rows["high priority probe"]["urgency"]
+        )
+    finally:
+        config.set_backend(None)
+
+
 @pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
 )

@@ -657,9 +657,11 @@ compaction count never changes the configured `message` text.
 | `project_min_depth` | `2` | Minimum dotted project depth for public tasks. |
 | `project_max_depth` | `3` | Maximum dotted project depth for public tasks. |
 
-Priority aliases are fixed: `critical/high -> H`, `medium -> M`, `low -> L`,
-and `none` clears priority. SLA due dates are one day, seven days, and thirty
-days for H/M/L.
+Priority aliases are fixed: `critical -> C`, `high -> H`, `medium -> M`,
+`low -> L`, and `none` clears priority. The generated Taskwarrior priority UDA
+accepts `C,H,M,L,`; its urgency coefficients are 8.1, 6.0, 3.9, and 1.8.
+Critical and high SLA due dates are one day, medium is seven days, and low is
+thirty days.
 
 ## `[tool.spice.tasks.phase_models.<driver>.<phase>]`
 

@@ -657,7 +657,13 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
     assert str(row.get(config.TASK_CREATION_SURFACE_UDA) or "") == ""
 
 
-def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
+@pytest.mark.parametrize(
+    ("severity", "label", "priority"),
+    (("C", "critical", "C"), ("H", "high", "H")),
+)
+def test_task_oops_accepts_priority_style_severity_shorthand(
+    task_repo, capsys, severity, label, priority
+):
     args = build_parser().parse_args(
         [
             "task",
@@ -665,7 +671,7 @@ def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
             "wrapper",
             "hiccup",
             "--severity",
-            "H",
+            severity,
             "--origin",
             "ack:1jN54zJJ",
         ]
@@ -676,8 +682,8 @@ def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
     created = re.search(r"OOPS-\S+", out).group(0)
     row = identity.resolve(created)
 
-    assert "[high]" in out
-    assert row["priority"] == "H"
+    assert f"[{label}]" in out
+    assert row["priority"] == priority
     assert row["project"] == config.OOPS_PROJECT
     assert row["phase"] == "plan"
     assert row.get("tags", []) == []

@@ -184,7 +184,7 @@ claim_context_seconds = 300
 oops_wait = "2099-01-01T00:00:00"
 
 [tasks.priority]
-critical = "H"
+critical = "C"
 high = "H"
 medium = "M"
 low = "L"
@@ -192,17 +192,25 @@ none = ""
 '' = ""
 
 [tasks.severity_priority]
-critical = "H"
+critical = "C"
 high = "H"
 medium = "M"
 low = "L"
 
 [tasks.severity_shorthands]
+c = "critical"
 h = "high"
 m = "medium"
 l = "low"
 
+[tasks.priority_urgency]
+C = 8.1
+H = 6.0
+M = 3.9
+L = 1.8
+
 [tasks.sla_due_seconds]
+C = 86400
 H = 86400
 M = 604800
 L = 2592000
