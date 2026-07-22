@@ -470,6 +470,57 @@ def test_packaging_steps_run_from_the_locked_project_toolchain(tmp_path, monkeyp
     )
 
 
+def test_git_private_records_resolve_from_a_linked_worktree(tmp_path):
+    repository, _source = _source_repository(tmp_path)
+    linked = tmp_path / "linked"
+    _git(repository, "worktree", "add", "--detach", str(linked))
+    record = Path(
+        subprocess.run(
+            ["git", "rev-parse", "--git-path", "release-proof-identities.json"],
+            check=True,
+            cwd=linked,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    if not record.is_absolute():
+        record = linked / record
+    record.write_text(
+        json.dumps({"schema_version": 1, "source": {"commit": "abc"}}),
+        encoding="utf-8",
+    )
+
+    resolved = REHEARSAL.git_private_path(linked, "release-proof-identities.json")
+    payload = REHEARSAL._load_git_private_json(linked, "release-proof-identities.json")
+
+    assert ((linked / ".git").is_file(), resolved.resolve(), payload) == (
+        True,
+        record.resolve(),
+        {"schema_version": 1, "source": {"commit": "abc"}},
+    )
+
+
+def test_missing_git_private_record_names_the_script_that_writes_it(tmp_path):
+    repository, _source = _source_repository(tmp_path)
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._load_git_private_json(repository, "release-proof-toolchain.json")
+
+    message = str(failure.value)
+    assert (
+        "release-proof-toolchain.json" in message,
+        "release-proof/toolchain.py" in message,
+        REHEARSAL.GIT_PRIVATE_RECORD_PRODUCERS,
+    ) == (
+        True,
+        True,
+        {
+            "release-proof-identities.json": "release-proof/init-source.py",
+            "release-proof-toolchain.json": "release-proof/toolchain.py",
+        },
+    )
+
+
 def test_packaging_preflight_names_every_missing_module(tmp_path, monkeypatch):
     root = tmp_path / "checkout"
 
@@ -887,7 +938,8 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         return rebuilt
 
     def clean_status(command, **_kwargs):
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        stdout = f".git/{command[-1]}\n" if "--git-path" in command else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(REHEARSAL, "_build_canonical_artifacts", build_canonical)
     monkeypatch.setattr(
