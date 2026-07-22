@@ -131,8 +131,8 @@ def _agent_launch_worktree_dirty(repo_root: Path) -> bool:
     completed = plumbing.run(repo_root, "status", "--porcelain")
     if completed.returncode != 0:
         raise SpiceError(
-            "cannot launch agent: the working tree state could not be inspected; "
-            "repair Git and retry\n"
+            "repair Git and retry; cannot launch agent: the working tree state "
+            "could not be inspected\n"
             + plumbing.fail("inspect working tree for agent launch", completed)
         )
     return bool(completed.stdout.strip())
@@ -193,13 +193,16 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     remote, baseline = resolved
     if _worktree_dirty(root):
         raise SpiceError(
-            "cannot start new work: commit or clear the working tree first"
+            "commit or clear the working tree first; cannot start new work"
         )
     ahead = plumbing.read(root, "rev-list", "--count", f"{baseline}..HEAD")
     if ahead and ahead != "0":
         raise SpiceError(
-            f"cannot start new work: the branch has {ahead} local commit(s) "
-            "not yet recorded by a completed task; capture or clear them first"
+            # "them" led the tail once the repair moved ahead of it, so the
+            # pronoun becomes the noun it referred to; nothing else changes.
+            "capture or clear the local commits first; cannot start new work: "
+            f"the branch has {ahead} local commit(s) not yet recorded by a "
+            "completed task"
         )
     before = plumbing.read(root, "rev-parse", "HEAD")
     plumbing.run(root, "fetch", remote)
@@ -208,8 +211,8 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     completed = plumbing.run(root, "merge", "--ff-only", baseline)
     if completed.returncode != 0:
         raise SpiceError(
-            "cannot start new work: the working tree could not be brought to the "
-            "current baseline cleanly; resolve local git state first"
+            "resolve local git state first; cannot start new work: the working "
+            "tree could not be brought to the current baseline cleanly"
         )
     after = plumbing.read(root, "rev-parse", "HEAD")
     blocked = plumbing.purge_stale_bytecode(root, before, after)
@@ -240,8 +243,8 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
         return SyncResult(notes=["skipped:fetch-failed"])
     if not plumbing.read(root, "rev-parse", baseline):
         raise SpiceError(
-            f"cannot launch agent: baseline {baseline} was not found after "
-            f"fetching {remote}; repair branch tracking and retry"
+            "repair branch tracking and retry; cannot launch agent: baseline "
+            f"{baseline} was not found after fetching {remote}"
         )
     if _agent_launch_worktree_dirty(root):
         return SyncResult(notes=["skipped:dirty"])
@@ -249,7 +252,7 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
         behind, ahead = _ahead_behind(root, baseline)
     except SpiceError as exc:
         headline, separator, git_failure = str(exc).partition("\n")
-        message = f"cannot launch agent: {headline}; repair Git and retry"
+        message = f"repair Git and retry; cannot launch agent: {headline}"
         if separator:
             message += f"\n{git_failure}"
         raise SpiceError(message) from exc
@@ -261,8 +264,8 @@ def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
     completed = plumbing.run(root, "merge", "--ff-only", baseline)
     if completed.returncode != 0:
         raise SpiceError(
-            f"cannot launch agent: the working tree could not fast-forward to "
-            f"{baseline}; repair the branch and retry\n"
+            "repair the branch and retry; cannot launch agent: the working tree "
+            f"could not fast-forward to {baseline}\n"
             + plumbing.fail(f"fast-forward agent launch to {baseline}", completed)
         )
     after = plumbing.read(root, "rev-parse", "HEAD")
