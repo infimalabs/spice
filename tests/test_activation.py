@@ -308,7 +308,7 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         assert "baseline_refresh=updated working tree to the current baseline" in packet
         assert f"claim_renewal=renewed {handle} until " in packet
         assert row["claim_head"] == refreshed_head
-        assert row["claim_lease_seconds"] == f"{config.CLAIM_TTL_SECONDS:g}"
+        assert row["claim_lease_seconds"] == "60"
     finally:
         config.set_backend(None)
 

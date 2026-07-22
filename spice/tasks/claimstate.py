@@ -173,20 +173,32 @@ def _resolved_claim_lease_seconds(lease_seconds: float | None) -> float:
 
 def _row_claim_lease_seconds(row: dict[str, Any]) -> float:
     raw = str(row.get("claim_lease_seconds") or "").strip()
+    if not raw:
+        raise SpiceError("active claim has no recorded lease duration")
     try:
-        return _resolved_claim_lease_seconds(float(raw) if raw else None)
-    except (SpiceError, ValueError):
-        return _resolved_claim_lease_seconds(None)
+        return _resolved_claim_lease_seconds(float(raw))
+    except (SpiceError, ValueError) as exc:
+        raise SpiceError(f"active claim has unreadable lease duration {raw!r}") from exc
 
 
 def _effective_claim_lease_seconds(
     row: dict[str, Any], requested_lease_seconds: float | None
 ) -> float:
-    """Keep an active claim on its longest recorded or newly requested lease."""
-    return max(
-        _row_claim_lease_seconds(row),
-        _resolved_claim_lease_seconds(requested_lease_seconds),
+    """Keep a readable policy, or explicitly replace one that cannot be read."""
+    requested = (
+        _resolved_claim_lease_seconds(requested_lease_seconds)
+        if requested_lease_seconds is not None
+        else None
     )
+    try:
+        recorded = _row_claim_lease_seconds(row)
+    except SpiceError:
+        if requested is None:
+            raise
+        return requested
+    if requested is None:
+        return recorded
+    return max(recorded, requested)
 
 
 def _require_pending(row: dict[str, Any], action: str) -> None:
