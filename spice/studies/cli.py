@@ -41,6 +41,7 @@ from spice.studies import (
     repodocs,
     shape,
     subsumption,
+    suiteseam,
     taste,
     testquality,
 )
@@ -69,6 +70,7 @@ def configure_study_parser(subparsers: Any) -> None:
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_python_unused_parser(actions)
     _configure_subsumption_parser(actions)
+    _configure_suite_seam_reach_parser(actions)
     _configure_task_generating_study_parsers(actions)
     _configure_extension_study_parsers(actions)
 
@@ -392,6 +394,33 @@ def _configure_subsumption_parser(actions: Any) -> None:
     )
     sub_parser.add_argument("--json", action="store_true", dest="emit_json")
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
+
+
+def _configure_suite_seam_reach_parser(actions: Any) -> None:
+    reach = actions.add_parser(
+        "suite-seam-reach",
+        help=(
+            "Rank package modules by the share of the test suite that reaches "
+            "them, the measurement suite_seam paths are chosen by."
+        ),
+    )
+    reach.add_argument(
+        "--package",
+        metavar="NAME",
+        default=suiteseam.SUITE_SEAM_PACKAGE,
+        help=(
+            "Top-level package directory to rank; default: "
+            f"{suiteseam.SUITE_SEAM_PACKAGE}."
+        ),
+    )
+    reach.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=25,
+        help="Maximum ranked rows rendered in text mode; default: 25.",
+    )
+    reach.add_argument("--json", action="store_true", dest="emit_json")
+    reach.set_defaults(func=handle_study, study_action="suite-seam-reach")
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -830,6 +859,21 @@ def _study_taste(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_suite_seam_reach(args: argparse.Namespace, root: Path) -> int:
+    report = suiteseam.suite_seam_reach(root, args.package)
+    # A declaration is defensible while its narrowest member still outreaches
+    # everything left out, so that break is the finding this study reports on.
+    # A repository that declares no seam has no band to hold or to lose.
+    held = not report.declared or (
+        report.declared_floor > report.widest_undeclared.reached_by
+    )
+    if args.emit_json:
+        _print_study_json(args.study_action, report=report, bandHolds=held)
+        return 0 if held else 1
+    print("\n".join(suiteseam.render_suite_seam_reach(report, limit=args.limit)))
+    return 0 if held else 1
+
+
 def _study_reachability(
     args: argparse.Namespace,
     root: Path,
@@ -1152,6 +1196,7 @@ _STUDY_ACTIONS: dict[str, StudyHandler] = {
     "taste": _study_taste,
     "python-unused": _study_python_unused,
     "subsumption": _study_subsumption,
+    "suite-seam-reach": _study_suite_seam_reach,
 }
 
 

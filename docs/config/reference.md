@@ -501,7 +501,35 @@ paths = ["spice/tasks/tw.py", "spice/policy.py"]
 
 Choose `paths` by measurement rather than by feel: a path belongs here when it
 is transitively reachable from most of the test suite, which is the condition
-that makes a lane's own subset misleading.
+that makes a lane's own subset misleading. `spice study suite-seam-reach` is
+that measurement, and it fixes the terms the answer turns on -- a test module
+is a collected `test_*.py` file under the configured test roots, and reach
+follows imports wherever they appear, including inside function bodies. It
+ranks every package module by how many test modules reach it, alongside how
+many name it directly, so a candidate is compared against the whole ordering
+rather than judged alone:
+
+```console
+$ spice study suite-seam-reach --limit 30
+suite-seam-reach: 24 declared module(s) of 192, reached by at least 183 of 219 test module(s)
+suite-seam-reach: spice/config/pyproject.py leads the undeclared rest at 159, so the band is a strict break
+    192 reached    58 imported  spice/errors.py [declared]
+    ...
+```
+
+The two header lines are the decision: the declared band reaches down to 183
+of 219 test modules and the widest module left out of it reaches 159, so the
+declaration names a group the import graph already separates. The command
+exits non-zero when that break closes, and `--json` emits the same ranking for
+a repository that wants to consume it.
+
+A repository that gates on this should assert the result rather than restate
+it. In this one,
+`tests/test_suiteseam.py::test_this_repository_declares_exactly_the_widest_reaching_modules`
+requires the declared paths to occupy the leading slots of that ranking and the
+boundary below them to be a strict break, so a path added by feel, or a module
+that grows into the band without being declared, fails the suite with the
+ranking in hand.
 
 A red suite here is a refusal to publish, not a lost merge. The integrated tree
 stays checked out, so the failures reported are the ones the branch would have

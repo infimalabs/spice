@@ -12,9 +12,11 @@ import pytest
 from spice.cli import entry as cli_entry
 from spice.errors import SpiceError
 from spice.studies.suiteseam import (
+    SUITE_SEAM_PACKAGE,
     UNTOUCHED_REASON,
     run_suite_seam_gate,
     suite_seam_plan,
+    suite_seam_reach,
 )
 from spice.tasks import gitsync
 from tests.test_taskgitsync import _configure_git_identity, _git, _init_repo, _run
@@ -257,3 +259,23 @@ def test_the_suite_runs_as_its_own_top_level_command(tmp_path, monkeypatch):
 
     assert "marker=cleared" in str(refused.value)
     assert os.environ[cli_entry.SELFEXEC_ENV] == str(root)  # env-policy: allow
+
+
+def test_this_repository_declares_exactly_the_widest_reaching_modules():
+    """The declared list is the top of the measured ordering, not a taste call.
+
+    The comment above the declaration says membership is measured, so this is
+    where that claim is settled on the live tree. Ranking every package module
+    by the share of the suite that reaches it must place the declared paths in
+    the leading slots, and the boundary between the last declared module and
+    the first undeclared one must be a strict break -- a tie across it means
+    the list no longer names a distinguishable band and the next path to add
+    is a coin flip.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+
+    report = suite_seam_reach(repo_root, SUITE_SEAM_PACKAGE)
+
+    declared = report.declared
+    assert report.ranked[: len(declared)] == declared
+    assert report.declared_floor > report.widest_undeclared.reached_by
