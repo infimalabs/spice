@@ -37,6 +37,8 @@ LAUNCH_EXIT_CODE = 1
 LAUNCH_THREAD_ID = "cccccccccccccccccccccccccccccccc"
 OUT_OF_CREDITS_LINE = "Credit balance too low to start this session\n"
 UNREADABLE_STATE_DETAIL = "agent state is unreadable"
+UNREADABLE_STATE_OSERROR_DETAIL = "agent state path cannot be read"
+CLAIM_WITNESS_OSERROR_DETAIL = "claim witness cannot be written"
 LAUNCH_ORIGIN = "ack:1kG9Z9zf"
 LAUNCH_PROJECT = "serve.launch"
 
@@ -133,6 +135,10 @@ def _unreadable_agent_state(_repo_root: Path) -> dict[str, object]:
     raise SpiceError(UNREADABLE_STATE_DETAIL)
 
 
+def _unreadable_agent_state_oserror(_repo_root: Path) -> dict[str, object]:
+    raise OSError(UNREADABLE_STATE_OSERROR_DETAIL)
+
+
 def test_launch_that_dies_out_of_credits_returns_its_task_to_the_board(
     task_repo, monkeypatch
 ):
@@ -199,6 +205,84 @@ def test_launch_that_dies_out_of_credits_returns_its_task_to_the_board(
     assert f"spice launch claim released: {uuid} reserved for {ACTOR_A}" in settled_log
 
 
+def test_supervisor_records_third_rapid_death_when_claim_handback_raises_oserror(
+    task_repo, monkeypatch
+):
+    """A failed terminal handback cannot suppress restart-storm memory."""
+    repo_root = task_repo.resolve()
+    handle, uuid = _reserved_task("Held when terminal handback cannot finish", ACTOR_A)
+    log_path = repo_root / "supervisor-handback.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=LAUNCH_EXIT_CODE)
+    stdout_thread = _FakeThread()
+    monkeypatch.setattr(lifecycle, "agent_environment", lambda _repo: {"ENV": "1"})
+    monkeypatch.setattr(
+        lifecycle,
+        "spawn_supervised_agent",
+        lambda command, *, cwd, log_path, env: (process, stdout_thread),
+    )
+    monkeypatch.setattr(
+        lifecycle, "require_started_process", lambda _process, _log, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "started_agent_thread_id",
+        lambda _log, *, repo_root, fallback_thread_id: LAUNCH_THREAD_ID,
+    )
+    monkeypatch.setattr(
+        lifecycle, "_watch_supervised_lane", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        sidechannel,
+        "AgentSideChannelServer",
+        lambda repo_root, **_kwargs: _FakeSideChannel(repo_root),
+    )
+
+    def fail_claim_handback(*_args, **_kwargs):
+        raise OSError(CLAIM_WITNESS_OSERROR_DETAIL)
+
+    monkeypatch.setattr(claimstate, "release_claim", fail_claim_handback)
+    for _index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD - 1):
+        lifecycle.record_launch_outcome(
+            repo_root,
+            {
+                "lifetime_seconds": 0.5,
+                "exit_code": LAUNCH_EXIT_CODE,
+                "ended_at": lifecycle.utc_now(),
+            },
+        )
+    args = argparse.Namespace(
+        repo_root=str(repo_root),
+        action="start",
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="",
+        resume_thread_id=LAUNCH_THREAD_ID,
+        log_path=str(log_path),
+        fast_mode=False,
+        command_json='["codex","exec","prompt"]',
+        launch_claim_uuid=uuid,
+        launch_claim_actor=ACTOR_A,
+    )
+
+    exit_code = lifecycle.run_agent_supervisor(args)
+    outcomes = lifecycle.read_launch_outcomes(repo_root)
+    refusal = lifecycle.launch_refusal(repo_root)
+    settled_log = (
+        agent_thread_state_dir(repo_root, LAUNCH_THREAD_ID) / "logs" / log_path.name
+    ).read_text(encoding="utf-8")
+
+    assert exit_code == LAUNCH_EXIT_CODE
+    assert _claim_owner(handle) == ACTOR_A
+    assert len(outcomes) == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    assert outcomes[-1]["thread_id"] == LAUNCH_THREAD_ID
+    assert isinstance(refusal, dict)
+    assert refusal["consecutive_rapid_deaths"] == (
+        lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+    assert f"spice launch claim kept: {CLAIM_WITNESS_OSERROR_DETAIL}" in settled_log
+
+
 def test_launch_that_reached_readiness_keeps_the_task_it_is_working(task_repo):
     repo_root = task_repo.resolve()
     handle, uuid = _reserved_task("Worked by a live agent", ACTOR_A)
@@ -261,6 +345,57 @@ def test_unreadable_lane_state_reports_itself_rather_than_raising(
     assert _claim_owner(handle) == ACTOR_A
     assert f"spice launch claim kept: {UNREADABLE_STATE_DETAIL}" in log_path.read_text(
         encoding="utf-8"
+    )
+
+
+def test_unreadable_lane_state_oserror_keeps_and_reports_the_reservation(
+    task_repo, monkeypatch
+):
+    """Path.read_text failures stay inside terminal launch cleanup."""
+    repo_root = task_repo.resolve()
+    handle, uuid = _reserved_task("Reserved behind an unreadable state path", ACTOR_A)
+    log_path = repo_root / "unreadable-oserror.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=LAUNCH_EXIT_CODE)
+    monkeypatch.setattr(lifecycle, "read_agent_state", _unreadable_agent_state_oserror)
+
+    lifecycle._release_unready_launch_claim(
+        repo_root, process, lifecycle.LaunchClaim(uuid=uuid, actor=ACTOR_A), log_path
+    )
+
+    assert _claim_owner(handle) == ACTOR_A
+    assert (
+        f"spice launch claim kept: {UNREADABLE_STATE_OSERROR_DETAIL}"
+        in log_path.read_text(encoding="utf-8")
+    )
+
+
+def test_failed_claim_witness_write_reports_the_completed_row_handback(
+    task_repo, monkeypatch
+):
+    """The witness write follows row release, but cannot escape cleanup."""
+    repo_root = task_repo.resolve()
+    handle, uuid = _reserved_task("Released before its witness write fails", ACTOR_A)
+    log_path = repo_root / "witness-oserror.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=LAUNCH_EXIT_CODE)
+    _publish_launch_state(
+        repo_root, process, log_path, startup_status=lifecycle.AGENT_STARTUP_STARTING
+    )
+
+    def fail_witness_write(*_args, **_kwargs):
+        raise OSError(CLAIM_WITNESS_OSERROR_DETAIL)
+
+    monkeypatch.setattr(claimstate, "_write_claim_witness", fail_witness_write)
+
+    lifecycle._release_unready_launch_claim(
+        repo_root, process, lifecycle.LaunchClaim(uuid=uuid, actor=ACTOR_A), log_path
+    )
+
+    assert handle in _allocatable_handles()
+    assert (
+        f"spice launch claim kept: {CLAIM_WITNESS_OSERROR_DETAIL}"
+        in log_path.read_text(encoding="utf-8")
     )
 
 
