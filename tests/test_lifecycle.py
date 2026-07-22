@@ -1022,8 +1022,14 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
 def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
-    def fake_renew_claim(handle=None, *, actor=None):
-        calls.append({"handle": handle, "actor": actor})
+    def fake_renew_claim(handle=None, *, actor=None, lease_seconds=None):
+        calls.append(
+            {
+                "handle": handle,
+                "actor": actor,
+                "lease_seconds": lease_seconds,
+            }
+        )
         return claimstate.ClaimRenewalResult(
             True,
             "renewed",
@@ -1037,7 +1043,13 @@ def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
         tmp_path, "thread-a", tmp_path / "supervisor.log", {}, {}
     )
 
-    assert calls == [{"handle": None, "actor": "thread-a"}]
+    assert calls == [
+        {
+            "handle": None,
+            "actor": "thread-a",
+            "lease_seconds": lifecycle.SUPERVISOR_CLAIM_LEASE_SECONDS,
+        }
+    ]
 
 
 def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monkeypatch):

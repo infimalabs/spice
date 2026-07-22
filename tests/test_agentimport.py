@@ -140,6 +140,7 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     )
     claimstate.annotate(uuid, "preserve this annotation")
     ops.claim(handle)
+    promoted = claimstate.renew_claim(handle, lease_seconds=7200.0)
     before = identity.resolve(handle)
     preserved_fields = (
         "start",
@@ -173,6 +174,7 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     status = lifecycle.import_agent(task_repo, SUCCESSOR_UUID)
     fresh = identity.resolve(handle)
 
+    assert promoted.renewed is True
     assert status.claim_carry == (
         f"claim_carry=carried {handle} until {fresh['claim_until']}"
     )
@@ -182,6 +184,7 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     assert Path(fresh["claim_worktree"]) == task_repo
     assert fresh["claim_branch"] == "main"
     assert fresh["claim_until"] > before["claim_until"]
+    assert fresh["claim_lease_seconds"] == before["claim_lease_seconds"] == "7200"
     assert {field: fresh.get(field) for field in preserved_fields} == preserved
     assert lifecycle_events == [(uuid, "claim", successor)]
     assert [member.agent_id for member in store.team_state(team.team_id).members] == [
