@@ -1356,6 +1356,7 @@ def test_static_fused_lane_status_line_uses_latest_member_compact_preview():
     assert "const fusedHosts = new Set();" in app_render
     assert "fusedHosts.add(laneGroupHost(lane));" in app_render
     assert "for (const host of fusedHosts) {" in app_render
+    assert "syncFusedLaneLights(host);" in app_render
     assert "syncFusedLaneStatusLine(host);" in app_render
     assert "function syncFusedLaneStatusLine(lane)" in app_groups
     assert "fusedLaneLatestStatusLine(laneGroupMemberLanes(lane))" in app_groups

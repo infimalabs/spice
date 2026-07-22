@@ -29,6 +29,28 @@ function fakeClassList() {
   };
 }
 
+// syncLaneLights reuses the lights already mounted when the member order is
+// unchanged, so the stub has to answer querySelectorAll from what it holds
+// rather than pretend the container is always empty.
+function fakeLaneLights() {
+  return {
+    hidden: false,
+    style: fakeStyle(),
+    children: [],
+    querySelectorAll(selector) {
+      const wanted = selector.replace(".", "");
+      return this.children.filter((child) => {
+        return String(child.className || "")
+          .split(" ")
+          .includes(wanted);
+      });
+    },
+    replaceChildren(...children) {
+      this.children = children;
+    },
+  };
+}
+
 function fakeLane(targetId, agentName, branchName, statusLine) {
   return {
     targetId,
@@ -44,26 +66,13 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
     },
     pipEl: {
       hidden: false,
-      dataset: { agentStatus: statusLine.agentVisualStatus || "unknown" },
+      dataset: {
+        agentStatus: statusLine.agentVisualStatus || "unknown",
+        agentActivity: statusLine.activityStatus || "unknown",
+      },
       title: "",
     },
-    laneLightsEl: {
-      hidden: false,
-      style: fakeStyle(),
-      children: [],
-      // syncLaneLights reuses the lights already in place when their order
-      // still matches the members, so the fake element has to answer for what
-      // it currently holds rather than only accepting replacements.
-      querySelectorAll(selector) {
-        const wanted = selector.replace(".", "");
-        return this.children.filter((child) =>
-          String(child.className).split(" ").includes(wanted),
-        );
-      },
-      replaceChildren(...children) {
-        this.children = children;
-      },
-    },
+    laneLightsEl: fakeLaneLights(),
     teamMenuButtonEl: {
       innerHTML: "",
       title: "",
@@ -81,11 +90,13 @@ const host = fakeLane("host", "Host", "main", {
   preview: "host retained",
   lastAssistantAt: "2026-06-12T05:00:00Z",
   agentVisualStatus: "running",
+  activityStatus: "active",
 });
 const member = fakeLane("member", "Member", "feature", {
   preview: "member retained",
   lastAssistantAt: "2026-06-12T05:01:00Z",
   agentVisualStatus: "idle",
+  activityStatus: "inactive",
 });
 
 const context = {
@@ -133,9 +144,26 @@ laneStore.registerLane(member);
 vm.runInContext(
   source +
     `
+  const lightIds = () => {
+    return host.laneLightsEl.children
+      .map((light) => { return light.dataset.laneLightTargetId; })
+      .join(",");
+  };
+  const lightActivity = () => {
+    return host.laneLightsEl.children
+      .map((light) => { return light.dataset.agentActivity; })
+      .join(",");
+  };
+
   reconcileLaneGroups([["host", "member"]]);
   if (!host.renderedFusedStatusLine)
     throw new Error("fused host did not record aggregate status ownership");
+  if (host.laneLightsEl.hidden || !host.pipEl.hidden)
+    throw new Error("fused host did not swap its single pip for the lane lights");
+  if (lightIds() !== "host,member")
+    throw new Error("fused host lights did not mirror member order: " + lightIds());
+  if (lightActivity() !== "active,inactive")
+    throw new Error("fused host lights did not carry per-member activity: " + lightActivity());
   const fusedWrite = statusWrites.at(-1);
   if (fusedWrite.preview !== "member retained" ||
       fusedWrite.lastAssistantAt !== "2026-06-12T05:01:00Z")
@@ -152,6 +180,10 @@ vm.runInContext(
   if (reorderedComposerWrite.targetId !== "host" ||
       reorderedComposerWrite.memberTargetIds.join(",") !== "member,host")
     throw new Error("reorder did not render new composer order on stable host: " + JSON.stringify(reorderedComposerWrite));
+  if (lightIds() !== "member,host")
+    throw new Error("reorder did not restack the host lights: " + lightIds());
+  if (lightActivity() !== "inactive,active")
+    throw new Error("reorder did not restack per-member activity: " + lightActivity());
 
   reconcileLaneGroups([]);
   const restoredWrite = statusWrites.at(-1);
@@ -159,6 +191,10 @@ vm.runInContext(
     throw new Error("split host kept fused status marker");
   if (restoredWrite.targetId !== "host" || restoredWrite.preview !== "host retained")
     throw new Error("split host did not restore retained status: " + JSON.stringify(restoredWrite));
+  if (!host.laneLightsEl.hidden || host.pipEl.hidden)
+    throw new Error("split host did not restore its single pip in place of the lane lights");
+  if (host.laneLightsEl.children.length !== 0)
+    throw new Error("split host kept stale lane lights: " + lightIds());
 `,
   context,
   { filename: "app.groups.js" },
