@@ -43,6 +43,7 @@ from spice.tasks.claimstate import (
     phases_of,
     require_no_active_plan_phase_implementation,
     resolve_claim_target,
+    release_claim,
 )
 from spice.tasks.projectsubs import (
     _gc_empty_project_task_filters,
@@ -77,6 +78,8 @@ def claim(handle: str, *, steal: bool = False) -> str:
         uuid,
         actor,
         site=current_claim_site(),
+        context_thread=None,
+        lease_seconds=None,
         guard_unclaimed=guarded,
     ):
         raise SpiceError(
@@ -148,8 +151,10 @@ def rtk_usage_nudge() -> str | None:
 def unclaim(handle: str | None = None) -> str:
     row = resolve_claim_target(handle, action="unclaim")
     uuid = identity.uuid_of(row)
-    # Atomic: clear the start date (deactivate) and the claim metadata together.
-    tw.run([uuid, "modify", "start:", *CLAIM_CLEAR])
+    if not release_claim(uuid, tw.current_actor()):
+        raise SpiceError(
+            f"cannot unclaim {identity.render_handle(row)}: active claim is not yours"
+        )
     return identity.render_handle(row)
 
 
@@ -421,6 +426,8 @@ def capture(
         identity.uuid_of(row),
         actor,
         site=current_claim_site(),
+        context_thread=None,
+        lease_seconds=None,
         guard_unclaimed=False,
     )
     noun = "commit" if ahead == 1 else "commits"

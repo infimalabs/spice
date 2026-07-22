@@ -107,7 +107,9 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     )
     site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third", site=site, context_thread=None)
+    claim = claimstate.claim_meta(
+        "actor-third", site=site, context_thread=None, lease_seconds=None
+    )
 
     assert "claim_thread:thread-third" in claim
     assert "claim_context_turn:turn-third" in claim
@@ -136,7 +138,9 @@ def test_claim_meta_uses_actor_as_thread_without_ambient(tmp_path, monkeypatch):
     monkeypatch.setattr(claimstate, "ambient_thread", lambda: None)
     site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third", site=site, context_thread=None)
+    claim = claimstate.claim_meta(
+        "actor-third", site=site, context_thread=None, lease_seconds=None
+    )
 
     assert "claim_by:actorthird" in claim
     assert "claim_thread:actorthird" in claim
@@ -1006,6 +1010,13 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
     assert renewals == [(tmp_path, "thread-a", log_path)]
     assert nudges == [(tmp_path, "thread-a", log_path)]
     assert stop.waits[0] == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
+    assert (
+        lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
+        == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
+    )
+    assert lifecycle.SUPERVISOR_CLAIM_LEASE_SECONDS == (
+        3.0 * lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
+    )
 
 
 def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):

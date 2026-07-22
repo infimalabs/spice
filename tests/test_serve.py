@@ -525,6 +525,226 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     ]
 
 
+def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    trace: list[tuple[str, object]] = []
+    candidate = {"uuid": "task-a"}
+
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda actor: trace.append(("select", actor)) or [candidate],
+    )
+
+    def fake_claim(task_uuid, actor, **kwargs):
+        trace.append(("claim", (task_uuid, actor, kwargs)))
+        return True
+
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", fake_claim)
+    monkeypatch.setattr(
+        agentapi,
+        "git_read",
+        lambda _repo, *args: "target-head" if args[0] == "rev-parse" else "main",
+    )
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda ensured_target, **_kwargs: (
+            trace.append(("start", ensured_target.id))
+            or ({"ok": True, "action": "start", "threadId": THREAD_A}, HTTPStatus.OK)
+        ),
+    )
+
+    payload = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    claim_kwargs = trace[1][1][2]
+    assert payload == {
+        "ok": True,
+        "action": "start",
+        "threadId": THREAD_A,
+        "trigger": "available-work",
+        "taskHandle": "task-a",
+    }
+    assert [event[0] for event in trace] == ["select", "claim", "start"]
+    assert trace[0] == ("select", THREAD_A)
+    assert trace[1][1][:2] == ("task-a", THREAD_A)
+    assert claim_kwargs == {
+        "site": agentapi.claimstate.ClaimSite(repo.resolve(), "main", "target-head"),
+        "context_thread": THREAD_A,
+        "lease_seconds": lifecycle.SUPERVISOR_CLAIM_LEASE_SECONDS,
+        "guard_unclaimed": True,
+    }
+
+
+def test_available_work_ensure_reports_unbound_lane(tmp_path):
+    target = _target(_repo(tmp_path))
+
+    payload = agentapi.ensure_agent_for_available_work(target, thread_id="")
+
+    assert payload == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "unbound",
+    }
+
+
+def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
+    tmp_path, monkeypatch
+):
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    trace: list[str] = []
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-raced"}, {"uuid": "task-next"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "do_claim",
+        lambda *_args, **_kwargs: trace.append("claim-raced") or False,
+    )
+
+    payload = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    assert payload == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "claim-lost",
+        "taskHandle": "task-raced",
+    }
+    assert trace == ["claim-raced"]
+
+
+def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
+    tmp_path, monkeypatch
+):
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    trace: list[str] = []
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-failed"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "do_claim",
+        lambda *_args, **_kwargs: trace.append("claim") or True,
+    )
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda *_args, **_kwargs: (
+            trace.append("start") or {"ok": False, "error": "launch failed"},
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+        ),
+    )
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "release_claim",
+        lambda *_args, **_kwargs: trace.append("release") or True,
+    )
+
+    payload = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    assert trace == ["claim", "start", "release"]
+    assert payload == {
+        "ok": False,
+        "error": "launch failed",
+        "trigger": "available-work",
+        "taskHandle": "task-failed",
+        "claimReleased": True,
+    }
+
+
+def test_available_work_concurrent_lane_decisions_claim_distinct_tasks(
+    tmp_path, monkeypatch
+):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    targets = [
+        agentapi.WorktreeTarget("lane-a", repo_a, "lane-a", "main-a"),
+        agentapi.WorktreeTarget("lane-b", repo_b, "lane-b", "main-b"),
+    ]
+    actors = [THREAD_A, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+    candidates = [{"uuid": "task-a"}, {"uuid": "task-b"}]
+    claims: dict[str, str] = {}
+    starts: list[str] = []
+    results: list[dict[str, object] | None] = []
+    monkeypatch.setattr(
+        agentapi,
+        "agent_status",
+        lambda repo_root: SimpleNamespace(running=False, repo_root=repo_root),
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [row for row in candidates if row["uuid"] not in claims],
+    )
+
+    def fake_claim(task_uuid, actor, **_kwargs):
+        claims[task_uuid] = actor
+        return True
+
+    def fake_start(target, **_kwargs):
+        starts.append(target.id)
+        return {"ok": True, "action": "start"}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", fake_claim)
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_start)
+
+    threads = [
+        threading.Thread(
+            target=lambda lane=target, actor=actor: results.append(
+                agentapi.ensure_agent_for_available_work(
+                    lane,
+                    thread_id=actor,
+                    attempt_cache={},
+                    retry_seconds=0.0,
+                )
+            )
+        )
+        for target, actor in zip(targets, actors, strict=True)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert set(claims) == {"task-a", "task-b"}
+    assert set(claims.values()) == set(actors)
+    assert sorted(starts) == ["lane-a", "lane-b"]
+    assert {result["taskHandle"] for result in results if result} == {
+        "task-a",
+        "task-b",
+    }
+
+
 def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
     tmp_path, monkeypatch
 ):

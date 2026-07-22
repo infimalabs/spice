@@ -304,6 +304,7 @@ _CLAIM = [
     "claim_worktree",
     "claim_branch",
     "claim_head",
+    "claim_lease_seconds",
     "claim_context_start",
     "claim_context_end",
     "claim_context_link",
