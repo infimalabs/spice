@@ -602,23 +602,25 @@ def render_next(*, wait: bool = False) -> str:
             baseline = current
             continue
         peer_deadline = alloc.live_peer_claim_deadline()
+        # A peer lease may have lapsed by time alone since the allocation above.
+        # A lapse writes nothing -- no task event, no inbox entry -- so the token
+        # cannot witness it; allocation is the only observer that re-reads the
+        # clock. This snapshot cannot report the lapse either: it drops the
+        # lapsed claim, which reads as None only when that peer was the last one
+        # and as a live sibling's later deadline whenever one remains. So run
+        # allocation again before committing to either outcome, and claim the
+        # stale takeover this lane just became eligible for instead of sleeping
+        # past it or reporting terminal empty.
+        takeover = alloc.next_task()
+        if takeover is not None:
+            return _render_next_result(renewal, takeover)
+        # The token still guards the event-visible race the clock cannot
+        # explain: a peer releasing work between those two allocations.
+        current = eventwait.task_event_token()
+        if current != baseline:
+            baseline = current
+            continue
         if peer_deadline is None:
-            # Every peer lease this lane was waiting behind is gone, and one of
-            # them may have lapsed by time alone since the allocation above.
-            # A lapse writes nothing -- no task event, no inbox entry -- so the
-            # token cannot witness it; allocation is the only observer that
-            # re-reads the clock. Run it again before conceding, so the stale
-            # takeover this lane just became eligible for is claimed instead of
-            # reported as terminal empty.
-            takeover = alloc.next_task()
-            if takeover is not None:
-                return _render_next_result(renewal, takeover)
-            # The token still guards the event-visible race the clock cannot
-            # explain: a peer releasing work between those two allocations.
-            current = eventwait.task_event_token()
-            if current != baseline:
-                baseline = current
-                continue
             return _render_next_result(renewal, None)
         wake = eventwait.wait_for_allocator_event(baseline, peer_deadline)
         baseline = wake.task_token
