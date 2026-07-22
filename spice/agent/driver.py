@@ -781,6 +781,13 @@ class ClaudeDriver(AgentDriver):
             return _claude_assistant_event(timestamp, message)
         if rtype == "user" and isinstance(message, dict):
             return _claude_user_event(timestamp, message, raw.get("promptId"))
+        compacting = _claude_compaction_activity(raw)
+        if compacting is not None:
+            return {
+                "type": "compacting",
+                "timestamp": timestamp,
+                "payload": {"active": compacting},
+            }
         if _claude_is_compaction(raw):
             return {"type": "compacted", "timestamp": timestamp, "payload": {}}
         return None
@@ -1000,6 +1007,25 @@ def _claude_is_compaction(raw: dict[str, Any]) -> bool:
     if raw.get("type") == "summary":
         return True
     return raw.get("type") == "system" and raw.get("subtype") == "compact_boundary"
+
+
+def _claude_compaction_activity(raw: dict[str, Any]) -> bool | None:
+    """True while a compaction runs, False when it settles, None otherwise.
+
+    Resuming a large thread compacts before the agent can act at all, and the
+    CLI narrates that on bare status lines: `status: "compacting"` when the
+    compaction starts and a `compact_result` when it succeeds or fails. The
+    boundary and summary lines that `_claude_is_compaction` matches only ever
+    arrive *after* a compaction produced new context, so they cannot tell a
+    supervisor that a silent process is busy rather than wedged.
+    """
+    if raw.get("type") != "system" or raw.get("subtype") != "status":
+        return None
+    if raw.get("status") == "compacting":
+        return True
+    if raw.get("compact_result") is not None:
+        return False
+    return None
 
 
 def rewrite_claude_eval_envelope_command(

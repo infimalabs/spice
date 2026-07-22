@@ -14,6 +14,10 @@ STARTUP_TERMINATED_EXIT_CODE = -15
 STARTUP_TEST_GRACE_SECONDS = 0.01
 THREAD_JOIN_TIMEOUT_SECONDS = 1.0
 SLOW_CLEANUP_TEST_TIMEOUT_SECONDS = 5.0
+# An already-spent first-activity window: whatever holds the wait open past it
+# is the compaction phase alone, so these outcomes cannot pass by scheduling
+# luck the way a merely-short window could.
+EXPIRED_GRACE_SECONDS = 0.0
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +120,143 @@ def test_first_activity_transitions_starting_agent_to_ready_with_hook_warning(
     assert ready.ready is True
     assert ready.ready_at.endswith("Z")
     assert log_path.read_text(encoding="utf-8") == hooks_warning
+
+
+def _startup_outcome(signal: AgentStartupSignal, *, compacting_seconds: float) -> str:
+    return signal.wait(EXPIRED_GRACE_SECONDS, compacting_seconds=compacting_seconds)
+
+
+def test_compaction_window_governs_the_wait_until_it_settles():
+    outcomes: list[str] = []
+
+    # A resume that is compacting waits on the compaction, so first activity
+    # still arrives long after the first-activity window is spent.
+    compacting = AgentStartupSignal()
+    compacting.note_compaction_active(True)
+    waiter = lifecycle.Thread(
+        target=lambda: outcomes.append(
+            _startup_outcome(compacting, compacting_seconds=THREAD_JOIN_TIMEOUT_SECONDS)
+        )
+    )
+    waiter.start()
+    compacting.note_activity()
+    waiter.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
+
+    # A compaction that never settles is still reported, against its own window.
+    wedged = AgentStartupSignal()
+    wedged.note_compaction_active(True)
+    outcomes.append(
+        _startup_outcome(wedged, compacting_seconds=STARTUP_TEST_GRACE_SECONDS)
+    )
+
+    # Once the compaction settles the first-activity deadline governs again.
+    settled = AgentStartupSignal()
+    settled.note_compaction_active(True)
+    settled.note_compaction_active(False)
+    outcomes.append(
+        _startup_outcome(settled, compacting_seconds=SLOW_CLEANUP_TEST_TIMEOUT_SECONDS)
+    )
+
+    assert outcomes == ["activity", "compacting-timeout", "timeout"]
+
+
+def test_compacting_resume_reaches_first_activity_instead_of_being_killed(
+    tmp_path, monkeypatch
+):
+    log_path = tmp_path / "compacting.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(returncode=None)
+    state = lifecycle.build_agent_state(
+        process=process,
+        action="resume",
+        command=["claude", "--resume", "thread"],
+        driver="claude",
+        model="claude-test",
+        reasoning_effort="high",
+        service_tier="",
+        thread_id="cccccccccccccccccccccccccccccccc",
+        prompt_skill_path=tmp_path / "skill.md",
+        log_path=log_path,
+        fast_mode=False,
+        startup_status=lifecycle.AGENT_STARTUP_STARTING,
+    )
+    lifecycle.write_agent_state(tmp_path, state)
+    monkeypatch.setattr(lifecyclebinding, "process_id_is_running", lambda _pid: True)
+    monkeypatch.setattr(
+        lifecyclebinding, "process_group_is_running", lambda _pgid: True
+    )
+    signal = AgentStartupSignal()
+    signal.note_compaction_active(True)
+    stalled = lifecycle.Event()
+
+    watcher = lifecycle.Thread(
+        target=lifecycle._watch_agent_startup,
+        args=(tmp_path, process, log_path, signal, stalled),
+        kwargs={
+            "grace_seconds": EXPIRED_GRACE_SECONDS,
+            "compacting_seconds": SLOW_CLEANUP_TEST_TIMEOUT_SECONDS,
+        },
+    )
+    watcher.start()
+    # A compacting lane is alive but has produced nothing, so it stays
+    # `starting` until real activity promotes it.
+    assert lifecycle.agent_status(tmp_path).process_status == "starting"
+    signal.note_activity()
+    watcher.join(timeout=SLOW_CLEANUP_TEST_TIMEOUT_SECONDS)
+
+    ready = lifecycle.agent_status(tmp_path)
+    assert ready.process_status == "running"
+    assert ready.ready is True
+    assert ready.ready_at.endswith("Z")
+
+
+def test_wedged_compaction_stalls_with_a_compaction_specific_failure(
+    tmp_path, monkeypatch
+):
+    log_path = tmp_path / "wedged.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(returncode=None)
+    terminated: list[int] = []
+    state = lifecycle.build_agent_state(
+        process=process,
+        action="resume",
+        command=["claude", "--resume", "thread"],
+        driver="claude",
+        model="claude-test",
+        reasoning_effort="high",
+        service_tier="",
+        thread_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        prompt_skill_path=tmp_path / "skill.md",
+        log_path=log_path,
+        fast_mode=False,
+        startup_status=lifecycle.AGENT_STARTUP_STARTING,
+    )
+    lifecycle.write_agent_state(tmp_path, state)
+    monkeypatch.setattr(
+        lifecycle,
+        "terminate_process_group",
+        lambda target: terminated.append(target.pid),
+    )
+    signal = AgentStartupSignal()
+    signal.note_compaction_active(True)
+    stalled = lifecycle.Event()
+
+    lifecycle._watch_agent_startup(
+        tmp_path,
+        process,
+        log_path,
+        signal,
+        stalled,
+        grace_seconds=EXPIRED_GRACE_SECONDS,
+        compacting_seconds=STARTUP_TEST_GRACE_SECONDS,
+    )
+
+    status = lifecycle.agent_status(tmp_path)
+    assert terminated == [SUPERVISED_AGENT_PID]
+    assert stalled.is_set() is True
+    assert "compaction never settled" in status.startup_failure
+    assert f"{STARTUP_TEST_GRACE_SECONDS:g}s" in status.startup_failure
+    assert f"{STARTUP_TEST_GRACE_SECONDS:g}s" in log_path.read_text(encoding="utf-8")
 
 
 def test_silent_supervised_agent_stalls_recovers_and_arms_restart_refusal(

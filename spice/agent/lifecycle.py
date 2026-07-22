@@ -124,6 +124,13 @@ from spice.tasks import gitsync
 STARTUP_GRACE_SECONDS = 0.25
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
 FIRST_ACTIVITY_GRACE_SECONDS = 120.0
+# A resume that must compact first cannot produce activity until the compaction
+# returns, and a large transcript takes far longer than the first-activity
+# grace. Killing it mid-compaction aborts the compaction, so the transcript
+# stays oversized and the next launch compacts into the same kill -- the window
+# is generous because escaping that loop matters more than detecting a wedged
+# compaction quickly, and it stays bounded so a truly stuck one still reports.
+COMPACTING_GRACE_SECONDS = 900.0
 STARTUP_STATE_PERSISTENCE_ALLOWANCE_SECONDS = 3.0
 STARTUP_WATCH_JOIN_SECONDS = (
     PROCESS_GROUP_TERMINATION_BOUND_SECONDS
@@ -704,8 +711,9 @@ def _watch_agent_startup(
     stalled: Event,
     *,
     grace_seconds: float = FIRST_ACTIVITY_GRACE_SECONDS,
+    compacting_seconds: float = COMPACTING_GRACE_SECONDS,
 ) -> None:
-    outcome = signal.wait(grace_seconds)
+    outcome = signal.wait(grace_seconds, compacting_seconds=compacting_seconds)
     if outcome == "activity":
         if process.poll() is None:
             _transition_agent_startup_state(
@@ -719,10 +727,16 @@ def _watch_agent_startup(
         return
     if process.poll() is not None:
         return
-    detail = (
-        "agent startup stalled: no driver-defined first activity within "
-        f"{grace_seconds:g}s"
-    )
+    if outcome == "compacting-timeout":
+        detail = (
+            "agent startup stalled: compaction never settled within "
+            f"{compacting_seconds:g}s"
+        )
+    else:
+        detail = (
+            "agent startup stalled: no driver-defined first activity within "
+            f"{grace_seconds:g}s"
+        )
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(f"{detail}\n")
         log_handle.flush()
@@ -792,7 +806,10 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                     startup_signal,
                     startup_stalled,
                 ),
-                kwargs={"grace_seconds": FIRST_ACTIVITY_GRACE_SECONDS},
+                kwargs={
+                    "grace_seconds": FIRST_ACTIVITY_GRACE_SECONDS,
+                    "compacting_seconds": COMPACTING_GRACE_SECONDS,
+                },
                 name=f"spice-startup-watch-{started_thread_id or process.pid}",
                 daemon=False,
             )

@@ -109,12 +109,26 @@ class MaximReminderGate:
 
 
 class AgentStartupSignal:
-    """Notify the supervisor when first activity arrives or the process exits."""
+    """Notify the supervisor when first activity arrives or the process exits.
+
+    A resumed thread can spend minutes compacting an oversized transcript
+    before it can act at all. Compaction is liveness without readiness: it
+    swings the stall deadline out to the compacting window so the supervisor
+    does not terminate a process that is working -- terminating it aborts the
+    compaction, leaves the transcript exactly as oversized as before, and
+    relaunches into the identical kill forever -- while still leaving the lane
+    `starting` rather than ready, because nothing has been produced yet.
+
+    Each phase change restarts the wait against the window that now applies,
+    so callers block on the real start/settle events instead of polling.
+    """
 
     def __init__(self) -> None:
         self._condition = Condition()
         self._activity = False
         self._finished = False
+        self._compacting = False
+        self._phase_generation = 0
 
     def note_activity(self) -> None:
         with self._condition:
@@ -126,17 +140,31 @@ class AgentStartupSignal:
             self._finished = True
             self._condition.notify_all()
 
-    def wait(self, timeout_seconds: float) -> str:
+    def note_compaction_active(self, active: bool) -> None:
         with self._condition:
-            self._condition.wait_for(
-                lambda: self._activity or self._finished,
-                timeout=max(0.0, timeout_seconds),
-            )
-            if self._activity:
-                return "activity"
-            if self._finished:
-                return "finished"
-            return "timeout"
+            self._compacting = active
+            self._phase_generation += 1
+            self._condition.notify_all()
+
+    def wait(self, timeout_seconds: float, *, compacting_seconds: float) -> str:
+        with self._condition:
+            while True:
+                generation = self._phase_generation
+                window = compacting_seconds if self._compacting else timeout_seconds
+                self._condition.wait_for(
+                    lambda: (
+                        self._activity
+                        or self._finished
+                        or self._phase_generation != generation
+                    ),
+                    timeout=max(0.0, window),
+                )
+                if self._activity:
+                    return "activity"
+                if self._finished:
+                    return "finished"
+                if self._phase_generation == generation:
+                    return "compacting-timeout" if self._compacting else "timeout"
 
 
 def startup_signal_for_supervised_thread(thread: Thread) -> AgentStartupSignal:
@@ -172,6 +200,7 @@ def spawn_supervised_agent(
         repo_root=cwd,
         log_path=log_path,
         on_activity=startup_signal.note_activity,
+        on_compaction_active=startup_signal.note_compaction_active,
     )
     setattr(stdout_thread, "startup_signal", startup_signal)
     return typed, stdout_thread
@@ -183,10 +212,11 @@ def supervise_agent_stdout(
     repo_root: Path,
     log_path: Path,
     on_activity: Callable[[], None] | None = None,
+    on_compaction_active: Callable[[bool], None] | None = None,
 ) -> Thread:
     thread = Thread(
         target=_tee_agent_stdout,
-        args=(process, repo_root, log_path, on_activity),
+        args=(process, repo_root, log_path, on_activity, on_compaction_active),
         name=f"spice-agent-stdout-{process.pid}",
         daemon=True,
     )
@@ -199,6 +229,7 @@ def _tee_agent_stdout(
     repo_root: Path,
     log_path: Path,
     on_activity: Callable[[], None] | None = None,
+    on_compaction_active: Callable[[bool], None] | None = None,
 ) -> None:
     stdout = process.stdout
     if stdout is None:
@@ -219,6 +250,7 @@ def _tee_agent_stdout(
                 message=TEXT_STARVATION_NUDGE,
             ),
             on_activity=on_activity,
+            on_compaction_active=on_compaction_active,
         )
         try:
             for line in stdout:
@@ -534,8 +566,14 @@ def make_stdout_scanner(
     on_compaction: Callable[[], None],
     on_text_starvation: Callable[[int], None] | None = None,
     on_activity: Callable[[], None] | None = None,
+    on_compaction_active: Callable[[bool], None] | None = None,
 ) -> StdoutScanner:
-    """Pick the scanner matching this worktree's driver's stdout format."""
+    """Pick the scanner matching this worktree's driver's stdout format.
+
+    `on_compaction_active` reaches the json scanner only: a marker stream names
+    a compaction that already finished, and its driver already counts that
+    marker as activity, so there is no in-flight phase for it to report.
+    """
     if driver.stdout_format == "json":
         return JsonStdoutScanner(
             on_message,
@@ -543,6 +581,7 @@ def make_stdout_scanner(
             on_compaction=on_compaction,
             on_text_starvation=on_text_starvation,
             on_activity=on_activity,
+            on_compaction_active=on_compaction_active,
         )
     return AgentStdoutMessageScanner(
         driver,
@@ -571,6 +610,10 @@ class JsonStdoutScanner:
     that keep calling tools while emitting zero text blocks. Once the streak
     reaches `TEXT_STARVATION_THRESHOLD` the starvation callback fires (once per
     streak) so the supervisor can nudge the lane; any real text resets it.
+
+    Compaction events report on their own callback rather than as activity: a
+    compacting agent is alive but has produced nothing, so it must hold the
+    startup deadline open without being mistaken for a ready lane.
     """
 
     def __init__(
@@ -581,12 +624,14 @@ class JsonStdoutScanner:
         on_compaction: Callable[[], None] | None = None,
         on_text_starvation: Callable[[int], None] | None = None,
         on_activity: Callable[[], None] | None = None,
+        on_compaction_active: Callable[[bool], None] | None = None,
     ) -> None:
         self.on_message = on_message
         self._normalize = normalize
         self._on_compaction = on_compaction or (lambda: None)
         self._on_text_starvation = on_text_starvation or (lambda _count: None)
         self._on_activity = on_activity or (lambda: None)
+        self._on_compaction_active = on_compaction_active or (lambda _active: None)
         self._textless_streak = 0
         self._starvation_fired = False
 
@@ -601,8 +646,15 @@ class JsonStdoutScanner:
         event = self._normalize(raw)
         if event is None:
             return
+        if event.get("type") == "compacting":
+            payload = event.get("payload") or {}
+            self._on_compaction_active(bool(payload.get("active")))
+            return
         if event.get("type") == "compacted":
             self._on_compaction()
+            # A boundary is the compaction's own completion notice, so the
+            # startup deadline goes back to waiting on real first activity.
+            self._on_compaction_active(False)
             return
         payload = event.get("payload") or {}
         if payload.get("role") == "assistant" or payload.get("type") in {
