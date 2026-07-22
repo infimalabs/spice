@@ -208,8 +208,19 @@ def test_agent_show_renders_bound_agent_state_through_real_parser(
         calls.append(repo_root)
         return status
 
+    observation = lifecycle.AgentOutputObservation(
+        status="active",
+        source="transcript",
+        path=tmp_path / "rollout.jsonl",
+        last_output_at="2026-07-03T00:01:00Z",
+        age_seconds=8,
+    )
+
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: tmp_path)
     monkeypatch.setattr(lifecycle, "agent_status", fake_agent_status)
+    monkeypatch.setattr(
+        lifecycle, "agent_output_observation", lambda _status: observation
+    )
 
     show_args = build_parser().parse_args(["agent", "show"])
     assert show_args.func(show_args) == 0
@@ -224,6 +235,11 @@ def test_agent_show_renders_bound_agent_state_through_real_parser(
             "thread=thread-agent",
             "model=gpt-test effort=high service_tier=fast",
             "started_at=2026-07-03T00:00:00Z",
+            "output_status=active",
+            "last_output_age=8s",
+            "last_output_at=2026-07-03T00:01:00Z",
+            "output_source=transcript",
+            f"output_path={tmp_path / 'rollout.jsonl'}",
             f"skill={tmp_path / 'skill.md'}",
             f"log={tmp_path / 'agent.log'}",
             "",
@@ -231,6 +247,68 @@ def test_agent_show_renders_bound_agent_state_through_real_parser(
     )
     assert show_output == expected
     assert calls == [tmp_path]
+
+
+@pytest.mark.parametrize(
+    ("age_seconds", "expected_status"),
+    [
+        (60, "active"),
+        (int(lifecycle.AGENT_OUTPUT_STALL_SECONDS) + 1, "stalled"),
+    ],
+)
+def test_agent_output_observation_classifies_transcript_recency(
+    tmp_path, monkeypatch, age_seconds, expected_status
+):
+    now = datetime(2026, 7, 3, 1, 0, tzinfo=UTC)
+    thread_id = "f2249a9fb99641e29e1854cb381cc634"
+    sessions = tmp_path / "codex-home" / "sessions" / "2026" / "07" / "03"
+    sessions.mkdir(parents=True)
+    transcript = sessions / f"rollout-2026-07-03T00-00-00-{thread_id}.jsonl"
+    transcript.write_text('{"type":"event"}\n', encoding="utf-8")
+    observed_epoch = now.timestamp() - age_seconds
+    os.utime(transcript, (observed_epoch, observed_epoch))
+    log_path = tmp_path / "supervisor.log"
+    log_path.write_text("spice claim renewal renewed\n", encoding="utf-8")
+    os.utime(log_path, (now.timestamp(), now.timestamp()))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    status = SimpleNamespace(
+        repo_root=tmp_path,
+        process_status="running",
+        thread_id=thread_id,
+        driver="codex",
+        started_at="2026-07-03T00:00:00Z",
+        log_path=log_path,
+    )
+
+    observation = lifecycle.agent_output_observation(status, now=now)
+
+    assert observation.status == expected_status
+    assert observation.source == "transcript"
+    assert observation.path == transcript.resolve()
+    assert observation.age_seconds == age_seconds
+
+
+def test_agent_output_observation_uses_log_when_transcript_is_unavailable(tmp_path):
+    now = datetime(2026, 7, 3, 1, 0, tzinfo=UTC)
+    log_path = tmp_path / "agent.log"
+    log_path.write_text("agent output\n", encoding="utf-8")
+    observed_epoch = now.timestamp() - lifecycle.AGENT_OUTPUT_STALL_SECONDS - 1
+    os.utime(log_path, (observed_epoch, observed_epoch))
+    status = SimpleNamespace(
+        repo_root=tmp_path,
+        process_status="running",
+        thread_id="",
+        driver="codex",
+        started_at="2026-07-03T00:00:00Z",
+        log_path=log_path,
+    )
+
+    observation = lifecycle.agent_output_observation(status, now=now)
+
+    assert observation.status == "stalled"
+    assert observation.source == "log"
+    assert observation.path == log_path.resolve()
+    assert observation.age_seconds == int(lifecycle.AGENT_OUTPUT_STALL_SECONDS) + 1
 
 
 def test_agent_show_renders_startup_stall_diagnostic(tmp_path):

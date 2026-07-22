@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from spice.agent.driver import claude_auto_compact_environment, driver_for
+from spice.agent.driver import (
+    claude_auto_compact_environment,
+    driver_for,
+    select_driver,
+)
 from spice.agent.identity import (
     ambient_thread,
     ambient_thread_id,
@@ -58,6 +62,10 @@ SUPERVISOR_ENVIRONMENT_SCRUB_NAMES = (
     "UV_PROJECT_ENVIRONMENT",
 )
 AGENT_ENSURE_LOCK_TIMEOUT_SECONDS = 10.0
+# This is an operator diagnostic, not a process-kill deadline. Two ordinary
+# claim-renewal intervals give quiet tool work room while still surfacing a
+# wedged lane well before its one-hour claim expires.
+AGENT_OUTPUT_STALL_SECONDS = 30.0 * 60.0
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,15 @@ class AgentStatus:
     @property
     def ready(self) -> bool:
         return self.process_status == "running"
+
+
+@dataclass(frozen=True)
+class AgentOutputObservation:
+    status: str
+    source: str
+    path: Path | None
+    last_output_at: str
+    age_seconds: int | None
 
 
 def agent_status(repo_root: Path) -> AgentStatus:
@@ -120,6 +137,100 @@ def agent_status(repo_root: Path) -> AgentStatus:
         prompt_skill_path=skill_path,
         command=command,
     )
+
+
+def agent_output_observation(
+    status: Any, *, now: datetime | None = None
+) -> AgentOutputObservation | None:
+    """Measure a running agent's output recency from driver-owned artifacts."""
+    if str(getattr(status, "process_status", "") or "") != "running":
+        return None
+    path, source = _agent_output_path(status)
+    reference = now or datetime.now(UTC)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=UTC)
+    if path is not None:
+        try:
+            observed_epoch = path.stat().st_mtime
+        except OSError:
+            path = None
+            source = ""
+        else:
+            return _output_observation(
+                source=source,
+                path=path,
+                observed_epoch=observed_epoch,
+                reference=reference,
+            )
+    started_epoch = _timestamp_epoch(str(getattr(status, "started_at", "") or ""))
+    if started_epoch is None:
+        return AgentOutputObservation("unknown", "", None, "", None)
+    observation = _output_observation(
+        source="none",
+        path=None,
+        observed_epoch=started_epoch,
+        reference=reference,
+    )
+    return AgentOutputObservation(
+        observation.status,
+        observation.source,
+        observation.path,
+        "",
+        observation.age_seconds,
+    )
+
+
+def _agent_output_path(status: Any) -> tuple[Path | None, str]:
+    thread_id = canonical_thread_id(getattr(status, "thread_id", ""))
+    repo_root = Path(getattr(status, "repo_root", Path.cwd())).expanduser().resolve()
+    if thread_id:
+        driver_name = str(getattr(status, "driver", "") or "")
+        try:
+            driver = (
+                select_driver(driver_name) if driver_name else driver_for(repo_root)
+            )
+            transcript = driver.thread_transcript_path(thread_id)
+        except (OSError, SpiceError, SystemExit):
+            pass
+        else:
+            if transcript.is_file():
+                return transcript, "transcript"
+    log_path = state_path_value(getattr(status, "log_path", None))
+    if log_path is not None and log_path.is_file():
+        return log_path.resolve(), "log"
+    return None, ""
+
+
+def _output_observation(
+    *,
+    source: str,
+    path: Path | None,
+    observed_epoch: float,
+    reference: datetime,
+) -> AgentOutputObservation:
+    age_seconds = max(0, int(reference.timestamp() - observed_epoch))
+    output_status = "stalled" if age_seconds >= AGENT_OUTPUT_STALL_SECONDS else "active"
+    observed_at = (
+        datetime.fromtimestamp(observed_epoch, UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    return AgentOutputObservation(
+        output_status,
+        source,
+        path,
+        observed_at,
+        age_seconds,
+    )
+
+
+def _timestamp_epoch(value: str) -> float | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def agent_binding_error(repo_root: Path, status: Any) -> str:
