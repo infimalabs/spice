@@ -78,9 +78,13 @@ def run(
             timeout=TASK_COMMAND_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
+        # The schema overrides are the same deterministic boilerplate on every
+        # invocation, and there are a hundred of them; naming them here buries
+        # the mutation that actually stalled under text no operator can act on.
+        stalled = [token for token in command if not token.startswith("rc.uda.")]
         raise SpiceError(
             f"Taskwarrior {action} timed out after {TASK_COMMAND_TIMEOUT_SECONDS:g}s: "
-            f"{shlex.join(command)}"
+            f"{shlex.join(stalled)}"
         ) from exc
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
