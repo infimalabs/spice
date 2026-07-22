@@ -6,14 +6,14 @@ Status: implemented contract, 2026-07-21.
 
 `spice init` is an inspectable agreement with an ownership-aware exit, not an
 opaque mutation. One side-effect-free planner drives preview, apply, and reversal
-off a single ordered operation model, and `spice uninit` reverses only the state
+off a single ordered operation model, and `spice deinit` reverses only the state
 Spice actually introduced.
 
 - **One plan, three consumers.** `plan_initialization(repo, mode)` produces an
   ordered `InitializationPlan` of `InitOperation`s. Each operation carries a
   `kind` (`file` or `git-config`) and a `scope`
   (`worktree-files`, `worktree-git-config`, or `common-git-config`). Dry-run,
-  apply, and uninit all consume the same plan, so what is previewed is exactly
+  apply, and deinit all consume the same plan, so what is previewed is exactly
   what is applied and exactly what is later reversed.
 - **Preview is byte-identical.** `spice init --dry-run` prints every planned
   file, mode, and Git-config transition; `--dry-run --json` exposes the same
@@ -23,8 +23,8 @@ Spice actually introduced.
   scope, the mode, and per-operation completion. The receipt
   (`.spice/init-receipt.json`, mode `0600`) is durable enough to resume or
   reverse an interrupted run.
-- **Uninit reverses in strict reverse order, owning only what it owns.**
-  `spice uninit` walks the receipt back-to-front. It restores a generated file
+- **Deinit reverses in strict reverse order, owning only what it owns.**
+  `spice deinit` walks the receipt back-to-front. It restores a generated file
   only when the on-disk bytes still match what apply generated, and restores a
   Git value only when the current value still matches. Anything the operator has
   since edited is left exactly as-is and reported as explicit residue — never
@@ -56,13 +56,13 @@ relies on.
 ## Round-Trip Contract
 
 The load-bearing guarantee is that a clean fixture repository round-trips to its
-*exact* pre-init state. `plan → dry-run → apply → uninit` returns the worktree to
+*exact* pre-init state. `plan → dry-run → apply → deinit` returns the worktree to
 byte-identical content and modes, removes both receipts, and leaves no
 Spice-owned Git config behind. There is no residual `.spice/` directory and no
 loose shared-config key; the only surviving config is what Git itself sets.
 
 Preservation is the dual guarantee. When apply-generated state has diverged —
-an operator-edited hook, a hand-changed `core.hooksPath` — uninit does **not**
+an operator-edited hook, a hand-changed `core.hooksPath` — deinit does **not**
 force the round-trip. It retains the divergent state in place and emits a
 structured residue entry with a recovery handle pointing at the durable report,
 so nothing is silently lost.
@@ -70,7 +70,7 @@ so nothing is silently lost.
 ## Reversal Outcomes
 
 Each reversed operation resolves to one explicit outcome, and the union of them
-is the uninit report:
+is the deinit report:
 
 - **RESTORED** — generated state matched; the recorded prior value (or absence)
   was restored.
@@ -83,12 +83,12 @@ is the uninit report:
 
 ## Resumability
 
-Uninit is itself durable and idempotent. It writes a reverse receipt marking
+Deinit is itself durable and idempotent. It writes a reverse receipt marking
 per-operation completion, so an interrupted reversal resumes from where it
 stopped rather than restarting or double-applying. While a reversal is in
 flight, re-initialization is rejected — the init path double-guards on both the
-presence of the uninit receipt and an `UNINITIALIZING` init status — so a repo is
-never left half-reversed and half-reinitialized. Repeated `spice uninit` on an
+presence of the deinit receipt and a `DEINITIALIZING` init status — so a repo is
+never left half-reversed and half-reinitialized. Repeated `spice deinit` on an
 already-clean repository reports `not-initialized` and changes nothing.
 
 ## Implementation Evidence
@@ -96,12 +96,12 @@ already-clean repository reports `not-initialized` and changes nothing.
 - `spice/hooks/initplan.py` — `plan_initialization`, `apply_initialization_plan`,
   the versioned plan payload/preview rows, and the durable initialization receipt
   with per-operation provenance and completion.
-- `spice/hooks/uninitplan.py` — `uninitialize_repository` walks the receipt in
+- `spice/hooks/deinitplan.py` — `deinitialize_repository` walks the receipt in
   reverse, classifies each operation into the outcomes above, transfers shared
   ownership, and finalizes with a residue/recovery report.
-- `spice/hooks/cli.py` — the `init` (with `--dry-run`/`--json`) and `uninit`
+- `spice/hooks/cli.py` — the `init` (with `--dry-run`/`--json`) and `deinit`
   (with `--json`) surfaces.
-- `tests/test_initplan.py` and `tests/test_uninitplan.py` pin the plan model,
+- `tests/test_initplan.py` and `tests/test_deinitplan.py` pin the plan model,
   dry-run byte-identity, idempotent convergence, reverse-order restoration,
   divergent-residue reporting, cross-worktree shared-config hand-off, and
   interrupt/resume.
@@ -117,4 +117,4 @@ live work queue.
 - Not reversing operator-created state that Spice never generated; unmanaged
   content is always preserved, never cleaned up on Spice's behalf.
 - Not extending the plan model to non-initialization mutations; this covers the
-  `spice init` / `spice uninit` boundary only.
+  `spice init` / `spice deinit` boundary only.
