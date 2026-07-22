@@ -438,6 +438,7 @@ shared PATHPOL matchers.
 | `python_typecheck_interpreter` | Optional interpreter for `python-typecheck`; otherwise repo venv/uv is resolved. |
 | `assertion_helpers` | Callable names that count as test assertions. |
 | `internal_couplings` | Named private-internals allowlist entries `{ path, test, target }`. |
+| `suite_seam` | Paths the whole suite depends on, and the suite command that gates a task landing that touches one. |
 | `pre_commit` | Extra gate steps that run after built-in pre-commit gates. |
 | `pre_commit_success` | Success-only steps that run after the gate passes. |
 | `pre_commit_builtins` | Per gate-only pre-commit built-in overrides for `merge-integrity`, `plan-phase`, `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `javascript-unused`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `python-unused`, `assertion-free-tests`, and `private-internals`. |
@@ -470,6 +471,41 @@ outputs.
 families to env-access regexes; custom pattern families must have suffixes.
 `baseline` points at existing `env-policy` findings. The env-name ledger only
 accounts for extractable literal names and scans tests like production.
+
+### `[tool.spice.policy.suite_seam]`
+
+Per-lane verification is a subset twice over. An agent runs the tests that name
+the module it changed, and for a widely depended-on module that direct-import
+view understates the real reach by an order of magnitude. It then runs that
+subset against its own pinned baseline, which the other lanes have moved since.
+Both gaps close only on the integrated tree, so this gate runs there: after
+`spice task done` merges the task onto the baseline and before it pushes.
+
+`paths` lists the repository paths whose reach is the whole suite. A task whose
+footprint touches one runs `run` -- the whole suite -- against the merged tree,
+and a red suite refuses the publish with the merge left in the tree to fix. A
+task that touches nothing declared matches nothing and runs nothing, so only the
+landings that need the coverage pay for it, and no commit pays at all.
+
+`run` is an argv list, kept in order and with repeats intact. Optional `seconds`
+is the cost the repository accepts when the gate fires; the gate prints it before
+starting and reports the measured wall clock afterwards, so a stale declaration
+is visible on every seam landing.
+
+```toml
+[tool.spice.policy.suite_seam]
+seconds = 200
+run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
+paths = ["spice/tasks/tw.py", "spice/policy.py"]
+```
+
+Choose `paths` by measurement rather than by feel: a path belongs here when it
+is transitively reachable from most of the test suite, which is the condition
+that makes a lane's own subset misleading.
+
+A red suite here is a refusal to publish, not a lost merge. The integrated tree
+stays checked out, so the failures reported are the ones the branch would have
+taken; fix them, commit, and run `spice task done` again.
 
 ### `[tool.spice.policy.csharp_unused_retention]`
 

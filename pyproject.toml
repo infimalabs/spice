@@ -181,6 +181,50 @@ env_names = [
     "ZSH_COMPDUMP",
 ]
 
+# Staging one of these paths runs the whole suite before the commit lands.
+#
+# Membership is measured, not felt. Each path below is transitively reachable
+# from at least 83% of this repo's test modules; the next-widest module sits at
+# 65%, so the set is a natural break in the import graph rather than a tuned
+# threshold. The gap between that reach and a lane's direct-import view is the
+# whole problem: spice/tasks/tw.py is imported by 4 test modules and reached by
+# 181 of 218, so on 2026-07-22 a lane verified 120 task tests, believed that
+# covered it, and landed a red branch anyway.
+#
+# Cost when it fires: `seconds` below, measured at 125s / 81s / 196s across
+# three runs on this checkout, paid once by the landing rather than by any
+# commit. Every other landing pays one path comparison. Browser smokes stay
+# out: they need `npm ci`, which is a release-time dependency.
+[tool.spice.policy.suite_seam]
+seconds = 200
+run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
+paths = [
+    "spice/agent/driver.py",
+    "spice/agent/identity.py",
+    "spice/agent/paths.py",
+    "spice/config/layers.py",
+    "spice/config/values.py",
+    "spice/defaultinventory.py",
+    "spice/defaults.py",
+    "spice/errors.py",
+    "spice/extensions.py",
+    "spice/hooks/commitmsg.py",
+    "spice/locking.py",
+    "spice/mail/steeringkey.py",
+    "spice/pathmatch.py",
+    "spice/paths.py",
+    "spice/policy.py",
+    "spice/policyconfig.py",
+    "spice/process/git.py",
+    "spice/process/groups.py",
+    "spice/process/tool.py",
+    "spice/scopes.py",
+    "spice/sqliteconnection.py",
+    "spice/tasks/config.py",
+    "spice/tasks/identity.py",
+    "spice/tasks/tw.py",
+]
+
 # Low-value words this repo rejects, merged over the built-in defaults
 # (hallucinate). Empty value = "consider rephrasing".
 [tool.spice.policy.taste.words]
