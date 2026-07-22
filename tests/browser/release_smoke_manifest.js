@@ -38,6 +38,7 @@ const releaseSafe = [
   { path: "serve_mosaic_team_smoke.js" },
   { path: "serve_nack_render_smoke.js" },
   { path: "serve_pending_badge_smoke.js", serial: true },
+  { path: "serve_relative_time_stall_smoke.js" },
   { path: "serve_reply_card_smoke.js" },
   { path: "serve_scrollbar_gutter_smoke.js" },
   { path: "serve_structural_status_smoke.js", serial: true },
