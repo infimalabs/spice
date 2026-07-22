@@ -99,6 +99,8 @@ def configure_agent_parser(subparsers: Any) -> None:
     supervise.add_argument("--log-path", required=True)
     supervise.add_argument("--fast-mode", action="store_true")
     supervise.add_argument("--command-json", required=True)
+    supervise.add_argument("--launch-claim-uuid", default="")
+    supervise.add_argument("--launch-claim-actor", default="")
     supervise.set_defaults(func=handle_agent)
 
 

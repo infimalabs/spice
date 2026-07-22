@@ -144,6 +144,7 @@ def supervised_launch_outcome(
     lifetime_seconds: float,
     exit_code: int | None,
     failure_kind: str = "",
+    released_claim: str = "",
 ) -> dict[str, Any]:
     scan = scan_launch_log(repo_root, log_path)
     kind = (
@@ -165,6 +166,7 @@ def supervised_launch_outcome(
         "assistant_messages": scan["assistant_messages"],
         "tool_calls": scan["tool_calls"],
         "failure_kind": kind,
+        "released_claim": released_claim,
     }
     if scan.get("reset_epoch") is not None:
         outcome["reset_epoch"] = scan["reset_epoch"]

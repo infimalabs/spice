@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import re
 import subprocess
+import sys
 from threading import Event, Thread
 from types import SimpleNamespace
 
@@ -38,6 +39,7 @@ from spice.agent.driver import (
     post_tool_hook_config_path,
     write_playwright_mcp_config,
 )
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.paths import git_dir
 from spice.process import tool as processtool
@@ -53,6 +55,8 @@ SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
 SPEND_LIMIT_RESET_EPOCH = 1784280000
 STORM_DEATH_EPOCH = 1784269388  # 2026-07-17T06:23:08Z, the final storm launch death
+LAUNCH_CLAIM_UUID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+LAUNCH_CLAIM_ACTOR = "dddddddddddddddddddddddddddddddd"
 
 
 @pytest.fixture(autouse=True)
@@ -571,6 +575,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
         prompt_skill_path=tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH,
         fast_mode=False,
         supervise_stdout=False,
+        launch_claim=None,
     )
     state = lifecycle.read_agent_state(tmp_path)
     final_log_path = (
@@ -636,6 +641,7 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(
         prompt_skill_path=tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH,
         fast_mode=True,
         supervise_stdout=True,
+        launch_claim=None,
     )
 
     assert returned == log_path
@@ -677,6 +683,7 @@ def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatc
         resume_thread_id="",
         log_path=log_path,
         fast_mode=False,
+        launch_claim=None,
     )
 
     command = spawned[0]["command"]
@@ -685,6 +692,75 @@ def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatc
     assert command[command.index("--repo-root") + 1] == str(tmp_path)
     assert "--prompt-skill-path" not in command
     assert command[command.index("--command-json") + 1] == '["codex","exec","prompt"]'
+
+
+def test_supervisor_command_carries_the_launch_claim_to_the_supervisor(
+    tmp_path, monkeypatch
+):
+    """The reservation survives the only hop that leaves this process."""
+    log_path = tmp_path / "supervised.log"
+    spawned: list[list[str]] = []
+    claim = lifecycle.LaunchClaim(uuid=LAUNCH_CLAIM_UUID, actor=LAUNCH_CLAIM_ACTOR)
+    # Built before Popen is faked: assembling the parser shells out to git.
+    parser = build_parser()
+
+    class FakePopen(_FakeProcess):
+        def __init__(self, command, **_kwargs) -> None:
+            super().__init__(pid=SUPERVISOR_PID, returncode=None)
+            spawned.append(command)
+
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        lifecycle, "agent_supervisor_environment", lambda repo_root: {"ENV": "1"}
+    )
+
+    for launch_claim in (claim, None):
+        lifecycle.spawn_agent_supervisor(
+            tmp_path,
+            action="start",
+            command=["codex", "exec", "prompt"],
+            model="gpt-test",
+            reasoning_effort="medium",
+            service_tier="",
+            resume_thread_id="",
+            log_path=log_path,
+            fast_mode=False,
+            launch_claim=launch_claim,
+        )
+
+    # `spice agent supervise ...` is the whole hop: parse the spawned argv back
+    # with the real CLI parser rather than reading the flags off the list.
+    parsed = [parser.parse_args(command[3:]) for command in spawned]
+    assert [lifecycle.launch_claim_from_args(args) for args in parsed] == [claim, None]
+    assert [command[:5] for command in spawned] == [
+        [sys.executable, "-m", "spice", "agent", "supervise"]
+    ] * 2
+
+
+@pytest.mark.parametrize(
+    "uuid,actor",
+    [(LAUNCH_CLAIM_UUID, ""), ("", LAUNCH_CLAIM_ACTOR)],
+)
+def test_launch_claim_refuses_to_name_half_a_reservation(uuid, actor):
+    args = argparse.Namespace(launch_claim_uuid=uuid, launch_claim_actor=actor)
+
+    with pytest.raises(SpiceError, match="names both the task and its owner"):
+        lifecycle.launch_claim_from_args(args)
+
+
+def test_ensure_agent_refuses_a_launch_claim_no_supervisor_can_release(tmp_path):
+    with pytest.raises(SpiceError, match="a launch claim rides the supervisor"):
+        lifecycle.ensure_agent(
+            tmp_path,
+            supervise_stdout=False,
+            launch_claim=lifecycle.LaunchClaim(
+                uuid=LAUNCH_CLAIM_UUID, actor=LAUNCH_CLAIM_ACTOR
+            ),
+        )
 
 
 def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
@@ -731,6 +807,8 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
         log_path=str(log_path),
         fast_mode=True,
         command_json='["codex","exec","prompt"]',
+        launch_claim_uuid="",
+        launch_claim_actor="",
     )
 
     exit_code = lifecycle.run_agent_supervisor(args)
@@ -793,6 +871,8 @@ def test_run_agent_supervisor_records_launch_outcome_under_fakes(tmp_path, monke
         log_path=str(log_path),
         fast_mode=False,
         command_json='["codex","exec","prompt"]',
+        launch_claim_uuid="",
+        launch_claim_actor="",
     )
 
     exit_code = lifecycle.run_agent_supervisor(args)

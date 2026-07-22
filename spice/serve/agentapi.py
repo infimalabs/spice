@@ -15,6 +15,7 @@ from spice.agent.lifecycle import (
     AGENT_FAILURE_RESTART_REFUSED,
     AgentOutOfCreditsError,
     AgentRestartRefusedError,
+    LaunchClaim,
     SUPERVISOR_CLAIM_LEASE_SECONDS,
     agent_binding_error,
     agent_status,
@@ -80,6 +81,7 @@ def agent_ensure_response_payload(
     force_new: bool = False,
     fast_mode: bool = False,
     automatic: bool = False,
+    launch_claim: LaunchClaim | None = None,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = ensure_agent(
@@ -88,6 +90,7 @@ def agent_ensure_response_payload(
             fast_mode=fast_mode,
             supervise_stdout=True,
             automatic=automatic,
+            launch_claim=launch_claim,
         )
     except AgentRestartRefusedError as exc:
         return (
@@ -255,6 +258,10 @@ def ensure_agent_for_available_work(
     of how many lanes are already working. This is deliberately a
     single-candidate decision: a lost claim never falls through to another
     stale candidate.
+
+    The claim rides into the launch it reserves, so the supervisor of an agent
+    that never reaches readiness hands the row straight back instead of leaving
+    it held for a whole lease.
     """
     actor = canonical_thread_id(thread_id)
     if not actor:
@@ -309,6 +316,7 @@ def ensure_agent_for_available_work(
                 fast_mode=fast_mode,
                 force_new=force_new,
                 automatic=True,
+                launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
             )
         except Exception:
             claimstate.release_claim(task_uuid, actor)
