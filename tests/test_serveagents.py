@@ -413,7 +413,6 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
                 agentapi.ensure_agent_for_available_work(
                     lane,
                     thread_id=actor,
-                    running_lane_count=lambda: len(starts),
                     attempt_cache={},
                     retry_seconds=0.0,
                 )
@@ -433,10 +432,10 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
     ) == ["capacity", "started"]
 
 
-def test_available_work_capacity_tracks_running_lane_surplus(tmp_path, monkeypatch):
+def test_available_work_capacity_starts_with_two_ready_tasks(tmp_path, monkeypatch):
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    candidates = [{"uuid": "task-a"}, {"uuid": "task-b"}]
+    candidates = [{"uuid": "task-a"}]
     claims: list[str] = []
     monkeypatch.setattr(
         agentapi.alloc,
@@ -461,14 +460,12 @@ def test_available_work_capacity_tracks_running_lane_surplus(tmp_path, monkeypat
     below_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        running_lane_count=lambda: 1,
         retry_seconds=0.0,
     )
-    candidates.append({"uuid": "task-c"})
+    candidates.append({"uuid": "task-b"})
     at_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        running_lane_count=lambda: 1,
         retry_seconds=0.0,
     )
 

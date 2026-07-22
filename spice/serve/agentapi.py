@@ -6,7 +6,6 @@ import subprocess
 import threading
 import time
 from http import HTTPStatus
-from collections.abc import Callable
 from typing import Any, Sequence
 
 from spice.agent.driver import driver_for
@@ -39,9 +38,10 @@ from spice.tasks import alloc, claimstate, identity
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
-# Before a start there must be one ready task for the new lane and one more
-# still available than the number of lanes already running.
-AVAILABLE_WORK_READY_TASK_MARGIN = 2
+# Start one stopped Drain lane when two tasks are currently ready: one for the
+# lane to claim and one left on the board. READY excludes active claims, so the
+# already-running lane count is not part of this backlog threshold.
+AVAILABLE_WORK_START_THRESHOLD = 2
 AVAILABLE_WORK_STARVATION_SECONDS = 5.0 * 60.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
@@ -241,7 +241,6 @@ def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
     thread_id: str,
-    running_lane_count: Callable[[], int] | None = None,
     ready_since_cache: dict[tuple[str, str], float] | None = None,
     attempt_cache: dict[str, float] | None = None,
     retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
@@ -250,10 +249,12 @@ def ensure_agent_for_available_work(
 ) -> dict[str, Any] | None:
     """Claim one task as a stopped lane's actor, then start only that lane.
 
-    The Drain-only caller supplies the live lane count. Expansion requires two
-    more ready tasks than running lanes unless one candidate has remained ready
-    for the starvation interval. This is deliberately a single-candidate
-    decision: a lost claim never falls through to another stale candidate.
+    Expansion requires two ready tasks unless one candidate has remained ready
+    for the starvation interval. READY rows exclude active claims, so this
+    fixed threshold starts one lane and leaves one task on the board regardless
+    of how many lanes are already working. This is deliberately a
+    single-candidate decision: a lost claim never falls through to another
+    stale candidate.
     """
     actor = canonical_thread_id(thread_id)
     if not actor:
@@ -280,11 +281,7 @@ def ensure_agent_for_available_work(
             ready_since_cache,
             now=now,
         )
-        required_task_count = (
-            max(0, int(running_lane_count() if running_lane_count else 0))
-            + AVAILABLE_WORK_READY_TASK_MARGIN
-        )
-        if len(candidates) < required_task_count and not starved:
+        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and not starved:
             return _available_work_skip("capacity")
         chosen = candidates[0]
         task_uuid = identity.uuid_of(chosen)

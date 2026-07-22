@@ -56,6 +56,43 @@ def test_available_work_expansion_is_scoped_to_drain_lifetime(
     assert result[3] == expected_ensure
 
 
+def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    state.team_store.create_team(
+        config=TeamConfig(lifetime="Drain"),
+        members=[ACTOR_A],
+    )
+    _patch_payload_dependencies(monkeypatch, thread_id=THREAD_A, running=False)
+    observed: list[dict[str, object]] = []
+
+    def capture_available_work(_target, **kwargs):
+        observed.append(kwargs)
+        return {"ok": True, "trigger": "available-work"}
+
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
+        capture_available_work,
+    )
+
+    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+
+    assert result[3] == {"ok": True, "trigger": "available-work"}
+    assert observed == [
+        {
+            "thread_id": THREAD_A,
+            "ready_since_cache": state.available_work_ready_since,
+            "attempt_cache": state.pending_agent_ensure_attempts,
+            "fast_mode": False,
+            "force_new": False,
+        }
+    ]
+
+
 def test_operator_wake_bypasses_steer_available_work_gate(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     target = _target(repo)
