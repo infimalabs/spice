@@ -317,7 +317,7 @@ def test_lane_send_is_not_blocked_by_an_inflight_subscribe(tmp_path, monkeypatch
     # subscribe before the composer could clear -- the operator's several-second,
     # timing-dependent submit latency. The subscribe now completes off the
     # dispatch thread, so the send is dispatched and acked without waiting for it.
-    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", _idle_wait)
     target = _Target(id="lane", repo_root=tmp_path)
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
@@ -580,7 +580,7 @@ def test_metrics_worker_surfaces_compute_errors_as_bus_error(tmp_path):
 
 
 def test_lanes_subscribe_replies_once_with_activation_per_lane(tmp_path, monkeypatch):
-    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", _idle_wait)
     targets, transcripts = _two_lane_fixture(tmp_path)
     batch_connection = _Connection()
     batch_session = LiveBusSession(
@@ -621,7 +621,7 @@ def test_lanes_subscribe_replies_once_with_activation_per_lane(tmp_path, monkeyp
 
 
 def test_lanes_subscribe_reports_watcher_activation_per_lane(tmp_path, monkeypatch):
-    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", _idle_wait)
     targets, transcripts = _two_lane_fixture(tmp_path)
     callbacks = _multi_lane_callbacks(targets, transcripts)
     base_watch_paths = callbacks.lane_watch_paths
@@ -670,7 +670,7 @@ def test_lanes_subscribe_reports_watcher_activation_per_lane(tmp_path, monkeypat
 def test_lanes_subscribe_generations_change_on_replacement_and_reconnect(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", _idle_wait)
     targets, transcripts = _two_lane_fixture(tmp_path)
     callbacks = _multi_lane_callbacks(targets, transcripts)
     first_connection = _Connection()
@@ -767,7 +767,7 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
         with state_lock:
             return tuple(task_keys)
 
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", observed_wait)
     connection = _ObservedConnection()
     session = LiveBusSession(
         connection,
@@ -881,7 +881,7 @@ def test_lane_send_ack_is_not_queued_behind_a_bulk_watch_push_encode(
             other=(),
         )
 
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", observed_wait)
     connection = _GatedEncodeConnection()
     session = LiveBusSession(
         connection,
@@ -957,7 +957,7 @@ def test_lanes_subscribe_watch_pushes_exactly_the_changed_lane(tmp_path, monkeyp
         stop.wait(timeout=2.0)
         return False
 
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", observed_wait)
     session = LiveBusSession(connection, _multi_lane_callbacks(targets, transcripts))
 
     try:
@@ -991,7 +991,7 @@ def test_lanes_subscribe_watch_pushes_exactly_the_changed_lane(tmp_path, monkeyp
 
 
 def test_lanes_subscribe_computes_payloads_concurrently(tmp_path, monkeypatch):
-    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", _idle_wait)
     targets, transcripts = _two_lane_fixture(tmp_path)
     connection = _Connection()
     barrier = Barrier(2)

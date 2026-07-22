@@ -104,7 +104,7 @@ def test_submission_lifecycle_follows_real_watcher_events(
     target = _Target(id="lane", repo_root=repo)
     connection = _FrameConnection()
     gate = _WatchGate()
-    monkeypatch.setattr(livebus, "_wait_for_change", gate.wait)
+    monkeypatch.setattr(livebus, "wait_for_change", gate.wait)
     session = LiveBusSession(
         connection,
         _submission_callbacks(
