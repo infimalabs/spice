@@ -4,7 +4,7 @@
 }
 
 .agent-status-pip {
-  --agent-status-blue: #3b82f6;
+  --agent-status-lifecycle: var(--good);
   --agent-status-halo-color: color-mix(
     in srgb,
     var(--agent-status-color) 20%,
@@ -14,29 +14,29 @@
   box-shadow: 0 0 0 2px var(--agent-status-halo-color);
 }
 
-/* Match the filter pills' constant-hue saturation ramp. Lifecycle state
-   changes how vivid the established pip blue appears; it never substitutes a
-   green, red, or amber status hue. The neutral idle floor matches the pills. */
+/* Match the filter pills' constant-hue saturation ramp: lifecycle activity
+   starts at the same --good green, steps down in even quarters, and reaches
+   the same neutral idle floor. */
 .agent-status-pip[data-agent-status="running"] {
-  --agent-status-color: var(--agent-status-blue);
+  --agent-status-color: var(--agent-status-lifecycle);
 }
 
 .agent-status-pip[data-agent-status="starting"] {
   --agent-status-color: hsl(
-    from var(--agent-status-blue) h calc(s * 0.75) l
+    from var(--agent-status-lifecycle) h calc(s * 0.75) l
   );
 }
 
 .agent-status-pip[data-agent-status="stopping"],
 .agent-status-pip[data-agent-status="startup-stalled"] {
   --agent-status-color: hsl(
-    from var(--agent-status-blue) h calc(s * 0.5) l
+    from var(--agent-status-lifecycle) h calc(s * 0.5) l
   );
 }
 
 .agent-status-pip[data-agent-status="running-stale"] {
   --agent-status-color: hsl(
-    from var(--agent-status-blue) h calc(s * 0.25) l
+    from var(--agent-status-lifecycle) h calc(s * 0.25) l
   );
 }
 

@@ -581,10 +581,10 @@ def test_static_agent_status_distinguishes_starting_and_startup_stalled():
     )
     assert '[data-agent-status="starting"]' in css
     assert '[data-agent-status="startup-stalled"]' in css
-    assert "--agent-status-blue: #3b82f6;" in status_css
-    assert "from var(--agent-status-blue) h calc(s * 0.75) l" in status_css
-    assert "from var(--agent-status-blue) h calc(s * 0.5) l" in status_css
-    assert "from var(--agent-status-blue) h calc(s * 0.25) l" in status_css
+    assert "--agent-status-lifecycle: var(--good);" in status_css
+    assert "from var(--agent-status-lifecycle) h calc(s * 0.75) l" in status_css
+    assert "from var(--agent-status-lifecycle) h calc(s * 0.5) l" in status_css
+    assert "from var(--agent-status-lifecycle) h calc(s * 0.25) l" in status_css
 
 
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
