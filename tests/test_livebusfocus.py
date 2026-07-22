@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Event, Lock, Thread
+from threading import Condition, Event, Lock, Thread
 from typing import Any
 
 from spice.agent.driver import CODEX_DRIVER
@@ -29,13 +29,18 @@ class _Connection:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
         self.lock = Lock()
+        # Publish every appended frame through a Condition over the same lock
+        # that guards `sent`, so watch helpers block on arrival instead of
+        # polling the shared list.
+        self.arrival = Condition(self.lock)
 
     def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
         return payload
 
     def send_frame(self, frame: dict[str, Any]) -> None:
-        with self.lock:
+        with self.arrival:
             self.sent.append(frame)
+            self.arrival.notify_all()
 
 
 class _HeldSubscribeConnection(_Connection):
@@ -326,13 +331,14 @@ def _two_lane_fixture(tmp_path: Path) -> tuple[list[_Target], dict[str, Path]]:
 def _wait_for_watch_push(
     connection: _Connection, *, timeout_seconds: float = 3.0
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        with connection.lock:
-            pushes = [
-                frame for frame in connection.sent if frame.get("source") == "watch"
-            ]
-        if pushes:
-            return pushes[0]
-        time.sleep(0.02)
+    def first_push() -> dict[str, Any] | None:
+        for frame in connection.sent:
+            if frame.get("source") == "watch":
+                return frame
+        return None
+
+    with connection.arrival:
+        push = connection.arrival.wait_for(first_push, timeout=timeout_seconds)
+    if push is not None:
+        return push
     return {"targetId": "timed-out"}

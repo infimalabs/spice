@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
@@ -115,8 +114,14 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
             activated.set()
         assert transcript in paths
         watcher_ready.set()
-        change_written.wait(timeout=1.0)
-        return change_written.is_set() and not stop.is_set()
+        if change_written.is_set():
+            # One filesystem edge is one watcher iteration: once the change has
+            # been reported, park on stop so teardown releases us instead of
+            # spinning True on every re-wait.
+            stop.wait(timeout=1.0)
+            return False
+        changed = change_written.wait(timeout=1.0)
+        return changed and not stop.is_set()
 
     def messages_payload(_target, **_kwargs):
         items = message_reader.read_assistant_messages(
@@ -204,8 +209,14 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
             activated.set()
         assert inbox_dir(repo) in paths
         watcher_ready.set()
-        change_written.wait(timeout=1.0)
-        return change_written.is_set() and not stop.is_set()
+        if change_written.is_set():
+            # One filesystem edge is one watcher iteration: once the change has
+            # been reported, park on stop so teardown releases us instead of
+            # spinning True on every re-wait.
+            stop.wait(timeout=1.0)
+            return False
+        changed = change_written.wait(timeout=1.0)
+        return changed and not stop.is_set()
 
     monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
     message_payload_calls = 0
@@ -287,8 +298,14 @@ def _single_change_wait(path: Path, ready: Event, changed: Event):
             activated.set()
         assert path in paths
         ready.set()
-        changed.wait(timeout=1.0)
-        return changed.is_set() and not stop.is_set()
+        if changed.is_set():
+            # One filesystem edge is one watcher iteration: once the change has
+            # been reported, park on stop so teardown releases us instead of
+            # spinning True on every re-wait.
+            stop.wait(timeout=1.0)
+            return False
+        signaled = changed.wait(timeout=1.0)
+        return signaled and not stop.is_set()
 
     return wait
 
@@ -434,13 +451,16 @@ def _assert_send_ack_and_timing(connection: _Connection) -> None:
 
 
 def _wait_for_send_followup(connection: _Connection) -> dict[str, Any]:
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        with connection.lock:
-            for payload in connection.sent:
-                if payload.get("source") == "send":
-                    return payload
-        time.sleep(0.02)
+    def first_followup() -> dict[str, Any] | None:
+        for payload in connection.sent:
+            if payload.get("source") == "send":
+                return payload
+        return None
+
+    with connection.arrival:
+        followup = connection.arrival.wait_for(first_followup, timeout=1.0)
+    if followup is not None:
+        return followup
     pytest.fail(f"timed out waiting for send followup; sent={connection.sent!r}")
 
 

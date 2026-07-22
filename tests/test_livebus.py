@@ -9,7 +9,7 @@ import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from threading import Barrier, Event, Lock, Thread
+from threading import Barrier, Condition, Event, Lock, Thread
 from typing import Any
 
 import pytest
@@ -40,6 +40,10 @@ class _Connection:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
         self.lock = Lock()
+        # Publish every appended frame through a Condition over the same lock
+        # that guards `sent`, so reply/watch helpers block on arrival instead
+        # of polling the shared list.
+        self.arrival = Condition(self.lock)
 
     def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
         # The session encodes to a frame before taking its send lock; the fake
@@ -47,8 +51,9 @@ class _Connection:
         return payload
 
     def send_frame(self, frame: dict[str, Any]) -> None:
-        with self.lock:
+        with self.arrival:
             self.sent.append(frame)
+            self.arrival.notify_all()
 
 
 def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
@@ -1303,17 +1308,16 @@ def _write_inbox_item_from_subprocess(repo: Path) -> None:
 def _wait_for_watch_push(
     connection: _Connection, *, timeout_seconds: float = 3.0
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        with connection.lock:
-            pushes = [
-                payload
-                for payload in connection.sent
-                if payload.get("source") == "watch"
-            ]
-        if pushes:
-            return pushes[0]
-        time.sleep(0.02)
+    def first_push() -> dict[str, Any] | None:
+        for payload in connection.sent:
+            if payload.get("source") == "watch":
+                return payload
+        return None
+
+    with connection.arrival:
+        push = connection.arrival.wait_for(first_push, timeout=timeout_seconds)
+    if push is not None:
+        return push
     pytest.fail(f"timed out waiting for watch push; sent={connection.sent!r}")
 
 
@@ -1328,14 +1332,18 @@ def _wait_for_reply(
     Read-only verbs now compute their payload off the dispatch thread, so their
     reply lands asynchronously; tests await it here instead of reading sent[0].
     """
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        with connection.lock:
-            for payload in connection.sent:
-                if payload.get("source") is not None:
-                    continue
-                if request_id is not None and payload.get("requestId") != request_id:
-                    continue
-                return payload
-        time.sleep(0.02)
+
+    def first_reply() -> dict[str, Any] | None:
+        for payload in connection.sent:
+            if payload.get("source") is not None:
+                continue
+            if request_id is not None and payload.get("requestId") != request_id:
+                continue
+            return payload
+        return None
+
+    with connection.arrival:
+        reply = connection.arrival.wait_for(first_reply, timeout=timeout_seconds)
+    if reply is not None:
+        return reply
     pytest.fail(f"timed out waiting for reply; sent={connection.sent!r}")
