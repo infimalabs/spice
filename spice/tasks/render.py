@@ -603,8 +603,18 @@ def render_next(*, wait: bool = False) -> str:
             continue
         peer_deadline = alloc.live_peer_claim_deadline()
         if peer_deadline is None:
-            # Close the final race between the peer-work snapshot and the
-            # terminal empty decision.
+            # Every peer lease this lane was waiting behind is gone, and one of
+            # them may have lapsed by time alone since the allocation above.
+            # A lapse writes nothing -- no task event, no inbox entry -- so the
+            # token cannot witness it; allocation is the only observer that
+            # re-reads the clock. Run it again before conceding, so the stale
+            # takeover this lane just became eligible for is claimed instead of
+            # reported as terminal empty.
+            takeover = alloc.next_task()
+            if takeover is not None:
+                return _render_next_result(renewal, takeover)
+            # The token still guards the event-visible race the clock cannot
+            # explain: a peer releasing work between those two allocations.
             current = eventwait.task_event_token()
             if current != baseline:
                 baseline = current
