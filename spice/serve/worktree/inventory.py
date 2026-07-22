@@ -144,7 +144,6 @@ def _ensure_work_tree_agent(
         agent_ensure = ensure_agent_for_available_work(
             target,
             thread_id=thread_id,
-            running_lane_count=lambda: _running_drain_lane_count(state),
             ready_since_cache=ready_since_cache,
             **ensure_kwargs,
         )
@@ -156,19 +155,6 @@ def _ensure_work_tree_agent(
         agent_ensure=agent_ensure,
     )
     return ensured_thread_id or thread_id, predecessor_actor, renew_intent, agent_ensure
-
-
-def _running_drain_lane_count(state: Any) -> int:
-    running = 0
-    for candidate in state.worktree_targets():
-        status = agent_status(candidate.repo_root)
-        thread_id = str(getattr(status, "thread_id", "") or "")
-        if not status.running or not thread_id:
-            continue
-        facts = team_facts_for_target(state.team_store, candidate, thread_id)
-        if facts.get("lifetime") == "Drain":
-            running += 1
-    return running
 
 
 def _work_tree_status_payloads(
