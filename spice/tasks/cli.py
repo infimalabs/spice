@@ -579,6 +579,14 @@ def _configure_reclaim_parser(actions: Any) -> None:
         nargs="?",
         help="Task handle; omit to refresh your latest active claim.",
     )
+    reclaim.add_argument(
+        "--lease-seconds",
+        type=float,
+        help=(
+            "Requested lease duration; renewal preserves any longer duration "
+            "already recorded on the claim."
+        ),
+    )
     reclaim.set_defaults(func=handle)
 
 
@@ -1127,7 +1135,10 @@ def _depends(args: argparse.Namespace) -> str:
 
 
 def _reclaim(args: argparse.Namespace) -> str:
-    result = claimstate.renew_claim(args.handle)
+    result = claimstate.renew_claim(
+        args.handle,
+        lease_seconds=args.lease_seconds,
+    )
     if result.renewed:
         return f"reclaimed {result.handle} until {result.claim_until}"
     suffix = f" {result.handle}" if result.handle else ""

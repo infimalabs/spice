@@ -158,6 +158,16 @@ def _row_claim_lease_seconds(row: dict[str, Any]) -> float:
         return _resolved_claim_lease_seconds(None)
 
 
+def _effective_claim_lease_seconds(
+    row: dict[str, Any], requested_lease_seconds: float | None
+) -> float:
+    """Keep an active claim on its longest recorded or newly requested lease."""
+    return max(
+        _row_claim_lease_seconds(row),
+        _resolved_claim_lease_seconds(requested_lease_seconds),
+    )
+
+
 def _require_pending(row: dict[str, Any], action: str) -> None:
     status = str(row.get("status") or "")
     if status == "deleted":
@@ -635,12 +645,17 @@ def _claim_renewal_missing_result(
 
 
 def renew_claim(
-    handle: str | None = None, *, actor: str | None = None
+    handle: str | None = None,
+    *,
+    actor: str | None = None,
+    lease_seconds: float | None = None,
 ) -> ClaimRenewalResult:
     """Refresh the current actor/worktree's existing active claim.
 
     Renewal deliberately is not a claim operation: it never starts an unclaimed
-    task, steals a peer claim, repairs ownership, or advances phase state.
+    task, steals a peer claim, repairs ownership, or advances phase state. Its
+    effective lease is monotonic: a longer request promotes the recorded claim
+    policy, while a shorter request can refresh but never shorten that policy.
     """
     resolved_actor = tw.canonical_actor(actor or tw.current_actor())
     try:
@@ -666,7 +681,7 @@ def renew_claim(
                 *_renewal_claim_meta(
                     resolved_actor,
                     site=site,
-                    lease_seconds=_row_claim_lease_seconds(row),
+                    lease_seconds=_effective_claim_lease_seconds(row, lease_seconds),
                 ),
             ]
         )

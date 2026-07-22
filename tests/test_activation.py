@@ -240,7 +240,14 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
             project="task.unit",
             origin="ack:1jN54zJJ",
             acceptance=["claim metadata reflects post-refresh HEAD"],
-            claim=True,
+        )
+        claimed = identity.resolve(handle)
+        claimstate.do_claim(
+            identity.uuid_of(claimed),
+            ACTOR,
+            site=claimstate.current_claim_site(),
+            context_thread=ACTOR,
+            lease_seconds=60.0,
         )
         old_head = _git(repo, "rev-parse", "HEAD")
         _advance_upstream(tmp_path)
@@ -267,6 +274,7 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         assert "baseline_refresh=updated working tree to the current baseline" in packet
         assert f"claim_renewal=renewed {handle} until " in packet
         assert row["claim_head"] == refreshed_head
+        assert row["claim_lease_seconds"] == f"{config.CLAIM_TTL_SECONDS:g}"
     finally:
         config.set_backend(None)
 

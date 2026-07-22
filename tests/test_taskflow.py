@@ -298,12 +298,29 @@ def test_do_claim_records_explicit_cross_worktree_site(task_repo):
     assert fresh["claim_lease_seconds"] == "60"
 
 
-def test_renew_claim_preserves_claim_specific_short_lease(task_repo, monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "initial_lease",
+        "renewal_requests",
+        "expected_leases",
+    ),
+    [
+        (60.0, (600.0, 60.0), (600.0, 600.0)),
+        (600.0, (60.0, 600.0), (600.0, 600.0)),
+    ],
+)
+def test_renew_claim_uses_longest_requested_lease_in_either_order(
+    task_repo,
+    monkeypatch,
+    initial_lease,
+    renewal_requests,
+    expected_leases,
+):
     handle = create.add(
-        "Keep the supervisor claim heartbeat-sized",
+        "Keep the longest requested claim lease",
         project="task.unit",
         origin="ack:1jN54zJJ",
-        acceptance=["renewal preserves the claim's recorded lease policy"],
+        acceptance=["renewal preserves the longest requested lease policy"],
     )
     row = identity.resolve(handle)
     site = claimstate.current_claim_site()
@@ -312,21 +329,33 @@ def test_renew_claim_preserves_claim_specific_short_lease(task_repo, monkeypatch
         ACTOR_A,
         site=site,
         context_thread=ACTOR_A,
-        lease_seconds=60.0,
+        lease_seconds=initial_lease,
     )
     monkeypatch.setattr(claimstate, "current_claim_site", lambda: site)
 
-    result = claimstate.renew_claim(handle, actor=ACTOR_A)
+    results = []
+    observed_leases = []
+    for requested_lease in renewal_requests:
+        results.append(
+            claimstate.renew_claim(
+                handle,
+                actor=ACTOR_A,
+                lease_seconds=requested_lease,
+            )
+        )
+        observed_leases.append(identity.resolve(handle)["claim_lease_seconds"])
+    expected_lease = expected_leases[-1]
     renewed = identity.resolve(handle)
     until = datetime.fromisoformat(renewed["claim_until"].replace("Z", "+00:00"))
     context_end = datetime.fromisoformat(
         renewed["claim_context_end"].replace("Z", "+00:00")
     )
 
-    assert result.renewed is True
-    assert renewed["claim_lease_seconds"] == "60"
+    assert all(result.renewed for result in results)
+    assert observed_leases == [f"{lease:g}" for lease in expected_leases]
+    assert renewed["claim_lease_seconds"] == f"{expected_lease:g}"
     assert (context_end - until).total_seconds() == (
-        config.CLAIM_CONTEXT_SECONDS - 60.0
+        config.CLAIM_CONTEXT_SECONDS - expected_lease
     )
 
 

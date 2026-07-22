@@ -562,7 +562,10 @@ def _renew_supervised_claim(
     from spice.agent.watchdog import publish_supervisor_feedback
     from spice.tasks import claimstate
 
-    result = claimstate.renew_claim(actor=thread_id)
+    result = claimstate.renew_claim(
+        actor=thread_id,
+        lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+    )
     if result.renewed:
         reported.pop("claim_renewal", None)
         try:

@@ -27,6 +27,7 @@ from spice.tasks import (
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+REQUESTED_LEASE_SECONDS = 600.0
 
 
 @pytest.fixture
@@ -275,12 +276,22 @@ def test_task_wake_parser_defaults_into_to_none():
 
 def test_task_reclaim_parser_accepts_optional_handle():
     bare = build_parser().parse_args(["task", "reclaim"])
-    explicit = build_parser().parse_args(["task", "reclaim", "TASK-1jN54zJK"])
+    explicit = build_parser().parse_args(
+        [
+            "task",
+            "reclaim",
+            "TASK-1jN54zJK",
+            "--lease-seconds",
+            str(REQUESTED_LEASE_SECONDS),
+        ]
+    )
 
     assert bare.task_action == "reclaim"
     assert bare.handle is None
+    assert bare.lease_seconds is None
     assert explicit.task_action == "reclaim"
     assert explicit.handle == "TASK-1jN54zJK"
+    assert explicit.lease_seconds == REQUESTED_LEASE_SECONDS
 
 
 def test_task_reclaim_parser_rejects_renew_alias():
@@ -294,7 +305,7 @@ def test_task_reclaim_renders_result(monkeypatch):
     monkeypatch.setattr(
         claimstate,
         "renew_claim",
-        lambda _handle: claimstate.ClaimRenewalResult(
+        lambda _handle, *, lease_seconds=None: claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-1jN54zJK",
@@ -302,7 +313,12 @@ def test_task_reclaim_renders_result(monkeypatch):
         ),
     )
 
-    output = task_cli._reclaim(argparse.Namespace(handle="TASK-1jN54zJK"))
+    output = task_cli._reclaim(
+        argparse.Namespace(
+            handle="TASK-1jN54zJK",
+            lease_seconds=REQUESTED_LEASE_SECONDS,
+        )
+    )
 
     assert output == "reclaimed TASK-1jN54zJK until 2026-07-09T06:00:00.000000Z"
 
@@ -311,10 +327,12 @@ def test_task_reclaim_renders_noop(monkeypatch):
     monkeypatch.setattr(
         claimstate,
         "renew_claim",
-        lambda _handle: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+        lambda _handle, *, lease_seconds=None: claimstate.ClaimRenewalResult(
+            False, "no_active_claim"
+        ),
     )
 
-    output = task_cli._reclaim(argparse.Namespace(handle=None))
+    output = task_cli._reclaim(argparse.Namespace(handle=None, lease_seconds=None))
 
     assert output == "reclaim skipped no_active_claim"
 
