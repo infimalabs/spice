@@ -22,7 +22,8 @@ from spice.mail.inbox import (
     inbox_item_key,
     write_inbox_item,
 )
-from spice.tasks import claimstate, config, gitsync, identity, lanes, tw
+from spice.tasks import claimstate, config, identity, lanes, tw
+from spice.tasks.git import boundaries
 
 ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
 BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
@@ -374,7 +375,7 @@ def next_task() -> dict[str, Any] | None:
         # We intend to claim: bring the tree to the current baseline once
         # before the claim records HEAD, so new work starts from the latest
         # shared state.
-        for note_text in gitsync.prepare_for_claim().notes:
+        for note_text in boundaries.prepare_for_claim().notes:
             print(f"task: {note_text}")
         claimed_rows = tw.export([f"claim_by.is:{actor}"])
         claimed = _claim_first(
@@ -385,7 +386,7 @@ def next_task() -> dict[str, Any] | None:
     stale_candidates = _stale_takeover_candidates(actor, scoped_active)
     if not stale_candidates:
         return None
-    for note_text in gitsync.prepare_for_claim().notes:
+    for note_text in boundaries.prepare_for_claim().notes:
         print(f"task: {note_text}")
     return _take_over_stale(stale_candidates, actor, active_rows)
 

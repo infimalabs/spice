@@ -15,7 +15,7 @@ to shared config):
 
 The operator runs without these vars and sees native Git config untouched. The
 task control plane reads the integration branch with ``git config --get`` (see
-``spice.tasks.gitsync``), which returns the final command-scope true merge while
+``spice.tasks.git.boundaries``), which returns the final command-scope true merge while
 ``@{upstream}`` still uses the first system-scope self merge.
 """
 

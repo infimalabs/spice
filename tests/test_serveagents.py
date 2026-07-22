@@ -191,7 +191,7 @@ def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     launch_notes: list[str] = []
     spawned: list[object] = []
-    real_prepare = lifecycle.gitsync.prepare_for_agent_launch
+    real_prepare = lifecycle.boundaries.prepare_for_agent_launch
 
     def observed_prepare(repo_root):
         result = real_prepare(repo_root)
@@ -202,7 +202,9 @@ def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
         spawned.append(SimpleNamespace(repo_root=repo_root, **kwargs))
         return SimpleNamespace(pid=4321)
 
-    monkeypatch.setattr(lifecycle.gitsync, "prepare_for_agent_launch", observed_prepare)
+    monkeypatch.setattr(
+        lifecycle.boundaries, "prepare_for_agent_launch", observed_prepare
+    )
     monkeypatch.setattr(lifecycle, "ensure_origin_head", lambda _repo: None)
     monkeypatch.setattr(lifecycle, "spawn_agent_supervisor", fake_supervisor)
     monkeypatch.setattr(

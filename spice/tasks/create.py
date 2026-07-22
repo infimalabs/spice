@@ -10,7 +10,8 @@ from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
-from spice.tasks import claimstate, config, gitsync, identity, projectsubs, tw, wording
+from spice.tasks import claimstate, config, identity, projectsubs, tw, wording
+from spice.tasks.git import boundaries
 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
@@ -405,7 +406,7 @@ def prepare_add_one(
         claimstate._require_single_active_slot(actor, action="task add --claim")
         # Preserve the claim boundary's ordering: the current baseline must be
         # visible before project flow and the final Taskwarrior argv resolve.
-        gitsync.prepare_for_claim()
+        boundaries.prepare_for_claim()
     routed_flow = _creation_flow_policy(
         flow=flow,
         acceptance=acceptance,

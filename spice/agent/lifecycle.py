@@ -119,7 +119,7 @@ from spice.process.groups import (
     process_id_is_running,
     terminate_process_group,
 )
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries
 
 STARTUP_GRACE_SECONDS = 0.25
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
@@ -308,7 +308,7 @@ def start_agent(
     # This shared boundary covers both launch modes. It intentionally runs in
     # the globally installed parent before the detached ``python -m spice``
     # supervisor can import the worktree checkout.
-    gitsync.prepare_for_agent_launch(repo_root)
+    boundaries.prepare_for_agent_launch(repo_root)
     log_path = next_agent_log_path(repo_root)
     if supervise_stdout:
         supervisor = spawn_agent_supervisor(

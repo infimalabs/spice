@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries, merging
 
 GIT_CONFLICT_EXIT_CODE = 1
 GIT_FATAL_EXIT_CODE = 128
@@ -163,7 +163,7 @@ def test_marker_recovery_pins_merged_sha_while_origin_advances(tmp_path: Path) -
     _run(peer, "git", "push", "origin", "main")
     later_upstream = _git(peer, "rev-parse", "HEAD")
 
-    message = gitsync._merge_conflict_recovery("TASK-1kPinned", repo, merged_upstream)
+    message = merging.merge_conflict_recovery("TASK-1kPinned", repo, merged_upstream)
     commit_tree_line = next(
         line.strip()
         for line in message.splitlines()
@@ -187,7 +187,7 @@ def test_marker_recovery_pins_merged_sha_while_origin_advances(tmp_path: Path) -
     )
     _run(repo, "git", "update-ref", "refs/heads/main", rescue, agent_head)
 
-    result = gitsync.integrate_and_publish("TASK-1kPinned", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1kPinned", repo_root=repo)
     captured = dict(item.split(":", 1) for item in result.uda_args)
     published = captured["done_merge_head"]
     outcome = {

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_taskgitsync import (
     ACTOR_A,
     _advance_upstream,
@@ -46,7 +46,7 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1k98v0WX",
         repo_root=repo,
         meta={
@@ -95,7 +95,7 @@ def test_integrate_and_publish_collapses_no_op_phase_without_empty_merge(tmp_pat
     upstream_head = _git(peer, "rev-parse", "HEAD")
     assert upstream_head != base
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1k98v0WX",
         repo_root=repo,
         meta={
@@ -133,7 +133,7 @@ def test_integrate_and_publish_no_op_phase_fast_forwards_onto_peer_content(tmp_p
     peer_clone = tmp_path / "peer"
     upstream_head = _git(peer_clone, "rev-parse", "HEAD")
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1k98v0WX",
         repo_root=repo,
         meta={
@@ -176,7 +176,7 @@ def test_integrate_and_publish_preserves_divergent_tree_same_commits(tmp_path):
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1k98v0TS",
         repo_root=repo,
         meta={
@@ -225,7 +225,7 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(remote), str(peer))
     _configure_git_identity(peer)
-    real_run = gitsync._run
+    real_run = plumbing.run
     push_attempts = 0
 
     def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -241,9 +241,9 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
                 _run(peer, "git", "push", "origin", "main")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", racing_run)
+    monkeypatch.setattr(plumbing, "run", racing_run)
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1jN54zJN",
         repo_root=repo,
         meta={
@@ -285,7 +285,7 @@ def test_integrate_and_publish_converges_after_consecutive_publish_races(
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(remote), str(peer))
     _configure_git_identity(peer)
-    real_run = gitsync._run
+    real_run = plumbing.run
     push_attempts = 0
     storm_pushes = 3  # completion storm: three peers land ahead back-to-back
 
@@ -301,9 +301,9 @@ def test_integrate_and_publish_converges_after_consecutive_publish_races(
                 _run(peer, "git", "push", "origin", "main")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", storming_run)
+    monkeypatch.setattr(plumbing, "run", storming_run)
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1jN54zJP",
         repo_root=repo,
         meta={
@@ -340,7 +340,7 @@ def test_publish_storm_hook_failure_recovers_then_keeps_every_peer_path(
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(remote), str(peer))
     _configure_git_identity(peer)
-    real_run = gitsync._run
+    real_run = plumbing.run
     push_attempts = 0
     update_attempts = 0
     successful_local_heads: list[str] = []
@@ -369,10 +369,10 @@ def test_publish_storm_hook_failure_recovers_then_keeps_every_peer_path(
             successful_local_heads.append(args[2])
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", storm_then_reject)
+    monkeypatch.setattr(plumbing, "run", storm_then_reject)
 
     hook_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
+        lambda: boundaries.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
     )
 
     assert hook_outcome.state == "rejected"
@@ -383,7 +383,7 @@ def test_publish_storm_hook_failure_recovers_then_keeps_every_peer_path(
     assert _git(repo, "status", "--porcelain") == ""
     assert _git(repo, "show", "HEAD:peer-1.txt") == "peer landed first 1"
 
-    result = gitsync.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
     merge_head = _uda_map(result.uda_args)["done_merge_head"]
     published = _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0]
 
@@ -411,9 +411,9 @@ def test_integrate_and_publish_surfaces_recovery_when_races_never_stop(
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(remote), str(peer))
     _configure_git_identity(peer)
-    real_run = gitsync._run
+    real_run = plumbing.run
     push_attempts = 0
-    monkeypatch.setattr(gitsync, "PUBLISH_RACE_RETRY_LIMIT", 2)
+    monkeypatch.setattr(boundaries, "PUBLISH_RACE_RETRY_LIMIT", 2)
 
     def relentless_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         nonlocal push_attempts
@@ -426,10 +426,10 @@ def test_integrate_and_publish_surfaces_recovery_when_races_never_stop(
             _run(peer, "git", "push", "origin", "main")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", relentless_run)
+    monkeypatch.setattr(plumbing, "run", relentless_run)
 
     with pytest.raises(SpiceError, match="publish"):
-        gitsync.integrate_and_publish(
+        boundaries.integrate_and_publish(
             "TASK-1jN54zJQ",
             repo_root=repo,
             meta={
@@ -456,7 +456,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
     _run(repo, "git", "add", "agent.txt")
     _run(repo, "git", "commit", "-m", "agent work")
     agent_head = _git(repo, "rev-parse", "HEAD")
-    real_run = gitsync._run
+    real_run = plumbing.run
     update_attempts = 0
     raced_head = ""
 
@@ -492,10 +492,10 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
             )
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", racing_run)
+    monkeypatch.setattr(plumbing, "run", racing_run)
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish(
+        boundaries.integrate_and_publish(
             "TASK-1jN54zJQ",
             repo_root=repo,
             meta={
@@ -523,7 +523,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
 
 
 def test_merge_message_omits_task_description_body():
-    message = gitsync._compose_message(
+    message = merging.compose_message(
         "TASK-1k98xkpR",
         {
             "title": "Fix image labels",
@@ -551,7 +551,7 @@ def test_merge_message_omits_task_description_body():
 
 
 def test_merge_message_uses_fallback_subject_and_trailers_only():
-    message = gitsync._compose_message(
+    message = merging.compose_message(
         "TASK-1k98PQrs",
         {
             "title": "",
@@ -579,7 +579,7 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
 
 
 def test_merge_message_appends_non_todo_phase_after_three_segment_project():
-    message = gitsync._compose_message(
+    message = merging.compose_message(
         "SCOPES-1k98xkpR",
         {
             "title": "Review combined selectors",

@@ -529,7 +529,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     monkeypatch.setattr(lifecycle, "next_agent_log_path", lambda _repo: log_path)
     monkeypatch.setattr(
-        lifecycle.gitsync,
+        lifecycle.boundaries,
         "prepare_for_agent_launch",
         lambda repo_root: events.append(f"sync:{repo_root}"),
     )
@@ -601,7 +601,7 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(
     events: list[str] = []
     monkeypatch.setattr(lifecycle, "next_agent_log_path", lambda _repo: log_path)
     monkeypatch.setattr(
-        lifecycle.gitsync,
+        lifecycle.boundaries,
         "prepare_for_agent_launch",
         lambda repo_root: events.append(f"sync:{repo_root}"),
     )

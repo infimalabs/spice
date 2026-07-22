@@ -320,14 +320,15 @@ def render_activation_packet(repo_root: Path) -> str:
     )
     from spice.hooks.install import install_hooks_for_repo
     from spice.mail.steeringkey import steering_token
-    from spice.tasks import claimstate, gitsync
+    from spice.tasks import claimstate
+    from spice.tasks.git import boundaries
     from spice.agent.rtkhealth import probe_rtk_health
 
     rtk_health = probe_rtk_health(repo_root)
     status = bind_ambient_agent_thread(repo_root)
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
-    refresh = gitsync.fast_forward_if_safe(repo_root)
+    refresh = boundaries.fast_forward_if_safe(repo_root)
     claim_renewal = claimstate.renew_claim_or_report(actor=status.thread_id or None)
     token = steering_token(repo_root)
     return "\n".join(

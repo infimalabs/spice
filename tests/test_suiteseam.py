@@ -18,7 +18,7 @@ from spice.studies.suiteseam import (
     suite_seam_plan,
     suite_seam_reach,
 )
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries, plumbing
 from tests.test_taskgitsync import _configure_git_identity, _git, _init_repo, _run
 
 SEAM = "core/tw.py"
@@ -120,7 +120,7 @@ def test_a_landing_that_reddens_the_merged_tree_never_reaches_the_branch(tmp_pat
     upstream_head = _peer_lands_the_far_test(tmp_path, remote)
 
     with pytest.raises(SpiceError) as refused:
-        gitsync.integrate_and_publish("TASK-1kG4y9Pn", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1kG4y9Pn", repo_root=repo)
 
     message = str(refused.value)
     assert "1 passed" in lane_suite
@@ -147,7 +147,7 @@ def test_a_race_that_reddens_the_retried_tree_never_reaches_the_branch(
     (repo / "core" / "tw.py").write_text(SCHEMA_BOUND_SEAM_SOURCE, encoding="utf-8")
     _run(repo, "git", "add", "-A")
     _run(repo, "git", "commit", "-m", "bind the UDA schema to every invocation")
-    real_run = gitsync._run
+    real_run = plumbing.run
     pushes = 0
     raced_upstream = ""
 
@@ -159,10 +159,10 @@ def test_a_race_that_reddens_the_retried_tree_never_reaches_the_branch(
                 raced_upstream = _peer_lands_the_far_test(tmp_path, remote)
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", racing_run)
+    monkeypatch.setattr(plumbing, "run", racing_run)
 
     with pytest.raises(SpiceError) as refused:
-        gitsync.integrate_and_publish("TASK-1kG5WJNY", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1kG5WJNY", repo_root=repo)
 
     message = str(refused.value)
     assert pushes == 1
@@ -189,7 +189,7 @@ def test_a_green_merged_tree_publishes_the_landing(tmp_path):
     _run(peer, "git", "commit", "-m", "peer work")
     _run(peer, "git", "push", "origin", "main")
 
-    result = gitsync.integrate_and_publish("TASK-1kG4y9Pq", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1kG4y9Pq", repo_root=repo)
 
     merge_head = _git(repo, "rev-parse", "HEAD")
     assert result.uda_args

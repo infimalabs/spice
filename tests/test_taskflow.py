@@ -17,12 +17,12 @@ from spice.sessions import learnings
 from spice.tasks import (
     alloc,
     create,
-    gitsync,
     identity,
     ops,
     render,
     tw,
 )
+from spice.tasks.git import boundaries
 from tests.test_tasks import (
     ACTOR_A,
     _configure_git_identity,
@@ -58,7 +58,7 @@ __all__ = ["remote_task_repo", "task_repo"]
 
 def test_task_capture_mints_task_over_loose_then_done_captures_it(remote_task_repo):
     loose = _make_loose_commit(remote_task_repo, subject="loose fix worth keeping")
-    assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1
+    assert boundaries.commits_ahead_of_baseline(remote_task_repo) == 1
 
     output = ops.capture(project="task.unit", origin="ack:1jN54zJJ")
     handle = output.splitlines()[0].split()[-1]
@@ -620,7 +620,7 @@ def test_task_done_surfaces_git_sync_note(task_repo, monkeypatch):
         acceptance=["tree-same completion is named"],
     )
     ops.claim(handle)
-    original_integrate = gitsync.integrate_and_publish
+    original_integrate = boundaries.integrate_and_publish
 
     def integrate_with_note(*args, **kwargs):
         result = original_integrate(*args, **kwargs)
@@ -630,7 +630,7 @@ def test_task_done_surfaces_git_sync_note(task_repo, monkeypatch):
         )
         return result
 
-    monkeypatch.setattr(gitsync, "integrate_and_publish", integrate_with_note)
+    monkeypatch.setattr(boundaries, "integrate_and_publish", integrate_with_note)
 
     output = ops.done(handle, validation=["tree-same diagnostic checked"])
 

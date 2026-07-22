@@ -1,4 +1,4 @@
-"""Stale bytecode is purged when gitsync rewrites the working tree."""
+"""Stale bytecode is purged when boundaries rewrites the working tree."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_taskgitsync import (
     ACTOR_A,
     _configure_git_identity,
@@ -25,7 +25,7 @@ OLD_MODULE_SOURCE = 'VALUE = "aaaaaa"\n'
 NEW_MODULE_SOURCE = 'VALUE = "bbbbbb"\n'
 FIND_SPEC_PROBE = "import importlib.util; print(importlib.util.find_spec('pkg'))"
 VALUE_PROBE = "import pkg.mod; print(pkg.mod.VALUE)"
-TreeMove = Callable[..., gitsync.SyncResult]
+TreeMove = Callable[..., boundaries.SyncResult]
 
 
 def _seed_package_baseline(tmp_path: Path, module_source: str) -> Path:
@@ -58,7 +58,7 @@ def _publish_agent_work(repo: Path) -> None:
     (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "agent.txt")
     _run(repo, "git", "commit", "-m", "agent work")
-    gitsync.integrate_and_publish(
+    boundaries.integrate_and_publish(
         "TASK-1k98v0WX",
         repo_root=repo,
         meta={
@@ -124,7 +124,7 @@ def test_publication_merge_changing_module_defeats_mtime_size_collision(tmp_path
 
 @pytest.mark.parametrize(
     "tree_move",
-    [gitsync.prepare_for_claim, gitsync.fast_forward_if_safe],
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
     ids=["prepare-for-claim", "fast-forward-if-safe"],
 )
 def test_tree_move_does_not_follow_replacement_package_symlink(
@@ -164,7 +164,7 @@ def test_tree_move_does_not_follow_cache_directory_symlink(tmp_path: Path) -> No
 
     _peer_pushes(tmp_path, rewrite_module)
 
-    gitsync.prepare_for_claim(repo)
+    boundaries.prepare_for_claim(repo)
 
     assert (repo / "pkg" / "__pycache__").is_symlink() is True
     assert _file_bytes(external_cache) == before
@@ -172,7 +172,7 @@ def test_tree_move_does_not_follow_cache_directory_symlink(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(
     "tree_move",
-    [gitsync.prepare_for_claim, gitsync.fast_forward_if_safe],
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
     ids=["prepare-for-claim", "fast-forward-if-safe"],
 )
 def test_tree_move_survives_denied_cache_cleanup_and_reports_it(
@@ -218,7 +218,7 @@ def test_head_advance_completes_when_cache_cleanup_is_denied(tmp_path: Path) -> 
     cache = repo / "pkg" / "__pycache__"
     cache.chmod(0o500)
     try:
-        gitsync._materialize_and_update_head(
+        merging._materialize_and_update_head(
             repo,
             new_head=new_head,
             expected_head=old_head,
@@ -256,7 +256,7 @@ def test_conflict_materialization_completes_when_cache_cleanup_is_denied(
     cache = repo / "pkg" / "__pycache__"
     cache.chmod(0o500)
     try:
-        gitsync._materialize_merge_conflict(
+        merging.materialize_merge_conflict(
             repo,
             merged_tree=merged_tree,
             conflict_records=[
@@ -291,14 +291,14 @@ def test_conflict_materialization_completes_when_cache_cleanup_is_denied(
 
 
 def _install_diff_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_read = gitsync._read
+    real_read = plumbing.read
 
     def read_with_injected_diff_failure(root: Path, *args: str) -> str:
         if args and args[0] == "diff":
             raise SpiceError("injected: cleanup diff unavailable")
         return real_read(root, *args)
 
-    monkeypatch.setattr(gitsync, "_read", read_with_injected_diff_failure)
+    monkeypatch.setattr(plumbing, "read", read_with_injected_diff_failure)
 
 
 def test_head_advance_completes_when_cleanup_diff_discovery_fails(
@@ -312,7 +312,7 @@ def test_head_advance_completes_when_cleanup_diff_discovery_fails(
     _run(repo, "git", "reset", "--hard", old_head)
     _install_diff_read_failure(monkeypatch)
 
-    gitsync._materialize_and_update_head(
+    merging._materialize_and_update_head(
         repo,
         new_head=new_head,
         expected_head=old_head,
@@ -344,7 +344,7 @@ def test_conflict_materialization_completes_when_diff_discovery_fails(
     _run(repo, "git", "reset", "--hard", agent_head)
     _install_diff_read_failure(monkeypatch)
 
-    gitsync._materialize_merge_conflict(
+    merging.materialize_merge_conflict(
         repo,
         merged_tree=merged_tree,
         conflict_records=[f"100644 {base_blob} 1\tpkg/mod.py"],
@@ -379,9 +379,9 @@ def test_prepare_for_claim_reports_unknown_scope_when_diff_discovery_fails(
     _peer_pushes(tmp_path, rewrite_module)
     _install_diff_read_failure(monkeypatch)
 
-    result = gitsync.prepare_for_claim(repo)
+    result = boundaries.prepare_for_claim(repo)
 
-    guidance = f"stale bytecode kept for {gitsync.BYTECODE_SCOPE_UNKNOWN}"
+    guidance = f"stale bytecode kept for {plumbing.BYTECODE_SCOPE_UNKNOWN}"
     assert {
         "head": _git_out(repo, "rev-parse", "HEAD"),
         "clean": _git_out(repo, "status", "--porcelain"),
@@ -408,10 +408,10 @@ def test_fast_forward_reports_every_candidate_when_root_open_is_denied(
     def deny_root_open(repo_root: Path, directory_flags: int) -> int:
         raise PermissionError(13, "Permission denied", str(repo_root))
 
-    monkeypatch.setattr(gitsync, "_open_worktree_root", deny_root_open)
+    monkeypatch.setattr(plumbing, "_open_worktree_root", deny_root_open)
     cache = repo / "pkg" / "__pycache__"
 
-    result = gitsync.fast_forward_if_safe(repo_root=repo)
+    result = boundaries.fast_forward_if_safe(repo_root=repo)
 
     assert {
         "head": _git_out(repo, "rev-parse", "HEAD"),
@@ -430,7 +430,10 @@ def test_fast_forward_reports_every_candidate_when_root_open_is_denied(
 
 def test_close_quietly_contains_descriptor_teardown_failure(tmp_path: Path) -> None:
     fd = os.open(tmp_path, os.O_RDONLY)
-    assert (gitsync._close_quietly(fd), gitsync._close_quietly(fd)) == (None, None)
+    assert (plumbing._close_quietly(fd), plumbing._close_quietly(fd)) == (
+        None,
+        None,
+    )
 
 
 def _git_out(repo: Path, *args: str) -> str:
