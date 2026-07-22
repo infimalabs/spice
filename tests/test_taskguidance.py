@@ -18,6 +18,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+REVIEWER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 KEEP_DRAINING = (
     "keep working until no allocator-selected work remains or a real blocker exists"
 )
@@ -81,7 +82,7 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     assert (
         "next: YOU ARE NOT DONE. Run spice task next for reviewer "
         "assignment; "
-        "self-review only if next assigns it"
+        "a review you authored routes to a peer, never back to you"
     ) in done_output
     assert KEEP_DRAINING in done_output
     assert (
@@ -89,8 +90,12 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
         in render.render_show(handle)
     )
 
-    assigned = alloc.next_task()
-    assert identity.render_handle(assigned or {}) == handle
+    author_assignment = alloc.next_task()
+    monkeypatch.setenv(DRIVER.thread_id_env, REVIEWER)
+    reviewer_assignment = alloc.next_task()
+
+    assert author_assignment is None
+    assert identity.render_handle(reviewer_assignment or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")
 
@@ -158,7 +163,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_ORIGIN_HINT in done_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in done_output
     assert STEER_MANUAL_CLAIM in done_output
-    assert "self-review only if next assigns it" in done_output
+    assert "a review you authored routes to a peer, never back to you" in done_output
     shown = render.render_show(handle)
     assert "YOU ARE NOT DONE" not in shown
     assert STEER_EXPLICIT_DIRECTION in shown
@@ -169,8 +174,12 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
-    assigned = alloc.next_task()
-    assert identity.render_handle(assigned or {}) == handle
+    author_assignment = alloc.next_task()
+    monkeypatch.setenv(DRIVER.thread_id_env, REVIEWER)
+    reviewer_assignment = alloc.next_task()
+
+    assert author_assignment is None
+    assert identity.render_handle(reviewer_assignment or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")
 

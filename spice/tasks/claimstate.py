@@ -308,7 +308,15 @@ def _require_owner(row: dict[str, Any], actor: str, action: str) -> None:
     )
 
 
-def _is_same_author_review(row: dict[str, Any], actor: str) -> bool:
+def is_same_author_review(row: dict[str, Any], actor: str) -> bool:
+    """Whether this actor authored the work sitting in the row's review phase.
+
+    `review_author` is the only field that names the author of the reviewed
+    work. The creator of the task can be a different lane entirely — one lane
+    files a task out of its own run and the allocator hands the todo phase to
+    another — so a comparison against the creator passes on exactly the case
+    that must be refused.
+    """
     return (
         str(row.get("phase") or "") == "review"
         and str(row.get("review_author") or "") == actor
@@ -316,7 +324,7 @@ def _is_same_author_review(row: dict[str, Any], actor: str) -> bool:
 
 
 def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
-    if not _is_same_author_review(row, actor):
+    if not is_same_author_review(row, actor):
         return
     handle = identity.render_handle(row)
     raise SpiceError(
