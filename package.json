@@ -2,6 +2,7 @@
   "name": "spice-harness-browser-validation",
   "private": true,
   "devDependencies": {
+    "mermaid": "^11.16.0",
     "playwright": "1.61.0"
   }
 }
