@@ -549,12 +549,41 @@ def _claim_renewal_report_key(result: Any) -> str:
     )
 
 
+def _renew_held_claim(thread_id: str, held: dict[str, str]) -> Any:
+    """Renew the exact row last held, so a claim that moved names its new owner.
+
+    An actor-keyed lookup cannot see a claim that left the lane: it finds
+    nothing, which is indistinguishable from a lane that never claimed anything,
+    and that silence is what lets a working agent keep editing a row it no
+    longer owns. Naming the row is what turns the same event into
+    `claimed_by_other` carrying the peer that took it. The fallback keeps a
+    freshly claimed row renewed on the very beat it is taken.
+    """
+    from spice.tasks import claimstate
+
+    handle = held.pop("handle", "")
+    result = claimstate.renew_claim(
+        handle=handle or None,
+        actor=thread_id,
+        lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+    )
+    if handle and not result.renewed and result.reason == "no_active_claim":
+        result = claimstate.renew_claim(
+            actor=thread_id,
+            lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+        )
+    if result.renewed:
+        held["handle"] = result.handle
+    return result
+
+
 def _renew_supervised_claim(
     repo_root: Path,
     thread_id: str,
     log_path: Path,
     reported: dict[str, str],
     contract_cursors: dict[str, int],
+    held: dict[str, str],
 ) -> None:
     """Best-effort claim TTL renewal for the agent this supervisor owns."""
     if not thread_id:
@@ -562,10 +591,7 @@ def _renew_supervised_claim(
     from spice.agent.watchdog import publish_supervisor_feedback
     from spice.tasks import claimstate
 
-    result = claimstate.renew_claim(
-        actor=thread_id,
-        lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
-    )
+    result = _renew_held_claim(thread_id, held)
     if result.renewed:
         reported.pop("claim_renewal", None)
         try:
@@ -677,6 +703,8 @@ def _watch_supervised_lane(
     next_uncaptured_nudge = time.monotonic()
     reported: dict[str, str] = {}
     contract_cursors: dict[str, int] = {}
+    # Scoped to the child's life, which is the exact span of "actively working".
+    held: dict[str, str] = {}
     while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
         if process.poll() is not None:
             return
@@ -684,7 +712,7 @@ def _watch_supervised_lane(
         try:
             if now >= next_renewal:
                 _renew_supervised_claim(
-                    repo_root, thread_id, log_path, reported, contract_cursors
+                    repo_root, thread_id, log_path, reported, contract_cursors, held
                 )
                 next_renewal = now + SUPERVISOR_CLAIM_RENEWAL_SECONDS
             if now >= next_uncaptured_nudge:
