@@ -12,18 +12,27 @@ ROOT = Path(__file__).resolve().parent.parent
 BROWSER_DIR = ROOT / "tests" / "browser"
 MANIFEST = BROWSER_DIR / "release_smoke_manifest.js"
 RUNNER = BROWSER_DIR / "run_release_smokes.js"
+HARNESS = BROWSER_DIR / "serve_playwright_harness.js"
+IMPORT_SHELL_SMOKE = BROWSER_DIR / "serve_fresh_startup_import_shell_smoke.js"
+CALLER_BUDGET_MS = 45000
+REPLACED_IMPORT_SHELL_LITERAL_MS = 10000
+UNSETTLED_BUDGET_MS = 250
+UNSETTLED_CEILING_MS = 5000
 
 
-def _load_manifest() -> dict[str, Any]:
-    script = "console.log(JSON.stringify(require(process.argv[1])))"
+def _node(script: str, *arguments: str) -> dict[str, Any]:
     result = subprocess.run(
-        ["node", "-e", script, str(MANIFEST)],
+        ["node", "-e", script, *arguments],
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
     return json.loads(result.stdout)
+
+
+def _load_manifest() -> dict[str, Any]:
+    return _node("console.log(JSON.stringify(require(process.argv[1])))", str(MANIFEST))
 
 
 def test_release_browser_manifest_classifies_every_smoke_once() -> None:
@@ -102,6 +111,63 @@ def test_release_browser_runner_reports_scenario_output_and_exclusions(
             {"path": "failing_smoke.js", "serial": False, "status": "failed"},
         ],
     }
+
+
+def test_import_shell_wait_takes_the_harness_lifecycle_budget() -> None:
+    budgets = _node(
+        "const harness = require(process.argv[1]);"
+        "const smoke = require(process.argv[2]);"
+        "const caller = Number(process.argv[3]);"
+        "console.log(JSON.stringify({"
+        "  derived: smoke.importShellTimeoutMs(),"
+        "  harness: harness.defaultLifecycleReadyTimeoutMs,"
+        "  overridden: smoke.importShellTimeoutMs({lifecycleReadyTimeoutMs: caller}),"
+        "}));",
+        str(HARNESS),
+        str(IMPORT_SHELL_SMOKE),
+        str(CALLER_BUDGET_MS),
+    )
+
+    assert budgets["derived"] == budgets["harness"]
+    assert budgets["overridden"] == CALLER_BUDGET_MS
+    assert budgets["harness"] > REPLACED_IMPORT_SHELL_LITERAL_MS
+
+
+def test_import_shell_wait_fails_promptly_when_the_shell_never_settles() -> None:
+    outcome = _node(
+        "const smoke = require(process.argv[1]);"
+        "const page = {"
+        "  waitForFunction(predicate, argument, options) {"
+        "    return new Promise((resolve, reject) => {"
+        "      setTimeout(() => {"
+        "        reject(new Error("
+        "          'page.waitForFunction: Timeout ' + options.timeout + 'ms exceeded'"
+        "        ));"
+        "      }, options.timeout);"
+        "    });"
+        "  },"
+        "};"
+        "const budget = Number(process.argv[2]);"
+        "const started = Date.now();"
+        "smoke.waitForImportShell(page, {lifecycleReadyTimeoutMs: budget}).then("
+        "  () => { console.log(JSON.stringify({settled: true})); },"
+        "  (error) => {"
+        "    console.log(JSON.stringify({"
+        "      settled: false,"
+        "      message: error.message,"
+        "      elapsedMs: Date.now() - started,"
+        "    }));"
+        "  },"
+        ");",
+        str(IMPORT_SHELL_SMOKE),
+        str(UNSETTLED_BUDGET_MS),
+    )
+
+    assert outcome["settled"] is False
+    assert outcome["message"] == (
+        f"page.waitForFunction: Timeout {UNSETTLED_BUDGET_MS}ms exceeded"
+    )
+    assert UNSETTLED_BUDGET_MS <= outcome["elapsedMs"] < UNSETTLED_CEILING_MS
 
 
 def test_release_docs_require_repo_local_playwright_and_manifest() -> None:
