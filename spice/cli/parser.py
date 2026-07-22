@@ -11,7 +11,7 @@ from spice.version import runtime_version
 
 # The reserved verb set: mounted repo commands may not shadow these, and the
 # mount dispatcher short-circuits on them without reading any configuration.
-# `init` and `dev` register together in `configure_dev_parser`.
+# `init`, `uninit`, and `dev` register together in `configure_dev_parser`.
 BUILTIN_COMMANDS = (
     "agent",
     "task",
@@ -25,6 +25,7 @@ BUILTIN_COMMANDS = (
     "study",
     "doctor",
     "init",
+    "uninit",
     "dev",
 )
 

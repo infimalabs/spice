@@ -12,29 +12,7 @@ from spice.paths import repo_root_from_cwd, require_repo_root
 
 
 def configure_dev_parser(subparsers: Any) -> None:
-    init = subparsers.add_parser(
-        "init",
-        help="Set up this repo: install hooks, materialize skill, exclude state.",
-    )
-    init.add_argument(
-        "--gates",
-        action="store_true",
-        help=(
-            "Install constitution gates only; do not materialize the agent skill "
-            "or fleet-specific reference guard."
-        ),
-    )
-    init.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the ordered initialization plan without changing the repository.",
-    )
-    init.add_argument(
-        "--json",
-        action="store_true",
-        help="With --dry-run, emit the versioned initialization plan as JSON.",
-    )
-    init.set_defaults(func=handle_init)
+    _configure_initialization_parsers(subparsers)
 
     parser = subparsers.add_parser(
         "dev",
@@ -101,6 +79,47 @@ def configure_dev_parser(subparsers: Any) -> None:
         recovery_examples=("spice dev python-typecheck",),
     ).set_defaults(func=handle_dev)
 
+    _configure_commit_parsers(actions)
+
+
+def _configure_initialization_parsers(subparsers: Any) -> None:
+    init = subparsers.add_parser(
+        "init",
+        help="Set up this repo: install hooks, materialize skill, exclude state.",
+    )
+    init.add_argument(
+        "--gates",
+        action="store_true",
+        help=(
+            "Install constitution gates only; do not materialize the agent skill "
+            "or fleet-specific reference guard."
+        ),
+    )
+    init.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the ordered initialization plan without changing the repository.",
+    )
+    init.add_argument(
+        "--json",
+        action="store_true",
+        help="With --dry-run, emit the versioned initialization plan as JSON.",
+    )
+    init.set_defaults(func=handle_init)
+
+    uninit = subparsers.add_parser(
+        "uninit",
+        help="Reverse Spice-owned initialization state without overwriting edits.",
+    )
+    uninit.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the versioned reversal and residue report as JSON.",
+    )
+    uninit.set_defaults(func=handle_uninit)
+
+
+def _configure_commit_parsers(actions: Any) -> None:
     commit_msg = actions.add_parser(
         "commit-msg",
         help="Validate (and auto-fold) a commit message file.",
@@ -160,6 +179,21 @@ def handle_init(args: argparse.Namespace) -> int:
     apply_initialization_plan(plan)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
+    return 0
+
+
+def handle_uninit(args: argparse.Namespace) -> int:
+    from spice.hooks.uninitplan import (
+        uninitialization_report_rows,
+        uninitialize_repository,
+    )
+
+    report = uninitialize_repository(init_repo_root())
+    if bool(args.json):
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        for row in uninitialization_report_rows(report):
+            print(row)
     return 0
 
 
