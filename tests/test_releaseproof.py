@@ -14,6 +14,7 @@ from typing import cast
 
 import pytest
 
+from tests.test_releasepackaging import DECLARED_PACKAGING_PINS, TOOLCHAIN_RELATIVE_PATH
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     EVIDENCE,
@@ -215,11 +216,11 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "--json",
     )
     assert REHEARSAL.CHECKS == (
+        "packaging-toolchain",
         "python",
         "ruff",
         "browser-release-manifest",
         "deterministic-mutation-cohort",
-        "packaging-toolchain",
         "build-sdist",
         "build-wheel",
         "metadata",
@@ -288,57 +289,6 @@ def test_canonical_artifacts_are_built_once_outside_the_source_and_checked_exact
     )
 
 
-def test_packaging_steps_run_from_the_locked_project_toolchain(tmp_path, monkeypatch):
-    project = tmp_path / "checkout"
-    source = tmp_path / "exported"
-    artifacts = tmp_path / "artifacts"
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    calls: list[tuple[str, ...]] = []
-
-    def build_tools(command, *, cwd, **_kwargs):
-        argv = tuple(command)
-        calls.append(argv)
-        if "--sdist" in argv:
-            (artifacts / "spice_harness-1.2.3.tar.gz").write_bytes(b"sdist\n")
-        if "--wheel" in argv:
-            _write_test_wheel(
-                cwd / "spice_harness-1.2.3-py3-none-any.whl",
-                {"spice/__init__.py": b"namespace package\n"},
-                year=2024,
-            )
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(REHEARSAL, "_run", build_tools)
-    monkeypatch.setattr(
-        REHEARSAL,
-        "_extract_sdist",
-        lambda _sdist, destination, _version: destination,
-    )
-
-    sdist, _wheel = REHEARSAL._build_canonical_artifacts(
-        source, artifacts, "1.2.3", None, project_root=project
-    )
-    rebuilt = REHEARSAL._rebuild_wheel_from_sdist(
-        sdist, "1.2.3", scratch, None, project_root=project
-    )
-
-    locked = REHEARSAL.packaging_python_command(project)
-    assert (
-        [command[: len(locked)] for command in calls],
-        rebuilt.name,
-    ) == ([locked] * 4, "spice_harness-1.2.3-py3-none-any.whl")
-    assert locked == (
-        "uv",
-        "run",
-        "--locked",
-        "--project",
-        str(project),
-        "python",
-        "-P",
-    )
-
-
 def test_git_private_records_resolve_from_a_linked_worktree(tmp_path):
     repository, _source = _source_repository(tmp_path)
     linked = tmp_path / "linked"
@@ -387,44 +337,6 @@ def test_missing_git_private_record_names_the_script_that_writes_it(tmp_path):
             "release-proof-identities.json": "release-proof/init-source.py",
             "release-proof-toolchain.json": "release-proof/toolchain.py",
         },
-    )
-
-
-def test_packaging_preflight_names_every_missing_module(tmp_path, monkeypatch):
-    root = tmp_path / "checkout"
-
-    def missing_modules(command, **_kwargs):
-        return subprocess.CompletedProcess(
-            command, 0, stdout="build.__main__ twine\n", stderr=""
-        )
-
-    monkeypatch.setattr(REHEARSAL, "_run", missing_modules)
-
-    with pytest.raises(REHEARSAL.RehearsalError) as failure:
-        REHEARSAL.verify_packaging_toolchain(root)
-
-    message = str(failure.value)
-    assert (
-        "build.__main__, twine failed to import" in message,
-        "uv lock" in message,
-    ) == (True, True)
-
-
-def test_packaging_preflight_records_the_toolchain_it_proved(tmp_path, monkeypatch):
-    root = tmp_path / "checkout"
-    probes: list[tuple[str, ...]] = []
-
-    def present_modules(command, **_kwargs):
-        probes.append(tuple(command))
-        return subprocess.CompletedProcess(command, 0, stdout="\n", stderr="")
-
-    monkeypatch.setattr(REHEARSAL, "_run", present_modules)
-
-    proven = REHEARSAL.verify_packaging_toolchain(root)
-
-    assert (proven, probes[0][: len(proven)]) == (
-        ["build.__main__", "setuptools", "twine", "wheel"],
-        REHEARSAL.packaging_python_command(root)[: len(proven)],
     )
 
 
@@ -779,6 +691,12 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         },
     )
 
+    monkeypatch.setattr(
+        REHEARSAL,
+        "verify_packaging_toolchain",
+        lambda _root, _failures: dict(DECLARED_PACKAGING_PINS),
+    )
+
     def build_canonical(_root, artifact_dir, version, _failures, *, project_root):
         carried.append(("built", project_root))
         sdist = artifact_dir / f"spice_harness-{version}.tar.gz"
@@ -833,10 +751,38 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     _assert_release_receipt(receipt, artifacts, sdist, wheel, rebuilt_hashes[0])
 
 
+def test_packaging_preflight_stops_the_rehearsal_before_the_source_gates(
+    tmp_path, monkeypatch
+):
+    """The whole point of moving this check first: fail in seconds, not minutes.
+
+    The observed failure ran the full test, browser and mutation gates and only
+    then discovered the artifact phase had no toolchain, so the source gates are
+    wired to fail here if they are ever reached.
+    """
+    root, artifacts = _release_receipt_fixture(tmp_path)
+
+    def refuse_source_gates(*_arguments):
+        raise AssertionError("source gates ran before the packaging toolchain existed")
+
+    monkeypatch.setattr(REHEARSAL, "_run_source_gates", refuse_source_gates)
+    monkeypatch.setattr(REHEARSAL.shutil, "which", lambda _name: None)
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.rehearse(root, artifacts)
+
+    assert "uv" in str(failure.value)
+
+
 def _release_receipt_fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "source"
     git_dir = root / ".git"
     git_dir.mkdir(parents=True)
+    (root / "release-proof").mkdir(parents=True)
+    (root / TOOLCHAIN_RELATIVE_PATH).write_text(
+        json.dumps({"schema_version": 1, "pinned": dict(DECLARED_PACKAGING_PINS)}),
+        encoding="utf-8",
+    )
     (root / "pyproject.toml").write_text(
         '[project]\nname = "spice-harness"\nversion = "9.8.7"\n',
         encoding="utf-8",
@@ -883,8 +829,7 @@ def _assert_release_receipt(
     assert (
         _test_sha256(wheel) == rebuilt_hash,
         receipt["artifact_rehearsal"]["checks"],
-        receipt["artifact_rehearsal"]["packaging_modules"],
-    ) == (False, list(REHEARSAL.CHECKS), list(REHEARSAL.PACKAGING_MODULES))
+    ) == (False, list(REHEARSAL.CHECKS))
     assert receipt["tests"] == {
         "python": {"passed": 999, "total": 999},
         "ruff": {"passed": True},
@@ -895,6 +840,11 @@ def _assert_release_receipt(
         "skipped": 1,
         "total": 46,
     }
+    # The receipt carries the packaging pins the artifact chain actually ran on,
+    # so host evidence states its own toolchain instead of implying the image's.
+    assert receipt["artifact_rehearsal"]["packaging_toolchain"] == (
+        DECLARED_PACKAGING_PINS
+    )
     assert receipt["claim_boundary"] == {
         "operating_system": "linux",
         "host_native_companion": "release-proof-macos.json",
