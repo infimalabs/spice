@@ -34,17 +34,20 @@ def _shell_and_composer_text() -> str:
     )
 
 
-def test_static_initial_bootstrap_waits_for_server_topology():
+def test_static_initial_bootstrap_publishes_server_topology_readiness():
     app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
+    assert "async function init() {" in app
+    assert "  installLiveBusLaneFocusTracking();" in app
+    assert "    await connectLiveBus();" in app
+    assert "    await refreshServerTopology();" in app
+    assert '    setServeLifecycle("failed", serveLifecycleFailureReason(error));' in app
     assert (
-        "async function init() {\n"
-        "  installLiveBusLaneFocusTracking();\n"
-        "  await connectLiveBus();\n"
-        "  await refreshServerTopology();\n"
-        "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);\n"
-        "}\n"
-    ) in app
+        '    setServeLifecycle("failed", "initial topology refresh did not complete");'
+        in app
+    )
+    assert '  setServeLifecycle("ready");' in app
+    assert "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);" in app
 
 
 def test_static_fresh_startup_keeps_import_shell_with_stale_restore_hints():

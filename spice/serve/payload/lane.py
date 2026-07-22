@@ -264,7 +264,6 @@ def status_line_payload(
         items=items,
         error=error,
         pending_identity=pending,
-        claimed_task=_claimed_task_payload(status.thread_id),
     )
 
 
@@ -293,7 +292,6 @@ def _status_line_payload_from_status(
     items: list[message_reader.AssistantMessage],
     error: str | None,
     pending_identity: dict[str, Any],
-    claimed_task: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     thread_id = thread_id or ""
     visible = [item for item in items if not item.kind.startswith("presence:")]
@@ -318,7 +316,7 @@ def _status_line_payload_from_status(
         "agentVisualStatus": _agent_visual_status(
             status.process_status, latest_activity_kind
         ),
-        "claimedTask": claimed_task or {},
+        "claimedTask": _claimed_task_payload(thread_id),
         "error": binding_error or error or "",
     }
 
