@@ -349,9 +349,9 @@ def guard_exposed_bind(
         return
     address = serve_address(host, port)
     raise SpiceError(
-        "use --allow-insecure-bind to expose it deliberately or --auth-token "
-        "TOKEN to require a token; spice serve refuses to bind the no-auth "
-        f"control surface to exposed address {address}. On wildcard binds, "
+        "use --allow-insecure-bind to expose the no-auth control surface "
+        "deliberately or --auth-token TOKEN to require a token; spice serve "
+        f"refuses to bind it to exposed address {address}. On wildcard binds, "
         "WebSocket Origin checks degrade to Origin-equals-Host, so the token "
         "is the operative defense."
     )

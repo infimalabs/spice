@@ -316,7 +316,7 @@ def test_task_claim_peer_owned_row_leads_with_the_steal_flag(
         ops.claim(handle)
 
     assert str(exc_info.value) == (
-        f"use --steal to take it; task already claimed by {PEER_ACTOR}"
+        f"use --steal to take the task; it is already claimed by {PEER_ACTOR}"
     )
 
 
