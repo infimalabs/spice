@@ -350,6 +350,7 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "ruff",
         "browser-release-manifest",
         "deterministic-mutation-cohort",
+        "packaging-toolchain",
         "build-sdist",
         "build-wheel",
         "metadata",
@@ -408,13 +409,102 @@ def test_canonical_artifacts_are_built_once_outside_the_source_and_checked_exact
         1,
         1,
         (
-            sys.executable,
+            *REHEARSAL.packaging_python_command(root),
             "-m",
             "twine",
             "check",
             str(sdist),
             str(wheel),
         ),
+    )
+
+
+def test_packaging_steps_run_from_the_locked_project_toolchain(tmp_path, monkeypatch):
+    project = tmp_path / "checkout"
+    source = tmp_path / "exported"
+    artifacts = tmp_path / "artifacts"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def build_tools(command, *, cwd, **_kwargs):
+        argv = tuple(command)
+        calls.append(argv)
+        if "--sdist" in argv:
+            (artifacts / "spice_harness-1.2.3.tar.gz").write_bytes(b"sdist\n")
+        if "--wheel" in argv:
+            _write_test_wheel(
+                cwd / "spice_harness-1.2.3-py3-none-any.whl",
+                {"spice/__init__.py": b"namespace package\n"},
+                year=2024,
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(REHEARSAL, "_run", build_tools)
+    monkeypatch.setattr(
+        REHEARSAL,
+        "_extract_sdist",
+        lambda _sdist, destination, _version: destination,
+    )
+
+    sdist, _wheel = REHEARSAL._build_canonical_artifacts(
+        source, artifacts, "1.2.3", None, project_root=project
+    )
+    rebuilt = REHEARSAL._rebuild_wheel_from_sdist(
+        sdist, "1.2.3", scratch, None, project_root=project
+    )
+
+    locked = REHEARSAL.packaging_python_command(project)
+    assert (
+        [command[: len(locked)] for command in calls],
+        rebuilt.name,
+    ) == ([locked] * 4, "spice_harness-1.2.3-py3-none-any.whl")
+    assert locked == (
+        "uv",
+        "run",
+        "--locked",
+        "--project",
+        str(project),
+        "python",
+        "-P",
+    )
+
+
+def test_packaging_preflight_names_every_missing_module(tmp_path, monkeypatch):
+    root = tmp_path / "checkout"
+
+    def missing_modules(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout="build.__main__ twine\n", stderr=""
+        )
+
+    monkeypatch.setattr(REHEARSAL, "_run", missing_modules)
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.verify_packaging_toolchain(root)
+
+    message = str(failure.value)
+    assert (
+        "build.__main__, twine failed to import" in message,
+        "uv lock" in message,
+    ) == (True, True)
+
+
+def test_packaging_preflight_records_the_toolchain_it_proved(tmp_path, monkeypatch):
+    root = tmp_path / "checkout"
+    probes: list[tuple[str, ...]] = []
+
+    def present_modules(command, **_kwargs):
+        probes.append(tuple(command))
+        return subprocess.CompletedProcess(command, 0, stdout="\n", stderr="")
+
+    monkeypatch.setattr(REHEARSAL, "_run", present_modules)
+
+    proven = REHEARSAL.verify_packaging_toolchain(root)
+
+    assert (proven, probes[0][: len(proven)]) == (
+        ["build.__main__", "setuptools", "twine", "wheel"],
+        REHEARSAL.packaging_python_command(root)[: len(proven)],
     )
 
 
@@ -769,7 +859,8 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         },
     )
 
-    def build_canonical(_root, artifact_dir, version, _failures):
+    def build_canonical(_root, artifact_dir, version, _failures, *, project_root):
+        carried.append(("built", project_root))
         sdist = artifact_dir / f"spice_harness-{version}.tar.gz"
         wheel = artifact_dir / f"spice_harness-{version}-py3-none-any.whl"
         sdist.write_bytes(b"canonical sdist\n")
@@ -783,8 +874,9 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     def validate_installed(_root, wheel, _version, _scratch, _failures):
         carried.append(("installed", wheel))
 
-    def rebuild_from_sdist(sdist, version, scratch, _failures):
-        carried.append(("rebuilt", sdist))
+    def rebuild_from_sdist(sdist, version, scratch, _failures, *, project_root):
+        carried.append(("rebuilt", project_root))
+        carried.append(("rebuilt-from", sdist))
         rebuilt = scratch / f"spice_harness-{version}-py3-none-any.whl"
         _write_test_wheel(
             rebuilt,
@@ -811,7 +903,12 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     sdist = artifacts / "spice_harness-9.8.7.tar.gz"
     wheel = artifacts / "spice_harness-9.8.7-py3-none-any.whl"
 
-    assert carried == [("installed", wheel), ("rebuilt", sdist)]
+    assert carried == [
+        ("built", root),
+        ("installed", wheel),
+        ("rebuilt", root),
+        ("rebuilt-from", sdist),
+    ]
     _assert_release_receipt(receipt, artifacts, sdist, wheel, rebuilt_hashes[0])
 
 
@@ -865,7 +962,8 @@ def _assert_release_receipt(
     assert (
         _test_sha256(wheel) == rebuilt_hash,
         receipt["artifact_rehearsal"]["checks"],
-    ) == (False, list(REHEARSAL.CHECKS))
+        receipt["artifact_rehearsal"]["packaging_modules"],
+    ) == (False, list(REHEARSAL.CHECKS), list(REHEARSAL.PACKAGING_MODULES))
     assert receipt["tests"] == {
         "python": {"passed": 999, "total": 999},
         "ruff": {"passed": True},
