@@ -298,6 +298,35 @@ def test_repo_root_from_cwd_names_a_failed_git_run(tmp_path, monkeypatch):
     assert "index.lock" in message
 
 
+def test_repo_root_from_cwd_answers_none_inside_a_bare_repository(tmp_path):
+    """A bare repo is git reporting no work tree, in its other sentence for it."""
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+
+    absent = paths.repo_root_from_cwd(bare)
+    with pytest.raises(SpiceError) as required:
+        paths.require_repo_root(bare)
+
+    assert absent is None
+    assert str(required.value) == "not inside a git worktree"
+
+
+def test_spice_command_inside_a_bare_repository_reports_the_missing_worktree(
+    tmp_path, monkeypatch, capsys
+):
+    """The operator surface names the fact git found, not a failure git did not."""
+    from spice.cli import entry
+
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.chdir(bare)
+
+    code = entry.main(["task", "status"])
+
+    assert code == 2
+    assert capsys.readouterr().err.strip() == "spice: not inside a git worktree"
+
+
 def test_require_repo_root_names_the_launch_failure_rather_than_the_tree(
     tmp_path, monkeypatch
 ):
