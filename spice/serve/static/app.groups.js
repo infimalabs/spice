@@ -449,6 +449,8 @@ function syncLaneLights(lane, members) {
       light.className = "agent-status-pip lane-light";
       light.dataset.laneLightTargetId = member.targetId;
       light.dataset.agentStatus = member.pipEl.dataset.agentStatus || "unknown";
+      light.dataset.agentActivity =
+        member.pipEl.dataset.agentActivity || "unknown";
       light.title = member.branchName || member.targetId;
       applyLaneLightGridPosition(light, index, layout);
       return light;

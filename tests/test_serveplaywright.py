@@ -576,25 +576,27 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert "page.screenshot(" in smoke
 
 
-def test_structural_status_smoke_covers_pill_style_lifecycle_desaturation() -> None:
+def test_structural_status_smoke_covers_activity_recency_pip_ladder() -> None:
     smoke = (ROOT / "browser" / "serve_structural_status_smoke.js").read_text(
         encoding="utf-8"
     )
 
-    assert '"running",\n  "starting",\n  "stopping"' in smoke
-    assert '"running-stale",\n  "idle"' in smoke
+    assert (
+        'const pipRampStates = ["active", "active-ish", "inactive", "unknown"]' in smoke
+    )
     assert "getComputedStyle(lane.pipEl).backgroundColor" in smoke
     assert "function assertPipSaturationRamp(colors)" in smoke
-    assert "pip status shifted hue instead of desaturating" in smoke
-    assert "pip saturation did not fall running>starting>stopping>stale>idle" in smoke
-    assert "startup-stalled pip diverged from the stopping ramp step" in smoke
-    assert 'lifecycleProbe.style.color = "var(--good)"' in smoke
+    assert "pip activity shifted hue instead of desaturating" in smoke
+    assert "pip saturation did not fall active>active-ish>inactive>unknown" in smoke
+    assert 'activityProbe.style.color = "var(--good)"' in smoke
     assert "function assertGroupedPipRamp(groupedPips, colors)" in smoke
     assert 'querySelectorAll(".lane-light")' in smoke
     assert "const bounds = pip.getBoundingClientRect();" in smoke
     assert "visibility: style.visibility" in smoke
-    assert "function assertPipLifecycleBase(colors, lifecycleBase)" in smoke
-    assert "running pip did not use the top-pill --good base" in smoke
+    assert "function assertPipActivityBase(colors, activityBase)" in smoke
+    assert "active pip did not use the top-pill --good base" in smoke
+    assert 'kind: "presence:function_call"' in smoke
+    assert "tool activity without commentary did not refresh the pip" in smoke
     assert "page.screenshot({ path: screenshotPath })" in smoke
 
 

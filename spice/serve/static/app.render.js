@@ -1,12 +1,13 @@
 // Message and chrome rendering. Messages lay out in the agent's order: leading
 // prose, then each ACK as its steering-context quote(s) followed by that ACK's
-// response. Status pips distinguish running from running-stale by transcript
-// recency, and pending counts blend backend truth with optimistic sends.
+// response. Status pips show transcript-activity recency independently of
+// lifecycle labels, and pending counts blend backend truth with optimistic sends.
 
 const secondsPerMinute = 60;
 const minutesPerHour = 60;
 const hoursPerDay = 24;
 const activeAssistantSeconds = 60;
+const activeishAssistantSeconds = 5 * secondsPerMinute;
 const transientLaneStatusMilliseconds = 2500;
 const transientGlobalStatusMilliseconds = 3000;
 const messageOccupantAccentPalette = [
@@ -376,9 +377,14 @@ function applyRetainedLaneStatus(lane, rawStatusLine) {
   const statusLine = statusLineWithRetainedSummary(lane, rawStatusLine);
   const liveStatusLine = {
     ...statusLine,
+    agentActivityStatus: liveAgentActivityStatus(statusLine),
     agentVisualStatus: liveAgentVisualStatus(statusLine),
   };
-  setAgentStatusPip(lane, liveStatusLine.agentVisualStatus);
+  setAgentStatusPip(
+    lane,
+    liveStatusLine.agentVisualStatus,
+    liveStatusLine.agentActivityStatus,
+  );
   setLaneStatus(lane, liveStatusLine);
   lane.lastRenderedStatusLine = liveStatusLine;
   return liveStatusLine;
@@ -403,9 +409,27 @@ function liveAgentVisualStatus(statusLine) {
   return backendStatus;
 }
 
-function setAgentStatusPip(lane, status) {
+function liveAgentActivityStatus(statusLine) {
+  const ageSeconds = relativeAgeSeconds(statusLine.lastAssistantAt);
+  if (ageSeconds !== null) {
+    if (ageSeconds < activeAssistantSeconds) return "active";
+    if (ageSeconds < activeishAssistantSeconds) return "active-ish";
+    return "inactive";
+  }
+  const backendStatus = String(statusLine.activityStatus || "");
+  if (
+    backendStatus === "active" ||
+    backendStatus === "active-ish" ||
+    backendStatus === "inactive"
+  )
+    return backendStatus;
+  return "unknown";
+}
+
+function setAgentStatusPip(lane, status, activityStatus) {
   const normalized = status || "unknown";
   lane.pipEl.dataset.agentStatus = normalized;
+  lane.pipEl.dataset.agentActivity = activityStatus || "unknown";
   lane.pipEl.title = agentStatusLabel(normalized);
 }
 
