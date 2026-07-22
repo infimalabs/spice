@@ -117,3 +117,13 @@ def test_handout_command_renders_all_assets_and_pdf(
     assert len(list((tmp_path / "diagrams").glob("*.svg"))) == len(registry.CUTS)
     assert len(list((tmp_path / "diagrams").glob("*.png"))) == len(registry.CUTS)
     assert [entry["name"] for entry in manifest["diagrams"]] == list(registry.NAMES)
+    assert manifest["composition"]["diagram"] == "32-board-at-a-glance"
+    assert manifest["composition"]["verifiedHtmlLabels"] >= 6
+    assert tuple(lines[0] for lines in manifest["composition"]["indexLabels"]) == (
+        "spice task board",
+        "origin forest",
+        "dependency DAG",
+        "review network",
+        "phase ladder",
+        "taskdoc tree",
+    )

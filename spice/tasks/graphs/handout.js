@@ -25,6 +25,18 @@ const RASTER_MARGIN = 48;
 const RASTER_MIN_WIDTH = 400;
 const RASTER_MIN_HEIGHT = 300;
 const BYTES_PER_KIBIBYTE = 1024;
+const INDEX_DIAGRAM = "32-board-at-a-glance";
+const HANDOUT_FONT_FAMILY =
+  '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const INDEX_LABEL_TITLES = [
+  "spice task board",
+  "origin forest",
+  "dependency DAG",
+  "review network",
+  "phase ladder",
+  "taskdoc tree",
+];
+const LABEL_BOUND_TOLERANCE_PX = 0.75;
 
 const FAMILY = {
   magnitude: ["Magnitude", "#eb6834"],
@@ -111,7 +123,7 @@ function chartPage(diagram, pageNumber) {
   const archive = diagram.includeArchived
     ? "This filing census includes archived rows."
     : "Archived rows are excluded from this live-board cut.";
-  return `<section class="page chart-page ${layout}">
+  return `<section class="page chart-page ${layout}" data-diagram-name="${escapeHtml(diagram.name)}">
     <header><div class="eyebrow"><i style="background:${hue}"></i>${number} / ${family}</div>
       <h2>${escapeHtml(diagram.title)}</h2></header>
     <div class="chart-content">
@@ -129,7 +141,7 @@ const CSS = `
 @page { size: 11in 8.5in; margin: 0; }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: #e9e7e1; color: #0b0b0b; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; print-color-adjust: exact; }
+body { font-family: ${HANDOUT_FONT_FAMILY}; print-color-adjust: exact; }
 .page { width: 11in; height: 8.5in; padding: .55in .62in .42in; background: #f2f1ed; break-after: page; overflow: hidden; display: flex; flex-direction: column; }
 .page:last-child { break-after: auto; }
 h1, h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; margin: 0; letter-spacing: -.025em; }
@@ -163,6 +175,8 @@ footer { margin-top: auto; border-top: 1px solid rgba(11,11,11,.1); padding-top:
 .chart-content { flex: 1; min-height: 0; margin-top: .18in; }
 .visual { margin: 0; background: #fcfcfb; border-radius: 5px; box-shadow: 0 8px 24px -12px rgba(11,11,11,.25), inset 0 0 0 1px rgba(11,11,11,.06); overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .visual svg { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
+.visual svg foreignObject * { box-sizing: content-box; }
+.visual svg foreignObject > div { font-family: ${HANDOUT_FONT_FAMILY}; }
 .caption .lead { color: #0b0b0b; font: 12pt Georgia, serif; line-height: 1.35; margin: 0; }
 .caption p:not(.lead) { font-size: 8.5pt; margin: 10px 0; }
 .caption code { display: block; overflow-wrap: anywhere; }
@@ -196,9 +210,87 @@ async function renderDiagram(renderPage, shotPage, diagram, index) {
     width: Math.max(RASTER_MIN_WIDTH, width + RASTER_MARGIN),
     height: Math.max(RASTER_MIN_HEIGHT, height + RASTER_MARGIN),
   });
-  await shotPage.setContent(`<style>html,body{margin:0;background:#fcfcfb}.shot{width:${width}px;height:${height}px;padding:16px}.shot svg{width:100%;height:100%;display:block}</style><div class="shot">${result.svg}</div>`);
+  await shotPage.setContent(`<style>html,body{margin:0;background:#fcfcfb;font-family:${HANDOUT_FONT_FAMILY}}.shot{width:${width}px;height:${height}px;padding:16px}.shot svg{width:100%;height:100%;display:block}</style><div class="shot">${result.svg}</div>`);
   await shotPage.locator(".shot").screenshot({ path: path.join(diagramPath, `${diagram.name}.png`) });
   return { ...diagram, ...result, ratio };
+}
+
+async function verifyComposedLabels(page) {
+  return page.evaluate(
+    ({ diagramName, expectedTitles, tolerance }) => {
+      const rectValue = (rect) => ({
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+      });
+      const observed = Array.from(
+        document.querySelectorAll("[data-diagram-name]"),
+      ).flatMap((section) => {
+        const sectionName = section.dataset.diagramName || "";
+        return Array.from(section.querySelectorAll(".nodeLabel p")).map((label) => {
+          const foreignObject = label.closest("foreignObject");
+          if (!foreignObject)
+            throw new Error(`label has no foreignObject: ${label.innerText}`);
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          const bounds = foreignObject.getBoundingClientRect();
+          const lineRects = Array.from(range.getClientRects()).filter(
+            (rect) => rect.width > 0 && rect.height > 0,
+          );
+          const clipped = lineRects.some(
+            (rect) =>
+              rect.left < bounds.left - tolerance ||
+              rect.right > bounds.right + tolerance ||
+              rect.top < bounds.top - tolerance ||
+              rect.bottom > bounds.bottom + tolerance,
+          );
+          const lines = label.innerText
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          const labelStyle = getComputedStyle(label);
+          return {
+            bounds: rectValue(bounds),
+            boxSizing: getComputedStyle(foreignObject.firstElementChild).boxSizing,
+            clipped,
+            diagram: sectionName,
+            fontFamily: labelStyle.fontFamily,
+            fontSize: labelStyle.fontSize,
+            lineHeight: labelStyle.lineHeight,
+            lineRects: lineRects.map(rectValue),
+            lines,
+            title: lines[0] || "",
+          };
+        });
+      });
+      for (const entry of observed) {
+        if (entry.boxSizing !== "content-box")
+          throw new Error(
+            `composed label ${entry.diagram}/${entry.title} uses ${entry.boxSizing} sizing`,
+          );
+        if (entry.clipped)
+          throw new Error(
+            `composed label ${entry.diagram}/${entry.title} exceeds its foreignObject: ${JSON.stringify(entry)}`,
+          );
+      }
+      const indexEntries = observed.filter(
+        (entry) => entry.diagram === diagramName,
+      );
+      const byTitle = new Map(indexEntries.map((entry) => [entry.title, entry]));
+      const indexLabels = expectedTitles.map((title) => {
+        const entry = byTitle.get(title);
+        if (!entry) throw new Error(`missing composed label ${title}`);
+        return entry.lines;
+      });
+      return { indexLabels, verifiedHtmlLabels: observed.length };
+    },
+    {
+      diagramName: INDEX_DIAGRAM,
+      expectedTitles: INDEX_LABEL_TITLES,
+      tolerance: LABEL_BOUND_TOLERANCE_PX,
+    },
+  );
 }
 
 async function main() {
@@ -208,7 +300,10 @@ async function main() {
   try {
     const renderPage = await browser.newPage();
     const shotPage = await browser.newPage({ deviceScaleFactor: 2 });
-    await renderPage.setContent("<!doctype html><html><body></body></html>");
+    await renderPage.setContent(
+      `<!doctype html><html><head><style>body{font-family:${HANDOUT_FONT_FAMILY}}</style></head><body></body></html>`,
+    );
+    await renderPage.evaluate(() => document.fonts.ready);
     await renderPage.addScriptTag({ path: mermaidBundle });
     await renderPage.evaluate(() => window.mermaid.initialize({ startOnLoad: false }));
     const rendered = [];
@@ -222,6 +317,8 @@ async function main() {
     const pdfPage = await browser.newPage();
     await pdfPage.setContent(html, { waitUntil: "load" });
     await pdfPage.emulateMedia({ media: "print" });
+    await pdfPage.evaluate(() => document.fonts.ready);
+    const composition = await verifyComposedLabels(pdfPage);
     await pdfPage.pdf({
       path: path.join(outputPath, "handout.pdf"),
       width: "11in",
@@ -229,7 +326,11 @@ async function main() {
       printBackground: true,
       preferCSSPageSize: true,
     });
-    const manifest = { ...payload, diagrams: rendered.map(({ source, svg, ...entry }) => entry) };
+    const manifest = {
+      ...payload,
+      composition: { diagram: INDEX_DIAGRAM, ...composition },
+      diagrams: rendered.map(({ source, svg, ...entry }) => entry),
+    };
     fs.writeFileSync(path.join(outputPath, "manifest.json"), JSON.stringify(manifest, null, 2));
     const pdfBytes = fs.statSync(path.join(outputPath, "handout.pdf")).size;
     process.stdout.write(`handout=${path.join(outputPath, "handout.pdf")} pages=${pages.length} diagrams=${rendered.length} pdf_kb=${Math.round(pdfBytes / BYTES_PER_KIBIBYTE)}`);
