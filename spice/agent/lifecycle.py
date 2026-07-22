@@ -111,6 +111,7 @@ from spice.config.values import (
 from spice.errors import SpiceError
 from spice.process.git import git_probe
 from spice.process.groups import (
+    PROCESS_GROUP_TERMINATION_BOUND_SECONDS,
     popen_new_process_group_kwargs,
     process_id_is_running,
     terminate_process_group,
@@ -120,7 +121,11 @@ from spice.tasks import gitsync
 STARTUP_GRACE_SECONDS = 0.25
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
 FIRST_ACTIVITY_GRACE_SECONDS = 120.0
-STARTUP_WATCH_JOIN_SECONDS = 3.0
+STARTUP_STATE_PERSISTENCE_ALLOWANCE_SECONDS = 3.0
+STARTUP_WATCH_JOIN_SECONDS = (
+    PROCESS_GROUP_TERMINATION_BOUND_SECONDS
+    + STARTUP_STATE_PERSISTENCE_ALLOWANCE_SECONDS
+)
 AGENT_FAILURE_OUT_OF_CREDITS = "out-of-credits"
 AGENT_FAILURE_RESTART_REFUSED = "restart-refused"
 AGENT_FAILURE_STARTUP_STALLED = AGENT_STARTUP_STALLED
@@ -786,7 +791,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 ),
                 kwargs={"grace_seconds": FIRST_ACTIVITY_GRACE_SECONDS},
                 name=f"spice-startup-watch-{started_thread_id or process.pid}",
-                daemon=True,
+                daemon=False,
             )
             startup_watch.start()
             stop_watch = Event()

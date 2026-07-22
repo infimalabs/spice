@@ -23,6 +23,13 @@ PROCESS_POLL_INTERVAL_SECONDS = 0.1
 # (liveness assumes the process is still alive; termination falls through to the
 # caller's forceful escalation).
 PROCESS_PROBE_TIMEOUT_SECONDS = 5.0
+PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS = 2.0
+PROCESS_GROUP_TERMINATION_MAX_PROBES = 2
+PROCESS_GROUP_TERMINATION_BOUND_SECONDS = (
+    PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS
+    + PROCESS_GROUP_TERMINATION_MAX_PROBES * PROCESS_PROBE_TIMEOUT_SECONDS
+    + PROCESS_POLL_INTERVAL_SECONDS
+)
 
 
 def popen_new_process_group_kwargs() -> dict[str, Any]:
@@ -41,7 +48,7 @@ def terminate_process_group(
     process: subprocess.Popen[Any],
     *,
     signum: int | None = None,
-    timeout_seconds: float = 2.0,
+    timeout_seconds: float = PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS,
 ) -> None:
     # The leader may exit while descendants keep inherited pipes open, so
     # cleanup always targets the complete group/tree regardless of leader state.
