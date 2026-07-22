@@ -13,6 +13,7 @@ const pipRampStates = [
   "idle",
 ];
 const pipHueToleranceDeg = 8;
+const groupedPipStates = ["running", "starting", "running-stale", "idle"];
 
 function parseRgb(value) {
   const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
@@ -61,6 +62,36 @@ function assertPipSaturationRamp(colors) {
   return ramp;
 }
 
+function assertGroupedPipRamp(groupedPips, colors) {
+  if (groupedPips.length !== groupedPipStates.length)
+    throw new Error(
+      "grouped lane did not render four status pips: " + JSON.stringify(groupedPips),
+    );
+  for (let index = 0; index < groupedPipStates.length; index += 1) {
+    const pip = groupedPips[index];
+    const expectedStatus = groupedPipStates[index];
+    if (
+      pip.status !== expectedStatus ||
+      pip.color !== colors[expectedStatus] ||
+      pip.width <= 0 ||
+      pip.height <= 0 ||
+      pip.visibility !== "visible"
+    )
+      throw new Error(
+        "grouped status pip diverged from lifecycle ramp: " +
+          JSON.stringify({ groupedPips, colors }),
+      );
+  }
+}
+
+function assertPipLifecycleBase(colors, lifecycleBase) {
+  if (colors.running !== lifecycleBase)
+    throw new Error(
+      "running pip did not use the top-pill --good base: " +
+        JSON.stringify({ lifecycleBase, colors }),
+    );
+}
+
 async function run() {
   return withServePage(
     {
@@ -74,6 +105,8 @@ async function run() {
           "laneComposePlaceholder",
           "laneGroupHost",
           "laneGroupMemberLanes",
+          "reconcileLaneGroups",
+          "syncFusedLaneChrome",
           "syncComposerShards",
           "targetChoiceStatus",
           "updateLiveRelativeTimes",
@@ -243,12 +276,53 @@ async function runStructuralStatusSmokePage() {
     statusAge: lane.statusTimeEl.textContent || "",
     visualStatus: lane.lastRenderedStatusLine.agentVisualStatus || "",
   };
-  return { active, afterRelativeTick, final, phaseTransition, pipColors };
+  const lifecycleProbe = document.createElement("span");
+  lifecycleProbe.style.color = "var(--good)";
+  lane.element.append(lifecycleProbe);
+  const lifecycleBase = getComputedStyle(lifecycleProbe).color;
+  lifecycleProbe.remove();
+  const groupedStatuses = ["running", "starting", "running-stale", "idle"];
+  const groupedMembers = [
+    lane,
+    ...groupedStatuses.slice(1).map((_, index) =>
+      resolveIsolatedLane("structural-status-member-" + index),
+    ),
+  ];
+  for (let index = 0; index < groupedMembers.length; index += 1) {
+    groupedMembers[index].element.classList.remove("lane--empty-team");
+    groupedMembers[index].pipEl.dataset.agentStatus = groupedStatuses[index];
+  }
+  reconcileLaneGroups([groupedMembers.map((member) => member.targetId)]);
+  const groupedHost = laneGroupHost(lane);
+  syncFusedLaneChrome(groupedHost);
+  const groupedPips = Array.from(
+    groupedHost.laneLightsEl.querySelectorAll(".lane-light"),
+  ).map((pip) => {
+    const bounds = pip.getBoundingClientRect();
+    const style = getComputedStyle(pip);
+    return {
+      color: style.backgroundColor,
+      height: bounds.height,
+      status: pip.dataset.agentStatus || "",
+      visibility: style.visibility,
+      width: bounds.width,
+    };
+  });
+  return {
+    active,
+    afterRelativeTick,
+    final,
+    groupedPips,
+    lifecycleBase,
+    phaseTransition,
+    pipColors,
+  };
 }
 
-function assertStructuralStatusResult(result) {
-  const { active, afterRelativeTick, final, phaseTransition } = result;
+function assertPipStatusResult(result) {
   const pipRamp = assertPipSaturationRamp(result.pipColors);
+  assertPipLifecycleBase(result.pipColors, result.lifecycleBase);
+  assertGroupedPipRamp(result.groupedPips, result.pipColors);
   const stalled = rgbToHsl(result.pipColors["startup-stalled"]);
   if (
     Math.abs(stalled.hue - pipRamp.stopping.hue) > pipHueToleranceDeg ||
@@ -258,6 +332,9 @@ function assertStructuralStatusResult(result) {
       "startup-stalled pip diverged from the stopping ramp step: " +
         JSON.stringify({ stalled, stopping: pipRamp.stopping }),
     );
+}
+
+function assertStatusTransitionTimes(active, phaseTransition, final) {
   for (const [label, snapshot] of [
     ["active", active],
     ["phaseTransition", phaseTransition],
@@ -266,6 +343,9 @@ function assertStructuralStatusResult(result) {
     if (snapshot.elapsedMs > maxStatusTransitionMs)
       throw new Error(label + " status transition exceeded bound: " + snapshot.elapsedMs);
   }
+}
+
+function assertActiveStatusResult(active) {
   if (active.latestActivityKind !== "assistant")
     throw new Error("active event did not retain structural activity kind");
   for (const value of [
@@ -296,6 +376,14 @@ function assertStructuralStatusResult(result) {
   )
     throw new Error("claimed task hover detail is incomplete: " + active.composerTitle);
   if (
+    active.placeholderOverflowWrap !== "anywhere" ||
+    !active.placeholderWithinCard
+  )
+    throw new Error("long claimed task breaks its composer card: " + JSON.stringify(active));
+}
+
+function assertPhaseTransitionResult(phaseTransition) {
+  if (
     phaseTransition.placeholder !==
       "spice-b, main-b\n0 pending, running\nUI-1kF5xdSM, review" ||
     phaseTransition.composerTitle !==
@@ -305,12 +393,9 @@ function assertStructuralStatusResult(result) {
     throw new Error(
       "claimed task phase transition is stale: " + JSON.stringify(phaseTransition),
     );
-  if (
-    active.placeholderOverflowWrap !== "anywhere" ||
-    !active.placeholderWithinCard
-  )
-    throw new Error("long claimed task breaks its composer card: " + JSON.stringify(active));
+}
 
+function assertFinalStatusResult(final) {
   if (final.latestActivityKind !== "final")
     throw new Error("final event did not retain structural activity kind");
   for (const value of [
@@ -332,7 +417,9 @@ function assertStructuralStatusResult(result) {
     throw new Error("final lane text mismatch: " + JSON.stringify(final));
   if (final.statusGapPx < 0)
     throw new Error("final lane age and preview are not ordered: " + final.statusGapPx);
+}
 
+function assertRelativeTickResult(afterRelativeTick) {
   if (
     afterRelativeTick.latestActivityKind !== "final" ||
     afterRelativeTick.visualStatus !== "idle" ||
@@ -344,6 +431,16 @@ function assertStructuralStatusResult(result) {
       "relative-time tick changed structural status: " +
         JSON.stringify(afterRelativeTick),
     );
+}
+
+function assertStructuralStatusResult(result) {
+  const { active, afterRelativeTick, final, phaseTransition } = result;
+  assertPipStatusResult(result);
+  assertStatusTransitionTimes(active, phaseTransition, final);
+  assertActiveStatusResult(active);
+  assertPhaseTransitionResult(phaseTransition);
+  assertFinalStatusResult(final);
+  assertRelativeTickResult(afterRelativeTick);
 }
 
 if (require.main === module) {
