@@ -46,6 +46,7 @@ def test_general_purpose_study_flags_cover_reference_surface():
         ["study", "taste", "--json", "--staged"],
         ["study", "shape", "--json"],
         ["study", "markdown-links", "--json"],
+        ["study", "suite-seam-reach", "--json", "--package", "spice", "--limit", "5"],
         ["study", "subsumption", "coverage.db", "--json"],
         [
             "study",
@@ -427,3 +428,62 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
             print_created=False,
         )
     }
+
+
+def _reach_repo(root: Path, declared: str) -> Path:
+    """A package two test modules reach unevenly, declaring one of them a seam.
+
+    ``test_two.py`` names the narrow module from inside a function body, so the
+    wide module is reached by both test modules while being named by one.
+    """
+    (root / "pkg").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "pkg" / "wide.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "pkg" / "narrow.py").write_text(
+        "from pkg.wide import VALUE\n", encoding="utf-8"
+    )
+    (root / "tests" / "test_one.py").write_text(
+        "from pkg.wide import VALUE\n\n\ndef test_one():\n    assert VALUE == 1\n",
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_two.py").write_text(
+        "def test_two():\n    from pkg.narrow import VALUE\n\n    assert VALUE == 1\n",
+        encoding="utf-8",
+    )
+    (root / "pyproject.toml").write_text(
+        f'[tool.spice.policy.suite_seam]\nrun = ["pytest"]\npaths = ["{declared}"]\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_suite_seam_reach_cli_ranks_the_band_and_reports_when_it_closes(
+    tmp_path, monkeypatch, capsys
+):
+    """The measurement a maintainer runs before adding a suite-seam path.
+
+    Declaring the module both test modules reach is a band the import graph
+    supports, and the study says so. Declaring the narrow module instead leaves
+    a wider module outside the declaration, which is the state the study exists
+    to report, so the same command answers differently and exits non-zero.
+    """
+    held_root = _reach_repo(tmp_path / "wide", "pkg/wide.py")
+    closed_root = _reach_repo(tmp_path / "narrow", "pkg/narrow.py")
+    args = build_parser().parse_args(["study", "suite-seam-reach", "--package", "pkg"])
+
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: held_root)
+    held_code = args.func(args)
+    held_out = capsys.readouterr().out
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: closed_root)
+    closed_code = args.func(args)
+    closed_out = capsys.readouterr().out
+
+    assert held_code == 0
+    assert closed_code == 1
+    assert "1 declared module(s) of 3, reached by at least 2 of 2" in held_out
+    assert "pkg/narrow.py leads the undeclared rest at 1" in held_out
+    assert "so the band is a strict break" in held_out
+    assert "pkg/wide.py leads the undeclared rest at 2" in closed_out
+    assert "so the band is no longer a break" in closed_out
+    assert held_out != closed_out

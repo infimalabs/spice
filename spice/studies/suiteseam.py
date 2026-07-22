@@ -31,11 +31,19 @@ from spice.config.layers import config_string_list, effective_table
 from spice.errors import SpiceError
 from spice.pathmatch import matches_repo_path_or_ancestor, normalize_repo_path
 from spice.process.tool import run_tool_command
+from spice.studies.reachabilitypython import (
+    _direct_imports,
+    _module_to_path,
+    _path_to_module,
+)
+from spice.studies.walk import configured_test_roots
 
 SUITE_SEAM_KEY = "suite_seam"
 SUITE_SEAM_PATHS_KEY = "paths"
 SUITE_SEAM_RUN_KEY = "run"
 SUITE_SEAM_SECONDS_KEY = "seconds"
+SUITE_SEAM_PACKAGE = "spice"
+SUITE_SEAM_TEST_GLOB = "test_*.py"
 
 UNDECLARED_REASON = "this repository declares no suite seam"
 UNTOUCHED_REASON = "this task touches no declared suite seam"
@@ -59,6 +67,166 @@ class SuiteSeamOutcome:
     elapsed_seconds: float
     returncode: int
     output: str
+
+
+@dataclass(frozen=True)
+class ModuleReach:
+    """How much of the test suite one package module holds."""
+
+    module: str
+    path: str
+    reached_by: int
+    imported_by: int
+    declared: bool
+
+
+@dataclass(frozen=True)
+class ReachReport:
+    """Every package module ranked by the share of the suite that reaches it."""
+
+    test_modules: int
+    ranked: tuple[ModuleReach, ...]
+
+    @property
+    def declared(self) -> tuple[ModuleReach, ...]:
+        """The ranked entries whose path the seam table already names."""
+        return tuple(entry for entry in self.ranked if entry.declared)
+
+    @property
+    def declared_floor(self) -> int:
+        """The narrowest reach inside the declared band."""
+        return min(entry.reached_by for entry in self.declared)
+
+    @property
+    def widest_undeclared(self) -> ModuleReach:
+        """The module just outside the band -- the next path a maintainer weighs."""
+        for entry in self.ranked:
+            if not entry.declared:
+                return entry
+        raise SpiceError("every package module is already a declared suite seam")
+
+
+@dataclass(frozen=True)
+class _ImportGraph:
+    """One package tree, with the edges already walked kept for reuse."""
+
+    pkg_root: Path
+    package: str
+    edges: dict[str, set[str]]
+
+
+def suite_seam_reach(repo_root: Path, package: str) -> ReachReport:
+    """Rank ``package`` modules by how many test modules reach them by import.
+
+    This is the measurement ``paths`` is chosen by, so its terms are fixed
+    here. A test module is a collected ``test_*.py`` file under the configured
+    test roots. Reach follows imports wherever they appear, including inside
+    function bodies, because a deferred import binds the two modules just as
+    tightly once the process runs. ``imported_by`` counts only the test modules
+    that name the module themselves, which is the view a lane has of its own
+    change and the reason the two numbers are worth printing side by side.
+    """
+    graph = _ImportGraph(repo_root / package, package, {})
+    declared, _argv, _seconds = _suite_seam_config(repo_root)
+    reached: dict[str, int] = {}
+    imported: dict[str, int] = {}
+    test_paths = sorted(
+        path
+        for test_root in configured_test_roots(repo_root)
+        for path in test_root.rglob(SUITE_SEAM_TEST_GLOB)
+    )
+    for path in test_paths:
+        direct = set(_direct_imports(path, graph.pkg_root, graph.package))
+        for module in direct:
+            imported[module] = imported.get(module, 0) + 1
+        for module in _reached_modules(direct, graph):
+            reached[module] = reached.get(module, 0) + 1
+    return ReachReport(
+        test_modules=len(test_paths),
+        ranked=_ranked_modules(repo_root, graph, declared, reached, imported),
+    )
+
+
+def _ranked_modules(
+    repo_root: Path,
+    graph: _ImportGraph,
+    declared: tuple[str, ...],
+    reached: dict[str, int],
+    imported: dict[str, int],
+) -> tuple[ModuleReach, ...]:
+    entries: list[ModuleReach] = []
+    for path in sorted(graph.pkg_root.rglob("*.py")):
+        module = _path_to_module(path, graph.pkg_root, graph.package)
+        if module is None:
+            continue
+        relative = str(path.relative_to(repo_root))
+        entries.append(
+            ModuleReach(
+                module=module,
+                path=relative,
+                reached_by=reached.get(module, 0),
+                imported_by=imported.get(module, 0),
+                # The same predicate the gate matches a footprint with, so a
+                # seam declared as a directory marks the files under it here.
+                declared=any(
+                    matches_repo_path_or_ancestor(relative, seam) for seam in declared
+                ),
+            )
+        )
+    return tuple(sorted(entries, key=lambda entry: (-entry.reached_by, entry.module)))
+
+
+def _reached_modules(direct: set[str], graph: _ImportGraph) -> set[str]:
+    seen: set[str] = set()
+    pending = list(direct)
+    while pending:
+        module = pending.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        pending.extend(_module_edges(module, graph))
+    return seen
+
+
+def _module_edges(module: str, graph: _ImportGraph) -> set[str]:
+    if module not in graph.edges:
+        path = _module_to_path(module, graph.pkg_root, graph.package)
+        graph.edges[module] = (
+            set(_direct_imports(path, graph.pkg_root, graph.package)) if path else set()
+        )
+    return graph.edges[module]
+
+
+def render_suite_seam_reach(report: ReachReport, *, limit: int) -> list[str]:
+    """The ranking a maintainer reads before adding a path to ``paths``.
+
+    The header states the band the declaration currently claims: the narrowest
+    reach inside it and the widest module left outside it. A declaration is
+    defensible while those two are a strict break, so when the second catches
+    the first the header says so and the rows below show where it happened.
+    """
+    declared = report.declared
+    if not declared:
+        return [
+            f"suite-seam-reach: {report.test_modules} test module(s) rank "
+            f"{len(report.ranked)} package module(s), none of them declared"
+        ]
+    next_up = report.widest_undeclared
+    floor = report.declared_floor
+    verdict = "a strict break" if floor > next_up.reached_by else "no longer a break"
+    lines = [
+        f"suite-seam-reach: {len(declared)} declared module(s) of "
+        f"{len(report.ranked)}, reached by at least {floor} of "
+        f"{report.test_modules} test module(s)",
+        f"suite-seam-reach: {next_up.path} leads the undeclared rest at "
+        f"{next_up.reached_by}, so the band is {verdict}",
+    ]
+    lines.extend(
+        f"  {entry.reached_by:>5} reached {entry.imported_by:>5} imported  "
+        f"{entry.path}{' [declared]' if entry.declared else ''}"
+        for entry in report.ranked[:limit]
+    )
+    return lines
 
 
 def suite_seam_plan(repo_root: Path, footprint: Sequence[Path | str]) -> SuiteSeamPlan:
