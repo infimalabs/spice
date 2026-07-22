@@ -187,6 +187,11 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     assert fresh["claim_lease_seconds"] == before["claim_lease_seconds"] == "7200"
     assert {field: fresh.get(field) for field in preserved_fields} == preserved
     assert lifecycle_events == [(uuid, "claim", successor)]
+    predecessor_witness = claimstate.read_claim_witness(task_repo, predecessor)
+    successor_witness = claimstate.read_claim_witness(task_repo, successor)
+    assert predecessor_witness is not None and predecessor_witness.active is False
+    assert successor_witness is not None and successor_witness.active
+    assert successor_witness.uuid == uuid
     assert [member.agent_id for member in store.team_state(team.team_id).members] == [
         successor
     ]

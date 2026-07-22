@@ -6,6 +6,7 @@ imports ops, so guards stay usable from any task surface without cycles.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from dataclasses import dataclass
@@ -13,9 +14,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from spice.agent.identity import ambient_thread
+from spice.agent.identity import ambient_thread, uuid_thread_id
+from spice.agent.paths import agent_thread_state_dir
+from spice.agent.sidechannelnotify import (
+    SIDE_CHANNEL_CLAIM_EVENT,
+    notify_agent_side_channel,
+)
 from spice.errors import SpiceError
+from spice.paths import atomic_write_json
 from spice.tasks import config, gitsync, identity, tw
+
+CLAIM_WITNESS_FILE = "claim-witness.json"
 
 
 def annotate(target: str, text: str) -> None:
@@ -219,6 +228,121 @@ class ClaimRenewalResult:
     claim_until: str = ""
     detail: str = ""
     uuid: str = ""
+
+
+@dataclass(frozen=True)
+class ClaimWitness:
+    active: bool
+    actor: str
+    uuid: str
+    handle: str = ""
+
+
+def claim_witness_path(repo_root: Path, actor: str) -> Path | None:
+    thread_id = uuid_thread_id(actor)
+    if not thread_id:
+        return None
+    return agent_thread_state_dir(repo_root, thread_id) / CLAIM_WITNESS_FILE
+
+
+def read_claim_witness(repo_root: Path, actor: str) -> ClaimWitness | None:
+    """Read the exact row this thread most recently claimed or retired."""
+    path = claim_witness_path(repo_root, actor)
+    if path is None:
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SpiceError(f"cannot read claim witness {path}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise SpiceError(f"invalid claim witness {path}: expected an object")
+    witness_actor = uuid_thread_id(str(loaded.get("actor") or ""))
+    uuid = str(loaded.get("uuid") or "").strip()
+    active = loaded.get("active")
+    handle = str(loaded.get("handle") or "").strip()
+    if (
+        witness_actor != uuid_thread_id(actor)
+        or not uuid
+        or not isinstance(active, bool)
+    ):
+        raise SpiceError(f"invalid claim witness {path}: missing identity fields")
+    if active and not handle:
+        raise SpiceError(f"invalid claim witness {path}: active row has no handle")
+    return ClaimWitness(active=active, actor=witness_actor, uuid=uuid, handle=handle)
+
+
+def _write_claim_witness(
+    repo_root: Path,
+    actor: str,
+    *,
+    uuid: str,
+    handle: str,
+    active: bool,
+) -> bool:
+    try:
+        path = claim_witness_path(repo_root, actor)
+    except SpiceError:
+        # Explicit claim-site metadata may name a worktree that has not been
+        # materialized yet. No supervisor can inhabit that path, so retain the
+        # established cross-worktree claim behavior without inventing state in
+        # the caller's different lane.
+        return False
+    if path is None:
+        return False
+    intended = ClaimWitness(
+        active=active,
+        actor=uuid_thread_id(actor),
+        uuid=uuid,
+        handle=handle if active else "",
+    )
+    try:
+        if read_claim_witness(repo_root, actor) == intended:
+            return False
+    except SpiceError:
+        # The atomic rewrite repairs an interrupted or manually damaged record.
+        pass
+    atomic_write_json(
+        path,
+        {
+            "active": intended.active,
+            "actor": intended.actor,
+            "handle": intended.handle,
+            "uuid": intended.uuid,
+        },
+        compact=True,
+        sort_keys=True,
+    )
+    notify_agent_side_channel(repo_root, event=SIDE_CHANNEL_CLAIM_EVENT)
+    return True
+
+
+def record_claim_witness(uuid: str, actor: str, *, site: ClaimSite) -> bool:
+    rows = tw.export([uuid])
+    if len(rows) != 1:
+        raise SpiceError(f"cannot record claim witness: task UUID {uuid} is not unique")
+    fresh = rows[0]
+    return _write_claim_witness(
+        site.worktree,
+        actor,
+        uuid=identity.uuid_of(fresh),
+        handle=identity.render_handle(fresh),
+        active=True,
+    )
+
+
+def retire_claim_witness(
+    repo_root: Path, actor: str, *, uuid: str, handle: str = ""
+) -> bool:
+    """Durably distinguish an intentional/announced end from no history."""
+    return _write_claim_witness(
+        repo_root,
+        actor,
+        uuid=uuid,
+        handle=handle,
+        active=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -490,6 +614,7 @@ def do_claim(
         if guard_unclaimed:
             return False
         raise
+    record_claim_witness(uuid, actor, site=site)
     _record_task_lifecycle_event(uuid, "claim", actor)
     return True
 
@@ -538,6 +663,7 @@ def take_over_stale_claim(
         )
     except SpiceError:
         return False
+    record_claim_witness(uuid, actor, site=site)
     _record_task_lifecycle_event(uuid, "claim", actor)
     return True
 
@@ -608,6 +734,8 @@ def carry_claim(
         raise SpiceError(
             f"claim carry did not seat {next_actor} on active task {handle}"
         )
+    record_claim_witness(uuid, next_actor, site=site)
+    retire_claim_witness(site.worktree, prior_actor, uuid=uuid, handle=handle)
     _record_task_lifecycle_event(uuid, "claim", next_actor)
     return ClaimCarryResult(
         True,
@@ -636,6 +764,12 @@ def _renewal_claim_meta(
 def release_claim(uuid: str, actor: str) -> bool:
     """Release only the exact active claim still owned by ``actor``."""
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
+    rows = tw.export([uuid])
+    claim_worktree = (
+        Path(str(rows[0].get("claim_worktree") or config.repo_root()))
+        if len(rows) == 1
+        else config.repo_root()
+    )
     try:
         tw.run(
             [
@@ -649,6 +783,7 @@ def release_claim(uuid: str, actor: str) -> bool:
         )
     except SpiceError:
         return False
+    retire_claim_witness(claim_worktree, claim_actor, uuid=uuid)
     return True
 
 
@@ -756,6 +891,7 @@ def renew_claim(
         fresh = identity.resolve(handle_text)
     except SpiceError as exc:
         return _claim_renewal_missing_result(handle_text, exc)
+    record_claim_witness(uuid, resolved_actor, site=site)
     return ClaimRenewalResult(
         True,
         "renewed",

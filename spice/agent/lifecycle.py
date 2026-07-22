@@ -26,7 +26,7 @@ import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from threading import Event, Thread
+from threading import Condition, Event, Thread
 from typing import Any, cast
 
 from spice.agent.driver import driver_for
@@ -513,6 +513,49 @@ LANE_UNCAPTURED_NUDGE = (
     "editing further, or fold the changes in with spice task capture."
 )
 CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
+CLAIM_RENEWAL_TERMINAL_REASONS = frozenset(
+    {
+        "claim_ended",
+        "claimed_by_other",
+        "completed",
+        "deleted",
+        "different_worktree",
+        "missing",
+    }
+)
+
+
+class SupervisorLaneSignal:
+    """One blocking wakeup surface for claim events, cadence, and shutdown."""
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._generation = 0
+        self._observed_generation = 0
+        self._stopped = False
+
+    def notify(self) -> None:
+        with self._condition:
+            self._generation += 1
+            self._condition.notify_all()
+
+    def stop(self) -> None:
+        with self._condition:
+            self._stopped = True
+            self._condition.notify_all()
+
+    def wait_for_event(self, timeout: float) -> bool:
+        """Block until an event or timeout; return whether shutdown was requested."""
+        with self._condition:
+            if self._generation != self._observed_generation:
+                self._observed_generation = self._generation
+                return self._stopped
+            self._condition.wait_for(
+                lambda: self._stopped or self._generation != self._observed_generation,
+                timeout=max(0.0, timeout),
+            )
+            self._observed_generation = self._generation
+            return self._stopped
 
 
 # Supervisor-side git probes run on the lane-watch loop; a wedged git binary must
@@ -549,7 +592,7 @@ def _claim_renewal_report_key(result: Any) -> str:
     )
 
 
-def _renew_held_claim(thread_id: str, held: dict[str, str]) -> Any:
+def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> Any:
     """Renew the exact row last held, so a claim that moved names its new owner.
 
     An actor-keyed lookup cannot see a claim that left the lane: it finds
@@ -561,19 +604,50 @@ def _renew_held_claim(thread_id: str, held: dict[str, str]) -> Any:
     """
     from spice.tasks import claimstate
 
-    handle = held.pop("handle", "")
+    try:
+        witness = claimstate.read_claim_witness(repo_root, thread_id)
+    except SpiceError as exc:
+        return claimstate.ClaimRenewalResult(
+            False,
+            "backend_error",
+            handle=held.get("handle", ""),
+            detail=str(exc),
+            uuid=held.get("uuid", ""),
+        )
+    if witness is not None:
+        held.clear()
+        if witness.active:
+            held.update({"handle": witness.handle, "uuid": witness.uuid})
+    # The public prefix may change, but its incepted suffix is the durable row
+    # identity accepted by ``identity.resolve``; keep the UUID separately for
+    # witness retirement after a terminal result.
+    target = held.get("handle") or held.get("uuid", "")
     result = claimstate.renew_claim(
-        handle=handle or None,
+        handle=target or None,
         actor=thread_id,
         lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
     )
-    if handle and not result.renewed and result.reason == "no_active_claim":
+    if target and not result.renewed and result.reason == "no_active_claim":
         result = claimstate.renew_claim(
             actor=thread_id,
             lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
         )
+        if not result.renewed and result.reason == "no_active_claim":
+            result = replace(
+                result,
+                reason="claim_ended",
+                handle=held.get("handle", ""),
+                uuid=held.get("uuid", ""),
+            )
     if result.renewed:
-        held["handle"] = result.handle
+        held.clear()
+        held.update({"handle": result.handle, "uuid": result.uuid})
+    elif target and not result.uuid:
+        result = replace(
+            result,
+            handle=result.handle or held.get("handle", ""),
+            uuid=held.get("uuid", ""),
+        )
     return result
 
 
@@ -591,7 +665,7 @@ def _renew_supervised_claim(
     from spice.agent.watchdog import publish_supervisor_feedback
     from spice.tasks import claimstate
 
-    result = _renew_held_claim(thread_id, held)
+    result = _renew_held_claim(repo_root, thread_id, held)
     if result.renewed:
         reported.pop("claim_renewal", None)
         try:
@@ -608,25 +682,32 @@ def _renew_supervised_claim(
     if result.reason in CLAIM_RENEWAL_QUIET_REASONS:
         return
     report_key = _claim_renewal_report_key(result)
-    if reported.get("claim_renewal") == report_key:
-        return
-    reported["claim_renewal"] = report_key
-    state = claimstate.claim_renewal_state(result)
-    detail = f" detail={result.detail}" if result.detail else ""
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        log_handle.write(
-            f"spice claim renewal {state}: "
-            f"reason={result.reason} handle={result.handle or '-'}{detail}\n"
-        )
-        log_handle.flush()
-        publish_supervisor_feedback(
+    if reported.get("claim_renewal") != report_key:
+        reported["claim_renewal"] = report_key
+        state = claimstate.claim_renewal_state(result)
+        detail = f" detail={result.detail}" if result.detail else ""
+        with log_path.open("a", encoding="utf-8") as log_handle:
+            log_handle.write(
+                f"spice claim renewal {state}: "
+                f"reason={result.reason} handle={result.handle or '-'}{detail}\n"
+            )
+            log_handle.flush()
+            publish_supervisor_feedback(
+                repo_root,
+                log_handle,
+                f"claim.renewal-{state}",
+                reason=result.reason,
+                handle=result.handle,
+                detail=result.detail,
+            )
+    if result.reason in CLAIM_RENEWAL_TERMINAL_REASONS and result.uuid:
+        claimstate.retire_claim_witness(
             repo_root,
-            log_handle,
-            f"claim.renewal-{state}",
-            reason=result.reason,
+            thread_id,
+            uuid=result.uuid,
             handle=result.handle,
-            detail=result.detail,
         )
+        held.clear()
 
 
 def _notice_contract_mutations(
@@ -697,29 +778,28 @@ def _watch_supervised_lane(
     thread_id: str,
     log_path: Path,
     process: subprocess.Popen[str],
-    stop: Event,
+    lane_signal: SupervisorLaneSignal,
 ) -> None:
-    next_renewal = time.monotonic()
     next_uncaptured_nudge = time.monotonic()
     reported: dict[str, str] = {}
     contract_cursors: dict[str, int] = {}
     # Scoped to the child's life, which is the exact span of "actively working".
     held: dict[str, str] = {}
-    while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
+    while True:
         if process.poll() is not None:
             return
         now = time.monotonic()
         try:
-            if now >= next_renewal:
-                _renew_supervised_claim(
-                    repo_root, thread_id, log_path, reported, contract_cursors, held
-                )
-                next_renewal = now + SUPERVISOR_CLAIM_RENEWAL_SECONDS
+            _renew_supervised_claim(
+                repo_root, thread_id, log_path, reported, contract_cursors, held
+            )
             if now >= next_uncaptured_nudge:
                 _flag_uncaptured_lane(repo_root, thread_id, log_path)
                 next_uncaptured_nudge = now + SUPERVISOR_UNCAPTURED_NUDGE_SECONDS
         except Exception:  # best-effort watch: never take down the supervisor
             pass
+        if lane_signal.wait_for_event(SUPERVISOR_CLAIM_RENEWAL_SECONDS):
+            return
 
 
 def _transition_agent_startup_state(
@@ -798,7 +878,9 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
     command = supervisor_command_from_json(str(args.command_json))
     prompt_skill_path = resolve_agent_prompt_skill_path(repo_root)
     env = agent_environment(repo_root)
-    with AgentSideChannelServer(repo_root):
+    lane_signal = SupervisorLaneSignal()
+
+    with AgentSideChannelServer(repo_root, on_claim=lane_signal.notify):
         started_at = utc_now()
         launch_clock = time.monotonic()
         started_thread_id = str(args.resume_thread_id or "")
@@ -852,10 +934,9 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 daemon=False,
             )
             startup_watch.start()
-            stop_watch = Event()
             lane_watch = Thread(
                 target=_watch_supervised_lane,
-                args=(repo_root, started_thread_id, log_path, process, stop_watch),
+                args=(repo_root, started_thread_id, log_path, process, lane_signal),
                 name=f"spice-lane-watch-{started_thread_id or process.pid}",
                 daemon=True,
             )
@@ -863,12 +944,14 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
             try:
                 exit_code = process.wait()
             finally:
-                stop_watch.set()
+                lane_signal.stop()
                 startup_signal.note_finished()
                 stdout_thread.join(timeout=1.0)
                 startup_watch.join(timeout=STARTUP_WATCH_JOIN_SECONDS)
                 lane_watch.join(timeout=1.0)
         finally:
+            if process.poll() is None:
+                terminate_process_group(process)
             # Every supervised launch leaves a terminal outcome — including a
             # startup death, which otherwise only surfaces as a raised error —
             # so restart policy can see consecutive rapid deaths.

@@ -44,6 +44,7 @@ from spice.tasks.claimstate import (
     require_no_active_plan_phase_implementation,
     resolve_claim_target,
     release_claim,
+    retire_claim_witness,
 )
 from spice.tasks.projectsubs import (
     _gc_empty_project_task_filters,
@@ -487,9 +488,11 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
     index = phase_index(row)
     handle = identity.render_handle(row)
     actor = str(row.get("claim_by") or "").strip() or tw.current_actor()
+    claim_worktree = Path(str(row.get("claim_worktree") or config.repo_root()))
     if index + 1 >= len(phases):
         project = str(row.get("project") or "")
         tw.run([uuid, "done"])
+        retire_claim_witness(claim_worktree, actor, uuid=uuid, handle=handle)
         _record_task_lifecycle_event(uuid, "complete", actor)
         _record_task_lifecycle_event(uuid, "drain", actor)
         _gc_empty_project_task_filters(project)
@@ -508,6 +511,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         author = review_author or str(row.get("claim_by") or "") or tw.current_actor()
         args.append(f"review_author:{author}")
     tw.run(args)
+    retire_claim_witness(claim_worktree, actor, uuid=uuid, handle=handle)
     _record_task_lifecycle_event(uuid, "phaseAdvance", actor)
     return f"advanced {handle} -> {nxt}"
 

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import re
 import subprocess
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -716,7 +717,7 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         sidechannel,
         "AgentSideChannelServer",
-        lambda repo_root: _FakeSideChannel(repo_root, side_events),
+        lambda repo_root, **_kwargs: _FakeSideChannel(repo_root, side_events),
     )
     args = argparse.Namespace(
         repo_root=str(tmp_path),
@@ -778,7 +779,7 @@ def test_run_agent_supervisor_records_launch_outcome_under_fakes(tmp_path, monke
     monkeypatch.setattr(
         sidechannel,
         "AgentSideChannelServer",
-        lambda repo_root: _FakeSideChannel(repo_root, []),
+        lambda repo_root, **_kwargs: _FakeSideChannel(repo_root, []),
     )
     args = argparse.Namespace(
         repo_root=str(tmp_path),
@@ -1009,7 +1010,7 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
 
     assert renewals == [(tmp_path, "thread-a", log_path)]
     assert nudges == [(tmp_path, "thread-a", log_path)]
-    assert stop.waits[0] == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
+    assert stop.waits[0] == lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
     assert (
         lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
         == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
@@ -1017,6 +1018,22 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
     assert lifecycle.SUPERVISOR_CLAIM_LEASE_SECONDS == (
         3.0 * lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
     )
+
+
+def test_supervisor_lane_signal_keeps_notification_that_precedes_wait():
+    signal = lifecycle.SupervisorLaneSignal()
+    consumed = Event()
+    signal.notify()
+
+    def wait_for_signal() -> None:
+        signal.wait_for_event(30.0)
+        consumed.set()
+
+    waiter = Thread(target=wait_for_signal, daemon=True)
+    waiter.start()
+
+    assert consumed.wait(2.0)
+    waiter.join(timeout=2.0)
 
 
 def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
@@ -1035,6 +1052,7 @@ def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
             "renewed",
             handle="TASK-00000000",
             claim_until="2026-07-09T06:00:00.000000Z",
+            uuid="11111111-1111-1111-1111-111111111111",
         )
 
     monkeypatch.setattr(claimstate, "renew_claim", fake_renew_claim)
@@ -1352,9 +1370,9 @@ class _StopAfterOneIteration:
     def __init__(self) -> None:
         self.waits: list[float] = []
 
-    def wait(self, seconds: float) -> bool:
+    def wait_for_event(self, seconds: float) -> bool:
         self.waits.append(seconds)
-        return len(self.waits) > 1
+        return True
 
 
 class _FakeSideChannel:

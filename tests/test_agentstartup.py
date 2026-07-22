@@ -294,7 +294,7 @@ def test_silent_supervised_agent_stalls_recovers_and_arms_restart_refusal(
     monkeypatch.setattr(
         sidechannel,
         "AgentSideChannelServer",
-        lambda repo_root: _FakeSideChannel(repo_root),
+        lambda repo_root, **_kwargs: _FakeSideChannel(repo_root),
     )
 
     def terminate_silent_agent(target) -> None:
@@ -375,7 +375,7 @@ def test_startup_stall_waits_for_slow_group_cleanup_and_terminal_state(
     monkeypatch.setattr(
         sidechannel,
         "AgentSideChannelServer",
-        lambda repo_root: _FakeSideChannel(repo_root),
+        lambda repo_root, **_kwargs: _FakeSideChannel(repo_root),
     )
 
     def terminate_after_slow_cleanup(target) -> None:
