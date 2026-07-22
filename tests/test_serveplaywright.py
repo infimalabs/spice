@@ -152,14 +152,18 @@ def test_serve_fresh_startup_import_shell_smoke_asserts_stale_hint_reset() -> No
     smoke = (ROOT / "browser" / "serve_fresh_startup_import_shell_smoke.js").read_text(
         encoding="utf-8"
     )
+    # The wait threads the caller's options through, so the import-shell budget
+    # scales with the harness lifecycle budget instead of a pinned literal.
+    settle = "waitForImportShell(page, options)"
 
     assert 'require("./serve_playwright_harness")' in smoke
     assert "withServePage(" in smoke
     assert "installStaleOpenLaneHints" in smoke
     assert "page.reload" in smoke
-    # The wait threads the caller's options through, so the import-shell budget
-    # scales with the harness lifecycle budget instead of a pinned literal.
-    assert "waitForImportShell(page, options)" in smoke
+    assert settle in smoke
+    # Reading afterReload only means anything once the shell has settled again,
+    # so the smoke waits a second time on the far side of the reload.
+    assert smoke.index("page.reload") < smoke.rindex(settle)
     assert "assertEqual(\n        afterReload.storedConfig," in smoke
     assert '"[]"' in smoke
     assert "fresh startup topology must settle on the import shell" in smoke
