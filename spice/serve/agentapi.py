@@ -377,7 +377,6 @@ def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> f
     The durable origin is the task's current READY transition, not the moment
     the task was conceived. Native Taskwarrior timestamps cover the initial
     transition, while Spice's ``ready_at`` UDA records later entries into READY.
-    The inception stamp remains only a compatibility fallback for legacy rows.
     """
     return max(0.0, now.timestamp() - readiness.queue_ready_epoch(row))
 
