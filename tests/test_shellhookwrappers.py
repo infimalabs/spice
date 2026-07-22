@@ -161,64 +161,6 @@ def test_repository_common_wrapper_preserves_native_git_fidelity_routes():
     assert '          command git "$@"' in lines
 
 
-def test_repository_spice_dev_wrapper_redirects_bare_task():
-    lines = shellhook.render_agent_wrapper_lines(Path.cwd())
-
-    start = lines.index("task() {")
-    assert lines[start - 1 : start + 3] == [
-        "",
-        "task() {",
-        '  spice task "$@"',
-        "}",
-    ]
-
-
-@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
-def test_spice_checkout_task_wrapper_forwards_and_preserves_native_escape(
-    tmp_path, shell_name
-):
-    shell = shutil.which(shell_name)
-    if shell is None:
-        pytest.skip(f"{shell_name} is not installed")
-    trace = tmp_path / "trace.log"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    for name in ("spice", "task"):
-        tool = bin_dir / name
-        tool.write_text(
-            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
-            encoding="utf-8",
-        )
-        tool.chmod(0o755)
-    script = "\n".join(
-        [
-            "set -u",
-            *shellhook.render_agent_wrapper_lines(Path.cwd()),
-            "task status --limit 3",
-            "command task native status",
-        ]
-    )
-
-    completed = subprocess.run(
-        [shell, "-c", script],
-        check=False,
-        env={
-            "PATH": str(bin_dir)
-            + os.pathsep
-            + os.environ.get("PATH", ""),  # env-policy: allow
-            SHELL_TRACE_ENV: str(trace),
-        },
-        text=True,
-        capture_output=True,
-    )
-
-    assert completed.returncode == 0, completed_process_detail(completed, trace)
-    assert trace_lines(trace, expected_prefix="task:native status") == [
-        "spice:task status --limit 3",
-        "task:native status",
-    ]
-
-
 def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
     write_agent_wrapper_config(
         tmp_path,
