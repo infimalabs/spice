@@ -188,7 +188,7 @@ def verify_packaging_toolchain(
     if shutil.which("uv") is None:
         raise RehearsalError(
             "the release rehearsal drives its packaging toolchain through uv, "
-            f"which is not on PATH; install uv and rerun (declared pins: "
+            "which is not on PATH; install uv and rerun (declared pins: "
             f"{json.dumps(expected, sort_keys=True)})"
         )
     names = ", ".join(repr(name) for name in PACKAGING_TOOLCHAIN_PINS)
