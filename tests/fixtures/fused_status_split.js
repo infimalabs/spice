@@ -50,6 +50,16 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
     laneLightsEl: {
       hidden: false,
       style: fakeStyle(),
+      children: [],
+      // syncLaneLights reuses the lights already in place when their order
+      // still matches the members, so the fake element has to answer for what
+      // it currently holds rather than only accepting replacements.
+      querySelectorAll(selector) {
+        const wanted = selector.replace(".", "");
+        return this.children.filter((child) =>
+          String(child.className).split(" ").includes(wanted),
+        );
+      },
       replaceChildren(...children) {
         this.children = children;
       },
