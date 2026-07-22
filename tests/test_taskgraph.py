@@ -327,16 +327,35 @@ def test_canned_registry_bakes_in_exactly_eight_unique_palette_slots() -> None:
         assert registry.PALETTE[0] in rendered
 
 
-def test_aspect_guard_rejects_extreme_layouts() -> None:
+def test_aspect_guard_admits_the_whole_shipped_range() -> None:
+    """Both bounds are inclusive, and the guard hands back the ratio it measured.
+
+    Asserting the returned ratio pins the two shipped limits with literals. A
+    bound that silently widened would raise nothing at either edge, so a test
+    that only watched for errors would keep passing while the gate it guards
+    stopped meaning anything.
+    """
     name = registry.NAMES[0]
 
-    assert registry.validate_aspect(name, 1200, 600) == 2
-    with pytest.raises(SpiceError, match="12.00:1"):
-        registry.validate_aspect(name, 1200, 100)
-    with pytest.raises(SpiceError, match="0.17:1"):
-        registry.validate_aspect(name, 170, 1000)
-    with pytest.raises(SpiceError, match="WIDTHxHEIGHT"):
-        graph.render(name, _rows(), check_aspect="wide")
+    assert registry.validate_aspect(name, 1000, 4000) == 0.25
+    assert registry.validate_aspect(name, 1200, 600) == 2.0
+    assert registry.validate_aspect(name, 4000, 800) == 5.0
+
+
+def test_check_aspect_parses_the_dimensions_the_browser_reports() -> None:
+    """`--check-aspect` carries a real measurement, so parsing is the contract.
+
+    Chromium reports fractional dimensions and the flag is typed by hand, so
+    the shipped pattern accepts decimals, either case of the separator, and
+    surrounding space. Each of those is a promise the CLI makes to its caller.
+    """
+    assert registry.parse_aspect("1200x660") == (1200.0, 660.0)
+    assert registry.parse_aspect("  1100X560.5  ") == (1100.0, 560.5)
+
+    name = registry.NAMES[0]
+    rendered = graph.render(name, _rows(), check_aspect="1200x660")
+
+    assert rendered == graph.render(name, _rows())
 
 
 def test_every_emitted_diagram_renders_through_real_mermaid(tmp_path: Path) -> None:
