@@ -7,11 +7,13 @@ import pytest
 
 from spice.agent import lifecycle, lifecyclebinding, sidechannel
 from spice.agent.watchdog import AgentStartupSignal
+from spice.process.groups import PROCESS_GROUP_TERMINATION_BOUND_SECONDS
 
 SUPERVISED_AGENT_PID = 4444
 STARTUP_TERMINATED_EXIT_CODE = -15
 STARTUP_TEST_GRACE_SECONDS = 0.01
 THREAD_JOIN_TIMEOUT_SECONDS = 1.0
+SLOW_CLEANUP_TEST_TIMEOUT_SECONDS = 5.0
 
 
 @pytest.fixture(autouse=True)
@@ -194,4 +196,101 @@ def test_silent_supervised_agent_stalls_recovers_and_arms_restart_refusal(
     assert isinstance(refusal, dict)
     assert (
         refusal["consecutive_rapid_deaths"] == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+
+
+def test_startup_stall_waits_for_slow_group_cleanup_and_terminal_state(
+    tmp_path, monkeypatch
+):
+    log_path = tmp_path / "slow-cleanup.log"
+    log_path.write_text("silent startup\n", encoding="utf-8")
+    process = _SilentProcess()
+    stdout_thread = _FakeThread(AgentStartupSignal())
+    thread_id = "ffffffffffffffffffffffffffffffff"
+    cleanup_started = lifecycle.Event()
+    release_cleanup = lifecycle.Event()
+    ordered_events: list[str] = []
+    supervisor_results: list[int] = []
+    record_launch_outcome = lifecycle.record_launch_outcome
+    monkeypatch.setattr(
+        lifecycle, "FIRST_ACTIVITY_GRACE_SECONDS", STARTUP_TEST_GRACE_SECONDS
+    )
+    monkeypatch.setattr(lifecycle, "agent_environment", lambda _repo: {"ENV": "1"})
+    monkeypatch.setattr(
+        lifecycle,
+        "spawn_supervised_agent",
+        lambda command, *, cwd, log_path, env: (process, stdout_thread),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "require_started_process",
+        lambda _process, _log_path, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "started_agent_thread_id",
+        lambda _log_path, *, repo_root, fallback_thread_id: thread_id,
+    )
+    monkeypatch.setattr(
+        sidechannel,
+        "AgentSideChannelServer",
+        lambda repo_root: _FakeSideChannel(repo_root),
+    )
+
+    def terminate_after_slow_cleanup(target) -> None:
+        ordered_events.append("cleanup-started")
+        target.returncode = STARTUP_TERMINATED_EXIT_CODE
+        target.finished.set()
+        cleanup_started.set()
+        release_cleanup.wait(timeout=SLOW_CLEANUP_TEST_TIMEOUT_SECONDS)
+        ordered_events.append("cleanup-complete")
+
+    def record_terminal_outcome(repo_root, outcome) -> None:
+        state = lifecycle.read_agent_state(repo_root)
+        ordered_events.append(f"outcome-after-{state['startup_status']}")
+        record_launch_outcome(repo_root, outcome)
+        ordered_events.append("outcome-recorded")
+
+    monkeypatch.setattr(
+        lifecycle, "terminate_process_group", terminate_after_slow_cleanup
+    )
+    monkeypatch.setattr(lifecycle, "record_launch_outcome", record_terminal_outcome)
+    args = argparse.Namespace(
+        repo_root=str(tmp_path),
+        action="resume",
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="",
+        resume_thread_id=thread_id,
+        log_path=str(log_path),
+        fast_mode=False,
+        command_json='["codex","exec","prompt"]',
+    )
+
+    def run_supervisor() -> None:
+        supervisor_results.append(lifecycle.run_agent_supervisor(args))
+        ordered_events.append("supervisor-returned")
+
+    assert lifecycle.STARTUP_WATCH_JOIN_SECONDS == (
+        PROCESS_GROUP_TERMINATION_BOUND_SECONDS
+        + lifecycle.STARTUP_STATE_PERSISTENCE_ALLOWANCE_SECONDS
+    )
+    supervisor = lifecycle.Thread(target=run_supervisor)
+    supervisor.start()
+    assert cleanup_started.wait(timeout=SLOW_CLEANUP_TEST_TIMEOUT_SECONDS) is True
+    assert ordered_events == ["cleanup-started"]
+
+    release_cleanup.set()
+    supervisor.join(timeout=SLOW_CLEANUP_TEST_TIMEOUT_SECONDS)
+
+    assert ordered_events == [
+        "cleanup-started",
+        "cleanup-complete",
+        f"outcome-after-{lifecycle.AGENT_STARTUP_STALLED}",
+        "outcome-recorded",
+        "supervisor-returned",
+    ]
+    assert supervisor_results == [STARTUP_TERMINATED_EXIT_CODE]
+    assert lifecycle.read_launch_outcomes(tmp_path)[0]["failure_kind"] == (
+        lifecycle.AGENT_FAILURE_STARTUP_STALLED
     )
