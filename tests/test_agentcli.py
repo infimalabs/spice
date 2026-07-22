@@ -775,6 +775,8 @@ def test_agent_import_binds_external_thread_from_either_uuid_form(tmp_path):
     assert status.thread_id == dashless
     assert status.process_status == "idle"
     assert status.pid is None
+    assert status.claim_carry == "claim_carry=skipped no_predecessor"
+    assert "claim_carry=skipped no_predecessor" in agent_cli.render_agent_status(status)
     assert lifecycle.agent_status(repo).thread_id == dashless
 
     # The dashless form of the same UUID is the same binding.
