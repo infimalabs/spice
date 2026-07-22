@@ -497,7 +497,7 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
         [
             "task",
             "add",
-            "Adopting CLI task",
+            "Orphaning CLI task",
             "--project",
             "task.unit",
             "--acceptance",
@@ -512,20 +512,20 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
     row = identity.resolve(created)
     annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
 
-    assert row["description"] == "Adopting CLI task"
+    assert row["description"] == "Orphaning CLI task"
     assert row["phase"] == "plan"
     assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     assert row["origin"] == "ack:1jN54zJJ"
     assert any(
-        "adopting" in ann and "self-correction required" in ann for ann in annotations
+        "orphaning" in ann and "self-correction required" in ann for ann in annotations
     )
 
 
 def test_task_reword_clears_active_claim_marker(task_repo, capsys):
     handle = create.add(
-        "Adopting CLI resolve",
+        "Orphaning CLI resolve",
         project="task.unit",
         acceptance=["parent bookend acceptance exists"],
         origin="ack:1jN54zJJ",

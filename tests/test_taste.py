@@ -61,20 +61,20 @@ def test_only_text_files_scanned_and_clean_passes(tmp_path):
 def test_stem_star_key_matches_every_inflection(tmp_path):
     doc = tmp_path / "notes.md"
     doc.write_text(
-        "we adopted it; still adopting; an orphaned note; the adoption.\n",
+        "we migrated it; still migrating; an orphaned note; the migration.\n",
         encoding="utf-8",
     )
 
     findings = taste.scan_taste(
         [Path("notes.md")],
         root=tmp_path,
-        words={"adopt*": "capture", "orphan*": "loose"},
+        words={"migrat*": "move", "orphan*": "loose"},
     )
 
     hits = {(finding.word, finding.suggestion) for finding in findings}
-    assert ("adopted", "capture") in hits
-    assert ("adopting", "capture") in hits
-    assert ("adoption", "capture") in hits
+    assert ("migrated", "move") in hits
+    assert ("migrating", "move") in hits
+    assert ("migration", "move") in hits
     assert ("orphaned", "loose") in hits
 
 
