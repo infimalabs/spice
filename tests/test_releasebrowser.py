@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 BROWSER_DIR = ROOT / "tests" / "browser"
@@ -12,7 +14,7 @@ MANIFEST = BROWSER_DIR / "release_smoke_manifest.js"
 RUNNER = BROWSER_DIR / "run_release_smokes.js"
 
 
-def _load_manifest() -> dict[str, object]:
+def _load_manifest() -> dict[str, Any]:
     script = "console.log(JSON.stringify(require(process.argv[1])))"
     result = subprocess.run(
         ["node", "-e", script, str(MANIFEST)],
@@ -77,8 +79,13 @@ def test_release_browser_runner_reports_scenario_output_and_exclusions(
         cwd=ROOT,
         check=False,
         capture_output=True,
+        env={
+            **os.environ,  # env-policy: allow
+            "SPICE_RELEASE_BROWSER_REPORT": str(tmp_path / "browser-report.json"),
+        },
         text=True,
     )
+    report = json.loads((tmp_path / "browser-report.json").read_text(encoding="utf-8"))
 
     assert result.returncode == 1
     assert "PASS passing_smoke.js" in result.stdout
@@ -86,6 +93,15 @@ def test_release_browser_runner_reports_scenario_output_and_exclusions(
     assert "FAIL failing_smoke.js" in result.stderr
     assert "actionable failure" in result.stderr
     assert "release browser gate failed" in result.stderr
+    assert report == {
+        "schemaVersion": 1,
+        "counts": {"failed": 1, "passed": 1, "skipped": 1, "total": 3},
+        "externalState": [{"path": "external_smoke.js", "reason": "needs live state"}],
+        "scenarios": [
+            {"path": "passing_smoke.js", "serial": False, "status": "passed"},
+            {"path": "failing_smoke.js", "serial": False, "status": "failed"},
+        ],
+    }
 
 
 def test_release_docs_require_repo_local_playwright_and_manifest() -> None:

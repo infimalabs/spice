@@ -7,6 +7,7 @@ const repoRoot = path.resolve(browserDir, "..", "..");
 const defaultManifestPath = path.join(browserDir, "release_smoke_manifest.js");
 const maxParallel = 4;
 const scenarioTimeoutMs = 120000;
+const reportPathEnv = "SPICE_RELEASE_BROWSER_REPORT"; // env-policy: allow
 
 function loadManifest(manifestPath) {
   const loaded = require(manifestPath);
@@ -117,6 +118,33 @@ function reportResult(result) {
   return false;
 }
 
+function writeReport(manifest, results) {
+  const reportPath = process.env[reportPathEnv]; // env-policy: allow
+  if (!reportPath) return;
+  const scenarios = results.map((result) => ({
+    path: result.path,
+    serial: Boolean(
+      manifest.releaseSafe.find((entry) => entry.path === result.path)?.serial,
+    ),
+    status: result.code === 0 && !result.signal ? "passed" : "failed",
+  }));
+  const payload = {
+    schemaVersion: 1,
+    counts: {
+      failed: scenarios.filter((entry) => entry.status === "failed").length,
+      passed: scenarios.filter((entry) => entry.status === "passed").length,
+      skipped: manifest.externalState.length,
+      total: scenarios.length + manifest.externalState.length,
+    },
+    externalState: manifest.externalState,
+    scenarios,
+  };
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  const temporary = reportPath + ".tmp";
+  fs.writeFileSync(temporary, JSON.stringify(payload, null, 2) + "\n");
+  fs.renameSync(temporary, reportPath);
+}
+
 async function run(manifestPath = defaultManifestPath) {
   const resolvedManifest = path.resolve(manifestPath);
   const manifest = loadManifest(resolvedManifest);
@@ -130,6 +158,7 @@ async function run(manifestPath = defaultManifestPath) {
   for (const excluded of manifest.externalState)
     console.log("SKIP " + excluded.path + ": " + excluded.reason);
   const passed = results.map(reportResult);
+  writeReport(manifest, results);
   if (passed.every(Boolean)) return;
   throw new Error("release browser gate failed");
 }
