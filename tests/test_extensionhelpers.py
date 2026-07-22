@@ -10,8 +10,7 @@ from collections.abc import Mapping
 from importlib import metadata
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FIXTURE_ROOT = PROJECT_ROOT / "fixtures" / "spiceextensionfixture"
+FIXTURE_ROOT = Path(__file__).with_name("fixtures") / "spiceextensionfixture"
 
 
 class FilteredExtensionDistribution:
