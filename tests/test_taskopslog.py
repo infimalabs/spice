@@ -124,12 +124,14 @@ def test_contract_mutations_track_edits_exactly(task_repo):
     uuid = identity.uuid_of(identity.resolve(handle))
     baseline = opslog.claim_baseline_id(uuid, ACTOR_A)
 
+    ops.edit(handle, title="Retitled opslog probe")
     ops.edit(handle, acceptance=["sharpened criterion"])
     ops.edit(handle, description="claim probe body rewritten")
     tw.run([uuid, "modify", "priority:H"])
 
     cursor, mutations = opslog.contract_mutations_since(uuid, baseline)
     assert [(item.property, item.old_value, item.new_value) for item in mutations] == [
+        ("description", "Opslog probe task", "Retitled opslog probe"),
         ("acceptance", "initial criterion", "sharpened criterion"),
         ("task_description", "", "claim probe body rewritten"),
         ("priority", "L", "H"),
