@@ -155,12 +155,12 @@ def summarize_ack_archival(
     """
     segments = extract_ack_segments_from_text(message_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
-    if not requested and has_noop_ack_marker(message_text):
+    if not requested:
         return AckArchivalSummary(
             archived=[],
             already_acked=[],
             unmatched=[],
-            noop=True,
+            noop=has_noop_ack_marker(message_text),
         )
     try:
         already_acked_keys = _consumed_state_keys(
@@ -214,6 +214,14 @@ def summarize_nack_archival(
     requested = list(
         dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
     )
+    if not requested:
+        return NackArchivalSummary(
+            refused=[],
+            already_refused=[],
+            already_acked=[],
+            unmatched=[],
+            reasonless=reasonless,
+        )
     try:
         already_refused_keys = _consumed_state_keys(
             repo_root, disposition=ACK_DISPOSITION_REFUSED
