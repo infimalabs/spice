@@ -21,8 +21,8 @@ function assertPill(pills, label, expected) {
 }
 
 // getComputedStyle returns the resolved tone color as `rgb(...)`/`rgba(...)`
-// (or a `color(srgb ...)` fallback with 0-1 channels); recover its HSL so the
-// saturation ramp can be checked in hue/saturation terms.
+// (or a `color(srgb ...)` fallback with 0-1 channels); recover its HSL for the
+// secondary monotonicity and hue-cohesion checks.
 function parseRgb(value) {
   const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
   if (channels.length < 3) throw new Error("unparseable color: " + value);
@@ -54,25 +54,40 @@ function toneColor(pills, label) {
   return rgbToHsl(pill.color);
 }
 
-// Saturation encodes agent coverage layered with work flow. A running,
+// Tone encodes agent coverage layered with work flow. A running,
 // boundary-dissolving Drain lane covers every public stem, so under it the ramp
 // climbs saturated (covered + ready) -> active (covered + in flight) -> assigned
-// (covered, all blocked/deferred) -> idle (uncovered but ready) purely by
-// stepping saturation down a constant --good hue: the ready green washes toward
-// the neutral gray with no green->cyan hue shift. `serve` renders saturated,
+// (covered, all blocked/deferred) -> idle (uncovered but ready) in even sRGB
+// steps between --good and --muted. `serve` renders saturated,
 // `lifecycle` active, `studies` assigned, and the private `agent` channel (which
-// sits out boundary dissolution) renders the neutral idle endpoint. A
-// regression that reintroduces an off-hue accent moves a step's hue off the
-// ready hue and fails here.
+// sits out boundary dissolution) renders the neutral idle endpoint.
 const RAMP_HUE_TOLERANCE_DEG = 8;
 const IDLE_MAX_SATURATION = 0.2;
+const RUNG_CHANNEL_TOLERANCE = 1;
 // Hidden/system stems recover the warn accent: an orange/red hue well away from
 // the green ramp, with real saturation rather than the desaturated gray floor.
 const WARN_HUE_MAX_DEG = 60;
 const WARN_MIN_SATURATION = 0.2;
 const RAMP_HUE_DIVERGENCE_DEG = 60;
 
-function assertCoverageSaturationRamp(pills, readyGreen) {
+function assertEvenCoverageRung(color, readyGreen, idleColor, weight, label) {
+  const actual = parseRgb(color);
+  const ready = parseRgb(readyGreen);
+  const idle = parseRgb(idleColor);
+  const expected = ready.map(
+    (channel, index) => channel * weight + idle[index] * (1 - weight),
+  );
+  for (let index = 0; index < actual.length; index += 1) {
+    if (Math.abs(actual[index] - expected[index]) > RUNG_CHANNEL_TOLERANCE)
+      throw new Error(
+        label +
+          " pill missed its evenly spaced ready-to-idle rung: " +
+          JSON.stringify({ actual, expected, ready, idle, weight }),
+      );
+  }
+}
+
+function assertCoverageSaturationRamp(pills, readyGreen, idleColor) {
   const saturatedPill = pills.find((item) => item.label === "serve");
   if (
     saturatedPill.color !== readyGreen ||
@@ -82,6 +97,20 @@ function assertCoverageSaturationRamp(pills, readyGreen) {
       "fully-ready pill and count did not use the shared ready green: " +
         JSON.stringify({ saturatedPill, readyGreen }),
     );
+  assertEvenCoverageRung(
+    pills.find((item) => item.label === "lifecycle").color,
+    readyGreen,
+    idleColor,
+    0.75,
+    "active",
+  );
+  assertEvenCoverageRung(
+    pills.find((item) => item.label === "studies").color,
+    readyGreen,
+    idleColor,
+    0.5,
+    "assigned",
+  );
   const saturated = toneColor(pills, "serve");
   const active = toneColor(pills, "lifecycle");
   const assigned = toneColor(pills, "studies");
@@ -247,14 +276,20 @@ async function readPills(page) {
   PILL_TONES);
 }
 
-async function readReadyGreen(page) {
+async function readRampEndpoints(page) {
   return page.evaluate(() => {
-    const probe = document.createElement("span");
-    probe.style.color = "var(--good)";
-    document.body.append(probe);
-    const color = getComputedStyle(probe).color;
-    probe.remove();
-    return color;
+    const readyProbe = document.createElement("span");
+    readyProbe.style.color = "var(--good)";
+    const idleProbe = document.createElement("span");
+    idleProbe.style.color = "var(--muted)";
+    document.body.append(readyProbe, idleProbe);
+    const endpoints = {
+      readyGreen: getComputedStyle(readyProbe).color,
+      idleColor: getComputedStyle(idleProbe).color,
+    };
+    readyProbe.remove();
+    idleProbe.remove();
+    return endpoints;
   });
 }
 
@@ -339,7 +374,7 @@ async function resolveCliBlocker(page) {
   await page.evaluate(() => {
     const lane = resolveIsolatedLane("task-filter-pill-smoke");
     const inventory = structuredClone(lane.taskFilterInventory);
-    inventory.revision = "10000000000000000000000000000";
+    inventory.revision = "30000000000000000000000000000";
     inventory.primaryStems = inventory.primaryStems.map((stem) =>
       stem.name === "cli"
         ? { ...stem, readyTaskCount: 1, blockedTaskCount: 0 }
@@ -349,6 +384,38 @@ async function resolveCliBlocker(page) {
     renderFilterPills();
   });
   return readPills(page);
+}
+
+async function renderReportedServeState(page) {
+  await page.evaluate(() => {
+    const lane = resolveIsolatedLane("task-filter-pill-smoke");
+    const inventory = structuredClone(lane.taskFilterInventory);
+    inventory.revision = "10000000000000000000000000000";
+    inventory.primaryStems = inventory.primaryStems.map((stem) =>
+      stem.name === "serve"
+        ? {
+            ...stem,
+            openTaskCount: 1,
+            readyTaskCount: 0,
+            inFlightTaskCount: 1,
+            blockedTaskCount: 0,
+            deferredTaskCount: 0,
+          }
+        : stem,
+    );
+    applyTaskFilterInventory(inventory);
+    renderFilterPills();
+  });
+  return readPills(page);
+}
+
+async function restoreInitialState(page) {
+  const inventory = initialInventory();
+  inventory.revision = "20000000000000000000000000000";
+  await page.evaluate((restoredInventory) => {
+    applyTaskFilterInventory(restoredInventory);
+    renderFilterPills();
+  }, inventory);
 }
 
 // Stop the covering lane so no agent is assigned to any public stem. Coverage,
@@ -364,7 +431,7 @@ async function dropCoverage(page) {
   return readPills(page);
 }
 
-function assertUncoveredPills(pills, coveredRamp, warnAccents) {
+function assertUncoveredPills(pills, coveredRamp, warnAccents, endpoints) {
   // Ready work with no agent on it drops from saturated to the idle waiting step.
   assertPill(pills, "serve", { tone: "idle", implicit: false });
   assertPill(pills, "tests", { tone: "idle" });
@@ -388,6 +455,13 @@ function assertUncoveredPills(pills, coveredRamp, warnAccents) {
         JSON.stringify(serveIdle),
     );
   const studiesDormant = toneColor(pills, "studies");
+  assertEvenCoverageRung(
+    pills.find((item) => item.label === "studies").color,
+    endpoints.readyGreen,
+    endpoints.idleColor,
+    0.25,
+    "dormant",
+  );
   if (
     Math.abs(studiesDormant.hue - coveredRamp.saturated.hue) >
     RAMP_HUE_TOLERANCE_DEG
@@ -423,7 +497,7 @@ async function clearInventory(page) {
   return page.evaluate(() => {
     const lane = resolveIsolatedLane("task-filter-pill-smoke");
     const inventory = structuredClone(lane.taskFilterInventory);
-    inventory.revision = "100000000000000000000000000000";
+    inventory.revision = "40000000000000000000000000000";
     inventory.primaryStems = [];
     applyTaskFilterInventory(inventory);
     renderFilterPills();
@@ -437,11 +511,30 @@ async function clearInventory(page) {
 
 async function runScenario({ page }) {
   const pills = await installInitialState(page);
-  const readyGreen = await readReadyGreen(page);
+  const endpoints = await readRampEndpoints(page);
   assertInitialPills(pills);
-  const coverageRamp = assertCoverageSaturationRamp(pills, readyGreen);
+  const coverageRamp = assertCoverageSaturationRamp(
+    pills,
+    endpoints.readyGreen,
+    endpoints.idleColor,
+  );
   const warnAccents = assertHiddenWarnAccent(pills);
+  const reportedStatePills = await renderReportedServeState(page);
+  assertPill(reportedStatePills, "serve", {
+    count: "0·1·0",
+    tone: "active",
+    implicit: false,
+    unavailable: "0",
+  });
+  assertEvenCoverageRung(
+    reportedStatePills.find((item) => item.label === "serve").color,
+    endpoints.readyGreen,
+    endpoints.idleColor,
+    0.75,
+    "reported serve active",
+  );
   await page.screenshot({ path: SCREENSHOT_PATH });
+  await restoreInitialState(page);
   const resolvedPills = await resolveCliBlocker(page);
   assertPill(resolvedPills, "cli", {
     count: "1·0·0",
@@ -449,18 +542,24 @@ async function runScenario({ page }) {
     unavailable: "0",
   });
   const uncoveredPills = await dropCoverage(page);
-  const uncovered = assertUncoveredPills(uncoveredPills, coverageRamp, warnAccents);
+  const uncovered = assertUncoveredPills(
+    uncoveredPills,
+    coverageRamp,
+    warnAccents,
+    endpoints,
+  );
   const emptyState = await clearInventory(page);
   if (emptyState.ariaHidden !== "true" || emptyState.pillCount !== 0)
     throw new Error("empty inventory mismatch: " + JSON.stringify(emptyState));
   return {
     pills,
+    reportedStatePills,
     resolvedPills,
     uncoveredPills,
     uncovered,
     emptyState,
     coverageRamp,
-    readyGreen,
+    endpoints,
     warnAccents,
     screenshotPath: SCREENSHOT_PATH,
   };

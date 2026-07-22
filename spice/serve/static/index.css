@@ -249,30 +249,31 @@ button.primary:hover {
   padding: 2px 10px;
   white-space: nowrap;
 }
-/* Constant-hue saturation ramp in even ~25% steps. A pill's saturation encodes
+/* Ready-to-idle color ramp in even 25% steps. A pill's tone encodes
    how strongly the stem is covered and moving -- not merely whether ready tasks
    exist -- so ready work with no agent assigned reads as nearly-desaturated idle
    rather than a false full green, and a stem an agent is camped on stays lit
-   even when every task is blocked. Every step holds --good's hue and lightness
-   and lowers only saturation (relative color), so idle -> dormant -> assigned ->
-   active -> saturated is one monotonic ramp with no green->cyan drift. Idle is
-   the neutral --muted floor because it means handleable work has no agent;
-   dormant is the 25% step because there is no ready work being left idle. */
+   even when every task is blocked. Mixing each rung directly between --muted
+   and --good keeps idle -> dormant -> assigned -> active -> saturated evenly
+   spaced instead of bunching HSL saturation multipliers near the already-muted
+   ready green. Idle is the neutral --muted floor because it means handleable
+   work has no agent; dormant is the 25% step because there is no ready work
+   being left idle. */
 .filter-pill--saturated { border-color: var(--good); color: var(--good); }
 .filter-pill--active {
-  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.75) l);
+  --filter-pill-tone: color-mix(in srgb, var(--good) 75%, var(--muted));
   background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);
   border-color: var(--filter-pill-tone);
   color: var(--filter-pill-tone);
 }
 .filter-pill--assigned {
-  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.5) l);
+  --filter-pill-tone: color-mix(in srgb, var(--good) 50%, var(--muted));
   background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);
   border-color: var(--filter-pill-tone);
   color: var(--filter-pill-tone);
 }
 .filter-pill--dormant {
-  --filter-pill-tone: hsl(from var(--good) h calc(s * 0.25) l);
+  --filter-pill-tone: color-mix(in srgb, var(--good) 25%, var(--muted));
   border-color: var(--filter-pill-tone);
   color: var(--filter-pill-tone);
 }

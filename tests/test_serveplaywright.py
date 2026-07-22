@@ -565,7 +565,7 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'count: "0·2·0"' in smoke
     assert 'count: "1·0·0"' in smoke
     assert 'title:\n      "0 ready, 0 active/in flight' in smoke
-    # Saturation encodes agent coverage layered with work: a covered stem climbs
+    # Tone encodes agent coverage layered with work: a covered stem climbs
     # saturated -> active -> assigned, an uncovered-but-ready stem reads idle, and
     # nothing-movable-uncovered rests one step above it on dormant.
     assert 'tone: "saturated"' in smoke
@@ -574,12 +574,13 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'tone: "idle"' in smoke
     assert 'tone: "dormant"' in smoke
     # The coverage ramp guard reads each tone's rendered color and asserts the
-    # covered saturated->active->assigned steps plus dormant and the uncovered
-    # neutral idle floor form one constant-hue --good desaturation -- a
-    # green->cyan hue shift regression fails the smoke.
+    # covered saturated->active->assigned steps plus dormant are the exact
+    # 100/75/50/25% sRGB mixes between --good and the uncovered neutral floor.
     assert "getComputedStyle(pill).color" in smoke
     assert "function rgbToHsl(" in smoke
-    assert "assertCoverageSaturationRamp(pills, readyGreen)" in smoke
+    assert "assertCoverageSaturationRamp(" in smoke
+    assert "function assertEvenCoverageRung(" in smoke
+    assert "pill missed its evenly spaced ready-to-idle rung" in smoke
     assert "fully-ready pill and count did not use the shared ready green" in smoke
     assert "coverage ramp step shifted hue instead of desaturating" in smoke
     assert (
@@ -603,8 +604,10 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
         'labels !== "serve,studies,cli,tests,lifecycle,agent,oops,maxim_proposal"'
         in smoke
     )
+    assert "async function renderReportedServeState(page)" in smoke
+    assert 'count: "0·1·0"' in smoke
     assert 'inventory.revision = "10000000000000000000000000000";' in smoke
-    assert 'inventory.revision = "100000000000000000000000000000";' in smoke
+    assert 'inventory.revision = "40000000000000000000000000000";' in smoke
     assert 'ariaHidden: strip?.getAttribute("aria-hidden")' in smoke
     assert "page.screenshot(" in smoke
 
