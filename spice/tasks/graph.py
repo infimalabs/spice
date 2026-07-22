@@ -37,14 +37,30 @@ _TASK_ORIGIN_PREFIX = "task:"
 _UNPLACED = "(unplaced)"
 
 
-def live_rows(rows: list[TaskRow] | None = None) -> list[TaskRow]:
-    """Exported rows with deleted ones dropped.
+def live_rows(rows: list[TaskRow] | None = None, *, ceiling: str = "") -> list[TaskRow]:
+    """Exported rows with deleted and post-ceiling ones dropped.
 
     Deleted rows are overwhelmingly smoke-test residue and would otherwise
-    inflate every count in every view.
+    inflate every count in every view. The inception ceiling is inclusive and
+    filters the shared row set before any view can derive edges from it.
     """
     source = tw.export() if rows is None else rows
-    return [row for row in source if str(row.get("status") or "") != "deleted"]
+    stamp = _ceiling_stamp(ceiling)
+    return [
+        row
+        for row in source
+        if str(row.get("status") or "") != "deleted"
+        and (
+            not stamp
+            or (
+                bool(row_stamp := str(row.get("incepted") or "")) and row_stamp <= stamp
+            )
+        )
+    ]
+
+
+def _ceiling_stamp(value: str) -> str:
+    return identity.incepted_of_handle(value) if value else ""
 
 
 def handle_of(row: TaskRow) -> str:
@@ -250,9 +266,15 @@ _RENDERERS = {
 }
 
 
-def render(view: str, rows: list[TaskRow] | None = None) -> str:
+def render(view: str, rows: list[TaskRow] | None = None, *, ceiling: str = "") -> str:
     """Mermaid source for one view, ready to render unmodified."""
     renderer = _RENDERERS.get(view)
     if renderer is None:
         raise SpiceError(f"unknown graph view {view!r}; choose from {', '.join(VIEWS)}")
-    return renderer(live_rows(rows))
+    stamp = _ceiling_stamp(ceiling)
+    rendered = renderer(live_rows(rows, ceiling=stamp))
+    if not stamp:
+        return rendered
+    lines = rendered.splitlines()
+    lines.insert(2, f"%% Snapshot ceiling: incepted <= {stamp}")
+    return "\n".join(lines)

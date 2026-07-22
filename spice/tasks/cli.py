@@ -222,15 +222,32 @@ def _configure_task_graph_parser(actions: Any) -> None:
     graph_cmd = actions.add_parser(
         "graph",
         help="Emit a board graph as mermaid.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Emit one of the graphs the board carries as mermaid source: the "
             "origin forest, the dependency DAG, the review network, or the "
             "phase ladder. Output renders unmodified."
         ),
-        epilog="Example: spice task graph review",
-        recovery_examples=("spice task graph review",),
+        epilog=(
+            "Examples:\n"
+            "  spice task graph review\n"
+            "  spice task graph phase --ceiling 1kG0aaaa"
+        ),
+        recovery_examples=(
+            "spice task graph review",
+            "spice task graph phase --ceiling 1kG0aaaa",
+        ),
     )
     graph_cmd.add_argument("view", choices=graph.VIEWS)
+    graph_cmd.add_argument(
+        "--ceiling",
+        metavar="INCEPTED_OR_HANDLE",
+        default="",
+        help=(
+            "Render an inclusive, reproducible snapshot ending at this "
+            "incepted stamp or task handle."
+        ),
+    )
     graph_cmd.set_defaults(func=handle)
 
 
@@ -956,7 +973,7 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
-    "graph": lambda a: graph.render(a.view),
+    "graph": lambda a: graph.render(a.view, ceiling=a.ceiling),
     "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(
