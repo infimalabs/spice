@@ -66,10 +66,14 @@ OOPS_WAIT = defaults.string("tasks", "oops_wait")
 OOPS_PROJECT = f".{defaults.string('tasks', 'oops_hidden_stem')}"
 MAXIM_PROPOSAL_PROJECT = f".{MAXIM_PROPOSAL_HIDDEN_STEM}"
 
-# Native Taskwarrior priorities (H/M/L, or unset). Word aliases map to them.
+# Spice extends Taskwarrior's native priority UDA to C/H/M/L (or unset).
 DEFAULT_PRIORITY = defaults.string("tasks", "default_priority")
 PRIORITY_MAP = {
     str(key): str(value) for key, value in defaults.table("tasks", "priority").items()
+}
+PRIORITY_URGENCY = {
+    str(key): float(value)
+    for key, value in defaults.table("tasks", "priority_urgency").items()
 }
 SEVERITY_PRIORITY = {
     str(key): str(value)
@@ -260,12 +264,12 @@ def _configured_project_depth(table: dict[str, object], key: str, default: int) 
 
 def map_priority(raw: str) -> str:
     value = (raw or "").strip()
-    if value.upper() in ("H", "M", "L"):
+    if value.upper() in PRIORITY_URGENCY:
         return value.upper()
     mapped = PRIORITY_MAP.get(value.lower())
     if mapped is None:
         raise SpiceError(
-            f"invalid priority {raw!r} (use high/medium/low/none or H/M/L)"
+            f"invalid priority {raw!r} (use critical/high/medium/low/none or C/H/M/L)"
         )
     return mapped
 
@@ -277,7 +281,7 @@ def map_severity(raw: str) -> str:
     if value.lower() in SEVERITIES:
         return value.lower()
     raise SpiceError(
-        f"invalid severity {raw!r} (use critical/high/medium/low or H/M/L)"
+        f"invalid severity {raw!r} (use critical/high/medium/low or C/H/M/L)"
     )
 
 
@@ -413,6 +417,11 @@ def uda_schema() -> dict[str, dict[str, str]]:
     enum = ",".join(APPROVED_PHASES)
     schema: dict[str, dict[str, str]] = {}
     schema["incepted"] = {"type": _STRING, "label": "Incepted"}
+    schema["priority"] = {
+        "type": _STRING,
+        "label": "Priority",
+        "values": ",".join((*PRIORITY_URGENCY, "")),
+    }
     schema["phase"] = {"type": _STRING, "label": "Phase", "values": enum}
     schema["phase_i"] = {"type": "numeric", "label": "PhaseIndex"}
     for i in range(PHASE_SLOT_COUNT):
@@ -435,7 +444,12 @@ def write_taskrc() -> None:
             "recurrence=no",
             "# spice phase-review urgency: peer review rises fleet-wide.",
             "urgency.uda.phase.review.coefficient=4.0",
+            "# spice priority urgency: critical remains distinct from high.",
         ]
+        lines.extend(
+            f"urgency.uda.priority.{priority}.coefficient={coefficient}"
+            for priority, coefficient in PRIORITY_URGENCY.items()
+        )
         for name, frag in sorted(uda_schema().items()):
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")

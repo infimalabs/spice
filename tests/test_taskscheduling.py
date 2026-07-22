@@ -80,7 +80,12 @@ def test_sla_due_stores_creation_plus_interval_under_chicago(task_repo, monkeypa
     monkeypatch.setenv("TZ", TZ_CHICAGO)
     _freeze(monkeypatch, CDT_INSTANT)
 
-    for priority, key in (("high", "H"), ("medium", "M"), ("low", "L")):
+    for priority, key in (
+        ("critical", "C"),
+        ("high", "H"),
+        ("medium", "M"),
+        ("low", "L"),
+    ):
         handle = create.add(
             f"Deadline {priority}",
             project="task.unit",

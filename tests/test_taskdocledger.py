@@ -38,6 +38,7 @@ CORPUS = {
         "  Tags: alpha, beta\n"
         "  This is a description paragraph.\n"
     ),
+    "critical_priority": "- restore production\n  Priority: critical\n",
     "field_synonyms": (
         "# Root\n\n"
         "- work\n"

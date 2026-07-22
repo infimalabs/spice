@@ -21,7 +21,7 @@ _MAX_ATX_LEVEL = 6
 _HEADING_CONTENT_COL = 0
 _ITEM_INDENT_STEP = 2
 _LIST_ITEM_RE = re.compile(r"^ *- ")
-_PRIORITY_NAMES = {"H": "high", "M": "medium", "L": "low"}
+_PRIORITY_NAMES = {"C": "critical", "H": "high", "M": "medium", "L": "low"}
 _BOARD_FAMILY_STATUS_FILTER = (
     "(",
     "status:pending",

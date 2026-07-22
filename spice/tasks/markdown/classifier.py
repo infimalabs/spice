@@ -38,7 +38,7 @@ _ESCAPED_PROSE_RE = re.compile(
     r"^(?:\\[-*+#>|`=~_\[<]|\d+\\[.)]|[A-Za-z][A-Za-z ]{0,30}?\\:)"
 )
 _LINK_RESIDUE_CHARS = 12
-_PRIORITIES = frozenset(("high", "medium", "low", "none"))
+_PRIORITIES = frozenset(("critical", "high", "medium", "low", "none"))
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:--[a-z0-9]+(?:-[a-z0-9]+)*)?$")
 
 _FIELD_SECTIONS = {
