@@ -24,6 +24,8 @@ from spice.tasks import (
 
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+PEER_A = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+PEER_B = "cccccccccccccccccccccccccccccccc"
 ACK_ORIGIN = "ack:1jN54zJJ"
 
 
@@ -449,7 +451,10 @@ def test_task_next_wait_reallocates_after_task_event(monkeypatch):
         phase="todo",
     )
     row.update({"phase_i": "0", "urgency": "9.2"})
-    candidates = iter((None, row))
+    # Two empty allocations per pre-wake pass: the wait re-runs allocation after
+    # sampling the peer deadline, so the row has to stay out of reach until the
+    # watcher actually reports a task event.
+    candidates = iter((None, None, row))
     monkeypatch.setattr(
         render.claimstate,
         "renew_claim",
@@ -577,6 +582,150 @@ def test_task_next_wait_claims_takeover_when_peer_lease_lapses_mid_decision(
     assert calls == ["token", "next", "token", "peer", "next"]
 
 
+def test_task_next_wait_claims_lapsed_peer_while_a_sibling_lease_stays_live(
+    monkeypatch,
+):
+    """The multi-peer deadline edge: a lapsed peer hiding behind a live sibling.
+
+    Peer A's lease crosses while the first allocation reads the board, so the
+    row A held is a stale takeover by the time the deadline is sampled. The
+    sample cannot say so: it drops A's lapsed claim and returns peer B's later
+    deadline, a reading identical to one where A never existed. Waiting on that
+    parks this lane until B's 08:10 over work it can claim at 08:03, and nothing
+    arrives to cut the wait short because a lapse writes no task event. Only a
+    real allocation re-reads the clock, so it has to run again even though a
+    live peer remains. This drives the true live_peer_claim_deadline so the
+    later-deadline reading is produced by the board, not asserted by a stub.
+    """
+    row = _row(
+        "Claimed while a sibling lease is still live",
+        project="task.allocator",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update({"phase_i": "0", "urgency": "9.2"})
+    clock = {"value": "2026-07-22T08:00:00Z"}
+    board = [
+        {"claim_by": PEER_A, "claim_until": "2026-07-22T08:02:00Z"},
+        {"claim_by": PEER_B, "claim_until": "2026-07-22T08:10:00Z"},
+    ]
+    calls: list[str] = []
+    sampled: list[str | None] = []
+    attempts = {"count": 0}
+    live_peer_claim_deadline = render.alloc.live_peer_claim_deadline
+
+    def allocate() -> dict[str, object] | None:
+        calls.append("next")
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            # A still holds its lease for this read; the clock crosses 08:02
+            # immediately after, leaving the board byte-for-byte identical.
+            clock["value"] = "2026-07-22T08:03:00Z"
+            return None
+        return row
+
+    def sample_peer_deadline() -> str | None:
+        calls.append("peer")
+        deadline = live_peer_claim_deadline()
+        sampled.append(deadline)
+        return deadline
+
+    def refuse_to_wait(_baseline: str, _deadline: str) -> eventwait.AllocatorWake:
+        raise AssertionError(
+            f"entered the watcher until {_deadline} with a lapsed peer takeover "
+            "already claimable"
+        )
+
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc.tw, "now_iso", lambda: clock["value"])
+    monkeypatch.setattr(render.alloc.tw, "current_actor", lambda: ACTOR_A)
+    monkeypatch.setattr(render.alloc, "visible_active_rows", lambda _actor: board)
+    monkeypatch.setattr(render.alloc, "next_task", allocate)
+    monkeypatch.setattr(render.alloc, "live_peer_claim_deadline", sample_peer_deadline)
+    monkeypatch.setattr(
+        render.eventwait,
+        "task_event_token",
+        lambda: calls.append("token") or "stable",
+    )
+    monkeypatch.setattr(render.eventwait, "wait_for_allocator_event", refuse_to_wait)
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo"])
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next(wait=True)
+
+    assert (
+        "next task:\nTASK-test [todo] P:M task.allocator "
+        "Claimed while a sibling lease is still live" in output
+    )
+    # B's live lease is what the snapshot reported, so this run took the branch
+    # the single-peer fix leaves untouched -- the rerun is what found A's row.
+    assert sampled == ["2026-07-22T08:10:00Z"]
+    # Allocation reran between the deadline sample and the watcher, and the
+    # watcher raises, so reaching the return proves it was never entered.
+    assert calls == ["token", "next", "token", "peer", "next"]
+
+
+def test_task_next_wait_still_waits_on_the_earliest_live_peer_lease(monkeypatch):
+    """The same two-peer board with the clock held still: both leases are live.
+
+    Differentiation for the lapsed-sibling rerun. The rerun exists to catch a
+    takeover the clock created, so it must leave a board where the clock created
+    nothing alone: with A and B both holding, this lane has genuine peer work to
+    wait behind and parks on A's earlier deadline, the first instant anything
+    can change. Without this the rerun could satisfy its own regression by
+    spinning on allocation and never waiting at all.
+    """
+    clock = {"value": "2026-07-22T08:00:00Z"}
+    board = [
+        {"claim_by": PEER_A, "claim_until": "2026-07-22T08:02:00Z"},
+        {"claim_by": PEER_B, "claim_until": "2026-07-22T08:10:00Z"},
+    ]
+    calls: list[str] = []
+    waited_until: list[str] = []
+
+    def record_wait(_baseline: str, deadline: str) -> eventwait.AllocatorWake:
+        calls.append("wait")
+        waited_until.append(deadline)
+        return eventwait.AllocatorWake("steering", "stable")
+
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc.tw, "now_iso", lambda: clock["value"])
+    monkeypatch.setattr(render.alloc.tw, "current_actor", lambda: ACTOR_A)
+    monkeypatch.setattr(render.alloc, "visible_active_rows", lambda _actor: board)
+    monkeypatch.setattr(render.alloc, "next_task", lambda: calls.append("next") or None)
+    monkeypatch.setattr(render.eventwait, "task_event_token", lambda: "stable")
+    monkeypatch.setattr(render.eventwait, "wait_for_allocator_event", record_wait)
+
+    output = render.render_next(wait=True)
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=skipped no_active_claim",
+            "allocator wait interrupted by pending steering; "
+            "run spice session briefing",
+        ]
+    )
+    # A's lease is the earliest live one, so it is the first instant this board
+    # can change and the deadline the watcher is given.
+    assert waited_until == ["2026-07-22T08:02:00Z"]
+    # The rerun runs, agrees there is nothing to take over, and hands off to the
+    # watcher rather than looping.
+    assert calls == ["next", "next", "wait"]
+
+
 def test_task_next_wait_yields_to_pending_steering(monkeypatch):
     monkeypatch.setattr(
         render.claimstate,
@@ -636,7 +785,8 @@ def test_task_next_wait_rechecks_at_peer_claim_deadline(monkeypatch):
             "no available tasks; run spice task status",
         ]
     )
-    assert calls == ["next", "peer", "next", "peer", "next"]
+    # Each pass samples the deadline once and allocates on both sides of it.
+    assert calls == ["next", "peer", "next", "next", "peer", "next"]
 
 
 def test_task_next_wait_interrupt_exits_through_cli_boundary(monkeypatch, capsys):
