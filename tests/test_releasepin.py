@@ -292,7 +292,7 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
 ):
     snapshot = tmp_path / "source"
     (snapshot / "release-proof").mkdir(parents=True)
-    (snapshot / ".git").mkdir()
+    _git(snapshot, "init", "--quiet")
     (snapshot / "release-proof" / "toolchain.py").write_text(
         "import sys\n"
         "print('No module named build', file=sys.stderr)\n"
@@ -313,6 +313,27 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     assert gate["reason"] == (
         "the declared release-proof toolchain does not resolve here"
     )
+    assert recorded == gate
+
+
+def test_toolchain_gate_round_trips_its_record_from_a_linked_worktree(tmp_path):
+    repository, _source = _source_repository(tmp_path)
+    linked = tmp_path / "linked"
+    _git(repository, "worktree", "add", "--detach", str(linked))
+    (linked / "release-proof").mkdir()
+    (linked / "release-proof" / "toolchain.py").write_text(
+        "import sys\n"
+        "print('No module named build', file=sys.stderr)\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+
+    gate = PINNED.toolchain_gate(linked)
+    record = REHEARSAL.git_private_path(linked, "release-proof-toolchain.json")
+    recorded = REHEARSAL._load_git_private_json(linked, "release-proof-toolchain.json")
+
+    assert (linked / ".git").is_file()
+    assert record.is_file()
     assert recorded == gate
 
 
