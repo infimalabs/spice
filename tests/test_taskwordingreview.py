@@ -268,15 +268,15 @@ def test_reword_from_claimed_plan_parent_clears_child_marker(task_repo):
     assert str(child_row.get("start") or "") == ""
 
 
-def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):
+def test_task_modify_acceptance_suspect_wording_sets_review_marker(task_repo):
     handle = create.add(
-        "Edit gains suspect acceptance",
+        "Modify gains suspect acceptance",
         project="task.unit",
         origin="ack:1jN54zJJ",
         acceptance=["clean criterion"],
     )
 
-    ops.edit(handle, acceptance=["adopting the legacy rows"])
+    ops.modify(handle, acceptance=["adopting the legacy rows"])
 
     row = identity.resolve(handle)
     assert row["acceptance"] == "adopting the legacy rows"

@@ -37,7 +37,7 @@ def configure_task_parser(subparsers: Any) -> None:
     _configure_task_read_parsers(actions)
     _configure_add_parser(actions)
     _configure_task_phase_parsers(actions)
-    _configure_task_edit_parsers(actions)
+    _configure_task_mutation_parsers(actions)
 
 
 def _configure_task_read_parsers(actions: Any) -> None:
@@ -322,7 +322,7 @@ def _configure_task_phase_parsers(actions: Any) -> None:
     review.set_defaults(func=handle)
 
 
-def _configure_task_edit_parsers(actions: Any) -> None:
+def _configure_task_mutation_parsers(actions: Any) -> None:
     _configure_ingest_parser(actions)
     _configure_oops_parser(actions)
     _configure_note_parser(actions)
@@ -332,7 +332,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_claim_parser(actions)
     _configure_reclaim_parser(actions)
     _configure_unclaim_parser(actions)
-    _configure_edit_parser(actions)
+    _configure_modify_parser(actions)
     _configure_delete_parser(actions)
     _configure_capture_parser(actions)
 
@@ -522,30 +522,30 @@ def _configure_unclaim_parser(actions: Any) -> None:
     unclaim.set_defaults(func=handle)
 
 
-def _configure_edit_parser(actions: Any) -> None:
-    edit = actions.add_parser(
-        "edit",
+def _configure_modify_parser(actions: Any) -> None:
+    modify = actions.add_parser(
+        "modify",
         help="Change a task's title, priority, project, description, and/or "
         "acceptance in place.",
-        recovery_examples=("spice task edit TASK-1k4Q5gJw --priority high",),
+        recovery_examples=("spice task modify TASK-1k4Q5gJw --priority high",),
     )
-    edit.add_argument("handle")
-    edit.add_argument(
+    modify.add_argument("handle")
+    modify.add_argument(
         "--title",
         help="Rename the task without changing its description body.",
     )
-    edit.add_argument("--priority", help="critical/high/medium/low/none or C/H/M/L.")
-    edit.add_argument("--project", help="Reassign to an assignable dotted project.")
-    edit.add_argument(
+    modify.add_argument("--priority", help="critical/high/medium/low/none or C/H/M/L.")
+    modify.add_argument("--project", help="Reassign to an assignable dotted project.")
+    modify.add_argument(
         "--description",
         help="Replace the task description body.",
     )
-    edit.add_argument(
+    modify.add_argument(
         "--acceptance",
         action="append",
         help="Replace acceptance criteria (repeatable).",
     )
-    edit.set_defaults(func=handle)
+    modify.set_defaults(func=handle)
 
 
 def _configure_delete_parser(actions: Any) -> None:
@@ -992,7 +992,7 @@ _DISPATCH = {
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "reclaim": lambda a: _reclaim(a),
     "unclaim": lambda a: ops.unclaim(a.handle),
-    "edit": lambda a: ops.edit(
+    "modify": lambda a: ops.modify(
         a.handle,
         title=a.title,
         priority=a.priority,
