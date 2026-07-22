@@ -8,6 +8,7 @@ from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve.agentapi import (
     ensure_agent_for_available_work,
     ensure_agent_for_pending_inbox,
+    forget_available_work_observations,
 )
 from spice.serve.payload.identity import (
     _agent_name_for_target,
@@ -137,18 +138,37 @@ def _ensure_work_tree_agent(
         "force_new": renew_intent,
     }
     agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
-    if agent_ensure is None:
+    team_facts = team_facts_for_target(state.team_store, target, thread_id)
+    ready_since_cache = getattr(state, "available_work_ready_since", None)
+    if agent_ensure is None and team_facts.get("lifetime") == "Drain":
         agent_ensure = ensure_agent_for_available_work(
             target,
             thread_id=thread_id,
+            running_lane_count=lambda: _running_drain_lane_count(state),
+            ready_since_cache=ready_since_cache,
             **ensure_kwargs,
         )
+    elif team_facts.get("lifetime") != "Drain":
+        forget_available_work_observations(thread_id, ready_since_cache)
     ensured_thread_id = record_started_renewal_from_ensure(
         state.team_store,
         predecessor_agent_id=predecessor_actor,
         agent_ensure=agent_ensure,
     )
     return ensured_thread_id or thread_id, predecessor_actor, renew_intent, agent_ensure
+
+
+def _running_drain_lane_count(state: Any) -> int:
+    running = 0
+    for candidate in state.worktree_targets():
+        status = agent_status(candidate.repo_root)
+        thread_id = str(getattr(status, "thread_id", "") or "")
+        if not status.running or not thread_id:
+            continue
+        facts = team_facts_for_target(state.team_store, candidate, thread_id)
+        if facts.get("lifetime") == "Drain":
+            running += 1
+    return running
 
 
 def _work_tree_status_payloads(
