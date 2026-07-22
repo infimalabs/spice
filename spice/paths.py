@@ -33,6 +33,10 @@ WORKTREE_BACKEND_KEY_DIGEST_CHARS = 12
 
 _state_backend_override: Path | None = None
 
+# Git reports "no repository here" and every other fatal with the same exit
+# code, so only its own words separate them.
+_GIT_NO_REPOSITORY_STDERR_MARKER = "not a git repository"
+
 
 def set_state_backend(root: str | None) -> None:
     """Redirect every managed-state root under ``root``; ``None`` restores git.
@@ -69,8 +73,11 @@ def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
     argv = ["git", "-C", str(cwd or Path.cwd()), "rev-parse", "--show-toplevel"]
     try:
         result = run_git_command(argv, capture_output=True, check=True, text=True)
-    except CalledProcessError:
-        return None
+    except CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        if _GIT_NO_REPOSITORY_STDERR_MARKER in stderr:
+            return None
+        raise SpiceError(_git_failure_message(argv, exc.returncode, stderr)) from exc
     except OSError as exc:
         raise SpiceError(
             f"git command could not be launched: {shlex.join(argv)}: "
@@ -89,10 +96,11 @@ def require_repo_root(cwd: Path | None = None) -> Path:
     return root
 
 
-# git reports "no repository here" and every other fatal with the same exit
-# code, so only its own words separate them. This is the sentence it uses for
-# the one fact that is a statement about `root` rather than about the run.
-GIT_NO_REPOSITORY_STDERR_MARKER = "not a git repository"
+def _git_failure_message(argv: list[str], returncode: int, stderr: str) -> str:
+    return (
+        f"git command failed: {shlex.join(argv)}: exit {returncode}: "
+        f"{stderr or 'no stderr'}"
+    )
 
 
 def _resolve_git_dir(root: Path, flag: str) -> Path:
@@ -118,12 +126,9 @@ def _resolve_git_dir(root: Path, flag: str) -> Path:
         ) from exc
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
-        if GIT_NO_REPOSITORY_STDERR_MARKER in stderr:
+        if _GIT_NO_REPOSITORY_STDERR_MARKER in stderr:
             raise SpiceError("not inside a git worktree")
-        raise SpiceError(
-            f"git command failed: {shlex.join(argv)}: exit {result.returncode}: "
-            f"{stderr or 'no stderr'}"
-        )
+        raise SpiceError(_git_failure_message(argv, result.returncode, stderr))
     raw = Path(result.stdout.strip())
     return (raw if raw.is_absolute() else root / raw).resolve()
 
