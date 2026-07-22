@@ -86,7 +86,7 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     agent_status,
     agent_supervisor_environment,
     available_skill_path as _available_skill_path,
-    bind_ambient_agent_activation,
+    bind_ambient_agent_thread,
     git_tracks_relative_path,
     materialize_worktree_skill,
     materialize_worktree_skill_gitignore,
@@ -966,10 +966,10 @@ def import_agent(
 ) -> AgentStatus:
     """Bind this worktree to an externally-driven agent by thread id.
 
-    The counterpart to :func:`bind_ambient_agent_activation` for an agent spice
-    does not spawn: it writes the same worktree binding activation writes, but
-    for a thread id the operator supplies (dashed or dashless) rather than the
-    ambient environment. `spice agent show`, serve lanes, and task attribution then
+    The counterpart to :func:`bind_ambient_agent_thread` for an agent spice
+    does not spawn: it writes the same worktree binding the hook points write,
+    but for a thread id the operator supplies (dashed or dashless) rather than
+    the ambient environment. `spice agent show`, serve lanes, and task attribution then
     recognize the tree as driven by that agent. The binding owns no process, so
     it reads back idle -- spice tracks the agent without supervising it.
 

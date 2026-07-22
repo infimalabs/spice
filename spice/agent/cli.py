@@ -114,6 +114,7 @@ def handle_agent(args: argparse.Namespace) -> int:
             if str(getattr(args, "repo_root", "") or "").strip()
             else require_repo_root()
         )
+        lifecycle.bind_ambient_agent_thread(repo_root)
         response = render_post_tool_hook_response(
             repo_root, hook_event_name=str(args.event_name or POST_TOOL_HOOK_EVENT)
         )
@@ -312,7 +313,7 @@ def render_activation_packet(repo_root: Path) -> str:
         activation_source_root_lines,
     )
     from spice.agent.lifecycle import (
-        bind_ambient_agent_activation,
+        bind_ambient_agent_thread,
         materialize_worktree_skill,
     )
     from spice.hooks.install import install_hooks_for_repo
@@ -321,7 +322,7 @@ def render_activation_packet(repo_root: Path) -> str:
     from spice.agent.rtkhealth import probe_rtk_health
 
     rtk_health = probe_rtk_health(repo_root)
-    status = bind_ambient_agent_activation(repo_root)
+    status = bind_ambient_agent_thread(repo_root)
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
     refresh = gitsync.fast_forward_if_safe(repo_root)

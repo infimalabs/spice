@@ -477,11 +477,26 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def bind_ambient_agent_activation(repo_root: Path) -> AgentStatus:
+def bind_ambient_agent_thread(repo_root: Path) -> AgentStatus:
+    """Bind this worktree to the driver thread id ambient in this process.
+
+    Driven from the hook points that already run on ordinary agent traffic --
+    the driver's post-tool hook and the `spice agent run` shell stage -- as
+    well as from `spice agent activation`. A worktree therefore learns its
+    session id from the first command an agent runs in it, instead of from a
+    bootstrap step the agent has to remember to perform. All three paths share
+    this one function so they write identical state.
+
+    Re-binding the thread already recorded is a no-op: the hook points fire on
+    every command, and rewriting unchanged state on each one would churn the
+    state file for nothing.
+    """
     ambient = ambient_thread_id()
     if not ambient:
         return agent_status(repo_root)
     state = read_agent_state(repo_root)
+    if canonical_thread_id(state.get("thread_id")) == ambient:
+        return agent_status(repo_root)
     if agent_state_is_authoritative(state):
         state["thread_id"] = ambient
     else:
@@ -490,7 +505,7 @@ def bind_ambient_agent_activation(repo_root: Path) -> AgentStatus:
             "pid": os.getpid(),
             "process_group_id": os.getpgrp(),
             "started_at": utc_now(),
-            "mode": "activation",
+            "mode": "bind",
             "command": [],
             "driver": driver_for(repo_root).name,
             "model": "",

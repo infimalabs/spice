@@ -356,6 +356,11 @@ def _isolate_agent_run(
     monkeypatch.setattr(wrap.subprocess, "run", rtk_run)
     monkeypatch.setattr(
         wrap,
+        "bind_ambient_thread_for_shell_stage",
+        lambda _repo_root, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        wrap,
         "emit_initial_side_channel_payload",
         lambda _repo_root, **_kwargs: (),
     )
