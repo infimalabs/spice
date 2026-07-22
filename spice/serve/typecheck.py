@@ -70,8 +70,8 @@ def serve_web_typecheck_argv(
     npm = find_tool("npm")
     if not npm:
         raise SpiceError(
-            "npm is required for serve web typechecking; install Node/npm or "
-            "run `spice dev doctor` for environment details"
+            "install Node/npm or run `spice dev doctor` for environment "
+            "details; npm is required for serve web typechecking"
         )
     return (
         npm,

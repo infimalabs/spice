@@ -3,11 +3,10 @@
 Leaf module: ops (and anything else) imports from here; nothing here
 imports ops, so guards stay usable from any task surface without cycles.
 
-Refusal messages are repair-first: every refusal that can name a way out
-leads with the executable repair step, then `; `, then the diagnostic that
-explains it. An agent reading a refusal mid-task needs the command before
-the explanation, so a new refusal carrying repair guidance follows the same
-order. Refusals with no repair to offer stay a bare diagnostic.
+Refusal messages here are repair-first, like every other refusal in the
+tree: see `spice.errors` for the rule and its exemptions. This module holds
+the densest concentration of them because it is where an agent mid-claim
+gets stopped, so it is the surface where leading with the command pays most.
 """
 
 from __future__ import annotations

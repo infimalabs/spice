@@ -1201,5 +1201,5 @@ def check_app_types_js(repo_root: Path) -> None:
         raise SpiceError(f"could not read generated serve wire types: {exc}") from exc
     if actual != expected:
         raise SpiceError(
-            "serve wire typedefs are stale; run `spice dev serve-web-types --write`"
+            "run `spice dev serve-web-types --write`; serve wire typedefs are stale"
         )

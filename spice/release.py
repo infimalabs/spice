@@ -264,9 +264,9 @@ def ensure_release_preconditions(root: Path) -> None:
 
     if not claimstate.has_active_claim():
         raise SpiceError(
-            "refusing to release with no task claimed; claim a release task "
-            "first (e.g. `spice task add --project lifecycle.release ...` then "
-            "`spice task claim <handle>`)"
+            "claim a release task first (e.g. `spice task add --project "
+            "lifecycle.release ...` then `spice task claim <handle>`); "
+            "refusing to release with no task claimed"
         )
     ahead = gitsync.commits_ahead_of_baseline(root)
     if ahead > 0:
@@ -373,9 +373,9 @@ def ensure_publish_release_commit_is_head(release_commit: str) -> None:
     head = git("rev-parse", "HEAD")
     if release_commit != head:
         raise SpiceError(
-            "--release-commit must resolve to HEAD for publish because publish "
-            "builds artifacts from the current worktree; use `spice release "
-            "github --release-commit ...` for tag or GitHub release repair"
+            "use `spice release github --release-commit ...` for tag or GitHub "
+            "release repair; --release-commit must resolve to HEAD for publish "
+            "because publish builds artifacts from the current worktree"
         )
 
 

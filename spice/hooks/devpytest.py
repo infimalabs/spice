@@ -22,9 +22,9 @@ def run_checkout_pytest(repo_root: Path, pytest_args: list[str]) -> int:
     venv_root = (repo_root / ".venv").resolve()
     if Path(sys.prefix).resolve() != venv_root:
         raise SpiceError(
-            f"spice dev pytest runs under the worktree venv {venv_root}, "
-            f"but this interpreter is {sys.executable}; create the venv "
-            "with `uv sync` and retry"
+            "create the venv with `uv sync` and retry; spice dev pytest runs "
+            f"under the worktree venv {venv_root}, but this interpreter is "
+            f"{sys.executable}"
         )
     import pytest
 

@@ -514,10 +514,10 @@ def _reject_unavailable_turn_id_filter(
     # "unsupported here".
     if turn_filter and turns and not any(turn.turn_id for turn in turns):
         raise SpiceError(
-            "turn-id filtering is unavailable for this transcript: its turns "
-            "carry no per-turn id (e.g. Claude sessions, whose transcripts have "
-            "no Codex-style turn events). Filter by --start/--end/--contains, or "
-            "drop --turn-id."
+            "filter by --start/--end/--contains, or drop --turn-id; turn-id "
+            "filtering is unavailable for this transcript: its turns carry no "
+            "per-turn id (e.g. Claude sessions, whose transcripts have no "
+            "Codex-style turn events)"
         )
 
 

@@ -65,8 +65,9 @@ def python_typecheck_argv(repo_root: Path, targets: tuple[str, ...]) -> tuple[st
         uvx = find_tool("uvx")
         if not uvx:
             raise SpiceError(
-                "pyright is required for python typechecking; install pyright "
-                "or uv, or run `spice dev doctor` for environment details"
+                "install pyright or uv, or run `spice dev doctor` for "
+                "environment details; pyright is required for python "
+                "typechecking"
             )
         base = (uvx, "pyright")
     interpreter = python_typecheck_interpreter(repo_root)
