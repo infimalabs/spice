@@ -328,7 +328,7 @@ def render_activation_packet(repo_root: Path) -> str:
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
     refresh = gitsync.fast_forward_if_safe(repo_root)
-    claim_renewal = claimstate.renew_claim(actor=status.thread_id or None)
+    claim_renewal = claimstate.renew_claim_or_report(actor=status.thread_id or None)
     token = steering_token(repo_root)
     return "\n".join(
         [

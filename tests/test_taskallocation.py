@@ -293,6 +293,110 @@ def test_renew_claim_without_a_duration_explains_how_to_repair_an_unreadable_pol
         ),
     ],
 )
+def test_renew_claim_for_a_bare_actor_explains_how_to_repair_the_lease(
+    task_repo, monkeypatch, recorded_value, diagnostic
+):
+    # No handle and no requested lease: the shape `spice agent activation` uses,
+    # which finds the row through the actor's active claims rather than a
+    # resolved handle.
+    handle = create.add(
+        "Explain how to repair the lease an actor's own claim records",
+        project="task.unit",
+        origin="ack:1kG8vN5d",
+        acceptance=["the bare-actor renewal refusal leads with a repair command"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=2.0,
+    )
+    broken = identity.resolve(handle)
+    if recorded_value is None:
+        broken.pop("claim_lease_seconds", None)
+    else:
+        broken["claim_lease_seconds"] = recorded_value
+    suggested_lease = f"{float(config.CLAIM_TTL_SECONDS):g}"
+    repair = (
+        f"run `spice task reclaim {handle} --lease-seconds {suggested_lease}` "
+        "to repair the claim"
+    )
+
+    with monkeypatch.context() as context:
+        context.setattr(claimstate.tw, "export", lambda _filters=None: [broken])
+        with pytest.raises(SpiceError) as exc_info:
+            claimstate.renew_claim(actor=ACTOR_A)
+
+    assert str(exc_info.value) == f"{repair}; {diagnostic}"
+
+
+@pytest.mark.parametrize(
+    ("recorded_value", "diagnostic"),
+    [
+        pytest.param("", "active claim has no recorded lease duration", id="blank"),
+        pytest.param(None, "active claim has no recorded lease duration", id="missing"),
+        pytest.param(
+            "unreadable",
+            "active claim has unreadable lease duration 'unreadable'",
+            id="unreadable",
+        ),
+    ],
+)
+def test_renew_claim_or_report_turns_the_lease_refusal_into_a_status_line(
+    task_repo, monkeypatch, recorded_value, diagnostic
+):
+    handle = create.add(
+        "Report rather than raise on an unreadable lease",
+        project="task.unit",
+        origin="ack:1kG8vN5d",
+        acceptance=["the reporting renewal keeps the repair command in its detail"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=2.0,
+    )
+    broken = identity.resolve(handle)
+    if recorded_value is None:
+        broken.pop("claim_lease_seconds", None)
+    else:
+        broken["claim_lease_seconds"] = recorded_value
+    suggested_lease = f"{float(config.CLAIM_TTL_SECONDS):g}"
+    repair = (
+        f"run `spice task reclaim {handle} --lease-seconds {suggested_lease}` "
+        "to repair the claim"
+    )
+
+    with monkeypatch.context() as context:
+        context.setattr(claimstate.tw, "export", lambda _filters=None: [broken])
+        result = claimstate.renew_claim_or_report(actor=ACTOR_A)
+
+    assert result.renewed is False
+    assert claimstate.claim_renewal_state(result) == "failed"
+    assert claimstate.claim_renewal_status_line(result) == (
+        f"claim_renewal=failed refused detail={repair}; {diagnostic}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("recorded_value", "diagnostic"),
+    [
+        pytest.param("", "active claim has no recorded lease duration", id="blank"),
+        pytest.param(None, "active claim has no recorded lease duration", id="missing"),
+        pytest.param(
+            "unreadable",
+            "active claim has unreadable lease duration 'unreadable'",
+            id="unreadable",
+        ),
+    ],
+)
 def test_claim_carry_keeps_ownership_and_explains_unreadable_lease_repair(
     task_repo, monkeypatch, recorded_value, diagnostic
 ):

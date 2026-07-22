@@ -401,7 +401,7 @@ def claim_carry_status_line(result: ClaimCarryResult) -> str:
     return f"claim_carry=skipped {result.reason}"
 
 
-CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error"})
+CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error", "refused"})
 
 
 def claim_renewal_state(result: ClaimRenewalResult) -> str:
@@ -943,6 +943,25 @@ def renew_claim(
         claim_until=str(fresh.get("claim_until") or ""),
         uuid=identity.uuid_of(fresh),
     )
+
+
+def renew_claim_or_report(actor: str | None = None) -> ClaimRenewalResult:
+    """Renew for a surface that has to finish even when the claim will not.
+
+    Renewal already reports every condition it expects -- no claim, a deleted
+    or completed task, another worktree's claim, a backend that rejected the
+    write. What is left raises, and an unreadable recorded lease is the one an
+    agent meets: `spice task next` refuses on it outright, because allocation
+    must not proceed against a claim whose policy nobody can read. Activation
+    is the opposite case. It is the first command an agent runs and the only
+    place the steering key and its authenticity contract are handed over, so
+    one unreadable task row must not withhold all of that. The refusal becomes
+    a reported line carrying its repair command verbatim instead.
+    """
+    try:
+        return renew_claim(actor=actor)
+    except SpiceError as exc:
+        return ClaimRenewalResult(False, "refused", detail=str(exc))
 
 
 def _record_task_lifecycle_event(task_id: str, kind: str, actor: str) -> None:
