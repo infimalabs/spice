@@ -9,10 +9,20 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 SOURCE_PROVENANCE = Path(".release-proof/source.json")
 IDENTITIES_GIT_PATH = "release-proof-identities.json"
-OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+OBJECT_FORMAT_BY_ID_LENGTH = {40: "sha1", 64: "sha256"}
+OBJECT_ID = re.compile(
+    "|".join(rf"[0-9a-f]{{{length}}}" for length in OBJECT_FORMAT_BY_ID_LENGTH)
+)
+
+
+class SourceIdentity(TypedDict):
+    commit: str
+    tree: str
+    commit_epoch: int
 
 
 def _git_environment() -> dict[str, str]:
@@ -36,7 +46,7 @@ def _git(root: Path, *arguments: str, environment: dict[str, str]) -> str:
     return completed.stdout.strip()
 
 
-def _load_source(root: Path) -> dict[str, object]:
+def _load_source(root: Path) -> SourceIdentity:
     source_path = root / SOURCE_PROVENANCE
     payload = json.loads(source_path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1 or set(payload) != {
@@ -60,9 +70,16 @@ def _load_source(root: Path) -> dict[str, object]:
         raise SystemExit(f"invalid source commit: {source_path}")
     if not isinstance(tree, str) or OBJECT_ID.fullmatch(tree) is None:
         raise SystemExit(f"invalid source tree: {source_path}")
+    if len(commit) != len(tree):
+        raise SystemExit(f"inconsistent source object formats: {source_path}")
     if not isinstance(epoch, int) or epoch < 0:
         raise SystemExit(f"invalid source commit timestamp: {source_path}")
-    return source
+    return {"commit": commit, "tree": tree, "commit_epoch": epoch}
+
+
+def _source_object_format(source: SourceIdentity) -> str:
+    """Select the Git hash algorithm already encoded by the source IDs."""
+    return OBJECT_FORMAT_BY_ID_LENGTH[len(source["tree"])]
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -84,14 +101,19 @@ def initialize(root: Path) -> dict[str, object]:
         "init",
         "--quiet",
         "--initial-branch=release-proof",
+        f"--object-format={_source_object_format(source)}",
         environment=environment,
     )
     _git(root, "config", "core.autocrlf", "false", environment=environment)
     _git(root, "config", "core.filemode", "true", environment=environment)
     _git(root, "config", "commit.gpgsign", "false", environment=environment)
+    # The context came exclusively from ``git archive``, so every path here
+    # belongs to tracked HEAD. Force is necessary when HEAD itself tracks a
+    # path that a later ignore rule also matches; it cannot admit host residue.
     _git(
         root,
         "add",
+        "--force",
         "--all",
         "--",
         ".",
@@ -105,7 +127,14 @@ def initialize(root: Path) -> dict[str, object]:
             f"expected {source['tree']}, resolved {exported_tree}"
         )
 
-    _git(root, "add", "--", SOURCE_PROVENANCE.as_posix(), environment=environment)
+    _git(
+        root,
+        "add",
+        "--force",
+        "--",
+        SOURCE_PROVENANCE.as_posix(),
+        environment=environment,
+    )
     commit_environment = dict(environment)
     commit_environment.update(
         {
