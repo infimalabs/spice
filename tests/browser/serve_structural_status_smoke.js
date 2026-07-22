@@ -5,10 +5,28 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const screenshotPath = path.join(os.tmpdir(), "spice-structural-status.png");
 const maxStatusTransitionMs = 500;
-const pipRampStates = ["active", "active-ish", "inactive", "unknown"];
+const pipRampStates = [
+  "running",
+  "starting",
+  "running-stale",
+  "startup-stalled",
+  "idle",
+];
 const pipHueToleranceDeg = 8;
 const pipFullSaturationTolerance = 0.01;
-const groupedPipStates = ["active", "active-ish", "inactive", "unknown"];
+const pipStepTolerance = 0.02;
+const pipIdleSaturationMaximum = 0.1;
+const groupedPipStates = [
+  { activity: "active", status: "running", tone: "running" },
+  { activity: "active-ish", status: "starting", tone: "starting" },
+  { activity: "inactive", status: "running-stale", tone: "running-stale" },
+  {
+    activity: "unknown",
+    status: "startup-stalled",
+    tone: "startup-stalled",
+  },
+  { activity: "inactive", status: "idle", tone: "idle" },
+];
 
 function parseRgb(value) {
   const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
@@ -40,9 +58,9 @@ function assertPipSaturationRamp(colors) {
     pipRampStates.map((state) => [state, rgbToHsl(colors[state])]),
   );
   for (const state of pipRampStates.slice(0, -1)) {
-    if (Math.abs(ramp[state].hue - ramp.active.hue) > pipHueToleranceDeg)
+    if (Math.abs(ramp[state].hue - ramp.running.hue) > pipHueToleranceDeg)
       throw new Error(
-        "pip activity shifted hue instead of desaturating: " +
+        "pip lifecycle rung shifted hue instead of desaturating: " +
           JSON.stringify(ramp),
       );
   }
@@ -51,24 +69,41 @@ function assertPipSaturationRamp(colors) {
     const current = ramp[pipRampStates[index]].saturation;
     if (!(previous > current))
       throw new Error(
-        "pip saturation did not fall active>active-ish>inactive>unknown: " +
+        "pip saturation did not fall running>starting>quiet>stalled>idle: " +
           JSON.stringify(ramp),
       );
   }
+  const expectedSaturations = [1, 0.75, 0.5, 0.25];
+  for (let index = 0; index < expectedSaturations.length; index += 1) {
+    const state = pipRampStates[index];
+    if (
+      Math.abs(ramp[state].saturation - expectedSaturations[index]) >
+      pipStepTolerance
+    )
+      throw new Error(
+        "pip lifecycle rung missed its 25-point saturation step: " +
+          JSON.stringify(ramp),
+      );
+  }
+  if (ramp.idle.saturation > pipIdleSaturationMaximum)
+    throw new Error(
+      "idle pip did not reach the muted stem-pill floor: " + JSON.stringify(ramp),
+    );
   return ramp;
 }
 
 function assertGroupedPipRamp(groupedPips, colors) {
   if (groupedPips.length !== groupedPipStates.length)
     throw new Error(
-      "grouped lane did not render four status pips: " + JSON.stringify(groupedPips),
+      "grouped lane did not render five status pips: " + JSON.stringify(groupedPips),
     );
   for (let index = 0; index < groupedPipStates.length; index += 1) {
     const pip = groupedPips[index];
-    const expectedActivity = groupedPipStates[index];
+    const expected = groupedPipStates[index];
     if (
-      pip.activity !== expectedActivity ||
-      pip.color !== colors[expectedActivity] ||
+      pip.activity !== expected.activity ||
+      pip.status !== expected.status ||
+      pip.color !== colors[expected.tone] ||
       pip.width <= 0 ||
       pip.height <= 0 ||
       pip.visibility !== "visible"
@@ -80,17 +115,17 @@ function assertGroupedPipRamp(groupedPips, colors) {
   }
 }
 
-function assertPipActivityBase(colors, activityBase) {
-  if (colors.active !== activityBase)
+function assertPipLifecycleEndpoints(colors, runningBase, idleBase) {
+  if (colors.running !== runningBase || colors.idle !== idleBase)
     throw new Error(
-      "active pip did not use the full-saturation theme base: " +
-        JSON.stringify({ activityBase, colors }),
+      "pip lifecycle endpoints diverged from running and idle theme bases: " +
+        JSON.stringify({ runningBase, idleBase, colors }),
     );
-  const active = rgbToHsl(colors.active);
-  if (Math.abs(active.saturation - 1) > pipFullSaturationTolerance)
+  const running = rgbToHsl(colors.running);
+  if (Math.abs(running.saturation - 1) > pipFullSaturationTolerance)
     throw new Error(
-      "active pip was not 100% saturated: " +
-        JSON.stringify({ active, activityBase, colors }),
+      "running pip was not 100% saturated: " +
+        JSON.stringify({ running, runningBase, colors }),
     );
 }
 
@@ -212,6 +247,7 @@ async function runStructuralStatusSmokePage() {
       headerStatus: header ? header.dataset.agentStatus || "" : "",
       latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
       pipActivity: lane.pipEl.dataset.agentActivity || "",
+      pipColor: getComputedStyle(lane.pipEl).backgroundColor,
       pipStatus: lane.pipEl.dataset.agentStatus || "",
       placeholder: textarea.placeholder,
       compactPlaceholder: laneComposePlaceholder(lane),
@@ -277,20 +313,29 @@ async function runStructuralStatusSmokePage() {
   updateLiveRelativeTimes();
   const pipColors = {};
   const renderedPipActivity = lane.pipEl.dataset.agentActivity;
-  const renderedPipActivities = [
-    "active",
-    "active-ish",
-    "inactive",
-    "unknown",
+  const renderedPipStatus = lane.pipEl.dataset.agentStatus;
+  const renderedPipStates = [
+    { activity: "active", status: "running", tone: "running" },
+    { activity: "active-ish", status: "starting", tone: "starting" },
+    { activity: "inactive", status: "running-stale", tone: "running-stale" },
+    {
+      activity: "unknown",
+      status: "startup-stalled",
+      tone: "startup-stalled",
+    },
+    { activity: "inactive", status: "idle", tone: "idle" },
   ];
-  for (const state of renderedPipActivities) {
-    lane.pipEl.dataset.agentActivity = state;
-    pipColors[state] = getComputedStyle(lane.pipEl).backgroundColor;
+  for (const state of renderedPipStates) {
+    lane.pipEl.dataset.agentActivity = state.activity;
+    lane.pipEl.dataset.agentStatus = state.status;
+    pipColors[state.tone] = getComputedStyle(lane.pipEl).backgroundColor;
   }
   lane.pipEl.dataset.agentActivity = renderedPipActivity;
+  lane.pipEl.dataset.agentStatus = renderedPipStatus;
   const afterRelativeTick = {
     latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
     pipActivity: lane.pipEl.dataset.agentActivity || "",
+    pipColor: getComputedStyle(lane.pipEl).backgroundColor,
     pipStatus: lane.pipEl.dataset.agentStatus || "",
     placeholder: textarea.placeholder,
     statusAge: lane.statusTimeEl.textContent || "",
@@ -304,22 +349,28 @@ async function runStructuralStatusSmokePage() {
       timestamp: new Date().toISOString(),
     }),
   );
-  const activityProbe = document.createElement("span");
-  activityProbe.style.color = "hsl(from var(--good) h 100% l)";
-  lane.element.append(activityProbe);
-  const activityBase = getComputedStyle(activityProbe).color;
-  activityProbe.remove();
+  const runningProbe = document.createElement("span");
+  runningProbe.style.color = "hsl(from var(--good) h 100% l)";
+  lane.element.append(runningProbe);
+  const runningBase = getComputedStyle(runningProbe).color;
+  runningProbe.remove();
+  const idleProbe = document.createElement("span");
+  idleProbe.style.color = "var(--muted)";
+  lane.element.append(idleProbe);
+  const idleBase = getComputedStyle(idleProbe).color;
+  idleProbe.remove();
   const groupedMembers = [
     lane,
-    ...renderedPipActivities.slice(1).map((_, index) =>
+    ...renderedPipStates.slice(1).map((_, index) =>
       resolveIsolatedLane("structural-status-member-" + index),
     ),
   ];
   for (let index = 0; index < groupedMembers.length; index += 1) {
     groupedMembers[index].element.classList.remove("lane--empty-team");
-    groupedMembers[index].pipEl.dataset.agentStatus = "running";
+    groupedMembers[index].pipEl.dataset.agentStatus =
+      renderedPipStates[index].status;
     groupedMembers[index].pipEl.dataset.agentActivity =
-      renderedPipActivities[index];
+      renderedPipStates[index].activity;
   }
   reconcileLaneGroups([groupedMembers.map((member) => member.targetId)]);
   const groupedHost = laneGroupHost(lane);
@@ -341,14 +392,6 @@ async function runStructuralStatusSmokePage() {
   const liveMembers = groupedMembers.slice(1);
   const liveStatuses = [
     {
-      activityStatus: "active",
-      agentProcessStatus: "running",
-      agentVisualStatus: "running",
-      lastAssistantAt: new Date().toISOString(),
-      latestActivityKind: "presence:function_call",
-      latestActivityPreview: "Bash: pytest",
-    },
-    {
       activityStatus: "unknown",
       agentProcessStatus: "starting",
       agentVisualStatus: "starting",
@@ -357,12 +400,28 @@ async function runStructuralStatusSmokePage() {
       latestActivityPreview: "",
     },
     {
-      activityStatus: "unknown",
+      activityStatus: "inactive",
       agentProcessStatus: "running",
       agentVisualStatus: "running",
+      lastAssistantAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      latestActivityKind: "presence:function_call_output",
+      latestActivityPreview: "quiet tool output",
+    },
+    {
+      activityStatus: "unknown",
+      agentProcessStatus: "startup-stalled",
+      agentVisualStatus: "startup-stalled",
       lastAssistantAt: "",
       latestActivityKind: "",
       latestActivityPreview: "",
+    },
+    {
+      activityStatus: "inactive",
+      agentProcessStatus: "idle",
+      agentVisualStatus: "idle",
+      lastAssistantAt: new Date(Date.now() - 55 * 60 * 1000).toISOString(),
+      latestActivityKind: "final",
+      latestActivityPreview: "idle final",
     },
   ];
   for (let index = 0; index < liveMembers.length; index += 1) {
@@ -388,13 +447,14 @@ async function runStructuralStatusSmokePage() {
   return {
     active,
     activeish,
-    activityBase,
     afterRelativeTick,
     final,
     groupedPips,
+    idleBase,
     liveGroupedPips,
     phaseTransition,
     pipColors,
+    runningBase,
     startingHeaderColor,
     toolActivity,
   };
@@ -402,26 +462,47 @@ async function runStructuralStatusSmokePage() {
 
 function assertPipStatusResult(result) {
   assertPipSaturationRamp(result.pipColors);
-  assertPipActivityBase(result.pipColors, result.activityBase);
+  assertPipLifecycleEndpoints(
+    result.pipColors,
+    result.runningBase,
+    result.idleBase,
+  );
   assertGroupedPipRamp(result.groupedPips, result.pipColors);
-  const expectedLiveActivities = ["active", "active-ish", "active"];
-  for (let index = 0; index < expectedLiveActivities.length; index += 1) {
-    const expected = expectedLiveActivities[index];
+  for (let index = 0; index < result.liveGroupedPips.length; index += 1) {
+    const expected = groupedPipStates[index + 1];
     const pip = result.liveGroupedPips[index];
-    if (pip.activity !== expected || pip.color !== result.pipColors[expected])
+    if (
+      pip.activity !== expected.activity ||
+      pip.status !== expected.status ||
+      pip.color !== result.pipColors[expected.tone]
+    )
       throw new Error(
         "live grouped pip did not follow current member state: " +
           JSON.stringify({ expected, liveGroupedPips: result.liveGroupedPips }),
       );
   }
-  if (result.startingHeaderColor !== result.pipColors["active-ish"])
+  if (result.startingHeaderColor !== result.pipColors.starting)
     throw new Error(
       "starting header did not use the green activity rung: " +
         JSON.stringify({
-          activeish: result.pipColors["active-ish"],
+          starting: result.pipColors.starting,
           startingHeaderColor: result.startingHeaderColor,
         }),
     );
+  for (const snapshot of [result.activeish, result.final, result.afterRelativeTick]) {
+    if (snapshot.pipColor !== result.pipColors.idle)
+      throw new Error(
+        "idle lifecycle did not cap pip color at the muted floor: " +
+          JSON.stringify({ snapshot, idle: result.pipColors.idle }),
+      );
+  }
+  for (const snapshot of [result.active, result.phaseTransition, result.toolActivity]) {
+    if (snapshot.pipColor !== result.pipColors.running)
+      throw new Error(
+        "running lifecycle did not retain the saturated endpoint: " +
+          JSON.stringify({ snapshot, running: result.pipColors.running }),
+      );
+  }
 }
 
 function assertStatusTransitionTimes(active, phaseTransition, final) {

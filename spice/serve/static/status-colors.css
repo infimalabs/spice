@@ -14,30 +14,55 @@
   box-shadow: 0 0 0 2px var(--agent-status-halo-color);
 }
 
-/* The top rung keeps --good's theme hue and lightness but is literally fully
-   saturated; every lesser rung descends from that maximum instead of from the
-   intentionally muted --good token. Any transcript output refreshes the same
-   constant-hue activity ladder.
-   Lifecycle remains available in data-agent-status for labels; it does not
-   make a recently active agent look idle merely because its last text was a
-   final response. */
+/* Match the top-level stem pills' five semantic rungs while keeping the vivid
+   running endpoint: running 100%, starting 75%, running-quiet 50%,
+   stopping/stalled 25%, then the muted idle floor. Activity provides the
+   fallback tone; known lifecycle states cap it so an idle final cannot remain
+   green merely because its transcript timestamp is recent. */
 .agent-status-pip[data-agent-activity="active"] {
   --agent-status-color: var(--agent-activity-base);
 }
 
 .agent-status-pip[data-agent-activity="active-ish"] {
   --agent-status-color: hsl(
-    from var(--agent-activity-base) h calc(s * 0.6667) l
+    from var(--agent-activity-base) h calc(s * 0.75) l
   );
 }
 
 .agent-status-pip[data-agent-activity="inactive"] {
   --agent-status-color: hsl(
-    from var(--agent-activity-base) h calc(s * 0.3333) l
+    from var(--agent-activity-base) h calc(s * 0.5) l
   );
 }
 
 .agent-status-pip[data-agent-activity="unknown"] {
+  --agent-status-color: var(--muted);
+}
+
+.agent-status-pip[data-agent-status="running"] {
+  --agent-status-color: var(--agent-activity-base);
+}
+
+.agent-status-pip[data-agent-status="starting"] {
+  --agent-status-color: hsl(
+    from var(--agent-activity-base) h calc(s * 0.75) l
+  );
+}
+
+.agent-status-pip[data-agent-status="running-stale"] {
+  --agent-status-color: hsl(
+    from var(--agent-activity-base) h calc(s * 0.5) l
+  );
+}
+
+.agent-status-pip[data-agent-status="stopping"],
+.agent-status-pip[data-agent-status="startup-stalled"] {
+  --agent-status-color: hsl(
+    from var(--agent-activity-base) h calc(s * 0.25) l
+  );
+}
+
+.agent-status-pip[data-agent-status="idle"] {
   --agent-status-color: var(--muted);
 }
 
@@ -47,7 +72,7 @@
 
 .composer-quote-time[data-agent-status="starting"] {
   --agent-status-color: hsl(
-    from var(--agent-activity-base) h calc(s * 0.6667) l
+    from var(--agent-activity-base) h calc(s * 0.75) l
   );
 }
 
