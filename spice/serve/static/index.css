@@ -252,10 +252,10 @@ button.primary:hover {
    exist -- so ready work with no agent assigned reads as nearly-desaturated idle
    rather than a false full green, and a stem an agent is camped on stays lit
    even when every task is blocked. Every step holds --good's hue and lightness
-   and lowers only saturation (relative color), so dormant -> idle -> assigned ->
-   active -> saturated is one monotonic desaturating ramp with no green->cyan
-   drift; idle is the lowest green step and dormant drops off it to the neutral
-   --muted floor. */
+   and lowers only saturation (relative color), so idle -> dormant -> assigned ->
+   active -> saturated is one monotonic ramp with no green->cyan drift. Idle is
+   the neutral --muted floor because it means handleable work has no agent;
+   dormant is the 25% step because there is no ready work being left idle. */
 .filter-pill--saturated { border-color: var(--good); color: var(--good); }
 .filter-pill--active {
   --filter-pill-tone: hsl(from var(--good) h calc(s * 0.75) l);
@@ -269,12 +269,12 @@ button.primary:hover {
   border-color: var(--filter-pill-tone);
   color: var(--filter-pill-tone);
 }
-.filter-pill--idle {
+.filter-pill--dormant {
   --filter-pill-tone: hsl(from var(--good) h calc(s * 0.25) l);
   border-color: var(--filter-pill-tone);
   color: var(--filter-pill-tone);
 }
-.filter-pill--dormant { color: var(--muted); }
+.filter-pill--idle { color: var(--muted); }
 .filter-pill--implicit {
   background: color-mix(in srgb, var(--good) 8%, transparent);
 }
@@ -282,7 +282,7 @@ button.primary:hover {
 .filter-pill--system { border-style: dashed; }
 /* Hidden/system stems (oops, maxim_proposal, project-configured additions) are
    never handed out, so their coverage ramp never advances. Rather than collapse
-   to the neutral dormant gray, they carry the warn hue -- the dashed border
+   to the low dormant step, they carry the warn hue -- the dashed border
    marks them hidden, the amber marks a non-empty deferred/triage bucket so it
    stands out at a glance the way it did before its accent was dropped. */
 .filter-pill--system {
@@ -300,8 +300,8 @@ button.primary:hover {
 }
 .filter-pill--active .filter-pill-count,
 .filter-pill--assigned .filter-pill-count,
-.filter-pill--idle .filter-pill-count { background: var(--filter-pill-tone); }
-.filter-pill--dormant .filter-pill-count { background: var(--muted); }
+.filter-pill--dormant .filter-pill-count { background: var(--filter-pill-tone); }
+.filter-pill--idle .filter-pill-count { background: var(--muted); }
 .filter-pill--system .filter-pill-count { background: var(--warn); }
 
 /* ---- swimlanes ---- */
