@@ -13,11 +13,12 @@ from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
+    inbox_item_key,
     inbox_request_body,
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi
+from spice.serve import agentapi, launch, workroutes
 from spice.serve.workroutes import work_tree_send_response_payload
 from tests.test_servehelpers import (
     THREAD_A,
@@ -864,6 +865,87 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
     assert pending_inbox_count(repo) == 0
     outcomes = lifecycle.read_launch_outcomes(repo)
     assert len(outcomes) == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
+
+
+def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
+    tmp_path, monkeypatch
+):
+    """An already-awake watcher cannot consume a fresh explicit UI grant."""
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    published = threading.Event()
+    release_direct_send = threading.Event()
+    background_admitted = threading.Event()
+    background_finished = threading.Event()
+    agent_started = threading.Event()
+    direct_result: dict[str, object] = {}
+    attempts: list[bool] = []
+    real_submit = workroutes.submit_steering_message
+
+    def pause_after_publication(**kwargs):
+        sent = real_submit(**kwargs)
+        published.set()
+        release_direct_send.wait(timeout=15.0)
+        return sent
+
+    def status_after_explicit_start(*_args, **_kwargs):
+        return SimpleNamespace(running=agent_started.is_set())
+
+    def ensure_with_active_refusal(ensured_target, **kwargs):
+        assert ensured_target == target
+        automatic = bool(kwargs["automatic"])
+        attempts.append(automatic)
+        if automatic:
+            return {
+                "ok": False,
+                "failure": lifecycle.AGENT_FAILURE_RESTART_REFUSED,
+                "restartRefusal": {"reason": "rapid-death"},
+            }, HTTPStatus.TOO_MANY_REQUESTS
+        agent_started.set()
+        return {
+            "ok": True,
+            "action": "start",
+            "threadId": THREAD_A,
+        }, HTTPStatus.OK
+
+    monkeypatch.setattr(workroutes, "submit_steering_message", pause_after_publication)
+    monkeypatch.setattr(agentapi, "agent_status", status_after_explicit_start)
+    monkeypatch.setattr(
+        agentapi, "agent_ensure_response_payload", ensure_with_active_refusal
+    )
+
+    def send_directly() -> None:
+        direct_result["response"] = work_tree_send_response_payload(
+            state, target, {"text": "use my explicit restart grant"}
+        )
+
+    def evaluate_in_background() -> None:
+        background_admitted.set()
+        watch = launch.AvailableWorkWatch(state, events_path=tmp_path / "task-events")
+        watch.evaluate()
+        background_finished.set()
+
+    direct_thread = threading.Thread(target=send_directly, daemon=True)
+    direct_thread.start()
+    assert published.wait(timeout=5.0) is True
+    background_thread = threading.Thread(target=evaluate_in_background, daemon=True)
+    background_thread.start()
+    assert background_admitted.wait(timeout=5.0) is True
+    release_direct_send.set()
+    direct_thread.join(timeout=5.0)
+    background_thread.join(timeout=5.0)
+
+    response, status = direct_result["response"]
+    assert status == HTTPStatus.OK
+    assert response["agentEnsure"]["action"] == "start"
+    assert attempts[0] is False
+    assert agent_started.is_set() is True
+    assert background_finished.is_set() is True
+    assert [inbox_item_key(item.name) for item in collect_inbox_items(repo)] == [
+        response["key"]
+    ]
 
 
 def test_agent_status_payload_surfaces_restart_refusal(tmp_path, monkeypatch):
