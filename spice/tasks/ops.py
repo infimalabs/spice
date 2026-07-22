@@ -829,11 +829,12 @@ def next_task_drain_line(
     )
     if review_assignment:
         return (
-            "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment; "
+            "next: YOU ARE NOT DONE. Run spice task next --wait for reviewer "
+            "assignment; "
             "self-review only if next assigns it; "
             f"{tail}"
         )
-    return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"
+    return f"next: YOU ARE NOT DONE. Run spice task next --wait; {tail}"
 
 
 def _spawn_followup(

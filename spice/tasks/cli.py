@@ -45,7 +45,6 @@ def configure_task_parser(subparsers: Any) -> None:
 def _configure_task_read_parsers(actions: Any) -> None:
     for name, helptext in (
         ("status", "Agent briefing."),
-        ("next", "Select, claim, and render the next task."),
         ("doctor", "Prove allocator coherence."),
         ("stale", "List active claims whose deadline has elapsed."),
     ):
@@ -54,6 +53,21 @@ def _configure_task_read_parsers(actions: Any) -> None:
             help=helptext,
             recovery_examples=(f"spice task {name}",),
         ).set_defaults(func=handle)
+
+    next_task = actions.add_parser(
+        "next",
+        help="Select, claim, and render the next task.",
+        recovery_examples=("spice task next", "spice task next --wait"),
+    )
+    next_task.add_argument(
+        "--wait",
+        action="store_true",
+        help=(
+            "When peers still hold visible work, block on task and steering "
+            "events until allocation succeeds or the lane becomes terminally empty."
+        ),
+    )
+    next_task.set_defaults(func=handle)
 
     sizing = actions.add_parser(
         "sizing",
@@ -1008,7 +1022,7 @@ def _ledger(args: argparse.Namespace) -> str:
 
 _DISPATCH = {
     "status": lambda a: render.render_status(),
-    "next": lambda a: render.render_next(),
+    "next": lambda a: render.render_next(wait=a.wait),
     "doctor": lambda a: render.render_doctor(),
     "stale": lambda a: render.render_list(alloc.stale_rows()),
     "sizing": lambda a: sizing.completed_task_sizing_report(
