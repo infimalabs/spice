@@ -29,6 +29,7 @@ from rehearse import (  # noqa: E402
     _run,
     _sha256,
     _write_json,
+    git_private_path,
 )
 
 SCHEMA_VERSION = 1
@@ -39,8 +40,16 @@ EXPORTER_RELATIVE = Path("scripts/release-proof-source")
 INITIALIZER_RELATIVE = Path("release-proof/init-source.py")
 TOOLCHAIN_RELATIVE = Path("release-proof/toolchain.py")
 REHEARSAL_RELATIVE = Path("release-proof/rehearse.py")
-TOOLCHAIN_RECORD_RELATIVE = Path(".git/release-proof-toolchain.json")
+TOOLCHAIN_RECORD_NAME = "release-proof-toolchain.json"
 PROVISION_COMMAND = ("npm", "ci")
+INTERPRETER_COMMAND = (
+    "uv",
+    "run",
+    "--locked",
+    "python",
+    "-c",
+    "import sys; print(sys.executable)",
+)
 CONTAINER_ENGINES = ("docker", "podman")
 IDENTITY_REVISIONS = (("commit", "HEAD^{commit}"), ("tree", "HEAD^{tree}"))
 
@@ -80,6 +89,11 @@ def materialize(
         failures=failures,
         gate="source-export",
     )
+    # This one step runs under the host interpreter by necessity: it is what
+    # turns the export into the repository the pinned interpreter is later
+    # resolved from. Provisioning a snapshot environment first would leave a
+    # ``.venv`` for the initializer's ``git add --force --all`` to sweep in,
+    # and the exported tracked tree would then stop matching its provenance.
     initialized = _run(
         [sys.executable, str(snapshot / INITIALIZER_RELATIVE), str(snapshot)],
         cwd=snapshot,
@@ -88,6 +102,54 @@ def materialize(
         gate="source-initialize",
     )
     return snapshot, json.loads(initialized.stdout)
+
+
+def _pin_interpreter(snapshot: Path, resolved: str) -> Path:
+    """Accept only an interpreter the pinned snapshot itself owns.
+
+    The containing directory is resolved and the interpreter file is not. A
+    virtual environment's ``bin/python`` is a symlink onto a shared base
+    CPython by construction, so following that last link reports every snapshot
+    interpreter as living outside the snapshot. What a boundary commit can pin
+    is the environment around the link -- the locked site-packages beside it --
+    and that is what resolving only the directory keeps in view.
+    """
+    home = Path(resolved).parent.resolve()
+    snapshot = snapshot.resolve()
+    interpreter = home / Path(resolved).name
+    if not home.is_relative_to(snapshot):
+        raise PinError(
+            "the resolved interpreter lies outside the pinned snapshot:\n"
+            + json.dumps(
+                {"snapshot": str(snapshot), "interpreter": str(interpreter)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    return interpreter
+
+
+def snapshot_interpreter(
+    snapshot: Path,
+    failures: FailureArtifactStore,
+) -> Path:
+    """Provision the snapshot's locked environment and adopt its interpreter.
+
+    Pinning the harness source without pinning the runtime proves nothing about
+    the boundary commit, because the origin worktree's ``.venv`` carries
+    whatever the live tree happens to have installed. Asking uv, from inside the
+    snapshot, which interpreter the pinned lockfile resolves to is the only
+    answer the snapshot can vouch for, and it lands beside the sources it was
+    locked against.
+    """
+    resolved = _run(
+        INTERPRETER_COMMAND,
+        cwd=snapshot,
+        capture=True,
+        failures=failures,
+        gate="snapshot-interpreter",
+    )
+    return _pin_interpreter(snapshot, resolved.stdout.strip())
 
 
 def _exported_source(identities: dict[str, object]) -> dict[str, object]:
@@ -146,11 +208,11 @@ def provision_gate(
     }
 
 
-def toolchain_gate(snapshot: Path) -> dict[str, object]:
+def toolchain_gate(snapshot: Path, interpreter: Path) -> dict[str, object]:
     """Resolve the declared toolchain, or record it as explicitly not run."""
-    record = snapshot / TOOLCHAIN_RECORD_RELATIVE
+    record = git_private_path(snapshot, TOOLCHAIN_RECORD_NAME)
     command = [
-        sys.executable,
+        str(interpreter),
         str(snapshot / TOOLCHAIN_RELATIVE),
         "--output",
         str(record),
@@ -197,10 +259,19 @@ def appliance_gate(which=shutil.which) -> dict[str, object]:
     }
 
 
-def rehearse_pinned(snapshot: Path, artifacts: Path) -> dict[str, object]:
-    """Run the snapshot's own rehearsal so the harness is pinned too."""
+def rehearse_pinned(
+    snapshot: Path,
+    artifacts: Path,
+    interpreter: Path,
+) -> dict[str, object]:
+    """Run the snapshot's own rehearsal, on its own interpreter, pinning both.
+
+    The rehearsal spawns its isolated-install venv from ``sys.executable``, so
+    handing it a snapshot interpreter is what makes every gate command in the
+    failure diagnostics name the snapshot rather than the origin worktree.
+    """
     command = [
-        sys.executable,
+        str(interpreter),
         str(snapshot / REHEARSAL_RELATIVE),
         "--artifacts",
         str(artifacts),
@@ -264,11 +335,12 @@ def run_pinned_proof(
     snapshot, identities = materialize(root, workspace.resolve(strict=True), failures)
     source = verify_boundary(boundary, identities)
     before = _identity(snapshot, failures)
+    interpreter = snapshot_interpreter(snapshot, failures)
     gates = [
         provision_gate(snapshot, failures),
-        toolchain_gate(snapshot),
+        toolchain_gate(snapshot, interpreter),
         appliance_gate(),
-        rehearse_pinned(snapshot, artifacts),
+        rehearse_pinned(snapshot, artifacts, interpreter),
     ]
     after = _bind_identity(before, _identity(snapshot, failures))
     binding: dict[str, object] = {
@@ -281,6 +353,7 @@ def run_pinned_proof(
             "before": before,
             "after": after,
             "exported_source": source,
+            "interpreter": str(interpreter),
         },
         "origin_worktree": _origin_evidence(root, boundary, failures),
         "gates": gates,

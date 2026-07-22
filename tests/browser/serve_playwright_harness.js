@@ -400,6 +400,7 @@ async function withServePage(options, callback) {
 module.exports = {
   assertNoBrowserErrors,
   collectBrowserErrors,
+  defaultLifecycleReadyTimeoutMs,
   defaultSharedPlaywrightConfigPath,
   playwrightMcpConfigEnv,
   readSharedPlaywrightContextOptions,

@@ -375,17 +375,20 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
         "spice.tasks.lanes.team_route_for_actor",
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
-    assigned = alloc.next_task()
+    author_assignment = alloc.next_task()
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    reviewer_assignment = alloc.next_task()
 
-    assert identity.render_handle(assigned or {}) == handle
-    assert assigned["claim_by"] == ACTOR_A
+    assert author_assignment is None
+    assert identity.render_handle(reviewer_assignment or {}) == handle
+    assert reviewer_assignment["claim_by"] == PEER_ACTOR
 
     review_output = ops.review(handle, finding="clean", note="review passed")
     completed_row = tw.export([uuid])[0]
 
     assert f"reviewed {handle} clean; completed {handle}" in review_output
     assert completed_row["status"] == "completed"
-    assert completed_row["review_by"] == ACTOR_A
+    assert completed_row["review_by"] == PEER_ACTOR
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
 

@@ -1,13 +1,24 @@
-const { withServePage } = require("./serve_playwright_harness");
+const {
+  defaultLifecycleReadyTimeoutMs,
+  withServePage,
+} = require("./serve_playwright_harness");
 
-async function waitForImportShell(page) {
+// Settling on the import shell is the same class of wait as serve lifecycle
+// readiness -- both finish only once a server topology refresh has applied --
+// so it takes the same budget and honours the same caller override instead of
+// pinning a literal that stops scaling once peer lanes load the host.
+function importShellTimeoutMs(options = {}) {
+  return options.lifecycleReadyTimeoutMs || defaultLifecycleReadyTimeoutMs;
+}
+
+async function waitForImportShell(page, options = {}) {
   await page.waitForFunction(
     () => {
       const lanes = laneStore.lanesSnapshot();
       return lanes.length === 1 && lanes[0].emptyTeam && lanes[0].teamId;
     },
     {},
-    { timeout: 10000 },
+    { timeout: importShellTimeoutMs(options) },
   );
 }
 
@@ -46,20 +57,21 @@ function assertJsonEqual(actual, expected, message, details = null) {
   assertEqual(JSON.stringify(actual), JSON.stringify(expected), message, details);
 }
 
-async function run() {
+async function run(options = {}) {
   return withServePage(
     {
       path: "/?smoke=serve-fresh-startup-import-shell-" + Date.now(),
       contextOptions: { viewport: { width: 1440, height: 900 } },
+      ...options,
     },
     async ({ page, server }) => {
-      await waitForImportShell(page);
+      await waitForImportShell(page, options);
       const beforeReload = await page.evaluate(pageTopology);
       const hintedCount = await page.evaluate(installStaleOpenLaneHints);
       if (hintedCount < 1)
         throw new Error("fresh startup smoke needs at least one target hint");
       await page.reload({ waitUntil: "domcontentloaded" });
-      await waitForImportShell(page);
+      await waitForImportShell(page, options);
       const afterReload = await page.evaluate(pageTopology);
       const expectedLanes = [
         {
@@ -102,4 +114,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { run };
+module.exports = { importShellTimeoutMs, run, waitForImportShell };

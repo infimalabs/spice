@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import platform
+import shlex
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,7 +15,6 @@ import pytest
 from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     PINNED,
-    REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
     _git,
@@ -37,11 +39,29 @@ def _pinned_repository(root: Path) -> tuple[Path, dict[str, object]]:
     }
 
 
+def _snapshot_interpreter(snapshot: Path) -> Path:
+    """The path a snapshot's own locked environment exposes."""
+    return snapshot / ".venv" / "bin" / "python"
+
+
+def _executable_interpreter(snapshot: Path) -> Path:
+    """Materialize that interpreter for real, delegating to this one."""
+    interpreter = _snapshot_interpreter(snapshot)
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8"
+    )
+    interpreter.chmod(0o755)
+    return interpreter
+
+
 def _stub_rehearsal(monkeypatch, during_gates=lambda: None) -> dict[str, object]:
     """Stand in for the long rehearsal and publish a receipt it can be bound to."""
     receipt = {"schema_version": 1, "tests": {"python": {"passed": 7, "total": 7}}}
 
-    def rehearse(_snapshot: Path, artifacts: Path) -> dict[str, object]:
+    def rehearse(
+        _snapshot: Path, artifacts: Path, _interpreter: Path
+    ) -> dict[str, object]:
         during_gates()
         artifacts.mkdir(parents=True)
         (artifacts / "release-proof.json").write_text(
@@ -52,13 +72,21 @@ def _stub_rehearsal(monkeypatch, during_gates=lambda: None) -> dict[str, object]
     monkeypatch.setattr(PINNED, "rehearse_pinned", rehearse)
     monkeypatch.setattr(
         PINNED,
+        "snapshot_interpreter",
+        lambda snapshot, _failures: _snapshot_interpreter(snapshot),
+    )
+    monkeypatch.setattr(
+        PINNED,
         "provision_gate",
         lambda _snapshot, _failures: {"gate": "browser-toolchain", "status": "ran"},
     )
     monkeypatch.setattr(
         PINNED,
         "toolchain_gate",
-        lambda _snapshot: {"gate": "declared-toolchain", "status": "ran"},
+        lambda _snapshot, _interpreter: {
+            "gate": "declared-toolchain",
+            "status": "ran",
+        },
     )
     monkeypatch.setattr(
         PINNED,
@@ -86,6 +114,7 @@ def test_pinned_proof_binds_every_gate_to_the_exported_boundary_commit(
     }
     assert binding["snapshot"]["exported_source"] == boundary
     assert binding["snapshot"]["before"] == binding["snapshot"]["after"]
+    assert binding["snapshot"]["interpreter"] == str(_snapshot_interpreter(snapshot))
     assert binding["origin_worktree"] == {
         "path": str(repository.resolve()),
         "before": binding["boundary"],
@@ -162,7 +191,7 @@ def test_pinned_proof_publishes_a_binding_for_a_red_gate_and_names_the_not_run(
     monkeypatch.setattr(
         PINNED,
         "rehearse_pinned",
-        lambda _snapshot, artifacts: {
+        lambda _snapshot, artifacts, _interpreter: {
             "gate": "rehearsal",
             "status": "failed",
             "exit_code": 2,
@@ -204,12 +233,66 @@ def test_pinned_proof_refuses_evidence_that_is_not_bound_to_the_boundary():
     ) == (True, True, True)
 
 
+def test_pinned_proof_refuses_an_interpreter_the_snapshot_does_not_own(tmp_path):
+    snapshot = tmp_path / "source"
+    snapshot.mkdir()
+    origin_python = tmp_path / "origin" / ".venv" / "bin" / "python"
+
+    owned = PINNED._pin_interpreter(snapshot, str(snapshot / ".venv/bin/python"))
+    with pytest.raises(PINNED.PinError) as origin_error:
+        PINNED._pin_interpreter(snapshot, str(origin_python))
+
+    assert owned == snapshot.resolve() / ".venv/bin/python"
+    assert str(origin_python.resolve()) in str(origin_error.value)
+
+
+def test_pinned_proof_keeps_a_venv_symlinked_onto_the_base_cpython(tmp_path):
+    """uv links ``.venv/bin/python`` at a shared CPython; the venv is the pin."""
+    snapshot = tmp_path / "source"
+    interpreter = _snapshot_interpreter(snapshot)
+    interpreter.parent.mkdir(parents=True)
+    base_cpython = tmp_path / "opt" / "python3"
+    base_cpython.parent.mkdir()
+    base_cpython.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    interpreter.symlink_to(base_cpython)
+
+    owned = PINNED._pin_interpreter(snapshot, str(interpreter))
+
+    assert owned == snapshot.resolve() / ".venv" / "bin" / "python"
+    assert owned.resolve() == base_cpython.resolve()
+
+
+def test_pinned_rehearsal_launches_the_interpreter_the_snapshot_resolved(tmp_path):
+    snapshot = tmp_path / "source"
+    (snapshot / "release-proof").mkdir(parents=True)
+    (snapshot / "release-proof" / "rehearse.py").write_text(
+        "raise SystemExit(3)\n", encoding="utf-8"
+    )
+    interpreter = _executable_interpreter(snapshot)
+    artifacts = tmp_path / "artifacts"
+
+    gate = PINNED.rehearse_pinned(snapshot, artifacts, interpreter)
+
+    assert gate["command"] == [
+        str(interpreter),
+        str(snapshot / PINNED.REHEARSAL_RELATIVE),
+        "--artifacts",
+        str(artifacts),
+    ]
+    assert (gate["gate"], gate["status"], gate["exit_code"]) == (
+        "rehearsal",
+        "failed",
+        3,
+    )
+    assert gate["diagnostics"] == str(artifacts / PINNED.FAILURE_DIRNAME)
+
+
 def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     tmp_path,
 ):
     snapshot = tmp_path / "source"
     (snapshot / "release-proof").mkdir(parents=True)
-    _git(snapshot, "init", "--quiet", "--initial-branch=main")
+    _git(snapshot, "init", "--quiet")
     (snapshot / "release-proof" / "toolchain.py").write_text(
         "import sys\n"
         "print('No module named build', file=sys.stderr)\n"
@@ -217,9 +300,11 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
         encoding="utf-8",
     )
 
-    gate = PINNED.toolchain_gate(snapshot)
-    recorded = REHEARSAL._load_git_private_json(
-        snapshot, "release-proof-toolchain.json"
+    gate = PINNED.toolchain_gate(snapshot, _executable_interpreter(snapshot))
+    recorded = json.loads(
+        PINNED.git_private_path(snapshot, PINNED.TOOLCHAIN_RECORD_NAME).read_text(
+            encoding="utf-8"
+        )
     )
 
     assert (gate["gate"], gate["status"], gate["detail"]) == (
@@ -230,6 +315,32 @@ def test_pinned_proof_records_an_unresolvable_toolchain_as_explicitly_not_run(
     assert gate["reason"] == (
         "the declared release-proof toolchain does not resolve here"
     )
+    assert gate["host"] == {
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+        "system": platform.system().casefold(),
+    }
+    assert recorded == gate
+
+
+def test_toolchain_gate_round_trips_its_record_from_a_linked_worktree(tmp_path):
+    repository, _source = _source_repository(tmp_path)
+    linked = tmp_path / "linked"
+    _git(repository, "worktree", "add", "--detach", str(linked))
+    (linked / "release-proof").mkdir()
+    (linked / "release-proof" / "toolchain.py").write_text(
+        "import sys\n"
+        "print('No module named build', file=sys.stderr)\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+
+    gate = PINNED.toolchain_gate(linked, _executable_interpreter(linked))
+    record = PINNED.git_private_path(linked, PINNED.TOOLCHAIN_RECORD_NAME)
+    recorded = json.loads(record.read_text(encoding="utf-8"))
+
+    assert (linked / ".git").is_file()
+    assert record.is_file()
     assert recorded == gate
 
 

@@ -64,7 +64,10 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
     monkeypatch.setattr(
         REHEARSAL,
         "verify_packaging_toolchain",
-        lambda _root, _failures: list(REHEARSAL.PACKAGING_MODULES),
+        lambda _root, _failures: {
+            distribution: "test-version"
+            for distribution in REHEARSAL.PACKAGING_TOOLCHAIN.values()
+        },
     )
     monkeypatch.setattr(
         REHEARSAL,
