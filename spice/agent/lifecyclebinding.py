@@ -498,6 +498,14 @@ def bind_ambient_agent_thread(repo_root: Path) -> AgentStatus:
     state = read_agent_state(repo_root)
     if canonical_thread_id(state.get("thread_id")) == ambient:
         return agent_status(repo_root)
+    driver = driver_for(repo_root)
+    if driver.thread_known_foreign(repo_root, ambient):
+        # The ambient thread's conversation lives under a different worktree: a
+        # crossed hook or foreign-ambient process is offering another lane's
+        # session id. Seating it here would leave `ensure` resume-looping on a
+        # thread this worktree can never open, so refuse the seed entirely and
+        # leave the existing binding untouched.
+        return agent_status(repo_root)
     if agent_state_is_authoritative(state):
         state["thread_id"] = ambient
     else:
@@ -508,7 +516,7 @@ def bind_ambient_agent_thread(repo_root: Path) -> AgentStatus:
             "started_at": utc_now(),
             "mode": "bind",
             "command": [],
-            "driver": driver_for(repo_root).name,
+            "driver": driver.name,
             "model": "",
             "reasoning_effort": "",
             "service_tier": "",

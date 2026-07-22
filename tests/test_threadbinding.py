@@ -13,7 +13,13 @@ import pytest
 
 from spice.agent import cli as agent_cli
 from spice.agent import wrap
-from spice.agent.driver import DRIVER, POST_TOOL_HOOK_EVENT
+from spice.agent.driver import (
+    CLAUDE_DRIVER,
+    CODEX_DRIVER,
+    DRIVER,
+    POST_TOOL_HOOK_EVENT,
+    SPICE_AGENT_DRIVER_ENV,
+)
 from spice.agent.lifecyclebinding import (
     agent_state_path,
     agent_status,
@@ -174,6 +180,85 @@ def test_hook_fire_without_an_ambient_thread_keeps_state_and_delivers_steering(
     assert "steering with no ambient thread" in context
     assert agent_state_path(tmp_path).read_bytes() == bound
     assert agent_status(tmp_path).thread_id == CANONICAL_THREAD
+
+
+def test_bind_refuses_a_foreign_worktree_thread_and_keeps_the_local_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crossed hook offering another lane's session id is refused, not seated.
+
+    Seating a thread whose conversation lives under a different worktree is the
+    seed of the spice-e brick: `ensure` would later resume-loop on a session
+    this worktree can never open. The bind keeps the worktree's own thread.
+    """
+    config_dir = tmp_path / "claude"
+    projects = config_dir / "projects"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    monkeypatch.delenv(CODEX_DRIVER.thread_id_env, raising=False)
+
+    local_dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
+    local_canonical = "768bcba1a66f4d229ce7bcf65b5d16aa"
+    foreign_dashed = "019f8806-85c0-7312-b89f-6bfc6cdd0bb5"
+    foreign_canonical = "019f880685c07312b89f6bfc6cdd0bb5"
+
+    # A legitimate local session records this worktree's own cwd, so its ambient
+    # thread binds normally.
+    local_project = projects / "-local"
+    local_project.mkdir(parents=True)
+    (local_project / f"{local_dashed}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(tmp_path.resolve())}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(CLAUDE_DRIVER.thread_id_env, local_dashed)
+    bound = bind_ambient_agent_thread(tmp_path)
+    assert bound.thread_id == local_canonical
+
+    # A crossed hook now offers another worktree's session id, its transcript
+    # recorded under a different cwd.
+    other_root = tmp_path / "wt-other"
+    other_root.mkdir()
+    foreign_project = projects / "-wt-other"
+    foreign_project.mkdir(parents=True)
+    (foreign_project / f"{foreign_dashed}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(other_root.resolve())}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(CLAUDE_DRIVER.thread_id_env, foreign_dashed)
+    after = bind_ambient_agent_thread(tmp_path)
+
+    # The foreign id is refused; the worktree keeps its own thread, distinct from
+    # the crisscross candidate that would have bricked its next start.
+    assert after.thread_id == local_canonical
+    assert after.thread_id != foreign_canonical
+    assert read_agent_thread_pointer(tmp_path) == local_canonical
+
+
+def test_bind_seats_a_new_session_whose_transcript_is_not_written_yet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absent transcript is a fresh session mid-startup, not a foreign one.
+
+    The guard refuses only *provably* foreign threads; a session that has yet to
+    flush its transcript must still bind, or a lane could never record its own
+    first thread.
+    """
+    config_dir = tmp_path / "claude"
+    (config_dir / "projects").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    monkeypatch.delenv(CODEX_DRIVER.thread_id_env, raising=False)
+
+    fresh_dashed = "3c1d7e04-5a2b-4f6c-8d9e-0a1b2c3d4e5f"
+    fresh_canonical = "3c1d7e045a2b4f6c8d9e0a1b2c3d4e5f"
+    monkeypatch.setenv(CLAUDE_DRIVER.thread_id_env, fresh_dashed)
+
+    status = bind_ambient_agent_thread(tmp_path)
+
+    assert status.thread_id == fresh_canonical
+    assert read_agent_thread_pointer(tmp_path) == fresh_canonical
 
 
 class _CompletedProcess:
