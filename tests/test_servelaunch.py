@@ -1,0 +1,181 @@
+"""The server-owned wake loop that starts stopped Drain lanes."""
+
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+from spice.serve import launch
+from spice.serve.worktree.target import WorktreeTarget
+
+# Spelled out here rather than read from the scheduler: reading the production
+# constant would keep these bounds green at any interval, and three minutes is
+# the property under test. The remainder is what the countdown has left one
+# minute into a candidate's wait.
+LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
+ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
+
+
+def _target(name: str, tmp_path: Path) -> WorktreeTarget:
+    repo = tmp_path / name
+    repo.mkdir(exist_ok=True)
+    return WorktreeTarget(id=name, repo_root=repo, name=name, branch="main")
+
+
+def _state(targets: list[WorktreeTarget]) -> SimpleNamespace:
+    return SimpleNamespace(
+        observer_mode=False,
+        worktree_targets=lambda: list(targets),
+        team_store=SimpleNamespace(global_fast_mode_enabled=lambda: False),
+        available_work_ready_since={},
+        pending_agent_ensure_attempts={},
+    )
+
+
+def _events_file(tmp_path: Path) -> Path:
+    events = tmp_path / "events"
+    events.write_text("0 bootstrap\n", encoding="utf-8")
+    return events
+
+
+def _patch_lanes(monkeypatch, lifetimes: dict[str, str], ensured: list[tuple]) -> None:
+    monkeypatch.setattr(
+        launch,
+        "resolve_thread_id_for_target",
+        lambda _state, target: f"thread-{target.id}",
+    )
+    monkeypatch.setattr(
+        launch,
+        "team_facts_for_target",
+        lambda _store, target, _thread: {"lifetime": lifetimes[target.id]},
+    )
+    monkeypatch.setattr(
+        launch,
+        "ensure_agent_for_available_work",
+        lambda target, **kwargs: ensured.append((target.id, kwargs["thread_id"])),
+    )
+
+
+def test_observer_mode_runs_no_available_work_watch():
+    """Observer mode owns no lanes, so it has nothing to start."""
+    watch = launch.start_available_work_watch(SimpleNamespace(observer_mode=True))
+
+    assert watch is None
+
+
+def test_evaluate_offers_work_to_drain_lanes_only(tmp_path, monkeypatch):
+    """A lane whose team drains the board is the only lane this may start."""
+    drain = _target("drain", tmp_path)
+    burst = _target("burst", tmp_path)
+    ensured: list[tuple] = []
+    _patch_lanes(monkeypatch, {"drain": "Drain", "burst": "Burst"}, ensured)
+    watch = launch.AvailableWorkWatch(
+        _state([drain, burst]), events_path=_events_file(tmp_path)
+    )
+
+    remaining = watch.evaluate()
+
+    assert ensured == [("drain", "thread-drain")]
+    # Nothing is on watch yet, so the next look is a whole interval out.
+    assert remaining == LONE_TASK_ESCAPE_SECONDS
+
+
+def test_evaluate_shortens_its_bound_to_the_oldest_candidates_escape(
+    tmp_path, monkeypatch
+):
+    """The next wake lands when the oldest candidate reaches three minutes."""
+    drain = _target("drain", tmp_path)
+    ensured: list[tuple] = []
+    _patch_lanes(monkeypatch, {"drain": "Drain"}, ensured)
+    monkeypatch.setattr(launch.time, "monotonic", lambda: 1000.0)
+    state = _state([drain])
+    state.available_work_ready_since = {("thread-drain", "task-old"): 940.0}
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+
+    remaining = watch.evaluate()
+
+    assert remaining == ESCAPE_REMAINING_AFTER_ONE_MINUTE
+
+
+def test_evaluate_keeps_a_floor_under_an_expired_escape(tmp_path, monkeypatch):
+    """A candidate already past its escape still leaves room to act on it."""
+    drain = _target("drain", tmp_path)
+    ensured: list[tuple] = []
+    _patch_lanes(monkeypatch, {"drain": "Drain"}, ensured)
+    monkeypatch.setattr(launch.time, "monotonic", lambda: 1000.0)
+    state = _state([drain])
+    state.available_work_ready_since = {("thread-drain", "task-stuck"): 500.0}
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+
+    remaining = watch.evaluate()
+
+    assert remaining == launch.AVAILABLE_WORK_WATCH_MIN_SECONDS
+
+
+def test_watch_looks_again_when_its_deadline_arrives_with_no_board_change(
+    tmp_path, monkeypatch
+):
+    """The lone-task escape needs no second task and no client refresh."""
+    watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
+    looked_twice = threading.Event()
+    looks: list[int] = []
+
+    def evaluate() -> float:
+        looks.append(len(looks))
+        if len(looks) >= 2:
+            looked_twice.set()
+        # A deadline just out of reach of the first wait; nothing will be
+        # written to the event token for the rest of this test.
+        return 0.05
+
+    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch.start()
+    try:
+        assert looked_twice.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(looks) >= 2
+
+
+def test_watch_looks_again_when_the_task_board_changes(tmp_path, monkeypatch):
+    """A task entering the board wakes the decision without waiting out a deadline."""
+    events = _events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
+    looked_twice = threading.Event()
+    looks: list[int] = []
+
+    def evaluate() -> float:
+        looks.append(len(looks))
+        if len(looks) >= 2:
+            looked_twice.set()
+        # Far past this test: only a board change can produce a second look.
+        return 3600.0
+
+    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch.start()
+    try:
+        assert watch.armed.wait(timeout=15.0) is True
+        events.write_text("1 task\n", encoding="utf-8")
+        assert looked_twice.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(looks) >= 2
+
+
+def test_cancel_ends_the_watch(tmp_path, monkeypatch):
+    """Serve shutdown reclaims the thread out of its blocking wait."""
+    watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
+    monkeypatch.setattr(watch, "evaluate", lambda: 3600.0)
+    watch.start()
+    assert watch.armed.wait(timeout=15.0) is True
+
+    watch.cancel()
+    watch.join()
+
+    assert watch.error == ""
+    assert threading.active_count() >= 1

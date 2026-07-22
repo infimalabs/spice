@@ -913,7 +913,7 @@ class LiveBusSession:
         while not subscription.stop.is_set():
             thread_id, transcript = self._lane_context(target)
             watch_paths = self.callbacks.lane_watch_paths(target, thread_id, transcript)
-            changed = _wait_for_change(
+            changed = wait_for_change(
                 watch_paths,
                 subscription.stop,
                 watch,
@@ -1093,7 +1093,7 @@ def _elapsed_ms(start: float, end: float) -> float:
     return max(0.0, (end - start) * _MS_PER_SECOND)
 
 
-def _wait_for_change(
+def wait_for_change(
     paths: tuple[Path, ...],
     stop: Event,
     watch: _KqueueWatch | None = None,
@@ -1107,10 +1107,16 @@ def _wait_for_change(
     queued and delivered on the next call instead of being lost in a reopen
     gap. Without one (or off kqueue) the watch is opened per call. `activated`
     is published only after the selected watcher has accepted observable paths.
+
+    Public because the lane watchers are not the only thing in serve that has
+    to wait on a file: `spice.serve.launch` waits on the task event token the
+    same way. Callers outside this module supply their own `stop`, which is
+    also how they bound the wait — set it from a deadline and this returns
+    False when that deadline arrives rather than only on a change.
     """
     watch_paths = _existing_watch_paths(paths)
     if not watch_paths:
-        raise RuntimeError("lane watcher has no observable paths")
+        raise RuntimeError("file watch has no observable paths")
     if _HAVE_KQUEUE:
         if watch is not None:
             return watch.wait(watch_paths, stop, activated=activated)

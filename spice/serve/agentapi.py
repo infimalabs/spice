@@ -42,7 +42,11 @@ AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
 # lane to claim and one left on the board. READY excludes active claims, so the
 # already-running lane count is not part of this backlog threshold.
 AVAILABLE_WORK_START_THRESHOLD = 2
-AVAILABLE_WORK_STARVATION_SECONDS = 5.0 * 60.0
+# The escape for the task the threshold above would otherwise strand: one task
+# ready on its own is never two, so without a deadline it waits for a second
+# task that may never be filed. After this long a lone ready task starts a lane
+# by itself. It is the age at which one is enough, not a retry interval.
+AVAILABLE_WORK_STARVATION_SECONDS = 3.0 * 60.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
@@ -302,7 +306,6 @@ def ensure_agent_for_available_work(
         )
         if not claimed:
             return _available_work_skip("claim-lost", task_handle=handle)
-        forget_available_work_observation(actor, task_uuid, ready_since_cache)
         try:
             payload, _status = agent_ensure_response_payload(
                 target,
@@ -315,7 +318,18 @@ def ensure_agent_for_available_work(
             raise
         payload.update({"trigger": "available-work", "taskHandle": handle})
         if payload.get("ok") is False:
+            # The launch was attempted and refused -- out of credits, or the
+            # restart guard. The task returns to the board, so it keeps the
+            # ready-since observation it had earned: how long it has been
+            # starving is the evidence that says whether this lane is merely
+            # idle or has been unable to start for an hour, and rereading it as
+            # freshly ready would both erase that and make it serve the whole
+            # interval again before the next attempt.
             payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+            return payload
+        # Only a lane that actually started stops being a reason to watch this
+        # task: its claim takes the row out of READY.
+        forget_available_work_observation(actor, task_uuid, ready_since_cache)
         return payload
 
 
@@ -338,6 +352,28 @@ def _observe_available_work_candidates(
         now - ready_since_cache[key] >= AVAILABLE_WORK_STARVATION_SECONDS
         for key in candidate_keys
     )
+
+
+def available_work_next_deadline(
+    ready_since_cache: dict[tuple[str, str], float] | None,
+    *,
+    now: float,
+    starvation_seconds: float = AVAILABLE_WORK_STARVATION_SECONDS,
+) -> float:
+    """Seconds until the oldest candidate on watch reaches the starvation escape.
+
+    With nothing on watch the answer is the whole interval, which is the longest
+    a task filed a moment from now could have to wait. Read under the claim lock
+    that owns the cache, so a start happening in another thread cannot resize the
+    mapping mid-read.
+    """
+    with _AVAILABLE_WORK_CLAIM_LOCK:
+        oldest = (
+            min(ready_since_cache.values(), default=None) if ready_since_cache else None
+        )
+    if oldest is None:
+        return starvation_seconds
+    return starvation_seconds - (now - oldest)
 
 
 def forget_available_work_observation(

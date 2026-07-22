@@ -154,7 +154,7 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
         livebus,
-        "_wait_for_change",
+        "wait_for_change",
         _single_change_wait(transcript, watcher_ready, change_written),
     )
     session = LiveBusSession(
@@ -222,7 +222,7 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
     change_written = Event()
     monkeypatch.setattr(
         livebus,
-        "_wait_for_change",
+        "wait_for_change",
         _single_change_wait(inbox_dir(repo), watcher_ready, change_written),
     )
     message_payload_calls = 0
@@ -374,7 +374,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     change_written = Event()
     monkeypatch.setattr(
         livebus,
-        "_wait_for_change",
+        "wait_for_change",
         _single_change_wait(inbox_dir(repo), watcher_ready, change_written),
     )
     session = _live_message_session(
@@ -551,7 +551,7 @@ def test_lane_subscription_suppresses_duplicate_push_for_unchanged_signature(
         signature_calls += 1
         return "initial" if signature_calls == 1 else "changed"
 
-    monkeypatch.setattr(livebus, "_wait_for_change", fake_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", fake_wait)
     session = LiveBusSession(
         connection,
         _callbacks(target=target, transcript=transcript, lane_signature=signature),
@@ -603,7 +603,7 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
         payload_kwargs.append(kwargs)
         return valid_lane_payload(messages=[], statusLine={})
 
-    monkeypatch.setattr(livebus, "_wait_for_change", fake_wait)
+    monkeypatch.setattr(livebus, "wait_for_change", fake_wait)
     callbacks = replace(
         _callbacks(target=target, transcript=transcript),
         messages_payload=messages_payload,
@@ -821,7 +821,7 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
     reply_log = reply_log_path(repo, THREAD_ID)
     monkeypatch.setattr(
         livebus,
-        "_wait_for_change",
+        "wait_for_change",
         _single_change_wait(reply_log, watcher_ready, change_written),
     )
     task_config.set_backend(str(tmp_path / "task-backend"))

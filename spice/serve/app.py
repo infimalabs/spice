@@ -32,6 +32,7 @@ from spice.serve.audio import (
     render_speech_audio,
 )
 from spice.serve.filewatch import start_exit_file_watch
+from spice.serve.launch import start_available_work_watch
 from spice.serve.images import rollout_image_from_offset
 from spice.serve.httpapi import (
     METRICS_CONTENT_TYPE,
@@ -306,6 +307,7 @@ def run_serve(args: argparse.Namespace) -> int:
     server = _ServeHttpServer((args.host, args.port), _ServeHandler, state)
     watch_stop = Event()
     watch_thread = start_exit_file_watch(server, args, stop_event=watch_stop)
+    available_work_watch = start_available_work_watch(state)
     bound_host, bound_port = server.server_address[:2]
     host = str(bound_host)
     port = int(bound_port)
@@ -320,9 +322,15 @@ def run_serve(args: argparse.Namespace) -> int:
         print("\nspice serve: interrupted")
     finally:
         watch_stop.set()
+        # Cancel before closing the server so the watcher leaves its blocking
+        # wait while the socket teardown runs, rather than after it.
+        if available_work_watch is not None:
+            available_work_watch.cancel()
         server.server_close()
         if watch_thread is not None:
             watch_thread.join(timeout=SERVE_UNTIL_WATCHER_JOIN_SECONDS)
+        if available_work_watch is not None:
+            available_work_watch.join()
     return 0
 
 

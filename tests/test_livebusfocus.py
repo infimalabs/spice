@@ -246,7 +246,7 @@ def _pending_focus_race(tmp_path: Path, monkeypatch) -> _PendingFocusRace:
 
     monkeypatch.setattr(
         livebus,
-        "_wait_for_change",
+        "wait_for_change",
         _observed_wait(change_queues, change_dequeued),
     )
     monkeypatch.setattr(livebus, "Timer", DeferredTimer)

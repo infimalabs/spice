@@ -28,6 +28,13 @@ from tests.test_servehelpers import (
 )
 from tests.test_taskgitsync import _advance_upstream, _repo_with_upstream, _run
 
+# Spelled out here rather than read from `agentapi`: reading the production
+# constant would keep these assertions green at any interval, and three minutes
+# is the property under test. The remainder is what the watcher's countdown has
+# left one minute into a candidate's wait.
+LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
+ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
+
 
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     tmp_path, monkeypatch
@@ -547,6 +554,167 @@ def test_available_work_starvation_escape_starts_old_ready_task(tmp_path, monkey
         "trigger": "available-work",
         "taskHandle": "task-old",
     }
+
+
+def test_available_work_single_fresh_task_leaves_the_board_alone(tmp_path, monkeypatch):
+    """One task filed a moment ago is the case the threshold exists to decline."""
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    claims: list[str] = []
+    ready_since: dict[tuple[str, str], float] = {}
+    monkeypatch.setattr(agentapi.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-only"}],
+    )
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "do_claim",
+        lambda task_uuid, *_args, **_kwargs: claims.append(task_uuid) or True,
+    )
+
+    skipped = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        ready_since_cache=ready_since,
+        retry_seconds=0.0,
+    )
+
+    assert agentapi.AVAILABLE_WORK_START_THRESHOLD == 2
+    assert skipped == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "capacity",
+    }
+    assert claims == []
+    # Declining still starts the clock: this observation is what the escape
+    # three minutes later is measured from.
+    assert ready_since == {(THREAD_A, "task-only"): 0.0}
+
+
+def test_available_work_lone_task_starts_a_lane_after_three_minutes(
+    tmp_path, monkeypatch
+):
+    """The escape fires at three minutes with nothing else on the board."""
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    ready_since: dict[tuple[str, str], float] = {}
+    # Literal seconds, not the constant: reading the constant would keep this
+    # green at any interval, and three minutes is the property under test.
+    observed_times = iter([0.0, 180.0])
+    monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-alone"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda *_args, **_kwargs: ({"ok": True, "action": "start"}, HTTPStatus.OK),
+    )
+
+    fresh = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        ready_since_cache=ready_since,
+        retry_seconds=0.0,
+    )
+    starved = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        ready_since_cache=ready_since,
+        retry_seconds=0.0,
+    )
+
+    assert agentapi.AVAILABLE_WORK_STARVATION_SECONDS == LONE_TASK_ESCAPE_SECONDS
+    assert fresh["reason"] == "capacity"
+    assert starved == {
+        "ok": True,
+        "action": "start",
+        "trigger": "available-work",
+        "taskHandle": "task-alone",
+    }
+    # The lane started, so the row is claimed and no longer worth watching.
+    assert ready_since == {}
+
+
+def test_available_work_refused_launch_keeps_the_ready_age(tmp_path, monkeypatch):
+    """A launch the provider refuses returns the task at the age it had earned."""
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    ready_since: dict[tuple[str, str], float] = {}
+    released: list[tuple[str, str]] = []
+    observed_times = iter([0.0, 180.0])
+    monkeypatch.setattr(agentapi.time, "monotonic", lambda: next(observed_times))
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-broke"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "release_claim",
+        lambda task_uuid, actor: released.append((task_uuid, actor)) or True,
+    )
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda *_args, **_kwargs: (
+            {
+                "ok": False,
+                "failure": lifecycle.AGENT_FAILURE_OUT_OF_CREDITS,
+                "error": "Could not ensure agent: out of credits",
+            },
+            HTTPStatus.PAYMENT_REQUIRED,
+        ),
+    )
+
+    agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        ready_since_cache=ready_since,
+        retry_seconds=0.0,
+    )
+    refused = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        ready_since_cache=ready_since,
+        retry_seconds=0.0,
+    )
+
+    # Credit exhaustion is legible as itself: a launch was attempted, named the
+    # provider's failure, and handed the task back.
+    assert refused == {
+        "ok": False,
+        "failure": lifecycle.AGENT_FAILURE_OUT_OF_CREDITS,
+        "error": "Could not ensure agent: out of credits",
+        "trigger": "available-work",
+        "taskHandle": "task-broke",
+        "claimReleased": True,
+    }
+    assert released == [("task-broke", THREAD_A)]
+    # Still three minutes old, so the next attempt is immediate rather than
+    # another full interval away, and the age remains readable as evidence.
+    assert ready_since == {(THREAD_A, "task-broke"): 0.0}
+
+
+def test_available_work_next_deadline_counts_down_from_the_oldest_candidate(tmp_path):
+    """The watcher's bound is what is left of the oldest candidate's interval."""
+    empty = agentapi.available_work_next_deadline({}, now=1000.0)
+    watched = agentapi.available_work_next_deadline(
+        {(THREAD_A, "task-old"): 940.0, (THREAD_A, "task-new"): 995.0},
+        now=1000.0,
+    )
+
+    assert empty == LONE_TASK_ESCAPE_SECONDS
+    assert watched == ESCAPE_REMAINING_AFTER_ONE_MINUTE
 
 
 def test_available_work_ready_age_resets_after_task_leaves_backlog(
