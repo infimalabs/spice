@@ -3,8 +3,8 @@
 Taskwarrior gives initial readiness an authoritative native ``entry`` stamp,
 and timed blockers retain their ``wait``/``scheduled`` horizons.  Later
 transitions need one Spice-owned fact because unrelated row modifications must
-not reset queue age.  Mutation owners write ``ready_at`` only after the native
-READY filter confirms the transition; allocator reads stay read-only.
+not reset queue age. Mutation owners publish ``ready_at`` in the same command
+that changes native READY state; allocator reads stay read-only.
 """
 
 from __future__ import annotations
@@ -32,27 +32,21 @@ def transition_arg(*, at: str, ready: bool) -> str:
     return f"{config.TASK_READY_AT_UDA}:{value}"
 
 
-def stamp_if_ready(uuid: str, *, at: str) -> bool:
-    """Stamp one confirmed READY transition without touching a raced claim."""
-    try:
-        tw.run(
-            [
-                uuid,
-                "status:pending",
-                "+READY",
-                "-ACTIVE",
-                "modify",
-                f"{config.TASK_READY_AT_UDA}:{at}",
-            ]
-        )
-    except SpiceError:
-        # Losing readiness to a concurrent claim is the successful competing
-        # outcome, not a transition-stamping failure. Any row still READY was
-        # rejected for a different reason and must remain loud.
-        if not is_ready(uuid):
-            return False
-        raise
-    return True
+def dependency_transition_args(
+    row: dict[str, Any], *, dependencies: Iterable[str], at: str
+) -> tuple[str, ...]:
+    """UDA arguments carried by the dependency mutation that changes READY.
+
+    A second command is too late: every successful Taskwarrior mutation wakes
+    serve, so the newly READY row could otherwise be exported with its old age
+    before ``ready_at`` lands. No transition means no argument, preserving the
+    current interval across an edge edit that leaves readiness unchanged.
+    """
+    was_ready = is_ready(identity.uuid_of(row))
+    will_be_ready = _ready_with_dependencies(row, dependencies=dependencies, at=at)
+    if was_ready == will_be_ready:
+        return ()
+    return (transition_arg(at=at, ready=will_be_ready),)
 
 
 def prepare_ready_rows(uuids: Iterable[str], *, at: str) -> None:
@@ -65,15 +59,6 @@ def prepare_ready_rows(uuids: Iterable[str], *, at: str) -> None:
     unique = tuple(dict.fromkeys(uuids))
     if unique:
         tw.run([*unique, "modify", transition_arg(at=at, ready=True)])
-
-
-def reconcile_transition(uuid: str, *, was_ready: bool, at: str) -> None:
-    """Refresh or clear the stamp when one mutation changes READY state."""
-    now_ready = is_ready(uuid)
-    if was_ready and not now_ready:
-        tw.run([uuid, "modify", transition_arg(at=at, ready=False)])
-    elif now_ready and not was_ready:
-        stamp_if_ready(uuid, at=at)
 
 
 def dependents_becoming_ready(uuid: str, *, at: str) -> list[str]:
@@ -103,6 +88,24 @@ def ready_after_clearing_wait(row: dict[str, Any], *, at: str) -> bool:
     if not _timed_blockers_clear(row, at_epoch=at_epoch, ignore_wait=True):
         return False
     for dependency in _dependency_uuids(row):
+        rows = tw.export([dependency])
+        if len(rows) != 1 or str(rows[0].get("status") or "") != "completed":
+            return False
+    return True
+
+
+def _ready_with_dependencies(
+    row: dict[str, Any], *, dependencies: Iterable[str], at: str
+) -> bool:
+    """Whether the row is READY after atomically replacing its native edges."""
+    if str(row.get("status") or "") not in ("pending", "waiting"):
+        return False
+    if row.get("start"):
+        return False
+    at_epoch = _datetime_epoch(at, field="ready transition")
+    if not _timed_blockers_clear(row, at_epoch=at_epoch):
+        return False
+    for dependency in dict.fromkeys(str(value) for value in dependencies if value):
         rows = tw.export([dependency])
         if len(rows) != 1 or str(rows[0].get("status") or "") != "completed":
             return False

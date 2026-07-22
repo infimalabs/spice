@@ -928,16 +928,20 @@ def _link_existing_followup(
     row: dict[str, Any], *, after_uuid: str, after_handle: str
 ) -> str:
     uuid = identity.uuid_of(row)
-    was_ready = readiness.is_ready(uuid)
     changed_at = tw.now_iso()
+    dependencies = {*_dependency_uuids(row), after_uuid}
+    transition = readiness.dependency_transition_args(
+        row,
+        dependencies=dependencies,
+        at=changed_at,
+    )
     try:
-        tw.run([uuid, "modify", f"depends:{after_uuid}"])
+        tw.run([uuid, "modify", f"depends:{after_uuid}", *transition])
     except SpiceError as exc:
         raise SpiceError(
             f"could not link existing review follow-up {identity.render_handle(row)} "
             "(would it create a cycle?)"
         ) from exc
-    readiness.reconcile_transition(uuid, was_ready=was_ready, at=changed_at)
     annotate(uuid, f"review follow-up depends on {after_handle}")
     return identity.render_handle(row)
 
@@ -1023,14 +1027,19 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
     changes = [f"depends:-{dep_uuid}" for dep_uuid, _ in removals]
     changes += [f"depends:{dep_uuid}" for dep_uuid, _ in additions]
     if changes:
-        ready_before = readiness.is_ready(uuid)
         changed_at = tw.now_iso()
+        dependencies = (existing - {dep_uuid for dep_uuid, _ in removals}) | added
+        transition = readiness.dependency_transition_args(
+            row,
+            dependencies=dependencies,
+            at=changed_at,
+        )
         # One modify carries every edge change: Taskwarrior validates the
         # final dependency set and applies or refuses the batch wholesale,
-        # so a refused re-point cannot strand the task with edges removed
-        # but not re-added.
+        # so a refused re-point cannot strand the task with edges removed but
+        # not re-added, or expose READY before its age origin is present.
         try:
-            tw.run([uuid, "modify", *changes])
+            tw.run([uuid, "modify", *changes, *transition])
         except SpiceError as exc:
             targets = ", ".join(rendered_dep for _, rendered_dep in additions)
             if targets:
@@ -1038,7 +1047,6 @@ def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> 
                     f"could not add dependency on {targets} (would it create a cycle?)"
                 ) from exc
             raise
-        readiness.reconcile_transition(uuid, was_ready=ready_before, at=changed_at)
     return rendered
 
 
