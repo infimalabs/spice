@@ -236,14 +236,37 @@ function assertNoBrowserErrors(errors) {
   );
 }
 
+function worktreeGitDir() {
+  const marker = path.join(repoRoot, ".git");
+  const metadata = fsSync.statSync(marker);
+  if (metadata.isDirectory()) return fsSync.realpathSync(marker);
+  if (!metadata.isFile())
+    throw new Error("worktree .git marker is neither a file nor directory: " + marker);
+  const line = fsSync.readFileSync(marker, "utf8").trim();
+  const prefix = "gitdir:";
+  if (!line.startsWith(prefix))
+    throw new Error("invalid worktree .git pointer at " + marker + ": " + line);
+  const target = line.slice(prefix.length).trim();
+  if (!target)
+    throw new Error("empty worktree .git pointer at " + marker);
+  return fsSync.realpathSync(path.resolve(repoRoot, target));
+}
+
+function defaultSharedPlaywrightConfigPath() {
+  return path.join(
+    worktreeGitDir(),
+    ".spice",
+    "agents",
+    "playwright-mcp.json",
+  );
+}
+
 function sharedPlaywrightConfigPath(options = {}) {
   const configPath =
     options.playwrightConfigPath || process.env[playwrightMcpConfigEnv]; // env-policy: allow
-  if (configPath) return configPath;
-  throw new Error(
-    "missing shared Playwright config path; run browser validation through " +
-      "the Spice release gate or pass playwrightConfigPath explicitly",
-  );
+  return configPath
+    ? path.resolve(configPath)
+    : defaultSharedPlaywrightConfigPath();
 }
 
 async function readSharedPlaywrightContextOptions(options = {}) {
@@ -256,8 +279,9 @@ async function readSharedPlaywrightContextOptions(options = {}) {
       throw new Error(
         "missing shared Playwright config at " +
           configPath +
-          "; run browser validation through the Spice release gate or pass a " +
-          "populated playwrightConfigPath fixture",
+          "; run spice agent activation to create the worktree default, set " +
+          playwrightMcpConfigEnv +
+          ", or pass a populated playwrightConfigPath fixture",
       );
     throw error;
   }
@@ -376,6 +400,7 @@ async function withServePage(options, callback) {
 module.exports = {
   assertNoBrowserErrors,
   collectBrowserErrors,
+  defaultSharedPlaywrightConfigPath,
   playwrightMcpConfigEnv,
   readSharedPlaywrightContextOptions,
   repoRoot,

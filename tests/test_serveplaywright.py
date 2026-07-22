@@ -46,9 +46,14 @@ def test_serve_playwright_harness_loads_shared_agent_context() -> None:
     assert (  # env-policy: allow
         'playwrightMcpConfigEnv = "SPICE_PLAYWRIGHT_MCP_CONFIG"' in harness
     )
+    assert "defaultSharedPlaywrightConfigPath" in harness
+    assert 'worktreeGitDir(),\n    ".spice",\n    "agents"' in harness
+    assert '"playwright-mcp.json"' in harness
     assert "sharedPlaywrightConfigPath" in harness
     assert "process.env[playwrightMcpConfigEnv]" in harness
-    assert "pass playwrightConfigPath explicitly" in harness
+    assert "path.resolve(configPath)" in harness
+    assert "run spice agent activation to create the worktree default" in harness
+    assert 'playwrightMcpConfigEnv +\n          ", or pass a populated' in harness
     assert "readSharedPlaywrightContextOptions" in harness
     assert "missing shared Playwright config" in harness
     assert "config.browser.contextOptions" in harness
