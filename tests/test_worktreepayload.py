@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve.worktree import inventory
-from spice.serve.payload import identity, message
+from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -249,6 +249,82 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             "repo_root": tmp_path,
         }
     ]
+
+
+def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
+    thread_id = "019f6eddab8c7ab2870af6b81dfc5b7f"
+    target = _Target(id="wt", repo_root=tmp_path)
+    status = _Status(
+        running=True,
+        started_at="",
+        process_status="running",
+        thread_id=thread_id,
+    )
+    active_task = {
+        "handle": "UI-1kF5xdSM",
+        "phase": "todo",
+        "title": "Keep task context through target refresh",
+    }
+    resolved_task = active_task
+    resolver_calls: list[str] = []
+
+    def resolve_claimed_task(candidate: str) -> dict[str, str]:
+        resolver_calls.append(candidate)
+        return resolved_task
+
+    monkeypatch.setattr(lane, "_claimed_task_payload", resolve_claimed_task)
+    monkeypatch.setattr(
+        inventory,
+        "serve_agent_identity_payload",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        message,
+        "target_activity_items",
+        lambda *_args, **_kwargs: ([], None, None),
+    )
+    monkeypatch.setattr(lane, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(
+        lane,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+
+    _, inventory_active = inventory._work_tree_status_payloads(
+        _State(),
+        target,
+        thread_id=thread_id,
+        binding_status="bound",
+        binding_error="",
+        status=status,
+        pending_identity=_pending_identity(),
+    )
+    subscription_active = lane.status_line_payload(
+        _State(), target, items=[], error=None
+    )
+
+    assert inventory_active["claimedTask"] == active_task
+    assert subscription_active["claimedTask"] == active_task
+    assert resolver_calls == [thread_id, thread_id]
+
+    resolved_task = {}
+    _, inventory_released = inventory._work_tree_status_payloads(
+        _State(),
+        target,
+        thread_id=thread_id,
+        binding_status="bound",
+        binding_error="",
+        status=status,
+        pending_identity=_pending_identity(),
+    )
+    subscription_released = lane.status_line_payload(
+        _State(), target, items=[], error=None
+    )
+
+    assert inventory_released["claimedTask"] == {}
+    assert subscription_released["claimedTask"] == {}
+    assert resolver_calls == [thread_id, thread_id, thread_id, thread_id]
 
 
 def test_pending_inbox_identity_version_is_positive_without_inbox_activity(tmp_path):
