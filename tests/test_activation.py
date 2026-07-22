@@ -103,6 +103,35 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     assert "baseline_refresh=current" in packet
 
 
+@pytest.mark.parametrize("condition", ["dirty", "ahead", "diverged"])
+def test_activation_packet_names_a_skipped_launch_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    condition: str,
+) -> None:
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.bind_ambient_agent_thread",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
+    )
+    monkeypatch.setattr(
+        "spice.tasks.gitsync.fast_forward_if_safe",
+        lambda _repo: SimpleNamespace(notes=[f"skipped:{condition}"]),
+    )
+    monkeypatch.setattr(
+        "spice.tasks.claimstate.renew_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+
+    packet = agent_cli.render_activation_packet(tmp_path)
+
+    assert f"baseline_refresh=skipped:{condition}" in packet
+
+
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     text = "\n".join(activation_command_surface_lines(rtk_active=True))
 

@@ -6,6 +6,8 @@ import threading
 from http import HTTPStatus
 from types import SimpleNamespace
 
+import pytest
+
 from spice.agent import lifecycle
 from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
@@ -24,6 +26,7 @@ from tests.test_servehelpers import (
     _serve_state,
     _target,
 )
+from tests.test_taskgitsync import _advance_upstream, _repo_with_upstream, _run
 
 
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
@@ -154,6 +157,61 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "1jNJvRyq.txt"
     ]
+
+
+@pytest.mark.parametrize("condition", ["dirty", "ahead", "diverged"])
+def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
+    tmp_path, monkeypatch, condition
+):
+    repo = _repo_with_upstream(tmp_path)
+    target = _target(repo)
+    (repo / ".git" / "info" / "exclude").write_text(".spice/\n", encoding="utf-8")
+    (repo / "local.txt").write_text("local work\n", encoding="utf-8")
+    if condition in {"ahead", "diverged"}:
+        _run(repo, "git", "add", "local.txt")
+        _run(repo, "git", "commit", "-m", "local work")
+        if condition == "diverged":
+            _advance_upstream(tmp_path)
+    write_inbox_item(
+        repo,
+        "1kLaunch.txt",
+        compose_inbox_text(body="recover this lane", priority=None, stop=False),
+    )
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    launch_notes: list[str] = []
+    spawned: list[object] = []
+    real_prepare = lifecycle.gitsync.prepare_for_agent_launch
+
+    def observed_prepare(repo_root):
+        result = real_prepare(repo_root)
+        launch_notes.extend(result.notes)
+        return result
+
+    def fake_supervisor(repo_root, **kwargs):
+        spawned.append(SimpleNamespace(repo_root=repo_root, **kwargs))
+        return SimpleNamespace(pid=4321)
+
+    monkeypatch.setattr(lifecycle.gitsync, "prepare_for_agent_launch", observed_prepare)
+    monkeypatch.setattr(lifecycle, "ensure_origin_head", lambda _repo: None)
+    monkeypatch.setattr(lifecycle, "spawn_agent_supervisor", fake_supervisor)
+    monkeypatch.setattr(
+        lifecycle, "require_supervisor_started", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        lifecycle, "reap_process_when_done", lambda *_args, **_kwargs: None
+    )
+
+    payload = agentapi.ensure_agent_for_pending_inbox(
+        target,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    assert payload["ok"] is True
+    assert payload["action"] == "start"
+    assert launch_notes == [f"skipped:{condition}"]
+    assert [item.name for item in collect_inbox_items(repo)] == ["1kLaunch.txt"]
+    assert [(item.repo_root, item.action) for item in spawned] == [(repo, "start")]
 
 
 def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monkeypatch):
