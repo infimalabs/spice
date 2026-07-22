@@ -290,7 +290,10 @@ def test_agent_environment_binds_taskrc_to_selected_spice_backend(
 
     env = lifecycle.agent_environment(tmp_path)
 
-    assert env[shellhook.TASKRC_ENV] == str(backend / "taskrc")
+    taskrc = Path(env[shellhook.TASKRC_ENV])
+    assert taskrc == backend / "taskrc"
+    assert taskrc.is_file()
+    assert (backend / "data").is_dir()
 
 
 def test_agent_environment_binds_taskrc_to_default_shared_backend(
@@ -306,7 +309,10 @@ def test_agent_environment_binds_taskrc_to_default_shared_backend(
         base_env={"HOME": str(tmp_path)},
     )
 
-    assert env[shellhook.TASKRC_ENV] == str(repo / ".git" / ".spice" / "taskrc")
+    taskrc = Path(env[shellhook.TASKRC_ENV])
+    assert taskrc == repo / ".git" / ".spice" / "taskrc"
+    assert taskrc.is_file()
+    assert (taskrc.parent / "data").is_dir()
 
 
 def test_native_task_verbs_use_spice_backend_across_nested_shells(
@@ -322,15 +328,13 @@ def test_native_task_verbs_use_spice_backend_across_nested_shells(
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    task_config.set_backend(str(backend))
-    try:
-        taskrc = task_config.bootstrap()
-    finally:
-        task_config.set_backend(None)
+    ambient = tmp_path / "unrelated-cwd"
+    ambient.mkdir()
+    monkeypatch.chdir(ambient)
     base_env = dict(os.environ)  # env-policy: allow
     base_env[task_config.TASK_BACKEND_ENV] = str(backend)
     env = shellhook.apply_shell_steering_environment(repo, base_env=base_env)
+    taskrc = Path(env[shellhook.TASKRC_ENV])
 
     def run_native(*args: str) -> subprocess.CompletedProcess[str]:
         inner = shlex.join([task_binary, *args])
@@ -351,6 +355,7 @@ def test_native_task_verbs_use_spice_backend_across_nested_shells(
     data_location = run_native("_get", "rc.data.location").stdout.strip()
 
     assert Path(env[shellhook.TASKRC_ENV]) == taskrc
+    assert taskrc.is_file()
     assert Path(data_location) == backend / "data"
     assert "Native revised" in listed
     assert [row["description"] for row in exported] == ["Native revised"]

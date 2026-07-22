@@ -127,7 +127,7 @@ def taskwarrior_runtime_environment(
             # Some library-level shell-hook consumers intentionally operate on
             # a product-shaped directory rather than an activated worktree.
             return {}
-    return {TASKRC_ENV: str(backend / "taskrc")}
+    return {TASKRC_ENV: str(task_config.materialize_task_backend(backend))}
 
 
 def packaged_shell_steering_hook_dir() -> Path:

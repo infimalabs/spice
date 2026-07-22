@@ -373,27 +373,28 @@ def backend_root() -> Path:
     return shared_state_root(repo_root())
 
 
-def data_dir() -> Path:
-    return backend_root() / "data"
+def data_dir(root: Path | None = None) -> Path:
+    return (root or backend_root()) / "data"
 
 
-def taskrc_path() -> Path:
-    return backend_root() / "taskrc"
+def taskrc_path(root: Path | None = None) -> Path:
+    return (root or backend_root()) / "taskrc"
 
 
 def task_event_path(root: Path | None = None) -> Path:
     return (root or backend_root()) / TASK_EVENT_FILENAME
 
 
-def bootstrap_lock_path() -> Path:
-    return backend_root() / ".bootstrap.lock"
+def bootstrap_lock_path(root: Path | None = None) -> Path:
+    return (root or backend_root()) / ".bootstrap.lock"
 
 
 @contextmanager
-def _bootstrap_lock():
-    backend_root().mkdir(parents=True, exist_ok=True)
+def _bootstrap_lock(root: Path | None = None):
+    selected_root = root or backend_root()
+    selected_root.mkdir(parents=True, exist_ok=True)
     with bounded_exclusive_lock(
-        bootstrap_lock_path(),
+        bootstrap_lock_path(selected_root),
         timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
         action="bootstrap task backend",
     ):
@@ -433,14 +434,18 @@ def uda_schema() -> dict[str, dict[str, str]]:
     return schema
 
 
-def write_taskrc() -> None:
-    from spice.paths import shared_attachment_root
-
-    with _bootstrap_lock():
-        data_dir().mkdir(parents=True, exist_ok=True)
-        shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
+def materialize_task_backend(root: Path) -> Path:
+    """Create one explicit backend's native Taskwarrior config and data dir."""
+    selected_root = root.expanduser()
+    if not selected_root.is_absolute():
+        raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
+    selected_root = selected_root.resolve()
+    selected_data_dir = data_dir(selected_root)
+    selected_taskrc = taskrc_path(selected_root)
+    with _bootstrap_lock(selected_root):
+        selected_data_dir.mkdir(parents=True, exist_ok=True)
         lines = [
-            f"data.location={data_dir()}",
+            f"data.location={selected_data_dir}",
             "confirmation=no",
             "verbose=nothing",
             "recurrence=no",
@@ -456,7 +461,19 @@ def write_taskrc() -> None:
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")
         lines.extend(_report_lines())
-        atomic_write_text(taskrc_path(), "\n".join(lines) + "\n", write_if_changed=True)
+        atomic_write_text(
+            selected_taskrc,
+            "\n".join(lines) + "\n",
+            write_if_changed=True,
+        )
+    return selected_taskrc
+
+
+def write_taskrc() -> None:
+    from spice.paths import shared_attachment_root
+
+    materialize_task_backend(backend_root())
+    shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
 
 
 def _report_lines() -> list[str]:
