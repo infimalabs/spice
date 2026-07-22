@@ -9,8 +9,15 @@ smallest move from the actor's last cell (stick).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from spice.mail.inbox import (
+    compose_inbox_text,
+    default_inbox_name,
+    inbox_item_key,
+    write_inbox_item,
+)
 from spice.tasks import config, gitsync, identity, lanes, tw
 
 ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
@@ -391,14 +398,19 @@ def _take_over_stale(
     site = claimstate.current_claim_site()
     for chosen in order(candidates, actor, [], active_rows):
         previous = str(chosen.get("claim_by") or "")
-        claimstate.do_claim(
+        previous_until = str(chosen.get("claim_until") or "")
+        if not claimstate.take_over_stale_claim(
             identity.uuid_of(chosen),
             actor,
+            expected_owner=previous,
+            expected_until=previous_until,
             site=site,
             context_thread=None,
             lease_seconds=None,
-            guard_unclaimed=False,
-        )
+        ):
+            # The observed owner or lease changed after export. In particular,
+            # never replace the live lease installed by another takeover.
+            continue
         fresh = identity.resolve(identity.render_handle(chosen))
         if str(fresh.get("claim_by") or "") != actor:
             # lost the takeover race to a concurrent agent; try the next one
@@ -407,5 +419,52 @@ def _take_over_stale(
             identity.uuid_of(fresh),
             f"stale claim reassigned: {previous} -> {actor}",
         )
+        notice = _notify_displaced_claimant(
+            chosen,
+            new_owner=actor,
+            expected_until=previous_until,
+        )
+        claimstate.annotate(
+            identity.uuid_of(fresh),
+            f"stale claim reassignment notice: {notice}",
+        )
         return fresh
     return None
+
+
+def _notify_displaced_claimant(
+    stale_row: dict[str, Any],
+    *,
+    new_owner: str,
+    expected_until: str,
+) -> str:
+    """Tell the displaced lane through its durable ordinary inbox."""
+    target_text = str(stale_row.get("claim_worktree") or "").strip()
+    if not target_text:
+        return "target-unavailable claim_worktree-empty"
+    target = Path(target_text)
+    if not target.is_dir():
+        return f"target-unavailable target={target}"
+    try:
+        if target.resolve() == config.repo_root().resolve():
+            return f"same-worktree target={target}"
+    except OSError:
+        return f"target-unavailable target={target}"
+    handle = identity.render_handle(stale_row)
+    previous = str(stale_row.get("claim_by") or "")
+    body = (
+        f"[CLAIM] {handle} was reassigned from your lane ({previous}) to "
+        f"{new_owner} after its recorded lease expired at {expected_until}. "
+        "Stop editing that task; capture any work that must continue before "
+        "attempting to land it."
+    )
+    try:
+        path = write_inbox_item(
+            target,
+            default_inbox_name(),
+            compose_inbox_text(body=body, priority="review", stop=False),
+            dedupe_pending_text=True,
+        )
+    except (OSError, RuntimeError) as exc:
+        return f"delivery-failed target={target} detail={exc}"
+    return f"delivered key={inbox_item_key(path.name)} target={target}"
