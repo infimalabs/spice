@@ -41,6 +41,29 @@ from tests.test_livebus import (
 from tests.test_wirefixtures import valid_lane_payload, valid_live_bus_callback_payloads
 
 
+def _single_change_wait(path: Path, ready: Event, changed: Event):
+    """Deliver one latched test change exactly once, then park until stopped."""
+    delivered = False
+
+    def wait(paths: tuple[Path, ...], stop, watch=None, *, activated=None) -> bool:
+        nonlocal delivered
+        if activated is not None:
+            activated.set()
+        assert path in paths
+        ready.set()
+        if delivered:
+            # One filesystem edge is one watcher iteration: once the change has
+            # been reported, park on stop so teardown releases us instead of
+            # spinning True on every re-wait.
+            stop.wait()
+            return False
+        changed.wait()
+        delivered = True
+        return not stop.is_set()
+
+    return wait
+
+
 def test_existing_watch_paths_returns_existing_input_paths(tmp_path):
     parent = tmp_path / "parent"
     parent.mkdir()
@@ -82,6 +105,11 @@ def test_lane_signature_changes_when_agent_state_file_changes(tmp_path):
 
 
 def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch):
+    # status_line_payload includes claimed-task metadata. Keep that read on a
+    # per-test backend so xdist load cannot block this watcher on the operator
+    # board's shared Git/bootstrap path.
+    isolated_task_backend = tmp_path / "task-backend"
+    task_config.set_backend(str(isolated_task_backend))
     repo = tmp_path / "repo"
     repo.mkdir()
     transcript = tmp_path / "rollout.jsonl"
@@ -107,22 +135,6 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
     watcher_ready = Event()
     change_written = Event()
 
-    def observed_wait(
-        paths: tuple[Path, ...], stop, watch=None, *, activated=None
-    ) -> bool:
-        if activated is not None:
-            activated.set()
-        assert transcript in paths
-        watcher_ready.set()
-        if change_written.is_set():
-            # One filesystem edge is one watcher iteration: once the change has
-            # been reported, park on stop so teardown releases us instead of
-            # spinning True on every re-wait.
-            stop.wait(timeout=1.0)
-            return False
-        changed = change_written.wait(timeout=1.0)
-        return changed and not stop.is_set()
-
     def messages_payload(_target, **_kwargs):
         items = message_reader.read_assistant_messages(
             transcript, limit=5, driver=CODEX_DRIVER
@@ -140,7 +152,11 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
             ),
         }
 
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(
+        livebus,
+        "_wait_for_change",
+        _single_change_wait(transcript, watcher_ready, change_written),
+    )
     session = LiveBusSession(
         connection,
         _callbacks(
@@ -186,6 +202,9 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
     finally:
         change_written.set()
         session._teardown()
+        task_config.set_backend(None)
+
+    assert isolated_task_backend.is_dir()
 
 
 def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_count(
@@ -201,24 +220,11 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
     connection = _Connection()
     watcher_ready = Event()
     change_written = Event()
-
-    def observed_wait(
-        paths: tuple[Path, ...], stop, watch=None, *, activated=None
-    ) -> bool:
-        if activated is not None:
-            activated.set()
-        assert inbox_dir(repo) in paths
-        watcher_ready.set()
-        if change_written.is_set():
-            # One filesystem edge is one watcher iteration: once the change has
-            # been reported, park on stop so teardown releases us instead of
-            # spinning True on every re-wait.
-            stop.wait(timeout=1.0)
-            return False
-        changed = change_written.wait(timeout=1.0)
-        return changed and not stop.is_set()
-
-    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    monkeypatch.setattr(
+        livebus,
+        "_wait_for_change",
+        _single_change_wait(inbox_dir(repo), watcher_ready, change_written),
+    )
     message_payload_calls = 0
 
     def messages_payload(_target, **_kwargs):
@@ -290,24 +296,6 @@ def _agent_status(*, running: bool, pid: int) -> SimpleNamespace:
 def _patch_agent_status(monkeypatch, status: SimpleNamespace) -> None:
     for module in (agentapi, identity, lane, message, inventory):
         monkeypatch.setattr(module, "agent_status", lambda *_args, **_kwargs: status)
-
-
-def _single_change_wait(path: Path, ready: Event, changed: Event):
-    def wait(paths: tuple[Path, ...], stop, watch=None, *, activated=None) -> bool:
-        if activated is not None:
-            activated.set()
-        assert path in paths
-        ready.set()
-        if changed.is_set():
-            # One filesystem edge is one watcher iteration: once the change has
-            # been reported, park on stop so teardown releases us instead of
-            # spinning True on every re-wait.
-            stop.wait(timeout=1.0)
-            return False
-        signaled = changed.wait(timeout=1.0)
-        return signaled and not stop.is_set()
-
-    return wait
 
 
 def _pending_signature(repo: Path, transcript: Path):
