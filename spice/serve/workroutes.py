@@ -129,6 +129,10 @@ def _work_tree_send_response_payload(
             attachments=request.attachments,
             controls=drive_drain_queue_controls(request.drive_agent),
             target_repo_root=target.repo_root,
+            # The synchronous route starts the lane itself and grants the
+            # explicit-send restart exception. Only the accepted/asynchronous
+            # route needs the background watcher to own that decision.
+            wake_server=not ensure_agent_before_reply,
         )
     except (RuntimeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}, steering_submit_error_status(exc)
