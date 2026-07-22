@@ -16,7 +16,7 @@ from spice.agent.activation import (
 )
 from spice.agent.driver import DRIVER
 from spice.agent.rtkhealth import RtkHealth
-from spice.tasks import claimstate, config, create, identity
+from spice.tasks import claimstate, config, create, identity, tw
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -338,6 +338,75 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
 
     assert "claim_renewal=failed backend_error detail=backend offline" in packet
     assert "baseline_refresh=current" in packet
+
+
+def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
+    tmp_path, monkeypatch
+):
+    # Activation is the one command that hands over the steering key and its
+    # authenticity contract, so a claim whose lease nobody can read is reported
+    # here rather than refused -- unlike `spice task next`, which must not
+    # allocate against an unreadable claim policy.
+    if shutil.which("task") is None:
+        pytest.skip("Taskwarrior binary is required")
+    repo = _repo_with_upstream(tmp_path)
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR)
+    config.set_backend(str(backend))
+    try:
+        handle = create.add(
+            "Activation survives a claim with an unreadable lease",
+            project="task.unit",
+            origin="ack:1kG8vN5d",
+            acceptance=["the activation packet reports the refusal and arms the agent"],
+        )
+        claimed = identity.resolve(handle)
+        claimstate.do_claim(
+            identity.uuid_of(claimed),
+            ACTOR,
+            site=claimstate.current_claim_site(),
+            context_thread=ACTOR,
+            lease_seconds=60.0,
+        )
+        tw.run([identity.uuid_of(claimed), "modify", "claim_lease_seconds:unreadable"])
+
+        monkeypatch.setattr(
+            "spice.agent.lifecycle.bind_ambient_agent_thread",
+            lambda _repo: SimpleNamespace(thread_id=ACTOR),
+        )
+        monkeypatch.setattr(
+            "spice.hooks.install.install_hooks_for_repo", lambda _repo: []
+        )
+        monkeypatch.setattr(
+            "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
+        )
+        monkeypatch.setattr(
+            "spice.tasks.gitsync.fast_forward_if_safe",
+            lambda _repo: SimpleNamespace(notes=["current"]),
+        )
+        monkeypatch.setattr(
+            "spice.mail.steeringkey.steering_token", lambda _repo: "tok"
+        )
+
+        packet = agent_cli.render_activation_packet(repo)
+        row = identity.resolve(handle)
+
+        suggested_lease = f"{float(config.CLAIM_TTL_SECONDS):g}"
+        assert (
+            "claim_renewal=failed refused detail=run `spice task reclaim "
+            f"{handle} --lease-seconds {suggested_lease}` to repair the claim; "
+            "active claim has unreadable lease duration 'unreadable'"
+        ) in packet
+        assert "steering_key=tok" in packet
+        assert (
+            "steering_authenticity=real spice steering reaches you on shell" in packet
+        )
+        assert "baseline_refresh=current" in packet
+        assert row["claim_lease_seconds"] == "unreadable"
+        assert row["claim_by"] == ACTOR
+    finally:
+        config.set_backend(None)
 
 
 def test_package_json_makes_node_playwright_available():
