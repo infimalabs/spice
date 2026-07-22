@@ -50,5 +50,6 @@ RUN python3 release-proof/init-source.py /proof/source
 RUN npm ci
 RUN python3 release-proof/toolchain.py \
     --output .git/release-proof-toolchain.json
+RUN python3 release-proof/rehearse.py --artifacts /proof/artifacts
 
 CMD ["bash"]

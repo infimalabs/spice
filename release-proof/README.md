@@ -28,3 +28,14 @@ packaging versions are resolved inside the built image and written to
 `.git/release-proof-toolchain.json`. No operator home, package cache,
 credential directory, source bind mount, or container-engine socket is part of
 this boundary.
+
+The final build step runs the full Python suite, Ruff, every release-safe
+browser smoke, and the committed deterministic mutation cohort before it
+creates `/proof/artifacts`. It materializes committed `HEAD` into a fresh build
+tree so ignored host residue cannot enter either artifact, builds the canonical
+sdist and wheel exactly once, checks both with Twine, installs that exact wheel
+into a fresh virtual environment for import and console-command probes, then
+rebuilds a comparison wheel from that exact sdist. `rehearsal.json` records the
+carried artifact digests and every member-level comparison. ZIP container-byte
+reproducibility is explicitly deferred; any missing, extra, or content-changed
+wheel member is reported by path and SHA-256.
