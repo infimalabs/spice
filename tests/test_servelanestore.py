@@ -82,6 +82,9 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
         "removeLane": 1,
         "laneForId": 29,
         "hasLane": 8,
+        # The relative-time tick once walked every lane a second time to sync
+        # fused status; it now collects the fused hosts during the first walk
+        # and drives those, so that snapshot consumer is gone by design.
         "lanesSnapshot": 23,
     }
 

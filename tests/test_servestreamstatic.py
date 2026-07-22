@@ -1351,8 +1351,11 @@ def test_static_fused_lane_status_line_uses_latest_member_compact_preview():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
 
+    # The tick collects the fused hosts while applying retained status and
+    # drives those, rather than walking every lane a second time.
     assert "const fusedHosts = new Set();" in app_render
     assert "fusedHosts.add(laneGroupHost(lane));" in app_render
+    assert "for (const host of fusedHosts) {" in app_render
     assert "syncFusedLaneLights(host);" in app_render
     assert "syncFusedLaneStatusLine(host);" in app_render
     assert "function syncFusedLaneStatusLine(lane)" in app_groups
