@@ -23,6 +23,21 @@ _MUTATING_COMMANDS = frozenset({"add", "annotate", "delete", "done", "modify"})
 TASK_COMMAND_TIMEOUT_SECONDS = 120.0
 
 
+def _uda_schema_overrides() -> list[str]:
+    """Bind this process's schema even if a peer rewrote the shared taskrc.
+
+    Worktrees on adjacent commits share one backend. An older process can
+    therefore materialize an older taskrc between this process's bootstrap and
+    Taskwarrior startup. Command-line overrides are parsed with the mutation
+    itself, so current UDA tokens can never degrade into description words.
+    """
+    return [
+        f"rc.uda.{name}.{key}={value}"
+        for name, fragments in config.uda_schema().items()
+        for key, value in fragments.items()
+    ]
+
+
 def require_task_binary() -> None:
     if not shutil.which("task"):
         raise SpiceError("Taskwarrior binary not found; install `task` first")
@@ -48,6 +63,7 @@ def run(
         "rc.confirmation=no",
         "rc.bulk=0",
         "rc.verbose=nothing",
+        *_uda_schema_overrides(),
         *(overrides or []),
         *args,
     ]

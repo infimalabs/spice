@@ -116,6 +116,39 @@ def test_renew_claim_uses_longest_requested_lease_in_either_order(
     )
 
 
+def test_renew_claim_keeps_title_when_shared_taskrc_lacks_lease_uda(
+    task_repo, monkeypatch
+):
+    title = "Renew without rewriting the task description"
+    handle = create.add(
+        title,
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        acceptance=["claim renewal keeps the task title intact"],
+    )
+    ops.claim(handle)
+    configured_taskrc = config.taskrc_path()
+    downgraded_taskrc = configured_taskrc.with_name("taskrc-without-lease-uda")
+    downgraded_taskrc.write_text(
+        "\n".join(
+            line
+            for line in configured_taskrc.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("uda.claim_lease_seconds.")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "bootstrap", lambda: downgraded_taskrc)
+
+    result = claimstate.renew_claim(handle, actor=ACTOR_A, lease_seconds=3600.0)
+
+    monkeypatch.setattr(config, "bootstrap", lambda: configured_taskrc)
+    fresh = identity.resolve(handle)
+    assert result.renewed is True
+    assert fresh["description"] == title
+    assert fresh["claim_lease_seconds"] == "3600"
+
+
 def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
     handle = create.add(
         "Stale takeover",
