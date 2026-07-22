@@ -112,6 +112,79 @@ def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
         session._teardown()
 
 
+@pytest.mark.parametrize("lane_count", (1, 8))
+def test_interactive_mutations_reply_while_target_inventory_is_computing(
+    tmp_path, lane_count
+):
+    targets: list[_Target] = []
+    transcripts: dict[str, Path] = {}
+    for index in range(lane_count):
+        target_id = f"lane-{index}"
+        repo = tmp_path / target_id
+        repo.mkdir()
+        transcript = tmp_path / f"{target_id}.jsonl"
+        transcript.write_text("", encoding="utf-8")
+        targets.append(_Target(id=target_id, repo_root=repo))
+        transcripts[f"thread-{target_id}"] = transcript
+    base_callbacks = _multi_lane_callbacks(targets, transcripts)
+    inventory_started = Event()
+    inventory_release = Event()
+    dispatch_finished = Event()
+
+    def slow_work_trees_payload():
+        inventory_started.set()
+        inventory_release.wait(timeout=5.0)
+        return base_callbacks.work_trees_payload()
+
+    connection = _Connection()
+    session = LiveBusSession(
+        connection,
+        replace(base_callbacks, work_trees_payload=slow_work_trees_payload),
+    )
+
+    def dispatch_frames() -> None:
+        session._dispatch({"type": "targets.refresh", "requestId": "targets-1"})
+        session._dispatch(
+            {
+                "type": "teams.command",
+                "requestId": "team-1",
+                "payload": {},
+            }
+        )
+        session._dispatch(
+            {
+                "type": "lane.send",
+                "requestId": "send-1",
+                "targetId": targets[-1].id,
+                "payload": {"text": "interactive steering"},
+            }
+        )
+        dispatch_finished.set()
+
+    dispatch_thread = Thread(target=dispatch_frames, daemon=True)
+    dispatch_thread.start()
+    try:
+        assert inventory_started.wait(timeout=1.0) is True
+        team_reply = _wait_for_reply(
+            connection, request_id="team-1", timeout_seconds=1.0
+        )
+        send_reply = _wait_for_reply(
+            connection, request_id="send-1", timeout_seconds=1.0
+        )
+
+        assert team_reply["type"] == "teams.commandResult"
+        assert send_reply["type"] == "lane.sendResult"
+        assert dispatch_finished.wait(timeout=1.0) is True
+
+        inventory_release.set()
+        targets_reply = _wait_for_reply(connection, request_id="targets-1")
+        assert targets_reply["type"] == "targets.payload"
+    finally:
+        inventory_release.set()
+        dispatch_thread.join(timeout=2.0)
+        session._teardown()
+
+
 def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
     tmp_path, monkeypatch
 ):
