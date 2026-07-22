@@ -219,6 +219,8 @@ def test_immediate_study_task_inherits_active_claim_origin(study_task_backend):
         identity.uuid_of(parent_row),
         ACTOR,
         site=claimstate.current_claim_site(),
+        context_thread=None,
+        lease_seconds=None,
     )
 
     child = create_study_tasks(

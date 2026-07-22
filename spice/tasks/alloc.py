@@ -185,6 +185,18 @@ def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
     return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
 
 
+def ordered_visible_ready_rows(actor: str) -> list[dict[str, Any]]:
+    """The allocator's current ready order without claiming any row."""
+    ready = visible_ready_rows(actor)
+    if not ready:
+        return []
+    active_rows = [r for r in tw.export(["+ACTIVE"]) if _is_open_task(r)]
+    if any(str(row.get("claim_by") or "") == actor for row in active_rows):
+        return []
+    claimed_rows = tw.export([f"claim_by.is:{actor}"])
+    return order(ready, actor, claimed_rows, active_rows)
+
+
 def visible_active_rows(actor: str) -> list[dict[str, Any]]:
     # Bare +ACTIVE: claims preserve wait, and status:pending filters out
     # future-wait rows, which would hide claimed deferred tasks.
@@ -283,6 +295,8 @@ def _claim_first(
             identity.uuid_of(chosen),
             actor,
             site=site,
+            context_thread=None,
+            lease_seconds=None,
             guard_unclaimed=guard_unclaimed,
         ):
             # lost the race to a concurrent agent; fall through to the next one
@@ -348,10 +362,11 @@ def next_task() -> dict[str, Any] | None:
 def _stale_takeover_candidates(
     actor: str, scoped_active: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Peer claims whose deadline elapsed. The TTL is stamped once at claim
-    time and never refreshed, so a slow-but-alive lane looks identical to a
-    dead one — takeover therefore runs only when no fresh READY work exists.
-    Reviews this actor authored stay off-limits even when stale."""
+    """Peer claims whose owner stopped renewing before the deadline.
+
+    Takeover runs only when no fresh READY work exists. Reviews this actor
+    authored stay off-limits even when stale.
+    """
     now = tw.now_iso()
     return [
         r
@@ -380,6 +395,8 @@ def _take_over_stale(
             identity.uuid_of(chosen),
             actor,
             site=site,
+            context_thread=None,
+            lease_seconds=None,
             guard_unclaimed=False,
         )
         fresh = identity.resolve(identity.render_handle(chosen))

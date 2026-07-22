@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
-from spice.serve.agentapi import ensure_agent_for_pending_inbox
+from spice.serve.agentapi import (
+    ensure_agent_for_available_work,
+    ensure_agent_for_pending_inbox,
+)
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
@@ -127,6 +130,12 @@ def _ensure_work_tree_agent(
         "force_new": renew_intent,
     }
     agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
+    if agent_ensure is None:
+        agent_ensure = ensure_agent_for_available_work(
+            target,
+            thread_id=thread_id,
+            **ensure_kwargs,
+        )
     ensured_thread_id = record_started_renewal_from_ensure(
         state.team_store,
         predecessor_agent_id=predecessor_actor,

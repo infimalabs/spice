@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from http import HTTPStatus
 from typing import Any, Sequence
 
 from spice.agent.driver import driver_for
+from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import (
     AGENT_FAILURE_OUT_OF_CREDITS,
     AGENT_FAILURE_RESTART_REFUSED,
     AgentOutOfCreditsError,
     AgentRestartRefusedError,
+    SUPERVISOR_CLAIM_LEASE_SECONDS,
     agent_binding_error,
     agent_status,
     ensure_agent,
@@ -24,14 +27,18 @@ from spice.mail.inbox import (
     inbox_request_priority,
     pending_operator_inbox_items,
 )
+from spice.process.git import git_read
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import alloc, claimstate, identity
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
+AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
+_AVAILABLE_WORK_CLAIM_LOCK = threading.Lock()
 
 
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
@@ -220,6 +227,80 @@ def ensure_agent_for_pending_inbox(
             payload,
             trigger_key=trigger_key,
         )
+    return payload
+
+
+def ensure_agent_for_available_work(
+    target: WorktreeTarget,
+    *,
+    thread_id: str,
+    attempt_cache: dict[str, float] | None = None,
+    retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
+    fast_mode: bool = False,
+    force_new: bool = False,
+) -> dict[str, Any] | None:
+    """Claim one task as a stopped lane's actor, then start only that lane.
+
+    This is deliberately a single-candidate decision. A concurrent claimant
+    winning that row ends the decision; falling through to another row would
+    turn one stale inventory observation into a spawn despite losing its guard.
+    """
+    actor = canonical_thread_id(thread_id)
+    if not actor:
+        return _available_work_skip("unbound")
+    if agent_status(target.repo_root).running:
+        return None
+    if not _ensure_due(
+        target.id, attempt_cache=attempt_cache, retry_seconds=retry_seconds
+    ):
+        return None
+    site = claimstate.ClaimSite(
+        worktree=target.repo_root.resolve(),
+        branch=target.branch or git_read(target.repo_root, "branch", "--show-current"),
+        head=git_read(target.repo_root, "rev-parse", "HEAD"),
+    )
+    with _AVAILABLE_WORK_CLAIM_LOCK:
+        candidates = alloc.ordered_visible_ready_rows(actor)
+        if not candidates:
+            return None
+        chosen = candidates[0]
+        task_uuid = identity.uuid_of(chosen)
+        handle = identity.render_handle(chosen)
+        claimed = claimstate.do_claim(
+            task_uuid,
+            actor,
+            site=site,
+            context_thread=actor,
+            lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+            guard_unclaimed=True,
+        )
+    if not claimed:
+        return _available_work_skip("claim-lost", task_handle=handle)
+    try:
+        payload, _status = agent_ensure_response_payload(
+            target,
+            fast_mode=fast_mode,
+            force_new=force_new,
+            automatic=True,
+        )
+    except Exception:
+        claimstate.release_claim(task_uuid, actor)
+        raise
+    payload.update({"trigger": "available-work", "taskHandle": handle})
+    if payload.get("ok") is False:
+        payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+    return payload
+
+
+def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": reason,
+    }
+    if task_handle:
+        payload["taskHandle"] = task_handle
     return payload
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -251,14 +252,52 @@ def test_do_claim_records_explicit_cross_worktree_site(task_repo):
         identity.uuid_of(row),
         ACTOR_A,
         site=target_site,
+        context_thread=ACTOR_A,
+        lease_seconds=60.0,
     )
     fresh = identity.resolve(handle)
+    next_row = alloc.next_task()
 
     assert claimed is True
+    assert identity.render_handle(next_row) == handle
     assert config.repo_root() == task_repo
     assert Path(fresh["claim_worktree"]) == target_site.worktree
     assert fresh["claim_branch"] == target_site.branch
     assert fresh["claim_head"] == target_site.head
+    assert fresh["claim_thread"] == ACTOR_A
+    assert fresh["claim_lease_seconds"] == "60"
+
+
+def test_renew_claim_preserves_claim_specific_short_lease(task_repo, monkeypatch):
+    handle = create.add(
+        "Keep the supervisor claim heartbeat-sized",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        acceptance=["renewal preserves the claim's recorded lease policy"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=60.0,
+    )
+    monkeypatch.setattr(claimstate, "current_claim_site", lambda: site)
+
+    result = claimstate.renew_claim(handle, actor=ACTOR_A)
+    renewed = identity.resolve(handle)
+    until = datetime.fromisoformat(renewed["claim_until"].replace("Z", "+00:00"))
+    context_end = datetime.fromisoformat(
+        renewed["claim_context_end"].replace("Z", "+00:00")
+    )
+
+    assert result.renewed is True
+    assert renewed["claim_lease_seconds"] == "60"
+    assert (context_end - until).total_seconds() == (
+        config.CLAIM_CONTEXT_SECONDS - 60.0
+    )
 
 
 def test_task_capture_rejects_handle_with_new_task_fields(remote_task_repo):

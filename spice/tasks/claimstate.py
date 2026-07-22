@@ -6,6 +6,7 @@ imports ops, so guards stay usable from any task surface without cycles.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -63,6 +64,7 @@ CLAIM_CLEAR = [
         "claim_worktree",
         "claim_branch",
         "claim_head",
+        "claim_lease_seconds",
         "claim_context_start",
         "claim_context_end",
         "claim_context_link",
@@ -95,11 +97,13 @@ def claim_meta(
     *,
     site: ClaimSite,
     context_thread: str | None,
+    lease_seconds: float | None,
 ) -> list[str]:
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
+    resolved_lease_seconds = _resolved_claim_lease_seconds(lease_seconds)
     at_dt = datetime.now(UTC)
     at = _iso(at_dt)
-    until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
+    until = _iso(at_dt + timedelta(seconds=resolved_lease_seconds))
     start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     explicit_context = tw.canonical_actor(context_thread or "")
@@ -127,11 +131,31 @@ def claim_meta(
         f"claim_worktree:{site.worktree}",
         f"claim_branch:{site.branch}",
         f"claim_head:{site.head}",
+        f"claim_lease_seconds:{resolved_lease_seconds:g}",
         f"claim_context_start:{start}",
         f"claim_context_end:{end}",
         f"claim_context_link:{link}",
         f"claim_context_turn:{turn}",
     ]
+
+
+def _resolved_claim_lease_seconds(lease_seconds: float | None) -> float:
+    resolved = (
+        float(config.CLAIM_TTL_SECONDS)
+        if lease_seconds is None
+        else float(lease_seconds)
+    )
+    if not math.isfinite(resolved) or resolved <= 0:
+        raise SpiceError("claim lease seconds must be positive")
+    return resolved
+
+
+def _row_claim_lease_seconds(row: dict[str, Any]) -> float:
+    raw = str(row.get("claim_lease_seconds") or "").strip()
+    try:
+        return _resolved_claim_lease_seconds(float(raw) if raw else None)
+    except (SpiceError, ValueError):
+        return _resolved_claim_lease_seconds(None)
 
 
 def _require_pending(row: dict[str, Any], action: str) -> None:
@@ -409,6 +433,8 @@ def do_claim(
     actor: str,
     *,
     site: ClaimSite,
+    context_thread: str | None,
+    lease_seconds: float | None,
     guard_unclaimed: bool = True,
 ) -> bool:
     """Atomic claim: set the `start` date AND the claim metadata in one modify.
@@ -433,7 +459,12 @@ def do_claim(
                 uuid,
                 *filters,
                 "modify",
-                *claim_meta(actor, site=site, context_thread=None),
+                *claim_meta(
+                    actor,
+                    site=site,
+                    context_thread=context_thread,
+                    lease_seconds=lease_seconds,
+                ),
                 "start:now",
             ]
         )
@@ -481,6 +512,7 @@ def carry_claim(
             next_actor,
             site=site,
             context_thread=next_actor,
+            lease_seconds=_row_claim_lease_seconds(row),
         )
         if not arg.startswith("claim_at:")
     ]
@@ -520,12 +552,38 @@ def carry_claim(
     )
 
 
-def _renewal_claim_meta(actor: str, *, site: ClaimSite) -> list[str]:
+def _renewal_claim_meta(
+    actor: str, *, site: ClaimSite, lease_seconds: float
+) -> list[str]:
     return [
         arg
-        for arg in claim_meta(actor, site=site, context_thread=None)
+        for arg in claim_meta(
+            actor,
+            site=site,
+            context_thread=None,
+            lease_seconds=lease_seconds,
+        )
         if not arg.startswith(("claim_by:", "claim_at:"))
     ]
+
+
+def release_claim(uuid: str, actor: str) -> bool:
+    """Release only the exact active claim still owned by ``actor``."""
+    claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
+    try:
+        tw.run(
+            [
+                uuid,
+                "+ACTIVE",
+                f"claim_by.is:{claim_actor}",
+                "modify",
+                "start:",
+                *CLAIM_CLEAR,
+            ]
+        )
+    except SpiceError:
+        return False
+    return True
 
 
 def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
@@ -605,7 +663,11 @@ def renew_claim(
                 f"claim_by.is:{resolved_actor}",
                 f"claim_worktree.is:{site.worktree}",
                 "modify",
-                *_renewal_claim_meta(resolved_actor, site=site),
+                *_renewal_claim_meta(
+                    resolved_actor,
+                    site=site,
+                    lease_seconds=_row_claim_lease_seconds(row),
+                ),
             ]
         )
     except SpiceError as exc:

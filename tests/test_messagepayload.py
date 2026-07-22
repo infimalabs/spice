@@ -597,6 +597,11 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         message, "resolve_thread_id_for_target", lambda _state, _target: actor
     )
     monkeypatch.setattr(
@@ -829,6 +834,11 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         message, "resolve_thread_id_for_target", lambda _state, _target: actor
     )
     monkeypatch.setattr(
@@ -1040,6 +1050,11 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         message,
         "resolve_thread_id_for_target",
         lambda _state, _target: thread_id,
@@ -1127,6 +1142,11 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     monkeypatch.setattr(
         inventory,
         "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -1284,6 +1304,11 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     monkeypatch.setattr(
         inventory,
         "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(

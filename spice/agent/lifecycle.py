@@ -499,10 +499,14 @@ def agent_state_matches_startup_log(
 # A low-frequency check, not a spinner: the operator asked the supervisor to
 # notice ~every 30-60s when its bound agent is holding no task yet the worktree
 # is dirty -- uncaptured work that cannot land until a task is claimed.
-SUPERVISOR_LANE_WATCH_SECONDS = 45.0
-# Claim TTL is one hour; renewing every 15 minutes gives long-running agents a
-# wide safety margin without turning the task backend into a heartbeat log.
-SUPERVISOR_CLAIM_RENEWAL_SECONDS = 15.0 * 60.0
+SUPERVISOR_LANE_WATCH_SECONDS = 20.0
+SUPERVISOR_UNCAPTURED_NUDGE_SECONDS = 45.0
+# A supervisor-owned handoff claim is renewed every watch tick while the child
+# lives. Its lease is derived from that heartbeat, so supervisor death makes
+# the row visible again within a bounded three missed beats while an arbitrarily
+# long healthy startup or compaction stays continuously owned.
+SUPERVISOR_CLAIM_RENEWAL_SECONDS = SUPERVISOR_LANE_WATCH_SECONDS
+SUPERVISOR_CLAIM_LEASE_SECONDS = 3.0 * SUPERVISOR_CLAIM_RENEWAL_SECONDS
 LANE_UNCAPTURED_NUDGE = (
     "your worktree has uncommitted or uncaptured changes but you hold no "
     "claimed task -- work cannot land without one. Claim a task before "
@@ -667,6 +671,7 @@ def _watch_supervised_lane(
     stop: Event,
 ) -> None:
     next_renewal = time.monotonic()
+    next_uncaptured_nudge = time.monotonic()
     reported: dict[str, str] = {}
     contract_cursors: dict[str, int] = {}
     while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
@@ -679,7 +684,9 @@ def _watch_supervised_lane(
                     repo_root, thread_id, log_path, reported, contract_cursors
                 )
                 next_renewal = now + SUPERVISOR_CLAIM_RENEWAL_SECONDS
-            _flag_uncaptured_lane(repo_root, thread_id, log_path)
+            if now >= next_uncaptured_nudge:
+                _flag_uncaptured_lane(repo_root, thread_id, log_path)
+                next_uncaptured_nudge = now + SUPERVISOR_UNCAPTURED_NUDGE_SECONDS
         except Exception:  # best-effort watch: never take down the supervisor
             pass
 

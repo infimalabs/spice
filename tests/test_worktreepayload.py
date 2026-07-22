@@ -203,6 +203,11 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     )
     monkeypatch.setattr(
         inventory,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        inventory,
         "resolve_thread_id_for_target",
         lambda _state, _target: "agent-a",
     )

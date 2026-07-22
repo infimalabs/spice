@@ -351,6 +351,10 @@
  * @property {string=} logPath
  * @property {string=} failure
  * @property {string=} error
+ * @property {string=} trigger
+ * @property {string=} reason
+ * @property {string=} taskHandle
+ * @property {boolean=} claimReleased
  * @property {RestartRefusal=} restartRefusal - driver-specific launch refusal facts
  * @property {Array.<string>=} deadletteredInboxKeys
  * @property {string=} deadletteredInboxKey
