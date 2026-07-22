@@ -7,8 +7,10 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -628,7 +630,7 @@ def git_private_path(root: Path, name: str) -> Path:
 
 def _load_git_private_json(root: Path, name: str) -> dict[str, Any]:
     path = git_private_path(root, name)
-    if not path.is_file():
+    if not _proof_record_exists(path):
         producer = GIT_PRIVATE_RECORD_PRODUCERS[name]
         raise RehearsalError(
             f"missing Git-private proof record {name} at {path}; "
@@ -636,10 +638,81 @@ def _load_git_private_json(root: Path, name: str) -> dict[str, Any]:
             "so a host checkout that has not run that build cannot emit a "
             "receipt for artifacts it otherwise proved"
         )
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RehearsalError(f"invalid Git-private proof record JSON: {path}") from exc
     if not isinstance(payload, dict):
         raise RehearsalError(f"invalid Git-private proof record: {path}")
     return payload
+
+
+def _container_provenance(
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, object]]:
+    names = (
+        "release-proof-identities.json",
+        "release-proof-toolchain.json",
+    )
+    paths = {name: git_private_path(root, name) for name in names}
+    present = {name: _proof_record_exists(path) for name, path in paths.items()}
+    if all(present.values()):
+        return (
+            _load_git_private_json(root, names[0]),
+            _load_git_private_json(root, names[1]),
+            {
+                "operating_system": "linux",
+                "host_native_companion": "release-proof-macos.json",
+                "host_native_checks": [
+                    "kqueue-or-fsevents",
+                    "appearance",
+                    "speech",
+                ],
+            },
+        )
+    if any(present.values()):
+        available = sorted(name for name, exists in present.items() if exists)
+        missing = sorted(name for name, exists in present.items() if not exists)
+        raise RehearsalError(
+            "incomplete container-only release provenance before gates: "
+            f"present={available} missing={missing}; run release-proof/appliance.py "
+            "to regenerate the container evidence boundary"
+        )
+
+    def absent(name: str) -> dict[str, str]:
+        return {
+            "availability": "absent",
+            "reason": (
+                "container-only proof record is not produced by a direct host "
+                "artifact rehearsal"
+            ),
+            "record": name,
+            "scope": "container-only",
+        }
+
+    system = platform.system()
+    operating_system = "macos" if system == "Darwin" else system.lower()
+    return (
+        absent(names[0]),
+        absent(names[1]),
+        {
+            "operating_system": operating_system,
+            "claim": "host-artifact-rehearsal",
+            "container_provenance": "absent",
+        },
+    )
+
+
+def _proof_record_exists(path: Path) -> bool:
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise RehearsalError(f"cannot inspect Git-private proof record: {path}: {exc}")
+    if not stat.S_ISREG(mode):
+        raise RehearsalError(f"Git-private proof record is not a file: {path}")
+    return True
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -657,6 +730,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
     artifact_dir.mkdir(parents=True, exist_ok=False)
     failures = FailureArtifactStore(artifact_dir)
     packaging = verify_packaging_toolchain(root, failures)
+    source_identity, toolchain, claim_boundary = _container_provenance(root)
     version = _project_version(root)
     with tempfile.TemporaryDirectory(prefix="spice-release-rehearsal-") as raw:
         scratch = Path(raw)
@@ -689,15 +763,9 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
     receipt: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "version": version,
-        "claim_boundary": {
-            "operating_system": "linux",
-            "host_native_companion": "release-proof-macos.json",
-            "host_native_checks": ["kqueue-or-fsevents", "appearance", "speech"],
-        },
-        "source_identity": _load_git_private_json(
-            root, "release-proof-identities.json"
-        ),
-        "toolchain": _load_git_private_json(root, "release-proof-toolchain.json"),
+        "claim_boundary": claim_boundary,
+        "source_identity": source_identity,
+        "toolchain": toolchain,
         "tests": {
             "python": gate_evidence["python"],
             "ruff": gate_evidence["ruff"],
