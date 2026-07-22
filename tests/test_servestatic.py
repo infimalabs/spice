@@ -39,6 +39,7 @@ def test_static_initial_bootstrap_publishes_server_topology_readiness():
 
     assert "async function init() {" in app
     assert "  installLiveBusLaneFocusTracking();" in app
+    assert "  startLiveRelativeTimeTicker();" in app
     assert "    await connectLiveBus();" in app
     assert "    await refreshServerTopology();" in app
     assert '    setServeLifecycle("failed", serveLifecycleFailureReason(error));' in app
@@ -47,7 +48,9 @@ def test_static_initial_bootstrap_publishes_server_topology_readiness():
         in app
     )
     assert '  setServeLifecycle("ready");' in app
-    assert "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);" in app
+    assert "function runLiveRelativeTimeTick() {" in app
+    assert "window).__spiceRelativeTimeDiagnostics =" in app
+    assert "    runLiveRelativeTimeTick," in app
 
     # Presence alone is not enough: the bootstrap sequence is load-bearing. The
     # live bus must connect before the initial topology refresh (refreshServer-
@@ -55,13 +58,14 @@ def test_static_initial_bootstrap_publishes_server_topology_readiness():
     # bus), and the incomplete-topology guard must gate the ready publication.
     # Pin the order by position so a reorder is caught without reintroducing the
     # brittle exact-block match.
+    ticker_at = app.index("  startLiveRelativeTimeTicker();")
     connect_at = app.index("    await connectLiveBus();")
     topology_at = app.index("    await refreshServerTopology();")
     incomplete_guard_at = app.index(
         '    setServeLifecycle("failed", "initial topology refresh did not complete");'
     )
     ready_at = app.index('  setServeLifecycle("ready");')
-    assert connect_at < topology_at < incomplete_guard_at < ready_at
+    assert ticker_at < connect_at < topology_at < incomplete_guard_at < ready_at
 
 
 def test_static_fresh_startup_keeps_import_shell_with_stale_restore_hints():
