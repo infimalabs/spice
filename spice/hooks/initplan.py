@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -42,6 +42,10 @@ STATE_GITIGNORE_CONTENT = (
     "*\n"
 )
 HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
+INIT_RECEIPT_RELATIVE_PATH = Path(STATE_DIRNAME) / "init-receipt.json"
+INIT_RECEIPT_MODE = 0o600
+OWNERSHIP_DIGEST_BYTES = 32
+FILE_MODE_MAX = 0o7777
 
 
 class InitializationMode(StrEnum):
@@ -60,6 +64,11 @@ class InitOperationScope(StrEnum):
     WORKTREE_FILE = "worktree-file"
     COMMON_GIT_CONFIG = "common-git-config"
     WORKTREE_GIT_CONFIG = "worktree-git-config"
+
+
+class InitReceiptStatus(StrEnum):
+    APPLYING = "applying"
+    COMPLETE = "complete"
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,26 @@ class InitializationPlan:
     repo_root: Path
     mode: InitializationMode
     operations: tuple[InitOperation, ...]
+    schema_version: int = 1
+
+
+@dataclass(frozen=True)
+class InitReceiptOperation:
+    """One planned operation plus its durably acknowledged apply state."""
+
+    operation: InitOperation
+    completed: bool
+
+
+@dataclass(frozen=True)
+class InitializationReceipt:
+    """Machine-local provenance for resumable and reversible initialization."""
+
+    repo_root: Path
+    mode: InitializationMode
+    plan_schema_version: int
+    status: InitReceiptStatus
+    operations: tuple[InitReceiptOperation, ...]
     schema_version: int = 1
 
 
@@ -211,15 +240,155 @@ def plan_initialization(
     )
 
 
-def apply_initialization_plan(plan: InitializationPlan) -> None:
-    """Apply exactly the already-resolved operations in ``plan``, in order."""
-    for operation in plan.operations:
-        if not operation.will_change:
-            continue
+def initialization_plan_payload(plan: InitializationPlan) -> dict[str, object]:
+    """Return the versioned JSON shape consumed by dry-run clients."""
+    return {
+        "schema_version": plan.schema_version,
+        "repository": str(plan.repo_root),
+        "mode": plan.mode.value,
+        "receipt_path": INIT_RECEIPT_RELATIVE_PATH.as_posix(),
+        "operations": [
+            {**_operation_payload(operation), "will_change": operation.will_change}
+            for operation in plan.operations
+        ],
+    }
+
+
+def initialization_preview_rows(plan: InitializationPlan) -> list[str]:
+    """Render every ordered file and Git-config transition without mutation."""
+    rows = [
+        f"initialization-plan schema={plan.schema_version} mode={plan.mode.value}",
+        f"repository={plan.repo_root}",
+        f"receipt={INIT_RECEIPT_RELATIVE_PATH.as_posix()}",
+    ]
+    for index, operation in enumerate(plan.operations, start=1):
+        state = (
+            "preserve"
+            if not operation.managed
+            else "change"
+            if operation.will_change
+            else "ready"
+        )
         if operation.kind is InitOperationKind.FILE:
-            _apply_file_operation(plan.repo_root, operation)
-        else:
-            _apply_config_operation(plan.repo_root, operation)
+            rows.append(
+                f"{index}. file {operation.target} "
+                f"mode {_render_mode(operation.previous_mode)} -> "
+                f"{_render_mode(operation.generated_mode)} "
+                f"digest={operation.ownership_digest} state={state}"
+            )
+            continue
+        effective = ""
+        if operation.previous_effective_value != operation.previous_value:
+            effective = (
+                f" effective={_render_value(operation.previous_effective_value)}"
+            )
+        rows.append(
+            f"{index}. git-config {operation.scope.value} {operation.target} "
+            f"at {operation.scope_path}: "
+            f"{_render_value(operation.previous_value)} -> "
+            f"{_render_value(operation.generated_value)}"
+            f"{effective} state={state}"
+        )
+    rows.append("dry-run: no changes applied")
+    return rows
+
+
+def initialization_receipt_path(repo_root: Path) -> Path:
+    return repo_root.expanduser().resolve() / INIT_RECEIPT_RELATIVE_PATH
+
+
+def initialization_receipt_payload(
+    receipt: InitializationReceipt,
+) -> dict[str, object]:
+    return {
+        "schema_version": receipt.schema_version,
+        "plan_schema_version": receipt.plan_schema_version,
+        "repository": str(receipt.repo_root),
+        "mode": receipt.mode.value,
+        "status": receipt.status.value,
+        "operations": [
+            {
+                **_operation_payload(receipt_operation.operation),
+                "completed": receipt_operation.completed,
+            }
+            for receipt_operation in receipt.operations
+        ],
+    }
+
+
+def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
+    path = initialization_receipt_path(repo_root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SpiceError(
+            f"could not read initialization receipt {path}: {exc}"
+        ) from exc
+    try:
+        return _receipt_from_payload(payload)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SpiceError(f"invalid initialization receipt {path}: {exc}") from exc
+
+
+def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
+    """Apply one plan with an atomically updated receipt after every operation."""
+    existing = load_initialization_receipt(plan.repo_root)
+    receipt = _receipt_for_plan(plan, existing)
+    plan_by_key = {
+        _operation_key(operation): operation for operation in plan.operations
+    }
+    if len(plan_by_key) != len(plan.operations):
+        raise SpiceError("initialization plan contains duplicate operation identities")
+    candidate_operations = tuple(
+        replace(receipt_operation, completed=True)
+        if _operation_key(receipt_operation.operation) in plan_by_key
+        else receipt_operation
+        for receipt_operation in receipt.operations
+    )
+    completed_candidate = replace(
+        receipt,
+        status=(
+            InitReceiptStatus.COMPLETE
+            if all(operation.completed for operation in candidate_operations)
+            else InitReceiptStatus.APPLYING
+        ),
+        operations=candidate_operations,
+    )
+    if (
+        existing is not None
+        and existing == completed_candidate
+        and all(not operation.will_change for operation in plan.operations)
+    ):
+        return existing
+
+    _write_initialization_receipt(receipt)
+    operations = list(receipt.operations)
+    positions = {
+        _operation_key(receipt_operation.operation): index
+        for index, receipt_operation in enumerate(operations)
+    }
+    for operation in plan.operations:
+        position = positions[_operation_key(operation)]
+        if operation.will_change:
+            if operation.kind is InitOperationKind.FILE:
+                _apply_file_operation(plan.repo_root, operation)
+            else:
+                _apply_config_operation(plan.repo_root, operation)
+        if not operations[position].completed:
+            operations[position] = replace(operations[position], completed=True)
+            receipt = replace(receipt, operations=tuple(operations))
+            _write_initialization_receipt(receipt)
+
+    status = (
+        InitReceiptStatus.COMPLETE
+        if all(operation.completed for operation in operations)
+        else InitReceiptStatus.APPLYING
+    )
+    receipt = replace(receipt, status=status, operations=tuple(operations))
+    _write_initialization_receipt(receipt)
+    return receipt
 
 
 def initialization_detail_rows(
@@ -250,6 +419,237 @@ def initialization_detail_rows(
             else "ready: spice serve | spice agent ensure | spice task status"
         )
     return rows
+
+
+def _operation_payload(operation: InitOperation) -> dict[str, object]:
+    return {
+        "kind": operation.kind.value,
+        "target": operation.target,
+        "scope": operation.scope.value,
+        "scope_path": str(operation.scope_path),
+        "previous_value": operation.previous_value,
+        "generated_value": operation.generated_value,
+        "previous_mode": operation.previous_mode,
+        "generated_mode": operation.generated_mode,
+        "ownership_digest": operation.ownership_digest,
+        "initialization_mode": operation.initialization_mode.value,
+        "introduced": operation.introduced,
+        "managed": operation.managed,
+        "previous_effective_value": operation.previous_effective_value,
+    }
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise TypeError("value must be a string or null")
+
+
+def _required_string(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    raise TypeError("value must be a string")
+
+
+def _optional_mode(value: object) -> int | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value <= FILE_MODE_MAX
+    ):
+        return value
+    raise TypeError("file mode must be an integer from 0 through 07777 or null")
+
+
+def _required_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise TypeError("value must be boolean")
+
+
+def _required_int(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise TypeError("value must be an integer")
+
+
+def _required_ownership_digest(value: object) -> str:
+    digest = _required_string(value)
+    try:
+        decoded = bytes.fromhex(digest)
+    except ValueError as exc:
+        raise TypeError("ownership digest must be hexadecimal SHA-256") from exc
+    if len(decoded) != OWNERSHIP_DIGEST_BYTES:
+        raise TypeError("ownership digest must be hexadecimal SHA-256")
+    return digest
+
+
+def _operation_from_payload(payload: dict[str, object]) -> InitOperation:
+    return InitOperation(
+        kind=InitOperationKind(_required_string(payload["kind"])),
+        target=_required_string(payload["target"]),
+        scope=InitOperationScope(_required_string(payload["scope"])),
+        scope_path=Path(_required_string(payload["scope_path"])),
+        previous_value=_optional_string(payload.get("previous_value")),
+        generated_value=_required_string(payload["generated_value"]),
+        previous_mode=_optional_mode(payload.get("previous_mode")),
+        generated_mode=_optional_mode(payload.get("generated_mode")),
+        ownership_digest=_required_ownership_digest(payload["ownership_digest"]),
+        initialization_mode=InitializationMode(
+            _required_string(payload["initialization_mode"])
+        ),
+        introduced=_required_bool(payload["introduced"]),
+        managed=_required_bool(payload["managed"]),
+        previous_effective_value=_optional_string(
+            payload.get("previous_effective_value")
+        ),
+    )
+
+
+def _receipt_from_payload(payload: dict[str, object]) -> InitializationReceipt:
+    if payload["schema_version"] != 1:
+        raise ValueError(f"unsupported schema version {payload['schema_version']!r}")
+    plan_schema_version = _required_int(payload["plan_schema_version"])
+    if plan_schema_version != 1:
+        raise ValueError(f"unsupported plan schema version {plan_schema_version!r}")
+    operation_payloads = payload["operations"]
+    if not isinstance(operation_payloads, list):
+        raise TypeError("operations must be a list")
+    operations: list[InitReceiptOperation] = []
+    operation_keys: set[tuple[InitOperationKind, InitOperationScope, str]] = set()
+    for item in operation_payloads:
+        if not isinstance(item, dict):
+            raise TypeError("receipt operation must be an object")
+        completed = item.get("completed")
+        if not isinstance(completed, bool):
+            raise TypeError("receipt operation completion must be boolean")
+        receipt_operation = InitReceiptOperation(
+            operation=_operation_from_payload(item),
+            completed=completed,
+        )
+        key = _operation_key(receipt_operation.operation)
+        if key in operation_keys:
+            raise ValueError(f"duplicate receipt operation identity {key!r}")
+        operation_keys.add(key)
+        operations.append(receipt_operation)
+    status = InitReceiptStatus(_required_string(payload["status"]))
+    if status is InitReceiptStatus.COMPLETE and any(
+        not operation.completed for operation in operations
+    ):
+        raise ValueError("complete receipt contains unfinished operations")
+    return InitializationReceipt(
+        repo_root=Path(_required_string(payload["repository"])).expanduser().resolve(),
+        mode=InitializationMode(_required_string(payload["mode"])),
+        plan_schema_version=plan_schema_version,
+        status=status,
+        operations=tuple(operations),
+        schema_version=_required_int(payload["schema_version"]),
+    )
+
+
+def _operation_key(
+    operation: InitOperation,
+) -> tuple[InitOperationKind, InitOperationScope, str]:
+    return operation.kind, operation.scope, operation.target
+
+
+def _receipt_for_plan(
+    plan: InitializationPlan,
+    existing: InitializationReceipt | None,
+) -> InitializationReceipt:
+    if existing is None:
+        return InitializationReceipt(
+            repo_root=plan.repo_root,
+            mode=plan.mode,
+            plan_schema_version=plan.schema_version,
+            status=InitReceiptStatus.APPLYING,
+            operations=tuple(
+                InitReceiptOperation(operation=operation, completed=False)
+                for operation in plan.operations
+            ),
+        )
+    if existing.repo_root != plan.repo_root:
+        raise SpiceError(
+            "initialization receipt belongs to a different repository: "
+            f"{existing.repo_root}"
+        )
+
+    planned_by_key = {
+        _operation_key(operation): operation for operation in plan.operations
+    }
+    merged: list[InitReceiptOperation] = []
+    seen: set[tuple[InitOperationKind, InitOperationScope, str]] = set()
+    for receipt_operation in existing.operations:
+        key = _operation_key(receipt_operation.operation)
+        planned = planned_by_key.get(key)
+        if planned is None:
+            merged.append(receipt_operation)
+        else:
+            merged.append(_merge_receipt_operation(receipt_operation, planned))
+            seen.add(key)
+    for operation in plan.operations:
+        key = _operation_key(operation)
+        if key in seen:
+            continue
+        merged.append(InitReceiptOperation(operation=operation, completed=False))
+
+    mode = (
+        InitializationMode.FULL
+        if InitializationMode.FULL in {existing.mode, plan.mode}
+        else InitializationMode.GATES_ONLY
+    )
+    return InitializationReceipt(
+        repo_root=plan.repo_root,
+        mode=mode,
+        plan_schema_version=plan.schema_version,
+        status=InitReceiptStatus.APPLYING,
+        operations=tuple(merged),
+    )
+
+
+def _merge_receipt_operation(
+    existing: InitReceiptOperation,
+    planned: InitOperation,
+) -> InitReceiptOperation:
+    previous = existing.operation
+    operation = replace(
+        planned,
+        previous_value=previous.previous_value,
+        previous_mode=previous.previous_mode,
+        initialization_mode=previous.initialization_mode,
+        introduced=previous.introduced,
+        previous_effective_value=previous.previous_effective_value,
+    )
+    completed = (
+        existing.completed
+        and previous.ownership_digest == planned.ownership_digest
+        and not planned.will_change
+    )
+    return InitReceiptOperation(operation=operation, completed=completed)
+
+
+def _write_initialization_receipt(receipt: InitializationReceipt) -> None:
+    path = initialization_receipt_path(receipt.repo_root)
+    content = (
+        json.dumps(
+            initialization_receipt_payload(receipt),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    atomic_write_text(path, content, write_if_changed=True)
+    path.chmod(INIT_RECEIPT_MODE)
+
+
+def _render_mode(mode: int | None) -> str:
+    return "<absent>" if mode is None else f"{mode:04o}"
+
+
+def _render_value(value: str | None) -> str:
+    return "<unset>" if value is None else json.dumps(value)
 
 
 def _skill_file_operation(

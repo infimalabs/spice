@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,16 @@ def configure_dev_parser(subparsers: Any) -> None:
             "Install constitution gates only; do not materialize the agent skill "
             "or fleet-specific reference guard."
         ),
+    )
+    init.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the ordered initialization plan without changing the repository.",
+    )
+    init.add_argument(
+        "--json",
+        action="store_true",
+        help="With --dry-run, emit the versioned initialization plan as JSON.",
     )
     init.set_defaults(func=handle_init)
 
@@ -120,11 +131,34 @@ def configure_dev_parser(subparsers: Any) -> None:
 
 
 def handle_init(args: argparse.Namespace) -> int:
-    from spice.hooks.install import init_gates_repo, init_repo
+    from spice.hooks.initplan import (
+        InitializationMode,
+        apply_initialization_plan,
+        initialization_detail_rows,
+        initialization_plan_payload,
+        initialization_preview_rows,
+        plan_initialization,
+    )
 
     repo_root = init_repo_root()
-    initialize = init_gates_repo if bool(args.gates) else init_repo
-    for row in initialize(repo_root):
+    mode = (
+        InitializationMode.GATES_ONLY if bool(args.gates) else InitializationMode.FULL
+    )
+    plan = plan_initialization(repo_root, mode)
+    if bool(args.json) and not bool(args.dry_run):
+        raise SpiceError("`spice init --json` requires `--dry-run`")
+    if bool(args.dry_run):
+        if bool(args.json):
+            print(
+                json.dumps(initialization_plan_payload(plan), indent=2, sort_keys=True)
+            )
+        else:
+            for row in initialization_preview_rows(plan):
+                print(row)
+        return 0
+
+    apply_initialization_plan(plan)
+    for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
     return 0
 
