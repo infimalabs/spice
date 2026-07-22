@@ -480,7 +480,10 @@ def test_container_declares_immutable_base_and_complete_resolved_toolchain():
     assert "COPY --chown=pwuser:pwuser . /proof/source" in containerfile
     assert "RUN python3 release-proof/init-source.py /proof/source" in containerfile
     assert "RUN npm ci" in containerfile
-    assert "--output .git/release-proof-toolchain.json" in containerfile
+    assert (
+        '--output "$(git rev-parse --git-path release-proof-toolchain.json)"'
+        in containerfile
+    )
     assert "FROM scratch AS artifact_carrier" in containerfile
     assert "COPY --from=proof /proof/artifacts/ /artifacts/" in containerfile
     assert containerfile.split("FROM scratch AS artifact_carrier\n", 1)[1] == (

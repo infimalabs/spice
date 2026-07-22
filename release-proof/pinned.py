@@ -29,6 +29,7 @@ from rehearse import (  # noqa: E402
     _run,
     _sha256,
     _write_json,
+    git_private_path,
 )
 
 SCHEMA_VERSION = 1
@@ -39,7 +40,7 @@ EXPORTER_RELATIVE = Path("scripts/release-proof-source")
 INITIALIZER_RELATIVE = Path("release-proof/init-source.py")
 TOOLCHAIN_RELATIVE = Path("release-proof/toolchain.py")
 REHEARSAL_RELATIVE = Path("release-proof/rehearse.py")
-TOOLCHAIN_RECORD_RELATIVE = Path(".git/release-proof-toolchain.json")
+TOOLCHAIN_RECORD_NAME = "release-proof-toolchain.json"
 PROVISION_COMMAND = ("npm", "ci")
 CONTAINER_ENGINES = ("docker", "podman")
 IDENTITY_REVISIONS = (("commit", "HEAD^{commit}"), ("tree", "HEAD^{tree}"))
@@ -148,7 +149,7 @@ def provision_gate(
 
 def toolchain_gate(snapshot: Path) -> dict[str, object]:
     """Resolve the declared toolchain, or record it as explicitly not run."""
-    record = snapshot / TOOLCHAIN_RECORD_RELATIVE
+    record = git_private_path(snapshot, TOOLCHAIN_RECORD_NAME)
     command = [
         sys.executable,
         str(snapshot / TOOLCHAIN_RELATIVE),

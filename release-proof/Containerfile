@@ -49,7 +49,7 @@ WORKDIR /proof/source
 RUN python3 release-proof/init-source.py /proof/source
 RUN npm ci
 RUN python3 release-proof/toolchain.py \
-    --output .git/release-proof-toolchain.json
+    --output "$(git rev-parse --git-path release-proof-toolchain.json)"
 RUN python3 release-proof/rehearse.py --artifacts /proof/artifacts
 
 FROM scratch AS artifact_carrier
