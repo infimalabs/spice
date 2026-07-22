@@ -22,6 +22,7 @@ from spice.extensions import (
     SpiceExtensionEntryPoint,
     extension_entry_points,
 )
+from spice.paths import shared_state_root
 from spice.scopes import (
     SCOPES_KEY,
     WRAPPER_ROUTE_SCOPES,
@@ -29,11 +30,13 @@ from spice.scopes import (
     ScopeContext,
     ScopeSelector,
 )
+from spice.tasks import config as task_config
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
 HISTFILE_ENV = "HISTFILE"
 ZSH_COMPDUMP_ENV = "ZSH_COMPDUMP"
+TASKRC_ENV = "TASKRC"
 BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
 SHELL_HOOK_DIR_NAME = "shellhooks"
@@ -77,6 +80,7 @@ def apply_shell_steering_environment(
 ) -> dict[str, str]:
     env = dict(base_env)
     env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
+    env.update(taskwarrior_runtime_environment(base_env=env, repo_root=repo_root))
     env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(render_agent_wrapper_lines(repo_root))
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
@@ -94,6 +98,36 @@ def apply_shell_steering_environment(
         )
         env[ZSH_COMPDUMP_ENV] = str(dump_base / ".zcompdump")
     return env
+
+
+def taskwarrior_runtime_environment(
+    *,
+    base_env: Mapping[str, str],
+    repo_root: Path,
+) -> dict[str, str]:
+    """Bind native Taskwarrior to the task backend selected for this agent.
+
+    ``TASKRC`` is Taskwarrior's own configuration seam.  The generated Spice
+    taskrc carries the matching ``data.location``, so exporting this one native
+    variable keeps every ``task`` command and argument untouched while the
+    binding naturally survives descendant shells.
+    """
+    selector = base_env.get(task_config.TASK_BACKEND_ENV, "").strip()
+    if selector:
+        backend = Path(selector).expanduser()
+        if not backend.is_absolute():
+            raise SpiceError(
+                f"{task_config.TASK_BACKEND_ENV} requires an absolute path"
+            )
+        backend = backend.resolve()
+    else:
+        try:
+            backend = shared_state_root(repo_root)
+        except SpiceError:
+            # Some library-level shell-hook consumers intentionally operate on
+            # a product-shaped directory rather than an activated worktree.
+            return {}
+    return {TASKRC_ENV: str(backend / "taskrc")}
 
 
 def packaged_shell_steering_hook_dir() -> Path:
