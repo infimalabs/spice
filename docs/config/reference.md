@@ -511,17 +511,15 @@ rather than judged alone:
 
 ```console
 $ spice study suite-seam-reach --limit 30
-suite-seam-reach: 24 declared module(s) of 192, reached by at least 183 of 219 test module(s)
-suite-seam-reach: spice/config/pyproject.py leads the undeclared rest at 159, so the band is a strict break
-    192 reached    58 imported  spice/errors.py [declared]
-    ...
 ```
 
-The two header lines are the decision: the declared band reaches down to 183
-of 219 test modules and the widest module left out of it reaches 159, so the
-declaration names a group the import graph already separates. The command
-exits non-zero when that break closes, and `--json` emits the same ranking for
-a repository that wants to consume it.
+The command's two header lines are the decision. The first reports the reach
+of the narrowest module in the declared band; the second reports the widest
+module left out. When the first is greater than the second, the declaration
+names a group the import graph already separates. The command is the source of
+these point-in-time figures, which change as tests and imports change, and
+exits non-zero when the break closes. `--json` emits the same ranking for a
+repository that wants to consume it.
 
 A repository that gates on this should assert the result rather than restate
 it. In this one,
