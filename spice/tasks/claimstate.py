@@ -27,7 +27,8 @@ from spice.agent.sidechannelnotify import (
 )
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
-from spice.tasks import config, gitsync, identity, tw
+from spice.tasks import config, identity, tw
+from spice.tasks.git import boundaries
 
 CLAIM_WITNESS_FILE = "claim-witness.json"
 
@@ -557,7 +558,7 @@ def _raise_plan_phase_implementation_block(
 def _require_plan_phase_done_has_no_local_commits(row: dict[str, Any]) -> None:
     if str(row.get("phase") or "") != "plan":
         return
-    ahead = gitsync.commits_ahead_of_baseline()
+    ahead = boundaries.commits_ahead_of_baseline()
     if ahead <= 0:
         return
     noun = "commit" if ahead == 1 else "commits"

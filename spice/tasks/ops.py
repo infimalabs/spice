@@ -23,7 +23,8 @@ from spice.process.tool import run_tool_command
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records as session_records
 from spice.sessions import resolve as session_resolve
-from spice.tasks import alloc, config, gitsync, identity, reviewfeedback, tw
+from spice.tasks import alloc, config, identity, reviewfeedback, tw
+from spice.tasks.git import boundaries
 from spice.tasks.claimstate import (
     CLAIM_CLEAR,
     _claimed_task_capture_recovery_message,
@@ -79,7 +80,7 @@ def claim(handle: str, *, steal: bool = False) -> str:
     # A fresh claim (not a repair of our own already-active row) brings the
     # tree to the current baseline before the claim records its commit.
     is_repair = owner == actor and bool(row.get("start"))
-    notes = [] if is_repair else gitsync.prepare_for_claim().notes
+    notes = [] if is_repair else boundaries.prepare_for_claim().notes
     if not do_claim(
         uuid,
         actor,
@@ -378,7 +379,7 @@ def capture(
     if complete and not validation:
         raise SpiceError("task capture --done requires --validation")
     tw.require_clean_worktree("task capture")
-    ahead = gitsync.commits_ahead_of_baseline()
+    ahead = boundaries.commits_ahead_of_baseline()
     if ahead == 0:
         raise SpiceError(
             "nothing to capture: no local commits ahead of the baseline; "
@@ -426,7 +427,7 @@ def capture(
         )
         row = identity.resolve(created)
     handle_text = identity.render_handle(row)
-    # Deliberately skip gitsync.prepare_for_claim: its baseline fast-forward
+    # Deliberately skip boundaries.prepare_for_claim: its baseline fast-forward
     # would discard the very loose commits capture exists to preserve.
     do_claim(
         identity.uuid_of(row),
@@ -540,7 +541,7 @@ def done(
     uuid = identity.uuid_of(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.
-    sync = gitsync.integrate_and_publish(
+    sync = boundaries.integrate_and_publish(
         identity.render_handle(row),
         meta=_publish_meta(row, actor, validation),
     )
@@ -805,7 +806,7 @@ def review(
         _link_existing_followup(target, after_uuid=uuid, after_handle=reviewed_handle)
         for target in targets
     ]
-    sync = gitsync.integrate_and_publish(
+    sync = boundaries.integrate_and_publish(
         identity.render_handle(row),
         meta=_publish_meta(row, actor, [note or ""]),
     )

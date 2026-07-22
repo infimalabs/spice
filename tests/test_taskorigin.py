@@ -259,10 +259,10 @@ def test_review_then_explicit_origin_overrides_reviewed_task(task_repo, monkeypa
 
 
 def test_capture_mint_new_records_origin(task_repo, monkeypatch):
-    from spice.tasks import gitsync
+    from spice.tasks.git import boundaries
 
     assert task_repo.is_dir()
-    monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda *_a: 1)
+    monkeypatch.setattr(boundaries, "commits_ahead_of_baseline", lambda *_a: 1)
     monkeypatch.setattr(tw, "require_clean_worktree", lambda *_a, **_k: None)
 
     output = ops.capture(project="task.unit", origin=f"ack:{ACK_KEY}")

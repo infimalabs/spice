@@ -65,7 +65,7 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
         lambda _repo: events.append("skill") or tmp_path / ".agents/skills/spice.md",
     )
     monkeypatch.setattr(
-        "spice.tasks.gitsync.fast_forward_if_safe",
+        "spice.tasks.git.boundaries.fast_forward_if_safe",
         lambda _repo: events.append("baseline") or SimpleNamespace(notes=["current"]),
     )
     monkeypatch.setattr(
@@ -121,7 +121,7 @@ def test_activation_packet_names_a_skipped_launch_refresh(
         "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
     )
     monkeypatch.setattr(
-        "spice.tasks.gitsync.fast_forward_if_safe",
+        "spice.tasks.git.boundaries.fast_forward_if_safe",
         lambda _repo: SimpleNamespace(notes=[f"skipped:{condition}"]),
     )
     monkeypatch.setattr(
@@ -235,7 +235,7 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
         "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
     )
     monkeypatch.setattr(
-        "spice.tasks.gitsync.fast_forward_if_safe",
+        "spice.tasks.git.boundaries.fast_forward_if_safe",
         lambda _repo: SimpleNamespace(notes=["current"]),
     )
     monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
@@ -323,7 +323,7 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
         "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
     )
     monkeypatch.setattr(
-        "spice.tasks.gitsync.fast_forward_if_safe",
+        "spice.tasks.git.boundaries.fast_forward_if_safe",
         lambda _repo: SimpleNamespace(notes=["current"]),
     )
     monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
@@ -382,7 +382,7 @@ def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
             "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
         )
         monkeypatch.setattr(
-            "spice.tasks.gitsync.fast_forward_if_safe",
+            "spice.tasks.git.boundaries.fast_forward_if_safe",
             lambda _repo: SimpleNamespace(notes=["current"]),
         )
         monkeypatch.setattr(

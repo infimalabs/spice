@@ -12,7 +12,7 @@ import pytest
 from spice.process import git
 from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
-from spice.tasks import gitsync
+from spice.tasks.git import boundaries, merging, plumbing
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -26,7 +26,7 @@ class GitsyncOutcome:
 def _gitsync_outcome(operation: Callable[[], object]) -> GitsyncOutcome:
     try:
         operation()
-    except gitsync.MergeConflict as exc:
+    except boundaries.MergeConflict as exc:
         return GitsyncOutcome("recoverable-conflict", str(exc))
     except SpiceError as exc:
         return GitsyncOutcome("rejected", str(exc))
@@ -54,8 +54,8 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    with pytest.raises(gitsync.MergeConflict) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict) as exc_info:
+        boundaries.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
 
     message = str(exc_info.value)
     assert "README.md" in message
@@ -78,7 +78,7 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
         "Resolve baseline overlap for TASK-1jN54zJL",
     )
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJL", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -114,8 +114,8 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -123,7 +123,7 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -137,7 +137,7 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     _run(repo, "git", "checkout", upstream_head, "--", "peer.txt")
     _run(repo, "git", "commit", "-m", "Restore baseline content")
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJS", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -172,8 +172,8 @@ def test_integrate_and_publish_refuses_rename_detected_peer_deletion(tmp_path):
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -181,7 +181,7 @@ def test_integrate_and_publish_refuses_rename_detected_peer_deletion(tmp_path):
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJV", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -197,7 +197,7 @@ def test_integrate_and_publish_allows_task_owned_rename(tmp_path):
     _run(repo, "git", "mv", "README.md", "NOTES.md")
     _run(repo, "git", "commit", "-m", "rename readme")
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJW", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJW", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -233,8 +233,8 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(peer, "git", "commit", "-m", "peer deletes stale file")
     _run(peer, "git", "push", "origin", "main")
 
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
@@ -242,7 +242,7 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -256,7 +256,7 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(repo, "git", "rm", "stale.txt")
     _run(repo, "git", "commit", "-m", "Restore baseline deletion")
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJX", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -293,8 +293,8 @@ def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
 
     (repo / "README.md").write_text("initial\n", encoding="utf-8")
     (repo / "conflict.txt").write_text("agent conflict work\n", encoding="utf-8")
@@ -303,7 +303,7 @@ def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJY", repo_root=repo)
 
     message = str(exc_info.value)
     assert "refusing to publish" in message
@@ -336,7 +336,7 @@ def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(remote), str(peer))
     _configure_git_identity(peer)
-    real_run = gitsync._run
+    real_run = plumbing.run
     push_attempts = 0
 
     def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -350,8 +350,8 @@ def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
                 _run(peer, "git", "push", "origin", "main")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", racing_run)
-    real_synth = gitsync._synthesize_and_fast_forward
+    monkeypatch.setattr(plumbing, "run", racing_run)
+    real_synth = merging.synthesize_and_fast_forward
     synth_calls = 0
 
     def adopting_synth(repo_root, treeish, first_parent, second_parent, message, **kw):
@@ -363,10 +363,10 @@ def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
             repo_root, treeish, first_parent, second_parent, message, **kw
         )
 
-    monkeypatch.setattr(gitsync, "_synthesize_and_fast_forward", adopting_synth)
+    monkeypatch.setattr(merging, "synthesize_and_fast_forward", adopting_synth)
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
 
     message = str(exc_info.value)
     raced_upstream = _git(peer, "rev-parse", "HEAD")
@@ -401,7 +401,7 @@ def test_integrate_and_publish_computes_merge_before_materializing_tree(
     _run(peer, "git", "commit", "-m", "baseline work")
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
-    real_run = gitsync._run
+    real_run = plumbing.run
     observed: dict[str, str] = {}
 
     def observe_atomic_update(repo_root: Path, *args: str):
@@ -417,9 +417,9 @@ def test_integrate_and_publish_computes_merge_before_materializing_tree(
             )
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", observe_atomic_update)
+    monkeypatch.setattr(plumbing, "run", observe_atomic_update)
 
-    result = gitsync.integrate_and_publish(
+    result = boundaries.integrate_and_publish(
         "TASK-1jN54zJR",
         repo_root=repo,
         meta={
@@ -468,7 +468,7 @@ def test_reference_hook_failure_restores_clean_pre_merge_state(tmp_path, monkeyp
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    real_run = gitsync._run
+    real_run = plumbing.run
     observed: dict[str, str] = {}
 
     def reject_ref_transaction(repo_root: Path, *args: str):
@@ -487,10 +487,10 @@ def test_reference_hook_failure_restores_clean_pre_merge_state(tmp_path, monkeyp
             )
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", reject_ref_transaction)
+    monkeypatch.setattr(plumbing, "run", reject_ref_transaction)
 
     hook_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish("TASK-1kCzAtomic", repo_root=repo)
+        lambda: boundaries.integrate_and_publish("TASK-1kCzAtomic", repo_root=repo)
     )
 
     assert hook_outcome.state == "rejected"
@@ -531,7 +531,7 @@ def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
     _run(peer, "git", "commit", "-m", "baseline work")
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
-    real_run = gitsync._run
+    real_run = plumbing.run
     merge_tree_attempts = 0
 
     def observe_merge_tree(
@@ -542,10 +542,10 @@ def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
             merge_tree_attempts += 1
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", observe_merge_tree)
+    monkeypatch.setattr(plumbing, "run", observe_merge_tree)
 
     conflict_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
+        lambda: boundaries.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
     )
 
     message = conflict_outcome.message
@@ -569,7 +569,7 @@ def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
     rescue_merge = _git(repo, "rev-parse", "HEAD")
     assert _git(repo, "status", "--porcelain") == ""
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJP", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -608,14 +608,14 @@ def _hook_aborted_merge_repositories(tmp_path):
 def _observe_merge_tree(repo, monkeypatch):
     attempts = [0]
 
-    real_run = gitsync._run
+    real_run = plumbing.run
 
     def observing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         if repo_root == repo and args[:2] == ("merge-tree", "--write-tree"):
             attempts[0] += 1
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", observing_run)
+    monkeypatch.setattr(plumbing, "run", observing_run)
     return attempts
 
 
@@ -633,7 +633,7 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
     merge_attempts = _observe_merge_tree(repo, monkeypatch)
 
     conflict_outcome = _gitsync_outcome(
-        lambda: gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
+        lambda: boundaries.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
     )
 
     message = conflict_outcome.message
@@ -659,7 +659,7 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
     assert _git(repo, "rev-parse", f"{rescue_merge}^{{tree}}") == merged_tree
     assert _git(repo, "status", "--porcelain") == ""
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJT", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -676,7 +676,7 @@ def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypat
 @pytest.mark.parametrize(
     ("args", "expected_timeout"),
     [
-        (("fetch", "origin"), gitsync.GIT_NETWORK_TIMEOUT_SECONDS),
+        (("fetch", "origin"), plumbing.GIT_NETWORK_TIMEOUT_SECONDS),
         (("status",), git.DEFAULT_GIT_TIMEOUT_SECONDS),
     ],
 )
@@ -693,12 +693,12 @@ def test_gitsync_commands_are_noninteractive_and_bounded(
 
     monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
 
-    gitsync._run(tmp_path, *args)
+    plumbing.run(tmp_path, *args)
 
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["GIT_TERMINAL_PROMPT"] == "0"
-    assert env["GIT_SSH_COMMAND"] == gitsync.TASK_GIT_SSH_COMMAND
+    assert env["GIT_SSH_COMMAND"] == plumbing.TASK_GIT_SSH_COMMAND
     assert seen["timeout"] == expected_timeout
 
 
@@ -714,10 +714,10 @@ def test_gitsync_timeout_names_the_bounded_command(tmp_path, monkeypatch):
     monkeypatch.setattr(git, "run_bounded_process_group", fake_run)
 
     with pytest.raises(SpiceError) as exc_info:
-        gitsync._run(tmp_path, "fetch", "origin")
+        plumbing.run(tmp_path, "fetch", "origin")
 
     assert str(exc_info.value) == (
-        f"git command timed out after {gitsync.GIT_NETWORK_TIMEOUT_SECONDS}s: "
+        f"git command timed out after {plumbing.GIT_NETWORK_TIMEOUT_SECONDS}s: "
         f"git -C {tmp_path} fetch origin; increase "
         f"{git.GIT_TIMEOUT_ENV} for a slower repository"
     )
@@ -744,8 +744,8 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
 
     conflicted = (repo / "README.md").read_text(encoding="utf-8")
     assert "<<<<<<<" in conflicted
@@ -753,7 +753,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     _run(repo, "git", "commit", "-m", "Resolve baseline overlap, badly")
 
     with pytest.raises(SpiceError, match="conflict markers") as exc_info:
-        gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
+        boundaries.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
 
     message = str(exc_info.value)
     assert "README.md" in message
@@ -767,7 +767,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     _run(repo, "git", "add", "README.md")
     _run(repo, "git", "commit", "--amend", "--no-edit")
 
-    result = gitsync.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
+    result = boundaries.integrate_and_publish("TASK-1jN54zJM", repo_root=repo)
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
@@ -795,7 +795,7 @@ def test_branch_upstream_target_reads_branch_merge_under_shadow_env(
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "branch.lane.remote")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", ".")
 
-    assert gitsync.branch_upstream_target(repo) == ("origin", "origin/trunk")
+    assert boundaries.branch_upstream_target(repo) == ("origin", "origin/trunk")
 
 
 def test_branch_upstream_target_uses_origin_head_only_as_backstop(tmp_path):
@@ -812,33 +812,33 @@ def test_branch_upstream_target_uses_origin_head_only_as_backstop(tmp_path):
         "refs/remotes/origin/dev",
     )
 
-    assert gitsync.branch_upstream_target(repo) == ("origin", "origin/dev")
+    assert boundaries.branch_upstream_target(repo) == ("origin", "origin/dev")
 
 
 def test_fast_forward_if_safe_reports_updated_then_current(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     _advance_upstream(tmp_path)
 
-    advanced = gitsync.fast_forward_if_safe(repo)
+    advanced = boundaries.fast_forward_if_safe(repo)
     assert advanced.notes == ["updated working tree to the current baseline"]
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["current"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["current"]
 
 
 def test_prepare_for_agent_launch_reports_updated_then_current(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     _advance_upstream(tmp_path)
 
-    advanced = gitsync.prepare_for_agent_launch(repo)
+    advanced = boundaries.prepare_for_agent_launch(repo)
 
     assert advanced.notes == ["updated working tree to the current baseline"]
-    assert gitsync.prepare_for_agent_launch(repo).notes == ["current"]
+    assert boundaries.prepare_for_agent_launch(repo).notes == ["current"]
 
 
 def test_prepare_for_agent_launch_accepts_current_local_only_tree(tmp_path):
     repo = _init_repo(tmp_path / "agent")
 
-    assert gitsync.prepare_for_agent_launch(repo).notes == ["current:local-only"]
+    assert boundaries.prepare_for_agent_launch(repo).notes == ["current:local-only"]
 
 
 def test_prepare_for_agent_launch_skips_dirty_user_work(tmp_path):
@@ -846,7 +846,7 @@ def test_prepare_for_agent_launch_skips_dirty_user_work(tmp_path):
     (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
     _run(repo, "git", "add", "dirty.txt")
 
-    result = gitsync.prepare_for_agent_launch(repo)
+    result = boundaries.prepare_for_agent_launch(repo)
 
     assert result.notes == ["skipped:dirty"]
     assert (repo / "dirty.txt").read_text(encoding="utf-8") == "uncommitted\n"
@@ -859,7 +859,7 @@ def test_prepare_for_agent_launch_skips_ahead_work_for_the_agent(tmp_path):
     _run(repo, "git", "commit", "-m", "ahead of baseline")
     local_head = _git(repo, "rev-parse", "HEAD")
 
-    result = gitsync.prepare_for_agent_launch(repo)
+    result = boundaries.prepare_for_agent_launch(repo)
 
     assert result.notes == ["skipped:ahead"]
     assert _git(repo, "rev-parse", "HEAD") == local_head
@@ -873,7 +873,7 @@ def test_prepare_for_agent_launch_skips_diverged_work_for_the_agent(tmp_path):
     local_head = _git(repo, "rev-parse", "HEAD")
     _advance_upstream(tmp_path)
 
-    result = gitsync.prepare_for_agent_launch(repo)
+    result = boundaries.prepare_for_agent_launch(repo)
 
     assert result.notes == ["skipped:diverged"]
     assert _git(repo, "rev-parse", "HEAD") == local_head
@@ -893,7 +893,7 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
     # Clean fast-forward: HEAD lands on exactly the fetched upstream tip, the
     # upstream file arrives, and history holds no merge commit -- a strict
     # fast-forward, not a merge.
-    advanced = gitsync.prepare_for_agent_launch(repo)
+    advanced = boundaries.prepare_for_agent_launch(repo)
     assert advanced.notes == ["updated working tree to the current baseline"]
     assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "origin/main")
     assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
@@ -914,7 +914,7 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
     # Non-fast-forward: the launch skips its update and leaves HEAD exactly
     # where it was -- the local commit is still the tip, no merge commit was
     # created, and no half-finished merge state is left behind.
-    result = gitsync.prepare_for_agent_launch(repo)
+    result = boundaries.prepare_for_agent_launch(repo)
     assert result.notes == ["skipped:diverged"]
     assert _git(repo, "rev-parse", "HEAD") == diverged_head
     assert _git(repo, "log", "-1", "--format=%s") == "local work"
@@ -925,16 +925,16 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
 def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
     repo = _repo_with_upstream(tmp_path)
     original_head = _git(repo, "rev-parse", "HEAD")
-    real_run = gitsync._run
+    real_run = plumbing.run
 
     def fail_fetch(repo_root, *args):
         if args and args[0] == "fetch":
             return subprocess.CompletedProcess(list(args), 128, "", "offline")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", fail_fetch)
+    monkeypatch.setattr(plumbing, "run", fail_fetch)
 
-    result = gitsync.prepare_for_agent_launch(repo)
+    result = boundaries.prepare_for_agent_launch(repo)
 
     assert result.notes == ["skipped:fetch-failed"]
     assert _git(repo, "rev-parse", "HEAD") == original_head
@@ -945,16 +945,16 @@ def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
     tmp_path, monkeypatch
 ):
     repo = _repo_with_upstream(tmp_path)
-    real_run = gitsync._run
+    real_run = plumbing.run
 
     def fail_relationship(repo_root, *args):
         if args[:3] == ("rev-list", "--left-right", "--count"):
             return subprocess.CompletedProcess(list(args), 128, "", "cannot inspect")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", fail_relationship)
+    monkeypatch.setattr(plumbing, "run", fail_relationship)
 
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
 
     assert outcome == GitsyncOutcome(
         "rejected",
@@ -970,7 +970,7 @@ def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path):
     (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
     _run(repo, "git", "add", "dirty.txt")
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:dirty"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:dirty"]
 
 
 def test_fast_forward_if_safe_reports_skipped_ahead(tmp_path):
@@ -979,43 +979,43 @@ def test_fast_forward_if_safe_reports_skipped_ahead(tmp_path):
     _run(repo, "git", "add", "ahead.txt")
     _run(repo, "git", "commit", "-m", "ahead of baseline")
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:ahead"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:ahead"]
 
 
 def test_fast_forward_if_safe_reports_skipped_no_remote(tmp_path):
     repo = _init_repo(tmp_path / "agent")
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:no-remote"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:no-remote"]
 
 
 def test_fast_forward_if_safe_distinguishes_a_failed_fetch(tmp_path, monkeypatch):
     repo = _repo_with_upstream(tmp_path)
-    real_run = gitsync._run
+    real_run = plumbing.run
 
     def fail_fetch(repo_root, *args):
         if args and args[0] == "fetch":
             return subprocess.CompletedProcess(list(args), 128, "", "offline")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", fail_fetch)
+    monkeypatch.setattr(plumbing, "run", fail_fetch)
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:fetch-failed"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:fetch-failed"]
 
 
 def test_fast_forward_if_safe_distinguishes_an_uninspectable_baseline(
     tmp_path, monkeypatch
 ):
     repo = _repo_with_upstream(tmp_path)
-    real_run = gitsync._run
+    real_run = plumbing.run
 
     def fail_relationship(repo_root, *args):
         if args[:3] == ("rev-list", "--left-right", "--count"):
             return subprocess.CompletedProcess(list(args), 128, "", "cannot inspect")
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", fail_relationship)
+    monkeypatch.setattr(plumbing, "run", fail_relationship)
 
-    assert gitsync.fast_forward_if_safe(repo).notes == [
+    assert boundaries.fast_forward_if_safe(repo).notes == [
         "skipped:baseline-uninspectable"
     ]
 
@@ -1027,7 +1027,7 @@ def test_fast_forward_if_safe_reports_skipped_diverged(tmp_path):
     _run(repo, "git", "commit", "-m", "local work")
     _advance_upstream(tmp_path)
 
-    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:diverged"]
+    assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:diverged"]
 
 
 def _repo_with_upstream(tmp_path: Path) -> Path:

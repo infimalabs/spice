@@ -695,20 +695,20 @@ def test_release_clean_worktree_guard_allows_any_branch_blocks_dirty(
 
 
 def test_release_preconditions_refuse_without_claim(tmp_path, monkeypatch):
-    from spice.tasks import gitsync
+    from spice.tasks.git import boundaries
 
     monkeypatch.setattr(claimstate, "has_active_claim", lambda: False)
-    monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda root: 0)
+    monkeypatch.setattr(boundaries, "commits_ahead_of_baseline", lambda root: 0)
 
     with pytest.raises(SpiceError, match="no task claimed"):
         release.ensure_release_preconditions(tmp_path)
 
 
 def test_release_preconditions_refuse_uncaptured_commits(tmp_path, monkeypatch):
-    from spice.tasks import gitsync
+    from spice.tasks.git import boundaries
 
     monkeypatch.setattr(claimstate, "has_active_claim", lambda: True)
-    monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda root: 2)
+    monkeypatch.setattr(boundaries, "commits_ahead_of_baseline", lambda root: 2)
 
     with pytest.raises(SpiceError, match="2 local commit"):
         release.ensure_release_preconditions(tmp_path)
@@ -717,10 +717,10 @@ def test_release_preconditions_refuse_uncaptured_commits(tmp_path, monkeypatch):
 def test_release_preconditions_pass_when_claimed_and_baseline_clean(
     tmp_path, monkeypatch
 ):
-    from spice.tasks import gitsync
+    from spice.tasks.git import boundaries
 
     monkeypatch.setattr(claimstate, "has_active_claim", lambda: True)
-    monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda root: 0)
+    monkeypatch.setattr(boundaries, "commits_ahead_of_baseline", lambda root: 0)
 
     assert release.ensure_release_preconditions(tmp_path) is None
 
