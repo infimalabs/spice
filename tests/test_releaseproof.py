@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_EXPORTER = PROJECT_ROOT / "scripts" / "release-proof-source"
@@ -30,20 +31,40 @@ def _git(repository: Path, *arguments: str, environment=None) -> str:
     return completed.stdout.strip()
 
 
-def _source_repository(root: Path) -> tuple[Path, dict[str, object]]:
+def _source_repository(
+    root: Path,
+    *,
+    object_format: str = "sha1",
+    tracked_ignored: bool = False,
+) -> tuple[Path, dict[str, object]]:
     repository = root / "source"
     repository.mkdir()
+    ignored_tracked_rule = "/tracked-ignored.txt\n" if tracked_ignored else ""
     (repository / ".gitignore").write_text(
-        ".cache/\n.spice/\n.venv/\nbuild/\ndist/\nnode_modules/\n",
+        ".cache/\n.spice/\n.venv/\nbuild/\ndist/\nnode_modules/\n"
+        + ignored_tracked_rule,
         encoding="utf-8",
     )
     (repository / "payload.txt").write_text(
         "tracked release source\n", encoding="utf-8"
     )
-    _git(repository, "init", "--quiet", "--initial-branch=main")
+    if tracked_ignored:
+        (repository / "tracked-ignored.txt").write_text(
+            "tracked source despite its ignore rule\n",
+            encoding="utf-8",
+        )
+    _git(
+        repository,
+        "init",
+        "--quiet",
+        "--initial-branch=main",
+        f"--object-format={object_format}",
+    )
     _git(repository, "config", "user.email", "proof@example.invalid")
     _git(repository, "config", "user.name", "Release Proof Fixture")
     _git(repository, "add", ".gitignore", "payload.txt")
+    if tracked_ignored:
+        _git(repository, "add", "--force", "tracked-ignored.txt")
     commit_environment = {
         "GIT_AUTHOR_DATE": "1700000000 +0000",
         "GIT_COMMITTER_DATE": "1700000000 +0000",
@@ -180,6 +201,47 @@ def test_synthetic_repository_keeps_source_identity_and_clean_git_semantics(tmp_
     assert _git(first, "log", "-1", "--format=%s") == (
         "Synthetic release-proof source snapshot"
     )
+
+
+def test_synthetic_repository_preserves_a_force_tracked_ignored_path(tmp_path):
+    repository, source = _source_repository(tmp_path, tracked_ignored=True)
+    context = tmp_path / "context"
+    _export(repository, context)
+
+    identities = _initialize(context)
+
+    assert identities["source"] == source
+    assert _git(context, "ls-files", "tracked-ignored.txt") == "tracked-ignored.txt"
+    assert (context / "tracked-ignored.txt").read_text(encoding="utf-8") == (
+        "tracked source despite its ignore rule\n"
+    )
+    assert _git(context, "cat-file", "-t", str(source["tree"])) == "tree"
+    assert _git(context, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_synthetic_repository_preserves_sha256_object_format_and_provenance(
+    tmp_path,
+):
+    repository, source = _source_repository(tmp_path, object_format="sha256")
+    context = tmp_path / "context"
+    _export(repository, context)
+
+    identities = _initialize(context)
+    synthetic = cast(dict[str, object], identities["synthetic"])
+
+    assert identities["source"] == source
+    assert _git(context, "rev-parse", "--show-object-format") == "sha256"
+    assert {
+        len(str(source["commit"])),
+        len(str(source["tree"])),
+        len(str(synthetic["commit"])),
+        len(str(synthetic["tree"])),
+    } == {64}
+    assert (
+        source["commit"] == synthetic["commit"],
+        source["tree"] == synthetic["tree"],
+    ) == (False, False)
+    assert _git(context, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
 def test_container_declares_immutable_base_and_complete_resolved_toolchain():
