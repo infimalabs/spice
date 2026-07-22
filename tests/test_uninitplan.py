@@ -28,7 +28,39 @@ from spice.hooks.uninitplan import (
     uninitialization_receipt_path,
     uninitialize_repository,
 )
-from spice.paths import git_common_dir
+from spice.paths import git_common_dir, git_dir
+
+
+def test_full_cli_round_trip_restores_whole_tree_and_git_config_identity(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    (repo / "README.md").write_text("pre-init state\n", encoding="utf-8")
+    before_tree = _worktree_identity(repo)
+    before_config = _git_config_identity(repo)
+
+    _run([sys.executable, "-m", "spice", "init", "--dry-run"], cwd=repo)
+    after_preview = (_worktree_identity(repo), _git_config_identity(repo))
+    _run([sys.executable, "-m", "spice", "init"], cwd=repo)
+    _run([sys.executable, "-m", "spice", "uninit"], cwd=repo)
+    after_reversal = (_worktree_identity(repo), _git_config_identity(repo))
+
+    assert (after_preview, after_reversal) == (
+        (before_tree, before_config),
+        (before_tree, before_config),
+    )
+
+
+def test_round_trip_preserves_preexisting_empty_initialization_containers(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    (repo / ".spice/hooks").mkdir(parents=True)
+    worktree_config = git_dir(repo) / "config.worktree"
+    worktree_config.write_bytes(b"")
+    worktree_config.chmod(0o600)
+    before = (_worktree_identity(repo), _git_config_identity(repo))
+
+    apply_initialization_plan(plan_initialization(repo))
+    uninitialize_repository(repo)
+
+    assert (_worktree_identity(repo), _git_config_identity(repo)) == before
 
 
 def test_uninit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
@@ -296,6 +328,35 @@ def _tree_identity(root: Path) -> tuple[tuple[str, int, bytes], ...]:
         for path in sorted(
             candidate for candidate in root.rglob("*") if candidate.is_file()
         )
+    )
+
+
+def _worktree_identity(root: Path) -> tuple[tuple[str, int, bytes | None], ...]:
+    return tuple(
+        (
+            path.relative_to(root).as_posix(),
+            stat.S_IMODE(path.lstat().st_mode),
+            path.read_bytes() if path.is_file() else None,
+        )
+        for path in sorted(
+            candidate
+            for candidate in root.rglob("*")
+            if candidate.relative_to(root).parts[0] != ".git"
+        )
+    )
+
+
+def _git_config_identity(
+    root: Path,
+) -> tuple[tuple[str, int | None, bytes | None], ...]:
+    paths = (git_common_dir(root) / "config", git_dir(root) / "config.worktree")
+    return tuple(
+        (
+            path.name,
+            stat.S_IMODE(path.stat().st_mode) if path.is_file() else None,
+            path.read_bytes() if path.is_file() else None,
+        )
+        for path in paths
     )
 
 

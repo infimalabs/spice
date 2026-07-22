@@ -90,6 +90,8 @@ class InitOperation:
     introduced: bool
     managed: bool = True
     previous_effective_value: str | None = None
+    introduced_parent_directories: tuple[str, ...] = ()
+    introduced_scope_path: bool = False
 
     @property
     def will_change(self) -> bool:
@@ -448,6 +450,8 @@ def _operation_payload(operation: InitOperation) -> dict[str, object]:
         "introduced": operation.introduced,
         "managed": operation.managed,
         "previous_effective_value": operation.previous_effective_value,
+        "introduced_parent_directories": list(operation.introduced_parent_directories),
+        "introduced_scope_path": operation.introduced_scope_path,
     }
 
 
@@ -487,6 +491,12 @@ def _required_int(value: object) -> int:
     raise TypeError("value must be an integer")
 
 
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise TypeError("value must be a list of strings")
+    return tuple(value)
+
+
 def _required_ownership_digest(value: object) -> str:
     digest = _required_string(value)
     try:
@@ -516,6 +526,12 @@ def _operation_from_payload(payload: dict[str, object]) -> InitOperation:
         managed=_required_bool(payload["managed"]),
         previous_effective_value=_optional_string(
             payload.get("previous_effective_value")
+        ),
+        introduced_parent_directories=_string_tuple(
+            payload.get("introduced_parent_directories", [])
+        ),
+        introduced_scope_path=_required_bool(
+            payload.get("introduced_scope_path", False)
         ),
     )
 
@@ -635,6 +651,8 @@ def _merge_receipt_operation(
         initialization_mode=previous.initialization_mode,
         introduced=previous.introduced,
         previous_effective_value=previous.previous_effective_value,
+        introduced_parent_directories=previous.introduced_parent_directories,
+        introduced_scope_path=previous.introduced_scope_path,
     )
     completed = (
         existing.completed
@@ -734,6 +752,9 @@ def _file_operation(
         initialization_mode=mode,
         introduced=previous_value is None,
         managed=managed,
+        introduced_parent_directories=_introduced_parent_directories(
+            repo_root, relative_path
+        ),
     )
 
 
@@ -767,7 +788,28 @@ def _config_operation(
         initialization_mode=mode,
         introduced=previous_value is None,
         previous_effective_value=effective,
+        introduced_scope_path=not _path_exists(scope_path),
     )
+
+
+def _introduced_parent_directories(
+    repo_root: Path, relative_path: Path
+) -> tuple[str, ...]:
+    introduced: list[str] = []
+    parent = relative_path.parent
+    while parent != Path("."):
+        if not _path_exists(repo_root / parent):
+            introduced.append(parent.as_posix())
+        parent = parent.parent
+    return tuple(reversed(introduced))
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _ownership_digest(
