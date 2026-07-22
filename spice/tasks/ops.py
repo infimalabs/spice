@@ -890,7 +890,7 @@ def oops(
         tags=list(tags or []),
         after=[],
         acceptance=[],
-        wait=config.OOPS_WAIT,
+        wait=None,
         claim=False,
         origin=origin or None,
         system_project=True,

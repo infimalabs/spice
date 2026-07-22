@@ -181,7 +181,8 @@ project_min_depth = 2
 project_max_depth = 3
 claim_ttl_seconds = 3600
 claim_context_seconds = 300
-oops_wait = "2099-01-01T00:00:00"
+deferred_wait = "2099-01-01T00:00:00"
+oops_wait_seconds = 604800
 
 [tasks.priority]
 critical = "C"

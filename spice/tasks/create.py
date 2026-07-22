@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -111,7 +112,16 @@ def _resolved_wait(*, wait: str | None, deferred: bool, claim: bool) -> str | No
         raise SpiceError("task add --deferred cannot be combined with --wait")
     if claim:
         raise SpiceError("task add --deferred cannot be combined with --claim")
-    return config.OOPS_WAIT
+    return config.DEFERRED_WAIT
+
+
+def _creation_wait(*, wait: str | None, project: str, incepted: str) -> str | None:
+    if not config.is_oops_project(project):
+        return wait
+    waiting_at = identity.incepted_datetime(incepted) + timedelta(
+        seconds=config.OOPS_WAIT_SECONDS
+    )
+    return tw.canonical_utc(waiting_at)
 
 
 def validated_task_origin(value: str) -> str:
@@ -303,7 +313,13 @@ def _build_add_args(
     # SLA while waiting, and wake starts the clock through the same seam.
     args.extend(
         sla_due_args(
-            due, mapped_priority, auto_due=auto_due and wait != config.OOPS_WAIT
+            due,
+            mapped_priority,
+            auto_due=(
+                auto_due
+                and wait != config.DEFERRED_WAIT
+                and not config.is_oops_project(resolved_project)
+            ),
         )
     )
     if wait:
@@ -398,6 +414,11 @@ def _add_result(
     incepted = identity.mint_incepted(existing)
     if existing is not None:
         existing.add(incepted)
+    resolved_wait = _creation_wait(
+        wait=resolved_wait,
+        project=resolved_project,
+        incepted=incepted,
+    )
     extra_args = [
         *(extra or []),
         *_suspect_wording_extra_args(
