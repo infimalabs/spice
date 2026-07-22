@@ -53,6 +53,7 @@ MUTATION_GATE_COMMAND = (
     "tests/mutation-ratchet.json",
     "--json",
 )
+PACKAGING_MODULES = ("build.__main__", "setuptools", "twine", "wheel")
 PLAYWRIGHT_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
@@ -62,6 +63,7 @@ CHECKS = (
     "ruff",
     "browser-release-manifest",
     "deterministic-mutation-cohort",
+    "packaging-toolchain",
     "build-sdist",
     "build-wheel",
     "metadata",
@@ -291,16 +293,70 @@ def _materialize_committed_source(root: Path, scratch: Path) -> Path:
     return source
 
 
+def packaging_python_command(project_root: Path) -> tuple[str, ...]:
+    """Drive packaging tools from the same locked toolchain as every other gate.
+
+    ``-P`` keeps the working directory off ``sys.path`` so a stray ``build``
+    directory beside the invocation cannot shadow the real distribution.
+    """
+    return ("uv", "run", "--locked", "--project", str(project_root), "python", "-P")
+
+
+def verify_packaging_toolchain(
+    project_root: Path,
+    failures: FailureArtifactStore | None = None,
+) -> list[str]:
+    """Fail before the long gates when the packaging toolchain is unusable.
+
+    Returns the imported modules so the caller can record what it proved. Each
+    module is probed separately and reported by name, because a mid-run
+    ``No module named build`` after the suite, browser, and mutation gates
+    costs several minutes and hides which dependency is actually absent.
+    """
+    probe = (
+        "import importlib\n"
+        f"modules = {list(PACKAGING_MODULES)!r}\n"
+        "missing = []\n"
+        "for module in modules:\n"
+        "    try:\n"
+        "        importlib.import_module(module)\n"
+        "    except ImportError:\n"
+        "        missing.append(module)\n"
+        "print(' '.join(missing))\n"
+    )
+    completed = _run(
+        [*packaging_python_command(project_root), "-c", probe],
+        cwd=project_root,
+        capture=True,
+        failures=failures,
+        gate="packaging-toolchain",
+    )
+    missing = completed.stdout.split()
+    if missing:
+        raise RehearsalError(
+            "packaging toolchain is unusable from the locked environment: "
+            f"{', '.join(missing)} failed to import under "
+            f"`{shlex.join(packaging_python_command(project_root))}`. Add each "
+            "one to the project's dev dependency group and re-run `uv lock` so "
+            "the artifact chain uses the same locked toolchain as every other "
+            "gate."
+        )
+    return list(PACKAGING_MODULES)
+
+
 def _build_canonical_artifacts(
     root: Path,
     artifact_dir: Path,
     version: str,
     failures: FailureArtifactStore | None = None,
+    *,
+    project_root: Path | None = None,
 ) -> tuple[Path, Path]:
+    packaging_python = packaging_python_command(project_root or root)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     _run(
         [
-            sys.executable,
+            *packaging_python,
             "-m",
             "build",
             "--no-isolation",
@@ -315,7 +371,7 @@ def _build_canonical_artifacts(
     )
     _run(
         [
-            sys.executable,
+            *packaging_python,
             "-m",
             "build",
             "--no-isolation",
@@ -338,7 +394,7 @@ def _build_canonical_artifacts(
             f"resolved={resolved!r}"
         )
     _run(
-        [sys.executable, "-m", "twine", "check", str(sdist), str(wheel)],
+        [*packaging_python, "-m", "twine", "check", str(sdist), str(wheel)],
         cwd=artifact_dir,
         failures=failures,
         gate="metadata",
@@ -434,13 +490,15 @@ def _rebuild_wheel_from_sdist(
     version: str,
     scratch: Path,
     failures: FailureArtifactStore | None = None,
+    *,
+    project_root: Path | None = None,
 ) -> Path:
     source = _extract_sdist(sdist, scratch / "sdist", version)
     rebuilt_dir = scratch / "rebuilt"
     rebuilt_dir.mkdir()
     _run(
         [
-            sys.executable,
+            *packaging_python_command(project_root or source),
             "-m",
             "build",
             "--no-isolation",
@@ -524,15 +582,18 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
     artifact_dir.mkdir(parents=True, exist_ok=False)
     failures = FailureArtifactStore(artifact_dir)
     version = _project_version(root)
+    packaging_modules = verify_packaging_toolchain(root, failures)
     with tempfile.TemporaryDirectory(prefix="spice-release-rehearsal-") as raw:
         scratch = Path(raw)
         gate_evidence = _run_source_gates(root, scratch, failures)
         source = _materialize_committed_source(root, scratch)
         sdist, wheel = _build_canonical_artifacts(
-            source, artifact_dir, version, failures
+            source, artifact_dir, version, failures, project_root=root
         )
         _validate_installed_wheel(root, wheel, version, scratch, failures)
-        rebuilt = _rebuild_wheel_from_sdist(sdist, version, scratch, failures)
+        rebuilt = _rebuild_wheel_from_sdist(
+            sdist, version, scratch, failures, project_root=root
+        )
         mismatches = wheel_member_mismatches(wheel, rebuilt)
         if mismatches:
             raise RehearsalError(
@@ -585,6 +646,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         "artifact_rehearsal": {
             "checks": list(CHECKS),
             "installed_wheel_sha256": wheel_sha256,
+            "packaging_modules": packaging_modules,
             "sdist_rebuilt_from_sha256": sdist_sha256,
         },
         "content_comparison": {

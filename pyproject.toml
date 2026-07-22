@@ -66,10 +66,14 @@ namespaces = true
 
 [dependency-groups]
 dev = [
+    "build>=1.2",
     "pyright>=1.1",
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "pytest-xdist>=3.6",
+    "setuptools>=80",
+    "twine>=5.0",
+    "wheel",
 ]
 
 [tool.pyright]
