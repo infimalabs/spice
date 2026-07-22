@@ -990,10 +990,11 @@ function taskFilterStemPillTone(model) {
   // agent is camped on reads saturated even when every task is blocked, so a
   // legitimately-blocked-but-covered stem stays visibly distinct from one that
   // simply has no agent assigned; ready work with no agent on it desaturates to
-  // the idle gray floor. The ramp climbs in even ~25% steps: dormant (uncovered,
-  // nothing ready) -> idle (uncovered, ready waiting) -> assigned (covered, all
-  // blocked) -> active (covered, work in flight) -> saturated (covered, ready to
-  // pull).
+  // the idle gray floor. The ramp climbs in even ~25% steps: idle (uncovered,
+  // ready waiting) -> dormant (uncovered, nothing ready) -> assigned (covered,
+  // all blocked) -> active (covered, work in flight) -> saturated (covered,
+  // ready to pull). Idle is deliberately the neutral endpoint: it alone means
+  // handleable work is waiting for an agent.
   const covered = model.drainability.count > 0;
   if (!covered) return model.readyTaskCount > 0 ? "idle" : "dormant";
   if (model.readyTaskCount > 0) return "saturated";

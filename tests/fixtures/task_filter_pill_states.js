@@ -60,8 +60,8 @@ function stem(counts) {
 
 // Toggle whether the running, boundary-dissolving Drain lane covers the public
 // stems. A running lane makes every public stem "covered" (an agent could pull
-// from it); stopping the lane leaves the stems uncovered, so the same task state
-// resolves to the idle/dormant gray floor instead of the saturated band.
+// from it); stopping the lane leaves the stems uncovered, so ready work resolves
+// to the neutral idle floor instead of the saturated band.
 function setCoverage(running) {
   const status = running ? "running" : "stopped";
   lane.lastRenderedStatusLine.agentProcessStatus = status;
@@ -204,7 +204,8 @@ assert(
 );
 
 // ---- uncovered: no running agent is assigned to the stem. Ready work reads as
-// idle (waiting for an agent) and everything-blocked reads as dormant, so an
+// idle (the neutral waiting-for-an-agent endpoint) and everything-blocked reads
+// as the 25%-saturated dormant step, so an
 // uncovered stem is visibly distinct from a covered one at the same task state.
 setCoverage(false);
 const idleTone = tone(READY_ONLY);
@@ -215,7 +216,7 @@ assert(
 );
 assert(
   dormantTone === "dormant",
-  "uncovered fully-blocked work falls to the neutral dormant floor",
+  "uncovered fully-blocked work rests on the low dormant step",
 );
 assert(idleTone !== dormantTone, "idle and dormant are distinct steps");
 assert(

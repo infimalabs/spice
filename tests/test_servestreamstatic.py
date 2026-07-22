@@ -123,17 +123,15 @@ def test_static_filter_header_pills_render_models_and_styles():
         "  font-size: 9px;\n"
         "  padding: 0 5px;\n"
     )
-    # The mid-ramp badges track their pill's derived tone; the dormant floor uses
-    # the neutral gray; hidden/system stems recover the warn accent on the badge.
+    # The colored ramp badges track their pill's derived tone; idle uses the
+    # neutral gray; hidden/system stems recover the warn accent on the badge.
     assert (
         ".filter-pill--active .filter-pill-count,\n"
         ".filter-pill--assigned .filter-pill-count,\n"
-        ".filter-pill--idle .filter-pill-count { background: var(--filter-pill-tone); }"
+        ".filter-pill--dormant .filter-pill-count { background: var(--filter-pill-tone); }"
         in css
     )
-    assert (
-        ".filter-pill--dormant .filter-pill-count { background: var(--muted); }" in css
-    )
+    assert ".filter-pill--idle .filter-pill-count { background: var(--muted); }" in css
     assert ".filter-pill--system .filter-pill-count { background: var(--warn); }" in css
     assert ".filter-pill--implicit {" in css
     assert (

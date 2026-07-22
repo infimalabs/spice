@@ -530,16 +530,16 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'title:\n      "0 ready, 0 active/in flight' in smoke
     # Saturation encodes agent coverage layered with work: a covered stem climbs
     # saturated -> active -> assigned, an uncovered-but-ready stem reads idle, and
-    # nothing-movable-uncovered rests on dormant.
+    # nothing-movable-uncovered rests one step above it on dormant.
     assert 'tone: "saturated"' in smoke
     assert 'tone: "active"' in smoke
     assert 'tone: "assigned"' in smoke
     assert 'tone: "idle"' in smoke
     assert 'tone: "dormant"' in smoke
     # The coverage ramp guard reads each tone's rendered color and asserts the
-    # covered saturated->active->assigned steps plus the uncovered idle floor form
-    # one constant-hue --good desaturation -- a green->cyan hue shift regression
-    # fails the smoke.
+    # covered saturated->active->assigned steps plus dormant and the uncovered
+    # neutral idle floor form one constant-hue --good desaturation -- a
+    # green->cyan hue shift regression fails the smoke.
     assert "getComputedStyle(pill).color" in smoke
     assert "function rgbToHsl(" in smoke
     assert "assertCoverageSaturationRamp(pills)" in smoke
@@ -549,15 +549,16 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     )
     # Dropping coverage (stopping the lane) desaturates the same ready work off
     # saturated, and hidden stems keep the restored warn accent instead of
-    # collapsing onto the neutral public dormant gray.
+    # collapsing onto the public dormant tone.
     assert "async function dropCoverage(page)" in smoke
     assert "assertHiddenWarnAccent(pills)" in smoke
     assert "hidden stem desaturated to gray instead of the warn accent" in smoke
     assert (
         "uncovered serve did not desaturate below its covered saturated tone" in smoke
     )
+    assert "uncovered ready stem is not the neutral idle endpoint" in smoke
     assert (
-        "hidden oops pill collapsed onto the public dormant gray instead of warn"
+        "hidden oops pill collapsed onto the public dormant tone instead of warn"
         in smoke
     )
     assert (
