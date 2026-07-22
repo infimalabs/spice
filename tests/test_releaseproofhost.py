@@ -9,6 +9,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REHEARSAL_SCRIPT = PROJECT_ROOT / "release-proof" / "rehearse.py"
@@ -50,6 +52,12 @@ def _repository(root: Path) -> Path:
     _git(root, "add", "pyproject.toml")
     _git(root, "commit", "--quiet", "--message", "fixture")
     return root
+
+
+def _linked_repository(root: Path, linked: Path) -> Path:
+    repository = _repository(root)
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(linked))
+    return linked
 
 
 def _write_wheel(path: Path) -> None:
@@ -130,3 +138,53 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
         json.loads((artifacts / REHEARSAL.RECEIPT_NAME).read_text(encoding="utf-8"))
         == receipt
     )
+
+
+def test_linked_host_rehearsal_rejects_partial_provenance_before_gates(
+    tmp_path, monkeypatch
+):
+    root = _linked_repository(tmp_path / "source", tmp_path / "linked")
+    present_name = "release-proof-identities.json"
+    missing_name = "release-proof-toolchain.json"
+    present = REHEARSAL.git_private_path(root, present_name)
+    present.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        REHEARSAL,
+        "verify_packaging_toolchain",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr(
+        REHEARSAL,
+        "_run_source_gates",
+        lambda *_args: pytest.fail("source gates ran before provenance preflight"),
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.rehearse(root, tmp_path / "artifacts")
+
+    assert str(failure.value) == (
+        "incomplete container-only release provenance before gates: "
+        f"present=['{present_name}'] missing=['{missing_name}']; "
+        "run release-proof/appliance.py to regenerate the container evidence boundary"
+    )
+
+
+def test_linked_host_rehearsal_names_a_proof_record_directory(tmp_path, monkeypatch):
+    root = _linked_repository(tmp_path / "source", tmp_path / "linked")
+    record = REHEARSAL.git_private_path(root, "release-proof-identities.json")
+    record.mkdir()
+    monkeypatch.setattr(
+        REHEARSAL,
+        "verify_packaging_toolchain",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr(
+        REHEARSAL,
+        "_run_source_gates",
+        lambda *_args: pytest.fail("source gates ran before provenance preflight"),
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.rehearse(root, tmp_path / "artifacts")
+
+    assert str(failure.value) == f"Git-private proof record is not a file: {record}"
