@@ -131,6 +131,47 @@ def test_a_landing_that_reddens_the_merged_tree_never_reaches_the_branch(tmp_pat
     )
 
 
+def test_a_race_that_reddens_the_retried_tree_never_reaches_the_branch(
+    tmp_path, monkeypatch
+):
+    """The gate runs again on the tree the race built, not the one it cleared.
+
+    The first gate sees a merged tree that is green and clears the landing to
+    push. The push then loses a race, and the retry merges the peer work that
+    reddens the seam change, so the tree about to be pushed is one no gate has
+    seen. Only the gate inside the retry stands between it and the branch.
+    """
+    repo, remote = _lane_on_a_baseline(tmp_path)
+    (repo / "core" / "tw.py").write_text(SCHEMA_BOUND_SEAM_SOURCE, encoding="utf-8")
+    _run(repo, "git", "add", "-A")
+    _run(repo, "git", "commit", "-m", "bind the UDA schema to every invocation")
+    real_run = gitsync._run
+    pushes = 0
+    raced_upstream = ""
+
+    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal pushes, raced_upstream
+        if args and args[0] == "push" and repo_root == repo:
+            pushes += 1
+            if pushes == 1:
+                raced_upstream = _peer_lands_the_far_test(tmp_path, remote)
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", racing_run)
+
+    with pytest.raises(SpiceError) as refused:
+        gitsync.integrate_and_publish("TASK-1kG5WJNY", repo_root=repo)
+
+    message = str(refused.value)
+    assert pushes == 1
+    assert "refusing to publish" in message
+    assert f"{SEAM} is a declared suite seam" in message
+    assert "test_far.py" in message
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        raced_upstream
+    )
+
+
 def test_a_green_merged_tree_publishes_the_landing(tmp_path):
     """The same seam landing over a peer whose work keeps the suite green."""
     repo, remote = _lane_on_a_baseline(tmp_path)
