@@ -397,6 +397,38 @@ def test_linked_bare_common_worktree_can_be_planned_before_git_bootstrap(tmp_pat
     ).stdout.strip() == (".spice/hooks")
 
 
+def test_bare_common_lane_git_and_marker_discovery_match(tmp_path, monkeypatch):
+    """The documented fallback yields the primary resolver's exact plan."""
+    from spice.hooks import cli
+
+    seed = _git_init(tmp_path / "seed")
+    (seed / "README.md").write_text("seed\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "seed")
+    common = tmp_path / "common.git"
+    _run(["git", "clone", "--bare", str(seed), str(common)])
+    lane = tmp_path / "lane"
+    _git(common, "worktree", "add", str(lane), "main")
+
+    asked_git = cli.init_repo_root(lane)
+    monkeypatch.setattr(cli, "repo_root_from_cwd", lambda _cwd=None: None)
+    walked_marker = cli.init_repo_root(lane)
+    scope_paths = tuple(
+        _operation(
+            plan_initialization(root),
+            "core.bare",
+            InitOperationScope.WORKTREE_GIT_CONFIG,
+        ).scope_path
+        for root in (asked_git, walked_marker)
+    )
+
+    assert (asked_git, walked_marker, scope_paths) == (
+        lane,
+        lane,
+        (common / "worktrees" / "lane" / "config.worktree",) * 2,
+    )
+
+
 def test_tracked_custom_skill_is_inventoried_but_preserved(tmp_path):
     repo = _git_init(tmp_path / "repo")
     skill = repo / WORKTREE_SKILL_RELATIVE_PATH
