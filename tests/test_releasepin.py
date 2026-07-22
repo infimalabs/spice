@@ -246,6 +246,22 @@ def test_pinned_proof_refuses_an_interpreter_the_snapshot_does_not_own(tmp_path)
     assert str(origin_python.resolve()) in str(origin_error.value)
 
 
+def test_pinned_proof_keeps_a_venv_symlinked_onto_the_base_cpython(tmp_path):
+    """uv links ``.venv/bin/python`` at a shared CPython; the venv is the pin."""
+    snapshot = tmp_path / "source"
+    interpreter = _snapshot_interpreter(snapshot)
+    interpreter.parent.mkdir(parents=True)
+    base_cpython = tmp_path / "opt" / "python3"
+    base_cpython.parent.mkdir()
+    base_cpython.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    interpreter.symlink_to(base_cpython)
+
+    owned = PINNED._pin_interpreter(snapshot, str(interpreter))
+
+    assert owned == snapshot.resolve() / ".venv" / "bin" / "python"
+    assert owned.resolve() == base_cpython.resolve()
+
+
 def test_pinned_rehearsal_launches_the_interpreter_the_snapshot_resolved(tmp_path):
     snapshot = tmp_path / "source"
     (snapshot / "release-proof").mkdir(parents=True)

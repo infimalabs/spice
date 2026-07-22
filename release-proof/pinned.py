@@ -104,10 +104,19 @@ def materialize(
 
 
 def _pin_interpreter(snapshot: Path, resolved: str) -> Path:
-    """Accept only an interpreter the pinned snapshot itself owns."""
+    """Accept only an interpreter the pinned snapshot itself owns.
+
+    The containing directory is resolved and the interpreter file is not. A
+    virtual environment's ``bin/python`` is a symlink onto a shared base
+    CPython by construction, so following that last link reports every snapshot
+    interpreter as living outside the snapshot. What a boundary commit can pin
+    is the environment around the link -- the locked site-packages beside it --
+    and that is what resolving only the directory keeps in view.
+    """
+    home = Path(resolved).parent.resolve()
     snapshot = snapshot.resolve()
-    interpreter = Path(resolved).resolve()
-    if not interpreter.is_relative_to(snapshot):
+    interpreter = home / Path(resolved).name
+    if not home.is_relative_to(snapshot):
         raise PinError(
             "the resolved interpreter lies outside the pinned snapshot:\n"
             + json.dumps(
