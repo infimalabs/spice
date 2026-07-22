@@ -994,6 +994,27 @@ def _capitalize_first(text: str) -> str:
     return f"{first.title()}{text[1:]}"
 
 
+def _replace_terminal_colon(text: str) -> str:
+    content = text.rstrip()
+    if not content.endswith(":"):
+        return text
+    return f"{content[:-1]}.{text[len(content) :]}"
+
+
+def _normalize_terminal_colon_for_display(
+    message: str, preamble: str, segment_bodies: list[str]
+) -> tuple[str, list[str]]:
+    if not message.rstrip().endswith(":"):
+        return preamble, segment_bodies
+    for body_index in range(len(segment_bodies) - 1, -1, -1):
+        if segment_bodies[body_index]:
+            segment_bodies[body_index] = _replace_terminal_colon(
+                segment_bodies[body_index]
+            )
+            return preamble, segment_bodies
+    return _replace_terminal_colon(preamble), segment_bodies
+
+
 def _assistant_message(
     key: str,
     offset: int,
@@ -1006,6 +1027,12 @@ def _assistant_message(
 ) -> AssistantMessage:
     preamble, segments = split_keyed_response(text, drop_task_directives=False)
     preamble = strip_app_directive_lines(preamble)
+    segment_bodies = [
+        strip_app_directive_lines(segment.content) for segment in segments
+    ]
+    preamble, segment_bodies = _normalize_terminal_colon_for_display(
+        text, preamble, segment_bodies
+    )
     ack_segments: list[dict[str, Any]] = []
     # `ack_keys` is the polarity-agnostic set of keys this message responded to
     # (ACK and NACK alike): it drives context fetch, cache retention, copy, and
@@ -1022,11 +1049,11 @@ def _assistant_message(
         [_display_text_with_task_directives(preamble)] if preamble else []
     )
     task_card_count = _task_directive_count(preamble)
-    for segment in segments:
+    for segment, segment_body in zip(segments, segment_bodies, strict=True):
         refused = segment.disposition == ACK_DISPOSITION_REFUSED
         # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
-        body = _capitalize_first(strip_app_directive_lines(segment.content))
+        body = _capitalize_first(segment_body)
         task_card_count += _task_directive_count(body)
         display_body = _display_text_with_task_directives(body)
         ack_segments.append(

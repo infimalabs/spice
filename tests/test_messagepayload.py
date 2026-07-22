@@ -345,6 +345,72 @@ def test_malformed_task_like_progress_update_remains_plain_message(tmp_path):
     assert payload["text"] == text
 
 
+def test_ordinary_assistant_message_display_replaces_only_terminal_colon(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = "Status: ready:"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+
+    assert item.text == text
+    assert item.display_text == "Status: ready."
+    assert item.display_html == "<p>Status: ready.</p>"
+    assert item.preview == "Status: ready."
+
+
+def test_ack_display_replaces_terminal_colon_and_keeps_spoken_text(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = "ACK 1k4YggTX: follow-up: queued:"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+
+    assert item.text == text
+    assert item.display_text == "Follow-up: queued."
+    assert item.ack_segments[0]["html"] == "<p>Follow-up: queued.</p>"
+    assert item.ack_utterances == ["follow-up: queued:"]
+    assert item.preview == "Follow-up: queued."
+
+
+def test_assistant_message_display_preserves_nonterminal_colon(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = "Status: ready."
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+
+    assert item.display_text == text
+    assert item.display_html == f"<p>{text}</p>"
+    assert item.preview == text
+
+
 def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     tmp_path,
 ):
