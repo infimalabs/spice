@@ -9,6 +9,10 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const repoLocalServeCommand = path.join(repoRoot, ".venv", "bin", "spice");
 const playwrightMcpConfigEnv = "SPICE_PLAYWRIGHT_MCP_CONFIG"; // env-policy: allow
 const defaultStartTimeoutMs = 15000;
+// Boot is usually ~2s, but the shared sandbox can stall past 10s when sibling
+// agents load the machine; this is an upper bound on reaching lifecycle ready,
+// not an expected wait.
+const defaultLifecycleReadyTimeoutMs = 20000;
 // Stopfile-change delivery rides macOS FSEvents, which under sandbox load
 // takes multiple seconds to notice the stop write (~7s observed, with an
 // unbounded tail); past this window teardown falls back to SIGINT.
@@ -308,6 +312,34 @@ async function serveBrowserContextOptions(options = {}) {
   };
 }
 
+// Serve publishes window.__spiceServeLifecycle = { state, reason }, reaching
+// `ready` only once the live bus is connected and the initial topology refresh
+// has applied -- so the page is genuinely usable, not merely navigated. Waiting
+// on that state is the one authoritative readiness signal; a `failed` state
+// surfaces the product-owned reason instead of a generic navigation timeout.
+async function waitForServeLifecycleReady(page, options = {}) {
+  const timeout =
+    options.lifecycleReadyTimeoutMs || defaultLifecycleReadyTimeoutMs;
+  const handle = await page.waitForFunction(
+    () => {
+      const lifecycle = window.__spiceServeLifecycle;
+      if (!lifecycle) return null;
+      if (lifecycle.state === "ready") return { state: "ready", reason: "" };
+      if (lifecycle.state === "failed")
+        return { state: "failed", reason: String(lifecycle.reason || "") };
+      return null;
+    },
+    null,
+    { timeout },
+  );
+  const outcome = await handle.jsonValue();
+  if (outcome.state === "failed")
+    throw new Error(
+      "serve initialization failed: " + (outcome.reason || "no reason reported"),
+    );
+  return outcome;
+}
+
 async function withServePage(options, callback) {
   const server = await startServe(options);
   let browser = null;
@@ -324,6 +356,7 @@ async function withServePage(options, callback) {
       waitUntil: options.waitUntil || "domcontentloaded",
       timeout: options.navigationTimeoutMs || defaultStartTimeoutMs,
     });
+    await waitForServeLifecycleReady(page, options);
     const result = await callback({
       browser,
       context,
@@ -349,5 +382,6 @@ module.exports = {
   serveBrowserContextOptions,
   sharedPlaywrightConfigPath,
   startServe,
+  waitForServeLifecycleReady,
   withServePage,
 };

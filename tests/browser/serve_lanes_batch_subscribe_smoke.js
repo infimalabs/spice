@@ -393,6 +393,44 @@ async function batchPhaseFailedLane(state, config, hostTargetId) {
   };
 }
 
+// Phase H: a lane that startup removes while its batch subscribe is in flight
+// must not be resumed through after the awaited boundary. The subscribe is held
+// mid-flight, the member lane is closed the way a topology reconciliation would
+// close it, then the response is released: applyLanesSubscribePayloads must
+// re-resolve each lane and skip the disappeared one -- never resurrect its
+// subscription state, and never fail the surviving sibling's apply.
+async function batchPhaseResumeThroughRemovedLane(state, config) {
+  state.frames.length = 0;
+  state.payloadOverrides = {};
+  state.deferNextSubscribe = true;
+  const removedId = config.memberIds[1];
+  const survivingId = config.memberIds[0];
+  subscribeLaneToLiveBus(laneStore.laneForId(survivingId));
+  subscribeLaneToLiveBus(laneStore.laneForId(removedId));
+  for (
+    let attempt = 0;
+    attempt < config.deferredSubscribeAttempts &&
+    typeof state.releaseDeferredSubscribe !== "function";
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  if (typeof state.releaseDeferredSubscribe !== "function") {
+    throw new Error("deferred lanes.subscribe did not reach the transport");
+  }
+  const removedLane = laneStore.laneForId(removedId);
+  const survivingLane = laneStore.laneForId(survivingId);
+  closeLaneCore(removedLane);
+  state.releaseDeferredSubscribe();
+  await window.__batchSettle(config);
+  return {
+    removedLaneReopened: laneStore.hasLane(removedId),
+    removedLaneSubscribedAfterResume: removedLane.liveBusSubscribed,
+    removedLanePendingAfterResume: removedLane.liveBusSubscribePending,
+    survivingLaneSubscribedAfterResume: survivingLane.liveBusSubscribed,
+  };
+}
+
 async function batchMeasure(config) {
   const state = {
     frames: [],
@@ -413,6 +451,10 @@ async function batchMeasure(config) {
     config,
     initial.hostTargetId,
   );
+  const removed = await window.__batchPhaseResumeThroughRemovedLane(
+    state,
+    config,
+  );
   // eslint-disable-next-line no-global-assign
   mosaicRenderMessageStream = state.originalMosaicRender;
   return {
@@ -423,6 +465,7 @@ async function batchMeasure(config) {
     ...resync,
     ...coalesced,
     ...failed,
+    ...removed,
   };
 }
 
@@ -441,6 +484,7 @@ const BATCH_PAGE_HELPERS = {
   __batchPhaseResync: batchPhaseResync,
   __batchPhaseCoalesce: batchPhaseCoalesce,
   __batchPhaseFailedLane: batchPhaseFailedLane,
+  __batchPhaseResumeThroughRemovedLane: batchPhaseResumeThroughRemovedLane,
 };
 
 function batchPageHelperScript() {
@@ -502,6 +546,14 @@ function assertBatchResult(result) {
       result.failedLaneStatus !== "boom from batch",
     "sibling lane did not render normally beside the failed lane":
       result.siblingFreshRenderCount !== 1,
+    "resume resurrected a lane that startup removed mid-subscribe":
+      result.removedLaneReopened !== false,
+    "startup-removed lane was resubscribed past the awaited boundary":
+      result.removedLaneSubscribedAfterResume !== false,
+    "startup-removed lane kept a pending subscribe past the awaited boundary":
+      result.removedLanePendingAfterResume !== false,
+    "surviving sibling did not complete its subscribe past the removed lane":
+      result.survivingLaneSubscribedAfterResume !== true,
   };
   for (const [message, failed] of Object.entries(failures)) {
     if (failed) throw new Error(message + ": " + JSON.stringify(result));
@@ -515,14 +567,11 @@ async function run() {
       contextOptions: { viewport: { width: 1900, height: 1000 } },
     },
     async ({ page }) => {
-      await page.waitForFunction(
-        () =>
-          typeof applyTeamSnapshotPayload === "function" &&
-          typeof subscribeLaneToLiveBus === "function" &&
-          typeof mosaicRenderMessageStream === "function" &&
-          typeof ensureTeamMemberLane === "function",
-        { timeout: 10000 },
-      );
+      // withServePage waits on the serve lifecycle reaching `ready`, so the app
+      // module has finished executing and its initial topology refresh applied
+      // before this callback runs -- the smoke's forced snapshot below is the
+      // last word and cannot race a startup reconciliation. No parsed-declaration
+      // readiness probe is needed.
       await page.addScriptTag({ content: installScript });
       await page.addScriptTag({ content: batchPageHelperScript() });
       const result = await page.evaluate(batchMeasure, {

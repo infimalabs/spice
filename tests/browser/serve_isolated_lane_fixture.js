@@ -11,8 +11,9 @@
 // the smoke's own message pushes. syncEmptyTeamLane guards on
 // lane.emptyTeam, so later team-snapshot syncs never reset the lane.
 //
-// installIsolatedLaneFixture waits for the first server lane (".lane") so
-// the initial team snapshot has already been reconciled before the smoke
+// installIsolatedLaneFixture waits on the authoritative serve lifecycle
+// (window.__spiceServeLifecycle reaching `ready`) so the live bus is connected
+// and the initial team snapshot has already been reconciled before the smoke
 // fabricates its lane -- applyTeamSnapshotPayload closes lanes it does not
 // recognize, so creating the fixture lane before that first snapshot would
 // race a reconciliation close. Snapshots after boot only arrive on team
@@ -22,6 +23,8 @@
 // serve_task_card_live_smoke.js: its entire subject is live-bus delivery to
 // a lane bound to a real thread, so it must keep addLane() on a real
 // target.
+
+const { waitForServeLifecycleReady } = require("./serve_playwright_harness");
 
 // Upper bound, not a wait: boot is usually ~2s, but the shared sandbox can
 // stall past 10s when sibling agents load the machine.
@@ -71,10 +74,13 @@ function activateIsolatedLaneWatch(lane, generation) {
   return value;
 }
 
-// Waits for app boot (first team-snapshot lane plus the fixture's page
-// globals, and any extra globals the smoke needs), then injects
-// resolveIsolatedLane into the page. app globals declared with const/let
-// are not window properties, so readiness is a bare-identifier expression.
+// Waits on the serve lifecycle reaching `ready`, then injects
+// resolveIsolatedLane into the page. Reaching ready guarantees every app
+// module executed, so the fixture's page globals (and any extra globals the
+// smoke needs) are defined; their presence is asserted as a post-ready sanity
+// check rather than treated as the readiness signal. app globals declared with
+// const/let are not window properties, so that assertion is a bare-identifier
+// expression.
 async function installIsolatedLaneFixture(page, options = {}) {
   const globals = [
     ...isolatedLaneRequiredGlobals,
@@ -85,7 +91,10 @@ async function installIsolatedLaneFixture(page, options = {}) {
       throw new Error("invalid page global name: " + name);
   }
   const timeout = options.timeoutMs || isolatedLaneReadyTimeoutMs;
-  await page.waitForSelector(".lane", { timeout });
+  await waitForServeLifecycleReady(page, {
+    ...options,
+    lifecycleReadyTimeoutMs: timeout,
+  });
   await page.waitForFunction(
     globals.map((name) => 'typeof ' + name + ' !== "undefined"').join(" && "),
     null,
