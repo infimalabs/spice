@@ -52,9 +52,25 @@ async function main() {
       results[view] = await page.evaluate(async ([id, definition]) => {
         try {
           const { svg } = await window.mermaid.render(`g_${id}`, definition);
-          return { ok: svg.includes("<svg"), svgLength: svg.length, error: "" };
+          const viewBox = svg.match(/viewBox="([^"]+)"/);
+          const dimensions = viewBox
+            ? viewBox[1].split(/\s+/).map((value) => Number(value))
+            : [];
+          return {
+            ok: svg.includes("<svg") && Boolean(viewBox),
+            svgLength: svg.length,
+            width: dimensions[2] || 0,
+            height: dimensions[3] || 0,
+            error: viewBox ? "" : "rendered SVG has no measurable viewBox",
+          };
         } catch (err) {
-          return { ok: false, svgLength: 0, error: String(err && err.message) };
+          return {
+            ok: false,
+            svgLength: 0,
+            width: 0,
+            height: 0,
+            error: String(err && err.message),
+          };
         }
       }, [view, text]);
     }
