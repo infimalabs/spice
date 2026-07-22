@@ -676,6 +676,7 @@ WIRE_OBJECTS = (
     _object(
         "ServerTiming",
         optional={
+            "mutationQueueMs": NUMBER,
             "targetResolveMs": NUMBER,
             "sendPayloadMs": NUMBER,
             "totalBeforeReplyMs": NUMBER,

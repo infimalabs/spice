@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from spice.mail.inbox import pending_operator_inbox_items, write_inbox_item
-from spice.serve import launch, livebus
+from spice.serve import launch, livebuswatch
 from spice.serve.worktree import inventory
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -295,9 +295,9 @@ def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch)
             looked_twice.set()
         return 3600.0
 
-    monkeypatch.setattr(livebus, "_HAVE_KQUEUE", False)
+    monkeypatch.setattr(livebuswatch, "_HAVE_KQUEUE", False)
     monkeypatch.setattr(
-        livebus,
+        livebuswatch,
         "import_module",
         lambda name: (
             SimpleNamespace(watch=native_watch) if name == "watchfiles" else None

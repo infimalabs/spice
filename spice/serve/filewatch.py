@@ -121,7 +121,7 @@ def _watch_target_changes(
 
 
 def serve_until_uses_kqueue() -> bool:
-    from spice.serve.livebus import _HAVE_KQUEUE
+    from spice.serve.livebuswatch import _HAVE_KQUEUE
 
     return _HAVE_KQUEUE
 
@@ -132,7 +132,7 @@ def _watch_target_changes_kqueue(
     *,
     activated: Event,
 ) -> Iterator[None]:
-    from spice.serve.livebus import _KqueueWatch
+    from spice.serve.livebuswatch import _KqueueWatch
 
     watch = _KqueueWatch()
     try:

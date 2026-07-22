@@ -23,20 +23,25 @@
 //     replacements, proving every persistent kqueue watcher rearmed and the
 //     removed per-card topology refresh did not reappear as reconcile traffic.
 //
-// Submit path (Pass S) -- a REAL scratch-backed lane.send:
+// Submit path (Pass S) -- a REAL ephemeral-inbox lane.send:
 //   * browser submit marks   -- app enqueueSend/liveBusRequest performance marks
 //                               (startedAt, liveBusFrameSentAt, response receipt,
 //                               resultAppliedAt) via window.__spiceSubmitLatencySamples
-//   * server receive+compute -- lane.sendTiming serverTiming (targetResolveMs,
-//                               sendPayloadMs, totalBeforeReplyMs, reply lock/write)
+//   * server receive+compute -- lane.sendTiming serverTiming (mutationQueueMs,
+//                               targetResolveMs, sendPayloadMs,
+//                               totalBeforeReplyMs, reply lock/write)
 //   * reply send completion  -- reply lock hold / write, totalMs
 // The reply shares ONE send_lock with every watch-push frame, but livebus.py
 // `_send` now encodes each frame to bytes BEFORE taking the lock, so the lock's
 // critical section covers only the socket write and a small lane.sendResult ack
 // acquires it as soon as any in-flight write returns rather than queuing behind a
 // bulk-payload encode. Pass S fires a genuine lane.send into the isolated scratch
-// backend (no operator inbox is touched, no stubbed transport) while the eight
-// lanes stay active, so the submit numbers are measured, not modelled.
+// worktrees (no operator inbox is touched, no stubbed transport) while the eight
+// lanes stay active, so the submit numbers are measured, not modelled. Pass S
+// runs on a second serve instance without --task-backend (which intentionally
+// rejects live mutations). Its only targets are throwaway worktrees and every
+// lane points at one harmless detached sentinel process, so inbox publication
+// is real while no operator inbox or real agent process is touched.
 //
 // Cards that never arrive inside the per-frame budget are recorded as misses
 // (render rate), not thrown: a dropped or deferred card is measurement data.
@@ -55,7 +60,7 @@
 const os = require("os");
 const path = require("path");
 const fsp = require("fs/promises");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const { promisify } = require("util");
 const { repoRoot, withServePage } = require("./serve_playwright_harness");
 
@@ -63,10 +68,10 @@ const execFileAsync = promisify(execFile);
 
 // Seed a fully isolated N-lane environment (ephemeral git repo + private driver
 // home + scratch task backend, all under one throwaway root) and return its
-// paths. Serve launched with cwd at repoRoot and CLAUDE_CONFIG_DIR at driverHome
-// discovers ONLY these scratch worktrees, so a real lane.send in Pass S lands in
-// a scratch inbox and no real agent is ever steered.
-async function seedScratchLanes(seedRoot, laneCount) {
+// paths. Both serve instances launch with cwd at repoRoot and CLAUDE_CONFIG_DIR
+// at driverHome, so they discover only these worktrees; Pass S therefore lands
+// in ephemeral inboxes and never steers a real agent.
+async function seedScratchLanes(seedRoot, laneCount, agentPid) {
   // The seeder imports spice, so it must run under the repo venv. Commit to that
   // one interpreter; a missing venv fails loudly here rather than silently
   // falling back to a system python that cannot import spice.
@@ -79,6 +84,8 @@ async function seedScratchLanes(seedRoot, laneCount) {
       seedRoot,
       "--lanes",
       String(laneCount),
+      "--agent-pid",
+      String(agentPid),
     ],
     { cwd: repoRoot, timeout: probeAddTimeoutMs },
   );
@@ -114,9 +121,10 @@ async function run() {
   // task-adds, and the Pass S lane.send stay inside this root and cannot reach a
   // real worktree or steer a real agent. The finally removes the whole tree.
   const seedRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "livebus-probe-"));
+  const sentinel = startAgentSentinel();
   try {
-    const seed = await seedScratchLanes(seedRoot, probeLaneCount);
-    return await withServePage(
+    const seed = await seedScratchLanes(seedRoot, probeLaneCount, sentinel.pid);
+    const report = await withServePage(
       {
         path: "/?smoke=serve-livebus-latency-probe-" + Date.now(),
         contextOptions: { viewport: { width: 1280, height: 720 } },
@@ -134,11 +142,67 @@ async function run() {
           seed.taskBackend,
         ],
       },
-      async ({ page, server }) => runProbe(page, server, seed),
+      async ({ page, server }) => runProbe(page, server, seed, false),
     );
+    const acceptedSubmit = await withServePage(
+      {
+        path: "/?smoke=serve-livebus-accepted-submit-probe-" + Date.now(),
+        contextOptions: { viewport: { width: 1280, height: 720 } },
+        cwd: seed.repoRoot,
+        env: { CLAUDE_CONFIG_DIR: seed.driverHome },
+        args: (scratch) => [
+          "serve",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--until",
+          scratch.stopFile,
+        ],
+      },
+      async ({ page, server }) => runAcceptedSubmitProbe(page, server),
+    );
+    report.submit = acceptedSubmit.submit;
+    report.submitUrl = acceptedSubmit.url;
+    report.meta.conditions.submit =
+      "real lane.send into ephemeral worktree inboxes; lanes bind to one harmless running sentinel; no task-backend mutation refusal";
+    report.meta.isolation +=
+      " Pass S uses a second serve process without a task-backend override; " +
+      "its worktrees, git state, inboxes, driver home, and running-agent " +
+      "sentinel are all ephemeral under that same throwaway root.";
+    if (
+      report.submit.sampleCount !== probeSubmits ||
+      report.submit.acceptedCount !== probeSubmits
+    ) {
+      throw new Error(
+        "accepted submit probe incomplete: " + JSON.stringify(report.submit),
+      );
+    }
+    return report;
   } finally {
+    await stopAgentSentinel(sentinel);
     await removeSeedRoot(seedRoot);
   }
+}
+
+function startAgentSentinel() {
+  return spawn(
+    process.execPath,
+    ["-e", "setInterval(() => {}, 2 ** 30)"],
+    { detached: true, stdio: "ignore" },
+  );
+}
+
+async function stopAgentSentinel(sentinel) {
+  if (!sentinel || !sentinel.pid || sentinel.exitCode !== null) return;
+  const exited = new Promise((resolve) => sentinel.once("exit", resolve));
+  try {
+    process.kill(-sentinel.pid, "SIGTERM");
+  } catch (error) {
+    if (!error || error.code !== "ESRCH") throw error;
+    return;
+  }
+  await exited;
 }
 
 // Remove the throwaway seed root. The harness has already awaited serve's exit,
@@ -166,7 +230,7 @@ async function removeSeedRoot(seedRoot) {
   }
 }
 
-async function runProbe(page, server, seed) {
+async function runProbe(page, server, seed, includeSubmit = true) {
   await page.waitForFunction(
     () =>
       laneStore.targetsSnapshot().length > 0 &&
@@ -219,14 +283,18 @@ async function runProbe(page, server, seed) {
   const afterB = await snapshotTelemetry(page);
   const passBReconcile = await reconcileFrameCounts(page);
 
-  // Pass S -- a real scratch-backed lane.send while all lanes stay active.
-  await waitAllWatchersActive(page, lanes);
-  await forceLanesFocused(page, lanes);
-  await resetTelemetry(page);
-  await resetFrameLog(page);
-  const submitSamples = await runSubmitPass(page, lanes);
-  const afterS = await snapshotTelemetry(page);
-  const passSReconcile = await reconcileFrameCounts(page);
+  let submitSamples = [];
+  let afterS = null;
+  let passSReconcile = {};
+  if (includeSubmit) {
+    await waitAllWatchersActive(page, lanes);
+    await forceLanesFocused(page, lanes);
+    await resetTelemetry(page);
+    await resetFrameLog(page);
+    submitSamples = await runSubmitPass(page, lanes);
+    afterS = await snapshotTelemetry(page);
+    passSReconcile = await reconcileFrameCounts(page);
+  }
 
   const meta = await probeMeta(server, seed, lanes);
 
@@ -256,6 +324,34 @@ async function runProbe(page, server, seed) {
       reconcileFrames: passSReconcile,
     },
   });
+}
+
+async function runAcceptedSubmitProbe(page, server) {
+  await page.waitForFunction(
+    () =>
+      laneStore.targetsSnapshot().length > 0 &&
+      typeof addLane === "function" &&
+      typeof liveBusRequest === "function",
+    { timeout: probeReadyTimeoutMs },
+  );
+  const lanes = await bindLanes(page, probeLaneCount);
+  if (lanes.length === 0)
+    throw new Error("no bound targets available for accepted submit probe");
+  await waitAllWatchersActive(page, lanes);
+  await forceLanesFocused(page, lanes);
+  await resetTelemetry(page);
+  await resetFrameLog(page);
+  const samples = await runSubmitPass(page, lanes);
+  const telemetry = await snapshotTelemetry(page);
+  const reconcileFrames = await reconcileFrameCounts(page);
+  return {
+    url: server.url,
+    submit: summarizeSubmit({
+      samples,
+      sendLock: sendLockStats(telemetry),
+      reconcileFrames,
+    }),
+  };
 }
 
 // Pick up to `count` real bound targets, open a lane for each, and return the
@@ -475,30 +571,35 @@ async function runSingleFocusPass(page, seed, lane) {
   return samples;
 }
 
-// Pass S: fire `probeSubmits` REAL scratch-backed lane.send frames through the
+// Pass S: fire `probeSubmits` REAL ephemeral-inbox lane.send frames through the
 // app's own submit entry point (enqueueSend -> sendLanePayload ->
-// liveBusRequest("lane.send")) one at a time, while all lanes stay active, and
-// harvest the browser submit-latency sample the app records for each. No
+// liveBusRequest("lane.send")) one at a time, rotating across every active lane,
+// and harvest the browser submit-latency sample recorded for each completion.
 // transport is stubbed: the frame crosses the real socket, the server resolves
-// the target and writes the isolated scratch inbox, and the reply plus the
+  // the target and writes the isolated worktree inbox, and the reply plus the
 // lane.sendTiming frame carry the server-measured intervals back. Each sample
 // carries browser performance marks (startedAt, optimisticRenderedAt,
 // liveBusFrameSentAt, response receipt, resultAppliedAt, completedAt), the
 // app-computed browser durations, and the merged serverTiming.
 async function runSubmitPass(page, lanes) {
-  const targetId = lanes[0].targetId;
+  const targetIds = lanes.map((lane) => lane.targetId);
   return page.evaluate(
-    async ({ targetId, count, budgetMs }) => {
+    async ({ targetIds, count, budgetMs }) => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const samples = window.__spiceSubmitLatencySamples;
       const out = [];
       for (let index = 0; index < count; index += 1) {
+        const targetId = targetIds[index % targetIds.length];
         const lane = laneStore.laneForId(targetId);
         if (!lane) {
           out.push({ index, targetId, status: "no-lane", marks: {}, durations: {}, serverTiming: {} });
           continue;
         }
-        const before = samples.length;
+        // The app intentionally retains only its 25 newest latency samples.
+        // Correlate this send by request id rather than waiting for array length
+        // growth: once the ring is full, every new completion shifts one old
+        // sample and the length remains constant forever.
+        const beforeRequestIds = new Set(samples.map((sample) => sample.requestId));
         const text = "livebus submit probe l0 " + Date.now() + "_" + index;
         // Real submit through the operator entry point: builds the browser
         // marks, sends the lane.send frame, applies the sendResult.
@@ -506,9 +607,15 @@ async function runSubmitPass(page, lanes) {
         const deadline = Date.now() + budgetMs;
         let sample = null;
         while (Date.now() < deadline) {
-          const candidate = samples[samples.length - 1];
+          const candidate = [...samples]
+            .reverse()
+            .find(
+              (item) =>
+                item &&
+                item.requestId &&
+                !beforeRequestIds.has(item.requestId),
+            );
           if (
-            samples.length > before &&
             candidate &&
             candidate.completed &&
             candidate.marks &&
@@ -542,7 +649,7 @@ async function runSubmitPass(page, lanes) {
       }
       return out;
     },
-    { targetId, count: probeSubmits, budgetMs: probeSubmitBudgetMs },
+    { targetIds, count: probeSubmits, budgetMs: probeSubmitBudgetMs },
   );
 }
 
@@ -836,6 +943,7 @@ function submitBreakdown(sample) {
     browserResponseHandlingMs: finite(browser.responseHandlingMs),
     browserTotalMs: finite(browser.totalMs),
     // Server submit path (perf_counter deltas from lane.sendTiming).
+    serverMutationQueueMs: finite(server.mutationQueueMs),
     serverTargetResolveMs: finite(server.targetResolveMs),
     serverSendPayloadMs: finite(server.sendPayloadMs),
     serverTotalBeforeReplyMs: finite(server.totalBeforeReplyMs),
@@ -851,6 +959,7 @@ const submitStageKeys = [
   "browserSendResultWaitMs",
   "browserResponseHandlingMs",
   "browserTotalMs",
+  "serverMutationQueueMs",
   "serverTargetResolveMs",
   "serverSendPayloadMs",
   "serverTotalBeforeReplyMs",
@@ -903,7 +1012,7 @@ async function probeMeta(server, seed, lanes) {
     submitBudgetMs: probeSubmitBudgetMs,
     isolation:
       "ephemeral scratch fixture: an init-fresh git repo with one worktree per " +
-      "lane, a private CLAUDE_CONFIG_DIR driver home (canned pid-0 transcripts), " +
+      "lane, a private CLAUDE_CONFIG_DIR driver home (canned transcripts), " +
       "and a scratch task backend, all under a throwaway temp root. serve " +
       "discovers ONLY these worktrees, so every task-add, watch push, and the " +
       "Pass S lane.send stays inside the fixture; no real worktree or agent is touched.",
