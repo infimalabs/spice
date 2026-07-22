@@ -924,6 +924,7 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
 
 def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
     repo = _repo_with_upstream(tmp_path)
+    original_head = _git(repo, "rev-parse", "HEAD")
     real_run = gitsync._run
 
     def fail_fetch(repo_root, *args):
@@ -933,11 +934,11 @@ def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(gitsync, "_run", fail_fetch)
 
-    outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
+    result = gitsync.prepare_for_agent_launch(repo)
 
-    assert outcome.state == "rejected"
-    assert "current baseline could not be fetched" in outcome.message
-    assert "offline" in outcome.message
+    assert result.notes == ["skipped:fetch-failed"]
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "status", "--porcelain") == ""
 
 
 def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
@@ -955,9 +956,13 @@ def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
 
     outcome = _gitsync_outcome(lambda: gitsync.prepare_for_agent_launch(repo))
 
-    assert outcome.state == "rejected"
-    assert "relationship to origin/main could not be inspected" in outcome.message
-    assert "cannot inspect" in outcome.message
+    assert outcome == GitsyncOutcome(
+        "rejected",
+        "cannot launch agent: the relationship to origin/main could not be "
+        "inspected; repair Git and retry\n"
+        "could not inspect relationship to origin/main (git exit 128)\n"
+        "cannot inspect",
+    )
 
 
 def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path):
@@ -981,6 +986,38 @@ def test_fast_forward_if_safe_reports_skipped_no_remote(tmp_path):
     repo = _init_repo(tmp_path / "agent")
 
     assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:no-remote"]
+
+
+def test_fast_forward_if_safe_distinguishes_a_failed_fetch(tmp_path, monkeypatch):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = gitsync._run
+
+    def fail_fetch(repo_root, *args):
+        if args and args[0] == "fetch":
+            return subprocess.CompletedProcess(list(args), 128, "", "offline")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", fail_fetch)
+
+    assert gitsync.fast_forward_if_safe(repo).notes == ["skipped:fetch-failed"]
+
+
+def test_fast_forward_if_safe_distinguishes_an_uninspectable_baseline(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    real_run = gitsync._run
+
+    def fail_relationship(repo_root, *args):
+        if args[:3] == ("rev-list", "--left-right", "--count"):
+            return subprocess.CompletedProcess(list(args), 128, "", "cannot inspect")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", fail_relationship)
+
+    assert gitsync.fast_forward_if_safe(repo).notes == [
+        "skipped:baseline-uninspectable"
+    ]
 
 
 def test_fast_forward_if_safe_reports_skipped_diverged(tmp_path):

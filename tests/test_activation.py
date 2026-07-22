@@ -103,7 +103,10 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     assert "baseline_refresh=current" in packet
 
 
-@pytest.mark.parametrize("condition", ["dirty", "ahead", "diverged"])
+@pytest.mark.parametrize(
+    "condition",
+    ["dirty", "ahead", "diverged", "fetch-failed", "baseline-uninspectable"],
+)
 def test_activation_packet_names_a_skipped_launch_refresh(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
