@@ -571,6 +571,7 @@ def test_static_relative_times_are_monospace_and_padded():
 
 def test_static_agent_status_distinguishes_starting_and_startup_stalled():
     css = _serve_css_text()
+    status_css = (STATIC_ROOT / "status-colors.css").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     assert 'if (status === "starting") return "agent starting";' in app_render
@@ -580,6 +581,10 @@ def test_static_agent_status_distinguishes_starting_and_startup_stalled():
     )
     assert '[data-agent-status="starting"]' in css
     assert '[data-agent-status="startup-stalled"]' in css
+    assert "--agent-status-blue: #3b82f6;" in status_css
+    assert "from var(--agent-status-blue) h calc(s * 0.75) l" in status_css
+    assert "from var(--agent-status-blue) h calc(s * 0.5) l" in status_css
+    assert "from var(--agent-status-blue) h calc(s * 0.25) l" in status_css
 
 
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
@@ -824,14 +829,10 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert "composerQuoteBandHeader(lane, targetId, member, draft)" in app_shell
     assert ".agent-status-pip,\n.composer-quote-time[data-agent-status] {" in status_css
     assert "--agent-status-color: var(--muted);" in status_css
-    assert (
-        '.agent-status-pip[data-agent-status="running"],\n'
-        '.composer-quote-time[data-agent-status="running"] {' in status_css
-    )
-    assert (
-        '.agent-status-pip[data-agent-status="idle"],\n'
-        '.composer-quote-time[data-agent-status="idle"] {' in status_css
-    )
+    assert '.agent-status-pip[data-agent-status="running"] {' in status_css
+    assert '.composer-quote-time[data-agent-status="running"] {' in status_css
+    assert '.agent-status-pip[data-agent-status="idle"] {' in status_css
+    assert '.composer-quote-time[data-agent-status="idle"] {' in status_css
     assert (
         ".composer-quote-time[data-agent-status] {\n  color: var(--agent-status-color);"
         in status_css

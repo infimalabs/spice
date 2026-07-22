@@ -1,7 +1,65 @@
+const os = require("os");
+const path = require("path");
 const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
+const screenshotPath = path.join(os.tmpdir(), "spice-structural-status.png");
 const maxStatusTransitionMs = 500;
+const pipRampStates = [
+  "running",
+  "starting",
+  "stopping",
+  "running-stale",
+  "idle",
+];
+const pipHueToleranceDeg = 8;
+
+function parseRgb(value) {
+  const channels = (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
+  if (channels.length < 3) throw new Error("unparseable pip color: " + value);
+  const scale = /color\(|srgb/i.test(value) ? 255 : 1;
+  return channels.map((channel) => channel * scale);
+}
+
+function rgbToHsl(value) {
+  const [r, g, b] = parseRgb(value).map((channel) => channel / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === r) hue = ((g - b) / delta) % 6;
+    else if (max === g) hue = (b - r) / delta + 2;
+    else hue = (r - g) / delta + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  const lightness = (max + min) / 2;
+  const saturation =
+    delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
+  return { hue, saturation, lightness };
+}
+
+function assertPipSaturationRamp(colors) {
+  const ramp = Object.fromEntries(
+    pipRampStates.map((state) => [state, rgbToHsl(colors[state])]),
+  );
+  for (const state of pipRampStates.slice(0, -1)) {
+    if (Math.abs(ramp[state].hue - ramp.running.hue) > pipHueToleranceDeg)
+      throw new Error(
+        "pip status shifted hue instead of desaturating: " + JSON.stringify(ramp),
+      );
+  }
+  for (let index = 1; index < pipRampStates.length; index += 1) {
+    const previous = ramp[pipRampStates[index - 1]].saturation;
+    const current = ramp[pipRampStates[index]].saturation;
+    if (!(previous > current))
+      throw new Error(
+        "pip saturation did not fall running>starting>stopping>stale>idle: " +
+          JSON.stringify(ramp),
+      );
+  }
+  return ramp;
+}
 
 async function run() {
   return withServePage(
@@ -23,7 +81,8 @@ async function run() {
       });
       const result = await page.evaluate(runStructuralStatusSmokePage);
       assertStructuralStatusResult(result);
-      return { ...result, url: server.url };
+      await page.screenshot({ path: screenshotPath });
+      return { ...result, screenshotPath, url: server.url };
     },
   );
 }
@@ -162,6 +221,21 @@ async function runStructuralStatusSmokePage() {
     }),
   );
   updateLiveRelativeTimes();
+  const pipColors = {};
+  const renderedPipStatus = lane.pipEl.dataset.agentStatus;
+  const renderedPipStates = [
+    "running",
+    "starting",
+    "stopping",
+    "running-stale",
+    "idle",
+    "startup-stalled",
+  ];
+  for (const state of renderedPipStates) {
+    lane.pipEl.dataset.agentStatus = state;
+    pipColors[state] = getComputedStyle(lane.pipEl).backgroundColor;
+  }
+  lane.pipEl.dataset.agentStatus = renderedPipStatus;
   const afterRelativeTick = {
     latestActivityKind: lane.lastRenderedStatusLine.latestActivityKind || "",
     pipStatus: lane.pipEl.dataset.agentStatus || "",
@@ -169,11 +243,21 @@ async function runStructuralStatusSmokePage() {
     statusAge: lane.statusTimeEl.textContent || "",
     visualStatus: lane.lastRenderedStatusLine.agentVisualStatus || "",
   };
-  return { active, afterRelativeTick, final, phaseTransition };
+  return { active, afterRelativeTick, final, phaseTransition, pipColors };
 }
 
 function assertStructuralStatusResult(result) {
   const { active, afterRelativeTick, final, phaseTransition } = result;
+  const pipRamp = assertPipSaturationRamp(result.pipColors);
+  const stalled = rgbToHsl(result.pipColors["startup-stalled"]);
+  if (
+    Math.abs(stalled.hue - pipRamp.stopping.hue) > pipHueToleranceDeg ||
+    Math.abs(stalled.saturation - pipRamp.stopping.saturation) > 0.01
+  )
+    throw new Error(
+      "startup-stalled pip diverged from the stopping ramp step: " +
+        JSON.stringify({ stalled, stopping: pipRamp.stopping }),
+    );
   for (const [label, snapshot] of [
     ["active", active],
     ["phaseTransition", phaseTransition],

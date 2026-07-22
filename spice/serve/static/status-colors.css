@@ -1,41 +1,66 @@
 .agent-status-pip,
 .composer-quote-time[data-agent-status] {
   --agent-status-color: var(--muted);
-  --agent-status-halo-color: color-mix(in srgb, var(--muted) 18%, var(--panel));
 }
 
 .agent-status-pip {
+  --agent-status-blue: #3b82f6;
+  --agent-status-halo-color: color-mix(
+    in srgb,
+    var(--agent-status-color) 20%,
+    transparent
+  );
   background: var(--agent-status-color);
   box-shadow: 0 0 0 2px var(--agent-status-halo-color);
 }
 
-.agent-status-pip[data-agent-status="running"],
-.composer-quote-time[data-agent-status="running"] {
-  --agent-status-color: #2f9e44;
-  --agent-status-halo-color: color-mix(in srgb, #2f9e44 18%, transparent);
+/* Match the filter pills' constant-hue saturation ramp. Lifecycle state
+   changes how vivid the established pip blue appears; it never substitutes a
+   green, red, or amber status hue. The neutral idle floor matches the pills. */
+.agent-status-pip[data-agent-status="running"] {
+  --agent-status-color: var(--agent-status-blue);
 }
 
-.agent-status-pip[data-agent-status="starting"],
-.composer-quote-time[data-agent-status="starting"] {
-  --agent-status-color: #3b82f6;
-  --agent-status-halo-color: color-mix(in srgb, #3b82f6 20%, transparent);
+.agent-status-pip[data-agent-status="starting"] {
+  --agent-status-color: hsl(
+    from var(--agent-status-blue) h calc(s * 0.75) l
+  );
 }
 
 .agent-status-pip[data-agent-status="stopping"],
+.agent-status-pip[data-agent-status="startup-stalled"] {
+  --agent-status-color: hsl(
+    from var(--agent-status-blue) h calc(s * 0.5) l
+  );
+}
+
+.agent-status-pip[data-agent-status="running-stale"] {
+  --agent-status-color: hsl(
+    from var(--agent-status-blue) h calc(s * 0.25) l
+  );
+}
+
+.agent-status-pip[data-agent-status="idle"] {
+  --agent-status-color: var(--muted);
+}
+
+.composer-quote-time[data-agent-status="running"] {
+  --agent-status-color: #2f9e44;
+}
+
+.composer-quote-time[data-agent-status="starting"] {
+  --agent-status-color: #3b82f6;
+}
+
 .composer-quote-time[data-agent-status="stopping"],
-.agent-status-pip[data-agent-status="startup-stalled"],
 .composer-quote-time[data-agent-status="startup-stalled"] {
   --agent-status-color: #d64545;
-  --agent-status-halo-color: color-mix(in srgb, #d64545 20%, transparent);
 }
 
-.agent-status-pip[data-agent-status="running-stale"],
 .composer-quote-time[data-agent-status="running-stale"] {
   --agent-status-color: #d99a00;
-  --agent-status-halo-color: color-mix(in srgb, #d99a00 20%, transparent);
 }
 
-.agent-status-pip[data-agent-status="idle"],
 .composer-quote-time[data-agent-status="idle"] {
   --agent-status-color: color-mix(in srgb, var(--muted) 92%, var(--panel));
 }

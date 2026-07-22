@@ -408,26 +408,6 @@ button.primary:hover {
   flex: 0 0 auto;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--muted) 18%, var(--panel));
 }
-.agent-status-pip[data-agent-status="running"] {
-  background: #2f9e44;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #2f9e44 18%, transparent);
-}
-.agent-status-pip[data-agent-status="starting"] {
-  background: #3b82f6;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #3b82f6 20%, transparent);
-}
-.agent-status-pip[data-agent-status="stopping"],
-.agent-status-pip[data-agent-status="startup-stalled"] {
-  background: #d64545;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #d64545 20%, transparent);
-}
-.agent-status-pip[data-agent-status="running-stale"] {
-  background: #d99a00;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #d99a00 20%, transparent);
-}
-.agent-status-pip[data-agent-status="idle"] {
-  background: color-mix(in srgb, var(--muted) 92%, var(--panel));
-}
 .lane-lights {
   --lane-light-pip-size: 9px;
   display: grid;
