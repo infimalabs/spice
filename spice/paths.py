@@ -36,6 +36,11 @@ _state_backend_override: Path | None = None
 # Git reports "no repository here" and every other fatal with the same exit
 # code, so only its own words separate them.
 _GIT_NO_REPOSITORY_STDERR_MARKER = "not a git repository"
+# The other sentence git uses for the same absence. A bare repository is a
+# repository with nowhere to stand, so `--show-toplevel` fails inside one even
+# though git looked and answered. The git-dir resolvers never see this: a bare
+# repository answers `--git-dir` and `--git-common-dir` normally.
+_GIT_NO_WORK_TREE_STDERR_MARKER = "must be run in a work tree"
 
 
 def set_state_backend(root: str | None) -> None:
@@ -62,11 +67,13 @@ def _worktree_backend_key(repo_root: Path) -> str:
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
     """Resolve the enclosing git worktree root, or None outside git.
 
-    None is an answer git gave: it ran, looked, and reported no worktree. A git
-    that could not be launched answered nothing at all, so it raises rather
-    than returning None -- otherwise a broken environment is indistinguishable
-    from an ordinary directory to every caller, and the tree takes the blame
-    for it.
+    None is an answer git gave: it ran, looked, and reported no worktree. It
+    has two ways of saying that -- no repository at all, and a repository with
+    no work tree to stand in -- and both are answers about ``cwd``. A git that
+    could not be launched, or one that failed for its own reasons, answered
+    nothing at all, so those raise rather than returning None -- otherwise a
+    broken environment is indistinguishable from an ordinary directory to every
+    caller, and the tree takes the blame for it.
     """
     from spice.errors import SpiceError
 
@@ -75,7 +82,7 @@ def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
         result = run_git_command(argv, capture_output=True, check=True, text=True)
     except CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
-        if _GIT_NO_REPOSITORY_STDERR_MARKER in stderr:
+        if _git_reported_no_work_tree(stderr):
             return None
         raise SpiceError(_git_failure_message(argv, exc.returncode, stderr)) from exc
     except OSError as exc:
@@ -94,6 +101,14 @@ def require_repo_root(cwd: Path | None = None) -> Path:
     if root is None:
         raise SpiceError("not inside a git worktree")
     return root
+
+
+def _git_reported_no_work_tree(stderr: str) -> bool:
+    """Whether git's own words place no work tree at the path it was asked about."""
+    return (
+        _GIT_NO_REPOSITORY_STDERR_MARKER in stderr
+        or _GIT_NO_WORK_TREE_STDERR_MARKER in stderr
+    )
 
 
 def _git_failure_message(argv: list[str], returncode: int, stderr: str) -> str:
