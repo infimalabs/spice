@@ -1,7 +1,7 @@
-"""Task graph surface: the three graphs the board actually contains.
+"""Task graph surface: relationship views and named analytical cuts.
 
-One set of task rows carries three independent graphs, and none of them is
-visible from a task list:
+One set of task rows carries four independent relationship graphs plus a
+registry of analytical cuts, and none of them is visible from a task list:
 
 * **origin forest** — ``origin: task:<handle>`` links a task to the task that
   caused it, so the board grows lineage families rooted at operator steering.
@@ -9,6 +9,8 @@ visible from a task list:
   is a plan skeleton and deliberately not the same shape as lineage.
 * **review network** — ``review_author`` links a reviewer to the author whose
   task they reviewed, which is the only record of who checks whose work.
+* **phase ladder** — ``phase_0`` through ``phase_N`` record the route the
+  allocator actually walked.
 
 Every view is derived from exported task rows. Two sources are off limits by
 construction: the ledger export self-warns that it is lossy and does not
@@ -24,11 +26,13 @@ from typing import Any
 
 from spice.errors import SpiceError
 from spice.tasks import identity, tw
+from spice.tasks.graphs import registry
 
 TaskRow = dict[str, Any]
 
 #: Views the surface can emit, in presentation order.
-VIEWS = ("origin", "depends", "review", "phase")
+LEGACY_VIEWS = ("origin", "depends", "review", "phase")
+VIEWS = (*LEGACY_VIEWS, *registry.NAMES)
 
 #: Longest label a node carries before it is cut and ellipsed.
 LABEL_LIMIT = 44
@@ -266,13 +270,32 @@ _RENDERERS = {
 }
 
 
-def render(view: str, rows: list[TaskRow] | None = None, *, ceiling: str = "") -> str:
+def render(
+    view: str,
+    rows: list[TaskRow] | None = None,
+    *,
+    ceiling: str = "",
+    check_aspect: str = "",
+) -> str:
     """Mermaid source for one view, ready to render unmodified."""
+    filtered = live_rows(rows, ceiling=ceiling)
+    if view in registry.NAMES:
+        if check_aspect:
+            registry.validate_aspect(view, *registry.parse_aspect(check_aspect))
+        rendered = registry.render(view, filtered)
+        stamp = _ceiling_stamp(ceiling)
+        if stamp:
+            lines = rendered.splitlines()
+            lines.insert(2, f"%% Snapshot ceiling: incepted <= {stamp}")
+            return "\n".join(lines)
+        return rendered
+    if check_aspect:
+        raise SpiceError("--check-aspect is available only for named canned graphs")
     renderer = _RENDERERS.get(view)
     if renderer is None:
         raise SpiceError(f"unknown graph view {view!r}; choose from {', '.join(VIEWS)}")
     stamp = _ceiling_stamp(ceiling)
-    rendered = renderer(live_rows(rows, ceiling=stamp))
+    rendered = renderer(filtered)
     if not stamp:
         return rendered
     lines = rendered.splitlines()

@@ -24,6 +24,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.tasks import graph
+from spice.tasks.graphs import registry
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RENDERER = PROJECT_ROOT / "tests" / "browser" / "task_graph_mermaid_render.js"
@@ -31,7 +32,7 @@ MERMAID_BUNDLE = PROJECT_ROOT / "node_modules" / "mermaid" / "dist" / "mermaid.m
 
 
 def _rows() -> list[dict]:
-    """A small board carrying all four graphs at once.
+    """A small board carrying every relationship type at once.
 
     Every field the surface reads is present on at least one row, and every
     escaping hazard is present on at least one label.
@@ -106,23 +107,40 @@ def test_live_rows_drop_deleted_smoke_residue() -> None:
     assert [row["uuid"] for row in rows] == ["u-seed", "u-child", "u-blocked"]
 
 
+def test_canned_derivations_accept_export_shapes() -> None:
+    from spice.tasks.graphs import derive
+
+    row = {"entry": "20260721T035259Z", "project": ".oops.workflow"}
+
+    assert derive.epoch(row, "entry") is not None
+    assert derive.stem(row) == "oops"
+
+
 def test_task_graph_cli_passes_the_inception_ceiling_to_rendering(
     monkeypatch, capsys
 ) -> None:
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    def fake_render(view: str, *, ceiling: str = "") -> str:
-        calls.append((view, ceiling))
+    def fake_render(view: str, *, ceiling: str = "", check_aspect: str = "") -> str:
+        calls.append((view, ceiling, check_aspect))
         return "%% fixed snapshot"
 
     monkeypatch.setattr(graph, "render", fake_render)
     args = build_parser().parse_args(
-        ["task", "graph", "phase", "--ceiling", "LINEAGE-9kG0bbbb"]
+        [
+            "task",
+            "graph",
+            "20-daily-throughput-xy",
+            "--ceiling",
+            "LINEAGE-9kG0bbbb",
+            "--check-aspect",
+            "1100x560",
+        ]
     )
 
     assert args.func(args) == 0
     assert capsys.readouterr().out == "%% fixed snapshot\n"
-    assert calls == [("phase", "LINEAGE-9kG0bbbb")]
+    assert calls == [("20-daily-throughput-xy", "LINEAGE-9kG0bbbb", "1100x560")]
 
 
 def test_fixed_ceiling_is_reproducible_across_live_board_churn(monkeypatch) -> None:
@@ -251,6 +269,76 @@ def test_render_annotates_every_advertised_view() -> None:
     assert all(text.startswith("%% ") for text in rendered.values())
 
 
+def test_canned_registry_is_the_complete_handout_selection() -> None:
+    expected = (
+        "29-integration-gitgraph",
+        "23-hour-of-day-xy",
+        "15-reviewer-strictness-xy",
+        "05-phase-flow-sankey",
+        "26-era-timeline",
+        "13b-review-matrix-sankey",
+        "17-stem-quadrant",
+        "20-daily-throughput-xy",
+        "30-origin-kind-sankey",
+        "07-origin-family-1",
+        "01-project-stems-xy",
+        "06-lifecycle-state",
+        "24b-final-phase-turnaround-xy",
+        "12-lineage-handoff-sankey",
+        "18-friction-oops-board",
+        "02-agent-worktrees-xy",
+        "03-project-tree-mindmap",
+        "04-agent-to-stem-sankey",
+        "07-origin-family-2",
+        "07-origin-family-3",
+        "08-origin-deepest-spines",
+        "09-ack-seeding-fanout",
+        "10-dependency-component-1",
+        "10-dependency-component-2",
+        "11-taskdoc-families",
+        "13-review-network",
+        "14-review-findings-pie",
+        "16-stem-difficulty-xy",
+        "19-priority-to-stem-sankey",
+        "21-cumulative-burnup-xy",
+        "22-lane-concurrency-xy",
+        "24-cycle-time-xy",
+        "25-campaign-gantt",
+        "27-task-verbs-xy",
+        "28-record-schema-er",
+        "31-title-length-xy",
+        "32-board-at-a-glance",
+    )
+
+    assert registry.NAMES == expected
+    assert {cut.family for cut in registry.CUTS} == {
+        "flow",
+        "magnitude",
+        "time",
+        "topology",
+    }
+
+
+def test_canned_registry_bakes_in_exactly_eight_unique_palette_slots() -> None:
+    assert len(registry.PALETTE) == 8
+    assert len(set(registry.PALETTE)) == 8
+    for name in registry.NAMES:
+        rendered = graph.render(name, _rows())
+        assert registry.PALETTE[0] in rendered
+
+
+def test_aspect_guard_rejects_extreme_layouts() -> None:
+    name = registry.NAMES[0]
+
+    assert registry.validate_aspect(name, 1200, 600) == 2
+    with pytest.raises(SpiceError, match="12.00:1"):
+        registry.validate_aspect(name, 1200, 100)
+    with pytest.raises(SpiceError, match="0.17:1"):
+        registry.validate_aspect(name, 170, 1000)
+    with pytest.raises(SpiceError, match="WIDTHxHEIGHT"):
+        graph.render(name, _rows(), check_aspect="wide")
+
+
 def test_every_emitted_diagram_renders_through_real_mermaid(tmp_path: Path) -> None:
     """The load-bearing test: each view is laid out by mermaid in Chromium.
 
@@ -284,3 +372,7 @@ def test_every_emitted_diagram_renders_through_real_mermaid(tmp_path: Path) -> N
     for view in diagrams:
         assert reported[view]["ok"] is True, f"{view}: {reported[view]['error']}"
         assert reported[view]["svgLength"] > 0
+        if view in registry.NAMES:
+            registry.validate_aspect(
+                view, reported[view]["width"], reported[view]["height"]
+            )

@@ -221,21 +221,23 @@ def _configure_artifact_parser(actions: Any) -> None:
 def _configure_task_graph_parser(actions: Any) -> None:
     graph_cmd = actions.add_parser(
         "graph",
-        help="Emit a board graph as mermaid.",
+        help="Emit a named live-board diagram as mermaid.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Emit one of the graphs the board carries as mermaid source: the "
-            "origin forest, the dependency DAG, the review network, or the "
-            "phase ladder. Output renders unmodified."
+            "Emit a live-board diagram as render-ready mermaid source. Four "
+            "relationship views remain available, followed by the 37 ranked "
+            "handout cuts across magnitude, flow, topology, and time families."
         ),
         epilog=(
             "Examples:\n"
             "  spice task graph review\n"
-            "  spice task graph phase --ceiling 1kG0aaaa"
+            "  spice task graph 20-daily-throughput-xy\n"
+            "  spice task graph 29-integration-gitgraph --ceiling 1kG0aaaa\n"
+            "  spice task graph 29-integration-gitgraph --check-aspect 1200x660"
         ),
         recovery_examples=(
             "spice task graph review",
-            "spice task graph phase --ceiling 1kG0aaaa",
+            "spice task graph 20-daily-throughput-xy --ceiling 1kG0aaaa",
         ),
     )
     graph_cmd.add_argument("view", choices=graph.VIEWS)
@@ -247,6 +249,12 @@ def _configure_task_graph_parser(actions: Any) -> None:
             "Render an inclusive, reproducible snapshot ending at this "
             "incepted stamp or task handle."
         ),
+    )
+    graph_cmd.add_argument(
+        "--check-aspect",
+        metavar="WIDTHxHEIGHT",
+        default="",
+        help="Reject measured renderer dimensions outside the shipped aspect bounds.",
     )
     graph_cmd.set_defaults(func=handle)
 
@@ -973,7 +981,9 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
-    "graph": lambda a: graph.render(a.view, ceiling=a.ceiling),
+    "graph": lambda a: graph.render(
+        a.view, ceiling=a.ceiling, check_aspect=a.check_aspect
+    ),
     "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(
