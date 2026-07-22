@@ -82,7 +82,7 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
         "removeLane": 1,
         "laneForId": 29,
         "hasLane": 8,
-        "lanesSnapshot": 24,
+        "lanesSnapshot": 23,
     }
 
 
