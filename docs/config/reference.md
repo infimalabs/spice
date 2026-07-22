@@ -507,10 +507,15 @@ is a collected `test_*.py` file under the configured test roots, and reach
 follows imports wherever they appear, including inside function bodies. It
 ranks every package module by how many test modules reach it, alongside how
 many name it directly, so a candidate is compared against the whole ordering
-rather than judged alone:
+rather than judged alone. The angle-bracketed fields below are filled from the
+live graph:
 
 ```console
 $ spice study suite-seam-reach --limit 30
+suite-seam-reach: <declared> declared module(s) of <package-modules>, reached by at least <floor> of <test-modules> test module(s)
+suite-seam-reach: <widest-undeclared-path> leads the undeclared rest at <reach>, so the band is <verdict>
+  <reach> reached <direct-imports> imported  <package-path> [declared]
+  ...
 ```
 
 The command's two header lines are the decision. The first reports the reach
