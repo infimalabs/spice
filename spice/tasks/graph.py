@@ -41,7 +41,12 @@ _TASK_ORIGIN_PREFIX = "task:"
 _UNPLACED = "(unplaced)"
 
 
-def live_rows(rows: list[TaskRow] | None = None, *, ceiling: str = "") -> list[TaskRow]:
+def live_rows(
+    rows: list[TaskRow] | None = None,
+    *,
+    ceiling: str = "",
+    include_deleted: bool = False,
+) -> list[TaskRow]:
     """Exported rows with deleted and post-ceiling ones dropped.
 
     Deleted rows are overwhelmingly smoke-test residue and would otherwise
@@ -53,7 +58,7 @@ def live_rows(rows: list[TaskRow] | None = None, *, ceiling: str = "") -> list[T
     return [
         row
         for row in source
-        if str(row.get("status") or "") != "deleted"
+        if (include_deleted or str(row.get("status") or "") != "deleted")
         and (
             not stamp
             or (
@@ -61,6 +66,16 @@ def live_rows(rows: list[TaskRow] | None = None, *, ceiling: str = "") -> list[T
             )
         )
     ]
+
+
+def rows_for(
+    view: str,
+    rows: list[TaskRow] | None = None,
+    *,
+    ceiling: str = "",
+) -> list[TaskRow]:
+    include_deleted = view in registry.NAMES and registry.cut(view).include_archived
+    return live_rows(rows, ceiling=ceiling, include_deleted=include_deleted)
 
 
 def _ceiling_stamp(value: str) -> str:
@@ -278,7 +293,7 @@ def render(
     check_aspect: str = "",
 ) -> str:
     """Mermaid source for one view, ready to render unmodified."""
-    filtered = live_rows(rows, ceiling=ceiling)
+    filtered = rows_for(view, rows, ceiling=ceiling)
     if view in registry.NAMES:
         if check_aspect:
             registry.validate_aspect(view, *registry.parse_aspect(check_aspect))

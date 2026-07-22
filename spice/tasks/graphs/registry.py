@@ -28,6 +28,7 @@ INK = "#0b0b0b"
 MUTED = "#898781"
 MIN_ASPECT_RATIO = 0.25
 MAX_ASPECT_RATIO = 5.0
+RANKED_CUT_COUNT = 15
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class Cut:
     name: str
     family: str
     builder: Builder
+    rank: int
+    include_archived: bool
 
 
 _SEED = (
@@ -86,7 +89,30 @@ _BUILDERS = {
 if set(_BUILDERS) != {name for name, _family in _SEED}:
     raise RuntimeError("board graph builders do not match the handout registry")
 
-CUTS = tuple(Cut(name, family, _BUILDERS[name]) for name, family in _SEED)
+_ARCHIVED_FILINGS = frozenset(
+    {
+        "02-agent-worktrees-xy",
+        "09-ack-seeding-fanout",
+        "18-friction-oops-board",
+        "20-daily-throughput-xy",
+        "21-cumulative-burnup-xy",
+        "22-lane-concurrency-xy",
+        "26-era-timeline",
+        "27-task-verbs-xy",
+        "30-origin-kind-sankey",
+        "31-title-length-xy",
+    }
+)
+CUTS = tuple(
+    Cut(
+        name,
+        family,
+        _BUILDERS[name],
+        index + 1 if index < RANKED_CUT_COUNT else 0,
+        name in _ARCHIVED_FILINGS,
+    )
+    for index, (name, family) in enumerate(_SEED)
+)
 NAMES = tuple(cut.name for cut in CUTS)
 _INDEX = {cut.name: cut for cut in CUTS}
 
@@ -171,6 +197,19 @@ def render(name: str, rows: list[TaskRow]) -> str:
     init = json.dumps(_settings(_kind(body)), separators=(",", ":"))
     comments = "\n".join(f"%% {part.strip().rstrip('.')}." for part in note.split(". "))
     return f"%% {title}\n{comments}\n%%{{init: {init}}}%%\n{body.strip()}"
+
+
+def describe(name: str, rows: list[TaskRow]) -> tuple[str, str, str]:
+    return cut(name).builder(rows)
+
+
+def cut(name: str) -> Cut:
+    selected = _INDEX.get(name)
+    if selected is None:
+        raise SpiceError(
+            f"unknown canned graph {name!r}; choose from {', '.join(NAMES)}"
+        )
+    return selected
 
 
 def validate_aspect(name: str, width: float, height: float) -> float:

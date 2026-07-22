@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
@@ -23,6 +24,7 @@ from spice.tasks import (
 )
 from spice.tasks.markdown.apply import ingest_path
 from spice.tasks.markdown.ledger import render_ledger
+from spice.tasks.graphs import handout as graphhandout
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -86,6 +88,7 @@ def _configure_task_read_parsers(actions: Any) -> None:
     show.set_defaults(func=handle)
 
     _configure_task_graph_parser(actions)
+    _configure_task_handout_parser(actions)
 
     ledger = actions.add_parser(
         "ledger",
@@ -225,7 +228,7 @@ def _configure_task_graph_parser(actions: Any) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Emit a live-board diagram as render-ready mermaid source. Four "
-            "relationship views remain available, followed by the 37 ranked "
+            "relationship views remain available, followed by the 37 selected "
             "handout cuts across magnitude, flow, topology, and time families."
         ),
         epilog=(
@@ -257,6 +260,38 @@ def _configure_task_graph_parser(actions: Any) -> None:
         help="Reject measured renderer dimensions outside the shipped aspect bounds.",
     )
     graph_cmd.set_defaults(func=handle)
+
+
+def _configure_task_handout_parser(actions: Any) -> None:
+    handout = actions.add_parser(
+        "handout",
+        help="Render every named board diagram and compose a PDF handout.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Export the board once, regenerate all 37 named diagram assets, and "
+            "compose them into a standalone HTML and landscape PDF."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  spice task handout\n"
+            "  spice task handout --ceiling 1kG0aaaa --output output/pdf/board"
+        ),
+        recovery_examples=("spice task handout --ceiling 1kG0aaaa",),
+    )
+    handout.add_argument(
+        "--output",
+        type=Path,
+        default=graphhandout.DEFAULT_OUTPUT,
+        metavar="DIRECTORY",
+        help=f"Output directory (default: {graphhandout.DEFAULT_OUTPUT}).",
+    )
+    handout.add_argument(
+        "--ceiling",
+        metavar="INCEPTED_OR_HANDLE",
+        default="",
+        help="Use an inclusive task-inception ceiling for a reproducible snapshot.",
+    )
+    handout.set_defaults(func=handle)
 
 
 def _configure_task_phase_parsers(actions: Any) -> None:
@@ -984,6 +1019,7 @@ _DISPATCH = {
     "graph": lambda a: graph.render(
         a.view, ceiling=a.ceiling, check_aspect=a.check_aspect
     ),
+    "handout": lambda a: graphhandout.generate(a.output, ceiling=a.ceiling),
     "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(

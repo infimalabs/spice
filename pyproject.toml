@@ -62,6 +62,7 @@ namespaces = true
     "*.webmanifest",
     "icons/*.svg",
 ]
+"spice.tasks.graphs" = ["*.js"]
 
 [dependency-groups]
 dev = [
