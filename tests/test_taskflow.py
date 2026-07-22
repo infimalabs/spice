@@ -75,6 +75,29 @@ def test_live_peer_claim_deadline_selects_earliest_future_peer(monkeypatch):
     assert deadline == "2026-07-22T08:03:00Z"
 
 
+def test_live_peer_claim_deadline_lapses_from_the_clock_with_no_event(monkeypatch):
+    """A lease can go from live to lapsed with the board byte-for-byte identical.
+
+    That is what the allocator wait has to survive: the rows never change, so
+    nothing writes a task event or an inbox entry, and only re-reading the clock
+    reveals that the peer this lane was waiting behind no longer holds anything.
+    """
+    now = {"value": "2026-07-22T08:00:00Z"}
+    rows = [{"claim_by": PEER_ACTOR, "claim_until": "2026-07-22T08:02:00Z"}]
+    monkeypatch.setattr(alloc.tw, "now_iso", lambda: now["value"])
+    monkeypatch.setattr(alloc, "visible_active_rows", lambda _actor: rows)
+
+    before = alloc.live_peer_claim_deadline(ACTOR_A)
+    now["value"] = "2026-07-22T08:03:00Z"
+    after = alloc.live_peer_claim_deadline(ACTOR_A)
+
+    assert {"before": before, "after": after, "clock_alone": before != after} == {
+        "before": "2026-07-22T08:02:00Z",
+        "after": None,
+        "clock_alone": True,
+    }
+
+
 def test_task_capture_mints_task_over_loose_then_done_captures_it(remote_task_repo):
     loose = _make_loose_commit(remote_task_repo, subject="loose fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1

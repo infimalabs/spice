@@ -510,7 +510,71 @@ def test_task_next_wait_returns_terminal_empty_state(monkeypatch):
             "no available tasks; run spice task status",
         ]
     )
-    assert calls == ["token", "next", "token", "peer", "token"]
+    # Genuine terminal empty still concedes, and it concedes only after the
+    # second allocation agrees with the first.
+    assert calls == ["token", "next", "token", "peer", "next", "token"]
+
+
+def test_task_next_wait_claims_takeover_when_peer_lease_lapses_mid_decision(
+    monkeypatch,
+):
+    """The deadline-edge race: a peer lease lapses between the two snapshots.
+
+    The first allocation runs while the peer still holds its claim, so nothing
+    is available. By the time the peer deadline is sampled the lease has lapsed,
+    leaving no live peer to wait behind. Nothing wrote a task event -- the token
+    is constant here precisely to prove the fix cannot lean on it -- so the lane
+    used to concede terminal empty while a stale takeover was already sitting
+    there. Allocation re-reads the clock, so re-running it is what sees the row.
+    """
+    row = _row(
+        "Taken over after the peer lease lapsed",
+        project="task.allocator",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update({"phase_i": "0", "urgency": "9.2"})
+    calls: list[str] = []
+    # Live peer, then lapsed: the whole race is that these two observations of
+    # one board disagree because they read the clock at different instants.
+    allocations = iter((None, row))
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(
+        render.alloc,
+        "next_task",
+        lambda: calls.append("next") or next(allocations),
+    )
+    monkeypatch.setattr(
+        render.alloc,
+        "live_peer_claim_deadline",
+        lambda: calls.append("peer") or None,
+    )
+    monkeypatch.setattr(
+        render.eventwait,
+        "task_event_token",
+        lambda: calls.append("token") or "stable",
+    )
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo"])
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next(wait=True)
+
+    assert (
+        "next task:\nTASK-test [todo] P:M task.allocator "
+        "Taken over after the peer lease lapsed" in output
+    )
+    # Allocation reran after the peer deadline came back empty, and it decided
+    # the outcome before the token was ever consulted a third time.
+    assert calls == ["token", "next", "token", "peer", "next"]
 
 
 def test_task_next_wait_yields_to_pending_steering(monkeypatch):
@@ -572,7 +636,7 @@ def test_task_next_wait_rechecks_at_peer_claim_deadline(monkeypatch):
             "no available tasks; run spice task status",
         ]
     )
-    assert calls == ["next", "peer", "next", "peer"]
+    assert calls == ["next", "peer", "next", "peer", "next"]
 
 
 def test_task_next_wait_interrupt_exits_through_cli_boundary(monkeypatch, capsys):
