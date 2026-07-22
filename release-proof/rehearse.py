@@ -56,6 +56,10 @@ MUTATION_GATE_COMMAND = (
     "--json",
 )
 PACKAGING_MODULES = ("build.__main__", "setuptools", "twine", "wheel")
+GIT_PRIVATE_RECORD_PRODUCERS = {
+    "release-proof-identities.json": "release-proof/init-source.py",
+    "release-proof-toolchain.json": "release-proof/toolchain.py",
+}
 PLAYWRIGHT_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
@@ -561,54 +565,41 @@ def wheel_member_mismatches(canonical: Path, rebuilt: Path) -> list[dict[str, st
     return mismatches
 
 
-def load_git_private_json(root: Path, name: str) -> dict[str, Any]:
-    path = _git_private_path(root, name)
+def git_private_path(root: Path, name: str) -> Path:
+    """Resolve a Git-private record the way init-source.py writes it.
+
+    A linked worktree keeps a ``.git`` file holding a gitdir pointer, so
+    joining ``.git`` as a directory raises ``Not a directory`` there. Asking
+    Git for the path works for both layouts.
+    """
+    resolved = Path(
+        _run(
+            ["git", "rev-parse", "--git-path", name],
+            cwd=root,
+            capture=True,
+            gate="git-private-path",
+        ).stdout.strip()
+    )
+    return resolved if resolved.is_absolute() else root / resolved
+
+
+def _load_git_private_json(root: Path, name: str) -> dict[str, Any]:
+    path = git_private_path(root, name)
+    if not _proof_record_exists(path):
+        producer = GIT_PRIVATE_RECORD_PRODUCERS[name]
+        raise RehearsalError(
+            f"missing Git-private proof record {name} at {path}; "
+            f"{producer} writes it during the release-proof container build, "
+            "so a host checkout that has not run that build cannot emit a "
+            "receipt for artifacts it otherwise proved"
+        )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise RehearsalError(f"missing Git-private proof record: {path}") from exc
     except json.JSONDecodeError as exc:
         raise RehearsalError(f"invalid Git-private proof record JSON: {path}") from exc
     if not isinstance(payload, dict):
         raise RehearsalError(f"invalid Git-private proof record: {path}")
     return payload
-
-
-def _git_private_path(root: Path, name: str) -> Path:
-    marker = root / ".git"
-    if marker.is_dir():
-        git_dir = marker.resolve(strict=True)
-        return git_dir / name
-    try:
-        pointer = marker.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise RehearsalError(
-            f"cannot read Git directory marker for proof record {name!r}: {exc}"
-        ) from exc
-    prefix = "gitdir:"
-    if not pointer.startswith(prefix):
-        raise RehearsalError(
-            f"invalid Git directory marker for proof record {name!r}: {marker}"
-        )
-    raw = pointer.removeprefix(prefix).strip()
-    if not raw:
-        raise RehearsalError(
-            f"empty Git directory marker for proof record {name!r}: {marker}"
-        )
-    candidate = Path(raw)
-    if not candidate.is_absolute():
-        candidate = marker.parent / candidate
-    try:
-        git_dir = candidate.resolve(strict=True)
-    except OSError as exc:
-        raise RehearsalError(
-            f"cannot resolve Git directory for proof record {name!r}: {exc}"
-        ) from exc
-    if not git_dir.is_dir():
-        raise RehearsalError(
-            f"Git directory for proof record {name!r} is not a directory: {git_dir}"
-        )
-    return git_dir / name
 
 
 def _container_provenance(
@@ -618,12 +609,12 @@ def _container_provenance(
         "release-proof-identities.json",
         "release-proof-toolchain.json",
     )
-    paths = {name: _git_private_path(root, name) for name in names}
+    paths = {name: git_private_path(root, name) for name in names}
     present = {name: _proof_record_exists(path) for name, path in paths.items()}
     if all(present.values()):
         return (
-            load_git_private_json(root, names[0]),
-            load_git_private_json(root, names[1]),
+            _load_git_private_json(root, names[0]),
+            _load_git_private_json(root, names[1]),
             {
                 "operating_system": "linux",
                 "host_native_companion": "release-proof-macos.json",
@@ -679,7 +670,7 @@ def _proof_record_exists(path: Path) -> bool:
     return True
 
 
-def _write_receipt(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -765,7 +756,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         },
         "failure_diagnostics": failure_policy_payload(),
     }
-    _write_receipt(artifact_dir / RECEIPT_NAME, receipt)
+    _write_json(artifact_dir / RECEIPT_NAME, receipt)
     return receipt
 
 

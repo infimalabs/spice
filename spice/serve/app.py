@@ -161,6 +161,7 @@ class ServeState:
         self.targets_discovery_error = ""
         self.rollout_cursors: dict[tuple[str, str], RolloutCursor] = {}
         self.pending_agent_ensure_attempts: dict[str, float] = {}
+        self.available_work_ready_since: dict[tuple[str, str], float] = {}
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self._team_store = (
             team_store

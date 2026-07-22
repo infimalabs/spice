@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from http import HTTPStatus
+from collections.abc import Callable
 from typing import Any, Sequence
 
 from spice.agent.driver import driver_for
@@ -38,7 +39,13 @@ from spice.tasks import alloc, claimstate, identity
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
-_AVAILABLE_WORK_CLAIM_LOCK = threading.Lock()
+# Before a start there must be one ready task for the new lane and one more
+# still available than the number of lanes already running.
+AVAILABLE_WORK_READY_TASK_MARGIN = 2
+AVAILABLE_WORK_STARVATION_SECONDS = 5.0 * 60.0
+# Capacity, candidate selection, claim, and startup are one serialized decision:
+# another inventory refresh must observe the started lane before it can expand.
+_AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
 
 
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
@@ -234,6 +241,8 @@ def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
     thread_id: str,
+    running_lane_count: Callable[[], int] | None = None,
+    ready_since_cache: dict[tuple[str, str], float] | None = None,
     attempt_cache: dict[str, float] | None = None,
     retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
@@ -241,31 +250,51 @@ def ensure_agent_for_available_work(
 ) -> dict[str, Any] | None:
     """Claim one task as a stopped lane's actor, then start only that lane.
 
-    This is deliberately a single-candidate decision. A concurrent claimant
-    winning that row ends the decision; falling through to another row would
-    turn one stale inventory observation into a spawn despite losing its guard.
+    The Drain-only caller supplies the live lane count. Expansion requires two
+    more ready tasks than running lanes unless one candidate has remained ready
+    for the starvation interval. This is deliberately a single-candidate
+    decision: a lost claim never falls through to another stale candidate.
     """
     actor = canonical_thread_id(thread_id)
     if not actor:
         return _available_work_skip("unbound")
     if agent_status(target.repo_root).running:
+        forget_available_work_observations(actor, ready_since_cache)
         return None
     if not _ensure_due(
         target.id, attempt_cache=attempt_cache, retry_seconds=retry_seconds
     ):
         return None
-    site = claimstate.ClaimSite(
-        worktree=target.repo_root.resolve(),
-        branch=target.branch or git_read(target.repo_root, "branch", "--show-current"),
-        head=git_read(target.repo_root, "rev-parse", "HEAD"),
-    )
     with _AVAILABLE_WORK_CLAIM_LOCK:
+        if agent_status(target.repo_root).running:
+            forget_available_work_observations(actor, ready_since_cache)
+            return None
         candidates = alloc.ordered_visible_ready_rows(actor)
         if not candidates:
+            forget_available_work_observations(actor, ready_since_cache)
             return None
+        now = time.monotonic()
+        starved = _observe_available_work_candidates(
+            actor,
+            candidates,
+            ready_since_cache,
+            now=now,
+        )
+        required_task_count = (
+            max(0, int(running_lane_count() if running_lane_count else 0))
+            + AVAILABLE_WORK_READY_TASK_MARGIN
+        )
+        if len(candidates) < required_task_count and not starved:
+            return _available_work_skip("capacity")
         chosen = candidates[0]
         task_uuid = identity.uuid_of(chosen)
         handle = identity.render_handle(chosen)
+        site = claimstate.ClaimSite(
+            worktree=target.repo_root.resolve(),
+            branch=target.branch
+            or git_read(target.repo_root, "branch", "--show-current"),
+            head=git_read(target.repo_root, "rev-parse", "HEAD"),
+        )
         claimed = claimstate.do_claim(
             task_uuid,
             actor,
@@ -274,22 +303,68 @@ def ensure_agent_for_available_work(
             lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
             guard_unclaimed=True,
         )
-    if not claimed:
-        return _available_work_skip("claim-lost", task_handle=handle)
-    try:
-        payload, _status = agent_ensure_response_payload(
-            target,
-            fast_mode=fast_mode,
-            force_new=force_new,
-            automatic=True,
-        )
-    except Exception:
-        claimstate.release_claim(task_uuid, actor)
-        raise
-    payload.update({"trigger": "available-work", "taskHandle": handle})
-    if payload.get("ok") is False:
-        payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
-    return payload
+        if not claimed:
+            return _available_work_skip("claim-lost", task_handle=handle)
+        forget_available_work_observation(actor, task_uuid, ready_since_cache)
+        try:
+            payload, _status = agent_ensure_response_payload(
+                target,
+                fast_mode=fast_mode,
+                force_new=force_new,
+                automatic=True,
+            )
+        except Exception:
+            claimstate.release_claim(task_uuid, actor)
+            raise
+        payload.update({"trigger": "available-work", "taskHandle": handle})
+        if payload.get("ok") is False:
+            payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+        return payload
+
+
+def _observe_available_work_candidates(
+    actor: str,
+    candidates: Sequence[dict[str, Any]],
+    ready_since_cache: dict[tuple[str, str], float] | None,
+    *,
+    now: float,
+) -> bool:
+    if ready_since_cache is None:
+        return False
+    candidate_keys = {(actor, identity.uuid_of(row)) for row in candidates}
+    for key in tuple(ready_since_cache):
+        if key[0] == actor and key not in candidate_keys:
+            ready_since_cache.pop(key, None)
+    for key in candidate_keys:
+        ready_since_cache.setdefault(key, now)
+    return any(
+        now - ready_since_cache[key] >= AVAILABLE_WORK_STARVATION_SECONDS
+        for key in candidate_keys
+    )
+
+
+def forget_available_work_observation(
+    actor: str,
+    task_uuid: str,
+    ready_since_cache: dict[tuple[str, str], float] | None,
+) -> None:
+    resolved_actor = canonical_thread_id(actor)
+    if ready_since_cache is not None and resolved_actor:
+        with _AVAILABLE_WORK_CLAIM_LOCK:
+            ready_since_cache.pop((resolved_actor, task_uuid), None)
+
+
+def forget_available_work_observations(
+    actor: str,
+    ready_since_cache: dict[tuple[str, str], float] | None,
+) -> None:
+    resolved_actor = canonical_thread_id(actor)
+    if ready_since_cache is None or not resolved_actor:
+        return
+    with _AVAILABLE_WORK_CLAIM_LOCK:
+        for key in tuple(ready_since_cache):
+            if key[0] == resolved_actor:
+                ready_since_cache.pop(key, None)
 
 
 def _available_work_skip(reason: str, *, task_handle: str = "") -> dict[str, Any]:

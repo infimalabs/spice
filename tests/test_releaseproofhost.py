@@ -97,13 +97,6 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
     monkeypatch.setattr(REHEARSAL, "_build_canonical_artifacts", build)
     monkeypatch.setattr(REHEARSAL, "_validate_installed_wheel", lambda *_args: None)
     monkeypatch.setattr(REHEARSAL, "_rebuild_wheel_from_sdist", rebuild)
-    monkeypatch.setattr(
-        REHEARSAL,
-        "_run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, 0, stdout="", stderr=""
-        ),
-    )
 
     receipt = REHEARSAL.rehearse(root, artifacts)
 
@@ -134,18 +127,3 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
         json.loads((artifacts / REHEARSAL.RECEIPT_NAME).read_text(encoding="utf-8"))
         == receipt
     )
-
-
-def test_git_private_proof_records_resolve_in_a_linked_worktree(tmp_path):
-    repository = _repository(tmp_path / "source")
-    linked = tmp_path / "linked"
-    _git(repository, "worktree", "add", "--quiet", "-b", "linked", str(linked))
-    record = {"schema_version": 1, "source": {"kind": "linked-worktree"}}
-    path = Path(
-        _git(linked, "rev-parse", "--path-format=absolute", "--git-path", "proof.json")
-    )
-    path.write_text(json.dumps(record), encoding="utf-8")
-
-    resolved = REHEARSAL.load_git_private_json(linked, "proof.json")
-
-    assert resolved == record

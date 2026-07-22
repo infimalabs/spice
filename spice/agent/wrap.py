@@ -85,10 +85,17 @@ SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 
-# The working-state banner is a change notification, not a periodic meter: once a
-# given state has been shown it stays silent until the state itself changes, so
-# it never becomes repeated noise on each shell command.
+# The working-state banner is normally a change notification, not a periodic
+# meter. Claim-expiry warnings are the exception: a quiet, long-running command
+# still needs deadline-driven reminders before its lease can lapse.
 AGENT_RUN_WORKING_STATE_REPEAT_SECONDS = math.inf
+CLAIM_LEASE_WARNING_SECONDS = 10 * 60
+CLAIM_LEASE_URGENT_SECONDS = 5 * 60
+CLAIM_LEASE_CRITICAL_SECONDS = 60
+CLAIM_LEASE_WARNING_REPEAT_SECONDS = 2 * 60.0
+CLAIM_LEASE_URGENT_REPEAT_SECONDS = 60.0
+CLAIM_LEASE_CRITICAL_REPEAT_SECONDS = 15.0
+CLAIM_LEASE_TIMER_MIN_SECONDS = 0.05
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 # The watcher's connect+hello to the supervisor socket carries this budget so a
@@ -100,7 +107,7 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
-WorkingStateKey = tuple[int, str, str, str]
+WorkingStateKey = tuple[int, str, str, str, str]
 
 
 @dataclass(frozen=True)
@@ -109,6 +116,7 @@ class WorkingStateSnapshot:
     claim_handle: str = ""
     claim_phase: str = ""
     claim_elapsed_seconds: int | None = None
+    claim_remaining_seconds: int | None = None
     last_maxim_bag: str = ""
 
     def has_fields(self) -> bool:
@@ -565,6 +573,8 @@ class AgentWorkingStateInjector:
         self.snapshot_factory = snapshot_factory or collect_working_state_snapshot
         self.displayed_at: float | None = None
         self.displayed_key: WorkingStateKey | None = None
+        self.latest_snapshot = WorkingStateSnapshot()
+        self.latest_snapshot_at: float | None = None
 
     def inject(self, *, force: bool) -> None:
         del force
@@ -572,11 +582,16 @@ class AgentWorkingStateInjector:
             snapshot = self.snapshot_factory(self.repo_root)
         except Exception:
             return
+        now = self.time_factory()
+        self.latest_snapshot = snapshot
+        self.latest_snapshot_at = now
         if not snapshot.has_fields():
             return
         key = working_state_key(snapshot)
-        now = self.time_factory()
-        if self._should_suppress(key, now=now):
+        repeat_seconds = _working_state_repeat_seconds(
+            snapshot, ceiling=self.repeat_interval_seconds
+        )
+        if self._should_suppress(key, now=now, repeat_seconds=repeat_seconds):
             return
         text = render_working_state_snapshot(snapshot)
         if not text:
@@ -586,11 +601,53 @@ class AgentWorkingStateInjector:
         self.stderr.flush()
         self._record_displayed(key, now=now)
 
-    def _should_suppress(self, key: WorkingStateKey, *, now: float) -> bool:
-        if self._is_recent_match(self.displayed_key, self.displayed_at, key, now=now):
+    def seconds_until_refresh(self) -> float | None:
+        """Return the next claim-warning deadline for a streaming command."""
+        snapshot_at = self.latest_snapshot_at
+        remaining = self.latest_snapshot.claim_remaining_seconds
+        if (
+            snapshot_at is None
+            or remaining is None
+            or not self.latest_snapshot.claim_handle
+        ):
+            return None
+        now = self.time_factory()
+        estimated = max(0.0, float(remaining) - max(0.0, now - snapshot_at))
+        level = _claim_lease_warning_level(int(estimated))
+        displayed_level = self.displayed_key[-1] if self.displayed_key else ""
+        if level != displayed_level:
+            return CLAIM_LEASE_TIMER_MIN_SECONDS
+        deadlines = [_seconds_until_claim_lease_boundary(estimated, level=level)]
+        repeat_seconds = _claim_lease_warning_repeat_seconds(level)
+        if math.isfinite(repeat_seconds):
+            if self.displayed_at is None:
+                deadlines.append(0.0)
+            else:
+                deadlines.append(repeat_seconds - max(0.0, now - self.displayed_at))
+        finite = [delay for delay in deadlines if math.isfinite(delay)]
+        if not finite:
+            return None
+        return max(CLAIM_LEASE_TIMER_MIN_SECONDS, min(finite))
+
+    def _should_suppress(
+        self, key: WorkingStateKey, *, now: float, repeat_seconds: float
+    ) -> bool:
+        if self._is_recent_match(
+            self.displayed_key,
+            self.displayed_at,
+            key,
+            now=now,
+            repeat_seconds=repeat_seconds,
+        ):
             return True
         stored_key, stored_at = read_working_state_state(self.repo_root)
-        if self._is_recent_match(stored_key, stored_at, key, now=now):
+        if self._is_recent_match(
+            stored_key,
+            stored_at,
+            key,
+            now=now,
+            repeat_seconds=repeat_seconds,
+        ):
             self.displayed_key = stored_key
             self.displayed_at = stored_at
             return True
@@ -608,11 +665,12 @@ class AgentWorkingStateInjector:
         key: WorkingStateKey,
         *,
         now: float,
+        repeat_seconds: float,
     ) -> bool:
         if displayed_key != key or displayed_at is None:
             return False
         age = now - displayed_at
-        return 0 <= age < self.repeat_interval_seconds
+        return 0 <= age < repeat_seconds
 
 
 def collect_working_state_snapshot(
@@ -621,14 +679,18 @@ def collect_working_state_snapshot(
     if repo_root is None:
         return WorkingStateSnapshot()
     root = Path(repo_root)
-    claim_handle, claim_phase, claim_elapsed_seconds = _working_state_claim(
-        root, now=now
-    )
+    (
+        claim_handle,
+        claim_phase,
+        claim_elapsed_seconds,
+        claim_remaining_seconds,
+    ) = _working_state_claim(root, now=now)
     return WorkingStateSnapshot(
         pending_inbox_count=_working_state_pending_count(root),
         claim_handle=claim_handle,
         claim_phase=claim_phase,
         claim_elapsed_seconds=claim_elapsed_seconds,
+        claim_remaining_seconds=claim_remaining_seconds,
         last_maxim_bag=_working_state_last_maxim_bag(root),
     )
 
@@ -653,6 +715,14 @@ def render_working_state_snapshot(snapshot: WorkingStateSnapshot) -> str:
         if snapshot.claim_elapsed_seconds is not None:
             claim += f" for {_working_state_duration(snapshot.claim_elapsed_seconds)}"
         parts.append(claim)
+        warning_level = _claim_lease_warning_level(snapshot.claim_remaining_seconds)
+        if warning_level:
+            handle = _working_state_clean_text(snapshot.claim_handle)
+            remaining = _working_state_duration(snapshot.claim_remaining_seconds or 0)
+            parts.append(
+                f"CLAIM LEASE {warning_level.upper()}: {handle} has {remaining} "
+                f"remaining; run spice task reclaim {handle}"
+            )
     if snapshot.last_maxim_bag:
         parts.append(f"last maxim {_working_state_clean_text(snapshot.last_maxim_bag)}")
     if not parts:
@@ -666,6 +736,7 @@ def working_state_key(snapshot: WorkingStateSnapshot) -> WorkingStateKey:
         _working_state_clean_text(snapshot.claim_handle),
         _working_state_clean_text(snapshot.claim_phase),
         _working_state_clean_text(snapshot.last_maxim_bag),
+        _claim_lease_warning_level(snapshot.claim_remaining_seconds),
     )
 
 
@@ -696,20 +767,22 @@ def write_working_state_state(
 
 
 def _working_state_key_payload(value: Any) -> WorkingStateKey | None:
-    if not isinstance(value, list) or len(value) != 4:
+    if not isinstance(value, list) or len(value) not in (4, 5):
         return None
     pending = _int_payload_value(value[0])
     claim_handle = value[1]
     claim_phase = value[2]
     last_maxim = value[3]
+    warning_level = value[4] if len(value) == 5 else ""
     if (
         pending is None
         or not isinstance(claim_handle, str)
         or not isinstance(claim_phase, str)
         or not isinstance(last_maxim, str)
+        or not isinstance(warning_level, str)
     ):
         return None
-    return (pending, claim_handle, claim_phase, last_maxim)
+    return (pending, claim_handle, claim_phase, last_maxim, warning_level)
 
 
 def _working_state_duration(seconds: int) -> str:
@@ -723,16 +796,16 @@ def _working_state_clean_text(value: object) -> str:
 
 def _working_state_claim(
     repo_root: Path, *, now: float | None
-) -> tuple[str, str, int | None]:
+) -> tuple[str, str, int | None, int | None]:
     actor = ambient_thread_id()
     if not actor:
-        return "", "", None
+        return "", "", None, None
     try:
         from spice.tasks import identity, tw
 
         rows = tw.export(["+ACTIVE"])
     except Exception:
-        return "", "", None
+        return "", "", None, None
     own_rows = [
         row
         for row in rows
@@ -740,18 +813,64 @@ def _working_state_claim(
         and _claim_worktree_matches(row, repo_root)
     ]
     if not own_rows:
-        return "", "", None
+        return "", "", None, None
     row = max(
         own_rows,
         key=lambda item: str(item.get("claim_at") or item.get("start") or ""),
     )
     claim_started_at = _iso_timestamp_seconds(str(row.get("claim_at") or ""))
+    claim_expires_at = _iso_timestamp_seconds(str(row.get("claim_until") or ""))
+    current = time.time() if now is None else now
     elapsed = None
     if claim_started_at is not None:
-        elapsed = int(
-            max(0.0, (time.time() if now is None else now) - claim_started_at)
-        )
-    return identity.render_handle(row), str(row.get("phase") or ""), elapsed
+        elapsed = int(max(0.0, current - claim_started_at))
+    remaining = None
+    if claim_expires_at is not None:
+        remaining = int(max(0.0, claim_expires_at - current))
+    return (
+        identity.render_handle(row),
+        str(row.get("phase") or ""),
+        elapsed,
+        remaining,
+    )
+
+
+def _claim_lease_warning_level(remaining_seconds: int | None) -> str:
+    if remaining_seconds is None or remaining_seconds >= CLAIM_LEASE_WARNING_SECONDS:
+        return ""
+    if remaining_seconds < CLAIM_LEASE_CRITICAL_SECONDS:
+        return "critical"
+    if remaining_seconds < CLAIM_LEASE_URGENT_SECONDS:
+        return "urgent"
+    return "warning"
+
+
+def _claim_lease_warning_repeat_seconds(level: str) -> float:
+    return {
+        "warning": CLAIM_LEASE_WARNING_REPEAT_SECONDS,
+        "urgent": CLAIM_LEASE_URGENT_REPEAT_SECONDS,
+        "critical": CLAIM_LEASE_CRITICAL_REPEAT_SECONDS,
+    }.get(level, math.inf)
+
+
+def _working_state_repeat_seconds(
+    snapshot: WorkingStateSnapshot, *, ceiling: float
+) -> float:
+    warning_repeat = _claim_lease_warning_repeat_seconds(
+        _claim_lease_warning_level(snapshot.claim_remaining_seconds)
+    )
+    return min(ceiling, warning_repeat)
+
+
+def _seconds_until_claim_lease_boundary(remaining: float, *, level: str) -> float:
+    target = {
+        "": CLAIM_LEASE_WARNING_SECONDS - 1,
+        "warning": CLAIM_LEASE_URGENT_SECONDS - 1,
+        "urgent": CLAIM_LEASE_CRITICAL_SECONDS - 1,
+    }.get(level)
+    if target is None:
+        return math.inf
+    return max(0.0, remaining - target)
 
 
 def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
