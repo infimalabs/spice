@@ -40,7 +40,7 @@ from spice.agent.driver import (
 from spice.errors import SpiceError
 from spice.paths import git_dir
 from spice.process import tool as processtool
-from spice.tasks import claimstate, ops
+from spice.tasks import claimstate
 
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
@@ -105,14 +105,15 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     monkeypatch.setattr(
         claimstate, "ambient_thread", lambda: ("thread-third", third_driver)
     )
-    monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
-    monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
+    site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third")
+    claim = claimstate.claim_meta("actor-third", site=site)
 
     assert "claim_thread:thread-third" in claim
     assert "claim_context_turn:turn-third" in claim
+    assert f"claim_worktree:{tmp_path}" in claim
+    assert "claim_branch:main" in claim
+    assert "claim_head:head-third" in claim
 
     calls: list[tuple[str, ...]] = []
 
@@ -131,16 +132,13 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     assert calls == [("third:third inner",), ("third inner",)]
 
 
-def test_claim_meta_uses_actor_as_fallback_thread_without_ambient(
-    tmp_path, monkeypatch
-):
+def test_claim_meta_uses_actor_as_thread_without_ambient(tmp_path, monkeypatch):
     monkeypatch.setattr(claimstate, "ambient_thread", lambda: None)
-    monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
-    monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
+    site = claimstate.ClaimSite(tmp_path, "main", "head-third")
 
-    claim = claimstate.claim_meta("actor-third")
+    claim = claimstate.claim_meta("actor-third", site=site)
 
+    assert "claim_by:actorthird" in claim
     assert "claim_thread:actorthird" in claim
     assert "claim_context_turn:actorthird" in claim
 
