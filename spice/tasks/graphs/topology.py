@@ -36,6 +36,18 @@ def lifecycle_state(rows: list[D.TaskRow]) -> tuple[str, str, str]:
     edges = D.phase_edges(rows)
     if not edges:
         return D.empty("The ladder as a machine")
+    if len(edges) <= 3:
+        lines = ["flowchart TD"]
+        for (source, target), count in edges.most_common():
+            lines.append(
+                f'    {D.slug(source)}["{D.label(source)}"] -->|{count}| '
+                f'{D.slug(target)}["{D.label(target)}"]'
+            )
+        return (
+            "The ladder as a machine",
+            "Observed transitions only; configured steps never reached are absent.",
+            "\n".join(lines),
+        )
     lines = ["stateDiagram-v2", "    direction LR"]
     for (source, target), count in edges.most_common():
         left = "[*]" if source == "(filed)" else D.slug(source)
@@ -303,7 +315,11 @@ def friction_board(rows: list[D.TaskRow]) -> tuple[str, str, str]:
     for row in oops:
         kind = str(row.get("oops_kind") or row.get("kind") or "tooling")
         kinds[kind].append(row)
-    lines = ["flowchart LR", f'  oops(["oops triage board<br/>{len(oops)} filed"])']
+    direction = "TD" if len(oops) <= 3 else "LR"
+    lines = [
+        f"flowchart {direction}",
+        f'  oops(["oops triage board<br/>{len(oops)} filed"])',
+    ]
     for kind, members in sorted(kinds.items(), key=lambda item: -len(item[1])):
         group = D.slug(f"kind_{kind}")
         lines.append(f'  oops --> {group}["{D.label(kind)}<br/>{len(members)}"]')
