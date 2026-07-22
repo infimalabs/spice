@@ -115,12 +115,14 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "preserves native command execution" in text
     assert "rtk_guidance=RTK rewrite support is active" in text
     assert "session=spice session briefing" in text
-    assert "task_next=spice task next --wait" in text
+    assert "task_next=spice task next" in text
     assert (
         "task_drain_contract=drive/drain lanes are not done after a task phase boundary"
         in text
     )
-    assert "wakes allocation through the task event" in text
+    assert (
+        "allocates immediately and reports an empty lane rather than blocking" in text
+    )
     assert "task_steer_contract=steer lanes treat allocator continuation" in text
     assert "manual task claims are exceptional" in text
     assert "task_capture_contract=operator requests to create or capture tasks" in text

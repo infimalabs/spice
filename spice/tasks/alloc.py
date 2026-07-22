@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.errors import SpiceError
 from spice.mail.inbox import (
     compose_inbox_text,
     default_inbox_name,
@@ -214,21 +213,6 @@ def visible_active_rows(actor: str) -> list[dict[str, Any]]:
         for r in rows
         if _is_open_task(r) and not is_hidden(r) and str(r.get("claim_by") or "")
     ]
-
-
-def live_peer_claim_deadline(actor: str | None = None) -> str | None:
-    """Earliest deadline among live peer claims visible to this lane."""
-    selected_actor = actor or tw.current_actor()
-    now = tw.now_iso()
-    deadlines = [
-        str(row.get("claim_until") or "")
-        for row in visible_active_rows(selected_actor)
-        if str(row.get("claim_by") or "") != selected_actor
-        and not _is_stale_claim(row, now)
-    ]
-    if any(not deadline for deadline in deadlines):
-        raise SpiceError("active peer claim is missing its claim_until deadline")
-    return min(deadlines, default=None)
 
 
 def briefing_snapshot(actor: str) -> BriefingTaskSnapshot:
