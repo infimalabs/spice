@@ -475,7 +475,32 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
     with pytest.raises(SpiceError, match="oops triage") as exc:
         ops.wake([handle])
 
-    assert "wake --into <public-project>" in str(exc.value)
+    assert f"spice task claim {handle}" in str(exc.value)
+    assert "already in plan mode" in str(exc.value)
+
+
+def test_claimed_oops_is_plan_parent_for_public_child(task_repo):
+    created = ops.oops(
+        "In-place oops plan parent",
+        description="triage builds a public child",
+        origin="ack:1jN54zJJ",
+    )
+    handle = created.split()[1]
+
+    claimed = ops.claim(handle)
+    child = create.add(
+        "Public oops implementation child",
+        project="task.unit",
+        acceptance=["implementation child has an execution contract"],
+    )
+    ops.depends(handle, [child])
+
+    parent_row = identity.resolve(handle)
+    child_row = identity.resolve(child)
+    assert handle in claimed.splitlines()
+    assert parent_row["phase"] == "plan"
+    assert child_row["origin"] == f"task:{handle}"
+    assert identity.uuid_of(child_row) in parent_row["depends"]
 
 
 def test_task_oops_kind_routes_to_child_board_with_caller_tags_only(task_repo):

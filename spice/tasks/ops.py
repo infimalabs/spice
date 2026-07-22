@@ -172,7 +172,9 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         if target is None and alloc.is_oops(row):
             raise SpiceError(
                 f"cannot wake deferred oops triage task: {rendered}; "
-                "promote it with wake --into <public-project>"
+                f"claim it in place with `spice task claim {rendered}` because "
+                "it is already in plan mode, then create and connect public "
+                "child tasks"
             )
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")

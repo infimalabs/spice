@@ -47,8 +47,8 @@ TASK_EVENT_FILENAME = "events"
 DEFAULT_FLOW = defaults.strings("tasks", "default_flow")
 PRIVATE_DEFAULT_FLOW = defaults.strings("tasks", "private_default_flow")
 # The hidden .oops triage project defaults to a lone plan phase: an oops item is
-# a deferred speed bump a human triages by planning follow-up work, so it starts
-# in plan and decomposes into dependent tasks. Oops identity rides the .oops
+# a deferred speed bump claimed in place when triage is directed, so it starts
+# in plan and decomposes into dependent public tasks. Oops identity rides the .oops
 # project stem (.oops and its .oops.* descendants), never a tag or an
 # APPROVED_PHASES entry.
 OOPS_DEFAULT_FLOW = defaults.strings("tasks", "oops_default_flow")
