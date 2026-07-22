@@ -455,6 +455,46 @@ def test_task_next_interrupt_exits_through_cli_boundary(monkeypatch, capsys):
     assert capsys.readouterr().err == "spice: interrupted\n"
 
 
+def test_task_next_cli_refuses_unreadable_lease_with_a_repair_command(
+    task_backend, capsys
+):
+    handle = create.add(
+        "Refuse task next when the current lease policy is unreadable",
+        project="task.render",
+        origin="ack:1kG8h3rm",
+        acceptance=["the CLI refusal leads with an executable repair step"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=2.0,
+    )
+    tw.run(
+        [
+            identity.uuid_of(row),
+            "modify",
+            "claim_lease_seconds:unreadable",
+        ]
+    )
+
+    code = cli_main(["task", "--backend", str(task_backend), "next"])
+
+    captured = capsys.readouterr()
+    suggested_lease = f"{float(config.CLAIM_TTL_SECONDS):g}"
+    assert code == 2
+    assert captured.out == ""
+    assert captured.err == (
+        "spice: run `spice task reclaim "
+        f"{handle} --lease-seconds {suggested_lease}` to repair the claim; "
+        "active claim has unreadable lease duration 'unreadable'\n"
+    )
+    assert identity.resolve(handle)["claim_lease_seconds"] == "unreadable"
+
+
 def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
     row = _row(
         "No transcript context",
