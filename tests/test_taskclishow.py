@@ -685,6 +685,53 @@ def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
     assert "review_agent_diff_command" not in output
 
 
+def test_task_show_renders_empty_remote_phase_as_an_explicit_empty_diff(monkeypatch):
+    row = _row(
+        "Review empty phase",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "done_ref": "concurrent-baseline",
+            "done_merge_head": "concurrent-baseline",
+            "done_head": "unchanged-phase-head",
+            "done_local_commits": "0",
+            "done_upstream": "origin/main",
+            "done_upstream_head": "concurrent-baseline",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert (
+        "review_commit unchanged-phase-head "
+        "(task phase head unchanged; no local commit)" in output
+    )
+    assert (
+        "review_diff_command git diff --stat --patch "
+        "unchanged-phase-head..unchanged-phase-head" in output
+    )
+    assert (
+        "review_baseline_commit concurrent-baseline "
+        "(baseline advanced independently after empty task phase)" in output
+    )
+    assert (
+        "review_diff_note task completion recorded zero local commits; the "
+        "baseline commit is context only and is not task work" in output
+    )
+
+
 def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     row = _row(
         "Review direct head",
