@@ -23,14 +23,14 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from threading import Event, Thread, Timer
+from threading import Event, Thread
 from typing import Any
 
 from spice.serve.agentapi import (
     available_work_next_deadline,
     ensure_agent_for_available_work,
 )
-from spice.serve.livebus import wait_for_change
+from spice.serve.livebus import FileChangeWatch
 from spice.serve.payload.identity import (
     resolve_thread_id_for_target,
     team_facts_for_target,
@@ -63,7 +63,6 @@ class AvailableWorkWatch:
     def __init__(self, state: Any, *, events_path: Path | None = None) -> None:
         self._state = state
         self._events_path = events_path or config.ensure_task_event_file()
-        self._wake = Event()
         self._stop = Event()
         self._thread: Thread | None = None
         # Published once the backend has accepted the event token, which is the
@@ -81,26 +80,39 @@ class AvailableWorkWatch:
         thread.start()
 
     def cancel(self) -> None:
-        # Order matters: the loop reads `_stop` to decide whether to keep going
-        # and `_wake` to leave the blocking wait, so the reason must be visible
-        # before the wakeup that makes it act on it.
         self._stop.set()
-        self._wake.set()
 
     def join(self, timeout: float = AVAILABLE_WORK_WATCH_JOIN_SECONDS) -> None:
         if self._thread is not None:
             self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
+        watch = FileChangeWatch()
         try:
+            # Arm before the first evaluation.  A zero bound returns as soon as
+            # native registration is known to be live, without closing it.
+            watch.wait(
+                (self._events_path,),
+                self._stop,
+                timeout=0.0,
+                activated=self.armed,
+            )
             while not self._stop.is_set():
-                self._wait(self.evaluate())
+                timeout = self.evaluate()
+                watch.wait(
+                    (self._events_path,),
+                    self._stop,
+                    timeout=timeout,
+                    activated=self.armed,
+                )
         except Exception as exc:
             # Losing this thread means no lane ever starts on its own again,
             # which reads exactly like an idle board. Say so where serve's other
             # startup and exit lines are read.
             self.error = str(exc)
             print(f"spice serve: available-work watch stopped: {exc}")
+        finally:
+            watch.close()
 
     def evaluate(self) -> float:
         """Start every stopped Drain lane that has work, and answer when to look again."""
@@ -121,18 +133,3 @@ class AvailableWorkWatch:
             state.available_work_ready_since, now=time.monotonic()
         )
         return max(remaining, AVAILABLE_WORK_WATCH_MIN_SECONDS)
-
-    def _wait(self, timeout: float) -> None:
-        self._wake.clear()
-        # Read the stop after the clear, never before: a cancel that landed in
-        # between set a flag this clear just dropped, and the wait it was meant
-        # to end has not started yet.
-        if self._stop.is_set():
-            return
-        deadline = Timer(timeout, self._wake.set)
-        deadline.daemon = True
-        deadline.start()
-        try:
-            wait_for_change((self._events_path,), self._wake, activated=self.armed)
-        finally:
-            deadline.cancel()

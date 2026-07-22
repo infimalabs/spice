@@ -1124,6 +1124,103 @@ def wait_for_change(
     return _wait_for_change_watchfiles(watch_paths, stop, activated=activated)
 
 
+class FileChangeWatch:
+    """A native file watch that remains armed between bounded waits.
+
+    The scheduler has useful work to do between waits, but a filesystem event
+    can arrive while that work is running.  Keeping the kqueue or watchfiles
+    iterator alive makes that event pending for the next ``wait`` instead of
+    reopening the backend after the work and leaving an observe-before-arm
+    gap.  ``timeout`` bounds only the blocking call; it never closes the
+    underlying native watch.
+    """
+
+    def __init__(self) -> None:
+        self._kqueue = _KqueueWatch() if _HAVE_KQUEUE else None
+        self._watchfiles_paths: tuple[Path, ...] = ()
+        self._watchfiles_stop: Event | None = None
+        self._watchfiles_changes: Any = None
+
+    def wait(
+        self,
+        paths: tuple[Path, ...],
+        stop: Event,
+        *,
+        timeout: float | None = None,
+        activated: Event | None = None,
+    ) -> bool:
+        """Wait for one change while preserving native registration on return."""
+        watch_paths = _existing_watch_paths(paths)
+        if not watch_paths:
+            raise RuntimeError("file watch has no observable paths")
+        if self._kqueue is not None:
+            return self._kqueue.wait(
+                watch_paths,
+                stop,
+                timeout=timeout,
+                activated=activated,
+            )
+        return self._wait_watchfiles(
+            watch_paths,
+            stop,
+            timeout=timeout,
+            activated=activated,
+        )
+
+    def _wait_watchfiles(
+        self,
+        paths: tuple[Path, ...],
+        stop: Event,
+        *,
+        timeout: float | None,
+        activated: Event | None,
+    ) -> bool:
+        if paths != self._watchfiles_paths or stop is not self._watchfiles_stop:
+            self._close_watchfiles()
+            module = import_module("watchfiles")
+            watch = cast(Callable[..., Any], getattr(module, "watch"))
+            self._watchfiles_changes = watch(
+                *paths,
+                stop_event=stop,
+                rust_timeout=int(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S * _MS_PER_SECOND),
+                yield_on_timeout=True,
+            )
+            self._watchfiles_paths = paths
+            self._watchfiles_stop = stop
+
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        while not stop.is_set():
+            try:
+                observed = next(self._watchfiles_changes)
+            except StopIteration:
+                self._close_watchfiles()
+                if stop.is_set():
+                    return False
+                raise RuntimeError("file watcher stopped before cancellation") from None
+            if activated is not None:
+                # The first yield follows construction of RustNotify.  Leaving
+                # the generator suspended here keeps that native watch alive.
+                activated.set()
+            if observed:
+                return True
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+        return False
+
+    def _close_watchfiles(self) -> None:
+        if self._watchfiles_changes is not None:
+            self._watchfiles_changes.close()
+        self._watchfiles_paths = ()
+        self._watchfiles_stop = None
+        self._watchfiles_changes = None
+
+    def close(self) -> None:
+        """Release the selected backend's native resources."""
+        if self._kqueue is not None:
+            self._kqueue.close()
+        self._close_watchfiles()
+
+
 class _KqueueWatch:
     """A kqueue VNODE watch kept armed across waits.
 
@@ -1140,17 +1237,27 @@ class _KqueueWatch:
         self._events: list[Any] = []
 
     def wait(
-        self, paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
+        self,
+        paths: tuple[Path, ...],
+        stop: Event,
+        *,
+        timeout: float | None = None,
+        activated: Event | None = None,
     ) -> bool:
         self._arm(paths)
         if not self._events:
             raise RuntimeError("lane watcher could not open observable paths")
         if activated is not None:
             activated.set()
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
         while not stop.is_set():
-            triggered = self._kqueue.control(
-                [], len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
-            )
+            wait_seconds = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return False
+                wait_seconds = min(wait_seconds, remaining)
+            triggered = self._kqueue.control([], len(self._events), wait_seconds)
             if triggered:
                 if any(
                     getattr(event, "fflags", 0) & _KQUEUE_INVALIDATING_FFLAGS
