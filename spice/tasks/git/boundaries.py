@@ -72,8 +72,8 @@ def _resolve_target(repo_root: Path) -> tuple[str, str] | None:
     if not plumbing.read(repo_root, "remote"):
         return None
     raise SpiceError(
-        "cannot resolve task baseline: origin remote is unavailable; add an "
-        "origin remote, configure branch tracking, or use a local-only tree"
+        "add an origin remote, configure branch tracking, or use a local-only tree; "
+        "cannot resolve task baseline: origin remote is unavailable"
     )
 
 
@@ -104,9 +104,9 @@ def _origin_head_backstop_target(repo_root: Path) -> tuple[str, str]:
     prefix = "refs/remotes/"
     if not head_ref.startswith(prefix):
         raise SpiceError(
-            "the lane has no branch.<lane>.merge and origin/HEAD is unset; run "
-            "`git remote set-head origin --auto` or configure branch tracking so "
-            "the task baseline can resolve the integration branch"
+            "run `git remote set-head origin --auto` or configure branch tracking so "
+            "the task baseline can resolve the integration branch; the lane has no "
+            "branch.<lane>.merge and origin/HEAD is unset"
         )
     return "origin", head_ref[len(prefix) :]
 

@@ -815,6 +815,33 @@ def test_branch_upstream_target_uses_origin_head_only_as_backstop(tmp_path):
     assert boundaries.branch_upstream_target(repo) == ("origin", "origin/dev")
 
 
+def test_task_baseline_refusal_leads_with_origin_remote_repair(tmp_path):
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "peer", str(tmp_path / "peer.git"))
+
+    with pytest.raises(SpiceError) as exc_info:
+        boundaries.commits_ahead_of_baseline(repo)
+
+    assert str(exc_info.value) == (
+        "add an origin remote, configure branch tracking, or use a local-only tree; "
+        "cannot resolve task baseline: origin remote is unavailable"
+    )
+
+
+def test_task_baseline_refusal_leads_with_origin_head_repair(tmp_path):
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(tmp_path / "remote.git"))
+
+    with pytest.raises(SpiceError) as exc_info:
+        boundaries.branch_upstream_target(repo)
+
+    assert str(exc_info.value) == (
+        "run `git remote set-head origin --auto` or configure branch tracking so "
+        "the task baseline can resolve the integration branch; the lane has no "
+        "branch.<lane>.merge and origin/HEAD is unset"
+    )
+
+
 def test_fast_forward_if_safe_reports_updated_then_current(tmp_path):
     repo = _repo_with_upstream(tmp_path)
     _advance_upstream(tmp_path)
