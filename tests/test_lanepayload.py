@@ -54,10 +54,12 @@ def _message(
     kind: str = "assistant",
     ack_count: int = 0,
     preview: str = "",
+    index: int = 0,
+    source_kind: str = "",
 ):
     return AssistantMessage(
-        key=f"{timestamp}#0",
-        index=0,
+        key=f"{timestamp}#{index}",
+        index=index,
         timestamp=timestamp,
         text="hello",
         display_text="hello",
@@ -67,6 +69,7 @@ def _message(
         ack_utterances=[],
         kind=kind,
         preview=preview,
+        source_kind=source_kind,
     )
 
 
@@ -582,6 +585,78 @@ def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
     assert item.preview == (
         "Task capture failed: batch add rejected: line 2 project depth"
     )
+
+
+def test_ack_archival_supervisor_error_updates_presence_preview(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 12, 2, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "function_call_output",
+            "call_id": "call-ack-archival-error",
+            "output": (
+                "Output:\n"
+                "Supervisor Feedback\n"
+                "  "
+                + supervisor_feedback_line(
+                    "ack.error",
+                    keys=["1kG83Rg9", "1kG8LMXw"],
+                    error="database is locked",
+                )
+                + "\n"
+            ),
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.kind == "presence:function_call_output"
+    assert item.preview == (
+        "Acknowledgment failed: 1kG83Rg9, 1kG8LMXw: database is locked"
+    )
+
+
+def test_ack_error_without_keys_still_renders_the_failure():
+    output = (
+        "Output:\n"
+        "Supervisor Feedback\n"
+        "  " + supervisor_feedback_line("ack.error", error="database is locked") + "\n"
+    )
+
+    items = message_reader._supervisor_feedback_items(output)
+
+    assert items == [
+        {
+            "kind": "ack.error",
+            "label": "Acknowledgment failed",
+            "detail": "database is locked",
+            "keys": [],
+        }
+    ]
+
+
+def test_ack_error_presence_is_retained_behind_later_tool_output():
+    failure = _message(
+        _stamp(datetime(2026, 6, 10, 12, 3, tzinfo=UTC)),
+        kind="presence:function_call_output",
+        source_kind="function_call_output",
+        preview="Acknowledgment failed: 1kG83Rg9: database is locked",
+    )
+    later = _message(
+        _stamp(datetime(2026, 6, 10, 12, 4, tzinfo=UTC)),
+        index=1,
+        kind="presence:function_call_output",
+        source_kind="function_call_output",
+        preview="Output: ok",
+    )
+
+    kept = message_reader._trim_chronological([failure, later], limit=5)
+
+    assert [message.preview for message in kept] == [failure.preview, later.preview]
 
 
 def test_status_line_prefers_latest_claude_presence_over_visible_message(

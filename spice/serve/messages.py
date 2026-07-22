@@ -73,6 +73,7 @@ _SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
 _SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
 _ACK_ALREADY_ACKED_KIND = "ack.already-acked"
 _ACK_ARCHIVED_KIND = "ack.archived"
+_ACK_ERROR_KIND = "ack.error"
 _ACK_NOOP_KIND = "ack.noop"
 _ACK_UNMATCHED_KIND = "ack.unmatched"
 _TASK_CREATED_KIND = "task.created"
@@ -81,6 +82,7 @@ _SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES = (
     "ACK ignored:",
     "Acknowledged:",
     "Acknowledged (no pending match):",
+    "Acknowledgment failed:",
     "Already acknowledged:",
     "Task capture failed:",
     "Task captured:",
@@ -850,6 +852,19 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
                     "kind": _ACK_NOOP_KIND,
                     "label": "ACK ignored",
                     "detail": detail or "no inbox key found",
+                }
+            )
+        elif feedback.kind == _ACK_ERROR_KIND:
+            # A failed archival still matters when the keys are unreadable, so
+            # this renders unconditionally rather than gating on `keys`.
+            keys = _feedback_string_list(feedback.fields.get("keys"))
+            error = str(feedback.fields.get("error") or "").strip() or "unknown error"
+            items.append(
+                {
+                    "kind": _ACK_ERROR_KIND,
+                    "label": "Acknowledgment failed",
+                    "detail": f"{', '.join(keys)}: {error}" if keys else error,
+                    "keys": keys,
                 }
             )
     return items
