@@ -47,6 +47,7 @@ def _rows() -> list[dict]:
             "origin_thread": "thread-g",
             "phase_0": "todo",
             "phase_1": "review",
+            "phase_i": 1,
         },
         {
             "uuid": "u-child",
@@ -63,6 +64,7 @@ def _rows() -> list[dict]:
             "phase_0": "plan",
             "phase_1": "todo",
             "phase_2": "review",
+            "phase_i": 2,
         },
         {
             "uuid": "u-blocked",
@@ -76,6 +78,7 @@ def _rows() -> list[dict]:
             "review_author": "thread-a",
             "depends": ["u-seed", "u-child"],
             "phase_0": "todo",
+            "phase_i": 0,
         },
         {
             "uuid": "u-deleted",
@@ -85,6 +88,7 @@ def _rows() -> list[dict]:
             "status": "deleted",
             "origin": "task:LINEAGE-1kG0aaaa",
             "phase_0": "todo",
+            "phase_i": 0,
         },
     ]
 
@@ -141,6 +145,32 @@ def test_phase_edges_count_the_route_each_task_actually_walked() -> None:
     }
 
 
+def test_phase_edges_exclude_configured_steps_the_task_has_not_reached() -> None:
+    rows = [
+        {
+            "phase_0": "plan",
+            "phase_1": "todo",
+            "phase_2": "review",
+            "phase_i": 0,
+            "status": "pending",
+        },
+        {
+            "phase_0": "plan",
+            "phase_1": "todo",
+            "phase_2": "review",
+            "phase_i": 2,
+            "status": "completed",
+        },
+    ]
+
+    assert dict(graph.phase_edges(rows)) == {
+        ("(filed)", "plan"): 2,
+        ("plan", "todo"): 1,
+        ("todo", "review"): 1,
+        ("review", "(completed)"): 1,
+    }
+
+
 def test_node_id_rewrites_handles_mermaid_grammar_would_reject() -> None:
     assert graph.node_id("LINEAGE-1kG0aaaa") == "LINEAGE_1kG0aaaa"
     assert graph.node_id("9kG0bbbb") == "n9kG0bbbb"
@@ -181,7 +211,10 @@ def test_every_emitted_diagram_renders_through_real_mermaid(tmp_path: Path) -> N
     if not MERMAID_BUNDLE.is_file():
         pytest.skip(f"missing Node dependencies: run npm install in {PROJECT_ROOT}")
 
-    diagrams = _diagrams()
+    diagrams = {
+        **_diagrams(),
+        **{f"empty_{view}": graph.render(view, []) for view in graph.VIEWS},
+    }
     payload = tmp_path / "diagrams.json"
     payload.write_text(json.dumps(diagrams), encoding="utf-8")
 
@@ -195,7 +228,7 @@ def test_every_emitted_diagram_renders_through_real_mermaid(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     reported = json.loads(result.stdout)
-    assert sorted(reported) == sorted(graph.VIEWS)
-    for view in graph.VIEWS:
+    assert sorted(reported) == sorted(diagrams)
+    for view in diagrams:
         assert reported[view]["ok"] is True, f"{view}: {reported[view]['error']}"
         assert reported[view]["svgLength"] > 0
