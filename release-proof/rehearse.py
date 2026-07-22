@@ -567,7 +567,7 @@ def _load_git_private_json(root: Path, name: str) -> dict[str, Any]:
     return payload
 
 
-def _write_receipt(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -658,7 +658,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         },
         "failure_diagnostics": failure_policy_payload(),
     }
-    _write_receipt(artifact_dir / RECEIPT_NAME, receipt)
+    _write_json(artifact_dir / RECEIPT_NAME, receipt)
     return receipt
 
 
