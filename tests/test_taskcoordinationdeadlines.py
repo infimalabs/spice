@@ -80,10 +80,13 @@ def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
         "phase:review",
         "claim_by:",
     ]
+    actionable_command = [
+        token for token in expected_command if not token.startswith("rc.uda.")
+    ]
     assert timeout.state == "timed-out"
     assert timeout.message == (
         f"Taskwarrior modify mutation timed out after "
-        f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: {shlex.join(expected_command)}"
+        f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: {shlex.join(actionable_command)}"
     )
     assert timed_out_state == {"phase": "todo", "claim": "actor-a"}
     assert state == {"phase": "review", "claim": "cleared"}
