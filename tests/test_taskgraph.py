@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.tasks import graph
 
@@ -103,6 +104,57 @@ def test_live_rows_drop_deleted_smoke_residue() -> None:
     rows = graph.live_rows(_rows())
 
     assert [row["uuid"] for row in rows] == ["u-seed", "u-child", "u-blocked"]
+
+
+def test_task_graph_cli_passes_the_inception_ceiling_to_rendering(
+    monkeypatch, capsys
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_render(view: str, *, ceiling: str = "") -> str:
+        calls.append((view, ceiling))
+        return "%% fixed snapshot"
+
+    monkeypatch.setattr(graph, "render", fake_render)
+    args = build_parser().parse_args(
+        ["task", "graph", "phase", "--ceiling", "LINEAGE-9kG0bbbb"]
+    )
+
+    assert args.func(args) == 0
+    assert capsys.readouterr().out == "%% fixed snapshot\n"
+    assert calls == [("phase", "LINEAGE-9kG0bbbb")]
+
+
+def test_fixed_ceiling_is_reproducible_across_live_board_churn(monkeypatch) -> None:
+    board = _rows()
+    monkeypatch.setattr(graph.tw, "export", lambda: [dict(row) for row in board])
+    ceiling = "LINEAGE-9kG0bbbb"
+
+    before = {view: graph.render(view, ceiling=ceiling) for view in graph.VIEWS}
+    board.append(
+        {
+            "uuid": "u-future",
+            "incepted": "BkG0bbbb",
+            "project": "task.lineage",
+            "description": "Post-ceiling row touching every graph",
+            "status": "completed",
+            "origin": "task:LINEAGE-1kG0aaaa",
+            "origin_worktree": "worktrees/spice-z",
+            "origin_thread": "thread-z",
+            "review_author": "thread-g",
+            "depends": ["u-seed"],
+            "phase_0": "todo",
+            "phase_1": "review",
+            "phase_i": 1,
+        }
+    )
+    after = {view: graph.render(view, ceiling=ceiling) for view in graph.VIEWS}
+
+    assert after == before
+    assert all(
+        "%% Snapshot ceiling: incepted <= 9kG0bbbb" in diagram
+        for diagram in after.values()
+    )
 
 
 def test_origin_edges_link_child_to_the_task_that_caused_it() -> None:
