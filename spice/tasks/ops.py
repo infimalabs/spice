@@ -235,37 +235,48 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
 def edit(
     handle: str,
     *,
+    title: str | None = None,
     priority: str | None = None,
     project: str | None = None,
     description: str | None = None,
     acceptance: list[str] | None = None,
 ) -> str:
-    """Change a task's priority, project, description, and/or acceptance in place.
+    """Change a task's title, priority, project, body, and/or acceptance in place.
 
     Avoids the delete-and-recreate detour for a simple priority bump, a
     project move, a description that outlived its implementation, or a plan
     task gaining its bookend acceptance: resolve the task and apply whichever
-    fields were supplied in one modify. At least one field is required.
-    Description and acceptance replace the prior value wholesale — acceptance
-    joined the same way creation writes it — and the new text passes the same
-    suspect-wording scan creation runs; a match sets the review marker so a
-    plan task still self-corrects before advancing.
+    fields were supplied in one modify. At least one field is required. The
+    title maps to Taskwarrior's description while the longer description body
+    remains in Spice's separate task_description field. Description and
+    acceptance replace the prior value wholesale — acceptance joined the same
+    way creation writes it — and the new text passes the same suspect-wording
+    scan creation runs; a match sets the review marker so a plan task still
+    self-corrects before advancing.
     """
     from spice.tasks import create
     from spice.tasks.wording import detect_task_creation_wording
 
     if (
-        priority is None
+        title is None
+        and priority is None
         and project is None
         and description is None
         and acceptance is None
     ):
         raise SpiceError(
-            "task edit needs --priority, --project, --description, and/or --acceptance"
+            "task edit needs --title, --priority, --project, --description, "
+            "and/or --acceptance"
         )
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
     mods: list[str] = []
+    task_title = ""
+    if title is not None:
+        task_title = create._task_title(title, context="task edit --title: ")
+        if not task_title:
+            raise SpiceError("task edit --title needs non-empty text")
+        mods.append(f"description:{task_title}")
     if priority is not None:
         mods.append(f"priority:{config.map_priority(priority)}")
     resolved_project: str | None = None
@@ -287,9 +298,9 @@ def edit(
             raise SpiceError("task edit --acceptance needs at least one entry")
         mods.append(f"acceptance:{' | '.join(items)}")
     wording_matches: tuple = ()
-    if body or items:
+    if task_title or body or items:
         wording_matches = detect_task_creation_wording(
-            title="", description=body or None, acceptance=items
+            title=task_title, description=body or None, acceptance=items
         )
         if wording_matches:
             mods.append(
