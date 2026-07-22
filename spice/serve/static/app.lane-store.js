@@ -164,7 +164,7 @@ class ServeLaneStore {
     if (!members.length)
       this.#recordEmptyTeam(team, state, adapters, emptyTeamCanClose);
     if (memberTargetIds.length < members.length)
-      this.#recordUnresolvedTeamLanes(team, state, adapters);
+      this.#recordUnresolvedTeamLanes(team, state, adapters, memberTargetIds);
     if (memberTargetIds.length > 1)
       state.groupRuns.push(Object.freeze(memberTargetIds.slice()));
   }
@@ -211,12 +211,33 @@ class ServeLaneStore {
     else state.adds.push(change);
   }
 
-  #recordUnresolvedTeamLanes(team, state, adapters) {
+  // Retention and membership are one decision. A snapshot that cannot resolve a
+  // member's actor -- the window while a renewing agent's new thread is already
+  // named by the team but not yet by the lane or its target -- keeps that lane
+  // open; keeping it out of the run at the same time is the disagreement. The
+  // fused host's merged stream is exactly its members' messages, so an ejected
+  // lane takes every card it owns off the board, and a run that falls under two
+  // dissolves the fusion outright, leaving the visible host showing only its own
+  // messages until the next snapshot resolves and restores everything.
+  #recordUnresolvedTeamLanes(team, state, adapters, memberTargetIds) {
     for (const value of adapters.unresolvedLaneTargetIds(team)) {
       const targetId = String(value || "");
-      if (targetId && this.#lanes.has(targetId))
-        state.desiredTargetIds.add(targetId);
+      if (!targetId || !this.#lanes.has(targetId)) continue;
+      state.desiredTargetIds.add(targetId);
+      if (!memberTargetIds.includes(targetId))
+        this.#retainGroupMember(targetId, memberTargetIds);
     }
+  }
+
+  // Its prior seat, not the tail: member order is composer order and drives
+  // accent colour, so a lane that re-entered at the end would reshuffle and
+  // recolour the composers on every transient refresh -- the same jitter moved
+  // from the stream to the composer strip.
+  #retainGroupMember(targetId, memberTargetIds) {
+    const topology = this.#groupTopologyByTargetId.get(targetId);
+    const priorIndex = topology ? topology.memberTargetIds.indexOf(targetId) : -1;
+    if (priorIndex < 0) memberTargetIds.push(targetId);
+    else memberTargetIds.splice(Math.min(priorIndex, memberTargetIds.length), 0, targetId);
   }
 
   #teamSnapshotLaneChanges(desiredTargetIds, canRemoveLane) {
