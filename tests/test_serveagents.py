@@ -43,6 +43,10 @@ WELL_SHORT_OF_THE_ESCAPE_SECONDS = 60.0
 # The tolerance for a countdown measured against the real clock: these rows are
 # stamped moments before the call that reads them.
 ESCAPE_COUNTDOWN_TOLERANCE_SECONDS = 5.0
+# Likewise literal: the shortest interval between two launch attempts for one
+# lane, which is what keeps a launch that dies on arrival from being retried at
+# the speed of the board it keeps re-dirtying.
+CAPACITY_RETRY_SECONDS = 5.0
 
 
 def _ready_row(uuid: str, *, waiting_seconds: float = 0.0) -> dict[str, str]:
@@ -472,9 +476,10 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
     ) == ["capacity", "started"]
 
 
-def test_second_ready_task_bypasses_debounce_age_and_restart_hold(
+def test_second_ready_task_dispatches_without_waiting_out_debounce_or_age(
     tmp_path, monkeypatch
 ):
+    """The pass that declined one row leaves the interval for the pass that acts."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     candidates = [_ready_row("task-a")]
@@ -534,7 +539,124 @@ def test_second_ready_task_bypasses_debounce_age_and_restart_hold(
         "taskHandle": identity.render_handle(candidates[0]),
     }
     assert claims == ["task-a"]
-    assert launch_policies == ["queue-immediate"]
+    assert launch_policies == ["restart-held"]
+
+
+def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeypatch):
+    """Queue pressure starts a lane; it never retries one whose launches die."""
+    # The available-work analogue of the pending-inbox storm below, and the
+    # worse one: the trigger re-arms itself. Every launch dies in under a
+    # second and hands its reservation straight back, so the two ready rows
+    # that caused the launch are the board again the moment it fails. The
+    # debounce is disabled here on purpose, leaving the journal-backed refusal
+    # as the only thing that can end the loop.
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    launches = 0
+
+    def fake_start_agent(repo_root, **_kwargs):
+        nonlocal launches
+        launches += 1
+        lifecycle.record_launch_outcome(
+            repo_root,
+            {
+                "lifetime_seconds": 0.751,
+                "exit_code": 0,
+                "ended_at": lifecycle.utc_now(),
+            },
+        )
+        return repo_root / "launch.log"
+
+    monkeypatch.setattr(lifecycle, "start_agent", fake_start_agent)
+    monkeypatch.setattr(lifecycle, "ensure_origin_head", lambda *_args: None)
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-a"}, {"uuid": "task-b"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(agentapi.claimstate, "release_claim", lambda *_args: True)
+
+    payloads = [
+        agentapi.ensure_agent_for_available_work(
+            target,
+            thread_id=THREAD_A,
+            attempt_cache={},
+            retry_seconds=0.0,
+        )
+        for _ in range(6)
+    ]
+
+    assert launches == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    assert [payload["action"] for payload in payloads[:3]] == [
+        "start",
+        "start",
+        "start",
+    ]
+    held = payloads[3:]
+    assert [payload["failure"] for payload in held] == (
+        [lifecycle.AGENT_FAILURE_RESTART_REFUSED] * 3
+    )
+    # Refusing costs the board nothing: each held pass hands its reservation
+    # back, so the row stays ready for whoever can actually run it.
+    assert [payload["claimReleased"] for payload in held] == [True, True, True]
+    assert [payload["taskHandle"] for payload in held] == ["task-a"] * 3
+    assert (
+        held[0]["restartRefusal"]["consecutive_rapid_deaths"]
+        == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+
+
+def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
+    tmp_path, monkeypatch
+):
+    """A reservation handed straight back is not a fresh reason to launch."""
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    attempt_cache: dict[str, float] = {}
+    starts: list[str] = []
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: [{"uuid": "task-a"}, {"uuid": "task-b"}],
+    )
+    monkeypatch.setattr(agentapi, "git_read", lambda *_args: "head")
+    monkeypatch.setattr(agentapi.claimstate, "do_claim", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda *_args, **_kwargs: (
+            starts.append("start") or ({"ok": True, "action": "start"}, HTTPStatus.OK)
+        ),
+    )
+
+    started = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache=attempt_cache,
+    )
+    immediately_again = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache=attempt_cache,
+    )
+
+    assert agentapi.AVAILABLE_WORK_ENSURE_RETRY_SECONDS == CAPACITY_RETRY_SECONDS
+    assert started == {
+        "ok": True,
+        "action": "start",
+        "trigger": "available-work",
+        "taskHandle": "task-a",
+    }
+    assert immediately_again == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "retry-wait",
+    }
+    assert starts == ["start"]
 
 
 def test_available_work_single_fresh_task_leaves_the_board_alone(tmp_path, monkeypatch):

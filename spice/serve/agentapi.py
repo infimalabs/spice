@@ -260,9 +260,12 @@ def ensure_agent_for_available_work(
     for the starvation interval. READY rows exclude active claims, so this
     fixed threshold starts one lane and leaves one task on the board regardless
     of how many lanes are already working. Two rows are an immediate capacity
-    signal: they bypass the local retry debounce and automatic-restart hold as
-    well as the lone-row age threshold. This is deliberately a single-candidate
-    decision: a lost claim never falls through to another stale candidate.
+    signal: they skip the lone-row age threshold and need not wait out an
+    interval spent by an earlier pass. They are not a reason to relaunch a lane
+    whose launches keep dying -- queue pressure is a demand for a working
+    agent, and the rapid-death hold is the standing answer that this lane is
+    not one. This is deliberately a single-candidate decision: a lost claim
+    never falls through to another stale candidate.
 
     The claim rides into the launch it reserves, so the supervisor of an agent
     that never reaches readiness hands the row straight back instead of leaving
@@ -280,18 +283,19 @@ def ensure_agent_for_available_work(
         if not candidates:
             return None
         remaining = available_work_next_deadline(candidates, now=datetime.now(UTC))
-        at_capacity = len(candidates) >= AVAILABLE_WORK_START_THRESHOLD
-        # The retry cache used to run before this snapshot. A one-row pass
-        # therefore hid a second row that arrived inside the debounce window,
-        # even though two READY rows are the exact signal to hand one out now.
-        if not at_capacity and not _ensure_due(
+        if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and remaining > 0.0:
+            return _available_work_skip("capacity", retry_after_seconds=remaining)
+        # Read after the board, not before it: a pass that declines above spends
+        # nothing here, so a second row arriving mid-interval finds the interval
+        # unspent and dispatches on arrival. What it does bound is attempts,
+        # which is what keeps a launch that dies on contact from being retried
+        # as fast as its own failure hands the rows back.
+        if not _ensure_due(
             target.id,
             attempt_cache=attempt_cache,
             retry_seconds=retry_seconds,
         ):
-            return None
-        if not at_capacity and remaining > 0.0:
-            return _available_work_skip("capacity", retry_after_seconds=remaining)
+            return _available_work_skip("retry-wait")
         chosen = candidates[0]
         task_uuid = identity.uuid_of(chosen)
         handle = identity.render_handle(chosen)
@@ -316,10 +320,7 @@ def ensure_agent_for_available_work(
                 target,
                 fast_mode=fast_mode,
                 force_new=force_new,
-                # Queue pressure is itself the grant to try immediately. A
-                # lone starved row remains an automatic restart and therefore
-                # continues to honor the lane-local rapid-death hold.
-                automatic=not at_capacity,
+                automatic=True,
                 launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
             )
         except Exception:
