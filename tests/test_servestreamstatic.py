@@ -1351,7 +1351,10 @@ def test_static_fused_lane_status_line_uses_latest_member_compact_preview():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
 
-    assert "syncFusedLaneStatusLine(lane);" in app_render
+    assert "const fusedHosts = new Set();" in app_render
+    assert "fusedHosts.add(laneGroupHost(lane));" in app_render
+    assert "syncFusedLaneLights(host);" in app_render
+    assert "syncFusedLaneStatusLine(host);" in app_render
     assert "function syncFusedLaneStatusLine(lane)" in app_groups
     assert "fusedLaneLatestStatusLine(laneGroupMemberLanes(lane))" in app_groups
     assert "function fusedLaneMemberStatusLine(member)" in app_groups
