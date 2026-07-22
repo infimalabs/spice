@@ -186,15 +186,16 @@ def test_supervisor_notice_names_changed_fields_and_renotices(task_repo, monkeyp
     )
     log_path = task_repo / "supervisor.log"
     cursors: dict[str, int] = {}
+    held: dict[str, str] = {}
 
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
     quiet_pass = list(calls)
 
     ops.modify(handle, acceptance=["sharpened criterion"])
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
 
     tw.run([uuid, "modify", "priority:H"])
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
 
     assert quiet_pass == []
     assert [
@@ -226,12 +227,13 @@ def test_supervisor_notice_reports_one_claimed_project_move(task_repo, monkeypat
     )
     log_path = task_repo / "supervisor.log"
     cursors: dict[str, int] = {}
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    held: dict[str, str] = {}
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
 
     ops.modify(handle, project="serve.unit")
     moved_handle = identity.render_handle(identity.resolve(handle))
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
-    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
+    lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, {}, cursors, held)
 
     assert [(kind, fields["fields"], fields["detail"]) for kind, fields in calls] == [
         (
