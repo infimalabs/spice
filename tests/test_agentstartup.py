@@ -1,13 +1,17 @@
 """Agent first-activity readiness and stalled-launch recovery contracts."""
 
 import argparse
+import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from spice.agent import lifecycle, lifecyclebinding, sidechannel
+from spice.agent.driver import CLAUDE_DRIVER
 from spice.agent.watchdog import AgentStartupSignal
 from spice.process.groups import PROCESS_GROUP_TERMINATION_BOUND_SECONDS
+from spice.tasks import claimstate
 
 SUPERVISED_AGENT_PID = 4444
 STARTUP_TERMINATED_EXIT_CODE = -15
@@ -439,3 +443,52 @@ def test_startup_stall_waits_for_slow_group_cleanup_and_terminal_state(
     assert lifecycle.read_launch_outcomes(tmp_path)[0]["failure_kind"] == (
         lifecycle.AGENT_FAILURE_STARTUP_STALLED
     )
+
+
+def test_ensure_agent_starts_fresh_when_the_bound_thread_has_no_local_conversation(
+    tmp_path, monkeypatch
+):
+    # Reproduce the spice-e brick: the worktree pointer names a Claude thread
+    # with no local conversation, so a `--resume` exits within a second and,
+    # while it stays bound, loops every retry into the same dead start.
+    config_dir = tmp_path / "claude"
+    (config_dir / "projects").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+    monkeypatch.setattr(claimstate, "active_claim_phase", lambda _actor: "")
+
+    dead_thread = "019f880685c07312b89f6bfc6cdd0bb5"
+    live_thread = "768bcba1a66f4d229ce7bcf65b5d16aa"
+    live_dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
+    # A genuinely resumable session for this same worktree: its transcript
+    # records this worktree's own cwd, so `--resume` can reach it.
+    project = config_dir / "projects" / "-live"
+    project.mkdir(parents=True)
+    (project / f"{live_dashed}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(tmp_path.resolve()), "message": {}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bound_thread = [dead_thread]
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            running=False,
+            thread_id=bound_thread[0],
+            log_path=None,
+            process_status="idle",
+        ),
+    )
+
+    stale = lifecycle.ensure_agent(tmp_path, dry_run=True)
+    bound_thread[0] = live_thread
+    resumable = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    # Same worktree, two bound threads: the dead one self-heals to a fresh start,
+    # the live one still resumes -- the guard discriminates by local reach.
+    assert stale.action != resumable.action
+    assert stale.action == "would-start"
+    assert resumable.action == "would-resume"
+    assert resumable.command[resumable.command.index("--resume") + 1] == live_dashed

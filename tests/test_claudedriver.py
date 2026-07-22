@@ -420,6 +420,69 @@ def test_claude_transcript_resolves_by_session_glob(tmp_path, monkeypatch):
     assert resolved == transcript.resolve()
 
 
+def _write_claude_transcript(
+    config_dir: Path, dashed: str, *, slug: str, cwd: str | None
+) -> Path:
+    """Plant a Claude transcript whose first record stamps `cwd` (or none)."""
+    project = config_dir / "projects" / slug
+    project.mkdir(parents=True, exist_ok=True)
+    transcript = project / f"{dashed}.jsonl"
+    lines = [json.dumps({"type": "queue-operation"})]
+    if cwd is not None:
+        lines.append(json.dumps({"type": "user", "cwd": cwd, "message": {}}))
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return transcript
+
+
+def test_claude_resumability_follows_the_recorded_cwd(tmp_path, monkeypatch):
+    config_dir = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    home_root = tmp_path / "wt-home"
+    away_root = tmp_path / "wt-away"
+    home_root.mkdir()
+    away_root.mkdir()
+    canonical = "768bcba1a66f4d229ce7bcf65b5d16aa"
+    dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
+    # `--resume` is scoped to the invoking cwd's project-slug dir, so the one
+    # transcript is reachable only from the worktree that recorded it.
+    _write_claude_transcript(config_dir, dashed, slug="-wt-home", cwd=str(home_root))
+
+    resumable_home = CLAUDE_DRIVER.thread_resumable_here(home_root, canonical)
+    resumable_away = CLAUDE_DRIVER.thread_resumable_here(away_root, canonical)
+    foreign_home = CLAUDE_DRIVER.thread_known_foreign(home_root, canonical)
+    foreign_away = CLAUDE_DRIVER.thread_known_foreign(away_root, canonical)
+
+    # Resumable-here and foreign-here are mirror verdicts of the same transcript:
+    # the worktree that recorded it can resume it; every other worktree finds it
+    # foreign.
+    assert resumable_home != resumable_away
+    assert foreign_home != foreign_away
+    assert resumable_home is True
+    assert foreign_away is True
+
+
+def test_claude_thread_without_a_local_transcript_is_unresumable_but_not_foreign(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "claude"
+    (config_dir / "projects").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    repo_root = tmp_path / "wt"
+    repo_root.mkdir()
+    # The spice-e incident id: a pointer named it, but no transcript exists
+    # anywhere, so `--resume` had nothing to attach to and exited within a
+    # second.
+    canonical = "019f880685c07312b89f6bfc6cdd0bb5"
+
+    resumable = CLAUDE_DRIVER.thread_resumable_here(repo_root, canonical)
+    foreign = CLAUDE_DRIVER.thread_known_foreign(repo_root, canonical)
+
+    # Unresumable, so `ensure` starts fresh; yet an absent transcript is not
+    # proof the thread belongs elsewhere, so a mid-startup bind stays allowed.
+    assert resumable is False
+    assert foreign is False
+
+
 def test_claude_normalizes_assistant_text_into_final_message():
     raw = {
         "type": "assistant",

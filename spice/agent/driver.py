@@ -116,6 +116,38 @@ class AgentDriver:
     ) -> Path:
         raise NotImplementedError
 
+    def find_session_transcript(self, thread_id: str) -> Path | None:
+        """Locate this driver's transcript for `thread_id`, or None if absent."""
+        del thread_id
+        return None
+
+    def thread_resumable_here(self, repo_root: Path, thread_id: str) -> bool:
+        """True iff a `--resume` of `thread_id` from `repo_root` can attach.
+
+        A resume aimed at a session this worktree cannot open dies on startup
+        ("no conversation found") in about a second, and — while the dead id
+        stays bound — bricks every subsequent start into the same loop. `ensure`
+        consults this before building `--resume` and falls back to a fresh start
+        when it is False. The default assumes resumability, matching drivers
+        (Codex) whose resume is addressed by thread id and is reachable from any
+        cwd; only a cwd-scoped driver (Claude) needs to prove it locally.
+        """
+        del repo_root, thread_id
+        return True
+
+    def thread_known_foreign(self, repo_root: Path, thread_id: str) -> bool:
+        """True iff `thread_id`'s transcript provably belongs to another worktree.
+
+        The ambient-binding hook consults this before seating a thread pointer:
+        a thread whose conversation lives under a different worktree must not be
+        bound here, or `ensure` would later resume-loop on it. Unlike
+        `thread_resumable_here`, an *absent* transcript is not foreign — a
+        brand-new session mid-startup has yet to write one and must stay
+        bindable. The default is never-foreign, matching id-addressed drivers.
+        """
+        del repo_root, thread_id
+        return False
+
     def owns_transcript(self, path: Path) -> bool:
         """True iff `path` sits in this driver's transcript layout."""
         return False
@@ -716,6 +748,17 @@ class ClaudeDriver(AgentDriver):
         )
         return matches[-1].resolve() if matches else None
 
+    def thread_resumable_here(self, repo_root: Path, thread_id: str) -> bool:
+        # find_session_transcript globs every project-slug dir (cwd-global), but
+        # `--resume` only reaches sessions under the invoking cwd's slug dir, so
+        # locate-then-confirm the recorded cwd matches this worktree.
+        path = self.find_session_transcript(thread_id)
+        return path is not None and _claude_transcript_belongs_to(path, repo_root)
+
+    def thread_known_foreign(self, repo_root: Path, thread_id: str) -> bool:
+        path = self.find_session_transcript(thread_id)
+        return path is not None and not _claude_transcript_belongs_to(path, repo_root)
+
     def build_exec_command(
         self,
         *,
@@ -846,6 +889,49 @@ class ClaudeDriver(AgentDriver):
             exit_code=0, output=result_text if isinstance(result_text, str) else ""
         )
         return {"kind": kind} if kind else None
+
+
+def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool:
+    """True iff Claude transcript `path` was recorded in `repo_root`'s cwd.
+
+    Claude names each session's project-slug directory from the invoking cwd, so
+    a transcript recorded under another worktree is invisible to a `--resume`
+    launched here. The session stamps its cwd on its first user/system line; an
+    absent or unreadable cwd is treated as belonging, because the hard failure
+    the callers guard against is a transcript that is entirely missing (handled
+    before reaching here), not one whose metadata cannot be read.
+    """
+    recorded = _claude_transcript_cwd(path)
+    if not recorded:
+        return True
+    try:
+        return Path(recorded).resolve() == repo_root.resolve()
+    except OSError:
+        return recorded == str(repo_root)
+
+
+def _claude_transcript_cwd(path: Path) -> str:
+    """The cwd Claude recorded for a transcript, or '' when none is present.
+
+    Reads only up to the first line carrying a `cwd` field (the session's first
+    user/system record), so it never scans the whole transcript.
+    """
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                cwd = record.get("cwd") if isinstance(record, dict) else None
+                if isinstance(cwd, str) and cwd:
+                    return cwd
+    except OSError:
+        return ""
+    return ""
 
 
 def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:

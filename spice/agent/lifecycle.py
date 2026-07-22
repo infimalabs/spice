@@ -254,6 +254,15 @@ def ensure_agent(
                     refusal=refusal,
                 )
         resume_thread_id = "" if force_new else status.thread_id
+        if resume_thread_id and not driver.thread_resumable_here(
+            resolved_root, resume_thread_id
+        ):
+            # The bound thread has no conversation this worktree can `--resume`
+            # (a reset, a superseded id, or a pointer crisscrossed from another
+            # lane). Resuming it dies on startup and, left bound, bricks every
+            # retry into the same loop; drop the id so the launch starts a fresh
+            # thread and the lane self-heals.
+            resume_thread_id = ""
         service_tier = driver.default_service_tier if fast_mode else ""
         phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
         # Resolution order: explicit argument > the claimed task's phase
