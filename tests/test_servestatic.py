@@ -586,8 +586,14 @@ def test_static_agent_status_distinguishes_starting_and_startup_stalled():
     assert '[data-agent-activity="active-ish"]' in status_css
     assert '[data-agent-activity="inactive"]' in status_css
     assert '[data-agent-activity="unknown"]' in status_css
-    assert "from var(--agent-activity-base) h calc(s * 0.6667) l" in status_css
-    assert "from var(--agent-activity-base) h calc(s * 0.3333) l" in status_css
+    assert "from var(--agent-activity-base) h calc(s * 0.75) l" in status_css
+    assert "from var(--agent-activity-base) h calc(s * 0.5) l" in status_css
+    assert "from var(--agent-activity-base) h calc(s * 0.25) l" in status_css
+    assert '.agent-status-pip[data-agent-status="running"] {' in status_css
+    assert '.agent-status-pip[data-agent-status="starting"] {' in status_css
+    assert '.agent-status-pip[data-agent-status="running-stale"] {' in status_css
+    assert '.agent-status-pip[data-agent-status="startup-stalled"] {' in status_css
+    assert '.agent-status-pip[data-agent-status="idle"] {' in status_css
 
 
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
@@ -837,7 +843,7 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert (
         '.composer-quote-time[data-agent-status="starting"] {\n'
         "  --agent-status-color: hsl(\n"
-        "    from var(--agent-activity-base) h calc(s * 0.6667) l\n"
+        "    from var(--agent-activity-base) h calc(s * 0.75) l\n"
         "  );" in status_css
     )
     assert '.agent-status-pip[data-agent-activity="unknown"] {' in status_css

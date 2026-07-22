@@ -576,26 +576,31 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert "page.screenshot(" in smoke
 
 
-def test_structural_status_smoke_covers_activity_recency_pip_ladder() -> None:
+def test_structural_status_smoke_covers_lifecycle_pip_ladder() -> None:
     smoke = (ROOT / "browser" / "serve_structural_status_smoke.js").read_text(
         encoding="utf-8"
     )
 
-    assert (
-        'const pipRampStates = ["active", "active-ish", "inactive", "unknown"]' in smoke
-    )
+    assert '  "running",\n  "starting",\n  "running-stale",' in smoke
+    assert '  "startup-stalled",\n  "idle",' in smoke
     assert "getComputedStyle(lane.pipEl).backgroundColor" in smoke
     assert "function assertPipSaturationRamp(colors)" in smoke
-    assert "pip activity shifted hue instead of desaturating" in smoke
-    assert "pip saturation did not fall active>active-ish>inactive>unknown" in smoke
-    assert 'activityProbe.style.color = "hsl(from var(--good) h 100% l)"' in smoke
+    assert "pip lifecycle rung shifted hue instead of desaturating" in smoke
+    assert "pip saturation did not fall running>starting>quiet>stalled>idle" in smoke
+    assert "pip lifecycle rung missed its 25-point saturation step" in smoke
+    assert "idle pip did not reach the muted stem-pill floor" in smoke
+    assert 'runningProbe.style.color = "hsl(from var(--good) h 100% l)"' in smoke
+    assert 'idleProbe.style.color = "var(--muted)"' in smoke
     assert "function assertGroupedPipRamp(groupedPips, colors)" in smoke
     assert 'querySelectorAll(".lane-light")' in smoke
     assert "const bounds = pip.getBoundingClientRect();" in smoke
     assert "visibility: style.visibility" in smoke
-    assert "function assertPipActivityBase(colors, activityBase)" in smoke
-    assert "active pip did not use the full-saturation theme base" in smoke
-    assert "active pip was not 100% saturated" in smoke
+    assert (
+        "function assertPipLifecycleEndpoints(colors, runningBase, idleBase)" in smoke
+    )
+    assert "pip lifecycle endpoints diverged from running and idle theme bases" in smoke
+    assert "running pip was not 100% saturated" in smoke
+    assert "idle lifecycle did not cap pip color at the muted floor" in smoke
     assert "new Date(Date.now() - 46 * 1000).toISOString()" in smoke
     assert "new Date(Date.now() - 13 * 1000).toISOString()" in smoke
     assert 'kind: "presence:function_call"' in smoke
