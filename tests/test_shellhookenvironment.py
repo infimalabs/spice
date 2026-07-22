@@ -381,12 +381,13 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     env = lifecycle.agent_environment(tmp_path)
 
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        shellhook.render_agent_wrapper_lines(tmp_path)
+        shellhook.render_shell_runtime_wrapper_lines(tmp_path)
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
             *expected_wrapper_lines("wrap", ["grep", "git"]),
             *expected_python_module_wrapper_lines(["pytest"]),
+            *shellhook.render_project_python_wrapper_lines(tmp_path),
         ]
     )
 

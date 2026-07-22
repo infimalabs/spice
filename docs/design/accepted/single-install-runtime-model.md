@@ -59,9 +59,11 @@ mechanisms. The single-install battery removed them:
 - **The production worktree-spice reexec** — ordinary commands no longer
   reexec into an active checkout; only the explicit `spice dev ...` surface
   enters candidate code for development validation.
-- **`python` / `python3` worktree-venv routing** — agent shells route bare
-  `python` and `python3` to the deployment interpreter, not the operated
-  worktree `.venv`.
+- **Implicit worktree-venv routing** — agent shells do not select a worktree
+  `.venv` directly. Inside a resolved worktree whose root contains
+  `pyproject.toml`, bare `python` and `python3` delegate environment selection
+  to `uv run python`; outside that project tree they retain native shell
+  resolution.
 - **The now-dead strippers** — release and doctor no longer compensate for
   worktree-injected `PYTHONPATH`, because the injection path is gone.
 
@@ -71,6 +73,8 @@ mechanisms. The single-install battery removed them:
 - `spice/cli/entry.py` limits checkout self-execution to `spice dev ...`.
 - Agent, wrapper, and mounted-command environments do not prepend an operated
   worktree to `PYTHONPATH` or promote its virtual environment.
+- Bare Python routing is scoped to the marked project root and stays behind
+  `uv`; explicit `uv` commands and non-Python commands pass through unchanged.
 - Shell-hook, runtime hermeticity, installed-runtime, Doctor, and release tests
   pin the boundary.
 

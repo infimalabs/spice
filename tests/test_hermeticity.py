@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from spice.agent import lifecycle, wrap
@@ -49,10 +48,13 @@ def test_agent_runtime_env_uses_installed_tool_without_worktree_import_path(
     assert "PYTHONPATH" not in launch_env
 
 
-def test_python_routes_to_deployment_interpreter_when_worktree_has_venv(
+def test_python_routes_through_uv_when_project_has_venv(
     tmp_path,
     monkeypatch,
 ):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'probe'\n", encoding="utf-8"
+    )
     worktree_python = tmp_path / ".venv" / "bin" / "python"
     worktree_python.parent.mkdir(parents=True)
     worktree_python.write_text("# worktree python placeholder\n", encoding="utf-8")
@@ -65,8 +67,8 @@ def test_python_routes_to_deployment_interpreter_when_worktree_has_venv(
         ["python3", "-c", "import sys"], repo_root=tmp_path
     )
 
-    assert python_command == [sys.executable, "-c", "import sys"]
-    assert python3_command == [sys.executable, "-c", "import sys"]
+    assert python_command == ["uv", "run", "python", "-c", "import sys"]
+    assert python3_command == ["uv", "run", "python", "-c", "import sys"]
 
 
 def test_worktree_selection_operates_worker_without_runtime_rederivation(

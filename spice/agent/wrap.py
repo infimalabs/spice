@@ -72,13 +72,15 @@ from spice.agent.rtkrewrite import (
 from spice.agent.shellhook import (
     BASH_ENV_ENV,
     BASH_HOOK_NAME,
+    PROJECT_PYTHON_COMMANDS,
+    UV_PYTHON_COMMAND,
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
+    project_routes_python,
     rtk_rewrite_yield_selectors,
 )
 from spice.errors import SpiceError
 
-PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
@@ -522,13 +524,18 @@ def agent_run_child_worktree_environment(
 def worktree_route_command(
     args: Sequence[str], *, repo_root: Path | None = None
 ) -> list[str]:
-    del repo_root
-    return worktree_python_route_command(args)
+    return worktree_python_route_command(args, repo_root=repo_root)
 
 
-def worktree_python_route_command(args: Sequence[str]) -> list[str]:
-    if args[:1] and args[0] in PYTHON_ROUTE_COMMANDS:
-        return [sys.executable, *args[1:]]
+def worktree_python_route_command(
+    args: Sequence[str], *, repo_root: Path | None = None
+) -> list[str]:
+    if (
+        args[:1]
+        and args[0] in PROJECT_PYTHON_COMMANDS
+        and project_routes_python(repo_root)
+    ):
+        return [*UV_PYTHON_COMMAND, *args[1:]]
     return list(args)
 
 
