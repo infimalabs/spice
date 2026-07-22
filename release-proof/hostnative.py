@@ -8,36 +8,38 @@ import hashlib
 import json
 import os
 import platform
+import re
 import select
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+from threading import Event, Thread, Timer
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 if str(SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIRECTORY))
+PROJECT_ROOT = SCRIPT_DIRECTORY.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from evidence import (  # noqa: E402
     FailureArtifactStore,
-    parse_pytest_counts,
     redact_text,
+)
+from spice.serve.livebus import (  # noqa: E402
+    LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S,
+    _KqueueWatch,  # pyright: ignore[reportPrivateUsage]
 )
 
 SCHEMA_VERSION = 1
 CONTAINER_REPORT_NAME = "release-proof.json"
 HOST_REPORT_NAME = "release-proof-macos.json"
 SPEECH_PROBE_TEXT = "Spice host native release proof"
-KQUEUE_TEST_COMMAND = (
-    "uv",
-    "run",
-    "--locked",
-    "pytest",
-    "-q",
-    "tests/test_livebusevents.py",
-    "-k",
-    "kqueue",
-)
+HOST_COMMAND_TIMEOUT_SECONDS = 30.0
+KQUEUE_EVENT_TIMEOUT_SECONDS = 5.0
+OBJECT_ID_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 
 
 class HostNativeError(RuntimeError):
@@ -65,16 +67,15 @@ def collect_host_native_evidence(
             f"container evidence does not retain its Linux claim: {container_path}"
         )
 
-    kqueue = _run_command(
-        KQUEUE_TEST_COMMAND,
-        cwd=resolved_root,
-        failures=failures,
-        gate="macos-kqueue",
-    )
-    try:
-        kqueue_counts = parse_pytest_counts(kqueue.stdout)
-    except ValueError as exc:
-        raise HostNativeError(str(exc)) from exc
+    container_source_commit = _container_source_commit(container, container_path)
+    checkout_head = _checkout_head(resolved_root, failures)
+    if checkout_head != container_source_commit:
+        raise HostNativeError(
+            "checkout HEAD does not match container source commit: "
+            f"checkout={checkout_head} container={container_source_commit}"
+        )
+
+    kqueue = _probe_kqueue_event()
     appearance = _appearance(resolved_root, failures)
     speech = _speech(resolved_root, failures)
     report: dict[str, object] = {
@@ -93,12 +94,13 @@ def collect_host_native_evidence(
             "filename": CONTAINER_REPORT_NAME,
             "sha256": hashlib.sha256(container_bytes).hexdigest(),
         },
+        "source_identity": {
+            "agreement": "exact",
+            "checkout_head": checkout_head,
+            "container_source_commit": container_source_commit,
+        },
         "checks": {
-            "kqueue-or-fsevents": {
-                "status": "passed",
-                "backend": "kqueue",
-                "tests": kqueue_counts,
-            },
+            "kqueue-or-fsevents": kqueue,
             "appearance": appearance,
             "speech": speech,
         },
@@ -109,61 +111,192 @@ def collect_host_native_evidence(
     return report
 
 
+def _container_source_commit(container: object, container_path: Path) -> str:
+    source_identity = (
+        container.get("source_identity") if isinstance(container, dict) else None
+    )
+    source = (
+        source_identity.get("source") if isinstance(source_identity, dict) else None
+    )
+    commit = source.get("commit") if isinstance(source, dict) else None
+    if not isinstance(commit, str) or OBJECT_ID_PATTERN.fullmatch(commit) is None:
+        raise HostNativeError(
+            f"container evidence has no valid source commit: {container_path}"
+        )
+    return commit
+
+
+def _checkout_head(root: Path, failures: FailureArtifactStore) -> str:
+    environment = dict(os.environ)  # env-policy: allow
+    environment.update(
+        {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "LC_ALL": "C",
+        }
+    )
+    completed = _run_command(
+        ["git", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=root,
+        failures=failures,
+        gate="macos-source-identity",
+        environment=environment,
+    )
+    head = completed.stdout.strip()
+    if OBJECT_ID_PATTERN.fullmatch(head) is None:
+        raise HostNativeError(f"checkout HEAD is not a full Git object ID: {head!r}")
+    return head
+
+
+def _probe_kqueue_event() -> dict[str, object]:
+    """Exercise the production kqueue watcher with one real filesystem write."""
+    if not hasattr(select, "kqueue"):
+        raise HostNativeError("host-native release proof requires kqueue")
+
+    with tempfile.TemporaryDirectory(prefix="spice-release-kqueue-") as raw:
+        watched = Path(raw) / "event"
+        watched.write_bytes(b"before\n")
+        activated = Event()
+        cancelled = Event()
+        stop = Event()
+        writer_errors: list[str] = []
+
+        def write_event() -> None:
+            if not activated.wait(timeout=KQUEUE_EVENT_TIMEOUT_SECONDS):
+                writer_errors.append("kqueue watcher did not publish activation")
+                return
+            if cancelled.is_set():
+                return
+            try:
+                with watched.open("ab", buffering=0) as stream:
+                    stream.write(b"after\n")
+                    os.fsync(stream.fileno())
+            except OSError as exc:
+                writer_errors.append(f"kqueue event write failed: {exc}")
+
+        writer = Thread(
+            target=write_event,
+            name="release-proof-kqueue-writer",
+            daemon=True,
+        )
+        deadline = Timer(KQUEUE_EVENT_TIMEOUT_SECONDS, stop.set)
+        watch = _KqueueWatch()
+        started = time.monotonic()
+        writer.start()
+        deadline.start()
+        try:
+            try:
+                observed = watch.wait((watched,), stop, activated=activated)
+            except (OSError, RuntimeError) as exc:
+                raise HostNativeError(
+                    f"production kqueue event probe failed: {exc}"
+                ) from exc
+        finally:
+            elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+            cancelled.set()
+            activated.set()
+            stop.set()
+            deadline.cancel()
+            watch.close()
+            writer.join(timeout=LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
+
+        if writer.is_alive():
+            raise HostNativeError("kqueue event writer did not stop within its bound")
+        if writer_errors:
+            raise HostNativeError(writer_errors[0])
+        if not observed:
+            raise HostNativeError(
+                "production kqueue watcher observed no filesystem event before deadline"
+            )
+
+    return {
+        "status": "passed",
+        "backend": "kqueue",
+        "production_path": "spice.serve.livebus._KqueueWatch",
+        "event": "filesystem-write",
+        "timeout_seconds": KQUEUE_EVENT_TIMEOUT_SECONDS,
+        "elapsed_ms": elapsed_ms,
+    }
+
+
 def _run_command(
     command: list[str] | tuple[str, ...],
     *,
     cwd: Path,
     failures: FailureArtifactStore,
     gate: str,
+    environment: dict[str, str] | None = None,
+    accepted_returncodes: tuple[int, ...] = (0,),
 ) -> subprocess.CompletedProcess[str]:
     argv = [str(part) for part in command]
-    completed = subprocess.run(
-        argv,
-        check=False,
-        capture_output=True,
-        cwd=cwd,
-        text=True,
+    effective_environment = (
+        environment
+        if environment is not None
+        else dict(os.environ)  # env-policy: allow
     )
-    if completed.returncode == 0:
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            cwd=cwd,
+            env=environment,
+            text=True,
+            timeout=HOST_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _timeout_output(exc.stdout)
+        stderr = _timeout_output(exc.stderr)
+        diagnostic = failures.record(
+            gate,
+            argv,
+            124,
+            stdout,
+            stderr,
+            environment=effective_environment,
+        )
+        raise HostNativeError(
+            f"{gate} exceeded {HOST_COMMAND_TIMEOUT_SECONDS:g}s; "
+            f"diagnostic={diagnostic}"
+        ) from exc
+    if completed.returncode in accepted_returncodes:
         return completed
-    environment = dict(os.environ)  # env-policy: allow
     diagnostic = failures.record(
         gate,
         argv,
         completed.returncode,
         completed.stdout,
         completed.stderr,
-        environment=environment,
+        environment=effective_environment,
     )
-    detail = redact_text(completed.stderr or completed.stdout, environment).strip()
+    detail = redact_text(
+        completed.stderr or completed.stdout, effective_environment
+    ).strip()
     suffix = f": {detail}" if detail else ""
     raise HostNativeError(f"{gate} failed; diagnostic={diagnostic}{suffix}")
 
 
+def _timeout_output(output: bytes | str | None) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
 def _appearance(root: Path, failures: FailureArtifactStore) -> dict[str, object]:
     command = ["defaults", "read", "-g", "AppleInterfaceStyle"]
-    completed = subprocess.run(
+    completed = _run_command(
         command,
-        check=False,
-        capture_output=True,
         cwd=root,
-        text=True,
+        failures=failures,
+        gate="macos-appearance",
+        accepted_returncodes=(0, 1),
     )
     if completed.returncode == 0:
         style = completed.stdout.strip().casefold() or "dark"
-    elif completed.returncode == 1:
-        style = "light"
     else:
-        environment = dict(os.environ)  # env-policy: allow
-        diagnostic = failures.record(
-            "macos-appearance",
-            command,
-            completed.returncode,
-            completed.stdout,
-            completed.stderr,
-            environment=environment,
-        )
-        raise HostNativeError(f"appearance probe failed; diagnostic={diagnostic}")
+        style = "light"
     return {"status": "passed", "style": style}
 
 
