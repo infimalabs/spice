@@ -313,6 +313,8 @@ def test_silent_supervised_agent_stalls_recovers_and_arms_restart_refusal(
         log_path=str(log_path),
         fast_mode=False,
         command_json='["codex","exec","prompt"]',
+        launch_claim_uuid="",
+        launch_claim_actor="",
     )
 
     assert lifecycle.run_agent_supervisor(args) == STARTUP_TERMINATED_EXIT_CODE
@@ -406,6 +408,8 @@ def test_startup_stall_waits_for_slow_group_cleanup_and_terminal_state(
         log_path=str(log_path),
         fast_mode=False,
         command_json='["codex","exec","prompt"]',
+        launch_claim_uuid="",
+        launch_claim_actor="",
     )
 
     def run_supervisor() -> None:

@@ -162,6 +162,19 @@ class AgentEnsureResult:
     log_path: Path | None
 
 
+@dataclass(frozen=True)
+class LaunchClaim:
+    """The task a launch reserved for its agent, and the actor holding it.
+
+    The reservation is taken before the process exists, so both halves travel
+    into the supervisor together: it is the only surface that sees the launch
+    end, and handing the row back has to name the row and its owner exactly.
+    """
+
+    uuid: str
+    actor: str
+
+
 def _claimed_task_phase_launch(
     repo_root: Path, driver_name: str, status: AgentStatus
 ) -> dict[str, str]:
@@ -204,7 +217,13 @@ def ensure_agent(
     fast_mode: bool = False,
     supervise_stdout: bool = True,
     automatic: bool = False,
+    launch_claim: LaunchClaim | None = None,
 ) -> AgentEnsureResult:
+    if launch_claim is not None and not supervise_stdout:
+        raise SpiceError(
+            "a launch claim rides the supervisor: an unsupervised launch never "
+            f"reports the startup failure that releases {launch_claim.uuid}"
+        )
     resolved_root = repo_root.resolve()
     with agent_ensure_lock(resolved_root):
         status = agent_status(resolved_root)
@@ -282,6 +301,7 @@ def ensure_agent(
             prompt_skill_path=prompt_skill_path,
             fast_mode=fast_mode,
             supervise_stdout=supervise_stdout,
+            launch_claim=launch_claim,
         )
         return AgentEnsureResult(
             action=action,
@@ -304,6 +324,7 @@ def start_agent(
     prompt_skill_path: Path,
     fast_mode: bool,
     supervise_stdout: bool,
+    launch_claim: LaunchClaim | None,
 ) -> Path:
     # This shared boundary covers both launch modes. It intentionally runs in
     # the globally installed parent before the detached ``python -m spice``
@@ -321,6 +342,7 @@ def start_agent(
             resume_thread_id=resume_thread_id,
             log_path=log_path,
             fast_mode=fast_mode,
+            launch_claim=launch_claim,
         )
         require_supervisor_started(supervisor, repo_root=repo_root, log_path=log_path)
         reap_process_when_done(supervisor, repo_root=repo_root)
@@ -402,6 +424,7 @@ def spawn_agent_supervisor(
     resume_thread_id: str,
     log_path: Path,
     fast_mode: bool,
+    launch_claim: LaunchClaim | None,
 ) -> subprocess.Popen[str]:
     supervisor_command = [
         sys.executable,
@@ -425,6 +448,10 @@ def spawn_agent_supervisor(
         str(log_path),
         "--command-json",
         json.dumps(command, separators=(",", ":")),
+        "--launch-claim-uuid",
+        launch_claim.uuid if launch_claim else "",
+        "--launch-claim-actor",
+        launch_claim.actor if launch_claim else "",
     ]
     if fast_mode:
         supervisor_command.append("--fast-mode")
@@ -876,12 +903,84 @@ def _watch_agent_startup(
         )
 
 
+def launch_claim_from_args(args: argparse.Namespace) -> LaunchClaim | None:
+    """The reservation this supervised launch must hand back if it never starts."""
+    uuid = str(args.launch_claim_uuid or "")
+    actor = str(args.launch_claim_actor or "")
+    if not uuid and not actor:
+        return None
+    if not uuid or not actor:
+        raise SpiceError(
+            "a launch claim names both the task and its owner: "
+            f"got uuid={uuid or '-'} actor={actor or '-'}"
+        )
+    return LaunchClaim(uuid=uuid, actor=actor)
+
+
+def _release_unready_launch_claim(
+    repo_root: Path,
+    process: subprocess.Popen[str],
+    launch_claim: LaunchClaim | None,
+    log_path: Path,
+) -> str:
+    """Hand back the task this launch reserved when it never reached readiness.
+
+    The reservation is taken before the process exists so no peer can take the
+    row out from under a starting lane, and the supervisor renews it only while
+    its child lives. A launch that dies before first activity would therefore
+    hold a READY task for a whole lease with nobody left to work it; releasing
+    it on the same event that ends the launch puts the row back on the board
+    immediately. Two launches are deliberately left alone: one that reached
+    `ready` may have left work on disk under that claim, and one whose state
+    binding already moved to another pid no longer speaks for the lane. Deaths
+    before the state is published belong to the parent ensure instead -- it is
+    still inside `require_supervisor_started` and sees the exit itself.
+
+    Cleanup runs on the terminal path a startup failure already travels, so it
+    reports its own failures rather than raising over the launch's.
+    """
+    if launch_claim is None:
+        return ""
+    try:
+        from spice.tasks import claimstate
+
+        state = read_agent_state(repo_root)
+        if state_int(state.get("pid")) != process.pid:
+            return ""
+        if str(state.get("startup_status") or "") == AGENT_STARTUP_READY:
+            return ""
+        released = claimstate.release_claim(launch_claim.uuid, launch_claim.actor)
+    except SpiceError as exc:
+        released = False
+        outcome = f"kept: {exc}"
+    else:
+        outcome = "released" if released else "kept: owned elsewhere now"
+    _note_launch_claim_outcome(log_path, launch_claim, outcome)
+    return launch_claim.uuid if released else ""
+
+
+def _note_launch_claim_outcome(
+    log_path: Path, launch_claim: LaunchClaim, outcome: str
+) -> None:
+    """Leave the reservation's fate beside this launch's own failure evidence."""
+    try:
+        with log_path.open("a", encoding="utf-8") as log_handle:
+            log_handle.write(
+                f"spice launch claim {outcome}: {launch_claim.uuid} "
+                f"reserved for {launch_claim.actor}\n"
+            )
+            log_handle.flush()
+    except OSError:
+        pass
+
+
 def run_agent_supervisor(args: argparse.Namespace) -> int:
     from spice.agent.sidechannel import AgentSideChannelServer
 
     repo_root = Path(str(args.repo_root)).expanduser().resolve()
     log_path = Path(str(args.log_path)).expanduser()
     command = supervisor_command_from_json(str(args.command_json))
+    launch_claim = launch_claim_from_args(args)
     prompt_skill_path = resolve_agent_prompt_skill_path(repo_root)
     env = agent_environment(repo_root)
     lane_signal = SupervisorLaneSignal()
@@ -958,6 +1057,9 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
         finally:
             if process.poll() is None:
                 terminate_process_group(process)
+            released_claim = _release_unready_launch_claim(
+                repo_root, process, launch_claim, log_path
+            )
             # Every supervised launch leaves a terminal outcome — including a
             # startup death, which otherwise only surfaces as a raised error —
             # so restart policy can see consecutive rapid deaths.
@@ -975,6 +1077,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                         if startup_stalled.is_set()
                         else ""
                     ),
+                    released_claim=released_claim,
                 ),
             )
     return int(exit_code or 0)
