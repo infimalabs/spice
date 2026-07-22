@@ -552,16 +552,28 @@ def grep_search_operand_route_guard_lines(argv: str) -> list[str]:
     """Route grep only when argv contains a file/directory search operand."""
     return [
         '  if [ "${1-}" = grep ]; then',
+        *grep_search_operand_scan_lines(),
+        *grep_search_operand_dispatch_lines(argv),
+        "  fi",
+    ]
+
+
+def grep_search_operand_scan_lines() -> list[str]:
+    """Render grep argv classification, including rewritten dash-patterns."""
+    return [
         "    local _spice_grep_seen_head=",
         "    local _spice_grep_seen_pattern=",
         "    local _spice_grep_expect=",
         "    local _spice_grep_positional=",
         "    local _spice_grep_has_operand=",
+        "    local _spice_grep_word_index=0",
+        "    local _spice_grep_dash_pattern_index=",
         '    for _spice_word in "$@"; do',
         '      if [ -z "$_spice_grep_seen_head" ]; then',
         "        _spice_grep_seen_head=1",
         "        continue",
         "      fi",
+        "      _spice_grep_word_index=$((_spice_grep_word_index + 1))",
         '      if [ -n "$_spice_grep_expect" ]; then',
         '        if [ "$_spice_grep_expect" = pattern ]; then',
         "          _spice_grep_seen_pattern=1",
@@ -596,6 +608,24 @@ def grep_search_operand_route_guard_lines(argv: str) -> list[str]:
         "          _spice_grep_seen_pattern=1",
         "          ;;",
         "        -A?*|-B?*|-C?*|-D?*|-d?*|-m?*|--*=*) ;;",
+        (
+            "        --basic-regexp|--binary|--byte-offset|--bz2decompress|"
+            "--color|--colour|--context|--count|--decompress|"
+            "--dereference-recursive|--extended-regexp|--files-with-matches|"
+            "--files-without-match|--fixed-strings|--help|--ignore-case|"
+            "--initial-tab|--invert-match|--line-buffered|--line-number|"
+            "--line-regexp|--lzmadecompress|--mmap|--no-filename|"
+            "--no-group-separator|--no-ignore-case|--no-messages|--null|"
+            "--null-data|--only-matching|--perl-regexp|--quiet|--recursive|"
+            "--silent|--text|--unix-byte-offsets|--version|--with-filename|"
+            "--word-regexp) ;;"
+        ),
+        "        --*)",
+        '          if [ -z "$_spice_grep_seen_pattern" ]; then',
+        "            _spice_grep_seen_pattern=1",
+        ('            _spice_grep_dash_pattern_index="$_spice_grep_word_index"'),
+        "          fi",
+        "          ;;",
         "        -*) ;;",
         "        *)",
         '          if [ -n "$_spice_grep_seen_pattern" ]; then',
@@ -606,12 +636,36 @@ def grep_search_operand_route_guard_lines(argv: str) -> list[str]:
         "          ;;",
         "      esac",
         "    done",
-        '    if [ -n "$_spice_grep_has_operand" ]; then',
+    ]
+
+
+def grep_search_operand_dispatch_lines(argv: str) -> list[str]:
+    """Render a routed grep call, restoring -e lost by RTK's rg rewrite."""
+    return [
+        (
+            '    if [ -n "$_spice_grep_has_operand" ] || '
+            '[ -n "$_spice_grep_dash_pattern_index" ]; then'
+        ),
         "      shift",
-        f'      command {argv} "$@"',
+        '      if [ -n "$_spice_grep_dash_pattern_index" ]; then',
+        "        local -a _spice_grep_route_args=()",
+        "        local _spice_grep_rebuild_index=0",
+        '        for _spice_word in "$@"; do',
+        ("          _spice_grep_rebuild_index=$((_spice_grep_rebuild_index + 1))"),
+        (
+            '          if [ "$_spice_grep_rebuild_index" -eq '
+            '"$_spice_grep_dash_pattern_index" ]; then'
+        ),
+        "            _spice_grep_route_args+=(-e)",
+        "          fi",
+        '          _spice_grep_route_args+=("$_spice_word")',
+        "        done",
+        f'        command {argv} "${{_spice_grep_route_args[@]}}"',
+        "      else",
+        f'        command {argv} "$@"',
+        "      fi",
         "      return",
         "    fi",
-        "  fi",
     ]
 
 
