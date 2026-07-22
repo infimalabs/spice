@@ -9,6 +9,7 @@ import os
 import stat
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 from typing import Any, cast
@@ -19,7 +20,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_EXPORTER = PROJECT_ROOT / "scripts" / "release-proof-source"
 SOURCE_INITIALIZER = PROJECT_ROOT / "release-proof" / "init-source.py"
 CONTAINERFILE = PROJECT_ROOT / "release-proof" / "Containerfile"
-TOOLCHAIN_DECLARATION = PROJECT_ROOT / "release-proof" / "toolchain.json"
+TOOLCHAIN_RELATIVE_PATH = "release-proof/toolchain.json"
+TOOLCHAIN_DECLARATION = PROJECT_ROOT / TOOLCHAIN_RELATIVE_PATH
+PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 REHEARSAL_SCRIPT = PROJECT_ROOT / "release-proof" / "rehearse.py"
 EVIDENCE_SCRIPT = PROJECT_ROOT / "release-proof" / "evidence.py"
 HOSTNATIVE_SCRIPT = PROJECT_ROOT / "release-proof" / "hostnative.py"
@@ -346,6 +349,7 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "--json",
     )
     assert REHEARSAL.CHECKS == (
+        "packaging-toolchain",
         "python",
         "ruff",
         "browser-release-manifest",
@@ -363,6 +367,157 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
     assert (
         "RUN python3 release-proof/rehearse.py --artifacts /proof/artifacts"
         in containerfile
+    )
+
+
+def test_packaging_tools_come_from_the_same_locked_surface_as_the_other_gates():
+    """The artifact chain runs on a locked group, not the ambient interpreter.
+
+    A host checkout has no reason to carry build or twine, so reaching for the
+    running interpreter is what made the artifact phase container-only. Every
+    packaging invocation now names the project explicitly, because the artifact
+    steps deliberately work outside the source and uv discovers upward from the
+    working directory.
+    """
+    project = Path("/proof/source")
+
+    assert REHEARSAL.packaging_command(project, "-m", "build", "--sdist") == (
+        "uv",
+        "run",
+        "--project",
+        str(project),
+        "--locked",
+        "--group",
+        "release",
+        "python",
+        "-m",
+        "build",
+        "--sdist",
+    )
+    assert (
+        REHEARSAL.PACKAGING_TOOLCHAIN_GROUP,
+        REHEARSAL.PACKAGING_TOOLCHAIN_PINS,
+        REHEARSAL.TOOLCHAIN_DECLARATION_PATH,
+    ) == ("release", ("build", "setuptools", "twine", "wheel"), TOOLCHAIN_RELATIVE_PATH)
+
+
+def test_locked_release_group_pins_match_the_container_toolchain_declaration():
+    """One declaration governs both runs, so host evidence is container evidence.
+
+    The container installs its packaging tools from Containerfile ARGs while a
+    host run resolves them from uv.lock. They are only interchangeable while
+    both agree with release-proof/toolchain.json, so that agreement is a gate
+    rather than a convention.
+    """
+    declared = json.loads(TOOLCHAIN_DECLARATION.read_text(encoding="utf-8"))["pinned"]
+    project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    group = project["dependency-groups"][REHEARSAL.PACKAGING_TOOLCHAIN_GROUP]
+
+    assert sorted(group) == sorted(
+        f"{name}=={declared[name]}" for name in REHEARSAL.PACKAGING_TOOLCHAIN_PINS
+    )
+
+
+DECLARED_PACKAGING_PINS = {
+    "build": "1.3.0",
+    "setuptools": "80.9.0",
+    "twine": "6.1.0",
+    "wheel": "0.45.1",
+}
+
+
+def _toolchain_source(tmp_path: Path) -> Path:
+    root = tmp_path / "declared"
+    (root / "release-proof").mkdir(parents=True)
+    (root / TOOLCHAIN_RELATIVE_PATH).write_text(
+        json.dumps({"schema_version": 1, "pinned": dict(DECLARED_PACKAGING_PINS)}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _resolved_packaging(**overrides: str):
+    resolved = dict(DECLARED_PACKAGING_PINS) | overrides
+
+    def probe(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(resolved), stderr=""
+        )
+
+    return probe
+
+
+def test_packaging_preflight_resolves_the_declared_pins_from_the_locked_group(
+    tmp_path, monkeypatch
+):
+    root = _toolchain_source(tmp_path)
+    commands: list[tuple[str, ...]] = []
+    resolve = _resolved_packaging()
+
+    def probe(command, **kwargs):
+        commands.append(tuple(command))
+        return resolve(command, **kwargs)
+
+    monkeypatch.setattr(REHEARSAL, "_run", probe)
+
+    resolved = REHEARSAL.verify_packaging_toolchain(root)
+
+    prefix = REHEARSAL.packaging_command(root)
+    assert (resolved, commands[0][: len(prefix)], commands[0][len(prefix)]) == (
+        DECLARED_PACKAGING_PINS,
+        prefix,
+        "-c",
+    )
+
+
+def test_packaging_preflight_names_the_tool_whose_version_drifted(
+    tmp_path, monkeypatch
+):
+    """Drift is reported by name, because the pins are the proof's whole point.
+
+    A host resolving a different twine than the container declares would still
+    build artifacts, just not artifacts the container's evidence describes.
+    """
+    root = _toolchain_source(tmp_path)
+    monkeypatch.setattr(REHEARSAL, "_run", _resolved_packaging(twine="5.0.0"))
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.verify_packaging_toolchain(root)
+
+    message = str(failure.value)
+    assert (
+        "twine" in message,
+        TOOLCHAIN_RELATIVE_PATH in message,
+        '"twine": "5.0.0"' in message,
+        '"twine": "6.1.0"' in message,
+    ) == (True, True, True, True)
+
+
+def test_packaging_preflight_names_uv_before_spending_a_subprocess(
+    tmp_path, monkeypatch
+):
+    """Without uv there is no locked surface at all, so say so and stop.
+
+    This is the host-checkout failure the container never sees, and it has to
+    read as an install instruction rather than as a missing-module traceback
+    from somewhere deep in the artifact phase.
+    """
+    root = _toolchain_source(tmp_path)
+
+    def refuse_to_run(command, **_kwargs):
+        raise AssertionError(f"spent a subprocess without uv present: {command}")
+
+    monkeypatch.setattr(REHEARSAL.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(REHEARSAL, "_run", refuse_to_run)
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.verify_packaging_toolchain(root)
+
+    message = str(failure.value)
+    assert ("uv" in message, "PATH" in message, '"build": "1.3.0"' in message) == (
+        True,
+        True,
+        True,
     )
 
 
@@ -389,7 +544,9 @@ def test_canonical_artifacts_are_built_once_outside_the_source_and_checked_exact
 
     monkeypatch.setattr(REHEARSAL, "_run", build_tools)
 
-    sdist, wheel = REHEARSAL._build_canonical_artifacts(root, artifacts, "1.2.3")
+    sdist, wheel = REHEARSAL._build_canonical_artifacts(
+        PROJECT_ROOT, root, artifacts, "1.2.3"
+    )
 
     assert (sdist.name, wheel.name) == (
         "spice_harness-1.2.3.tar.gz",
@@ -407,15 +564,14 @@ def test_canonical_artifacts_are_built_once_outside_the_source_and_checked_exact
     ) == (
         1,
         1,
-        (
-            sys.executable,
-            "-m",
-            "twine",
-            "check",
-            str(sdist),
-            str(wheel),
+        REHEARSAL.packaging_command(
+            PROJECT_ROOT, "-m", "twine", "check", str(sdist), str(wheel)
         ),
     )
+    # Every artifact command is the locked one, and it builds the materialized
+    # source while working from the artifact directory outside it.
+    prefix = REHEARSAL.packaging_command(PROJECT_ROOT)
+    assert [command[: len(prefix)] for command, _cwd in calls] == [prefix] * 3
 
 
 def test_rehearsal_materializes_only_the_committed_source_boundary(tmp_path):
@@ -769,7 +925,13 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         },
     )
 
-    def build_canonical(_root, artifact_dir, version, _failures):
+    monkeypatch.setattr(
+        REHEARSAL,
+        "verify_packaging_toolchain",
+        lambda _root, _failures: {"build": "1.3.0", "twine": "6.1.0"},
+    )
+
+    def build_canonical(_project, _root, artifact_dir, version, _failures):
         sdist = artifact_dir / f"spice_harness-{version}.tar.gz"
         wheel = artifact_dir / f"spice_harness-{version}-py3-none-any.whl"
         sdist.write_bytes(b"canonical sdist\n")
@@ -783,7 +945,7 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     def validate_installed(_root, wheel, _version, _scratch, _failures):
         carried.append(("installed", wheel))
 
-    def rebuild_from_sdist(sdist, version, scratch, _failures):
+    def rebuild_from_sdist(_project, sdist, version, scratch, _failures):
         carried.append(("rebuilt", sdist))
         rebuilt = scratch / f"spice_harness-{version}-py3-none-any.whl"
         _write_test_wheel(
@@ -815,10 +977,38 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     _assert_release_receipt(receipt, artifacts, sdist, wheel, rebuilt_hashes[0])
 
 
+def test_packaging_preflight_stops_the_rehearsal_before_the_source_gates(
+    tmp_path, monkeypatch
+):
+    """The whole point of moving this check first: fail in seconds, not minutes.
+
+    The observed failure ran the full test, browser and mutation gates and only
+    then discovered the artifact phase had no toolchain, so the source gates are
+    wired to fail here if they are ever reached.
+    """
+    root, artifacts = _release_receipt_fixture(tmp_path)
+
+    def refuse_source_gates(*_arguments):
+        raise AssertionError("source gates ran before the packaging toolchain existed")
+
+    monkeypatch.setattr(REHEARSAL, "_run_source_gates", refuse_source_gates)
+    monkeypatch.setattr(REHEARSAL.shutil, "which", lambda _name: None)
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL.rehearse(root, artifacts)
+
+    assert "uv" in str(failure.value)
+
+
 def _release_receipt_fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "source"
     git_dir = root / ".git"
     git_dir.mkdir(parents=True)
+    (root / "release-proof").mkdir(parents=True)
+    (root / TOOLCHAIN_RELATIVE_PATH).write_text(
+        json.dumps({"schema_version": 1, "pinned": dict(DECLARED_PACKAGING_PINS)}),
+        encoding="utf-8",
+    )
     (root / "pyproject.toml").write_text(
         '[project]\nname = "spice-harness"\nversion = "9.8.7"\n',
         encoding="utf-8",
@@ -876,6 +1066,9 @@ def _assert_release_receipt(
         "skipped": 1,
         "total": 46,
     }
+    # The receipt carries the packaging pins the artifact chain actually ran on,
+    # so host evidence states its own toolchain instead of implying the image's.
+    assert receipt["packaging_toolchain"] == {"build": "1.3.0", "twine": "6.1.0"}
     assert receipt["claim_boundary"] == {
         "operating_system": "linux",
         "host_native_companion": "release-proof-macos.json",
