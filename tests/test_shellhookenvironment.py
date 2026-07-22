@@ -2,6 +2,7 @@
 
 import getpass
 import io
+import json
 import os
 import shlex
 import shutil
@@ -13,6 +14,7 @@ import pytest
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.tasks import config as task_config
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
     builtin_common_wrapper_lines,
@@ -274,6 +276,84 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert shellhook.SHELL_HOOK_WRAPPERS_ENV in zshenv
     assert UNSUPPORTED_AGENT_STEER_COMMAND not in zshenv
     assert "--watch --parent-pid" not in zshenv
+
+
+def test_agent_environment_binds_taskrc_to_selected_spice_backend(
+    tmp_path, monkeypatch
+):
+    backend = tmp_path / "selected-task-backend"
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
+    monkeypatch.setenv(shellhook.TASKRC_ENV, str(tmp_path / "operator-taskrc"))
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+
+    env = lifecycle.agent_environment(tmp_path)
+
+    assert env[shellhook.TASKRC_ENV] == str(backend / "taskrc")
+
+
+def test_agent_environment_binds_taskrc_to_default_shared_backend(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    monkeypatch.delenv(task_config.TASK_BACKEND_ENV, raising=False)
+
+    env = shellhook.apply_shell_steering_environment(
+        repo,
+        base_env={"HOME": str(tmp_path)},
+    )
+
+    assert env[shellhook.TASKRC_ENV] == str(repo / ".git" / ".spice" / "taskrc")
+
+
+def test_native_task_verbs_use_spice_backend_across_nested_shells(
+    tmp_path, monkeypatch
+):
+    task_binary = shutil.which("task")
+    if task_binary is None:
+        pytest.skip("Taskwarrior is not installed")
+    shell = shutil.which("sh")
+    if shell is None:
+        pytest.skip("a POSIX shell is not installed")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    task_config.set_backend(str(backend))
+    try:
+        taskrc = task_config.bootstrap()
+    finally:
+        task_config.set_backend(None)
+    base_env = dict(os.environ)  # env-policy: allow
+    base_env[task_config.TASK_BACKEND_ENV] = str(backend)
+    env = shellhook.apply_shell_steering_environment(repo, base_env=base_env)
+
+    def run_native(*args: str) -> subprocess.CompletedProcess[str]:
+        inner = shlex.join([task_binary, *args])
+        outer = shlex.join([shell, "-c", inner])
+        return subprocess.run(
+            [shell, "-c", outer],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    run_native("add", "Native original")
+    created = json.loads(run_native("export").stdout)
+    run_native(created[0]["uuid"], "modify", "Native revised")
+    listed = run_native("list").stdout
+    exported = json.loads(run_native("export").stdout)
+    data_location = run_native("_get", "rc.data.location").stdout.strip()
+
+    assert Path(env[shellhook.TASKRC_ENV]) == taskrc
+    assert Path(data_location) == backend / "data"
+    assert "Native revised" in listed
+    assert [row["description"] for row in exported] == ["Native revised"]
 
 
 def test_agent_environment_precomputes_configured_shell_wrapper_block(
