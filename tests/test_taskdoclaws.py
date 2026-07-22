@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from spice.tasks import config, identity, ops
+from spice.tasks import config, identity, ops, readiness, tw
 from spice.tasks.markdown.apply import apply_document, load_family_rows, plan_document
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import graph_signature
@@ -143,3 +143,65 @@ def test_idempotence_repeats_reused_loose_drift_and_warn_facts(task_repo):
         f"drift drift {handles['drift']} description",
         "warn 4 checked-discarded checked marker stripped; the board owns status",
     ]
+
+
+def test_edge_drop_publishes_ready_age_in_task_document_mutation(
+    task_repo, monkeypatch
+):
+    initial = parse(
+        "# Root\n"
+        "Acceptance: root complete\n"
+        "Flow: todo\n"
+        "## Prepare\n"
+        "Acceptance: preparation complete\n"
+        "Flow: todo\n"
+        "## Promote\n"
+        "Acceptance: promotion complete\n"
+        "After: prepare\n"
+        "Flow: todo\n"
+    )
+    origin = f"ack:{ACK_KEY}"
+    apply_document(initial, project="task.unit", origin=origin)
+    family = load_family_rows("task.unit", origin)
+    by_slug = {str(row[config.TASKDOC_ID_UDA]): row for row in family}
+    promote = identity.render_handle(by_slug["promote"])
+    promote_uuid = identity.uuid_of(by_slug["promote"])
+    prepare_uuid = identity.uuid_of(by_slug["prepare"])
+    transition = "2099-05-06T07:08:09.000000Z"
+    observed: dict[str, object] = {}
+    real_run = tw.run
+
+    def observe_first_backend_wake(args, **kwargs):
+        result = real_run(args, **kwargs)
+        if f"depends:-{prepare_uuid}" in args:
+            row = identity.resolve(promote)
+            observed.update(
+                ready=readiness.is_ready(promote_uuid),
+                ready_at=row.get(config.TASK_READY_AT_UDA),
+                queue_epoch=readiness.queue_ready_epoch(row),
+            )
+        return result
+
+    revised = parse(
+        "# Root\n"
+        "Acceptance: root complete\n"
+        "Flow: todo\n"
+        "## Prepare\n"
+        "Acceptance: preparation complete\n"
+        "Flow: todo\n"
+        "## Promote\n"
+        "Acceptance: promotion complete\n"
+        "Flow: todo\n"
+    )
+    monkeypatch.setattr(tw, "now_iso", lambda: transition)
+    monkeypatch.setattr(tw, "run", observe_first_backend_wake)
+
+    apply_document(revised, project="task.unit", origin=origin)
+
+    assert observed == {
+        "ready": True,
+        "ready_at": transition,
+        "queue_epoch": readiness.queue_ready_epoch(
+            {config.TASK_READY_AT_UDA: transition}
+        ),
+    }

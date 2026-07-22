@@ -425,6 +425,51 @@ def test_queue_age_refreshes_each_time_task_reenters_ready(task_repo, monkeypatc
     assert second_ready[config.TASK_READY_AT_UDA] == claim_release
 
 
+def test_dependency_drop_publishes_ready_age_before_first_watcher_read(
+    task_repo, monkeypatch
+):
+    task = create.add(
+        "Long-planned dependency edit",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    blocker = create.add(
+        "Dependency removed at queue admission",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    ops.depends(task, [blocker])
+    task_uuid = identity.uuid_of(identity.resolve(task))
+    blocker_uuid = identity.uuid_of(identity.resolve(blocker))
+    transition = "2099-04-05T06:07:08.000000Z"
+    observed: dict[str, object] = {}
+    real_run = tw.run
+
+    def observe_first_backend_wake(args, **kwargs):
+        result = real_run(args, **kwargs)
+        if f"depends:-{blocker_uuid}" in args:
+            row = identity.resolve(task)
+            observed.update(
+                ready=readiness.is_ready(task_uuid),
+                ready_at=row.get(config.TASK_READY_AT_UDA),
+                queue_epoch=readiness.queue_ready_epoch(row),
+            )
+        return result
+
+    monkeypatch.setattr(tw, "now_iso", lambda: transition)
+    monkeypatch.setattr(tw, "run", observe_first_backend_wake)
+
+    ops.depends(task, [], not_after=[blocker])
+
+    assert observed == {
+        "ready": True,
+        "ready_at": transition,
+        "queue_epoch": readiness.queue_ready_epoch(
+            {config.TASK_READY_AT_UDA: transition}
+        ),
+    }
+
+
 def test_task_delete_allows_unclaimed_task(task_repo):
     handle = create.add(
         "Delete unclaimed task",

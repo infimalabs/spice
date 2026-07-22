@@ -909,12 +909,20 @@ def _execute_edge_change(
     if _is_settled(fresh):
         return False
     uuid = identity.uuid_of(fresh)
-    was_ready = readiness.is_ready(uuid)
     changed_at = tw.now_iso()
     target_uuid = identity.uuid_of(rows_by_slug[change.target])
     modifier = f"depends:-{target_uuid}" if drop else f"depends:{target_uuid}"
-    tw.run([uuid, "modify", modifier])
-    readiness.reconcile_transition(uuid, was_ready=was_ready, at=changed_at)
+    dependencies = _depends(fresh)
+    if drop:
+        dependencies.discard(target_uuid)
+    else:
+        dependencies.add(target_uuid)
+    transition = readiness.dependency_transition_args(
+        fresh,
+        dependencies=dependencies,
+        at=changed_at,
+    )
+    tw.run([uuid, "modify", modifier, *transition])
     return True
 
 
