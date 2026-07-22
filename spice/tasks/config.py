@@ -55,6 +55,7 @@ OOPS_DEFAULT_FLOW = defaults.strings("tasks", "oops_default_flow")
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
 TASK_WORDING_REVIEW_UDA = "wording_review"
+TASK_READY_AT_UDA = "ready_at"
 # Task-document identity is system-owned: authoring surfaces never write or
 # edit these fields; apply writes them atomically when it creates a row.
 TASKDOC_ID_UDA = "taskdoc_id"
@@ -321,6 +322,7 @@ _EVIDENCE = [
     "origin",
     TASK_CREATION_SURFACE_UDA,
     TASK_WORDING_REVIEW_UDA,
+    TASK_READY_AT_UDA,
     "origin_thread",
     "origin_worktree",
     "origin_branch",
