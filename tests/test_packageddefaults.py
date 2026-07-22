@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 import subprocess
 import tomllib
 import zipfile
@@ -65,20 +66,37 @@ def test_every_declared_static_family_exists_in_packaged_configuration():
     assert families <= set(defaults.packaged_values())
 
 
-def test_setuptools_package_data_and_built_wheel_ship_spice_toml(tmp_path):
+def test_setuptools_package_data_and_built_wheel_ship_only_runtime_config(tmp_path):
     project = tomllib.loads(
         (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
     package_data = project["tool"]["setuptools"]["package-data"]["spice"]
-    assert "spice.toml" in package_data
+    assert package_data == ["spice.toml"]
 
+    source = tmp_path / "source"
+    source.mkdir()
+    shutil.copy2(PROJECT_ROOT / "pyproject.toml", source / "pyproject.toml")
+    shutil.copy2(PROJECT_ROOT / "README.md", source / "README.md")
+    shutil.copytree(
+        PROJECT_ROOT / "spice",
+        source / "spice",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    wheel_dir = tmp_path / "wheel"
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
-        cwd=PROJECT_ROOT,
+        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=source,
         check=True,
         capture_output=True,
         text=True,
     )
-    wheel = next(tmp_path.glob("*.whl"))
+    wheel = next(wheel_dir.glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
-        assert "spice/spice.toml" in archive.namelist()
+        root_package_data = {
+            name
+            for name in archive.namelist()
+            if name.startswith("spice/")
+            and "/" not in name.removeprefix("spice/")
+            and not name.endswith(".py")
+        }
+    assert root_package_data == {"spice/spice.toml"}
