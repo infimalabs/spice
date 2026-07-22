@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -66,13 +67,23 @@ def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
     timed_out_state = dict(state)
     tw.run(["task-uuid", "modify", "phase:review", "claim_by:"])
 
+    expected_command = [
+        "task",
+        f"rc:{tmp_path / 'taskrc'}",
+        f"rc.data.location={tmp_path / 'data'}",
+        "rc.confirmation=no",
+        "rc.bulk=0",
+        "rc.verbose=nothing",
+        *tw._uda_schema_overrides(),
+        "task-uuid",
+        "modify",
+        "phase:review",
+        "claim_by:",
+    ]
     assert timeout.state == "timed-out"
     assert timeout.message == (
         f"Taskwarrior modify mutation timed out after "
-        f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: task rc:{tmp_path / 'taskrc'} "
-        f"rc.data.location={tmp_path / 'data'} "
-        "rc.confirmation=no rc.bulk=0 rc.verbose=nothing task-uuid modify "
-        "phase:review claim_by:"
+        f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: {shlex.join(expected_command)}"
     )
     assert timed_out_state == {"phase": "todo", "claim": "actor-a"}
     assert state == {"phase": "review", "claim": "cleared"}
