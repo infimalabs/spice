@@ -455,11 +455,16 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
     ) == ["capacity", "started"]
 
 
-def test_available_work_capacity_starts_with_two_ready_tasks(tmp_path, monkeypatch):
+def test_second_ready_task_bypasses_debounce_age_and_restart_hold(
+    tmp_path, monkeypatch
+):
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     candidates = [{"uuid": "task-a"}]
     claims: list[str] = []
+    launch_policies: list[str] = []
+    attempt_cache: dict[str, float] = {}
+    monkeypatch.setattr(agentapi.time, "monotonic", lambda: 100.0)
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -474,22 +479,24 @@ def test_available_work_capacity_starts_with_two_ready_tasks(tmp_path, monkeypat
     monkeypatch.setattr(
         agentapi,
         "agent_ensure_response_payload",
-        lambda *_args, **_kwargs: (
-            {"ok": True, "action": "start"},
-            HTTPStatus.OK,
+        lambda *_args, **kwargs: (
+            launch_policies.append(
+                "restart-held" if kwargs["automatic"] else "queue-immediate"
+            )
+            or ({"ok": True, "action": "start"}, HTTPStatus.OK)
         ),
     )
 
     below_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        retry_seconds=0.0,
+        attempt_cache=attempt_cache,
     )
     candidates.append({"uuid": "task-b"})
     at_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        retry_seconds=0.0,
+        attempt_cache=attempt_cache,
     )
 
     assert below_capacity == {
@@ -505,6 +512,7 @@ def test_available_work_capacity_starts_with_two_ready_tasks(tmp_path, monkeypat
         "taskHandle": "task-a",
     }
     assert claims == ["task-a"]
+    assert launch_policies == ["queue-immediate"]
 
 
 def test_available_work_starvation_escape_starts_old_ready_task(tmp_path, monkeypatch):
