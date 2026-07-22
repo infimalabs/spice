@@ -169,11 +169,21 @@ function syncFusedLaneChrome(lane) {
   }
   const members = laneGroupMemberLanes(lane);
   const fused = members.length > 1;
-  syncLaneLights(lane, fused ? members : []);
+  syncFusedLaneLights(lane);
   syncFusedLaneStatusLine(lane);
   syncLaneTeamMenuButton(lane);
   syncComposerShards(lane, fused ? members : [lane]);
   syncLaneEffectiveControls(lane);
+}
+
+function syncFusedLaneLights(lane) {
+  if (!lane || isShadowLane(lane)) return;
+  if (lane.emptyTeam) {
+    syncLaneLights(lane, []);
+    return;
+  }
+  const members = laneGroupMemberLanes(lane);
+  syncLaneLights(lane, members.length > 1 ? members : []);
 }
 
 function syncFusedLaneStatusLine(lane) {
@@ -443,19 +453,26 @@ function syncLaneLights(lane, members) {
   lane.pipEl.hidden = true;
   lane.laneLightsEl.hidden = false;
   applyLaneLightGridLayout(lane.laneLightsEl, layout);
-  lane.laneLightsEl.replaceChildren(
-    ...members.map((member, index) => {
-      const light = document.createElement("span");
-      light.className = "agent-status-pip lane-light";
-      light.dataset.laneLightTargetId = member.targetId;
-      light.dataset.agentStatus = member.pipEl.dataset.agentStatus || "unknown";
-      light.dataset.agentActivity =
-        member.pipEl.dataset.agentActivity || "unknown";
-      light.title = member.branchName || member.targetId;
-      applyLaneLightGridPosition(light, index, layout);
-      return light;
-    }),
-  );
+  const current = Array.from(lane.laneLightsEl.querySelectorAll(".lane-light"));
+  const orderIsCurrent =
+    current.length === members.length &&
+    current.every(
+      (light, index) =>
+        light.dataset.laneLightTargetId === members[index].targetId,
+    );
+  const lights = members.map((member, index) => {
+    const light = orderIsCurrent
+      ? current[index]
+      : document.createElement("span");
+    light.className = "agent-status-pip lane-light";
+    light.dataset.laneLightTargetId = member.targetId;
+    light.dataset.agentStatus = member.pipEl.dataset.agentStatus || "unknown";
+    light.dataset.agentActivity = member.pipEl.dataset.agentActivity || "unknown";
+    light.title = member.branchName || member.targetId;
+    applyLaneLightGridPosition(light, index, layout);
+    return light;
+  });
+  if (!orderIsCurrent) lane.laneLightsEl.replaceChildren(...lights);
 }
 
 function laneLightGridLayout(count) {

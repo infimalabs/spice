@@ -43,7 +43,7 @@
 }
 
 .composer-quote-time[data-agent-status="starting"] {
-  --agent-status-color: #3b82f6;
+  --agent-status-color: hsl(from var(--good) h calc(s * 0.6667) l);
 }
 
 .composer-quote-time[data-agent-status="stopping"],

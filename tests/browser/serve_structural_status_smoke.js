@@ -102,6 +102,7 @@ async function run() {
           "laneGroupMemberLanes",
           "reconcileLaneGroups",
           "syncFusedLaneChrome",
+          "syncFusedLaneLights",
           "syncComposerShards",
           "targetChoiceStatus",
           "updateLiveRelativeTimes",
@@ -330,6 +331,53 @@ async function runStructuralStatusSmokePage() {
       width: bounds.width,
     };
   });
+  const liveMembers = groupedMembers.slice(1);
+  const liveStatuses = [
+    {
+      activityStatus: "active",
+      agentProcessStatus: "running",
+      agentVisualStatus: "running",
+      lastAssistantAt: new Date().toISOString(),
+      latestActivityKind: "presence:function_call",
+      latestActivityPreview: "Bash: pytest",
+    },
+    {
+      activityStatus: "unknown",
+      agentProcessStatus: "starting",
+      agentVisualStatus: "starting",
+      lastAssistantAt: "",
+      latestActivityKind: "",
+      latestActivityPreview: "",
+    },
+    {
+      activityStatus: "unknown",
+      agentProcessStatus: "running",
+      agentVisualStatus: "running",
+      lastAssistantAt: "",
+      latestActivityKind: "",
+      latestActivityPreview: "",
+    },
+  ];
+  for (let index = 0; index < liveMembers.length; index += 1) {
+    liveMembers[index].latestPayload = { statusLine: liveStatuses[index] };
+  }
+  updateLiveRelativeTimes();
+  const liveGroupedPips = liveMembers.map((member) => {
+    const pip = groupedHost.laneLightsEl.querySelector(
+      '[data-lane-light-target-id="' + member.targetId + '"]',
+    );
+    return {
+      activity: pip.dataset.agentActivity || "",
+      color: getComputedStyle(pip).backgroundColor,
+      status: pip.dataset.agentStatus || "",
+    };
+  });
+  const startingHeaderProbe = document.createElement("span");
+  startingHeaderProbe.className = "composer-quote-time";
+  startingHeaderProbe.dataset.agentStatus = "starting";
+  lane.element.append(startingHeaderProbe);
+  const startingHeaderColor = getComputedStyle(startingHeaderProbe).color;
+  startingHeaderProbe.remove();
   return {
     active,
     activeish,
@@ -337,8 +385,10 @@ async function runStructuralStatusSmokePage() {
     afterRelativeTick,
     final,
     groupedPips,
+    liveGroupedPips,
     phaseTransition,
     pipColors,
+    startingHeaderColor,
     toolActivity,
   };
 }
@@ -347,6 +397,24 @@ function assertPipStatusResult(result) {
   assertPipSaturationRamp(result.pipColors);
   assertPipActivityBase(result.pipColors, result.activityBase);
   assertGroupedPipRamp(result.groupedPips, result.pipColors);
+  const expectedLiveActivities = ["active", "active-ish", "active"];
+  for (let index = 0; index < expectedLiveActivities.length; index += 1) {
+    const expected = expectedLiveActivities[index];
+    const pip = result.liveGroupedPips[index];
+    if (pip.activity !== expected || pip.color !== result.pipColors[expected])
+      throw new Error(
+        "live grouped pip did not follow current member state: " +
+          JSON.stringify({ expected, liveGroupedPips: result.liveGroupedPips }),
+      );
+  }
+  if (result.startingHeaderColor !== result.pipColors["active-ish"])
+    throw new Error(
+      "starting header did not use the green activity rung: " +
+        JSON.stringify({
+          activeish: result.pipColors["active-ish"],
+          startingHeaderColor: result.startingHeaderColor,
+        }),
+    );
 }
 
 function assertStatusTransitionTimes(active, phaseTransition, final) {

@@ -834,6 +834,11 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert "--agent-status-color: var(--muted);" in status_css
     assert '.agent-status-pip[data-agent-activity="active"] {' in status_css
     assert '.composer-quote-time[data-agent-status="running"] {' in status_css
+    assert (
+        '.composer-quote-time[data-agent-status="starting"] {\n'
+        "  --agent-status-color: hsl(from var(--good) h calc(s * 0.6667) l);"
+        in status_css
+    )
     assert '.agent-status-pip[data-agent-activity="unknown"] {' in status_css
     assert '.composer-quote-time[data-agent-status="idle"] {' in status_css
     assert (
