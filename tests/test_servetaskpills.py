@@ -40,6 +40,7 @@ def test_global_filter_pills_build_from_catalog_stems_and_private_channel():
 def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()
+    pill_rule = _between(css, ".filter-pill {", "}")
     implicit_rule = _between(css, ".filter-pill--implicit {", "}")
     saturated_rule = _between(css, ".filter-pill--saturated {", "}")
     active_rule = _between(css, ".filter-pill--active {", "}")
@@ -56,13 +57,16 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     )
     # The saturated end of the ramp is the full ready-green.
     assert "border-color: var(--good);" in saturated_rule
-    # The four colored rungs are evenly spaced against the fifth, fully idle
-    # endpoint. Each mid-ramp tone mixes the ready green toward --muted by its
-    # rung weight, making active/assigned/dormant visibly 75/50/25% ready rather
-    # than multiplying the ready color's already-partial HSL saturation.
+    # Each mid-ramp tone mixes the ready green toward a floor carrying only the
+    # theme's --muted lightness -- hue `none`, saturation zero -- so
+    # active/assigned/dormant hold exactly 70/45/20% of the ready saturation in
+    # both appearances. Mixing toward --muted itself made that share swing with
+    # the theme, because HSL saturation is lightness-normalized and --muted is
+    # far lighter than --good only in the dark override.
+    assert "--filter-pill-floor: hsl(from var(--muted) none 0% l);" in pill_rule
     assert (
-        "--filter-pill-tone: color-mix(in srgb, var(--good) 75%, var(--muted));"
-        in active_rule
+        "--filter-pill-tone: color-mix(in hsl, var(--good) 70%,"
+        " var(--filter-pill-floor));" in active_rule
     )
     assert (
         "background: color-mix(in srgb, var(--filter-pill-tone) 8%, transparent);"
@@ -71,12 +75,12 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     assert "border-color: var(--filter-pill-tone);" in active_rule
     assert "color: var(--filter-pill-tone);" in active_rule
     assert (
-        "--filter-pill-tone: color-mix(in srgb, var(--good) 50%, var(--muted));"
-        in assigned_rule
+        "--filter-pill-tone: color-mix(in hsl, var(--good) 45%,"
+        " var(--filter-pill-floor));" in assigned_rule
     )
     assert (
-        "--filter-pill-tone: color-mix(in srgb, var(--good) 25%, var(--muted));"
-        in dormant_rule
+        "--filter-pill-tone: color-mix(in hsl, var(--good) 20%,"
+        " var(--filter-pill-floor));" in dormant_rule
     )
     assert "border-color: var(--filter-pill-tone);" in dormant_rule
     assert "color: var(--filter-pill-tone);" in dormant_rule

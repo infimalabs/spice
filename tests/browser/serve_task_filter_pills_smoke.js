@@ -57,34 +57,42 @@ function toneColor(pills, label) {
 // Tone encodes agent coverage layered with work flow. A running,
 // boundary-dissolving Drain lane covers every public stem, so under it the ramp
 // climbs saturated (covered + ready) -> active (covered + in flight) -> assigned
-// (covered, all blocked/deferred) -> idle (uncovered but ready) in even sRGB
-// steps between --good and --muted. `serve` renders saturated,
-// `lifecycle` active, `studies` assigned, and the private `agent` channel (which
-// sits out boundary dissolution) renders the neutral idle endpoint.
+// (covered, all blocked/deferred) -> idle (uncovered but ready), each colored
+// rung holding its own share of the ready green's saturation. `serve` renders
+// saturated, `lifecycle` active, `studies` assigned, and the private `agent`
+// channel (which sits out boundary dissolution) renders the neutral idle
+// endpoint.
 const RAMP_HUE_TOLERANCE_DEG = 8;
 const IDLE_MAX_SATURATION = 0.2;
-const RUNG_CHANNEL_TOLERANCE = 1;
+// How far each rung has to sit from the fully-ready endpoint, as a fraction of
+// its saturation. Re-deriving a rung as a mix of the same two endpoints the CSS
+// mixes cannot fail -- it restates the stylesheet's own formula in the same page
+// -- so the bands measure the gap to the ready green instead, and are what the
+// sweep holds the ramp to in light and dark alike. active is capped at three
+// quarters ready so a lit-but-not-ready stem is never mistaken for ready work.
+const RUNG_READY_SATURATION_BANDS = {
+  active: { min: 0.66, max: 0.75 },
+  assigned: { min: 0.4, max: 0.5 },
+  dormant: { min: 0.15, max: 0.25 },
+};
 // Hidden/system stems recover the warn accent: an orange/red hue well away from
 // the green ramp, with real saturation rather than the desaturated gray floor.
 const WARN_HUE_MAX_DEG = 60;
 const WARN_MIN_SATURATION = 0.2;
 const RAMP_HUE_DIVERGENCE_DEG = 60;
 
-function assertEvenCoverageRung(color, readyGreen, idleColor, weight, label) {
-  const actual = parseRgb(color);
-  const ready = parseRgb(readyGreen);
-  const idle = parseRgb(idleColor);
-  const expected = ready.map(
-    (channel, index) => channel * weight + idle[index] * (1 - weight),
-  );
-  for (let index = 0; index < actual.length; index += 1) {
-    if (Math.abs(actual[index] - expected[index]) > RUNG_CHANNEL_TOLERANCE)
-      throw new Error(
-        label +
-          " pill missed its evenly spaced ready-to-idle rung: " +
-          JSON.stringify({ actual, expected, ready, idle, weight }),
-      );
-  }
+function assertRungSeparation(color, readyGreen, rung, label = rung) {
+  const band = RUNG_READY_SATURATION_BANDS[rung];
+  const tone = rgbToHsl(color);
+  const ready = rgbToHsl(readyGreen);
+  const share = tone.saturation / ready.saturation;
+  if (share < band.min || share > band.max)
+    throw new Error(
+      label +
+        " pill is not held its rung's distance from the ready endpoint: " +
+        JSON.stringify({ share, band, tone, ready }),
+    );
+  return share;
 }
 
 function assertCoverageSaturationRamp(pills, readyGreen, idleColor) {
@@ -97,25 +105,29 @@ function assertCoverageSaturationRamp(pills, readyGreen, idleColor) {
       "fully-ready pill and count did not use the shared ready green: " +
         JSON.stringify({ saturatedPill, readyGreen }),
     );
-  assertEvenCoverageRung(
-    pills.find((item) => item.label === "lifecycle").color,
-    readyGreen,
-    idleColor,
-    0.75,
-    "active",
-  );
-  assertEvenCoverageRung(
-    pills.find((item) => item.label === "studies").color,
-    readyGreen,
-    idleColor,
-    0.5,
-    "assigned",
-  );
+  const idlePill = pills.find((item) => item.label === "agent");
+  if (idlePill.color !== idleColor)
+    throw new Error(
+      "idle pill did not rest on the shared neutral endpoint: " +
+        JSON.stringify({ idlePill, idleColor }),
+    );
+  const shares = {
+    active: assertRungSeparation(
+      pills.find((item) => item.label === "lifecycle").color,
+      readyGreen,
+      "active",
+    ),
+    assigned: assertRungSeparation(
+      pills.find((item) => item.label === "studies").color,
+      readyGreen,
+      "assigned",
+    ),
+  };
   const saturated = toneColor(pills, "serve");
   const active = toneColor(pills, "lifecycle");
   const assigned = toneColor(pills, "studies");
   const idle = toneColor(pills, "agent");
-  const ramp = { saturated, active, assigned, idle };
+  const ramp = { saturated, active, assigned, idle, shares };
   const steps = [saturated, active, assigned, idle];
   // Hue is meaningful only while saturation remains on the green ramp. The
   // neutral --muted endpoint may report any nominal hue after RGB -> HSL.
@@ -455,11 +467,9 @@ function assertUncoveredPills(pills, coveredRamp, warnAccents, endpoints) {
         JSON.stringify(serveIdle),
     );
   const studiesDormant = toneColor(pills, "studies");
-  assertEvenCoverageRung(
+  assertRungSeparation(
     pills.find((item) => item.label === "studies").color,
     endpoints.readyGreen,
-    endpoints.idleColor,
-    0.25,
     "dormant",
   );
   if (
@@ -509,10 +519,60 @@ async function clearInventory(page) {
   });
 }
 
-async function runScenario({ page }) {
+// The ramp's contract is stated against the ready green rather than against one
+// theme's colors, so it has to hold wherever the operator reads it -- and the two
+// appearances disagreed once already, when the same rung measured 77% ready in
+// light and 66% in dark. Sweep both, prove the sweep moved the theme by watching
+// the neutral endpoint the dark override redefines, then require the appearances
+// to agree on how far active sits from ready. Mixing toward a saturation-free
+// floor makes that agreement exact -- the two shares differ in the seventh
+// decimal -- so the tolerance only has to absorb color rounding, not a design
+// that lets the themes drift.
+const APPEARANCE_SHARE_TOLERANCE = 0.01;
+
+async function sweepAppearanceRamps(page, sweepAppearances, pinnedEndpoints) {
+  const ramps = await sweepAppearances(async () => {
+    const endpoints = await readRampEndpoints(page);
+    const pills = await readPills(page);
+    return {
+      endpoints,
+      ramp: assertCoverageSaturationRamp(
+        pills,
+        endpoints.readyGreen,
+        endpoints.idleColor,
+      ),
+    };
+  });
+  if (ramps.light.endpoints.idleColor === ramps.dark.endpoints.idleColor)
+    throw new Error(
+      "appearance sweep measured one theme twice: " + JSON.stringify(ramps),
+    );
+  const shareGap = Math.abs(
+    ramps.light.ramp.shares.active - ramps.dark.ramp.shares.active,
+  );
+  if (shareGap > APPEARANCE_SHARE_TOLERANCE)
+    throw new Error(
+      "active rung sits a different distance from ready in each appearance: " +
+        JSON.stringify({ shareGap, ramps }),
+    );
+  const restored = await readRampEndpoints(page);
+  if (JSON.stringify(restored) !== JSON.stringify(pinnedEndpoints))
+    throw new Error(
+      "sweep left the page on an emulated appearance instead of the pinned one: " +
+        JSON.stringify({ restored, pinnedEndpoints }),
+    );
+  return ramps;
+}
+
+async function runScenario({ page, sweepAppearances }) {
   const pills = await installInitialState(page);
-  const endpoints = await readRampEndpoints(page);
   assertInitialPills(pills);
+  const endpoints = await readRampEndpoints(page);
+  const appearanceRamps = await sweepAppearanceRamps(
+    page,
+    sweepAppearances,
+    endpoints,
+  );
   const coverageRamp = assertCoverageSaturationRamp(
     pills,
     endpoints.readyGreen,
@@ -526,11 +586,10 @@ async function runScenario({ page }) {
     implicit: false,
     unavailable: "0",
   });
-  assertEvenCoverageRung(
+  assertRungSeparation(
     reportedStatePills.find((item) => item.label === "serve").color,
     endpoints.readyGreen,
-    endpoints.idleColor,
-    0.75,
+    "active",
     "reported serve active",
   );
   await page.screenshot({ path: SCREENSHOT_PATH });
@@ -559,6 +618,7 @@ async function runScenario({ page }) {
     uncovered,
     emptyState,
     coverageRamp,
+    appearanceRamps,
     endpoints,
     warnAccents,
     screenshotPath: SCREENSHOT_PATH,

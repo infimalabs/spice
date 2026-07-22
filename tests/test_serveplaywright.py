@@ -73,12 +73,16 @@ def test_serve_playwright_harness_cleans_up_when_context_creation_fails() -> Non
     assert "await serveBrowserContextOptions(options)" in harness
     assert "if (browser) await browser.close().catch(() => {});" in harness
     assert "await server.stop();" in harness
-    assert harness.index("let browser = null;") < harness.index(
+    # Read the ordering inside withServePage rather than across the file: the
+    # cleanup claim is that *this* function resolves its context options inside
+    # the try that owns the finally, and other helpers have their own.
+    with_serve_page = harness[harness.index("async function withServePage(") :]
+    assert with_serve_page.index("let browser = null;") < with_serve_page.index(
         "await serveBrowserContextOptions(options)"
     )
-    assert harness.index("await serveBrowserContextOptions(options)") < harness.index(
-        "finally"
-    )
+    assert with_serve_page.index(
+        "await serveBrowserContextOptions(options)"
+    ) < with_serve_page.index("finally")
 
 
 def test_serve_playwright_harness_rejects_per_smoke_color_scheme() -> None:
@@ -90,6 +94,38 @@ def test_serve_playwright_harness_rejects_per_smoke_color_scheme() -> None:
     assert 'hasOwnProperty.call(contextOptions, "colorScheme")' in harness
     assert "inherit colorScheme" in harness
     assert "shared agent Playwright config" in harness
+    # Pinning a smoke to one other appearance still leaves half the product
+    # unseen, so the refusal points at the one sanctioned alternative instead.
+    assert "sweep every appearance " in harness
+
+
+def test_serve_playwright_harness_sweeps_appearances_and_restores_the_pin() -> None:
+    harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
+        encoding="utf-8"
+    )
+
+    # Playwright's null reset drops the page to the browser default rather than
+    # the context's colorScheme, so the sweep restores the inherited appearance
+    # by name; the scenario receives sweepAppearances already bound to it.
+    assert 'const serveAppearances = ["light", "dark"];' in harness
+    assert (
+        "async function withAppearanceSweep(page, inheritedColorScheme, callback)"
+        in harness
+    )
+    assert "await page.emulateMedia({ colorScheme: appearance });" in harness
+    assert (
+        "await page.emulateMedia({ colorScheme: inheritedColorScheme || null });"
+        in harness
+    )
+    assert (
+        "withAppearanceSweep(page, contextOptions.colorScheme, sweepCallback)"
+        in harness
+    )
+    assert harness.index("readings[appearance] = await callback(appearance);") < (
+        harness.index(
+            "await page.emulateMedia({ colorScheme: inheritedColorScheme || null });"
+        )
+    )
 
 
 def test_serve_playwright_harness_captures_browser_errors() -> None:
@@ -573,14 +609,19 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'tone: "assigned"' in smoke
     assert 'tone: "idle"' in smoke
     assert 'tone: "dormant"' in smoke
-    # The coverage ramp guard reads each tone's rendered color and asserts the
-    # covered saturated->active->assigned steps plus dormant are the exact
-    # 100/75/50/25% sRGB mixes between --good and the uncovered neutral floor.
+    # The coverage ramp guard reads each tone's rendered color and holds every
+    # rung a measured distance from the ready endpoint -- its own share of that
+    # green's saturation -- rather than re-deriving it as a mix of the same two
+    # endpoints the stylesheet already mixes, which would restate the formula
+    # instead of testing it.
     assert "getComputedStyle(pill).color" in smoke
     assert "function rgbToHsl(" in smoke
     assert "assertCoverageSaturationRamp(" in smoke
-    assert "function assertEvenCoverageRung(" in smoke
-    assert "pill missed its evenly spaced ready-to-idle rung" in smoke
+    assert "function assertRungSeparation(" in smoke
+    assert "RUNG_READY_SATURATION_BANDS" in smoke
+    assert "active: { min: 0.66, max: 0.75 }" in smoke
+    assert "pill is not held its rung's distance from the ready endpoint" in smoke
+    assert "idle pill did not rest on the shared neutral endpoint" in smoke
     assert "fully-ready pill and count did not use the shared ready green" in smoke
     assert "coverage ramp step shifted hue instead of desaturating" in smoke
     assert (
@@ -610,6 +651,30 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     assert 'inventory.revision = "40000000000000000000000000000";' in smoke
     assert 'ariaHidden: strip?.getAttribute("aria-hidden")' in smoke
     assert "page.screenshot(" in smoke
+
+
+def test_task_filter_pill_smoke_sweeps_both_appearances() -> None:
+    smoke = (ROOT / "browser" / "serve_task_filter_pills_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    # The ramp is stated against the ready green, so it has to hold in whichever
+    # appearance the operator reads. The smoke measures the whole ramp in each,
+    # proves the sweep actually moved the theme by watching the neutral endpoint
+    # the dark override redefines, requires both appearances to place active the
+    # same distance from ready, and confirms the page came back to the pinned
+    # appearance before the screenshot and the rest of the scenario.
+    assert "async function sweepAppearanceRamps(" in smoke
+    assert "await sweepAppearances(" in smoke
+    assert "runScenario({ page, sweepAppearances })" in smoke
+    assert "appearance sweep measured one theme twice" in smoke
+    assert (
+        "active rung sits a different distance from ready in each appearance" in smoke
+    )
+    assert (
+        "sweep left the page on an emulated appearance instead of the pinned one"
+        in smoke
+    )
 
 
 def test_structural_status_smoke_covers_lifecycle_pip_ladder() -> None:

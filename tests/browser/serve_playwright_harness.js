@@ -310,6 +310,11 @@ async function readSharedPlaywrightContextOptions(options = {}) {
   return { ...contextOptions };
 }
 
+// The appearances serve is built for. Both are product surface: the shared
+// config pins whichever one the operator reads screenshots in, so the other is
+// only ever exercised by a check that asks for it.
+const serveAppearances = ["light", "dark"];
+
 function rejectColorSchemeOverride(contextOptions, configPath) {
   if (
     contextOptions &&
@@ -318,9 +323,33 @@ function rejectColorSchemeOverride(contextOptions, configPath) {
     throw new Error(
       "serve Playwright checks inherit colorScheme from " +
         configPath +
-        "; update the shared agent Playwright config instead of setting a " +
-        "per-smoke colorScheme override",
+        "; update the shared agent Playwright config, or sweep every appearance " +
+        "with withAppearanceSweep, instead of pinning a per-smoke colorScheme " +
+        "override",
     );
+}
+
+// Pinning a smoke to one *other* appearance stays rejected above -- it just
+// moves which half of the product goes unseen. A contract that spans appearances
+// is the case the pin cannot serve, so the sanctioned exception is sweeping
+// them: the callback runs once per appearance and the page is handed back on the
+// config's inherited one, so nothing downstream measures an emulated theme.
+//
+// Restoring names that inherited appearance rather than clearing emulation,
+// because Playwright's null reset drops the page to the browser's own default
+// instead of back to the context's colorScheme -- a page opened dark comes back
+// light, and every color read afterward silently belongs to the other theme.
+async function withAppearanceSweep(page, inheritedColorScheme, callback) {
+  const readings = {};
+  try {
+    for (const appearance of serveAppearances) {
+      await page.emulateMedia({ colorScheme: appearance });
+      readings[appearance] = await callback(appearance);
+    }
+  } finally {
+    await page.emulateMedia({ colorScheme: inheritedColorScheme || null });
+  }
+  return readings;
 }
 
 async function serveBrowserContextOptions(options = {}) {
@@ -369,9 +398,8 @@ async function withServePage(options, callback) {
   let browser = null;
   try {
     browser = await chromium.launch(options.launchOptions || {});
-    const context = await browser.newContext(
-      await serveBrowserContextOptions(options),
-    );
+    const contextOptions = await serveBrowserContextOptions(options);
+    const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
     const browserErrors = collectBrowserErrors(page, options);
     const targetPath = options.path || "/";
@@ -388,6 +416,10 @@ async function withServePage(options, callback) {
       server,
       browserErrors,
       assertNoBrowserErrors: () => assertNoBrowserErrors(browserErrors),
+      // The scenario never has to name the appearance it started on: the harness
+      // just resolved it, so it is what the sweep restores.
+      sweepAppearances: (sweepCallback) =>
+        withAppearanceSweep(page, contextOptions.colorScheme, sweepCallback),
     });
     assertNoBrowserErrors(browserErrors);
     return result;
