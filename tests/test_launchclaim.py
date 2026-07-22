@@ -39,6 +39,9 @@ OUT_OF_CREDITS_LINE = "Credit balance too low to start this session\n"
 UNREADABLE_STATE_DETAIL = "agent state is unreadable"
 UNREADABLE_STATE_OSERROR_DETAIL = "agent state path cannot be read"
 CLAIM_WITNESS_OSERROR_DETAIL = "claim witness cannot be written"
+# A fault that stops the handback before the row moves, unlike the witness write
+# that follows it: the two read differently in the log for exactly that reason.
+CLAIM_HANDBACK_OSERROR_DETAIL = "claim handback cannot reach the task store"
 LAUNCH_ORIGIN = "ack:1kG9Z9zf"
 LAUNCH_PROJECT = "serve.launch"
 
@@ -239,7 +242,7 @@ def test_supervisor_records_third_rapid_death_when_claim_handback_raises_oserror
     )
 
     def fail_claim_handback(*_args, **_kwargs):
-        raise OSError(CLAIM_WITNESS_OSERROR_DETAIL)
+        raise OSError(CLAIM_HANDBACK_OSERROR_DETAIL)
 
     monkeypatch.setattr(claimstate, "release_claim", fail_claim_handback)
     for _index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD - 1):
@@ -280,7 +283,7 @@ def test_supervisor_records_third_rapid_death_when_claim_handback_raises_oserror
     assert refusal["consecutive_rapid_deaths"] == (
         lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
     )
-    assert f"spice launch claim kept: {CLAIM_WITNESS_OSERROR_DETAIL}" in settled_log
+    assert f"spice launch claim kept: {CLAIM_HANDBACK_OSERROR_DETAIL}" in settled_log
 
 
 def test_launch_that_reached_readiness_keeps_the_task_it_is_working(task_repo):
@@ -373,7 +376,7 @@ def test_unreadable_lane_state_oserror_keeps_and_reports_the_reservation(
 def test_failed_claim_witness_write_reports_the_completed_row_handback(
     task_repo, monkeypatch
 ):
-    """The witness write follows row release, but cannot escape cleanup."""
+    """The witness write follows row release, so its failure reports one."""
     repo_root = task_repo.resolve()
     handle, uuid = _reserved_task("Released before its witness write fails", ACTOR_A)
     log_path = repo_root / "witness-oserror.log"
@@ -388,14 +391,17 @@ def test_failed_claim_witness_write_reports_the_completed_row_handback(
 
     monkeypatch.setattr(claimstate, "_write_claim_witness", fail_witness_write)
 
-    lifecycle._release_unready_launch_claim(
+    released_claim = lifecycle._release_unready_launch_claim(
         repo_root, process, lifecycle.LaunchClaim(uuid=uuid, actor=ACTOR_A), log_path
     )
 
     assert handle in _allocatable_handles()
+    # The row is allocatable, so the launch outcome has to name it as released:
+    # an empty released_claim here reads as a reservation that outlived its lane.
+    assert released_claim == uuid
     assert (
-        f"spice launch claim kept: {CLAIM_WITNESS_OSERROR_DETAIL}"
-        in log_path.read_text(encoding="utf-8")
+        "spice launch claim released, witness unwritten: "
+        f"{CLAIM_WITNESS_OSERROR_DETAIL}" in log_path.read_text(encoding="utf-8")
     )
 
 

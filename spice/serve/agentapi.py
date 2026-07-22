@@ -365,8 +365,9 @@ def ensure_agent_for_available_work(
             # The launch was attempted and refused -- out of credits, or the
             # restart guard. Releasing its claim is a new READY transition;
             # release_claim stamps that durable origin for the next watcher
-            # evaluation.
-            payload["claimReleased"] = claimstate.release_claim(task_uuid, actor)
+            # evaluation, and answers separately for the row and its witness.
+            release = claimstate.release_claim(task_uuid, actor)
+            payload["claimReleased"] = release.released
         return payload
 
 
