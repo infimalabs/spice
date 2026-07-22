@@ -579,7 +579,8 @@ def test_task_filter_pill_smoke_covers_live_unavailable_and_resolved_states() ->
     # green->cyan hue shift regression fails the smoke.
     assert "getComputedStyle(pill).color" in smoke
     assert "function rgbToHsl(" in smoke
-    assert "assertCoverageSaturationRamp(pills)" in smoke
+    assert "assertCoverageSaturationRamp(pills, readyGreen)" in smoke
+    assert "fully-ready pill and count did not use the shared ready green" in smoke
     assert "coverage ramp step shifted hue instead of desaturating" in smoke
     assert (
         "coverage ramp saturation did not fall saturated>active>assigned>idle" in smoke
@@ -619,9 +620,9 @@ def test_structural_status_smoke_covers_lifecycle_pip_ladder() -> None:
     assert "function assertPipSaturationRamp(colors)" in smoke
     assert "pip lifecycle rung shifted hue instead of desaturating" in smoke
     assert "pip saturation did not fall running>starting>quiet>stalled>idle" in smoke
-    assert "pip lifecycle rung missed its 25-point saturation step" in smoke
+    assert "pip lifecycle rung missed its proportional 25% saturation step" in smoke
     assert "idle pip did not reach the muted stem-pill floor" in smoke
-    assert 'runningProbe.style.color = "hsl(from var(--good) h 100% l)"' in smoke
+    assert 'runningProbe.style.color = "var(--good)"' in smoke
     assert 'idleProbe.style.color = "var(--muted)"' in smoke
     assert "function assertGroupedPipRamp(groupedPips, colors)" in smoke
     assert 'querySelectorAll(".lane-light")' in smoke
@@ -631,7 +632,7 @@ def test_structural_status_smoke_covers_lifecycle_pip_ladder() -> None:
         "function assertPipLifecycleEndpoints(colors, runningBase, idleBase)" in smoke
     )
     assert "pip lifecycle endpoints diverged from running and idle theme bases" in smoke
-    assert "running pip was not 100% saturated" in smoke
+    assert "running pip and relative time did not use the shared ready green" in smoke
     assert "idle lifecycle did not cap pip color at the muted floor" in smoke
     assert "new Date(Date.now() - 46 * 1000).toISOString()" in smoke
     assert "new Date(Date.now() - 13 * 1000).toISOString()" in smoke

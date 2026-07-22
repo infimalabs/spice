@@ -46,6 +46,7 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     dormant_rule = _between(css, ".filter-pill--dormant {", "}")
     idle_rule = _between(css, ".filter-pill--idle {", "}")
 
+    assert "--good: #2f9e44;" in css
     assert "model.drainability.boundaryDissolved" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
     assert (
