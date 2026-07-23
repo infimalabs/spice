@@ -21,6 +21,7 @@ from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.websocket import EncodedTextFrame
+from tests.test_livebus import LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS
 from tests.test_wirefixtures import (
     valid_lane_payload,
     valid_live_bus_callback_payloads,
@@ -995,7 +996,9 @@ def _write_inbox_item_from_subprocess(repo: Path) -> None:
 
 
 def _wait_for_watch_push(
-    connection: _Connection, *, timeout_seconds: float = 3.0
+    connection: _Connection,
+    *,
+    timeout_seconds: float = LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     def first_push() -> dict[str, Any] | None:
         for payload in connection.sent:
@@ -1014,7 +1017,7 @@ def _wait_for_reply(
     connection: _Connection,
     *,
     request_id: str | None = None,
-    timeout_seconds: float = 3.0,
+    timeout_seconds: float = LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     """Await a direct reply frame (no push `source`), optionally by requestId.
 
