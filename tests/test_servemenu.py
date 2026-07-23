@@ -786,7 +786,8 @@ def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
 
     assert 'const emptyTeamTargetPrefix = "empty-team:";' in app_lanes
     assert "function ensureEmptyTeamLane(team, options = {})" in app_shell
-    assert "this.#reconcileTeam(team, state, adapters, teams.length > 1);" in lane_store
+    assert "const teamCount = differential" in lane_store
+    assert "this.#reconcileTeam(team, state, adapters, teamCount > 1);" in lane_store
     assert 'kind: "emptyTeam",' in lane_store
     assert (
         "ensureEmptyTeamLane(change.team, { canClose: change.canClose });" in app_lanes

@@ -553,20 +553,24 @@
  * @property {number} globalRevision
  * @property {TeamGlobalSettings} globalSettings
  * @property {Array.<TeamPayload>} teams
+ * @property {number=} teamCount
+ * @property {Array.<string>=} removedTeamIds
  */
 
 /**
  * @typedef {Object} TeamSnapshotResponse
  * @property {number} revision
  * @property {boolean} changed
- * @property {TeamSnapshot} snapshot
  * @property {boolean=} ok
+ * @property {boolean=} differential
+ * @property {TeamSnapshot=} snapshot
  */
 
 /**
  * @typedef {Object} TeamCommandResponse
  * @property {boolean} ok
  * @property {number=} revision
+ * @property {boolean=} differential
  * @property {TeamSnapshot=} snapshot
  * @property {string=} error
  */

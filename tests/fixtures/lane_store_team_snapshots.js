@@ -18,8 +18,8 @@ function target(id) {
   return { id };
 }
 
-function lane(targetId) {
-  return { targetId };
+function lane(targetId, teamId = "") {
+  return { targetId, teamId };
 }
 
 function snapshot(revision, teams, changed = true) {
@@ -30,6 +30,26 @@ function snapshot(revision, teams, changed = true) {
       globalRevision: revision,
       globalSettings: { fastMode: false },
       teams,
+    },
+  };
+}
+
+function differentialSnapshot(
+  revision,
+  teams,
+  removedTeamIds,
+  teamCount,
+) {
+  return {
+    revision,
+    changed: true,
+    differential: true,
+    snapshot: {
+      globalRevision: revision,
+      globalSettings: { fastMode: false },
+      teamCount,
+      teams,
+      removedTeamIds,
     },
   };
 }
@@ -241,4 +261,73 @@ const seated = seatStore.applyTeamSnapshot(
 assert(
   JSON.stringify(seated.groupRuns) === JSON.stringify([["beta", "alpha", "gamma"]]),
   "a retained lane re-enters at the seat it held, not at the tail",
+);
+
+// A differential replaces only the named team's topology. Omitted teams keep
+// their lanes and group run; explicit removals close only the removed team.
+const differentialStore = new ServeLaneStore();
+differentialStore.replaceTargets(["a", "b", "c", "d"].map(target));
+for (const [targetId, teamId] of [
+  ["a", "first"],
+  ["b", "first"],
+  ["c", "second"],
+  ["d", "second"],
+])
+  differentialStore.registerLane(lane(targetId, teamId));
+differentialStore.applyLaneGroups([
+  ["a", "b"],
+  ["c", "d"],
+]);
+const changedFirst = differentialStore.applyTeamSnapshot(
+  differentialSnapshot(
+    3,
+    [
+      {
+        teamId: "first",
+        members: [{ agentId: "target:b" }, { agentId: "target:a" }],
+      },
+    ],
+    [],
+    2,
+  ),
+  {
+    resolveMember(member) {
+      return { targetId: member.agentId.replace("target:", "") };
+    },
+  },
+);
+assert(
+  JSON.stringify({
+    differential: changedFirst.differential,
+    desired: changedFirst.desiredTargetIds,
+    groups: changedFirst.groupRuns,
+    removes: changedFirst.removes.map((candidate) => candidate.targetId),
+    updates: changedFirst.updates.map((change) => change.targetId),
+  }) ===
+    JSON.stringify({
+      differential: true,
+      desired: ["b", "a"],
+      groups: [
+        ["c", "d"],
+        ["b", "a"],
+      ],
+      removes: [],
+      updates: ["b", "a"],
+    }),
+  "a differential merges one changed team without dropping omitted topology",
+);
+differentialStore.applyLaneGroups(changedFirst.groupRuns);
+const removedSecond = differentialStore.applyTeamSnapshot(
+  differentialSnapshot(4, [], ["second"], 1),
+);
+assert(
+  JSON.stringify({
+    groups: removedSecond.groupRuns,
+    removes: removedSecond.removes.map((candidate) => candidate.targetId),
+  }) ===
+    JSON.stringify({
+      groups: [["b", "a"]],
+      removes: ["c", "d"],
+    }),
+  "an explicit differential removal closes only that team's lanes",
 );

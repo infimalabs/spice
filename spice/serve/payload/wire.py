@@ -589,16 +589,26 @@ WIRE_OBJECTS = (
             "globalSettings": _ref("TeamGlobalSettings"),
             "teams": _array(_ref("TeamPayload")),
         },
+        {"teamCount": INTEGER, "removedTeamIds": STRINGS},
     ),
     _object(
         "TeamSnapshotResponse",
-        {"revision": INTEGER, "changed": BOOLEAN, "snapshot": _ref("TeamSnapshot")},
-        {"ok": BOOLEAN},
+        {"revision": INTEGER, "changed": BOOLEAN},
+        {
+            "ok": BOOLEAN,
+            "differential": BOOLEAN,
+            "snapshot": _ref("TeamSnapshot"),
+        },
     ),
     _object(
         "TeamCommandResponse",
         {"ok": BOOLEAN},
-        {"revision": INTEGER, "snapshot": _ref("TeamSnapshot"), "error": STRING},
+        {
+            "revision": INTEGER,
+            "differential": BOOLEAN,
+            "snapshot": _ref("TeamSnapshot"),
+            "error": STRING,
+        },
     ),
     _object(
         "MetricSeriesSubject",
