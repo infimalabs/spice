@@ -39,23 +39,35 @@ function mosaicRecomputeFrozen(cards, freezeDepth) {
   });
 }
 
-// placeKeepSpan: re-anchor a card at its LATCHED span (never re-chosen —
-// wetReplay settles position, not width) against the current rowFloor,
-// committing the placement into rowFloor. Returns { card, rowFloor }; never
-// mutates its inputs.
-function mosaicPlaceKeepSpan(card, rowFloor, trackCount) {
-  const anchor = mosaicAnchorFor(card.span, rowFloor, trackCount);
-  const placed = { ...card, t: anchor.t, b: anchor.b };
-  return { card: placed, rowFloor: mosaicCommit(rowFloor, placed, trackCount) };
+// restWetCard: re-rest a card at its LATCHED column and span (both fixed at
+// insert; wetReplay settles a card vertically, never sideways) against the
+// current rowFloor, letting only b slide down just far enough to clear
+// whatever now sits in its tracks, then committing the placement into
+// rowFloor. Re-choosing t here (picking a fresh flattest-frontier column)
+// was the message-card jitter source: a neighbour's late content growing
+// re-optimised every still-wet card's column, so an untouched card hopped
+// sideways -- sometimes back and forth as two acks resolved in turn. A
+// card's column is decided once, by insert()/fullReplay()'s decide(), and
+// only a full replay ever re-decides it; frozen resize already moves cards
+// on b alone (mosaicRippleRows), and this extends that same b-only rule to
+// the wet band. Returns { card, rowFloor }; never mutates its inputs.
+function mosaicRestWetCard(card, rowFloor, trackCount) {
+  const tracks = mosaicTrackCount(trackCount);
+  const start = Math.max(0, card.t);
+  const end = Math.min(tracks, card.t + card.span);
+  let b = 0;
+  for (let i = start; i < end; i += 1) if (rowFloor[i] > b) b = rowFloor[i];
+  const placed = { ...card, b };
+  return { card: placed, rowFloor: mosaicCommit(rowFloor, placed, tracks) };
 }
 
-// wetReplay: derive the floor from FROZEN cards only, then re-place each
-// wet card in creation order at its latched span -- spans never change
-// here, only (t, b) settle. Frozen cards are untouched. Order-invariant to
-// the input array's order (only creationIndex governs processing order),
-// so resolving two pending cards in either arrival order produces the same
-// final layout regardless of arrival races. Returns a new array in the input's original order;
-// never mutates its input.
+// wetReplay: derive the floor from FROZEN cards only, then re-rest each
+// wet card in creation order at its latched column and span -- neither t nor
+// span ever changes here, only b settles. Frozen cards are untouched.
+// Order-invariant to the input array's order (only creationIndex governs
+// processing order), so resolving two pending cards in either arrival order
+// produces the same final layout regardless of arrival races. Returns a new
+// array in the input's original order; never mutates its input.
 function mosaicWetReplay(cards, trackCount, freezeDepth) {
   const frozenCards = cards.filter((card) => card.frozen);
   const wetCards = cards
@@ -66,7 +78,7 @@ function mosaicWetReplay(cards, trackCount, freezeDepth) {
   let rowFloor = mosaicDeriveRowFloor(frozenCards, trackCount);
   const placedByIndex = new Map();
   for (const card of wetCards) {
-    const result = mosaicPlaceKeepSpan(card, rowFloor, trackCount);
+    const result = mosaicRestWetCard(card, rowFloor, trackCount);
     rowFloor = result.rowFloor;
     placedByIndex.set(card.creationIndex, result.card);
   }

@@ -261,26 +261,26 @@ def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     assert "lane.pending ack triggered an unexpected refresh" in smoke
 
 
-def test_serve_composer_pending_send_smoke_covers_lock_and_restore() -> None:
+def test_serve_composer_pending_send_smoke_covers_fifo_readiness_and_restore() -> None:
     smoke = (ROOT / "browser" / "serve_composer_pending_send_smoke.js").read_text(
         encoding="utf-8"
     )
 
     assert 'require("./serve_playwright_harness")' in smoke
-    assert (
-        'appearance: shard.classList.contains("composer-shard--pending-send")' in smoke
-    )
+    assert "shardPendingCount: Number(shard.dataset.pendingSendCount) || 0" in smoke
     assert 'composerState: textarea.disabled ? "locked" : "editable"' in smoke
-    assert "expectEqual(result.afterSecondSubmit.sendCount, 1" in smoke
+    assert "expectEqual(result.afterSecondSubmit.queueCount, 1" in smoke
+    assert "expectEqual(result.rapidQueued.snapshot.sendCount, 2" in smoke
     assert 'expectEqual(result.successSettled.text, ""' in smoke
-    assert "expectEqual(result.failureSettled.text, config.failureText" in smoke
+    assert '"failed and queued drafts restore in order"' in smoke
     assert "grouped.commandPending.payloads.length" in smoke
     assert 'grouped.commandFirstSettled.focusState, "focused"' in smoke
     assert "grouped.commandRepeatedPending.payloads.length" in smoke
     assert "grouped.commandRepeatedSettled.focusState" in smoke
     assert "grouped.buttonPayloads.length" in smoke
-    assert 'waitForComposerState(textarea, "editable")' in smoke
-    assert "new MutationObserver(" in smoke
+    assert "waitForPendingSendCount(lane, 0)" in smoke
+    assert "function waitForNextSend(events)" in smoke
+    assert 'attributeFilter: ["data-pending-send-count"]' in smoke
 
 
 def test_watch_frame_smokes_authenticate_subscription_generation() -> None:
@@ -369,6 +369,7 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert "withServePage(" in smoke
     assert "__spiceSubmitLatencySamples" in smoke
     assert "optimisticRenderMs" in smoke
+    assert "composerReadyMs" in smoke
     assert "liveBusOpenMs" in smoke
     assert "sendResultWaitMs" in smoke
     assert "responseHandlingMs" in smoke

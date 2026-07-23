@@ -1394,6 +1394,43 @@ def test_side_channel_watch_exits_when_parent_already_exited_before_registration
         parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
 
 
+def test_side_channel_watch_completes_when_parent_is_already_waitable(
+    tmp_path, monkeypatch
+):
+    waitid_names = ("waitid", "P_PID", "WEXITED", "WNOWAIT")
+    if not all(hasattr(os, name) for name in waitid_names):
+        pytest.skip("platform does not expose non-reaping child status")
+    watcher = wrap._parent_exit_watcher(os.getpid())
+    if watcher is None:
+        pytest.skip("platform does not expose process-exit watch handles")
+    watcher.close()
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    parent = subprocess.Popen([sys.executable, "-c", ""])
+    completed = Event()
+
+    try:
+        status = os.waitid(os.P_PID, parent.pid, os.WEXITED | os.WNOWAIT)
+
+        def watch_to_completion():
+            wrap.watch_agent_side_channel(
+                tmp_path,
+                parent_pid=parent.pid,
+                stderr=stderr,
+            )
+            completed.set()
+
+        with sidechannel.AgentSideChannelServer(tmp_path):
+            thread = Thread(target=watch_to_completion)
+            thread.start()
+            assert completed.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+            thread.join()
+
+        assert status.si_pid == parent.pid
+    finally:
+        parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+
+
 def _eventually(factory, *, contains: str):
     deadline = time.monotonic() + 2.0
     latest = factory()

@@ -209,6 +209,28 @@ def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
 
 
 def _process_exists(pid: int) -> bool:
+    waitid = getattr(os, "waitid", None)
+    if waitid is not None and all(
+        hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    ):
+        try:
+            status = waitid(
+                getattr(os, "P_PID"),
+                pid,
+                getattr(os, "WEXITED")
+                | getattr(os, "WNOHANG")
+                | getattr(os, "WNOWAIT"),
+            )
+        except (ChildProcessError, OSError):
+            # The watched process is not our child, or this platform cannot
+            # observe it through waitid; retain the portable existence probe.
+            pass
+        else:
+            # A child that has exited but has not yet been reaped still answers
+            # kill(pid, 0). Treat its non-reaping wait status as terminal so a
+            # kqueue registration race cannot leave the socket read orphaned.
+            if status is not None:
+                return False
     try:
         os.kill(pid, 0)
         return True

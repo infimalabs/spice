@@ -367,7 +367,7 @@ def test_agent_command_inventory_includes_tracked_doctrine_config_and_fixtures()
         "CONFIG.md",
         "STABILITY.md",
         "pyproject.toml",
-        "tests/fixtures/composer_accepted_draft_clear.js",
+        "tests/fixtures/composer_draft_detach_restore.js",
         "tests/fixtures/session/README.md",
     } <= audited
 

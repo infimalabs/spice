@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+from functools import cache
 import hashlib
 import json
 import os
@@ -43,6 +44,10 @@ _GIT_NO_REPOSITORY_STDERR_MARKER = "not a git repository"
 _GIT_NO_WORK_TREE_STDERR_MARKER = "must be run in a work tree"
 
 
+class _NoWorktreeAtCwd(Exception):
+    """Internal non-cacheable result from a successful git probe."""
+
+
 def set_state_backend(root: str | None) -> None:
     """Redirect every managed-state root under ``root``; ``None`` restores git.
 
@@ -67,6 +72,10 @@ def _worktree_backend_key(repo_root: Path) -> str:
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
     """Resolve the enclosing git worktree root, or None outside git.
 
+    Successful lookups are process-stable and cached by absolute cwd. Missing
+    worktrees are deliberately not cached, so a long-lived process observes a
+    repository created later at the same path.
+
     None is an answer git gave: it ran, looked, and reported no worktree. It
     has two ways of saying that -- no repository at all, and a repository with
     no work tree to stand in -- and both are answers about ``cwd``. A git that
@@ -75,15 +84,25 @@ def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
     broken environment is indistinguishable from an ordinary directory to every
     caller, and the tree takes the blame for it.
     """
+    lookup_cwd = Path(os.path.abspath(cwd if cwd is not None else Path.cwd()))
+    try:
+        return _cached_repo_root_from_cwd(lookup_cwd)
+    except _NoWorktreeAtCwd:
+        return None
+
+
+@cache
+def _cached_repo_root_from_cwd(cwd: Path) -> Path:
+    """Resolve and cache one cwd only when git reports a worktree."""
     from spice.errors import SpiceError
 
-    argv = ["git", "-C", str(cwd or Path.cwd()), "rev-parse", "--show-toplevel"]
+    argv = ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"]
     try:
         result = run_git_command(argv, capture_output=True, check=True, text=True)
     except CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         if _git_reported_no_work_tree(stderr):
-            return None
+            raise _NoWorktreeAtCwd from None
         raise SpiceError(_git_failure_message(argv, exc.returncode, stderr)) from exc
     except OSError as exc:
         raise SpiceError(
@@ -91,7 +110,9 @@ def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
             f"{exc.strerror or exc}; check that git is installed and on PATH"
         ) from exc
     raw = result.stdout.strip()
-    return Path(raw) if raw else None
+    if not raw:
+        raise _NoWorktreeAtCwd
+    return Path(raw)
 
 
 def require_repo_root(cwd: Path | None = None) -> Path:

@@ -560,6 +560,33 @@ def test_static_mosaic_event_log_is_wired_after_full_replay_before_sizing():
     assert full_replay_index < event_log_index < sizing_index
 
 
+def test_static_mosaic_cards_hold_their_column_across_every_event():
+    # Placement-jitter regression: replays representative arrival + ack
+    # sequences one event at a time through the shipped mosaicReplayEventLog
+    # and asserts that a card's column (t) is identical across every event
+    # other than a full replay. Content resolution may slide a wet card
+    # vertically to clear a growing neighbour, but never sideways -- the
+    # sideways hop was the message-card jitter (MESSAGE-1kGFNM63). The
+    # fixture also asserts a real vertical re-rest occurred, so a green run
+    # proves the wet path was exercised rather than passing vacuously.
+    script = Path(__file__).with_name("fixtures") / "mosaic_jitter.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+            str(STATIC_ROOT / "app.mosaic-full-replay.js"),
+            str(STATIC_ROOT / "app.mosaic-event-log.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "mosaic jitter: all assertions passed" in result.stdout
+
+
 def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw():
     script = Path(__file__).with_name("fixtures") / "mosaic_seam.js"
 
@@ -685,7 +712,7 @@ def test_static_cmd_enter_submits_focused_composer_target_only():
     assert "lane.formEl.requestSubmit();" not in app_shell
 
 
-def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
+def test_static_keyboard_submit_refocuses_target_composer_before_backend_reply():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     submit_start = app_controls.index("function submitLaneForm(")
@@ -730,10 +757,10 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
         app_stream
     )
     assert 'markLaneSubmitLatency(latencyProbe, "optimisticRenderedAt");' in app_stream
-    assert (
-        "sendLanePayload(lane, payload, sourceLane, { ...options, latencyProbe });"
-        in app_stream
-    )
+    assert "const composerDraft = detachLaneComposerDraft(" in app_stream
+    assert "lane.pendingSendQueue.push({" in app_stream
+    assert "drainLaneSendQueue(lane);" in app_stream
+    assert 'markLaneSubmitLatency(latencyProbe, "composerReadyAt");' in app_stream
     assert 'markLaneSubmitLatency(latencyProbe, "requestAwaitStartAt");' in (
         send_payload_body
     )
@@ -743,7 +770,7 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "closed");' in (
         send_payload_body
     )
-    assert "applyLaneSendResult(lane, payload, result, sourceLane, options);" in (
+    assert "applyLaneSendResult(lane, payload, result, sourceLane);" in (
         send_payload_body
     )
     assert 'markLaneSubmitLatency(latencyProbe, "resultAppliedAt");' in (
@@ -752,11 +779,7 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
     assert 'result.ok ? "accepted" : "rejected"' in send_payload_body
     assert 'markLaneSubmitLatency(latencyProbe, "errorAt");' in send_payload_body
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "error");' in (send_payload_body)
-    assert "options = {}," in result_body
-    assert result_body.index("finishLanePendingSubmission(lane") < result_body.index(
-        "focusAfterComposerReset(options.focusAfterReset);"
-    )
-    assert "clearAcceptedComposerDrafts(sourceLane, lane.targetId);" in result_body
+    assert "finishLanePendingSubmission(lane" in result_body
     assert (
         'throw new Error("composer focus target must remain in the document");'
         in focus_reset_body
@@ -783,6 +806,7 @@ def test_static_send_latency_probe_records_submit_timing_buckets():
     assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_static
     assert "function laneSubmitLatencyDurations(marks)" in app_static
     assert "optimisticRenderMs:" in app_static
+    assert "composerReadyMs:" in app_static
     assert "liveBusOpenMs:" in app_static
     assert "sendResultWaitMs:" in app_static
     assert "responseHandlingMs:" in app_static

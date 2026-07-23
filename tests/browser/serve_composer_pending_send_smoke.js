@@ -4,6 +4,8 @@ const { withServePage } = require("./serve_playwright_harness");
 const SUCCESS_TEXT = "pending send resolves successfully";
 const FAILURE_TEXT = "pending send restores after failure";
 const REPEATED_TEXT = "second keyboard submission without clicking";
+const QUEUED_FAILURE_TEXT = "queued after the failing submission";
+const NEWER_TEXT = "new draft typed while sends are pending";
 const SHARED_BODY = "shared focused body";
 const SHARED_QUOTE = "shared quote";
 const SHARED_CONTEXT = "shared context";
@@ -30,7 +32,8 @@ async function run() {
           runGroupedButtonSubmission,
           runGroupedComposerScenarios,
           runRepeatedKeyboardSubmission,
-          waitForComposerState,
+          waitForNextSend,
+          waitForPendingSendCount,
         ]
           .map((helper) => helper.toString())
           .join("\n"),
@@ -39,6 +42,8 @@ async function run() {
         failureText: FAILURE_TEXT,
         focusPreserveText: FOCUS_PRESERVE_TEXT,
         focusRestoreText: FOCUS_RESTORE_TEXT,
+        newerText: NEWER_TEXT,
+        queuedFailureText: QUEUED_FAILURE_TEXT,
         repeatedText: REPEATED_TEXT,
         sharedBody: SHARED_BODY,
         sharedContext: SHARED_CONTEXT,
@@ -58,10 +63,14 @@ async function runPendingSendScenarios(config) {
   const textarea = lane.shardTextareas.get(lane.targetId);
   if (!textarea) throw new Error("composer pending-send smoke needs a textarea");
   const originalLiveBusRequest = liveBusRequest;
+  const sendDispatchEvents = new EventTarget();
   const sends = [];
   liveBusRequest = (type, fields = {}) => {
     if (type !== "lane.send") return originalLiveBusRequest(type, fields);
-    return new Promise((resolve) => sends.push({ fields, resolve }));
+    return new Promise((resolve) => {
+      sends.push({ fields, resolve });
+      sendDispatchEvents.dispatchEvent(new Event("send-dispatched"));
+    });
   };
   try {
     textarea.value = config.successText;
@@ -70,11 +79,13 @@ async function runPendingSendScenarios(config) {
       new Event("submit", { bubbles: true, cancelable: true }),
     );
     const successPending = pendingSendSnapshot(lane, textarea, sends.length);
+    textarea.value = config.repeatedText;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
     lane.formEl.dispatchEvent(
       new Event("submit", { bubbles: true, cancelable: true }),
     );
     const afterSecondSubmit = pendingSendSnapshot(lane, textarea, sends.length);
-    const successUnlocked = waitForComposerState(textarea, "editable");
+    const secondSendDispatched = waitForNextSend(sendDispatchEvents);
     sends[0].resolve({
       result: {
         ok: true,
@@ -88,7 +99,19 @@ async function runPendingSendScenarios(config) {
         agentEnsure: { ok: true, threadId: lane.targetThreadId || "" },
       },
     });
-    await successUnlocked;
+    await secondSendDispatched;
+    const rapidQueued = {
+      payloadText: sends[1].fields.payload.text,
+      snapshot: pendingSendSnapshot(lane, textarea, sends.length),
+    };
+    resolveSuccessfulPendingSend(
+      sends[1],
+      lane,
+      "composer-pending-repeat-success",
+      sends[1].fields.payload.text,
+      2,
+    );
+    await waitForPendingSendCount(lane, 0);
     const successSettled = pendingSendSnapshot(lane, textarea, sends.length);
 
     textarea.value = config.failureText;
@@ -96,10 +119,17 @@ async function runPendingSendScenarios(config) {
     lane.formEl.dispatchEvent(
       new Event("submit", { bubbles: true, cancelable: true }),
     );
+    const failureSend = sends[sends.length - 1];
+    textarea.value = config.queuedFailureText;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    lane.formEl.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
+    textarea.value = config.newerText;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
     const failurePending = pendingSendSnapshot(lane, textarea, sends.length);
-    const failureUnlocked = waitForComposerState(textarea, "editable");
-    sends[1].resolve({ result: { ok: false, error: "expected smoke failure" } });
-    await failureUnlocked;
+    failureSend.resolve({ result: { ok: false, error: "expected smoke failure" } });
+    await waitForPendingSendCount(lane, 0);
     const failureSettled = pendingSendSnapshot(lane, textarea, sends.length);
     const grouped = await runGroupedComposerScenarios(sends, config);
     const crossFocus = await runCrossComposerFocusScenarios(sends, config);
@@ -109,6 +139,7 @@ async function runPendingSendScenarios(config) {
       failurePending,
       failureSettled,
       grouped,
+      rapidQueued,
       successPending,
       successSettled,
     };
@@ -154,7 +185,6 @@ async function runGroupedComposerScenarios(sends, config) {
       text: send.fields.payload.text,
     })),
   };
-  const commandUnlocked = waitForComposerState(hostTextarea, "editable");
   resolveSuccessfulPendingSend(
     commandSends[0],
     host,
@@ -162,7 +192,7 @@ async function runGroupedComposerScenarios(sends, config) {
     commandSends[0].fields.payload.text,
     2,
   );
-  await commandUnlocked;
+  await waitForPendingSendCount(host, 0);
   const commandFirstSettled = {
     focusState:
       document.activeElement === hostTextarea ? "focused" : "blurred",
@@ -200,11 +230,9 @@ function configureGroupedComposer(host, member) {
   laneStore.applyLaneGroups([[host.targetId, member.targetId]], { isLaneOpen });
 }
 
-// Two independent (ungrouped) composers. A keyboard submit captures its own
-// textarea as the post-completion focus target; the pending lock drops focus to
-// <body>. If the send is slow and the caret stayed put, completion restores it
-// (same-composer restoration); if the user moved to the second composer first,
-// completion must leave that focus alone (cross-composer preservation).
+// Two independent (ungrouped) composers. A keyboard submit resets and refocuses
+// its own textarea before the backend reply. If the user moves to the second
+// composer while the send is pending, completion must leave that focus alone.
 async function runCrossComposerFocusScenarios(sends, config) {
   const first = resolveIsolatedLane("composer-focus-first");
   const second = resolveIsolatedLane("composer-focus-second");
@@ -254,9 +282,8 @@ async function runCrossComposerFocusScenarios(sends, config) {
 
   const restorePending = submitByKeyboard(firstTextarea, config.focusRestoreText);
   const restorePendingFocus = focusLabel();
-  const restoreUnlocked = waitForComposerState(firstTextarea, "editable");
   resolveSends(restorePending, "composer-focus-restore-", 5);
-  await restoreUnlocked;
+  await waitForPendingSendCount(first, 0);
   const restoreSettledFocus = focusLabel();
 
   const preservePending = submitByKeyboard(
@@ -265,9 +292,8 @@ async function runCrossComposerFocusScenarios(sends, config) {
   );
   secondTextarea.focus();
   const preservePendingFocus = focusLabel();
-  const preserveUnlocked = waitForComposerState(firstTextarea, "editable");
   resolveSends(preservePending, "composer-focus-preserve-", 6);
-  await preserveUnlocked;
+  await waitForPendingSendCount(first, 0);
   const preserveSettledFocus = focusLabel();
 
   return {
@@ -308,7 +334,6 @@ async function runRepeatedKeyboardSubmission(
       text: send.fields.payload.text,
     })),
   };
-  const repeatedUnlocked = waitForComposerState(hostTextarea, "editable");
   resolveSuccessfulPendingSend(
     repeatedSends[0],
     host,
@@ -316,7 +341,7 @@ async function runRepeatedKeyboardSubmission(
     repeatedSends[0].fields.payload.text,
     3,
   );
-  await repeatedUnlocked;
+  await waitForPendingSendCount(host, 0);
   return {
     commandRepeatedPending,
     commandRepeatedSettled: {
@@ -352,10 +377,6 @@ async function runGroupedButtonSubmission(
     targetId: send.fields.targetId,
     text: send.fields.payload.text,
   }));
-  const buttonUnlocked = [
-    waitForComposerState(hostTextarea, "editable"),
-    waitForComposerState(memberTextarea, "editable"),
-  ];
   buttonSends.forEach((send, index) =>
     resolveSuccessfulPendingSend(
       send,
@@ -365,7 +386,10 @@ async function runGroupedButtonSubmission(
       4,
     ),
   );
-  await Promise.all(buttonUnlocked);
+  await Promise.all([
+    waitForPendingSendCount(host, 0),
+    waitForPendingSendCount(member, 0),
+  ]);
   return {
     buttonPayloads,
     buttonSettled: {
@@ -382,11 +406,12 @@ async function runGroupedButtonSubmission(
 function pendingSendSnapshot(lane, textarea, sendCount) {
   const shard = textarea.closest(".composer-shard");
   return {
-    appearance: shard.classList.contains("composer-shard--pending-send")
-      ? "dimmed"
-      : "normal",
+    appearance: getComputedStyle(textarea).opacity === "1" ? "normal" : "dimmed",
     composerState: textarea.disabled ? "locked" : "editable",
     opacity: getComputedStyle(textarea).opacity,
+    pendingCount: Number(lane.pendingSubmissionCount) || 0,
+    queueCount: lane.pendingSendQueue.length,
+    shardPendingCount: Number(shard.dataset.pendingSendCount) || 0,
     sendCount,
     submitState: lane.submitEl.disabled ? "locked" : "editable",
     text: textarea.value,
@@ -420,24 +445,27 @@ function resolveSuccessfulPendingSend(send, lane, key, requestText, version) {
   });
 }
 
-function waitForComposerState(textarea, expected) {
-  const current = () => (textarea.disabled ? "locked" : "editable");
+function waitForPendingSendCount(lane, expected) {
+  const current = () => Math.max(0, Number(lane.pendingSubmissionCount) || 0);
+  if (current() === expected) return Promise.resolve(expected);
+  const form = laneGroupHost(lane).formEl;
   return new Promise((resolve) => {
-    if (current() === expected) {
-      resolve(expected);
-      return;
-    }
     const observer = new MutationObserver(() => {
-      if (current() === expected) {
-        observer.disconnect();
-        resolve(expected);
-      }
+      if (current() !== expected) return;
+      observer.disconnect();
+      resolve(expected);
     });
-    observer.observe(textarea, {
-      attributeFilter: ["disabled"],
+    observer.observe(form, {
+      attributeFilter: ["data-pending-send-count"],
       attributes: true,
     });
   });
+}
+
+function waitForNextSend(events) {
+  return new Promise((resolve) =>
+    events.addEventListener("send-dispatched", resolve, { once: true }),
+  );
 }
 
 function expectEqual(actual, expected, message) {
@@ -446,24 +474,60 @@ function expectEqual(actual, expected, message) {
 }
 
 function assertPendingSendScenarios(result, config) {
+  assertRapidPendingSendScenario(result, config);
+  assertFailedPendingSendScenario(result, config);
+  assertCrossComposerFocusScenario(result.crossFocus);
+  assertGroupedCommandSendScenario(result.grouped, config);
+  assertGroupedButtonSendScenario(result.grouped, config);
+}
+
+function assertRapidPendingSendScenario(result, config) {
   expectEqual(
     result.successPending.appearance,
-    "dimmed",
+    "normal",
     "submitted composer text appearance",
   );
-  expectEqual(result.successPending.opacity, "0.52", "submitted text opacity");
-  expectEqual(result.successPending.composerState, "locked", "pending composer state");
-  expectEqual(result.successPending.submitState, "locked", "pending submit state");
-  expectEqual(result.afterSecondSubmit.sendCount, 1, "locked composer send count");
+  expectEqual(result.successPending.opacity, "1", "submitted text opacity");
+  expectEqual(result.successPending.composerState, "editable", "pending composer state");
+  expectEqual(result.successPending.submitState, "editable", "pending submit state");
+  expectEqual(result.successPending.text, "", "submitted draft detaches immediately");
+  expectEqual(result.successPending.pendingCount, 1, "first pending count");
+  expectEqual(result.afterSecondSubmit.sendCount, 1, "queued composer send count");
+  expectEqual(result.afterSecondSubmit.pendingCount, 2, "rapid pending count");
+  expectEqual(result.afterSecondSubmit.queueCount, 1, "rapid local queue count");
+  expectEqual(result.afterSecondSubmit.text, "", "rapid queued draft detaches");
+  expectEqual(result.rapidQueued.snapshot.sendCount, 2, "FIFO second dispatch count");
+  expectEqual(
+    result.rapidQueued.payloadText,
+    config.repeatedText,
+    "FIFO second dispatch payload",
+  );
   expectEqual(result.successSettled.appearance, "normal", "accepted appearance");
   expectEqual(result.successSettled.composerState, "editable", "accepted state");
   expectEqual(result.successSettled.text, "", "accepted composer text");
-  expectEqual(result.failurePending.composerState, "locked", "failure pending state");
+  expectEqual(result.successSettled.pendingCount, 0, "accepted pending count");
+}
+
+function assertFailedPendingSendScenario(result, config) {
+  expectEqual(result.failurePending.composerState, "editable", "failure pending state");
+  expectEqual(result.failurePending.pendingCount, 2, "failure queue pending count");
+  expectEqual(result.failurePending.queueCount, 1, "failure queue depth");
+  expectEqual(result.failurePending.text, config.newerText, "new draft remains editable");
   expectEqual(result.failureSettled.appearance, "normal", "failed appearance");
   expectEqual(result.failureSettled.composerState, "editable", "failed state");
-  expectEqual(result.failureSettled.text, config.failureText, "failed composer text");
+  expectEqual(result.failureSettled.pendingCount, 0, "failed queue pending count");
+  expectEqual(
+    result.failureSettled.text,
+    config.failureText +
+      "\n\n" +
+      config.queuedFailureText +
+      "\n\n" +
+      config.newerText,
+    "failed and queued drafts restore in order",
+  );
+}
 
-  const grouped = result.grouped;
+function assertGroupedCommandSendScenario(grouped, config) {
   expectEqual(grouped.commandPending.payloads.length, 1, "Command-Enter send count");
   expectEqual(
     grouped.commandPending.payloads[0].targetId,
@@ -475,8 +539,8 @@ function assertPendingSendScenarios(result, config) {
     config.sharedBody + "\n\n> " + config.sharedQuote + "\n\n" + config.sharedContext,
     "Command-Enter merged target stack",
   );
-  expectEqual(grouped.commandPending.focused.appearance, "dimmed", "focused appearance");
-  expectEqual(grouped.commandPending.focused.composerState, "locked", "focused state");
+  expectEqual(grouped.commandPending.focused.appearance, "normal", "focused appearance");
+  expectEqual(grouped.commandPending.focused.composerState, "editable", "focused state");
   expectEqual(grouped.commandPending.other.appearance, "normal", "other appearance");
   expectEqual(grouped.commandPending.other.composerState, "editable", "other state");
   expectEqual(grouped.commandFirstSettled.focusState, "focused", "restored focus");
@@ -526,6 +590,9 @@ function assertPendingSendScenarios(result, config) {
     "",
     "repeat accepted text",
   );
+}
+
+function assertGroupedButtonSendScenario(grouped, config) {
   expectEqual(grouped.buttonPayloads.length, 2, "button fan-out count");
   const hostPayload = grouped.buttonPayloads.find(
     (payload) => payload.targetId === grouped.hostTargetId,
@@ -553,18 +620,19 @@ function assertPendingSendScenarios(result, config) {
     "cleared",
     "button member quote state",
   );
+}
 
-  const crossFocus = result.crossFocus;
+function assertCrossComposerFocusScenario(crossFocus) {
   expectEqual(crossFocus.restoreSends, 1, "restore keyboard send count");
   expectEqual(
     crossFocus.restorePendingFocus,
-    "blurred",
-    "restore pending lock drops focus",
+    "first",
+    "submitting composer remains focused while pending",
   );
   expectEqual(
     crossFocus.restoreSettledFocus,
     "first",
-    "same-composer restoration after delayed completion",
+    "same-composer focus remains after delayed completion",
   );
   expectEqual(crossFocus.preserveSends, 1, "preserve keyboard send count");
   expectEqual(
