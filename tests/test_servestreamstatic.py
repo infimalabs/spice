@@ -561,14 +561,12 @@ def test_static_mosaic_event_log_is_wired_after_full_replay_before_sizing():
 
 
 def test_static_mosaic_cards_hold_their_column_across_every_event():
-    # Placement-jitter regression: replays representative arrival + ack
-    # sequences one event at a time through the shipped mosaicReplayEventLog
-    # and asserts that a card's column (t) is identical across every event
-    # other than a full replay. Content resolution may slide a wet card
-    # vertically to clear a growing neighbour, but never sideways -- the
-    # sideways hop was the message-card jitter (MESSAGE-1kGFNM63). The
-    # fixture also asserts a real vertical re-rest occurred, so a green run
-    # proves the wet path was exercised rather than passing vacuously.
+    # Placement-jitter regression: the same Node process covers pure mosaic
+    # sequences and serialized lane.append frames. Real LiveBus dispatch,
+    # ACK-context reconciliation, and shipped mosaic replay callbacks produce
+    # an exact logical-stage/coordinate trace. It proves that arrival and ACK
+    # state alone preserve coordinates, while the canonical layout changes
+    # only b; the prior wet re-column changes t at the layout observation.
     script = Path(__file__).with_name("fixtures") / "mosaic_jitter.js"
 
     result = subprocess.run(
@@ -579,6 +577,10 @@ def test_static_mosaic_cards_hold_their_column_across_every_event():
             str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
             str(STATIC_ROOT / "app.mosaic-full-replay.js"),
             str(STATIC_ROOT / "app.mosaic-event-log.js"),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.render.js"),
+            str(STATIC_ROOT / "app.live-bus.js"),
+            str(STATIC_ROOT / "app.stream.js"),
         ],
         check=True,
         capture_output=True,
