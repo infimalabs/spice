@@ -21,6 +21,7 @@ from spice.tasks import (
     opslog,
     tw,
 )
+from spice.tasks.git import plumbing
 
 
 SHOW_ANNOTATIONS_LIMIT = 6
@@ -368,7 +369,7 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
             if review_ref != agent_head
             else "unchanged baseline after empty task phase"
         )
-        return [
+        lines = [
             (
                 f"review_commit {agent_head} "
                 "(task phase head unchanged; no local commit)"
@@ -382,11 +383,12 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
                 "the baseline commit is context only and is not task work"
             ),
         ]
+        return _review_commit_reachability_lines(lines, agent_head)
     if merge_head != agent_head:
         upstream_head = _f(row, "done_upstream_head")
         diff_base = upstream_head or f"{review_ref}^1"
         base_source = "done_upstream_head" if upstream_head else "merge first parent"
-        return [
+        lines = [
             f"review_commit {review_ref} (task merge; agent_head {agent_head})",
             f"review_diff_base {diff_base} ({base_source})",
             (
@@ -399,7 +401,27 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
                 "because its ancestry can include already-integrated overlap"
             ),
         ]
-    return [f"review_commit {review_ref} (task head)"]
+        return _review_commit_reachability_lines(lines, review_ref)
+    return _review_commit_reachability_lines(
+        [f"review_commit {review_ref} (task head)"],
+        review_ref,
+    )
+
+
+def _review_commit_reachability_lines(
+    lines: list[str], review_commit: str
+) -> list[str]:
+    """Put a stale-checkout warning directly after the assigned commit."""
+    repo_root = repo_root_from_cwd()
+    if repo_root is not None and plumbing.is_ancestor(repo_root, review_commit, "HEAD"):
+        return lines
+    warning = (
+        "review_commit_warning UNREACHABLE_FROM_HEAD: assigned review_commit "
+        f"{review_commit} is not reachable from this worktree HEAD; do not run "
+        "focused tests against this possibly stale checkout—validate from an "
+        f"isolated checkout or git archive of {shlex.quote(review_commit)}"
+    )
+    return [lines[0], warning, *lines[1:]]
 
 
 def _phase_effort_lines(row: dict[str, Any]) -> list[str]:
