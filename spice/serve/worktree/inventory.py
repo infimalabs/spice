@@ -32,6 +32,7 @@ from spice.serve.payload.lane import (
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import claimstate
 
 
 def work_trees_payload(state: Any) -> dict[str, Any]:
@@ -41,9 +42,13 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     # across every lane; share one snapshot so the build spawns them at most
     # once instead of once per target.
     review_exports = ReviewExportSnapshot()
+    # Claimed-task resolution reads one global +ACTIVE export per BOUND lane,
+    # identical across lanes; share one snapshot so the build spawns it at most
+    # once regardless of how many lanes are bound.
+    active_claims = claimstate.ActiveClaimSnapshot()
     payload: dict[str, Any] = {
         "workTrees": [
-            _work_tree_payload(state, target, inventory, review_exports)
+            _work_tree_payload(state, target, inventory, review_exports, active_claims)
             for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
@@ -64,6 +69,7 @@ def _work_tree_payload(
     target: WorktreeTarget,
     inventory: dict[str, Any],
     review_exports: ReviewExportSnapshot,
+    active_claims: claimstate.ActiveClaimSnapshot,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
@@ -93,6 +99,7 @@ def _work_tree_payload(
         status=status,
         pending_identity=pending_identity,
         desired_config=desired_config,
+        active_claims=active_claims,
     )
     return {
         "id": target.id,
@@ -189,6 +196,7 @@ def _work_tree_status_payloads(
     status: Any,
     pending_identity: dict[str, Any],
     desired_config: dict[str, str] | None = None,
+    active_claims: claimstate.ActiveClaimSnapshot | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from spice.serve.payload.message import target_activity_items
 
@@ -210,6 +218,7 @@ def _work_tree_status_payloads(
         items=items,
         error=error,
         pending_identity=pending_identity,
+        active_claims=active_claims,
     )
     return serve_identity, status_line
 

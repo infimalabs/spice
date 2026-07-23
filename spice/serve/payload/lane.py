@@ -286,15 +286,16 @@ def status_line_payload(
     )
 
 
-def _claimed_task_payload(thread_id: str) -> dict[str, str]:
+def _claimed_task_payload(
+    thread_id: str, *, claims: claimstate.ActiveClaimSnapshot | None = None
+) -> dict[str, str]:
     if not thread_id:
         return {}
-    from spice.errors import SpiceError
-
-    try:
-        row = claimstate.active_claim(tw.canonical_actor(thread_id))
-    except SpiceError:
-        return {}
+    # A SpiceError on the +ACTIVE export is absorbed by the snapshot (empty
+    # rows -> no claim), preserving the prior "degrade to {}" behaviour while
+    # collapsing the per-lane export to one shared read.
+    snapshot = claims if claims is not None else claimstate.ActiveClaimSnapshot()
+    row = snapshot.active_claim(tw.canonical_actor(thread_id))
     if row is None:
         return {}
     handle = task_identity.render_handle(row)
@@ -311,6 +312,7 @@ def _status_line_payload_from_status(
     items: list[message_reader.AssistantMessage],
     error: str | None,
     pending_identity: dict[str, Any],
+    active_claims: claimstate.ActiveClaimSnapshot | None = None,
 ) -> dict[str, Any]:
     thread_id = thread_id or ""
     visible = [item for item in items if not item.kind.startswith("presence:")]
@@ -335,7 +337,7 @@ def _status_line_payload_from_status(
         "agentVisualStatus": _agent_visual_status(
             status.process_status, latest_activity_kind
         ),
-        "claimedTask": _claimed_task_payload(thread_id),
+        "claimedTask": _claimed_task_payload(thread_id, claims=active_claims),
         "error": binding_error or error or "",
     }
 

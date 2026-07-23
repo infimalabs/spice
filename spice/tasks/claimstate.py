@@ -515,11 +515,55 @@ def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
     )
 
 
-def _active_claims_for(actor: str) -> list[dict[str, Any]]:
+def _export_active() -> list[dict[str, Any]]:
     # Bare +ACTIVE: a claimed deferred task keeps its wait, and the
     # status:pending filter synthesizes `waiting` for future-wait rows, which
     # would hide the claim from its own owner.
-    return [r for r in tw.export(["+ACTIVE"]) if str(r.get("claim_by") or "") == actor]
+    return tw.export(["+ACTIVE"])
+
+
+def _claims_by_actor(rows: list[dict[str, Any]], actor: str) -> list[dict[str, Any]]:
+    return [r for r in rows if str(r.get("claim_by") or "") == actor]
+
+
+def _latest_claim(claims: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not claims:
+        return None
+    return max(claims, key=lambda r: str(r.get("claim_at") or ""))
+
+
+def _active_claims_for(actor: str) -> list[dict[str, Any]]:
+    return _claims_by_actor(_export_active(), actor)
+
+
+class ActiveClaimSnapshot:
+    """One shared +ACTIVE export reused across an inventory build.
+
+    ``active_claim`` answers per actor from the same global +ACTIVE rows as the
+    module-level function, but spawns the Taskwarrior export at most once: a
+    build with many bound lanes would otherwise re-run an identical query per
+    lane. A SpiceError on the single export is cached as empty, so every caller
+    then degrades to "no claim" without re-spawning the failing export.
+    """
+
+    def __init__(self) -> None:
+        self._rows: list[dict[str, Any]] = []
+        self._loaded = False
+
+    def _rows_once(self) -> list[dict[str, Any]]:
+        if not self._loaded:
+            self._loaded = True
+            try:
+                self._rows = _export_active()
+            except SpiceError:
+                self._rows = []
+        return self._rows
+
+    def active_claim(self, actor: str) -> dict[str, Any] | None:
+        """The actor's active task claim (latest claim_at), or None."""
+        if not actor:
+            return None
+        return _latest_claim(_claims_by_actor(self._rows_once(), actor))
 
 
 def has_active_claim() -> bool:
@@ -531,10 +575,7 @@ def active_claim(actor: str) -> dict[str, Any] | None:
     """The actor's active task claim (latest claim_at), or None."""
     if not actor:
         return None
-    claims = _active_claims_for(actor)
-    if not claims:
-        return None
-    return max(claims, key=lambda r: str(r.get("claim_at") or ""))
+    return _latest_claim(_active_claims_for(actor))
 
 
 def active_claim_phase(actor: str) -> str:

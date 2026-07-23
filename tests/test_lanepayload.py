@@ -291,17 +291,21 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        lane.claimstate,
-        "active_claim",
-        lambda actor: (
-            {
-                "description": "Show  claimed task\nwithout breaking the card",
-                "incepted": "1kF5xdSM",
-                "phase": "todo",
-                "project": "serve.ui",
-            }
-            if actor == "019f6eddab8c7ab2870af6b81dfc5b7f"
-            else None
+        lane.tw,
+        "export",
+        lambda filters=None, **_k: (
+            [
+                {
+                    "claim_by": "019f6eddab8c7ab2870af6b81dfc5b7f",
+                    "claim_at": "2026-06-10T00:00:00Z",
+                    "description": "Show  claimed task\nwithout breaking the card",
+                    "incepted": "1kF5xdSM",
+                    "phase": "todo",
+                    "project": "serve.ui",
+                }
+            ]
+            if list(filters or []) == ["+ACTIVE"]
+            else []
         ),
     )
 
