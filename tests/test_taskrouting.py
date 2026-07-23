@@ -617,6 +617,72 @@ def test_explicit_thread_route_keeps_private_fallback_without_membership(task_re
     assert filter_line == f"filter ( {private} or origin_thread.is:{ACTOR_A} )"
 
 
+def test_status_resolves_one_route_scope_for_every_scoped_category(monkeypatch):
+    route = {"lifetime": "Drive"}
+    scope = ["(", "project:task.unit", "or", "origin_thread.is:actor-a", ")"]
+    resolutions: list[tuple[str, object]] = []
+    scoped_queries: list[tuple[tuple[str, ...], object]] = []
+
+    def resolve_route(actor):
+        resolutions.append(("route", actor))
+        return route
+
+    def resolve_scope(actor, resolved_route):
+        resolutions.append(("scope", (actor, resolved_route)))
+        return scope
+
+    def active_rows(actor, *, scope):
+        scoped_queries.append((("active", actor), scope))
+        return []
+
+    def ready_rows(actor, *, scope):
+        scoped_queries.append((("ready", actor), scope))
+        return [{"phase": "todo"}, {"phase": "review"}]
+
+    def rows_in_scope(filters, resolved_scope):
+        scoped_queries.append((tuple(filters), resolved_scope))
+        return [{"status": "waiting"}]
+
+    monkeypatch.setattr(render.tw, "current_actor", lambda: "actor-a")
+    monkeypatch.setattr(render.tw, "now_iso", lambda: "2026-07-23T00:00:00Z")
+    monkeypatch.setattr(render.lanes, "team_route_for_actor", resolve_route)
+    monkeypatch.setattr(render.alloc, "effective_route_filter_args", resolve_scope)
+    monkeypatch.setattr(render.alloc, "visible_active_rows", active_rows)
+    monkeypatch.setattr(render.alloc, "visible_ready_rows", ready_rows)
+    monkeypatch.setattr(render.alloc, "visible_rows_in_scope", rows_in_scope)
+    monkeypatch.setattr(render.alloc, "is_hidden", lambda _row: False)
+    monkeypatch.setattr(render.alloc, "oops_rows", lambda: [{}, {}])
+    monkeypatch.setattr(
+        render, "public_task_project_depth_label", lambda: "public depth"
+    )
+
+    status = render.render_status()
+
+    assert resolutions == [
+        ("route", "actor-a"),
+        ("scope", ("actor-a", route)),
+    ]
+    assert scoped_queries == [
+        (("active", "actor-a"), scope),
+        (("ready", "actor-a"), scope),
+        (("status:pending", "+BLOCKED"), scope),
+        (("status:waiting", "-ACTIVE"), scope),
+    ]
+    assert status.splitlines() == [
+        "claim -",
+        "actor actor-a",
+        "filter ( project:task.unit or origin_thread.is:actor-a )",
+        "public depth",
+        "active 0",
+        "ready 1",
+        "review 1",
+        "blocked 1",
+        "waiting 1",
+        "stale 0",
+        "oops 2",
+    ]
+
+
 def test_drive_oops_creation_skips_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()

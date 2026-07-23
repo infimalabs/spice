@@ -532,10 +532,6 @@ def render_show(handle: str, *, include_recovery_context: bool | None = None) ->
     return "\n".join(lines)
 
 
-def _visible_count(actor: str, filters: list[str]) -> int:
-    return len(alloc.visible_rows(actor, filters))
-
-
 def public_task_project_depth_label() -> str:
     min_depth, max_depth = config.project_depth_bounds()
     return f"public task project depth {min_depth}..{max_depth} dotted segments"
@@ -549,18 +545,22 @@ def _is_stale_claim(row: dict[str, Any], now: str) -> bool:
 def render_status() -> str:
     actor = tw.current_actor()
     now = tw.now_iso()
-    active_rows = alloc.visible_active_rows(actor)
+    route = lanes.team_route_for_actor(actor)
+    scope = alloc.effective_route_filter_args(actor, route)
+    active_rows = alloc.visible_active_rows(actor, scope=scope)
     active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     active_count = sum(1 for r in active_rows if not _is_stale_claim(r, now))
-    ready_rows = alloc.visible_ready_rows(actor)
+    ready_rows = alloc.visible_ready_rows(actor, scope=scope)
     review_rows = [r for r in ready_rows if _f(r, "phase") == "review"]
     non_review_ready_rows = [r for r in ready_rows if _f(r, "phase") != "review"]
-    blocked_count = _visible_count(actor, ["status:pending", "+BLOCKED"])
+    blocked_count = len(
+        alloc.visible_rows_in_scope(["status:pending", "+BLOCKED"], scope)
+    )
     # -ACTIVE: a claimed deferred task keeps its wait and would otherwise be
     # double-counted as both active and waiting.
     waiting_count = sum(
         1
-        for r in alloc.visible_rows(actor, ["status:waiting", "-ACTIVE"])
+        for r in alloc.visible_rows_in_scope(["status:waiting", "-ACTIVE"], scope)
         if not alloc.is_hidden(r)
     )
     stale_count = sum(1 for r in active_rows if _is_stale_claim(r, now))
@@ -575,10 +575,8 @@ def render_status() -> str:
         f"stale {stale_count}",
         f"oops {len(alloc.oops_rows())}",
     ]
-    route = lanes.team_route_for_actor(actor)
-    effective_filter = alloc.effective_route_filter_args(actor, route)
-    if effective_filter:
-        lane_filter_label = " ".join(effective_filter)
+    if scope:
+        lane_filter_label = " ".join(scope)
     else:
         lane_filter_label = f"project:{config.private_project(actor)}"
     lines.insert(2, f"filter {lane_filter_label}")
