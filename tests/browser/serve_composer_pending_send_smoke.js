@@ -20,7 +20,11 @@ async function run() {
     },
     async ({ page, server }) => {
       await installIsolatedLaneFixture(page, {
-        globals: ["submitLaneForm", "syncComposerPendingSendState"],
+        globals: [
+          "closeLane",
+          "submitLaneForm",
+          "syncComposerPendingSendState",
+        ],
       });
       await page.addScriptTag({
         content: [
@@ -30,6 +34,7 @@ async function run() {
           resolveSuccessfulPendingSend,
           runCrossComposerFocusScenarios,
           runGroupedButtonSubmission,
+          runGroupedCloseProtectionScenario,
           runGroupedComposerScenarios,
           runRepeatedKeyboardSubmission,
           waitForNextSend,
@@ -216,13 +221,79 @@ async function runGroupedComposerScenarios(sends, config) {
     hostTextarea,
     memberTextarea,
   );
+  const closeProtection = await runGroupedCloseProtectionScenario(
+    sends,
+    config,
+    host,
+    member,
+    memberTextarea,
+  );
   return {
     ...button,
+    closeProtection,
     commandPending,
     commandFirstSettled,
     ...repeated,
     hostTargetId: host.targetId,
     memberTargetId: member.targetId,
+  };
+}
+
+async function runGroupedCloseProtectionScenario(
+  sends,
+  config,
+  host,
+  member,
+  memberTextarea,
+) {
+  const teamId = "composer-pending-close-protection";
+  host.teamId = teamId;
+  member.teamId = teamId;
+  const submitMemberDraft = (text) => {
+    memberTextarea.value = text;
+    memberTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+    memberTextarea.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Enter",
+        metaKey: true,
+      }),
+    );
+  };
+  const sendStart = sends.length;
+  submitMemberDraft(config.failureText);
+  submitMemberDraft(config.queuedFailureText);
+  const dispatched = sends.slice(sendStart);
+  const warningTexts = [];
+  const originalConfirm = window.confirm;
+  window.confirm = (text) => {
+    warningTexts.push(text);
+    return false;
+  };
+  try {
+    closeLane(host);
+  } finally {
+    window.confirm = originalConfirm;
+  }
+  const closeCanceled = {
+    closeState: host.serverCloseRequested ? "requested" : "canceled",
+    hostState: isLaneOpen(host) ? "open" : "closed",
+    memberState: isLaneOpen(member) ? "open" : "closed",
+    snapshot: pendingSendSnapshot(member, memberTextarea, dispatched.length),
+    warningTexts,
+  };
+
+  memberTextarea.value = config.newerText;
+  memberTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+  dispatched[0].resolve({
+    result: { ok: false, error: "expected grouped close-protection failure" },
+  });
+  await waitForPendingSendCount(member, 0);
+
+  return {
+    closeCanceled,
+    restored: pendingSendSnapshot(member, memberTextarea, sends.length),
   };
 }
 
@@ -479,6 +550,7 @@ function assertPendingSendScenarios(result, config) {
   assertCrossComposerFocusScenario(result.crossFocus);
   assertGroupedCommandSendScenario(result.grouped, config);
   assertGroupedButtonSendScenario(result.grouped, config);
+  assertGroupedCloseProtectionScenario(result.grouped.closeProtection, config);
 }
 
 function assertRapidPendingSendScenario(result, config) {
@@ -619,6 +691,73 @@ function assertGroupedButtonSendScenario(grouped, config) {
     grouped.buttonSettled.memberQuoteState,
     "cleared",
     "button member quote state",
+  );
+}
+
+function assertGroupedCloseProtectionScenario(closeProtection, config) {
+  expectEqual(
+    closeProtection.closeCanceled.warningTexts.length,
+    1,
+    "fused close warning count",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.warningTexts[0],
+    "Unsubmitted steering has not received a backend key yet. Leave anyway?",
+    "fused close warning text",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.hostState,
+    "open",
+    "canceled fused close host state",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.memberState,
+    "open",
+    "canceled fused close member state",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.closeState,
+    "canceled",
+    "canceled fused close request state",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.snapshot.sendCount,
+    1,
+    "non-host active send count",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.snapshot.pendingCount,
+    2,
+    "non-host pending and queued count",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.snapshot.queueCount,
+    1,
+    "non-host queued send count",
+  );
+  expectEqual(
+    closeProtection.closeCanceled.snapshot.text,
+    "",
+    "non-host detached drafts at close",
+  );
+  expectEqual(
+    closeProtection.restored.text,
+    config.failureText +
+      "\n\n" +
+      config.queuedFailureText +
+      "\n\n" +
+      config.newerText,
+    "fused close retains failed queued and newer drafts in order",
+  );
+  expectEqual(
+    closeProtection.restored.pendingCount,
+    0,
+    "fused close restored pending count",
+  );
+  expectEqual(
+    closeProtection.restored.queueCount,
+    0,
+    "fused close restored queue count",
   );
 }
 

@@ -821,6 +821,26 @@ def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
     )
 
 
+def test_static_unsafe_draft_guard_aggregates_fused_member_pending_state():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    guard_start = app_lanes.index("function laneHasUnsafeDraft(lane) {")
+    guard_end = app_lanes.index(
+        "function servePageHasUnsafeComposerState()", guard_start
+    )
+    guard = app_lanes[guard_start:guard_end]
+    close_start = app_lanes.index("function closeLane(lane) {")
+    close_end = app_lanes.index("function closeLaneCore(lane)", close_start)
+    snapshot_start = app_lanes.index("function applyTeamSnapshotPayload(")
+    snapshot_end = app_lanes.index("laneStore.subscribe((change) => {", snapshot_start)
+
+    assert "const host = laneGroupHost(lane);" in guard
+    assert "for (const member of laneGroupMemberLanes(host)) {" in guard
+    assert "member.sendAwaitingBackendCount > 0" in guard
+    assert "Number(member.pendingSubmissionCount)" in guard
+    assert "laneHasUnsafeDraft(host)" in app_lanes[close_start:close_end]
+    assert "laneHasUnsafeDraft(lane)" in app_lanes[snapshot_start:snapshot_end]
+
+
 def test_static_empty_team_controls_lock_collapsed_until_populated():
     css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
