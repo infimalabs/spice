@@ -357,8 +357,9 @@ def test_send_sizes_telemetry_from_the_single_encode(tmp_path):
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
     target = _Target(id="lane", repo_root=tmp_path)
-
-    sentinel_bytes = 4242
+    payload = {"type": "lane.payload", "payload": valid_lane_payload(messages=[])}
+    real_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sentinel_bytes = real_bytes + 1
 
     class _SentinelEncodeConnection(_Connection):
         def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
@@ -371,9 +372,6 @@ def test_send_sizes_telemetry_from_the_single_encode(tmp_path):
         connection,
         _callbacks(target=target, transcript=transcript),
     )
-    payload = {"type": "lane.payload", "payload": valid_lane_payload(messages=[])}
-    real_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    assert real_bytes != sentinel_bytes
 
     session._send(payload)
 
