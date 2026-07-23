@@ -832,7 +832,19 @@ function focusAfterComposerReset(element) {
     throw new Error("composer focus target must be an element");
   if (!document.contains(element))
     throw new Error("composer focus target must remain in the document");
+  // A slow lane.send resolves after the composer unlocks; only reclaim focus
+  // when nothing intentional took it meanwhile. Locking the composer during the
+  // pending send drops focus to <body>, so <body> (or nothing, or the target
+  // itself) means the caret never moved -- restore it. Any other active element
+  // is an intentional target (another composer) we must not steal focus from.
+  if (!composerFocusRestoreIsSafe(element)) return;
   element.focus({ preventScroll: true });
+}
+
+function composerFocusRestoreIsSafe(element) {
+  const active = document.activeElement;
+  if (!active || active === element) return true;
+  return active === document.body || active === document.documentElement;
 }
 
 // ---- route application -----------------------------------------------------------
