@@ -885,15 +885,11 @@ def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
 
 def _working_state_last_maxim_bag(repo_root: Path) -> str:
     try:
-        from spice.agent.maximmetrics import MAXIM_EVENT_FIRE, maxim_metric_records
+        from spice.agent.maximmetrics import latest_fire_bag_name
 
-        records = maxim_metric_records(repo_root)
+        return latest_fire_bag_name(repo_root)
     except Exception:
         return ""
-    for record in reversed(records):
-        if record.event_type == MAXIM_EVENT_FIRE:
-            return record.bag_name
-    return ""
 
 
 def _iso_timestamp_seconds(value: str) -> float | None:
