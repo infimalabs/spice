@@ -42,7 +42,17 @@ class TeamCommandService:
     ) -> None:
         config = _config_from_payload(payload.get("config"))
         members = [str(item) for item in payload.get("members") or [] if item]
-        self.store._create_team_locked(connection, None, config, members)
+        # The menu creates a team by relocating one target. Its bound thread is
+        # the primary actor and the stable target actor finds any placeholder
+        # slot that must leave the source team in this same transaction.
+        member_aliases = {members[0]: _aliases(payload)} if len(members) == 1 else {}
+        self.store._create_team_locked(
+            connection,
+            None,
+            config,
+            members,
+            member_aliases=member_aliases,
+        )
 
     def _cmd_close_team(
         self, payload: dict[str, Any], connection: sqlite3.Connection

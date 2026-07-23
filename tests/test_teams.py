@@ -258,6 +258,105 @@ def test_moving_an_agent_leaves_a_bystander_teams_roster_intact(tmp_path):
     assert statuses == {bystander.team_id: "open", destination.team_id: "open"}
 
 
+def test_ui_move_between_multi_member_teams_preserves_server_topology(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    source = store.create_team(
+        team_id="team-source",
+        members=["target:moved", "thread:source-a", "thread:source-b"],
+    )
+    destination = store.create_team(
+        team_id="team-destination",
+        members=["thread:destination-a", "thread:destination-b"],
+    )
+
+    moved = service.apply(
+        {
+            "command": "moveAgentToTeam",
+            "expectedRevision": destination.revision,
+            "teamId": destination.team_id,
+            "agentId": "thread:moved",
+            "agentAliases": ["target:moved"],
+        }
+    )
+
+    open_members = {
+        team.team_id: [member.agent_id for member in team.members]
+        for team in moved.snapshot.teams
+    }
+    assert moved.revision == 3
+    assert open_members == {
+        source.team_id: ["thread:source-a", "thread:source-b"],
+        destination.team_id: [
+            "thread:destination-a",
+            "thread:destination-b",
+            "thread:moved",
+        ],
+    }
+    with store.connect() as connection:
+        events = [
+            (row["revision"], row["kind"], row["team_id"])
+            for row in connection.execute(
+                "SELECT revision, kind, team_id FROM events ORDER BY revision"
+            )
+        ]
+    assert events == [
+        (1, "createTeam", source.team_id),
+        (2, "createTeam", destination.team_id),
+        (3, "assignAgent", destination.team_id),
+    ]
+
+
+def test_ui_create_team_from_member_preserves_other_server_groups(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    source = store.create_team(
+        team_id="team-source",
+        members=["target:moved", "thread:source-a", "thread:source-b"],
+    )
+    bystander = store.create_team(
+        team_id="team-bystander",
+        members=["thread:bystander-a", "thread:bystander-b"],
+    )
+
+    created = service.apply(
+        {
+            "command": "createTeam",
+            "expectedRevision": bystander.revision,
+            "members": ["thread:moved"],
+            "agentAliases": ["target:moved"],
+            "config": {},
+        }
+    )
+
+    open_members = {
+        team.team_id: [member.agent_id for member in team.members]
+        for team in created.snapshot.teams
+    }
+    existing_team_ids = {source.team_id, bystander.team_id}
+    new_team = next(
+        team for team in created.snapshot.teams if team.team_id not in existing_team_ids
+    )
+    assert created.revision == 3
+    assert open_members == {
+        source.team_id: ["thread:source-a", "thread:source-b"],
+        bystander.team_id: ["thread:bystander-a", "thread:bystander-b"],
+        new_team.team_id: ["thread:moved"],
+    }
+    with store.connect() as connection:
+        events = [
+            (row["revision"], row["kind"], row["team_id"])
+            for row in connection.execute(
+                "SELECT revision, kind, team_id FROM events ORDER BY revision"
+            )
+        ]
+    assert events == [
+        (1, "createTeam", source.team_id),
+        (2, "createTeam", bystander.team_id),
+        (3, "createTeam", new_team.team_id),
+    ]
+
+
 def test_removing_an_agent_leaves_a_bystander_teams_roster_intact(tmp_path):
     # Same bystander rule on the removal path: the aliases resolve which slot
     # in the named team the client meant, and reach no further than that team.
