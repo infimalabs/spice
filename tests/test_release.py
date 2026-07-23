@@ -537,7 +537,9 @@ def test_release_notes_group_edited_highlights_by_project():
         "> **Draft release notes — curate Highlights before publishing.** Replace\n"
         "> the placeholder under _Highlights_ with a short summary, then delete this\n"
         "> banner. The generated task inventory is already wrapped in the collapsed\n"
-        "> _Task-level changes_ section below; keep that section intact.\n"
+        "> _Task-level changes_ section below; keep that section intact. Omit from\n"
+        "> Highlights any feature that was added and then functionally reverted\n"
+        "> within this same release window — a net-zero change is not a highlight.\n"
         "\n"
         "## Highlights\n"
         "\n"
@@ -645,6 +647,10 @@ def test_release_notes_open_with_a_draft_curation_scaffold():
     # per-task export is already preserved in its final collapsed structure.
     assert notes.startswith("> [!IMPORTANT]\n")
     assert "Draft release notes — curate Highlights before publishing." in notes
+    # The banner steers curators away from features added and then reverted in
+    # the same window, so a net-zero change never lands in Highlights.
+    assert "any feature that was added and then functionally reverted" in notes
+    assert "a net-zero change is not a highlight." in notes
     banner = notes.index("> [!IMPORTANT]")
     highlights = notes.index("## Highlights")
     placeholder = notes.index("_Replace this line with a short, curated set")
