@@ -943,8 +943,9 @@ def _cross_lane_review(monkeypatch) -> str:
 
     The lanes disagree on purpose: `origin_thread` (rendered as
     creator_context) stays with the filing lane while `review_author` records
-    the lane that produced the work. A guard that compares the creator passes
-    this case, so it is the shape the refusal has to be proven against.
+    the lane that produced the work. The `ANTI_SELF_REVIEW` penalty keys off
+    `review_author`, so this is the shape that exercises it — a rule keyed on
+    the creator would miss exactly this case.
     """
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
@@ -964,29 +965,51 @@ def _cross_lane_review(monkeypatch) -> str:
     return handle
 
 
-def test_task_next_refuses_a_review_the_asking_actor_authored(task_repo, monkeypatch):
+def test_task_next_hands_a_self_review_when_the_board_is_otherwise_empty(
+    task_repo, monkeypatch
+):
     handle = _cross_lane_review(monkeypatch)
     reviewable = identity.resolve(handle)
 
-    refused = alloc.next_task()
-    unclaimed = identity.resolve(handle)
-    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    reviewer_assignment = alloc.next_task()
+    # ACTOR_A authored the work now sitting in review, and nothing else is on
+    # the board. The -100 penalty has no other work to lose to, so the
+    # allocator hands the author their own review as a last resort rather than
+    # returning no-available-tasks.
+    assigned = alloc.next_task()
+    claimed = identity.resolve(handle)
 
     assert (
         reviewable["phase"],
         reviewable["review_author"],
         reviewable["origin_thread"],
     ) == ("review", ACTOR_A, PEER_ACTOR)
-    assert refused is None
-    assert str(unclaimed.get("claim_by") or "") == ""
-    assert identity.render_handle(reviewer_assignment or {}) == handle
-    assert reviewer_assignment["claim_by"] == PEER_ACTOR
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["claim_by"] == ACTOR_A
+    assert claimed["claim_by"] == ACTOR_A
 
 
-def test_ready_surface_hides_a_review_from_its_author_and_keeps_it_for_peers(
-    task_repo, monkeypatch
-):
+def test_task_next_prefers_other_work_over_a_self_review(task_repo, monkeypatch):
+    handle = _cross_lane_review(monkeypatch)  # leaves the thread set to ACTOR_A
+    # Ordinary ready work in the same lane must outrank the actor's own review:
+    # the -100 penalty keeps the self-review below it, so the author takes the
+    # other task and leaves the review unclaimed for a peer.
+    other = create.add(
+        "Ordinary ready work",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        flow=["todo", "review"],
+    )
+
+    assigned = alloc.next_task()
+    review_row = identity.resolve(handle)
+
+    assert identity.render_handle(assigned or {}) == other
+    assert assigned["claim_by"] == ACTOR_A
+    assert str(review_row.get("claim_by") or "") == ""
+
+
+def test_ready_surface_shows_a_review_to_its_author_and_peers(task_repo, monkeypatch):
     handle = _cross_lane_review(monkeypatch)
 
     author_ready = [
@@ -996,6 +1019,8 @@ def test_ready_surface_hides_a_review_from_its_author_and_keeps_it_for_peers(
         identity.render_handle(row) for row in alloc.visible_ready_rows(PEER_ACTOR)
     ]
 
-    assert author_ready == []
+    # The author's own review is no longer hidden from the ready surface: it
+    # shows for the author (as last-resort work) exactly as it does for a peer.
+    assert author_ready == [handle]
     assert peer_ready == [handle]
-    assert author_ready != peer_ready
+    assert author_ready == peer_ready

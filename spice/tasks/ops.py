@@ -867,7 +867,7 @@ def next_task_drain_line(
         if review_assignment:
             return (
                 f"next: review assignment pending; {tail}; "
-                "a review you authored routes to a peer, never back to you"
+                "a review you authored routes to a peer unless the board holds nothing else, when it may return to you as a last resort"
             )
         return f"next: phase boundary reached; {tail}"
     tail = (
@@ -877,7 +877,7 @@ def next_task_drain_line(
         return (
             "next: YOU ARE NOT DONE. Run spice task next for reviewer "
             "assignment; "
-            "a review you authored routes to a peer, never back to you; "
+            "a review you authored routes to a peer unless the board holds nothing else, when it may return to you as a last resort; "
             f"{tail}"
         )
     return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"

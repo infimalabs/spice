@@ -5,9 +5,10 @@ overrides — anti-self-review plus any lane overlay). Within the top urgency
 band, `task next` avoids cells a peer is actively on (spread) and prefers the
 smallest move from the actor's last cell (stick).
 
-A review the actor authored is not merely outranked by that coefficient — it is
-dropped from every candidate set, so a quiet board cannot hand an author their
-own review.
+A review the actor authored is not excluded from the candidate set; the
+`ANTI_SELF_REVIEW` coefficient drops its urgency far below ordinary work, so
+the actor is handed their own review only as a last resort — when a quiet board
+holds nothing else they can take.
 """
 
 from __future__ import annotations
@@ -206,10 +207,7 @@ def visible_ready_rows(
         if scope is None
         else visible_rows_in_scope(filters, scope)
     )
-    return _allocatable(
-        [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")],
-        actor,
-    )
+    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
 
 
 def ordered_visible_ready_rows(actor: str) -> list[dict[str, Any]]:
@@ -309,26 +307,8 @@ def _candidate_rows(
     )
 
 
-def _allocatable(rows: list[dict[str, Any]], actor: str) -> list[dict[str, Any]]:
-    """Drop rows this actor may not be handed, whatever else recommends them.
-
-    A review authored by this actor is refused outright rather than merely
-    deprioritized by `ANTI_SELF_REVIEW`: a coefficient only loses while some
-    other work outranks it, so on a quiet board the author gets their own
-    review back. Refusing here leaves the row unclaimed and available to a
-    different reviewer, and the actor falls through to other work or to an
-    explicit no-available-tasks answer.
-    """
-    return [r for r in rows if not claimstate.is_same_author_review(r, actor)]
-
-
-def _unclaimed_actionable(
-    rows: list[dict[str, Any]], actor: str
-) -> list[dict[str, Any]]:
-    return _allocatable(
-        [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")],
-        actor,
-    )
+def _unclaimed_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
 
 
 def _claim_first(
@@ -379,7 +359,7 @@ def next_task() -> dict[str, Any] | None:
         )
         if _is_open_task(r)
     ]
-    repair_candidates = _unclaimed_actionable(scoped_active, actor)
+    repair_candidates = _unclaimed_actionable(scoped_active)
     if repair_candidates:
         repaired = _claim_first(
             repair_candidates, actor, [], active_rows, guard_unclaimed=False
@@ -388,7 +368,6 @@ def next_task() -> dict[str, Any] | None:
             return repaired
     candidates = _unclaimed_actionable(
         _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin),
-        actor,
     )
     if candidates:
         # We intend to claim: bring the tree to the current baseline once
@@ -415,20 +394,16 @@ def _stale_takeover_candidates(
 ) -> list[dict[str, Any]]:
     """Peer claims whose owner stopped renewing before the deadline.
 
-    Takeover runs only when no fresh READY work exists. Reviews this actor
-    authored stay off-limits even when stale.
+    Takeover runs only when no fresh READY work exists.
     """
     now = tw.now_iso()
-    return _allocatable(
-        [
-            r
-            for r in scoped_active
-            if not is_hidden(r)
-            and str(r.get("claim_by") or "") not in ("", actor)
-            and _is_stale_claim(r, now)
-        ],
-        actor,
-    )
+    return [
+        r
+        for r in scoped_active
+        if not is_hidden(r)
+        and str(r.get("claim_by") or "") not in ("", actor)
+        and _is_stale_claim(r, now)
+    ]
 
 
 def _take_over_stale(
