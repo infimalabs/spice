@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -818,6 +819,79 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     assert "review_commit agent-head (task head)" in output
     assert "review_diff_command" not in output
     assert "plain git show" not in output
+
+
+def test_review_commit_lines_warn_when_commit_is_unreachable_from_head(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "lane"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "spice-test@example.com")
+    git("config", "user.name", "Spice Test")
+    (repo / "review.txt").write_text("reachable\n", encoding="utf-8")
+    git("add", "review.txt")
+    git("commit", "-q", "-m", "reachable lane head")
+    reachable = git("rev-parse", "HEAD")
+
+    git("switch", "-q", "-c", "review-commit")
+    (repo / "review.txt").write_text("assigned review\n", encoding="utf-8")
+    git("commit", "-qam", "assigned review commit")
+    unreachable = git("rev-parse", "HEAD")
+    git("switch", "-q", "main")
+    monkeypatch.setattr(render, "repo_root_from_cwd", lambda: repo)
+
+    unreachable_row = _row(
+        "Unreachable review",
+        project="task.review",
+        incepted="1k4yrMDR",
+        phase="review",
+    )
+    unreachable_row.update(
+        {
+            "done_ref": unreachable,
+            "done_merge_head": unreachable,
+            "done_head": unreachable,
+        }
+    )
+    reachable_row = _row(
+        "Reachable review",
+        project="task.review",
+        incepted="1k4yrMDR",
+        phase="review",
+    )
+    reachable_row.update(
+        {
+            "done_ref": reachable,
+            "done_merge_head": reachable,
+            "done_head": reachable,
+        }
+    )
+
+    unreachable_lines = render._review_commit_lines(unreachable_row)
+    reachable_lines = render._review_commit_lines(reachable_row)
+
+    assert unreachable_lines == [
+        f"review_commit {unreachable} (task head)",
+        (
+            "review_commit_warning UNREACHABLE_FROM_HEAD: assigned review_commit "
+            f"{unreachable} is not reachable from this worktree HEAD; do not run "
+            "focused tests against this possibly stale checkout—validate from an "
+            f"isolated checkout or git archive of {unreachable}"
+        ),
+    ]
+    assert reachable_lines == [f"review_commit {reachable} (task head)"]
 
 
 def test_task_show_renders_phase_effort_as_aggregate_phase_rows(monkeypatch):
