@@ -148,7 +148,7 @@ findings.
 | subsystem | modules |
 | --- | --- |
 | steering fabric | `spice/mail/`, `spice/agent/wrap.py`, `spice/agent/sidechannel.py` |
-| lifecycle | `spice/agent/{lifecycle,renewal,activation,gitshadow,watchdog,driver}.py` |
+| lifecycle | `spice/agent/{lifecycle,renewal,activation,shadow,watchdog,driver}.py` |
 | conscience | `spice/agent/maxims.py`, `spice/agent/maximcli.py` |
 | tasks | `spice/tasks/` |
 | serve | `spice/serve/` plus lane-interface static UI |
