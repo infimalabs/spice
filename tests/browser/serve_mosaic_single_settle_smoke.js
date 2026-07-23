@@ -1,3 +1,4 @@
+const assert = require("node:assert/strict");
 const { withServePage } = require("./serve_playwright_harness");
 const { installScript } = require("./payload_factory");
 
@@ -257,6 +258,17 @@ function ssPageHelperScript() {
 
 function assertSingleSettleResult(result) {
   const allIds = SS_FUSED_IDS.concat([SS_SOLO_ID]).sort();
+  assert.deepStrictEqual(
+    {
+      ackContextState: result.ackContextState,
+      ackQuoteText: result.ackQuoteText,
+    },
+    {
+      ackContextState: "resolved",
+      ackQuoteText: "acked steering context",
+    },
+    "first settled paint ACK hydration inventory",
+  );
   const failures = {
     "cold load did not issue exactly one lanes.subscribe frame":
       result.subscribeFrameCount !== 1,
@@ -270,10 +282,6 @@ function assertSingleSettleResult(result) {
       result.fusedMessageRenderCount !== 1,
     "solo lane painted more than one settled message render on cold load":
       result.soloMessageRenderCount !== 1,
-    "ack context did not resolve on the fused host's first settled paint":
-      result.ackContextState !== "resolved",
-    "resolved ack context was not visible on the first settled paint":
-      result.ackQuoteText !== "acked steering context",
     "fused host did not record a settled full-replay at mount":
       result.fusedReplayInitial < 1,
     "solo lane did not record a settled full-replay at mount":

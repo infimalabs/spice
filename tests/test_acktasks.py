@@ -252,9 +252,14 @@ def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
         watchdog.MaximReminderGate(),
     )
 
-    assert _acked_inbox_names(task_repo) == []
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
-    assert feedback == [_ack_feedback("ack.unmatched", missing_key)]
+    assert {
+        "acked_inbox_names": _acked_inbox_names(task_repo),
+        "feedback": feedback,
+    } == {
+        "acked_inbox_names": [],
+        "feedback": [_ack_feedback("ack.unmatched", missing_key)],
+    }
 
 
 def test_supervised_ack_reports_noop_when_no_key_is_named(task_repo, quiet_supervisor):
@@ -296,9 +301,15 @@ def test_supervised_marker_examples_do_not_emit_feedback_or_tasks(
         watchdog.MaximReminderGate(),
     )
 
-    assert _acked_inbox_names(task_repo) == []
-    assert tw.export(["status:pending"]) == []
-    assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
+    assert {
+        "acked_inbox_names": _acked_inbox_names(task_repo),
+        "feedback": sidechannelnotify.consume_side_channel_notices(task_repo),
+        "pending_tasks": tw.export(["status:pending"]),
+    } == {
+        "acked_inbox_names": [],
+        "feedback": [],
+        "pending_tasks": [],
+    }
 
 
 def test_supervised_ack_reports_already_acked_keys(task_repo, quiet_supervisor):
