@@ -37,6 +37,7 @@ MUTATION_RATCHET_VERSION = 1
 STANDING_MUTATION_RATCHET_PATH = Path("tests/mutation-ratchet.json")
 DEFAULT_MAX_MUTANTS_PER_MODULE = 20
 DEFAULT_MUTATION_TIMEOUT_SECONDS = 30
+MUTATION_TIMEOUT_ATTEMPTS = 2
 _FAILED_NODEID_RE = re.compile(r"(tests/[^\s:]+\.py::[^\s]+)")
 BYTECODE_ISOLATION_ENVIRONMENT: Mapping[str, str] = MappingProxyType(
     {
@@ -58,6 +59,8 @@ class MutationResult:
     point: MutationPoint
     status: str
     source_sha256: str
+    timeout_seconds: int
+    attempt_outcomes: tuple[str, ...]
     killed_by: tuple[str, ...] = ()
     bytecode_environment: Mapping[str, str] = field(
         default_factory=lambda: BYTECODE_ISOLATION_ENVIRONMENT
@@ -376,13 +379,19 @@ def _run_module_mutations(
             source_bytes = mutated_text(original, point.index).encode("utf-8")
             source_sha256 = hashlib.sha256(source_bytes).hexdigest()
             abs_path.write_bytes(source_bytes)
-            result = _run_pytest(root, test_paths, timeout_seconds=timeout_seconds)
+            result, attempt_outcomes = _run_mutant_pytest(
+                root,
+                test_paths,
+                timeout_seconds=timeout_seconds,
+            )
             if result is None:
                 results.append(
                     MutationResult(
                         point=point,
                         status="timeout",
                         source_sha256=source_sha256,
+                        timeout_seconds=timeout_seconds,
+                        attempt_outcomes=attempt_outcomes,
                     )
                 )
                 continue
@@ -392,6 +401,8 @@ def _run_module_mutations(
                         point=point,
                         status="survived",
                         source_sha256=source_sha256,
+                        timeout_seconds=timeout_seconds,
+                        attempt_outcomes=attempt_outcomes,
                     )
                 )
                 continue
@@ -403,6 +414,8 @@ def _run_module_mutations(
                     status="killed",
                     killed_by=failed,
                     source_sha256=source_sha256,
+                    timeout_seconds=timeout_seconds,
+                    attempt_outcomes=attempt_outcomes,
                 )
             )
     finally:
@@ -436,6 +449,20 @@ def _ensure_baseline_tests_pass(
     if result.returncode != 0:
         detail = (result.stdout + result.stderr).strip()
         raise SpiceError("baseline pytest must pass before mutation testing\n" + detail)
+
+
+def _run_mutant_pytest(
+    root: Path, test_paths: list[Path], *, timeout_seconds: int
+) -> tuple[subprocess.CompletedProcess[str] | None, tuple[str, ...]]:
+    attempt_outcomes: list[str] = []
+    for _attempt in range(MUTATION_TIMEOUT_ATTEMPTS):
+        result = _run_pytest(root, test_paths, timeout_seconds=timeout_seconds)
+        if result is None:
+            attempt_outcomes.append("timeout")
+            continue
+        attempt_outcomes.append("survived" if result.returncode == 0 else "killed")
+        return result, tuple(attempt_outcomes)
+    return None, tuple(attempt_outcomes)
 
 
 def _run_pytest(

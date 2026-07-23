@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import py_compile
 import stat
@@ -24,6 +25,7 @@ import pytest
 from spice import paths
 from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
+from spice.studies import cli as studies_cli
 from spice.studies import mutations, scratch
 
 SAMPLE_SOURCE = "def add(a, b):\n    return a + b\n"
@@ -302,8 +304,60 @@ def test_timeout_preserves_caller_and_removes_scratch(tmp_path, monkeypatch):
     study = _run_study(root)
 
     report = study.reports[0]
-    assert report.timed_out == 1
+    assert (
+        report.timed_out,
+        report.results[0].status,
+        report.results[0].timeout_seconds,
+        report.results[0].attempt_outcomes,
+    ) == (1, "timeout", 5, ("timeout", "timeout"))
     assert report.score == 1.0
+    assert _caller_state(root) == before
+    assert [entry.name for entry in scratch.scratch_parent(root).iterdir()] == []
+
+
+def test_transient_timeout_confirms_the_mutants_stable_outcome(tmp_path, monkeypatch):
+    root = _seed_project(tmp_path / "repo")
+    before = _caller_state(root)
+    mutant_attempt = 0
+
+    def starved_then_killed(command, kwargs):
+        nonlocal mutant_attempt
+        mutant_attempt += 1
+        if mutant_attempt == 1:
+            raise ProcessDeadlineExceeded(
+                phase="tool.study",
+                input_label="mutation pytest",
+                timeout_seconds=5,
+                command=list(command),
+            )
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=f"FAILED {KILLING_NODEID} - AssertionError\n",
+            stderr="",
+        )
+
+    _patch_runners(monkeypatch, _killing_fake(on_mutant=starved_then_killed))
+
+    study = _run_study(root)
+
+    report = study.reports[0]
+    result = report.results[0]
+    evidence_result = json.loads(
+        json.dumps(studies_cli._mutation_reports_payload((report,)))
+    )[0]["results"][0]
+    assert (
+        report.killed,
+        report.timed_out,
+        result.status,
+        result.timeout_seconds,
+        result.attempt_outcomes,
+        result.killed_by,
+    ) == (1, 0, "killed", 5, ("timeout", "killed"), (KILLING_NODEID,))
+    assert (
+        evidence_result["timeout_seconds"],
+        evidence_result["attempt_outcomes"],
+    ) == (5, ["timeout", "killed"])
     assert _caller_state(root) == before
     assert [entry.name for entry in scratch.scratch_parent(root).iterdir()] == []
 

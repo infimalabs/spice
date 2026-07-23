@@ -1092,6 +1092,8 @@ def test_mutation_board_flags_zero_constraint_tests():
                         point=point,
                         status="survived",
                         source_sha256="fixture-sha256",
+                        timeout_seconds=5,
+                        attempt_outcomes=("survived",),
                     ),
                 ),
                 zero_constraint_tests=("tests/test_sample.py::test_add",),
