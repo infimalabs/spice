@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -211,9 +212,38 @@ def _task_filter_payload_rows(
     return filters, stems
 
 
+# Memoize the whole inventory payload on the task event revision. The
+# pending/waiting export behind it is the dominant cost on the messages and
+# work-trees builds, yet its result changes only when the task backend does, and
+# the revision advances on every ``mark_task_backend_changed``. The lock keeps a
+# concurrent burst of first-calls (serve is a threading HTTP server) to a single
+# export; the hot path re-reads the cache before taking it.
+_task_filter_inventory_cache: tuple[str, dict[str, Any]] | None = None
+_task_filter_inventory_lock = threading.Lock()
+
+
 def task_filter_inventory() -> dict[str, Any]:
-    """Open-task state counts per assignable project, plus system header signals."""
+    """Open-task state counts per assignable project, plus system header signals.
+
+    Memoized on ``task_filter_inventory_revision()``: repeated builds at an
+    unchanged board reuse one pending/waiting export, and the next backend change
+    advances the revision so the cache is never served stale.
+    """
+    global _task_filter_inventory_cache
     revision = task_filter_inventory_revision()
+    cached = _task_filter_inventory_cache
+    if cached is not None and cached[0] == revision:
+        return cached[1]
+    with _task_filter_inventory_lock:
+        cached = _task_filter_inventory_cache
+        if cached is not None and cached[0] == revision:
+            return cached[1]
+        payload = _build_task_filter_inventory(revision)
+        _task_filter_inventory_cache = (revision, payload)
+        return payload
+
+
+def _build_task_filter_inventory(revision: str) -> dict[str, Any]:
     catalog = task_config.task_project_validation_catalog()
     assignable_stems = set(cast(list[str], catalog["approvedStems"]))
     hidden_stems = set(cast(list[str], catalog["hiddenStems"]))
