@@ -20,6 +20,7 @@ from spice.serve import livebus
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.websocket import EncodedTextFrame
 from tests.test_wirefixtures import (
     valid_lane_payload,
     valid_live_bus_callback_payloads,
@@ -45,10 +46,12 @@ class _Connection:
         # of polling the shared list.
         self.arrival = Condition(self.lock)
 
-    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
         # The session encodes to a frame before taking its send lock; the fake
-        # keeps the payload dict as its "frame" so assertions read it directly.
-        return payload
+        # keeps the payload dict as its "frame" so assertions read it directly,
+        # and reports the real wire-text length so send telemetry stays exact.
+        text_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        return EncodedTextFrame(payload, text_bytes)
 
     def send_frame(self, frame: dict[str, Any]) -> None:
         with self.arrival:
@@ -343,6 +346,38 @@ def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
     assert frame["sendLockHoldMsLast"] == pytest.approx(7.0)
     assert frame["sendLockHoldMsMax"] == pytest.approx(7.0)
     assert diagnostics["totals"] == {"count": 1, "bytes": expected_bytes}
+
+
+def test_send_sizes_telemetry_from_the_single_encode(tmp_path):
+    # _send records frame telemetry bytes from encode_text_frame's reported
+    # payload length, so each frame is serialized exactly once. A fake that
+    # reports a sentinel length distinct from the real wire size makes any
+    # second json.dumps observable: a re-encode would size telemetry from the
+    # true wire length instead of the sentinel the single encode returned.
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    payload = {"type": "lane.payload", "payload": valid_lane_payload(messages=[])}
+    real_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sentinel_bytes = real_bytes + 1
+
+    class _SentinelEncodeConnection(_Connection):
+        def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
+            return replace(
+                super().encode_text_frame(payload), payload_bytes=sentinel_bytes
+            )
+
+    connection = _SentinelEncodeConnection()
+    session = LiveBusSession(
+        connection,
+        _callbacks(target=target, transcript=transcript),
+    )
+
+    session._send(payload)
+
+    diagnostics = session.diagnostics()
+    assert diagnostics["frames"]["lane.payload"]["bytes"] == sentinel_bytes
+    assert diagnostics["totals"]["bytes"] == sentinel_bytes
 
 
 def test_ping_reset_clears_frame_telemetry_between_windows(tmp_path):
@@ -707,8 +742,9 @@ class _DeadConnection:
         self.attempts = 0
         self.lock = Lock()
 
-    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return payload
+    def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
+        text_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        return EncodedTextFrame(payload, text_bytes)
 
     def send_frame(self, frame: dict[str, Any]) -> None:
         with self.lock:

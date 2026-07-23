@@ -320,12 +320,12 @@ function spiceMenuNewTeamPlacementIndex(group) {
   for (let index = 0; index < spiceMenuNewTeamPlacementHints.length; index++) {
     const hint = spiceMenuNewTeamPlacementHints[index];
     if (hint.teamId && teamId === hint.teamId) return index;
-    if (!hint.teamId && teamId === hint.optimisticTeamId) return index;
     if (
       !hint.teamId &&
+      teamId !== hint.sourceTeamId &&
       group.targets.some((target) => target.id === hint.targetId)
     ) {
-      if (teamId && teamId !== hint.optimisticTeamId) hint.teamId = teamId;
+      if (teamId) hint.teamId = teamId;
       return index;
     }
   }
@@ -622,7 +622,10 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
   spiceMenuTargetDragState = null;
   if (suppressClick) suppressNextSpiceMenuDragClick();
   if (hasMenuDrop) {
-    moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);
+    // Placement is interface-only. The target's teamIdentity remains untouched
+    // until targets.refresh reads the team store after the command commits.
+    if (menuDropTeamId === spiceMenuNewTeamDropId)
+      rememberSpiceMenuNewTeamPlacement(target.id);
     moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {
       setGlobalTransientError(
         menuDropTeamId === spiceMenuNewTeamDropId
@@ -759,54 +762,18 @@ function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
   return teamIdentityTeamId(target.teamIdentity) !== (teamId || "");
 }
 
-function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
-  const target = laneStore.targetForId(targetId);
-  if (!target) return;
-  if (teamIdentityTeamId(target.teamIdentity) === (teamId || "")) return;
-  if (teamId === spiceMenuNewTeamDropId)
-    rememberSpiceMenuNewTeamPlacement(targetId);
-  const teamIdentity =
-    teamId === spiceMenuNewTeamDropId
-      ? optimisticNewMenuTeamIdentity(targetId)
-      : optimisticMenuTeamIdentity(teamId);
-  laneStore.updateTarget(targetId, (item) => ({ ...item, teamIdentity }));
-  if (spiceMenuEl) renderSpiceMenu();
-}
-
 function rememberSpiceMenuNewTeamPlacement(targetId) {
   const id = String(targetId || "");
   if (!id) return;
+  const target = laneStore.targetForId(id);
   spiceMenuNewTeamPlacementHints = spiceMenuNewTeamPlacementHints.filter(
     (hint) => hint.targetId !== id,
   );
   spiceMenuNewTeamPlacementHints.push({
     targetId: id,
-    optimisticTeamId: optimisticNewMenuTeamId(id),
+    sourceTeamId: target ? teamIdentityTeamId(target.teamIdentity) : "",
     teamId: "",
   });
-}
-
-function optimisticNewMenuTeamIdentity(targetId) {
-  return {
-    state: "member",
-    teamId: optimisticNewMenuTeamId(targetId),
-    teamRevision: 0,
-    configRevision: 0,
-  };
-}
-
-function optimisticNewMenuTeamId(targetId) {
-  return "new-team:" + targetId;
-}
-
-function optimisticMenuTeamIdentity(teamId) {
-  const id = String(teamId || "");
-  if (!id) return { state: "none" };
-  for (const target of laneStore.targetsSnapshot()) {
-    if (teamIdentityTeamId(target.teamIdentity) === id)
-      return { ...target.teamIdentity };
-  }
-  throw new Error("optimistic menu team identity requires existing team");
 }
 
 async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
@@ -816,6 +783,7 @@ async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
     await requestTeamCommand(
       teamCommandPayload("createTeam", {
         members: [targetTeamAgentId(target)],
+        agentAliases: targetTeamAgentAliases(target),
         config: defaultTeamConfig(),
       }),
     );

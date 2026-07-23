@@ -12,7 +12,6 @@ appends through a held-open handle), watchfiles covers Linux/Windows.
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from collections import deque
@@ -282,10 +281,11 @@ class LiveBusSession(LiveBusMutationMixin):
         # longer holds the lock through that encode, so a small lane.sendResult
         # ack acquires it and writes as soon as any in-flight write returns
         # rather than queuing behind the encode. byte_count is the JSON payload
-        # length (matching the wire text), also computed outside the lock.
+        # length (matching the wire text), carried back from that one encode so
+        # the frame is never serialized a second time just to be measured.
         validate_live_bus_frame(payload)
-        frame = self.connection.encode_text_frame(payload)
-        byte_count = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        encoded = self.connection.encode_text_frame(payload)
+        byte_count = encoded.payload_bytes
         wait_started_at = time.perf_counter()
         self.send_lock.acquire()
         acquired_at = time.perf_counter()
@@ -294,7 +294,7 @@ class LiveBusSession(LiveBusMutationMixin):
             if before_send is not None:
                 before_send(lock_wait_ms)
             write_started_at = time.perf_counter()
-            self.connection.send_frame(frame)
+            self.connection.send_frame(encoded.frame)
             finished_at = time.perf_counter()
             timing = FrameSendTiming(
                 lock_wait_ms=lock_wait_ms,

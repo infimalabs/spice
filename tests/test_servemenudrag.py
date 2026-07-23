@@ -75,7 +75,10 @@ def test_static_spice_menu_target_drag_cleans_ghosts_and_keeps_desktop_drops_ope
     assert "function suppressNextSpiceMenuDragClick()" in app_menu
     assert 'document.addEventListener("click", onClick, true);' in app_menu
     assert "if (suppressClick) suppressNextSpiceMenuDragClick();" in app_menu
-    assert "moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);" in app_menu
+    assert (
+        "if (menuDropTeamId === spiceMenuNewTeamDropId)\n"
+        "      rememberSpiceMenuNewTeamPlacement(target.id);" in app_menu
+    )
     assert "sourceTarget = laneStore.targetForId(target.id) || target;" in app_menu
     assert "function clearSpiceMenuTargetDrag()" in app_menu
     assert (

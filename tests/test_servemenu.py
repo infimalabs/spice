@@ -698,7 +698,7 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert "function updateSpiceMenuTargetDragFromEvent(event, target" in app_menu
     assert "function finishSpiceMenuTargetDragFromEvent(event, target)" in app_menu
     assert "function suppressNextSpiceMenuDragClick()" in app_menu
-    assert "function moveTargetToMenuTeamOptimisticUi(teamId, targetId)" in app_menu
+    assert "function rememberSpiceMenuNewTeamPlacement(targetId)" in app_menu
     assert "function clearSpiceMenuTargetDrag()" in app_menu
     assert "function createSpiceMenuTargetDragGhost(button)" in app_menu
     assert 'ghost.classList.add("target-choice-drag-ghost");' in app_menu
@@ -724,18 +724,26 @@ def test_static_spice_menu_drag_manages_team_membership():
         "    return spiceMenuNewTeamDropId;" in app_menu
     )
     assert 'container.classList.add("spice-menu-team--drop-ready");' in app_menu
-    assert "moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);" in app_menu
+    assert (
+        "if (menuDropTeamId === spiceMenuNewTeamDropId)\n"
+        "      rememberSpiceMenuNewTeamPlacement(target.id);" in app_menu
+    )
     assert (
         "moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {"
         in app_menu
     )
-    assert "function optimisticNewMenuTeamIdentity(targetId)" in app_menu
     assert 'teamCommandPayload("moveAgentToTeam", {' in app_menu
     assert 'teamCommandPayload("createTeam", {' in app_menu
     assert 'teamCommandPayload("removeAgentFromTeam", {' in app_menu
     assert "members: [targetTeamAgentId(target)]," in app_menu
     assert "agentId: targetTeamAgentId(target)," in app_menu
     assert "agentAliases: targetTeamAgentAliases(target)," in app_menu
+    create_command_start = app_menu.index('teamCommandPayload("createTeam", {')
+    create_command_body = app_menu[
+        create_command_start : app_menu.index("}),", create_command_start)
+    ]
+    assert "members: [targetTeamAgentId(target)]," in create_command_body
+    assert "agentAliases: targetTeamAgentAliases(target)," in create_command_body
     assert "await refreshServerTopology();" in app_menu
     assert '"new team created"' in app_menu
     assert '"create team failed"' in app_menu

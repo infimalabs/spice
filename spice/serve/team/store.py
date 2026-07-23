@@ -20,7 +20,7 @@ import uuid as uuidlib
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
@@ -386,15 +386,23 @@ class ServeTeamStore(
         team_id: str | None,
         config: TeamConfig,
         members: Iterable[str],
+        *,
+        member_aliases: Mapping[str, Iterable[str]] | None = None,
     ) -> TeamState:
         member_list = list(members)
+        aliases_by_member = member_aliases or {}
         if len(dict.fromkeys(member_list)) > MAX_TEAM_MEMBERS:
             raise SpiceError(
                 f"team is limited to {MAX_TEAM_MEMBERS} agents; "
                 f"cannot create a team of {len(member_list)}"
             )
         if team_id is None:
-            reused = self._reuse_open_shell_team_locked(connection, config, member_list)
+            reused = self._reuse_open_shell_team_locked(
+                connection,
+                config,
+                member_list,
+                member_aliases=aliases_by_member,
+            )
             if reused is not None:
                 return reused
         resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
@@ -414,7 +422,12 @@ class ServeTeamStore(
             connection, resolved_team_id, config.task_filters
         )
         for agent_id in member_list:
-            self._assign_locked(connection, resolved_team_id, agent_id)
+            self._assign_locked(
+                connection,
+                resolved_team_id,
+                agent_id,
+                aliases=aliases_by_member.get(agent_id, ()),
+            )
         self._record_event(
             connection, "createTeam", resolved_team_id, {"members": member_list}
         )
@@ -425,6 +438,8 @@ class ServeTeamStore(
         connection: sqlite3.Connection,
         config: TeamConfig,
         member_list: list[str],
+        *,
+        member_aliases: Mapping[str, Iterable[str]],
     ) -> TeamState | None:
         # The ensure-open-team affordance keeps one member-less shell around
         # so the operator can import an agent with a single click. A fresh
@@ -453,7 +468,12 @@ class ServeTeamStore(
             connection, shell_team_id, config.task_filters
         )
         for agent_id in member_list:
-            self._assign_locked(connection, shell_team_id, agent_id)
+            self._assign_locked(
+                connection,
+                shell_team_id,
+                agent_id,
+                aliases=member_aliases.get(agent_id, ()),
+            )
         self._record_event(
             connection,
             "createTeam",
