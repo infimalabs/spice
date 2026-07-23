@@ -560,6 +560,33 @@ def test_static_mosaic_event_log_is_wired_after_full_replay_before_sizing():
     assert full_replay_index < event_log_index < sizing_index
 
 
+def test_static_mosaic_cards_hold_their_column_across_every_event():
+    # Placement-jitter regression: replays representative arrival + ack
+    # sequences one event at a time through the shipped mosaicReplayEventLog
+    # and asserts that a card's column (t) is identical across every event
+    # other than a full replay. Content resolution may slide a wet card
+    # vertically to clear a growing neighbour, but never sideways -- the
+    # sideways hop was the message-card jitter (MESSAGE-1kGFNM63). The
+    # fixture also asserts a real vertical re-rest occurred, so a green run
+    # proves the wet path was exercised rather than passing vacuously.
+    script = Path(__file__).with_name("fixtures") / "mosaic_jitter.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+            str(STATIC_ROOT / "app.mosaic-full-replay.js"),
+            str(STATIC_ROOT / "app.mosaic-event-log.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "mosaic jitter: all assertions passed" in result.stdout
+
+
 def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw():
     script = Path(__file__).with_name("fixtures") / "mosaic_seam.js"
 
