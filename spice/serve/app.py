@@ -552,7 +552,11 @@ class _ServeHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path.startswith(STATIC_ASSET_ROUTE_PREFIX):
-            send_static_asset(self, parsed.path.removeprefix(STATIC_ASSET_ROUTE_PREFIX))
+            send_static_asset(
+                self,
+                parsed.path.removeprefix(STATIC_ASSET_ROUTE_PREFIX),
+                if_none_match=self.headers.get("If-None-Match"),
+            )
             return
         if parsed.path == "/work/tree" or parsed.path.startswith("/work/tree/"):
             if self.state.observer_mode:
