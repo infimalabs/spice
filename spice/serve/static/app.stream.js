@@ -876,7 +876,17 @@ function focusAfterComposerReset(element) {
     throw new Error("composer focus target must be an element");
   if (!document.contains(element))
     throw new Error("composer focus target must remain in the document");
+  // Detaching a focused quote can drop focus to <body>, and a late send failure
+  // can revisit this reset after the operator has moved elsewhere. Reclaim the
+  // target only for the former case; any other active element is intentional.
+  if (!composerFocusRestoreIsSafe(element)) return;
   element.focus({ preventScroll: true });
+}
+
+function composerFocusRestoreIsSafe(element) {
+  const active = document.activeElement;
+  if (!active || active === element) return true;
+  return active === document.body || active === document.documentElement;
 }
 
 // ---- route application -----------------------------------------------------------

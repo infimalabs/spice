@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import mimetypes
@@ -179,17 +180,52 @@ def _string(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def send_static_asset(handler: Any, name: str) -> None:
+# 32 hex chars == 128 bits of the sha256 digest: ample collision resistance for
+# a cache validator while keeping the response header compact.
+_ETAG_DIGEST_HEXCHARS = 32
+
+
+def _asset_etag(body: bytes) -> str:
+    """A strong validator that changes only when the asset bytes change."""
+    return '"' + hashlib.sha256(body).hexdigest()[:_ETAG_DIGEST_HEXCHARS] + '"'
+
+
+def _if_none_match_satisfied(if_none_match: str, etag: str) -> bool:
+    """Whether a conditional request's If-None-Match covers the current ETag.
+
+    A browser echoes the ETag it was given verbatim, and may send several as a
+    comma list or the wildcard ``*``. We emit only strong tags, so exact-string
+    membership is the match.
+    """
+    candidates = [token.strip() for token in if_none_match.split(",")]
+    return "*" in candidates or etag in candidates
+
+
+def send_static_asset(
+    handler: Any, name: str, *, if_none_match: str | None = None
+) -> None:
     static_root = STATIC_ROOT.resolve()
     candidate = (STATIC_ROOT / name).resolve()
     if not candidate.is_relative_to(static_root) or not candidate.is_file():
         handler.send_error(HTTPStatus.NOT_FOUND)
         return
     body = candidate.read_bytes()
+    etag = _asset_etag(body)
+    # `no-cache` keeps the current always-fresh guarantee -- the browser
+    # revalidates on every load -- while the ETag lets an unchanged asset come
+    # back 304 with no body instead of a full re-download. The prior `no-store`
+    # forbade caching outright, so every load re-transferred the whole UI bundle.
+    if if_none_match is not None and _if_none_match_satisfied(if_none_match, etag):
+        handler.send_response(HTTPStatus.NOT_MODIFIED)
+        handler.send_header("ETag", etag)
+        handler.send_header("Cache-Control", "no-cache")
+        handler.end_headers()
+        return
     content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
     handler.send_response(HTTPStatus.OK)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("ETag", etag)
+    handler.send_header("Cache-Control", "no-cache")
     handler.end_headers()
     handler.wfile.write(body)

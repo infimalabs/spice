@@ -279,7 +279,8 @@ def test_serve_composer_pending_send_smoke_covers_fifo_readiness_and_restore() -
     assert "grouped.commandRepeatedSettled.focusState" in smoke
     assert "grouped.buttonPayloads.length" in smoke
     assert "waitForPendingSendCount(lane, 0)" in smoke
-    assert "function waitForSendCount(sends, expected)" in smoke
+    assert "function waitForNextSend(events)" in smoke
+    assert 'attributeFilter: ["data-pending-send-count"]' in smoke
 
 
 def test_watch_frame_smokes_authenticate_subscription_generation() -> None:

@@ -9,6 +9,8 @@ const NEWER_TEXT = "new draft typed while sends are pending";
 const SHARED_BODY = "shared focused body";
 const SHARED_QUOTE = "shared quote";
 const SHARED_CONTEXT = "shared context";
+const FOCUS_RESTORE_TEXT = "restore focus to submitting composer";
+const FOCUS_PRESERVE_TEXT = "preserve focus on the second composer";
 
 async function run() {
   return withServePage(
@@ -26,17 +28,20 @@ async function run() {
           pendingSendSnapshot,
           pendingSendSubmission,
           resolveSuccessfulPendingSend,
+          runCrossComposerFocusScenarios,
           runGroupedButtonSubmission,
           runGroupedComposerScenarios,
           runRepeatedKeyboardSubmission,
+          waitForNextSend,
           waitForPendingSendCount,
-          waitForSendCount,
         ]
           .map((helper) => helper.toString())
           .join("\n"),
       });
       const config = {
         failureText: FAILURE_TEXT,
+        focusPreserveText: FOCUS_PRESERVE_TEXT,
+        focusRestoreText: FOCUS_RESTORE_TEXT,
         newerText: NEWER_TEXT,
         queuedFailureText: QUEUED_FAILURE_TEXT,
         repeatedText: REPEATED_TEXT,
@@ -58,10 +63,14 @@ async function runPendingSendScenarios(config) {
   const textarea = lane.shardTextareas.get(lane.targetId);
   if (!textarea) throw new Error("composer pending-send smoke needs a textarea");
   const originalLiveBusRequest = liveBusRequest;
+  const sendDispatchEvents = new EventTarget();
   const sends = [];
   liveBusRequest = (type, fields = {}) => {
     if (type !== "lane.send") return originalLiveBusRequest(type, fields);
-    return new Promise((resolve) => sends.push({ fields, resolve }));
+    return new Promise((resolve) => {
+      sends.push({ fields, resolve });
+      sendDispatchEvents.dispatchEvent(new Event("send-dispatched"));
+    });
   };
   try {
     textarea.value = config.successText;
@@ -76,6 +85,7 @@ async function runPendingSendScenarios(config) {
       new Event("submit", { bubbles: true, cancelable: true }),
     );
     const afterSecondSubmit = pendingSendSnapshot(lane, textarea, sends.length);
+    const secondSendDispatched = waitForNextSend(sendDispatchEvents);
     sends[0].resolve({
       result: {
         ok: true,
@@ -89,7 +99,7 @@ async function runPendingSendScenarios(config) {
         agentEnsure: { ok: true, threadId: lane.targetThreadId || "" },
       },
     });
-    await waitForSendCount(sends, 2);
+    await secondSendDispatched;
     const rapidQueued = {
       payloadText: sends[1].fields.payload.text,
       snapshot: pendingSendSnapshot(lane, textarea, sends.length),
@@ -122,8 +132,10 @@ async function runPendingSendScenarios(config) {
     await waitForPendingSendCount(lane, 0);
     const failureSettled = pendingSendSnapshot(lane, textarea, sends.length);
     const grouped = await runGroupedComposerScenarios(sends, config);
+    const crossFocus = await runCrossComposerFocusScenarios(sends, config);
     return {
       afterSecondSubmit,
+      crossFocus,
       failurePending,
       failureSettled,
       grouped,
@@ -216,6 +228,84 @@ async function runGroupedComposerScenarios(sends, config) {
 
 function configureGroupedComposer(host, member) {
   laneStore.applyLaneGroups([[host.targetId, member.targetId]], { isLaneOpen });
+}
+
+// Two independent (ungrouped) composers. A keyboard submit resets and refocuses
+// its own textarea before the backend reply. If the user moves to the second
+// composer while the send is pending, completion must leave that focus alone.
+async function runCrossComposerFocusScenarios(sends, config) {
+  const first = resolveIsolatedLane("composer-focus-first");
+  const second = resolveIsolatedLane("composer-focus-second");
+  syncComposerShards(
+    laneGroupHost(first),
+    laneGroupMemberLanes(laneGroupHost(first)),
+  );
+  syncComposerShards(
+    laneGroupHost(second),
+    laneGroupMemberLanes(laneGroupHost(second)),
+  );
+  const firstTextarea = first.shardTextareas.get(first.targetId);
+  const secondTextarea = second.shardTextareas.get(second.targetId);
+  if (!firstTextarea || !secondTextarea)
+    throw new Error("cross-composer focus smoke needs both composer textareas");
+
+  const submitByKeyboard = (textarea, text) => {
+    textarea.value = text;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    const start = sends.length;
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Enter",
+        metaKey: true,
+      }),
+    );
+    return sends.slice(start);
+  };
+  const resolveSends = (pending, keyPrefix, version) =>
+    pending.forEach((send, index) =>
+      resolveSuccessfulPendingSend(
+        send,
+        laneStore.laneForId(send.fields.targetId),
+        keyPrefix + index,
+        send.fields.payload.text,
+        version,
+      ),
+    );
+  const focusLabel = () => {
+    if (document.activeElement === firstTextarea) return "first";
+    if (document.activeElement === secondTextarea) return "second";
+    return "blurred";
+  };
+
+  const restorePending = submitByKeyboard(firstTextarea, config.focusRestoreText);
+  const restorePendingFocus = focusLabel();
+  resolveSends(restorePending, "composer-focus-restore-", 5);
+  await waitForPendingSendCount(first, 0);
+  const restoreSettledFocus = focusLabel();
+
+  const preservePending = submitByKeyboard(
+    firstTextarea,
+    config.focusPreserveText,
+  );
+  secondTextarea.focus();
+  const preservePendingFocus = focusLabel();
+  resolveSends(preservePending, "composer-focus-preserve-", 6);
+  await waitForPendingSendCount(first, 0);
+  const preserveSettledFocus = focusLabel();
+
+  return {
+    firstTargetId: first.targetId,
+    preservePendingFocus,
+    preserveSends: preservePending.length,
+    preserveSettledFocus,
+    restorePendingFocus,
+    restoreSends: restorePending.length,
+    restoreSettledFocus,
+    secondTargetId: second.targetId,
+  };
 }
 
 async function runRepeatedKeyboardSubmission(
@@ -356,34 +446,26 @@ function resolveSuccessfulPendingSend(send, lane, key, requestText, version) {
 }
 
 function waitForPendingSendCount(lane, expected) {
+  const current = () => Math.max(0, Number(lane.pendingSubmissionCount) || 0);
+  if (current() === expected) return Promise.resolve(expected);
+  const form = laneGroupHost(lane).formEl;
   return new Promise((resolve) => {
-    const current = () => Math.max(0, Number(lane.pendingSubmissionCount) || 0);
-    if (current() === expected) {
+    const observer = new MutationObserver(() => {
+      if (current() !== expected) return;
+      observer.disconnect();
       resolve(expected);
-      return;
-    }
-    const timer = setInterval(() => {
-      if (current() === expected) {
-        clearInterval(timer);
-        resolve(expected);
-      }
-    }, 0);
+    });
+    observer.observe(form, {
+      attributeFilter: ["data-pending-send-count"],
+      attributes: true,
+    });
   });
 }
 
-function waitForSendCount(sends, expected) {
-  return new Promise((resolve) => {
-    if (sends.length === expected) {
-      resolve(expected);
-      return;
-    }
-    const timer = setInterval(() => {
-      if (sends.length === expected) {
-        clearInterval(timer);
-        resolve(expected);
-      }
-    }, 0);
-  });
+function waitForNextSend(events) {
+  return new Promise((resolve) =>
+    events.addEventListener("send-dispatched", resolve, { once: true }),
+  );
 }
 
 function expectEqual(actual, expected, message) {
@@ -394,6 +476,7 @@ function expectEqual(actual, expected, message) {
 function assertPendingSendScenarios(result, config) {
   assertRapidPendingSendScenario(result, config);
   assertFailedPendingSendScenario(result, config);
+  assertCrossComposerFocusScenario(result.crossFocus);
   assertGroupedCommandSendScenario(result.grouped, config);
   assertGroupedButtonSendScenario(result.grouped, config);
 }
@@ -536,6 +619,31 @@ function assertGroupedButtonSendScenario(grouped, config) {
     grouped.buttonSettled.memberQuoteState,
     "cleared",
     "button member quote state",
+  );
+}
+
+function assertCrossComposerFocusScenario(crossFocus) {
+  expectEqual(crossFocus.restoreSends, 1, "restore keyboard send count");
+  expectEqual(
+    crossFocus.restorePendingFocus,
+    "first",
+    "submitting composer remains focused while pending",
+  );
+  expectEqual(
+    crossFocus.restoreSettledFocus,
+    "first",
+    "same-composer focus remains after delayed completion",
+  );
+  expectEqual(crossFocus.preserveSends, 1, "preserve keyboard send count");
+  expectEqual(
+    crossFocus.preservePendingFocus,
+    "second",
+    "user focus moved to second composer while pending",
+  );
+  expectEqual(
+    crossFocus.preserveSettledFocus,
+    "second",
+    "cross-composer focus preserved through delayed completion",
   );
 }
 

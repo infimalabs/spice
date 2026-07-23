@@ -184,16 +184,28 @@ def visible_rows(actor: str, filters: list[str]) -> list[dict[str, Any]]:
     return visible_rows_with_scope(actor, filters)[0]
 
 
+def visible_rows_in_scope(filters: list[str], scope: list[str]) -> list[dict[str, Any]]:
+    """Export one query through an already-resolved actor route scope."""
+    return tw.export([*filters, *scope])
+
+
 def visible_rows_with_scope(
     actor: str, filters: list[str]
 ) -> tuple[list[dict[str, Any]], list[str]]:
     route = lanes.team_route_for_actor(actor)
     scope = effective_route_filter_args(actor, route)
-    return tw.export([*filters, *scope]), scope
+    return visible_rows_in_scope(filters, scope), scope
 
 
-def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending", "+READY", "-ACTIVE"])
+def visible_ready_rows(
+    actor: str, *, scope: list[str] | None = None
+) -> list[dict[str, Any]]:
+    filters = ["status:pending", "+READY", "-ACTIVE"]
+    rows = (
+        visible_rows(actor, filters)
+        if scope is None
+        else visible_rows_in_scope(filters, scope)
+    )
     return _allocatable(
         [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")],
         actor,
@@ -212,10 +224,17 @@ def ordered_visible_ready_rows(actor: str) -> list[dict[str, Any]]:
     return order(ready, actor, claimed_rows, active_rows)
 
 
-def visible_active_rows(actor: str) -> list[dict[str, Any]]:
+def visible_active_rows(
+    actor: str, *, scope: list[str] | None = None
+) -> list[dict[str, Any]]:
     # Bare +ACTIVE: claims preserve wait, and status:pending filters out
     # future-wait rows, which would hide claimed deferred tasks.
-    rows = visible_rows(actor, ["+ACTIVE"])
+    filters = ["+ACTIVE"]
+    rows = (
+        visible_rows(actor, filters)
+        if scope is None
+        else visible_rows_in_scope(filters, scope)
+    )
     return [
         r
         for r in rows
