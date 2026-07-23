@@ -44,6 +44,7 @@ HIDDEN_PROJECT_PREFIX = "."
 APPROVED_PHASES = defaults.strings("tasks", "approved_phases")
 PHASE_SLOT_COUNT = defaults.integer("tasks", "phase_slot_count")
 TASK_EVENT_FILENAME = "events"
+TASK_EVENT_LOCK_FILENAME = ".events.lock"
 DEFAULT_FLOW = defaults.strings("tasks", "default_flow")
 PRIVATE_DEFAULT_FLOW = defaults.strings("tasks", "private_default_flow")
 # The hidden .oops triage project defaults to a lone plan phase: an oops item is
@@ -402,6 +403,10 @@ def task_event_path(root: Path | None = None) -> Path:
     return (root or backend_root()) / TASK_EVENT_FILENAME
 
 
+def task_event_lock_path(root: Path | None = None) -> Path:
+    return (root or backend_root()) / TASK_EVENT_LOCK_FILENAME
+
+
 def bootstrap_lock_path(root: Path | None = None) -> Path:
     return (root or backend_root()) / ".bootstrap.lock"
 
@@ -425,11 +430,39 @@ def ensure_task_event_file(root: Path | None = None) -> Path:
     return path
 
 
+def task_event_revision(root: Path | None = None) -> str:
+    """Return the task-only revision carried by the shared wake file."""
+    try:
+        text = ensure_task_event_file(root).read_text(encoding="utf-8")
+    except OSError:
+        return "0"
+    token = (text.split(maxsplit=1) or ["0"])[0]
+    return token if token.isdigit() else "0"
+
+
 def mark_task_backend_changed(
     reason: str = "task", *, root: Path | None = None
 ) -> None:
-    token = f"{time.time_ns()} {os.getpid()} {reason.strip() or 'task'}\n"
-    atomic_write_text(task_event_path(root), token, write_if_changed=True)
+    selected_root = root or backend_root()
+    normalized_reason = reason.strip() or "task"
+    selected_root.mkdir(parents=True, exist_ok=True)
+    with bounded_exclusive_lock(
+        task_event_lock_path(selected_root),
+        timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
+        action="publish task backend event",
+    ):
+        event_revision = str(time.time_ns())
+        task_revision = (
+            task_event_revision(selected_root)
+            if normalized_reason == "team"
+            else event_revision
+        )
+        token = f"{task_revision} {event_revision} {os.getpid()} {normalized_reason}\n"
+        atomic_write_text(
+            task_event_path(selected_root),
+            token,
+            write_if_changed=True,
+        )
 
 
 def uda_schema() -> dict[str, dict[str, str]]:

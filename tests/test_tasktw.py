@@ -35,14 +35,19 @@ def task_repo(tmp_path, monkeypatch):
 def test_task_event_file_advances_on_mutation_and_stays_stable_on_export(task_repo):
     event_path = config.ensure_task_event_file()
     before = event_path.read_text(encoding="utf-8")
+    before_revision = config.task_event_revision()
 
     create.add("event signal", project="task.unit", origin="ack:1jN54zJJ")
     after_add = event_path.read_text(encoding="utf-8")
+    after_add_revision = config.task_event_revision()
     tw.export(["status:pending"])
     after_export = event_path.read_text(encoding="utf-8")
+    after_export_revision = config.task_event_revision()
 
     assert len({before, after_add}) == 2
     assert after_export == after_add
+    assert len({before_revision, after_add_revision}) == 2
+    assert after_export_revision == after_add_revision
 
 
 def test_task_run_disables_bulk_confirmation(monkeypatch, tmp_path):

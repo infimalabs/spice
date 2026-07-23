@@ -368,7 +368,7 @@ def lane_signature_for_target(
                     "revision",
                 )
             ),
-            _path_signature(task_config.ensure_task_event_file()),
+            task_config.task_event_revision(),
             _reply_log_signature(target.repo_root, thread_id),
             _path_signature(_agent_state_signature_path(target.repo_root)),
         ),

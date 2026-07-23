@@ -255,12 +255,7 @@ def task_filter_inventory() -> dict[str, Any]:
 
 def task_filter_inventory_revision() -> str:
     """Return the task event token that makes task-filter inventories comparable."""
-    try:
-        text = task_config.ensure_task_event_file().read_text(encoding="utf-8")
-    except OSError:
-        return "0"
-    token = (text.split(maxsplit=1) or ["0"])[0]
-    return token if token.isdigit() else "0"
+    return task_config.task_event_revision()
 
 
 def status_line_payload(
