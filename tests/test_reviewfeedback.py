@@ -176,7 +176,13 @@ def test_clean_review_feedback_does_not_emit_or_annotate(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_review_feedback_refuses_delivery_to_the_emitting_tree(tmp_path, monkeypatch):
+def test_renewal_successor_on_emitting_tree_delivers_to_live_author(
+    tmp_path, monkeypatch
+):
+    # A renewal put a different agent (the reviewer, agent-b) on the same tree
+    # where the reviewed work's author (agent-a) still runs. Because the skip is
+    # keyed on author identity, not tree path, this genuine cross-agent review
+    # DELIVERS to the live author instead of being refused as a self-review.
     tree = tmp_path / "repo-a"
     calls = _patch_targets(
         monkeypatch,
@@ -193,25 +199,53 @@ def test_review_feedback_refuses_delivery_to_the_emitting_tree(tmp_path, monkeyp
         reviewed_at="2026-01-02T00:00:00Z",
     )
 
-    assert result.status == "self-tree"
+    assert result.status == "delivered"
     assert result.target_repo_root == str(tree.resolve())
-    assert pending_inbox_count(tree) == 0
+    assert pending_inbox_count(tree) == 1
     assert calls[0][1] == "annotate"
-    assert "self-tree" in calls[0][-1]
+    assert "delivered" in calls[0][-1]
 
 
-def test_review_feedback_target_selection_compares_trees_and_nothing_else(tmp_path):
+def test_self_author_review_skips_by_identity_across_trees(tmp_path, monkeypatch):
+    # A migration puts the same agent (agent-a) on a different tree than where
+    # it did the work. Reviewing its own work SKIPS because the reviewer IS the
+    # author by identity, even though the live author tree differs from the
+    # emitting tree -- a tree-path compare would wrongly deliver here.
     emitting = tmp_path / "repo-e"
+    emitting.mkdir(parents=True, exist_ok=True)
+    author_tree = tmp_path / "repo-f"
+    calls = _patch_targets(
+        monkeypatch,
+        cwd=emitting,
+        targets=[(author_tree, True, "agent-a")],
+    )
+
+    result = reviewfeedback.emit_review_feedback(
+        _reviewed_row(),
+        finding="changes",
+        note="needs work",
+        followups=["FOLLOW-1"],
+        reviewer="agent-a",
+        reviewed_at="2026-01-02T00:00:00Z",
+    )
+
+    assert result.status == "self-author"
+    assert pending_inbox_count(author_tree) == 0
+    assert pending_inbox_count(emitting) == 0
+    assert calls[0][1] == "annotate"
+    assert "self-author" in calls[0][-1]
+
+
+def test_select_target_resolves_by_live_author_count(tmp_path):
     peer = tmp_path / "repo-f"
+    other = tmp_path / "repo-g"
 
-    refused = reviewfeedback._select_target([emitting], emitting)
-    delivered = reviewfeedback._select_target([peer], emitting)
-    peer_preferred = reviewfeedback._select_target(sorted([emitting, peer]), emitting)
+    delivered = reviewfeedback._select_target([peer])
+    ambiguous = reviewfeedback._select_target(sorted([peer, other]))
+    inactive = reviewfeedback._select_target([])
 
-    assert refused.status == "self-tree"
-    assert refused.repo_root == str(emitting)
     assert delivered.status == "delivered"
     assert delivered.repo_root == str(peer)
-    assert peer_preferred.status == "delivered"
-    assert peer_preferred.repo_root == str(peer)
-    assert refused.status != delivered.status
+    assert ambiguous.status == "target-ambiguous"
+    assert inactive.status == "target-inactive"
+    assert delivered.status != ambiguous.status
