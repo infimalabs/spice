@@ -512,7 +512,10 @@ function closeLaneCore(lane) {
 function laneHasUnsafeDraft(lane) {
   if (!isLaneOpen(lane)) return false;
   if (laneComposerDraftText(lane).trim()) return true;
-  return lane.sendAwaitingBackendCount > 0;
+  return (
+    lane.sendAwaitingBackendCount > 0 ||
+    Math.max(0, Number(lane.pendingSubmissionCount) || 0) > 0
+  );
 }
 
 function servePageHasUnsafeComposerState() {

@@ -24,33 +24,23 @@ function syncComposerShards(lane, members) {
 
 function syncComposerPendingSendState(lane) {
   const host = laneGroupHost(lane);
-  let anyPending = false;
+  let pendingCount = 0;
   for (const member of laneGroupMemberLanes(host)) {
-    const pending = Math.max(0, Number(member.pendingSubmissionCount) || 0) > 0;
+    const memberPendingCount = Math.max(
+      0,
+      Number(member.pendingSubmissionCount) || 0,
+    );
     const shard = composerShardElementForTarget(host, member.targetId);
     if (!shard) continue;
-    anyPending = anyPending || pending;
-    shard.classList.toggle("composer-shard--pending-send", pending);
-    shard.setAttribute("aria-busy", pending ? "true" : "false");
-    for (const control of shard.querySelectorAll("textarea, button, input"))
-      syncComposerPendingControl(control, pending);
+    pendingCount += memberPendingCount;
+    if (memberPendingCount)
+      shard.dataset.pendingSendCount = String(memberPendingCount);
+    else delete shard.dataset.pendingSendCount;
+    shard.setAttribute("aria-busy", memberPendingCount ? "true" : "false");
   }
-  host.formEl.classList.toggle("lane-composer--pending-send", anyPending);
-  host.formEl.setAttribute("aria-busy", anyPending ? "true" : "false");
-  syncComposerPendingControl(host.submitEl, anyPending);
-}
-
-function syncComposerPendingControl(control, pending) {
-  if (pending) {
-    if (control.dataset.composerPendingWasDisabled === undefined)
-      control.dataset.composerPendingWasDisabled = control.disabled ? "true" : "false";
-    control.disabled = true;
-    return;
-  }
-  const previous = control.dataset.composerPendingWasDisabled;
-  if (previous === undefined) return;
-  control.disabled = previous === "true";
-  delete control.dataset.composerPendingWasDisabled;
+  if (pendingCount) host.formEl.dataset.pendingSendCount = String(pendingCount);
+  else delete host.formEl.dataset.pendingSendCount;
+  host.formEl.setAttribute("aria-busy", pendingCount ? "true" : "false");
 }
 
 function composerShardElementForTarget(lane, targetId) {
@@ -421,8 +411,46 @@ function resetLaneComposerDraft(lane, targetId) {
   if (host.quoteDrafts.delete(targetId)) renderComposerQuoteBands(host);
 }
 
-function clearAcceptedComposerDrafts(lane, targetId) {
-  resetLaneComposerDraft(laneGroupHost(lane), targetId);
+function detachLaneComposerDraft(lane, targetId) {
+  const host = laneGroupHost(lane);
+  const textarea = host.shardTextareas.get(targetId);
+  const draft = {
+    text: textarea ? textarea.value : "",
+    attachments: [...composerAttachmentDraftsForTarget(host, targetId)],
+    quoteDrafts: composerQuoteDraftsForTarget(host, targetId).map((quote) => ({
+      ...quote,
+    })),
+  };
+  resetLaneComposerDraft(host, targetId);
+  return draft;
+}
+
+function restoreLaneComposerDrafts(lane, targetId, drafts) {
+  const host = laneGroupHost(lane);
+  const textarea = host.shardTextareas.get(targetId);
+  if (!textarea) return;
+  const current = {
+    text: textarea.value,
+    attachments: [...composerAttachmentDraftsForTarget(host, targetId)],
+    quoteDrafts: [...composerQuoteDraftsForTarget(host, targetId)],
+  };
+  const ordered = [...(drafts || []), current];
+  textarea.value = ordered
+    .map((draft) => String((draft && draft.text) || ""))
+    .filter((text) => text)
+    .join("\n\n");
+  const attachments = ordered.flatMap((draft) => [
+    ...((draft && draft.attachments) || []),
+  ]);
+  if (attachments.length) host.shardAttachments.set(targetId, attachments);
+  else host.shardAttachments.delete(targetId);
+  const quoteDrafts = ordered.flatMap((draft) => [
+    ...((draft && draft.quoteDrafts) || []),
+  ]);
+  if (quoteDrafts.length) host.quoteDrafts.set(targetId, quoteDrafts);
+  else host.quoteDrafts.delete(targetId);
+  renderComposerAttachmentStrips(host);
+  renderComposerQuoteBands(host);
 }
 
 function composerAttachmentStrip(lane, targetId) {

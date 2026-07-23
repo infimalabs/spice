@@ -939,6 +939,7 @@ function submitBreakdown(sample) {
     textLength: sample.textLength || 0,
     // Browser submit path (performance.now() deltas the app records).
     browserOptimisticRenderMs: finite(browser.optimisticRenderMs),
+    browserComposerReadyMs: finite(browser.composerReadyMs),
     browserSendResultWaitMs: finite(browser.sendResultWaitMs),
     browserResponseHandlingMs: finite(browser.responseHandlingMs),
     browserTotalMs: finite(browser.totalMs),
@@ -956,6 +957,7 @@ function submitBreakdown(sample) {
 
 const submitStageKeys = [
   "browserOptimisticRenderMs",
+  "browserComposerReadyMs",
   "browserSendResultWaitMs",
   "browserResponseHandlingMs",
   "browserTotalMs",

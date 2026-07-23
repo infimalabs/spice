@@ -201,6 +201,8 @@ function laneBackendState() {
     pendingSubmissionCount: 0,
     submissionLifecycleByKey: new Map(),
     sendAwaitingBackendCount: 0,
+    pendingSendQueue: [],
+    pendingSendQueueActive: false,
     liveBusSubscribed: false,
     liveBusSubscribePending: false,
     liveBusSubscriptionGeneration: "",
