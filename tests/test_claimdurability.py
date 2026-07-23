@@ -13,7 +13,7 @@ from threading import Event, Thread, Timer
 
 import pytest
 
-from spice.agent import lifecycle, watchdog
+from spice.agent import lifecycle, watchdog, wrap
 from spice.agent.driver import DRIVER
 from spice.tasks import alloc, claimstate, create, identity, ops, tw
 from tests.test_tasks import ACTOR_A, PEER_ACTOR, task_repo
@@ -58,6 +58,64 @@ def _wait_for_claim_lease_to_expire(handle: str) -> None:
     finally:
         timer.cancel()
     assert identity.resolve(handle)["claim_until"] < tw.now_iso()
+
+
+def test_supervisor_claim_lease_promotes_only_after_agent_health(tmp_path, monkeypatch):
+    states = [
+        {
+            "thread_id": ACTOR_A,
+            "startup_status": lifecycle.AGENT_STARTUP_STARTING,
+        },
+        {
+            "thread_id": ACTOR_A,
+            "startup_status": lifecycle.AGENT_STARTUP_READY,
+        },
+    ]
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(lifecycle, "read_agent_state", lambda _repo_root: states.pop(0))
+    monkeypatch.setattr(
+        claimstate, "read_claim_witness", lambda _repo_root, _actor: None
+    )
+
+    def fake_renew_claim(handle=None, *, actor=None, lease_seconds=None):
+        calls.append(
+            {
+                "handle": handle,
+                "actor": actor,
+                "lease_seconds": lease_seconds,
+            }
+        )
+        return claimstate.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-00000000",
+            claim_until="2026-07-09T06:00:00.000000Z",
+            uuid="11111111-1111-1111-1111-111111111111",
+        )
+
+    monkeypatch.setattr(claimstate, "renew_claim", fake_renew_claim)
+
+    lifecycle._renew_held_claim(tmp_path, ACTOR_A, {})
+    lifecycle._renew_held_claim(tmp_path, ACTOR_A, {})
+
+    assert calls == [
+        {
+            "handle": None,
+            "actor": ACTOR_A,
+            "lease_seconds": lifecycle.SUPERVISOR_CLAIM_LEASE_SECONDS,
+        },
+        {
+            "handle": None,
+            "actor": ACTOR_A,
+            "lease_seconds": lifecycle.SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS,
+        },
+    ]
+    assert (
+        lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
+        <= wrap.CLAIM_LEASE_CRITICAL_SECONDS
+        < lifecycle.SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS
+        - lifecycle.SUPERVISOR_CLAIM_RENEWAL_SECONDS
+    )
 
 
 def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
