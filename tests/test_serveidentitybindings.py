@@ -17,9 +17,45 @@ from spice.serve.payload.identity import (
     target_bound_actor,
 )
 from spice.serve.team.store import ServeTeamStore
+from spice.serve.worktree.bindings import reconcile_target_thread_bindings
+from spice.serve.worktree.target import discover_serve_worktrees
 
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 REBOUND_THREAD_ID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+
+def test_binding_resolution_resolves_one_git_state_root_per_target(
+    tmp_path, monkeypatch
+):
+    import spice.paths as state_paths
+
+    lane_a, lane_c = _linked_worktrees(tmp_path)
+    _write_idle_binding(lane_a, started_at="2026-07-22T19:04:22.000000Z")
+    _write_idle_binding(
+        lane_c,
+        started_at="2026-07-22T19:22:19.000000Z",
+        thread_id=REBOUND_THREAD_ID,
+    )
+    targets = discover_serve_worktrees(cwd=lane_a)
+    real_run_git_command = state_paths.run_git_command
+    git_dir_roots: list[str] = []
+
+    def counted_run_git_command(argv, *args, **kwargs):
+        if "--git-dir" in argv:
+            git_dir_roots.append(str(Path(argv[2]).resolve()))
+        return real_run_git_command(argv, *args, **kwargs)
+
+    monkeypatch.setattr(state_paths, "run_git_command", counted_run_git_command)
+
+    resolved = reconcile_target_thread_bindings(targets)
+
+    assert resolved == {
+        next(target.id for target in targets if target.repo_root == lane_a): THREAD_ID,
+        next(target.id for target in targets if target.repo_root == lane_c): (
+            REBOUND_THREAD_ID
+        ),
+    }
+    assert git_dir_roots == [str(target.repo_root.resolve()) for target in targets]
 
 
 def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
