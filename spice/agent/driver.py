@@ -753,11 +753,15 @@ class ClaudeDriver(AgentDriver):
         # `--resume` only reaches sessions under the invoking cwd's slug dir, so
         # locate-then-confirm the recorded cwd matches this worktree.
         path = self.find_session_transcript(thread_id)
-        return path is not None and _claude_transcript_belongs_to(path, repo_root)
+        return (
+            path is not None and _claude_transcript_belongs_to(path, repo_root) is True
+        )
 
     def thread_known_foreign(self, repo_root: Path, thread_id: str) -> bool:
         path = self.find_session_transcript(thread_id)
-        return path is not None and not _claude_transcript_belongs_to(path, repo_root)
+        return (
+            path is not None and _claude_transcript_belongs_to(path, repo_root) is False
+        )
 
     def build_exec_command(
         self,
@@ -891,19 +895,19 @@ class ClaudeDriver(AgentDriver):
         return {"kind": kind} if kind else None
 
 
-def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool:
-    """True iff Claude transcript `path` was recorded in `repo_root`'s cwd.
+def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
+    """Whether Claude transcript `path` was recorded in `repo_root`'s cwd.
 
     Claude names each session's project-slug directory from the invoking cwd, so
     a transcript recorded under another worktree is invisible to a `--resume`
-    launched here. The session stamps its cwd on its first user/system line; an
-    absent or unreadable cwd is treated as belonging, because the hard failure
-    the callers guard against is a transcript that is entirely missing (handled
-    before reaching here), not one whose metadata cannot be read.
+    launched here. The session stamps its cwd on its first user/system line.
+    Return None when that evidence is absent or unreadable: an unknown session
+    is not safe to resume, but it is also not provably foreign while a brand-new
+    session is still writing its first transcript records.
     """
     recorded = _claude_transcript_cwd(path)
     if not recorded:
-        return True
+        return None
     try:
         return Path(recorded).resolve() == repo_root.resolve()
     except OSError:

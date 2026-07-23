@@ -483,6 +483,28 @@ def test_claude_thread_without_a_local_transcript_is_unresumable_but_not_foreign
     assert foreign is False
 
 
+def test_claude_thread_with_unknown_cwd_is_unresumable_but_not_foreign(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    repo_root = tmp_path / "wt"
+    repo_root.mkdir()
+    canonical = "3c1d7e045a2b4f6c8d9e0a1b2c3d4e5f"
+    dashed = "3c1d7e04-5a2b-4f6c-8d9e-0a1b2c3d4e5f"
+    _write_claude_transcript(config_dir, dashed, slug="-unknown", cwd=None)
+
+    verdict = (
+        CLAUDE_DRIVER.thread_resumable_here(repo_root, canonical),
+        CLAUDE_DRIVER.thread_known_foreign(repo_root, canonical),
+    )
+
+    # A partial/legacy transcript is not affirmative evidence that Claude can
+    # reach it from this cwd, but its missing metadata also cannot prove that an
+    # ambient, just-started session belongs to another worktree.
+    assert verdict == (False, False)
+
+
 def test_claude_normalizes_assistant_text_into_final_message():
     raw = {
         "type": "assistant",
