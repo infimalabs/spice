@@ -18,6 +18,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable
 
 from spice.paths import shared_state_path
@@ -49,6 +50,17 @@ ACK_STATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
   ON acked_inbox_items(archived_at);
 """
+
+# Schema is initialized once per database path per process. Running the full
+# DDL sweep (CREATE + PRAGMA table_info + ALTER) on every write took a write
+# lock each time; under concurrent lanes that serialized all access -- reads
+# included. In the default rollback journal a reader's SHARED lock and that
+# write lock are mutually exclusive on a promotion SQLite refuses to retry, so
+# `busy_timeout` could not wait it out and the ACK commit raised "database is
+# locked". Initializing once and opening WAL (mirroring ServeTeamStore) lets a
+# reader and the single writer proceed together.
+_SCHEMA_INIT_LOCK = Lock()
+_INITIALIZED_PATHS: set[Path] = set()
 
 
 @dataclass(frozen=True)
@@ -103,13 +115,12 @@ def record_acked_inbox_items(
     if not rows:
         return []
     path = ack_state_database_path(repo_root)
+    _ensure_schema_once(path)
     with sqlite_connection(
         path,
         busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
         wal=True,
-        ensure_parent=True,
     ) as connection:
-        _ensure_schema(connection)
         connection.executemany(
             """
             INSERT INTO acked_inbox_items
@@ -132,16 +143,19 @@ def record_acked_inbox_items(
 
 
 def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
-    """Read archived steering without taking a schema/write lock.
+    """Read archived steering without creating or migrating the schema.
 
     Schema creation and migration belong to :func:`record_acked_inbox_items`,
-    the store's write boundary. Steady-state readers share this database across
-    every worktree and must remain query-only.
+    the store's write boundary, so this reader never runs DDL and takes no
+    write lock. It opens WAL -- the mode the writer persists -- so a read that
+    overlaps a writer observes the last committed snapshot rather than
+    contending on the writer's lock, mirroring ServeTeamStore's timeout-free
+    readers. Steady-state readers share this database across every worktree.
     """
     path = ack_state_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite_connection(path) as connection:
+    with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
             """
             SELECT key, inbox_name, text, attachments_json, lineage_json,
@@ -164,6 +178,28 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
         )
         for row in rows
     ]
+
+
+def _ensure_schema_once(path: Path) -> None:
+    """Create or migrate the schema at most once per database path per process.
+
+    Guarded by a lock and a per-path record so the DDL never re-runs on the hot
+    write path, and the initializing connection opens WAL so the journal mode
+    persists for every later reader and writer. Mirrors ServeTeamStore.
+    """
+    if path in _INITIALIZED_PATHS:
+        return
+    with _SCHEMA_INIT_LOCK:
+        if path in _INITIALIZED_PATHS:
+            return
+        with sqlite_connection(
+            path,
+            busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+            wal=True,
+            ensure_parent=True,
+        ) as connection:
+            _ensure_schema(connection)
+        _INITIALIZED_PATHS.add(path)
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:

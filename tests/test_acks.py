@@ -5,7 +5,7 @@ import json
 import sqlite3
 import subprocess
 from contextlib import contextmanager
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
@@ -31,6 +31,7 @@ from spice.mail.ackgrammar import (
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
     ACK_DISPOSITION_REFUSED,
+    ACK_STATE_TABLE_SQL,
     AckStateWrite,
     ack_state_database_path,
     ack_state_records,
@@ -493,6 +494,149 @@ def test_ack_state_records_reads_through_a_query_only_connection(tmp_path, monke
     assert query_only_modes == [1]
     assert statement_kinds == ["SELECT"]
     assert [record.key for record in records] == [KEY_A]
+
+
+def test_ack_store_opens_write_and_read_connections_in_wal(tmp_path):
+    _init_repo(tmp_path)
+    record_acked_inbox_items(
+        tmp_path, [AckStateWrite(key=KEY_A, inbox_name=f"{KEY_A}.txt", text="wal")]
+    )
+    path = ack_state_database_path(tmp_path)
+
+    with sqlite_connection(path) as connection:
+        mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert mode.lower() == "wal"
+    # The read path returns the persisted row while operating over the WAL store.
+    assert [record.key for record in ack_state_records(tmp_path)] == [KEY_A]
+
+
+def test_schema_initializes_once_per_path_across_repeated_writes(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    real_ensure_schema = ackstate._ensure_schema
+    ddl_runs: list[int] = []
+
+    def counting_ensure_schema(connection):
+        ddl_runs.append(1)
+        return real_ensure_schema(connection)
+
+    monkeypatch.setattr(ackstate, "_ensure_schema", counting_ensure_schema)
+
+    for index in range(3):
+        record_acked_inbox_items(
+            tmp_path,
+            [
+                AckStateWrite(
+                    key=f"1kY0{index:03d}", inbox_name=f"k{index}.txt", text="x"
+                )
+            ],
+        )
+
+    # The DDL sweep runs once for the path, not on every write.
+    assert len(ddl_runs) == 1
+
+
+def _write_outcome_with_reader_open(db_path, *, do_write):
+    """Hold a reader's read transaction open, attempt a write, report outcome.
+
+    In the default rollback journal the reader's SHARED lock and the writer's
+    commit-time promotion to EXCLUSIVE are mutually exclusive on a BUSY that
+    `busy_timeout` cannot retry away, so the write raises "database is locked".
+    In WAL the reader's snapshot and the single writer coexist and the write
+    commits.
+    """
+    reader = sqlite3.connect(db_path)
+    reader.isolation_level = None
+    try:
+        reader.execute("PRAGMA busy_timeout = 200")
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM acked_inbox_items").fetchall()
+        try:
+            do_write()
+            return "committed"
+        except sqlite3.OperationalError as exc:
+            return f"locked:{exc}"
+    finally:
+        reader.rollback()
+        reader.close()
+
+
+def test_wal_write_commits_while_a_reader_is_open_unlike_rollback(tmp_path):
+    _init_repo(tmp_path)
+
+    # Pre-fix shape: rollback journal with the schema DDL re-run on every write.
+    rollback_db = ack_state_database_path(tmp_path).parent / "rollback.sqlite3"
+    rollback_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(rollback_db, wal=False) as connection:
+        connection.execute(ACK_STATE_TABLE_SQL)
+
+    def rollback_write():
+        with sqlite_connection(
+            rollback_db, busy_timeout_ms=200, wal=False
+        ) as connection:
+            connection.execute(ACK_STATE_TABLE_SQL)
+            connection.execute(
+                "INSERT INTO acked_inbox_items "
+                "(key, inbox_name, text, archived_at) VALUES (?, ?, ?, ?)",
+                ("rb", "rb.txt", "rb", 1.0),
+            )
+
+    rollback_outcome = _write_outcome_with_reader_open(
+        rollback_db, do_write=rollback_write
+    )
+
+    # Fixed shape: WAL store initialized once, exercised through the real API.
+    record_acked_inbox_items(
+        tmp_path, [AckStateWrite(key="warm", inbox_name="warm.txt", text="warm")]
+    )
+    wal_db = ack_state_database_path(tmp_path)
+
+    def wal_write():
+        record_acked_inbox_items(
+            tmp_path, [AckStateWrite(key="live", inbox_name="live.txt", text="live")]
+        )
+
+    wal_outcome = _write_outcome_with_reader_open(wal_db, do_write=wal_write)
+
+    assert wal_outcome != rollback_outcome
+    assert wal_outcome == "committed"
+    assert rollback_outcome.startswith("locked")
+    # The WAL write committed while the reader was open and is durable.
+    assert {record.key for record in ack_state_records(tmp_path)} >= {"warm", "live"}
+
+
+def test_concurrent_ack_writes_and_reads_are_durable(tmp_path):
+    _init_repo(tmp_path)
+    # Warm the schema/WAL once so concurrent readers never race schema creation.
+    record_acked_inbox_items(
+        tmp_path, [AckStateWrite(key="warm", inbox_name="warm.txt", text="warm")]
+    )
+    keys = [f"1kX0{index:03d}" for index in range(24)]
+    read_counts: list[int] = []
+    start = Barrier(len(keys) + 4)
+
+    def writer(key):
+        start.wait()
+        record_acked_inbox_items(
+            tmp_path, [AckStateWrite(key=key, inbox_name=f"{key}.txt", text=key)]
+        )
+
+    def reader():
+        start.wait()
+        read_counts.append(len(ack_state_records(tmp_path)))
+
+    threads = [Thread(target=writer, args=(key,)) for key in keys]
+    threads += [Thread(target=reader) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    stored = {record.key for record in ack_state_records(tmp_path)}
+    # Every concurrent writer's row is durable and every reader completed.
+    assert set(keys) <= stored
+    assert len(read_counts) == 4
+    assert all(count >= 1 for count in read_counts)
 
 
 def test_ack_archival_failure_keeps_key_pending_and_publishes_feedback(
