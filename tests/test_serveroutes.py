@@ -935,6 +935,55 @@ def test_index_links_and_serves_packaged_favicon():
     assert handler.body.getvalue().startswith(b"\x00\x00\x01\x00")
 
 
+def test_static_asset_sets_revalidation_headers():
+    asset = STATIC_ROOT / "app.js"
+    handler = _StaticHandler()
+
+    send_static_asset(handler, "app.js")
+
+    body = asset.read_bytes()
+    assert len(body) > 0
+    assert handler.status == HTTPStatus.OK
+    assert handler.body.getvalue() == body
+    assert set(handler.headers) == {
+        "Content-Type",
+        "Content-Length",
+        "ETag",
+        "Cache-Control",
+    }
+    assert handler.headers["Cache-Control"] == "no-cache"
+    assert handler.headers["Content-Length"] == str(len(body))
+    etag = handler.headers["ETag"]
+    assert etag.startswith('"') and etag.endswith('"')
+
+
+def test_static_asset_conditional_match_returns_not_modified():
+    primer = _StaticHandler()
+    send_static_asset(primer, "app.js")
+    etag = primer.headers["ETag"]
+
+    handler = _StaticHandler()
+    send_static_asset(handler, "app.js", if_none_match=etag)
+
+    assert handler.status == HTTPStatus.NOT_MODIFIED
+    assert handler.body.getvalue() == b""
+    assert set(handler.headers) == {"ETag", "Cache-Control"}
+    assert handler.headers["ETag"] == etag
+    assert handler.headers["Cache-Control"] == "no-cache"
+
+
+def test_static_asset_conditional_mismatch_returns_full_body():
+    asset = STATIC_ROOT / "app.js"
+    handler = _StaticHandler()
+
+    send_static_asset(handler, "app.js", if_none_match='"stale-etag"')
+
+    body = asset.read_bytes()
+    assert handler.status == HTTPStatus.OK
+    assert handler.body.getvalue() == body
+    assert handler.headers["ETag"] != '"stale-etag"'
+
+
 def test_static_asset_rejects_shared_prefix_sibling_paths(tmp_path, monkeypatch):
     static_root = tmp_path / "static"
     static_root.mkdir()
