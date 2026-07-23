@@ -320,10 +320,32 @@ def test_cancel_ends_the_watch(tmp_path, monkeypatch):
     watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
     monkeypatch.setattr(watch, "evaluate", lambda: 3600.0)
     watch.start()
-    assert watch.armed.wait(timeout=15.0) is True
-
-    watch.cancel()
-    watch.join()
+    try:
+        assert watch.armed.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
 
     assert watch.error == ""
     assert threading.active_count() >= 1
+
+
+def test_available_work_watch_leak_guard_joins_the_owning_test_thread(
+    tmp_path,
+    monkeypatch,
+    _available_work_watch_leak_guard,
+):
+    watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
+    monkeypatch.setattr(watch, "evaluate", lambda: 3600.0)
+    watch.start()
+    assert watch.armed.wait(timeout=15.0) is True
+
+    leaked = _available_work_watch_leak_guard()
+    active_watch_threads = [
+        thread.name
+        for thread in threading.enumerate()
+        if thread.name == launch.AVAILABLE_WORK_WATCH_THREAD_NAME and thread.is_alive()
+    ]
+
+    assert leaked == [launch.AVAILABLE_WORK_WATCH_THREAD_NAME]
+    assert active_watch_threads == []

@@ -16,6 +16,10 @@ import os
 import sqlite3
 import threading
 
+import pytest
+
+from spice.serve import launch
+
 SQLITE_LIFECYCLE_AUDIT_ENV = "SPICE_SQLITE_LIFECYCLE_AUDIT"  # env-policy: allow
 
 _counts_lock = threading.Lock()
@@ -43,6 +47,52 @@ class _AuditedConnection(sqlite3.Connection):
 def _audited_connect(*args, **kwargs):
     kwargs.setdefault("factory", _AuditedConnection)
     return _real_connect(*args, **kwargs)
+
+
+def _join_test_owned_available_work_watches(
+    watches: list[launch.AvailableWorkWatch],
+) -> list[str]:
+    leaked: list[tuple[launch.AvailableWorkWatch, threading.Thread]] = []
+    for watch in watches:
+        thread = watch._thread
+        if (
+            thread is not None
+            and thread.name == launch.AVAILABLE_WORK_WATCH_THREAD_NAME
+            and thread.is_alive()
+        ):
+            leaked.append((watch, thread))
+            watch._stop.set()
+    for _watch, thread in leaked:
+        thread.join(timeout=launch.AVAILABLE_WORK_WATCH_JOIN_SECONDS)
+    still_alive = [thread.name for _watch, thread in leaked if thread.is_alive()]
+    if still_alive:
+        raise AssertionError(
+            "AvailableWorkWatch teardown could not join: " + ", ".join(still_alive)
+        )
+    return [thread.name for _watch, thread in leaked]
+
+
+@pytest.fixture(autouse=True)
+def _available_work_watch_leak_guard(monkeypatch):
+    watches: list[launch.AvailableWorkWatch] = []
+    original_start = launch.AvailableWorkWatch.start
+
+    def tracked_start(watch: launch.AvailableWorkWatch) -> None:
+        watches.append(watch)
+        original_start(watch)
+
+    monkeypatch.setattr(launch.AvailableWorkWatch, "start", tracked_start)
+
+    def join_leaks() -> list[str]:
+        return _join_test_owned_available_work_watches(watches)
+
+    yield join_leaks
+
+    leaked = join_leaks()
+    if leaked:
+        pytest.fail(
+            "test leaked AvailableWorkWatch background thread(s): " + ", ".join(leaked)
+        )
 
 
 def pytest_configure(config) -> None:
