@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
+from spice.errors import SpiceError
 from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
@@ -725,6 +726,41 @@ def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
     assert metadata_rows in card.display_html
     assert "<dt>title</dt><dd>Surface task origin</dd>" in card.display_html
     assert "<dt>handle</dt><dd>TASKCAR-1k4Yh62d</dd>" in card.display_html
+
+
+def test_shared_task_card_export_is_lazy_and_caches_failure(tmp_path, monkeypatch):
+    export_calls: list[list[str]] = []
+
+    def failing_export(filters: list[str] | None = None) -> list[dict[str, object]]:
+        export_calls.append(list(filters or []))
+        raise SpiceError("task export unavailable")
+
+    monkeypatch.setattr(message.tw, "export", failing_export)
+    snapshot = message.TaskCardExportSnapshot()
+
+    assert message.target_activity_items(
+        _Target(id="wt", repo_root=tmp_path),
+        "",
+        task_cards=snapshot,
+    ) == ([], None, None)
+    assert export_calls == []
+
+    first = message._task_card_messages_for_thread(
+        "agent-a",
+        after=None,
+        before=None,
+        task_cards=snapshot,
+    )
+    second = message._task_card_messages_for_thread(
+        "agent-b",
+        after=None,
+        before=None,
+        task_cards=snapshot,
+    )
+
+    assert first == []
+    assert second == []
+    assert export_calls == [["status.any:"]]
 
 
 def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
