@@ -106,6 +106,7 @@ def record_acked_inbox_items(
     with sqlite_connection(
         path,
         busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+        wal=True,
         ensure_parent=True,
     ) as connection:
         _ensure_schema(connection)
