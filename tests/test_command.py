@@ -13,7 +13,7 @@ from threading import Event, Thread
 import pytest
 
 from spice.agent import driver as agent_driver
-from spice.agent import sidechannel, sidechannelnotify, wrap
+from spice.agent import runwatch, sidechannel, sidechannelnotify, wrap
 from spice.agent.maximmetrics import (
     MAXIM_EVENT_FIRE,
     MaximMetricEventWrite,
@@ -1429,6 +1429,38 @@ def test_side_channel_watch_completes_when_parent_is_already_waitable(
         assert status.si_pid == parent.pid
     finally:
         parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+
+
+def test_parent_exit_check_uses_one_nonreaping_observation_before_portable_probe(
+    monkeypatch,
+):
+    waitid_names = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    if not all(hasattr(os, name) for name in waitid_names):
+        pytest.skip("platform does not expose non-reaping child status")
+    parent_pid = 424242
+    observations: list[tuple[object, ...]] = []
+
+    def observe_child(id_type, pid, options):
+        observations.append(("waitid", id_type, pid, options))
+        return None
+
+    def probe_existence(pid, signal):
+        observations.append(("kill", pid, signal))
+
+    monkeypatch.setattr(os, "waitid", observe_child)
+    monkeypatch.setattr(os, "kill", probe_existence)
+
+    runwatch._process_has_exited(parent_pid)
+
+    assert observations == [
+        (
+            "waitid",
+            os.P_PID,
+            parent_pid,
+            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+        ),
+        ("kill", parent_pid, 0),
+    ]
 
 
 def _eventually(factory, *, contains: str):
