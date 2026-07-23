@@ -352,9 +352,16 @@ def _agent_visual_status(process_status: str, latest_activity_kind: str) -> str:
 
 
 def _lane_info_payload(
-    target: WorktreeTarget, serve_identity: dict[str, Any]
+    target: WorktreeTarget,
+    serve_identity: dict[str, Any],
+    *,
+    agent_name: str | None = None,
 ) -> dict[str, Any]:
-    agent_name = _agent_name_for_target(target)
+    # ``agent_name`` lets the inventory caller pass the say-voice name it already
+    # resolved for this target so the lane build reuses it instead of resolving
+    # the same config a second time. Left unset, it resolves normally.
+    if agent_name is None:
+        agent_name = _agent_name_for_target(target)
     thread_id = str((serve_identity.get("thread") or {}).get("threadId") or "")
     driver = serve_identity.get("driver") or {}
     desired_driver = str(driver.get("desired") or "")

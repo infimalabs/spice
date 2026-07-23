@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
+from spice.config.values import effective_agent_config
 from spice.serve.agentapi import (
     ensure_agent_for_available_work,
     ensure_agent_for_pending_inbox,
@@ -69,6 +70,10 @@ def _work_tree_payload(
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
     agent_name = _agent_name_for_target(target)
+    # Resolve this target's effective agent config and say-voice name once, then
+    # reuse them across the identity, driver, and lane-info builders below --
+    # each otherwise re-resolves the same config for the same repo root.
+    desired_config = effective_agent_config(target.repo_root)
     renewal_intent = _work_tree_renewal_intent(
         state, target, thread_id, predecessor_actor, renew_intent
     )
@@ -80,6 +85,7 @@ def _work_tree_payload(
         binding_error=binding_error,
         status=status,
         pending_identity=pending_identity,
+        desired_config=desired_config,
     )
     return {
         "id": target.id,
@@ -92,6 +98,7 @@ def _work_tree_payload(
             binding_status=binding_status,
             binding_error=binding_error,
             agent_name=agent_name,
+            desired_config=desired_config,
         ),
         "serveAgentIdentity": serve_identity,
         "taskFilters": team_facts.get("taskFilters", []),
@@ -102,7 +109,7 @@ def _work_tree_payload(
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
         "taskFilterInventory": inventory,
-        "laneInfo": _lane_info_payload(target, serve_identity),
+        "laneInfo": _lane_info_payload(target, serve_identity, agent_name=agent_name),
         "pendingCount": pending,
         "pendingLabel": str(pending),
         **pending_identity,
@@ -169,6 +176,7 @@ def _work_tree_status_payloads(
     binding_error: str,
     status: Any,
     pending_identity: dict[str, Any],
+    desired_config: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from spice.serve.payload.message import target_activity_items
 
@@ -181,6 +189,7 @@ def _work_tree_status_payloads(
         binding_error=binding_error,
         transcript_owner=transcript_owner,
         store=state.team_store,
+        desired_config=desired_config,
     )
     status_line = _status_line_payload_from_status(
         status=status,
