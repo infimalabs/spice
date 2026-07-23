@@ -41,9 +41,9 @@ _KEY_ACRONYM_MIN_WORDS = 3
 
 
 def encode(value: int) -> str:
-    """Encode a non-negative integer as base62 (no padding)."""
+    """Encode a non-negative integer as base52 (no padding)."""
     if value < 0:
-        raise ValueError(f"base62 cannot encode a negative value: {value}")
+        raise ValueError(f"base52 cannot encode a negative value: {value}")
     if value == 0:
         return ZERO
     digits: list[str] = []
@@ -54,27 +54,27 @@ def encode(value: int) -> str:
 
 
 def decode(text: str) -> int:
-    """Decode a base62 string back to its integer value."""
+    """Decode a base52 string back to its integer value."""
     if not text:
-        raise ValueError("base62 cannot decode an empty string")
+        raise ValueError("base52 cannot decode an empty string")
     value = 0
     for char in text:
         digit = _VALUES.get(char)
         if digit is None:
-            raise ValueError(f"invalid base62 character: {char!r}")
+            raise ValueError(f"invalid base52 character: {char!r}")
         value = value * BASE + digit
     return value
 
 
 def encode_width(value: int, width: int = STAMP_WIDTH) -> str:
-    """Encode ``value`` as a fixed-width, zero-padded base62 string.
+    """Encode ``value`` as a fixed-width, zero-padded base52 string.
 
     Fixed width is what keeps the encoding order-preserving under a string
     sort; an oversized value is an error rather than a silent sort break.
     """
     encoded = encode(value)
     if len(encoded) > width:
-        raise ValueError(f"value {value} does not fit in {width} base62 chars")
+        raise ValueError(f"value {value} does not fit in {width} base52 chars")
     return encoded.rjust(width, ZERO)
 
 
