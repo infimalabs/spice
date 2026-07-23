@@ -78,7 +78,7 @@ const cachedPayload = {
     pendingInboxVersion: 40,
   },
 };
-const staleMetrics = { completed: 1 };
+const currentMetrics = { completed: 1 };
 const staleInfo = {
   summaryRows: [{ key: "thread", value: "thread-stale" }],
   members: [],
@@ -105,7 +105,7 @@ const lane = {
   lifetime: "Drain",
   serverLifetime: "Drain",
   renewalIntent: { requested: false },
-  laneMetrics: staleMetrics,
+  laneMetrics: currentMetrics,
   laneInfo: staleInfo,
   privateTaskCount: 1,
   backendPendingInboxCount: 2,
@@ -122,7 +122,7 @@ const lane = {
 };
 laneStore.registerLane(lane);
 
-const refreshedMetrics = { completed: 9 };
+const eagerPayloadMetrics = { completed: 9 };
 const refreshedInfo = {
   summaryRows: [{ key: "thread", value: "thread-fresh" }],
   members: [{ actorId: "fresh-actor" }],
@@ -162,7 +162,7 @@ const refreshedTarget = {
   },
   lifetime: "Drive",
   renewalIntent: refreshedRenewal,
-  laneMetrics: refreshedMetrics,
+  laneMetrics: eagerPayloadMetrics,
   laneInfo: refreshedInfo,
   privateTaskCount: 7,
   statusLine: {
@@ -214,7 +214,10 @@ assert(
   "refresh applies lifetime at the refreshed config revision",
 );
 assert(lane.renewalIntent === refreshedRenewal, "refresh updates renewal intent");
-assert(lane.laneMetrics === refreshedMetrics, "refresh updates lane metrics");
+assert(
+  lane.laneMetrics === currentMetrics,
+  "refresh preserves the on-demand lane metrics snapshot",
+);
 assert(lane.laneInfo === refreshedInfo, "refresh updates lane info");
 assert(lane.privateTaskCount === 7, "refresh updates private task count");
 assert(
