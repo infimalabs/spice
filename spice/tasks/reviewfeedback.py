@@ -55,7 +55,9 @@ def emit_review_feedback(
         result = ReviewFeedbackResult("target-inactive", "review_author is empty")
         _record_feedback_status(reviewed_row, result)
         return result
-    target = _resolve_active_author_target(review_author, config.repo_root())
+    target = _resolve_active_author_target(
+        review_author, config.repo_root(), reviewer=reviewer
+    )
     if target.status != "delivered":
         result = ReviewFeedbackResult(
             target.status,
@@ -94,7 +96,19 @@ class _TargetResolution:
 def _resolve_active_author_target(
     review_author: str,
     emitting_tree: Path,
+    *,
+    reviewer: str,
 ) -> _TargetResolution:
+    # Skip only a genuine self-review, decided by author identity rather than a
+    # tree path: the reviewer IS the reviewed work's author. Keying on the actor
+    # (UUID) means a renewal that puts a different agent on the author's tree
+    # still delivers to that live author, and a future migration that puts the
+    # same agent on a different tree still skips its own work.
+    if _actor_keys(reviewer) & _actor_keys(review_author):
+        return _TargetResolution(
+            "self-author",
+            "reviewer is the author of the reviewed work",
+        )
     try:
         records = list_worktrees(cwd=emitting_tree)
     except RuntimeError as exc:
@@ -112,38 +126,29 @@ def _resolve_active_author_target(
             continue
         if author_keys & _actor_keys(status.thread_id):
             matches.append(record.path.resolve())
-    return _select_target(sorted({path for path in matches}), emitting_tree)
+    return _select_target(sorted({path for path in matches}))
 
 
-def _select_target(
-    candidates: list[Path],
-    emitting_tree: Path,
-) -> _TargetResolution:
-    """Pick the delivery tree, never the tree the review was emitted from.
+def _select_target(candidates: list[Path]) -> _TargetResolution:
+    """Pick the delivery tree from the live author targets.
 
-    The refusal is a comparison between two paths. It consults no actor and no
-    task identifier, so it holds even when the task was filed by one lane and
-    worked by another, which is exactly the shape an identity comparison misses.
+    The self-review skip is decided upstream by author identity, so target
+    selection consults only how many distinct live author trees exist: exactly
+    one delivers, several are ambiguous, and none is inactive. It performs no
+    emitting-tree path comparison, so a live author sharing the emitting tree
+    (a renewal successor) still receives feedback.
     """
-    emitting = emitting_tree.resolve()
-    elsewhere = [path for path in candidates if path != emitting]
-    if len(elsewhere) == 1:
+    if len(candidates) == 1:
         return _TargetResolution(
             "delivered",
             "active author target resolved",
-            str(elsewhere[0]),
-        )
-    if elsewhere:
-        return _TargetResolution(
-            "target-ambiguous",
-            "multiple active targets for review_author: "
-            + ", ".join(path.as_posix() for path in elsewhere),
+            str(candidates[0]),
         )
     if candidates:
         return _TargetResolution(
-            "self-tree",
-            "the only active author target is the emitting tree",
-            str(emitting),
+            "target-ambiguous",
+            "multiple active targets for review_author: "
+            + ", ".join(path.as_posix() for path in candidates),
         )
     return _TargetResolution("target-inactive", "no active target for review_author")
 
