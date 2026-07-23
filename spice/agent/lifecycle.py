@@ -633,10 +633,7 @@ def _claim_renewal_report_key(result: Any) -> str:
 
 def _supervised_claim_lease_seconds(repo_root: Path, thread_id: str) -> float:
     """Keep startup claims short, then promote the confirmed healthy holder."""
-    try:
-        state = read_agent_state(repo_root)
-    except OSError:
-        return SUPERVISOR_CLAIM_LEASE_SECONDS
+    state = read_agent_state(repo_root)
     state_thread_id = canonical_thread_id(state.get("thread_id"))
     if (
         state_thread_id == canonical_thread_id(thread_id)
@@ -659,8 +656,9 @@ def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> 
     from spice.tasks import claimstate
 
     try:
+        lease_seconds = _supervised_claim_lease_seconds(repo_root, thread_id)
         witness = claimstate.read_claim_witness(repo_root, thread_id)
-    except SpiceError as exc:
+    except (OSError, SpiceError) as exc:
         return claimstate.ClaimRenewalResult(
             False,
             "backend_error",
@@ -676,7 +674,6 @@ def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> 
     # identity accepted by ``identity.resolve``; keep the UUID separately for
     # witness retirement after a terminal result.
     target = held.get("handle") or held.get("uuid", "")
-    lease_seconds = _supervised_claim_lease_seconds(repo_root, thread_id)
     result = claimstate.renew_claim(
         handle=target or None,
         actor=thread_id,
