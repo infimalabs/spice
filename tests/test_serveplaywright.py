@@ -565,7 +565,10 @@ def test_serve_mosaic_single_settle_smoke_asserts_single_settle() -> None:
     assert "result.fusedPresentCount !== result.fusedExpectedCount" in smoke
     assert "result.soloPresentCount !== result.soloExpectedCount" in smoke
     assert "result.fusedMessageRenderCount !== 1" in smoke
-    assert "result.ackContextPresent !== true" in smoke
+    assert 'require("node:assert/strict")' in smoke
+    assert "assert.deepStrictEqual(" in smoke
+    assert 'ackContextState: "resolved"' in smoke
+    assert 'ackQuoteText: "acked steering context"' in smoke
     # The per-host mosaic full-replay counter is a positive observable read from
     # the live event log, and equals its initial-mount value across a quiet
     # window (no post-settle reshuffle).
