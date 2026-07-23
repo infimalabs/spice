@@ -6,7 +6,15 @@ import ast
 import inspect
 from pathlib import Path
 
-from spice.serve import agentapi, httpapi, livebus, observer, submissions, workroutes
+from spice.serve import (
+    agentapi,
+    httpapi,
+    livebus,
+    livebusmutation,
+    observer,
+    submissions,
+    workroutes,
+)
 from spice.serve.payload import message, metric, wire
 from spice.serve.worktree import inventory
 from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES
@@ -43,11 +51,12 @@ def test_browser_payload_emitters_match_the_exact_schema_registry():
 
 
 def test_live_bus_outbound_discriminants_match_the_exact_frame_registry():
-    tree = ast.parse(inspect.getsource(livebus))
+    modules = (livebus, livebusmutation)
     actual = sorted(
         {
             value.value
-            for node in ast.walk(tree)
+            for module in modules
+            for node in ast.walk(ast.parse(inspect.getsource(module)))
             if isinstance(node, ast.Dict)
             for key, value in zip(node.keys, node.values, strict=True)
             if isinstance(key, ast.Constant)
