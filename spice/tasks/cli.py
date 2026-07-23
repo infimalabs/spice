@@ -569,7 +569,8 @@ def _configure_reclaim_parser(actions: Any) -> None:
         "--lease-seconds",
         type=float,
         help=(
-            "Requested lease duration; renewal preserves any longer duration "
+            "Requested lease duration; defaults to the configured claim TTL "
+            "for manual ownership, and renewal preserves any longer duration "
             "already recorded on the claim."
         ),
     )
@@ -1121,9 +1122,14 @@ def _depends(args: argparse.Namespace) -> str:
 
 
 def _reclaim(args: argparse.Namespace) -> str:
+    lease_seconds = (
+        float(config.CLAIM_TTL_SECONDS)
+        if args.lease_seconds is None
+        else args.lease_seconds
+    )
     result = claimstate.renew_claim(
         args.handle,
-        lease_seconds=args.lease_seconds,
+        lease_seconds=lease_seconds,
     )
     if result.renewed:
         return f"reclaimed {result.handle} until {result.claim_until}"
