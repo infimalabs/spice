@@ -66,6 +66,8 @@ function lane() {
 }
 
 const guarded = lane();
+const currentGuardedMetrics = { completed: 3 };
+guarded.laneMetrics = currentGuardedMetrics;
 context.renderLaneChrome(guarded, {
   teamIdentity: {
     state: "member",
@@ -76,6 +78,7 @@ context.renderLaneChrome(guarded, {
   taskFilters: ["old.filter"],
   laneFilterVersion: "v10",
   lifetime: "Drive",
+  laneMetrics: { completed: 2 },
   statusLine: {
     agentProcessStatus: "idle",
     pendingInboxCount: 1,
@@ -96,6 +99,10 @@ assert(
 );
 assert(guarded.laneFilterVersion === "v11", "stale filter version is ignored");
 assert(guarded.lifetime === "Drain", "stale lifetime does not rewind slider");
+assert(
+  guarded.laneMetrics === currentGuardedMetrics,
+  "stale chrome preserves the on-demand lane metrics snapshot",
+);
 assert(lifetimeCalls.length === 0, "stale lifetime is not handed to controls");
 assert(
   guarded.backendPendingInboxCount === 1,
@@ -178,7 +185,9 @@ assert(
 );
 
 const direct = lane();
-const directMetrics = { completed: 7 };
+const currentDirectMetrics = { completed: 6 };
+direct.laneMetrics = currentDirectMetrics;
+const eagerDirectMetrics = { completed: 7 };
 const directInfo = {
   summaryRows: [{ key: "thread", value: "thread-direct" }],
   members: [],
@@ -204,7 +213,7 @@ context.renderLaneChrome(direct, {
   },
   lifetime: "Drive",
   renewalIntent: directRenewal,
-  laneMetrics: directMetrics,
+  laneMetrics: eagerDirectMetrics,
   laneInfo: directInfo,
   privateTaskCount: 4,
   statusLine: {
@@ -229,7 +238,10 @@ assert(
 );
 assert(direct.lifetime === "Drive", "direct lifetime reaches chrome");
 assert(direct.renewalIntent === directRenewal, "direct renewal intent reaches chrome");
-assert(direct.laneMetrics === directMetrics, "direct metrics reach chrome");
+assert(
+  direct.laneMetrics === currentDirectMetrics,
+  "direct chrome preserves the on-demand lane metrics snapshot",
+);
 assert(direct.laneInfo === directInfo, "direct info reaches chrome");
 assert(direct.privateTaskCount === 4, "direct private count reaches chrome");
 assert(
