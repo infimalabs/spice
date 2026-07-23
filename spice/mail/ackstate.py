@@ -50,6 +50,11 @@ ACK_STATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
   ON acked_inbox_items(archived_at);
 """
+ACK_STATE_RECORD_SELECT_SQL = """
+SELECT key, inbox_name, text, attachments_json, lineage_json,
+       ack_text, ack_content, disposition, archived_at
+FROM acked_inbox_items
+"""
 
 # Schema is initialized once per database path per process. Running the full
 # DDL sweep (CREATE + PRAGMA table_info + ALTER) on every write took a write
@@ -157,27 +162,36 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
         return []
     with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
-            """
-            SELECT key, inbox_name, text, attachments_json, lineage_json,
-                   ack_text, ack_content, disposition, archived_at
-            FROM acked_inbox_items
-            ORDER BY archived_at DESC, key DESC
-            """
+            ACK_STATE_RECORD_SELECT_SQL + " ORDER BY archived_at DESC, key DESC"
         ).fetchall()
-    return [
-        AckStateRecord(
-            key=row[0],
-            inbox_name=row[1],
-            text=row[2],
-            attachments=_decode_attachments_json(row[3]),
-            lineage=_decode_lineage_json(row[4]),
-            ack_text=row[5],
-            ack_content=row[6],
-            disposition=_normalize_disposition(row[7]),
-            archived_at=row[8],
-        )
-        for row in rows
-    ]
+    return [_ack_state_record(row) for row in rows]
+
+
+def ack_state_records_for_keys(
+    repo_root: str | Path, keys: Iterable[str]
+) -> list[AckStateRecord]:
+    """Read the exact consumed steering rows named by ``keys``.
+
+    Message hydration needs every context referenced by its bounded message
+    window, even when a referenced key is older than the recent-history UI
+    limit. The primary-key lookup keeps that read proportional to requested
+    contexts instead of loading or truncating the archive.
+    """
+    wanted = tuple(dict.fromkeys(str(key) for key in keys if key))
+    if not wanted:
+        return []
+    path = ack_state_database_path(repo_root)
+    if not path.is_file():
+        return []
+    placeholders = ", ".join("?" for _key in wanted)
+    with sqlite_connection(path, wal=True) as connection:
+        rows = connection.execute(
+            ACK_STATE_RECORD_SELECT_SQL
+            + f" WHERE key IN ({placeholders})"
+            + " ORDER BY archived_at DESC, key DESC",
+            wanted,
+        ).fetchall()
+    return [_ack_state_record(row) for row in rows]
 
 
 def _ensure_schema_once(path: Path) -> None:
@@ -200,6 +214,20 @@ def _ensure_schema_once(path: Path) -> None:
         ) as connection:
             _ensure_schema(connection)
         _INITIALIZED_PATHS.add(path)
+
+
+def _ack_state_record(row: tuple[Any, ...]) -> AckStateRecord:
+    return AckStateRecord(
+        key=row[0],
+        inbox_name=row[1],
+        text=row[2],
+        attachments=_decode_attachments_json(row[3]),
+        lineage=_decode_lineage_json(row[4]),
+        ack_text=row[5],
+        ack_content=row[6],
+        disposition=_normalize_disposition(row[7]),
+        archived_at=row[8],
+    )
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:

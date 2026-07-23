@@ -1004,6 +1004,34 @@ def test_static_stream_uses_server_supplied_ack_contexts():
     assert "hydrateAckContextsForMessages" not in app_live_bus
 
 
+def test_ack_context_hydration_precedes_initial_reconnect_and_interleaved_messages():
+    script = Path(__file__).with_name("fixtures") / "ack_context_hydration.js"
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.stream.js")],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {
+        "early": {
+            "final": "resolved",
+            "text": "early context",
+            "trace": ["resolved"],
+        },
+        "initial": {
+            "final": "resolved",
+            "text": "initial context",
+            "trace": ["resolved"],
+        },
+        "reconnect": {
+            "final": "resolved",
+            "text": "reconnected context",
+            "trace": ["resolved"],
+        },
+    }
+
+
 _KNOWN_MESSAGE_ORDER_SCRIPT = """
 const fs = require("fs");
 const vm = require("vm");

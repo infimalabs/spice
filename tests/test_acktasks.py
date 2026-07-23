@@ -15,7 +15,6 @@ from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from spice.mail.ackstate import ACK_DISPOSITION_REFUSED, ack_state_records
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
-    collect_acked_inbox_items,
     collect_refused_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
@@ -36,6 +35,14 @@ pytestmark = pytest.mark.skipif(
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_MEMBER = thread_actor_id(ACTOR)
 INBOX_KEY = "1jNmXPHm"
+
+
+def _acked_inbox_names(repo_root) -> list[str]:
+    return [
+        record.inbox_name
+        for record in ack_state_records(repo_root)
+        if record.disposition != ACK_DISPOSITION_REFUSED
+    ]
 
 
 def _allowed_project_stems() -> list[str]:
@@ -112,9 +119,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
 
     rows = tw.export(["status:pending"])
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
-        f"{INBOX_KEY}.txt"
-    ]
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
     assert len(rows) == 1
     assert rows[0]["description"] == "Inline follow-up"
     assert rows[0]["project"] == "task.unit"
@@ -218,9 +223,7 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
 
     rows = tw.export(["status:pending"])
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
-        f"{INBOX_KEY}.txt"
-    ]
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
     assert len(rows) == 1
     assert rows[0]["description"] == "Claude follow-up"
     assert rows[0]["project"] == "task.unit"
@@ -249,7 +252,7 @@ def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
         watchdog.MaximReminderGate(),
     )
 
-    assert collect_acked_inbox_items(task_repo) == []
+    assert _acked_inbox_names(task_repo) == []
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [_ack_feedback("ack.unmatched", missing_key)]
 
@@ -293,7 +296,7 @@ def test_supervised_marker_examples_do_not_emit_feedback_or_tasks(
         watchdog.MaximReminderGate(),
     )
 
-    assert collect_acked_inbox_items(task_repo) == []
+    assert _acked_inbox_names(task_repo) == []
     assert tw.export(["status:pending"]) == []
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
@@ -576,9 +579,7 @@ def test_review_feedback_ack_never_mirrors_to_active_task(task_repo, quiet_super
 
     row = identity.resolve(handle)
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
-        f"{INBOX_KEY}.txt"
-    ]
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
     assert all(not note.startswith("ack ") for note in _annotations(row))
 
 
@@ -619,9 +620,7 @@ def test_retired_ack_without_active_claim_skips_annotation(task_repo, quiet_supe
     )
 
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
-        f"{INBOX_KEY}.txt"
-    ]
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
     assert "spice ack annotate: no active claim" in log.getvalue()
 
 
@@ -649,9 +648,7 @@ def test_ack_annotation_failure_never_blocks_retirement(
     )
 
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
-        f"{INBOX_KEY}.txt"
-    ]
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
     assert "spice ack annotate supervisor error: boom" in log.getvalue()
 
 

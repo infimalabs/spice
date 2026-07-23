@@ -23,10 +23,10 @@ from typing import Any, Sequence
 from urllib.parse import quote
 
 from spice.mail.ackstate import (
-    ACK_DISPOSITION_ACKED,
     ACK_DISPOSITION_REFUSED,
     ack_state_database_path,
     ack_state_records,
+    ack_state_records_for_keys,
 )
 from spice.mail.attachments import (
     InboxAttachment,
@@ -260,15 +260,6 @@ def collect_pending_inbox_entries(
     return entries
 
 
-def collect_acked_inbox_items(
-    repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
-) -> list[InboxItem]:
-    """Return consumed operator steering from ACK state, not archive files."""
-    return _collect_ack_state_inbox_items(
-        repo_root, limit=limit, disposition=ACK_DISPOSITION_ACKED
-    )
-
-
 def collect_refused_inbox_items(
     repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
 ) -> list[InboxItem]:
@@ -276,6 +267,22 @@ def collect_refused_inbox_items(
     return _collect_ack_state_inbox_items(
         repo_root, limit=limit, disposition=ACK_DISPOSITION_REFUSED
     )
+
+
+def collect_consumed_inbox_items_for_keys(
+    repo_root: str | Path | None, *, keys: Sequence[str]
+) -> list[InboxItem]:
+    """Return every durable ACK/NACK record named by ``keys``."""
+    if not repo_root:
+        return []
+    wanted = tuple(dict.fromkeys(inbox_item_key(key) for key in keys if key))
+    if not wanted:
+        return []
+    state_path = ack_state_database_path(repo_root)
+    return [
+        _ack_state_record_inbox_item(record, state_path=state_path)
+        for record in ack_state_records_for_keys(repo_root, wanted)
+    ]
 
 
 def _collect_ack_state_inbox_items(
@@ -289,19 +296,23 @@ def _collect_ack_state_inbox_items(
     prune_stale_inbox_artifacts(repo_root)
     state_path = ack_state_database_path(repo_root)
     items = [
-        InboxItem(
-            source_path=state_path,
-            archive_path=state_path,
-            name=record.inbox_name,
-            text=record.text,
-            attachments=_ack_state_record_attachments(record),
-            disposition=record.disposition,
-            age_epoch=_ack_state_record_age_epoch(record),
-        )
+        _ack_state_record_inbox_item(record, state_path=state_path)
         for record in ack_state_records(repo_root)
         if disposition is None or record.disposition == disposition
     ]
     return items[: max(0, limit)]
+
+
+def _ack_state_record_inbox_item(record: Any, *, state_path: Path) -> InboxItem:
+    return InboxItem(
+        source_path=state_path,
+        archive_path=state_path,
+        name=record.inbox_name,
+        text=record.text,
+        attachments=_ack_state_record_attachments(record),
+        disposition=record.disposition,
+        age_epoch=_ack_state_record_age_epoch(record),
+    )
 
 
 def collect_deadlettered_inbox_items(
