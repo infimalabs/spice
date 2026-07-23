@@ -317,11 +317,20 @@ class ServeTeamStore(
         connection.execute(
             f"DELETE FROM teams WHERE team_id IN ({placeholders})", team_ids
         )
+        # A pruned team is already closed -- absent from the open-team snapshot
+        # every client renders -- so its garbage collection changes no lane's
+        # displayed content. This prune runs inside team_snapshot(), which backs
+        # every teams.refresh poll: waking here would let a plain read bump the
+        # shared task event file and re-push every visible lane's full payload
+        # (transcript re-read + history) on unrelated GC. Record the revision
+        # bump without waking; clients reconcile the (identical open) topology on
+        # their next natural poll.
         self._record_event(
             connection,
             "pruneZeroActivityTeams",
             PRUNE_EVENT_TEAM_ID,
             {"teams": list(team_ids), "count": len(team_ids)},
+            wake=False,
         )
         return team_ids
 
