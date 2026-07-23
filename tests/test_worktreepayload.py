@@ -398,8 +398,9 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
     payload = inventory.work_trees_payload(_MultiInventoryState(targets))
 
     # Two targets, two lanes -- but the review-pressure export pair runs exactly
-    # once each across the whole build (claimed-task resolution issues its own
-    # per-lane +ACTIVE exports, which this pins away from).
+    # once each across the whole build. Claimed-task resolution shares its own
+    # single +ACTIVE export (pinned by the sibling test), interleaved here, so
+    # .count() pins each review filter rather than asserting the whole call list.
     assert export_calls.count(["status:completed"]) == 1
     assert export_calls.count(["(", "status:pending", "or", "status:waiting", ")"]) == 1
     pressures = [tree["laneInfo"]["reviewPressure"] for tree in payload["workTrees"]]
@@ -409,6 +410,90 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
     assert pressures[1]["count"] == 1
     assert pressures[0]["items"][0]["reviewedTask"] == "review-a"
     assert pressures[1]["items"][0]["reviewedTask"] == "review-b"
+
+
+def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkeypatch):
+    # Claimed-task resolution filters a GLOBAL +ACTIVE taskwarrior export by
+    # claim_by per actor. The filter carries no per-target argument, so its
+    # result is identical for every bound lane. The inventory build loads one
+    # shared snapshot and threads it through every lane, so the build spawns the
+    # +ACTIVE export exactly once regardless of bound-lane count while each lane
+    # still resolves only its own actor's claim.
+    targets = [
+        _Target(id="wt-a", repo_root=tmp_path / "a"),
+        _Target(id="wt-b", repo_root=tmp_path / "b"),
+    ]
+    threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
+
+    def running_status(repo_root: Path) -> _Status:
+        return _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=threads[repo_root],
+        )
+
+    # render_handle returns the row uuid when `incepted` is absent, so each
+    # lane's claimedTask is a predictable per-actor value. claim_by holds the
+    # canonicalised actor (agent-a -> agenta).
+    active = [
+        {
+            "uuid": "claim-a",
+            "claim_by": "agenta",
+            "claim_at": "2026-06-10T00:00:00Z",
+            "phase": "todo",
+            "description": "task a",
+        },
+        {
+            "uuid": "claim-b",
+            "claim_by": "agentb",
+            "claim_at": "2026-06-11T00:00:00Z",
+            "phase": "review",
+            "description": "task b",
+        },
+    ]
+    export_calls: list[list[str]] = []
+
+    def counting_export(filters: list[str] | None = None, **_kwargs: object):
+        recorded = list(filters or [])
+        export_calls.append(recorded)
+        if recorded == ["+ACTIVE"]:
+            return [dict(row) for row in active]
+        return []
+
+    monkeypatch.setattr(lane.tw, "export", counting_export)
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory,
+        "resolve_thread_id_for_target",
+        lambda _state, target: threads[target.repo_root],
+    )
+    monkeypatch.setattr(inventory, "agent_status", running_status)
+    monkeypatch.setattr(identity, "agent_status", running_status)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(
+        message, "target_activity_items", lambda *_a, **_k: ([], None, None)
+    )
+
+    payload = inventory.work_trees_payload(_MultiInventoryState(targets))
+
+    # Two bound lanes, but one shared +ACTIVE export for the whole build.
+    assert export_calls.count(["+ACTIVE"]) == 1
+    claimed = [tree["statusLine"]["claimedTask"] for tree in payload["workTrees"]]
+    # The shared snapshot is still filtered per lane: each actor resolves only
+    # its own claim.
+    assert claimed[0] == {"handle": "claim-a", "phase": "todo", "title": "task a"}
+    assert claimed[1] == {"handle": "claim-b", "phase": "review", "title": "task b"}
 
 
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
@@ -428,7 +513,9 @@ def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monke
     resolved_task = active_task
     resolver_calls: list[str] = []
 
-    def resolve_claimed_task(candidate: str) -> dict[str, str]:
+    def resolve_claimed_task(
+        candidate: str, *, claims: object | None = None
+    ) -> dict[str, str]:
         resolver_calls.append(candidate)
         return resolved_task
 
