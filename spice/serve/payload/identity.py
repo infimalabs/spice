@@ -181,10 +181,20 @@ def serve_agent_identity_payload(
     binding_error: str = "",
     transcript_owner: str = "",
     store: ServeTeamStore | None = None,
+    desired_config: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Resolve the driver-neutral serve identity for one worktree target."""
+    """Resolve the driver-neutral serve identity for one worktree target.
+
+    ``desired_config`` lets a caller that already resolved this target's
+    ``effective_agent_config`` pass it in so the identity build reuses that one
+    snapshot instead of re-resolving it. Left unset, it resolves normally.
+    """
     status = agent_status(target.repo_root)
-    desired = effective_agent_config(target.repo_root)
+    desired = (
+        desired_config
+        if desired_config is not None
+        else effective_agent_config(target.repo_root)
+    )
     bound_thread = canonical_thread_id(thread_id or getattr(status, "thread_id", ""))
     actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
     actual_launch = _actual_launch_identity(status)
@@ -282,6 +292,7 @@ def target_identity_payload(
     binding_status: str = "",
     binding_error: str = "",
     agent_name: str | None = None,
+    desired_config: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     status = binding_status or ("bound" if thread_id else "unbound")
     payload = {
@@ -291,7 +302,7 @@ def target_identity_payload(
             target.branch or target.name,
             "target branch",
         ),
-        "driver": _driver_identity_payload(target),
+        "driver": _driver_identity_payload(target, desired_config=desired_config),
         "agent": _agent_identity_payload(
             _agent_name_for_target(target) if agent_name is None else agent_name
         ),
@@ -304,8 +315,14 @@ def target_identity_payload(
     return payload
 
 
-def _driver_identity_payload(target: WorktreeTarget) -> dict[str, str]:
-    config = effective_agent_config(target.repo_root)
+def _driver_identity_payload(
+    target: WorktreeTarget, *, desired_config: dict[str, str] | None = None
+) -> dict[str, str]:
+    config = (
+        desired_config
+        if desired_config is not None
+        else effective_agent_config(target.repo_root)
+    )
     return {
         "name": _required_identity_string(
             config.get("driver"),

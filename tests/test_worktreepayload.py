@@ -259,6 +259,72 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     ]
 
 
+class _MultiInventoryState(_State):
+    def __init__(self, targets: list[_Target]) -> None:
+        super().__init__()
+        self._targets = targets
+
+    def worktree_targets(self) -> list[_Target]:
+        return list(self._targets)
+
+    def targets_discovery_errors(self) -> list[str]:
+        return []
+
+
+def test_work_trees_payload_resolves_agent_config_once_per_target(
+    tmp_path, monkeypatch
+):
+    # The identity, driver, and lane-info builders each consume this target's
+    # effective_agent_config and say-voice name. The inventory pass resolves both
+    # once and threads them down, so a payload build resolves each exactly once
+    # per target: two targets produce exactly two config resolutions and two
+    # voice resolutions, in target order.
+    targets = [
+        _Target(id="wt-a", repo_root=tmp_path / "a"),
+        _Target(id="wt-b", repo_root=tmp_path / "b"),
+    ]
+    config_calls: list[Path] = []
+    voice_calls: list[Path] = []
+
+    def counting_config(repo_root: Path) -> dict[str, str]:
+        config_calls.append(repo_root)
+        return {"driver": "codex", "model": "desired-model", "effort": "high"}
+
+    def counting_voice(repo_root: Path) -> str:
+        voice_calls.append(repo_root)
+        return "Ava (Premium)"
+
+    idle = _Status(running=False, started_at="", process_status="idle", thread_id="")
+    monkeypatch.setattr(inventory, "effective_agent_config", counting_config)
+    monkeypatch.setattr(identity, "effective_agent_config", counting_config)
+    monkeypatch.setattr(identity, "configured_say_voice", counting_voice)
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory, "resolve_thread_id_for_target", lambda _state, _target: ""
+    )
+    monkeypatch.setattr(inventory, "agent_status", lambda _repo: idle)
+    monkeypatch.setattr(identity, "agent_status", lambda _repo: idle)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(
+        message, "target_activity_items", lambda *_a, **_k: ([], None, None)
+    )
+
+    payload = inventory.work_trees_payload(_MultiInventoryState(targets))
+
+    assert len(payload["workTrees"]) == 2
+    assert config_calls == [targets[0].repo_root, targets[1].repo_root]
+    assert voice_calls == [targets[0].repo_root, targets[1].repo_root]
+
+
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
     thread_id = "019f6eddab8c7ab2870af6b81dfc5b7f"
     target = _Target(id="wt", repo_root=tmp_path)
