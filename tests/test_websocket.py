@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from email.message import Message
 from http import HTTPStatus
 from types import SimpleNamespace
@@ -32,6 +33,17 @@ class _FakeHandler:
 
     def end_headers(self) -> None:
         pass
+
+
+def test_text_frame_reports_the_compact_json_payload_byte_length():
+    connection = WebSocketConnection(_FakeHandler({}))
+    payload = {"type": "example", "message": "jalapeño 🌶️"}
+    text = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+    encoded = connection.encode_text_frame(payload)
+
+    assert encoded.payload_bytes == len(text)
+    assert encoded.frame == b"\x81" + bytes((len(text),)) + text
 
 
 def test_foreign_origin_upgrade_is_refused():
