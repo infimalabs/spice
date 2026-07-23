@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import sqlite3
 import subprocess
 
 from spice.config import edit, layers, values
-from spice.agent import watchdog
+from spice.agent import maximmetrics, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
 from spice.agent.maximcli import render_maxim_report, run_maxim_report_cli
@@ -16,9 +17,11 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_JUDGED_CONFIRMED,
     MAXIM_EVENT_JUDGED_REJECTED,
     MAXIM_EVENT_PUBLISHED,
+    MAXIM_METRICS_TABLE_SQL,
     MaximMetricCounts,
     MaximMetricEventWrite,
     MaximRecurrenceCounts,
+    latest_fire_bag_name,
     maxim_metric_counts,
     maxim_metric_records,
     maxim_metrics_database_path,
@@ -28,6 +31,7 @@ from spice.agent.maximmetrics import (
 )
 from spice.agent.maxims import MaximVerdict
 from spice.cli.parser import build_parser
+from spice.sqliteconnection import sqlite_connection
 
 
 def _init_repo(path):
@@ -574,3 +578,213 @@ def test_watchdog_records_gate_suppressed_metrics(tmp_path, monkeypatch):
         gate_suppressed_count=1,
         published_count=1,
     )
+
+
+def test_latest_fire_bag_name_returns_most_recent_fire_from_seeded_store(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="polling", driver_name="codex"
+            ),
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="fallbacks", driver_name="claude"
+            ),
+        ],
+        now=100.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="stalls", driver_name="codex"
+            )
+        ],
+        now=150.0,
+    )
+    # A newer non-fire event must not win: only fires are considered.
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_PUBLISHED,
+                bag_name="polling",
+                driver_name="codex",
+                reminder_key="1k9h3MxX",
+                reminder_body="[MAXIM] Use a watcher.",
+            )
+        ],
+        now=200.0,
+    )
+
+    assert latest_fire_bag_name(repo) == "stalls"
+
+
+def test_latest_fire_bag_name_breaks_ties_by_insert_order(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="earlier", driver_name="codex"
+            ),
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="later", driver_name="codex"
+            ),
+        ],
+        now=100.0,
+    )
+
+    # Same occurred_at; the row inserted later (higher id) is the most recent,
+    # matching the reversed (occurred_at ASC, id ASC) scan this replaces.
+    assert latest_fire_bag_name(repo) == "later"
+
+
+def test_latest_fire_bag_name_is_empty_without_fires(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+
+    # No store file yet.
+    assert latest_fire_bag_name(repo) == ""
+
+    # A store with only non-fire events still yields no fire bag.
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_PUBLISHED,
+                bag_name="polling",
+                driver_name="codex",
+                reminder_key="1k9h3MxX",
+                reminder_body="[MAXIM] Use a watcher.",
+            )
+        ],
+        now=100.0,
+    )
+
+    assert latest_fire_bag_name(repo) == ""
+
+
+def test_maxim_store_opens_write_and_read_connections_in_wal(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="polling", driver_name="codex"
+            )
+        ],
+        now=100.0,
+    )
+    path = maxim_metrics_database_path(repo)
+
+    with sqlite_connection(path) as connection:
+        mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert mode.lower() == "wal"
+    # The read path returns the persisted fire while operating over the WAL store.
+    assert latest_fire_bag_name(repo) == "polling"
+
+
+def test_maxim_schema_initializes_once_per_path_across_repeated_writes(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    real_ensure_schema = maximmetrics._ensure_schema
+    ddl_runs: list[int] = []
+
+    def counting_ensure_schema(connection):
+        ddl_runs.append(1)
+        return real_ensure_schema(connection)
+
+    monkeypatch.setattr(maximmetrics, "_ensure_schema", counting_ensure_schema)
+
+    for index in range(3):
+        record_maxim_metric_events(
+            repo,
+            [
+                MaximMetricEventWrite(
+                    MAXIM_EVENT_FIRE, bag_name=f"bag{index}", driver_name="codex"
+                )
+            ],
+            now=100.0 + index,
+        )
+
+    # The DDL sweep runs once for the path, not on every write.
+    assert len(ddl_runs) == 1
+
+
+def _maxim_write_outcome_with_reader_open(db_path, *, do_write):
+    """Hold a reader's read transaction open, attempt a write, report outcome.
+
+    In the default rollback journal the reader's SHARED lock and the writer's
+    commit-time promotion to EXCLUSIVE are mutually exclusive on a BUSY that
+    `busy_timeout` cannot retry away, so the write raises "database is locked".
+    In WAL the reader's snapshot and the single writer coexist and the write
+    commits.
+    """
+    reader = sqlite3.connect(db_path)
+    reader.isolation_level = None
+    try:
+        reader.execute("PRAGMA busy_timeout = 200")
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM maxim_metric_events").fetchall()
+        try:
+            do_write()
+            return "committed"
+        except sqlite3.OperationalError as exc:
+            return f"locked:{exc}"
+    finally:
+        reader.rollback()
+        reader.close()
+
+
+def test_wal_maxim_write_commits_while_a_reader_is_open_unlike_rollback(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+
+    # Pre-fix shape: rollback journal with the schema DDL re-run on every write.
+    rollback_db = maxim_metrics_database_path(repo).parent / "rollback.sqlite3"
+    rollback_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(rollback_db, wal=False) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+
+    def rollback_write():
+        with sqlite_connection(
+            rollback_db, busy_timeout_ms=200, wal=False
+        ) as connection:
+            connection.execute(MAXIM_METRICS_TABLE_SQL)
+            connection.execute(
+                "INSERT INTO maxim_metric_events "
+                "(occurred_at, event_type, bag_name, driver_name) VALUES (?, ?, ?, ?)",
+                (1.0, MAXIM_EVENT_FIRE, "rollback", "codex"),
+            )
+
+    rollback_outcome = _maxim_write_outcome_with_reader_open(
+        rollback_db, do_write=rollback_write
+    )
+
+    # Fixed shape: WAL store initialized once, exercised through the real API.
+    record_maxim_metric_events(
+        repo,
+        [MaximMetricEventWrite(MAXIM_EVENT_FIRE, bag_name="warm", driver_name="codex")],
+        now=100.0,
+    )
+    wal_db = maxim_metrics_database_path(repo)
+
+    def wal_write():
+        record_maxim_metric_events(
+            repo,
+            [
+                MaximMetricEventWrite(
+                    MAXIM_EVENT_FIRE, bag_name="live", driver_name="codex"
+                )
+            ],
+            now=101.0,
+        )
+
+    wal_outcome = _maxim_write_outcome_with_reader_open(wal_db, do_write=wal_write)
+
+    assert wal_outcome == "committed"
+    assert rollback_outcome.startswith("locked")
+    # The WAL write committed while the reader was open and is the newest fire.
+    assert latest_fire_bag_name(repo) == "live"

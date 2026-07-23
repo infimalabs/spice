@@ -6,6 +6,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Iterable
 
 from spice.errors import SpiceError
@@ -54,6 +55,25 @@ MAXIM_METRICS_RECURRENCE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS maxim_metric_events_recurrence_idx
   ON maxim_metric_events(trigger_family, driver_name, occurred_at);
 """
+# Supports the bounded per-command working-state read: the leading event_type
+# equality plus the ordered (occurred_at, id) tail lets the most-recent fire
+# lookup seek the fire partition and take one row instead of scanning the table.
+MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS maxim_metric_events_fire_recency_idx
+  ON maxim_metric_events(event_type, occurred_at, id);
+"""
+
+# Schema is initialized once per database path per process. The full DDL sweep
+# (CREATE TABLE + CREATE INDEX x3) previously ran on every connection -- reads
+# included -- taking a write lock each time. Under the concurrent lanes that
+# append maxim events forever, that serialized every access on the un-retryable
+# RESERVED->EXCLUSIVE promotion the default rollback journal refuses to wait
+# out, so a per-command working-state read could raise "database is locked".
+# Initializing once and opening WAL (mirroring ServeTeamStore and the ack-state
+# store) lets a reader observe committed rows while the single writer holds the
+# write lock.
+_SCHEMA_INIT_LOCK = Lock()
+_INITIALIZED_PATHS: set[Path] = set()
 
 
 @dataclass(frozen=True)
@@ -133,9 +153,13 @@ def record_maxim_metric_events(
     if not rows:
         return []
     path = maxim_metrics_database_path(repo_root)
+    _ensure_schema_once(path)
     ids: list[int] = []
-    with sqlite_connection(path, ensure_parent=True) as connection:
-        _ensure_schema(connection)
+    with sqlite_connection(
+        path,
+        busy_timeout_ms=MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS,
+        wal=True,
+    ) as connection:
         for row in rows:
             cursor = connection.execute(
                 """
@@ -153,12 +177,37 @@ def record_maxim_metric_events(
     return ids
 
 
+def latest_fire_bag_name(repo_root: str | Path) -> str:
+    """Return the most-recent fire event's bag name, or '' when none exists.
+
+    The per-command working-state line reads this on every command. A single
+    LIMIT 1 query over the fire-recency index returns at most one row -- it never
+    materializes the full event table -- and opens WAL so it observes committed
+    rows without contending on a concurrent writer's lock. The (occurred_at DESC,
+    id DESC) order reproduces the reversed full-table scan it replaces exactly.
+    """
+    path = maxim_metrics_database_path(repo_root)
+    if not path.is_file():
+        return ""
+    with sqlite_connection(path, wal=True) as connection:
+        row = connection.execute(
+            """
+            SELECT bag_name
+            FROM maxim_metric_events
+            WHERE event_type = ?
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT 1
+            """,
+            (MAXIM_EVENT_FIRE,),
+        ).fetchone()
+    return str(row[0]) if row is not None else ""
+
+
 def maxim_metric_records(repo_root: str | Path) -> list[MaximMetricRecord]:
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite_connection(path) as connection:
-        _ensure_schema(connection)
+    with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
             """
             SELECT id, occurred_at, event_type, bag_name, driver_name, thread_id,
@@ -174,8 +223,7 @@ def maxim_metric_counts(repo_root: str | Path) -> list[MaximMetricCounts]:
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite_connection(path) as connection:
-        _ensure_schema(connection)
+    with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
             """
             SELECT
@@ -221,8 +269,7 @@ def maxim_recurrence_inputs(repo_root: str | Path) -> list[MaximRecurrenceInput]
     path = maxim_metrics_database_path(repo_root)
     if not path.is_file():
         return []
-    with sqlite_connection(path) as connection:
-        _ensure_schema(connection)
+    with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
             """
             SELECT bag_name, driver_name, thread_id, trigger_family, event_type,
@@ -282,11 +329,34 @@ def maxim_recurrence_counts(
     ]
 
 
+def _ensure_schema_once(path: Path) -> None:
+    """Create the schema at most once per database path per process.
+
+    Guarded by a lock and a per-path record so the DDL never re-runs on the hot
+    read or write path, and the initializing connection opens WAL so the journal
+    mode persists for every later reader and writer. Mirrors ServeTeamStore and
+    the ack-state store.
+    """
+    if path in _INITIALIZED_PATHS:
+        return
+    with _SCHEMA_INIT_LOCK:
+        if path in _INITIALIZED_PATHS:
+            return
+        with sqlite_connection(
+            path,
+            busy_timeout_ms=MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS,
+            wal=True,
+            ensure_parent=True,
+        ) as connection:
+            _ensure_schema(connection)
+        _INITIALIZED_PATHS.add(path)
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(f"PRAGMA busy_timeout = {MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS}")
     connection.execute(MAXIM_METRICS_TABLE_SQL)
     connection.execute(MAXIM_METRICS_EVENT_INDEX_SQL)
     connection.execute(MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+    connection.execute(MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
 
 
 def _event_row(
