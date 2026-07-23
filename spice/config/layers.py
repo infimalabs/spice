@@ -59,10 +59,24 @@ class LayeredConfig:
         return self.sources.get(parts)
 
 
+_ConfigSource = tuple[str, Path, bool]
+_ConfigRevision = tuple[int, int, int, int, int, int] | None
+# Cached values are immutable. Concurrent cold reads may redundantly build the
+# same revision, but either complete value is safe to publish and config reads
+# never acquire a process-wide mutex.
+_CONFIG_CACHE: dict[
+    tuple[Path, ...], tuple[tuple[_ConfigRevision, ...], LayeredConfig]
+] = {}
+
+
 def load_config(repo_root: Path) -> LayeredConfig:
-    """Load the four Spice TOML layers in increasing precedence order."""
-    packaged = load_packaged_config()
-    specifications = (
+    """Load four immutable TOML layers, reusing them while sources are unchanged."""
+    specifications: tuple[_ConfigSource, ...] = (
+        (
+            SYSTEM_SOURCE,
+            paths.runtime_spice_source() / "spice.toml",
+            False,
+        ),
         (PYPROJECT_SOURCE, repo_root / "pyproject.toml", True),
         (REPOSITORY_SOURCE, repo_root / "spice.toml", False),
         (
@@ -71,10 +85,46 @@ def load_config(repo_root: Path) -> LayeredConfig:
             False,
         ),
     )
-    parsed: list[dict[str, Any]] = [dict(packaged.values)]
-    layers: list[ConfigLayer] = [packaged]
+    revisions = tuple(
+        _config_revision(name, path) for name, path, _pyproject in specifications
+    )
+    cache_key = tuple(path for _name, path, _pyproject in specifications)
+    cached = _CONFIG_CACHE.get(cache_key)
+    if cached is not None and cached[0] == revisions:
+        return cached[1]
+    loaded = _load_config_sources(specifications)
+    _CONFIG_CACHE[cache_key] = (revisions, loaded)
+    return loaded
+
+
+def _config_revision(source_name: str, path: Path) -> _ConfigRevision:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise SpiceError(
+            f"cannot read configuration source={source_name} path={path}: {exc}"
+        ) from exc
+    return (
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_mode,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+
+
+def _load_config_sources(
+    specifications: tuple[_ConfigSource, ...],
+) -> LayeredConfig:
+    parsed: list[dict[str, Any]] = []
+    layers: list[ConfigLayer] = []
     for name, path, pyproject in specifications:
         values, present = _read_toml(path, name)
+        if name == SYSTEM_SOURCE and not present:
+            raise SpiceError(f"packaged configuration is missing: {path}")
         if pyproject:
             values = _pyproject_spice_table(values)
         parsed.append(values)

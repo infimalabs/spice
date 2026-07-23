@@ -125,6 +125,42 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
     assert isinstance(loaded.effective["agent"], MappingProxyType)
 
 
+def test_unchanged_layers_parse_once_and_reload_after_source_revision(
+    tmp_path, monkeypatch
+):
+    packaged = tmp_path / "runtime"
+    packaged.mkdir()
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: packaged)
+    system_path = packaged / "spice.toml"
+    project_path = tmp_path / "pyproject.toml"
+    _write(system_path, '[agent]\nmodel = "system"\n')
+    _write(project_path, '[tool.spice.agent]\nmodel = "first"\n')
+    parsed: list[Path] = []
+    read_toml = layers._read_toml
+
+    def track_parse(path, source_name):
+        parsed.append(path)
+        return read_toml(path, source_name)
+
+    monkeypatch.setattr(layers, "_read_toml", track_parse)
+    repeats = 40
+
+    models = [
+        layers.load_config(tmp_path).effective["agent"]["model"] for _ in range(repeats)
+    ]
+    _write(project_path, '[tool.spice.agent]\nmodel = "second"\n')
+    models.append(layers.load_config(tmp_path).effective["agent"]["model"])
+    source_paths = [
+        system_path,
+        project_path,
+        tmp_path / "spice.toml",
+        tmp_path / ".spice" / "config" / "spice.toml",
+    ]
+
+    assert models == ["first"] * repeats + ["second"]
+    assert parsed == source_paths + source_paths
+
+
 def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
     tmp_path, monkeypatch
 ):
