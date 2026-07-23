@@ -968,6 +968,48 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert stems["waiting"]["deferredTaskCount"] == 1
 
 
+def test_task_filter_inventory_resolves_config_once_independent_of_row_count(
+    monkeypatch,
+):
+    rows: list[dict[str, object]] = []
+    resolver_calls = 0
+    real_resolver = lane.task_config._tasks_config_table
+
+    def counted_resolver(*args, **kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return real_resolver(*args, **kwargs)
+
+    monkeypatch.setattr(lane.task_config, "_tasks_config_table", counted_resolver)
+    monkeypatch.setattr(tw, "export", lambda _args: list(rows))
+
+    for row_count in (1, 64):
+        rows[:] = [
+            {"uuid": f"ready-{index}", "project": "serve.latency"}
+            for index in range(row_count)
+        ]
+        # An invalid project remains ignored without triggering another config
+        # resolution or disturbing valid inventory counts.
+        rows.append({"uuid": f"malformed-{row_count}", "project": ".bad-stem"})
+        calls_before = resolver_calls
+
+        inventory = task_filter_inventory()
+
+        assert resolver_calls == calls_before + 1
+        assert inventory["openTaskCount"] == row_count
+        assert inventory["filters"] == [
+            {
+                "name": "serve.latency",
+                "primaryStem": "serve",
+                "openTaskCount": row_count,
+                "readyTaskCount": row_count,
+                "inFlightTaskCount": 0,
+                "blockedTaskCount": 0,
+                "deferredTaskCount": 0,
+            }
+        ]
+
+
 def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
