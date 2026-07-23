@@ -602,6 +602,79 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     assert records[KEY_A].ack_text == header
 
 
+def test_ack_state_store_opens_in_wal_so_readers_never_block_the_writer(tmp_path):
+    """The shared ACK-state store persists WAL mode after a write.
+
+    WAL is load-bearing for reader/writer isolation: ack_state_records and the
+    inbox surfaces read this store from every worktree while the supervisor is
+    writing it. Reverting wal=True drops the file back to the rollback journal
+    and journal_mode reports "delete", so this assertion fails.
+    """
+    _init_repo(tmp_path)
+    record_acked_inbox_items(
+        tmp_path,
+        [AckStateWrite(key=KEY_A, inbox_name=f"{KEY_A}.txt", text="wal mode")],
+    )
+
+    with sqlite_connection(ack_state_database_path(tmp_path)) as connection:
+        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert journal_mode == "wal"
+
+
+def test_ack_write_completes_while_a_reader_holds_the_store(tmp_path):
+    """A concurrent reader never blocks the ACK writer under WAL.
+
+    In the default rollback journal a writer's commit needs an EXCLUSIVE lock
+    that any open reader's SHARED lock blocks -- the live "database is locked"
+    that dropped steering acks while eight peers read and wrote the shared store
+    at once. WAL lets the writer commit into the log without excluding readers,
+    so record_acked_inbox_items finishes even while a reader holds an open
+    transaction. Reverting wal=True makes the writer block on that reader for the
+    full busy_timeout, so it never finishes inside the window below and the wait
+    returns False.
+    """
+    _init_repo(tmp_path)
+    record_acked_inbox_items(
+        tmp_path,
+        [AckStateWrite(key=KEY_A, inbox_name=f"{KEY_A}.txt", text="seed schema")],
+    )
+    reader = sqlite3.connect(ack_state_database_path(tmp_path))
+    reader.execute("BEGIN")
+    reader.execute("SELECT key FROM acked_inbox_items").fetchall()
+    finished = Event()
+    outcomes: list[object] = []
+
+    def write_under_reader() -> None:
+        try:
+            outcomes.append(
+                record_acked_inbox_items(
+                    tmp_path,
+                    [
+                        AckStateWrite(
+                            key=KEY_B, inbox_name=f"{KEY_B}.txt", text="under reader"
+                        )
+                    ],
+                )
+            )
+        except sqlite3.OperationalError as error:
+            outcomes.append(error)
+        finally:
+            finished.set()
+
+    worker = Thread(target=write_under_reader)
+    worker.start()
+    try:
+        wrote_under_reader = finished.wait(timeout=2.0)
+    finally:
+        reader.commit()
+        reader.close()
+        worker.join()
+
+    assert wrote_under_reader is True
+    assert outcomes == [[KEY_B]]
+
+
 def test_summarize_ack_archival_retires_lineage_record_by_exact_key(
     tmp_path,
     monkeypatch,
