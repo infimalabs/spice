@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 
+from spice import paths
 from spice.agent.driver import DRIVER
+from spice.config import layers
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -680,6 +683,59 @@ def test_status_resolves_one_route_scope_for_every_scoped_category(monkeypatch):
         "waiting 1",
         "stale 0",
         "oops 2",
+    ]
+
+
+def test_many_row_status_keeps_repo_and_config_resolution_constant(
+    tmp_path, monkeypatch
+):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    monkeypatch.chdir(tmp_path)
+    actor = "actor-many-rows"
+    route = {"lifetime": "Drain", "filter": [], "manual": []}
+    waiting_rows = [{"project": ".oops", "status": "waiting"} for _ in range(128)]
+    git_probes: list[list[str]] = []
+    parsed: list[tuple[str, object]] = []
+    run_git_command = paths.run_git_command
+    read_toml = layers._read_toml
+
+    def track_git(command, **kwargs):
+        git_probes.append(list(command))
+        return run_git_command(command, **kwargs)
+
+    def track_parse(path, source_name):
+        parsed.append((source_name, path))
+        return read_toml(path, source_name)
+
+    def scoped_rows(filters, _scope):
+        if filters == ["status:waiting", "-ACTIVE"]:
+            return waiting_rows
+        return []
+
+    monkeypatch.setattr(paths, "run_git_command", track_git)
+    monkeypatch.setattr(layers, "_read_toml", track_parse)
+    monkeypatch.setattr(render.tw, "current_actor", lambda: actor)
+    monkeypatch.setattr(render.tw, "now_iso", lambda: "2026-07-23T00:00:00Z")
+    monkeypatch.setattr(render.lanes, "team_route_for_actor", lambda _actor: route)
+    monkeypatch.setattr(
+        render.alloc, "visible_active_rows", lambda _actor, *, scope: []
+    )
+    monkeypatch.setattr(render.alloc, "visible_ready_rows", lambda _actor, *, scope: [])
+    monkeypatch.setattr(render.alloc, "visible_rows_in_scope", scoped_rows)
+    monkeypatch.setattr(render.alloc, "oops_rows", lambda: [])
+    monkeypatch.setattr(
+        render, "public_task_project_depth_label", lambda: "public depth"
+    )
+
+    status = render.render_status()
+
+    assert "waiting 0" in status.splitlines()
+    assert len(git_probes) == 1
+    assert [source for source, _path in parsed] == [
+        layers.SYSTEM_SOURCE,
+        layers.PYPROJECT_SOURCE,
+        layers.REPOSITORY_SOURCE,
+        layers.WORKTREE_SOURCE,
     ]
 
 

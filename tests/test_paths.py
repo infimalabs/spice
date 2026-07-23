@@ -285,6 +285,53 @@ def test_repo_root_from_cwd_separates_a_launch_failure_from_an_absent_worktree(
     assert "No such file or directory" in message
 
 
+def test_repo_root_from_cwd_reuses_one_successful_probe_per_absolute_cwd(
+    tmp_path, monkeypatch
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    probed: list[Path] = []
+
+    def resolve(command, **_kwargs):
+        lookup = Path(command[2])
+        probed.append(lookup)
+        return subprocess.CompletedProcess(command, 0, stdout=f"{lookup}\n", stderr="")
+
+    monkeypatch.setattr(paths, "run_git_command", resolve)
+    repeats = 40
+
+    resolved = [
+        *(paths.repo_root_from_cwd(first) for _ in range(repeats)),
+        *(paths.repo_root_from_cwd(second) for _ in range(repeats)),
+    ]
+
+    assert resolved == [first] * repeats + [second] * repeats
+    assert probed == [first, second]
+
+
+def test_repo_root_from_cwd_discovers_git_init_after_an_absent_probe(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    probed: list[list[str]] = []
+    run_git_command = paths.run_git_command
+
+    def track_probe(command, **kwargs):
+        probed.append(list(command))
+        return run_git_command(command, **kwargs)
+
+    monkeypatch.setattr(paths, "run_git_command", track_probe)
+    paths.repo_root_from_cwd()
+    subprocess.run(["git", "init", "-q"], check=True)
+
+    resolved = [paths.repo_root_from_cwd(), paths.repo_root_from_cwd()]
+
+    assert resolved == [tmp_path, tmp_path]
+    assert len(probed) == 2
+
+
 def test_repo_root_from_cwd_names_a_failed_git_run(tmp_path, monkeypatch):
     _report_failed_git(monkeypatch)
 
