@@ -56,6 +56,7 @@ def test_team_event_wakes_task_event_file_after_commit(tmp_path):
     try:
         event_path = task_config.ensure_task_event_file()
         before = event_path.read_text(encoding="utf-8")
+        before_task_revision = task_config.task_event_revision()
         store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
         with store.connect() as connection:
@@ -67,6 +68,7 @@ def test_team_event_wakes_task_event_file_after_commit(tmp_path):
         after = event_path.read_text(encoding="utf-8")
         assert after != before
         assert after.endswith(" team\n")
+        assert task_config.task_event_revision() == before_task_revision
     finally:
         task_config.set_backend(None)
 

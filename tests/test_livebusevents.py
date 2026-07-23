@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,7 +18,14 @@ from spice.agent import lifecycle
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
 from spice.mail.replies import append_reply_record, reply_log_path
-from spice.serve import agentapi, app, livebus, livebuswatch, messages as message_reader
+from spice.serve import (
+    agentapi,
+    app,
+    httpapi,
+    livebus,
+    livebuswatch,
+    messages as message_reader,
+)
 from spice.serve.app import ServeState
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.payload import identity, lane, message
@@ -31,6 +38,7 @@ from tests.test_livebus import (
     THREAD_ID,
     _callbacks,
     _Connection,
+    _multi_lane_callbacks,
     _subscribe_lane,
     _Target,
     _transcript_resolution,
@@ -102,6 +110,143 @@ def test_lane_signature_changes_when_agent_state_file_changes(tmp_path):
     after = app.lane_signature_for_target(state, target, THREAD_ID, None)
 
     assert before != after
+
+
+def _team_move_lane_fixture(tmp_path: Path, lane_count: int):
+    targets: list[_Target] = []
+    transcripts: dict[str, Path] = {}
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    for index in range(lane_count):
+        target_id = f"lane-{index:02d}"
+        repo = tmp_path / f"repo-{target_id}"
+        repo.mkdir()
+        transcript = tmp_path / f"{target_id}.jsonl"
+        transcript.write_text("", encoding="utf-8")
+        targets.append(_Target(id=target_id, repo_root=repo))
+        transcripts[f"thread-{target_id}"] = transcript
+        store.create_team(
+            team_id=f"team-{index:02d}",
+            members=[f"target:{target_id}"],
+        )
+    destination = store.create_team(team_id="team-moved", members=[])
+    return targets, transcripts, store, destination
+
+
+def _two_round_lane_event_waiter(
+    event_path: Path,
+    lane_count: int,
+    changes: tuple[Event, Event],
+    completions: tuple[Event, Event],
+):
+    visits: dict[Path, int] = {}
+    completed: tuple[set[Path], set[Path]] = (set(), set())
+    visit_lock = Lock()
+
+    def wait(paths: tuple[Path, ...], stop, watch=None, *, activated=None) -> bool:
+        del watch
+        if activated is not None:
+            activated.set()
+        lane_path = next(path for path in paths if path != event_path)
+        with visit_lock:
+            visit = visits.get(lane_path, 0) + 1
+            visits[lane_path] = visit
+            completed_round = visit - 2
+            if completed_round in (0, 1):
+                completed[completed_round].add(lane_path)
+                if len(completed[completed_round]) == lane_count:
+                    completions[completed_round].set()
+        if visit in (1, 2):
+            return changes[visit - 1].wait(timeout=2.0) and not stop.is_set()
+        stop.wait()
+        return False
+
+    return wait
+
+
+def _watch_targets(connection: _Connection) -> list[str]:
+    with connection.lock:
+        return [
+            frame["targetId"]
+            for frame in connection.sent
+            if frame.get("source") == "watch"
+        ]
+
+
+def test_team_wake_pushes_only_changed_lane_then_task_wake_pushes_every_lane(
+    tmp_path, monkeypatch
+):
+    lane_count = 12
+    targets, transcripts, store, destination = _team_move_lane_fixture(
+        tmp_path, lane_count
+    )
+    moved_target_id = "lane-07"
+    event_path = task_config.ensure_task_event_file()
+    monkeypatch.setattr(httpapi, "_inbox_signature", lambda _repo_root: ())
+    monkeypatch.setattr(
+        httpapi,
+        "_reply_log_signature",
+        lambda _repo_root, _thread_id: ("", 0, 0),
+    )
+    monkeypatch.setattr(httpapi, "_agent_state_signature_path", lambda _repo_root: None)
+    team_change, task_change = Event(), Event()
+    team_round_complete, task_round_complete = Event(), Event()
+    event_round_wait = _two_round_lane_event_waiter(
+        event_path,
+        lane_count,
+        (team_change, task_change),
+        (team_round_complete, task_round_complete),
+    )
+    callbacks = _multi_lane_callbacks(targets, transcripts)
+    callbacks = replace(
+        callbacks,
+        thread_id=lambda _target: None,
+        lane_watch_paths=lambda target, _thread_id, _transcript: (
+            event_path,
+            target.repo_root,
+        ),
+        lane_signature=lambda target, thread_id, transcript: (
+            app.lane_signature_for_target(
+                SimpleNamespace(team_store=store),
+                target,
+                thread_id,
+                transcript,
+            )
+        ),
+    )
+    monkeypatch.setattr(livebus, "wait_for_change", event_round_wait)
+    connection = _Connection()
+    session = LiveBusSession(connection, callbacks)
+
+    try:
+        session._handle_lanes_subscribe(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "all-lanes",
+                "entries": [
+                    {"targetId": target.id, "query": {"limit": 5}} for target in targets
+                ],
+            }
+        )
+        _wait_for_reply(connection, request_id="all-lanes")
+
+        store.assign_agent(destination.team_id, f"target:{moved_target_id}")
+        team_change.set()
+        assert team_round_complete.wait(timeout=2.0)
+        team_watch_targets = _watch_targets(connection)
+        assert team_watch_targets == [moved_target_id]
+
+        task_config.mark_task_backend_changed("task")
+        task_change.set()
+        assert task_round_complete.wait(timeout=2.0)
+        all_watch_targets = _watch_targets(connection)
+        task_watch_targets = all_watch_targets[len(team_watch_targets) :]
+        assert sorted(task_watch_targets) == sorted(target.id for target in targets)
+    finally:
+        team_change.set()
+        task_change.set()
+        session._teardown()
+        task_config.set_backend(None)
 
 
 def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch):

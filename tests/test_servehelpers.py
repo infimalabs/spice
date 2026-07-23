@@ -122,7 +122,7 @@ def test_task_filter_inventory_carries_task_event_revision(tmp_path, monkeypatch
     event_path.write_text("123456789 unit\n", encoding="utf-8")
     calls: list[str] = []
 
-    def ensure_event_file() -> Path:
+    def ensure_event_file(_root=None) -> Path:
         calls.append("revision")
         return event_path
 
