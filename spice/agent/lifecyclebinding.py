@@ -21,9 +21,11 @@ from spice.agent.identity import (
     canonical_thread_id,
 )
 from spice.agent.paths import (
+    AgentWorktreeStatePaths,
     agent_state_dir,
     agent_thread_state_dir,
     agent_worktree_state_dir,
+    resolve_agent_worktree_state_paths,
     write_agent_thread_pointer,
 )
 from spice.agent.shadow import shadow_environment
@@ -106,9 +108,15 @@ class AgentOutputObservation:
     age_seconds: int | None
 
 
-def agent_status(repo_root: Path) -> AgentStatus:
+def agent_status(
+    repo_root: Path,
+    *,
+    state_paths: AgentWorktreeStatePaths | None = None,
+) -> AgentStatus:
     resolved_root = repo_root.resolve()
-    state = read_agent_state(resolved_root)
+    resolved_paths = state_paths or resolve_agent_worktree_state_paths(resolved_root)
+    state_path = agent_state_path(resolved_root, state_paths=resolved_paths)
+    state = _read_agent_state_path(state_path)
     agent_state = state if agent_state_is_authoritative(state) else {}
     pid = state_int(agent_state.get("pid"))
     pgid = state_int(agent_state.get("process_group_id")) or pid
@@ -120,7 +128,7 @@ def agent_status(repo_root: Path) -> AgentStatus:
     command = state_command_value(agent_state.get("command"))
     return AgentStatus(
         repo_root=resolved_root,
-        state_path=agent_state_path(resolved_root),
+        state_path=state_path,
         process_status=agent_process_status(
             running=running, state=agent_state, thread_id=thread_id
         ),
@@ -363,12 +371,23 @@ def packaged_skill_path() -> Path:
     return Path(__file__).resolve().parent / PACKAGED_SKILL_RESOURCE[1]
 
 
-def agent_state_path(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / AGENT_STATE_FILE
+def agent_state_path(
+    repo_root: Path,
+    *,
+    state_paths: AgentWorktreeStatePaths | None = None,
+) -> Path:
+    return agent_state_dir(repo_root, state_paths=state_paths) / AGENT_STATE_FILE
 
 
-def read_agent_state(repo_root: Path) -> dict[str, Any]:
-    path = agent_state_path(repo_root)
+def read_agent_state(
+    repo_root: Path,
+    *,
+    state_paths: AgentWorktreeStatePaths | None = None,
+) -> dict[str, Any]:
+    return _read_agent_state_path(agent_state_path(repo_root, state_paths=state_paths))
+
+
+def _read_agent_state_path(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -379,14 +398,26 @@ def read_agent_state(repo_root: Path) -> dict[str, Any]:
 
 
 def write_agent_state(repo_root: Path, state: dict[str, Any]) -> None:
+    state_paths = resolve_agent_worktree_state_paths(repo_root)
     thread_id = canonical_thread_id(state.get("thread_id"))
     if thread_id:
-        path = agent_thread_state_dir(repo_root, thread_id) / AGENT_STATE_FILE
+        path = (
+            agent_thread_state_dir(
+                repo_root,
+                thread_id,
+                state_paths=state_paths,
+            )
+            / AGENT_STATE_FILE
+        )
     else:
-        path = agent_state_path(repo_root)
+        path = agent_state_path(repo_root, state_paths=state_paths)
     atomic_write_json(path, state)
     if thread_id:
-        write_agent_thread_pointer(repo_root, thread_id)
+        write_agent_thread_pointer(
+            repo_root,
+            thread_id,
+            state_paths=state_paths,
+        )
 
 
 def agent_state_is_authoritative(state: dict[str, Any]) -> bool:
