@@ -118,7 +118,11 @@ def private_project(actor: str) -> str:
 
 
 def approved_stems() -> tuple[str, ...]:
-    extras = _configured_extra_stems()
+    return _approved_stems(_tasks_config_table())
+
+
+def _approved_stems(table: dict[str, object]) -> tuple[str, ...]:
+    extras = _configured_extra_stems(table)
     merged: list[str] = list(BASE_APPROVED_STEMS)
     for stem in extras:
         if stem not in merged:
@@ -127,13 +131,16 @@ def approved_stems() -> tuple[str, ...]:
 
 
 def assignable_stems() -> tuple[str, ...]:
-    return tuple(stem for stem in approved_stems() if stem not in INTERNAL_STEMS)
+    return _assignable_stems(approved_stems())
 
 
-def _configured_extra_stems() -> tuple[str, ...]:
+def _assignable_stems(stems: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(stem for stem in stems if stem not in INTERNAL_STEMS)
+
+
+def _configured_extra_stems(table: dict[str, object]) -> tuple[str, ...]:
     from spice.config.layers import config_string_list
 
-    table = _tasks_config_table()
     return tuple(
         stem
         for stem in config_string_list(table.get("stems"))
@@ -141,12 +148,13 @@ def _configured_extra_stems() -> tuple[str, ...]:
     )
 
 
-def _configured_hidden_stems() -> tuple[str, ...]:
+def _configured_hidden_stems(
+    table: dict[str, object], approved: tuple[str, ...]
+) -> tuple[str, ...]:
     from spice.config.layers import config_string_list
 
-    table = _tasks_config_table()
     configured: list[str] = []
-    approved = set(approved_stems())
+    approved_set = set(approved)
     for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
@@ -158,7 +166,7 @@ def _configured_hidden_stems() -> tuple[str, ...]:
                 "[tool.spice.tasks].hidden_stems values must match "
                 f"{PROJECT_SEGMENT_RULE_LABEL}; got {stem!r}"
             )
-        if stem in approved:
+        if stem in approved_set:
             raise SpiceError(
                 f"hidden project stem {stem!r} conflicts with an approved public "
                 "project stem"
@@ -169,16 +177,18 @@ def _configured_hidden_stems() -> tuple[str, ...]:
 
 
 def per_stem_flows() -> dict[str, tuple[str, ...]]:
-    return _configured_per_stem_flows()
+    table = _tasks_config_table()
+    return _configured_per_stem_flows(table, _approved_stems(table))
 
 
-def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
+def _configured_per_stem_flows(
+    table: dict[str, object], approved: tuple[str, ...]
+) -> dict[str, tuple[str, ...]]:
     from spice.config.layers import config_string_list
 
-    raw_flows = _tasks_config_table().get("flows")
+    raw_flows = table.get("flows")
     if not isinstance(raw_flows, dict):
         return {}
-    approved = approved_stems()
     approved_set = set(approved)
     flows: dict[str, tuple[str, ...]] = {}
     for raw_stem, raw_flow in raw_flows.items():
@@ -237,22 +247,26 @@ def project_depth_bounds() -> tuple[int, int]:
     root = repo_root_from_cwd()
     try:
         table = _tasks_config_table(root)
-        min_depth = _configured_project_depth(
-            table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
-        )
-        max_depth = _configured_project_depth(
-            table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
-        )
-        if max_depth < min_depth:
-            raise SpiceError(
-                "[tool.spice.tasks].project_max_depth must be greater than or equal "
-                "to project_min_depth"
-            )
-        return min_depth, max_depth
+        return _project_depth_bounds(table)
     except SpiceError as exc:
         if root is None:
             raise
         raise contextualize_config_error(root, exc, "tasks") from exc
+
+
+def _project_depth_bounds(table: dict[str, object]) -> tuple[int, int]:
+    min_depth = _configured_project_depth(
+        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
+    )
+    max_depth = _configured_project_depth(
+        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+    )
+    if max_depth < min_depth:
+        raise SpiceError(
+            "[tool.spice.tasks].project_max_depth must be greater than or equal "
+            "to project_min_depth"
+        )
+    return min_depth, max_depth
 
 
 def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:
@@ -524,8 +538,15 @@ def project_stem(project: str) -> str:
 
 
 def hidden_stems() -> tuple[str, ...]:
+    table = _tasks_config_table()
+    return _hidden_stems(table, _approved_stems(table))
+
+
+def _hidden_stems(
+    table: dict[str, object], approved: tuple[str, ...]
+) -> tuple[str, ...]:
     merged: list[str] = list(BASE_HIDDEN_STEMS)
-    for stem in _configured_hidden_stems():
+    for stem in _configured_hidden_stems(table, approved):
         if stem not in merged:
             merged.append(stem)
     return tuple(merged)
@@ -656,12 +677,29 @@ def is_internal_or_hidden_project(project: str) -> bool:
 
 def task_project_validation_catalog() -> dict[str, object]:
     """Return the lane-filter assignable task project vocabulary for serve."""
-    stems = assignable_stems()
-    flows = per_stem_flows()
-    min_depth, max_depth = project_depth_bounds()
+    from spice.config.layers import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root_from_cwd()
+    try:
+        return _task_project_validation_catalog(_tasks_config_table(root))
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
+
+
+def _task_project_validation_catalog(
+    table: dict[str, object],
+) -> dict[str, object]:
+    approved = _approved_stems(table)
+    stems = _assignable_stems(approved)
+    hidden = _hidden_stems(table, approved)
+    flows = _configured_per_stem_flows(table, approved)
+    min_depth, max_depth = _project_depth_bounds(table)
     return {
         "approvedStems": list(stems),
-        "hiddenStems": list(hidden_stems()),
+        "hiddenStems": list(hidden),
         "approvedPhases": list(APPROVED_PHASES),
         "defaultFlow": list(DEFAULT_FLOW),
         "perStemFlows": {stem: list(flow) for stem, flow in sorted(flows.items())},
