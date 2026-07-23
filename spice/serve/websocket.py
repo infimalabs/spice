@@ -39,6 +39,20 @@ class WebSocketProtocolError(Exception):
     """Raised for unsupported or malformed WebSocket frames."""
 
 
+@dataclass(frozen=True)
+class EncodedTextFrame:
+    """A framed text message paired with its JSON payload's wire byte length.
+
+    ``payload_bytes`` is the UTF-8 length of the compact JSON the frame wraps --
+    the same wire-text measurement send telemetry records -- captured from the
+    single serialization that built the frame. Callers size a frame from this
+    instead of re-encoding its payload just to measure it.
+    """
+
+    frame: bytes
+    payload_bytes: int
+
+
 @dataclass
 class WebSocketConnection:
     handler: Any
@@ -74,16 +88,19 @@ class WebSocketConnection:
                 continue
             raise WebSocketProtocolError(f"unsupported WebSocket opcode {opcode}")
 
-    def encode_text_frame(self, payload: dict[str, Any]) -> bytes:
-        """Serialize a JSON text frame to bytes without touching the socket.
+    def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
+        """Serialize a JSON text frame, returning it with its payload byte length.
 
         Encoding is the expensive part of a large lane push. Callers encode
         outside their send lock so the lock's critical section is only the
         socket write, and a bulk push cannot stall a small ack that is waiting
-        to write on the same connection.
+        to write on the same connection. The payload's wire byte length rides
+        back on the result so telemetry sizes the frame from this one
+        serialization instead of re-encoding the payload to measure it.
         """
         text = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        return self._build_frame(WEBSOCKET_TEXT_OPCODE, text)
+        frame = self._build_frame(WEBSOCKET_TEXT_OPCODE, text)
+        return EncodedTextFrame(frame, len(text))
 
     def send_frame(self, frame: bytes) -> None:
         """Write a pre-encoded frame; the writer lock guards only this write."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -14,6 +15,7 @@ from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore
+from spice.serve.websocket import EncodedTextFrame
 from spice.serve.worktree.target import WorktreeTarget
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -33,10 +35,12 @@ class _Connection:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
 
-    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
         # The session encodes to a frame before taking its send lock; the fake
-        # keeps the payload dict as its "frame" so assertions read it directly.
-        return payload
+        # keeps the payload dict as its "frame" so assertions read it directly,
+        # and reports the real wire-text length so send telemetry stays exact.
+        text_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        return EncodedTextFrame(payload, text_bytes)
 
     def send_frame(self, frame: dict[str, Any]) -> None:
         self.sent.append(frame)

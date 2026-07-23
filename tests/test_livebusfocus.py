@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,7 @@ from spice.agent.driver import CODEX_DRIVER
 from spice.serve import livebus
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
+from spice.serve.websocket import EncodedTextFrame
 from tests.test_wirefixtures import (
     valid_lane_payload,
     valid_live_bus_callback_payloads,
@@ -34,8 +36,11 @@ class _Connection:
         # polling the shared list.
         self.arrival = Condition(self.lock)
 
-    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return payload
+    def encode_text_frame(self, payload: dict[str, Any]) -> EncodedTextFrame:
+        # Keep the payload dict as the "frame" for direct assertions, and report
+        # the real wire-text length so send telemetry stays exact.
+        text_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        return EncodedTextFrame(payload, text_bytes)
 
     def send_frame(self, frame: dict[str, Any]) -> None:
         with self.arrival:
