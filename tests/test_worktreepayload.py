@@ -325,6 +325,93 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
     assert voice_calls == [targets[0].repo_root, targets[1].repo_root]
 
 
+def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeypatch):
+    # review_pressure filters two GLOBAL taskwarrior exports -- completed reviews
+    # and open follow-ups -- that carry no per-target argument, so their result is
+    # identical for every lane. The inventory build loads one shared snapshot and
+    # threads it through every lane, so the build spawns the export pair exactly
+    # once regardless of target count while each lane still filters that shared
+    # data down to its own actor.
+    targets = [
+        _Target(id="wt-a", repo_root=tmp_path / "a"),
+        _Target(id="wt-b", repo_root=tmp_path / "b"),
+    ]
+    threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
+
+    def running_status(repo_root: Path) -> _Status:
+        return _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=threads[repo_root],
+        )
+
+    completed = [
+        {
+            "uuid": "review-a",
+            "review_author": "agent-a",
+            "review_finding": "changes",
+            "review_by": "peer-a",
+            "review_at": "2026-06-10T00:00:00Z",
+        },
+        {
+            "uuid": "review-b",
+            "review_author": "agent-b",
+            "review_finding": "blocked",
+            "review_by": "peer-b",
+            "review_at": "2026-06-11T00:00:00Z",
+        },
+    ]
+    export_calls: list[list[str]] = []
+
+    def counting_export(filters: list[str] | None = None, **_kwargs: object):
+        recorded = list(filters or [])
+        export_calls.append(recorded)
+        if recorded == ["status:completed"]:
+            return [dict(row) for row in completed]
+        return []
+
+    monkeypatch.setattr(lane.tw, "export", counting_export)
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory,
+        "resolve_thread_id_for_target",
+        lambda _state, target: threads[target.repo_root],
+    )
+    monkeypatch.setattr(inventory, "agent_status", running_status)
+    monkeypatch.setattr(identity, "agent_status", running_status)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(
+        message, "target_activity_items", lambda *_a, **_k: ([], None, None)
+    )
+
+    payload = inventory.work_trees_payload(_MultiInventoryState(targets))
+
+    # Two targets, two lanes -- but the review-pressure export pair runs exactly
+    # once each across the whole build (claimed-task resolution issues its own
+    # per-lane +ACTIVE exports, which this pins away from).
+    assert export_calls.count(["status:completed"]) == 1
+    assert export_calls.count(["(", "status:pending", "or", "status:waiting", ")"]) == 1
+    pressures = [tree["laneInfo"]["reviewPressure"] for tree in payload["workTrees"]]
+    # The shared snapshot is still filtered per lane: each actor sees only its own
+    # completed review, so the two lanes carry distinct pressure.
+    assert pressures[0]["count"] == 1
+    assert pressures[1]["count"] == 1
+    assert pressures[0]["items"][0]["reviewedTask"] == "review-a"
+    assert pressures[1]["items"][0]["reviewedTask"] == "review-b"
+    assert pressures[0] != pressures[1]
+
+
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
     thread_id = "019f6eddab8c7ab2870af6b81dfc5b7f"
     target = _Target(id="wt", repo_root=tmp_path)

@@ -24,6 +24,7 @@ from spice.serve.payload.identity import (
     team_identity_payload,
 )
 from spice.serve.payload.lane import (
+    ReviewExportSnapshot,
     _lane_info_payload,
     _status_line_payload_from_status,
     task_filter_inventory,
@@ -36,9 +37,14 @@ from spice.serve.worktree.target import WorktreeTarget
 def work_trees_payload(state: Any) -> dict[str, Any]:
     targets = state.worktree_targets()
     inventory = task_filter_inventory()
+    # Review pressure reads two global taskwarrior exports that are identical
+    # across every lane; share one snapshot so the build spawns them at most
+    # once instead of once per target.
+    review_exports = ReviewExportSnapshot()
     payload: dict[str, Any] = {
         "workTrees": [
-            _work_tree_payload(state, target, inventory) for target in targets
+            _work_tree_payload(state, target, inventory, review_exports)
+            for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
         "taskFilterInventory": inventory,
@@ -57,6 +63,7 @@ def _work_tree_payload(
     state: Any,
     target: WorktreeTarget,
     inventory: dict[str, Any],
+    review_exports: ReviewExportSnapshot,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
@@ -109,7 +116,12 @@ def _work_tree_payload(
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
         "taskFilterInventory": inventory,
-        "laneInfo": _lane_info_payload(target, serve_identity, agent_name=agent_name),
+        "laneInfo": _lane_info_payload(
+            target,
+            serve_identity,
+            agent_name=agent_name,
+            review_exports=review_exports,
+        ),
         "pendingCount": pending,
         "pendingLabel": str(pending),
         **pending_identity,
