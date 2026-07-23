@@ -119,7 +119,7 @@ def test_read_path_prune_does_not_wake_task_event_file(tmp_path):
     # team_snapshot() backs every teams.refresh poll and garbage-collects closed
     # zero-activity teams. A pruned team is already closed -- absent from the
     # open-team topology every client renders -- so the prune must NOT bump the
-    # watched task event file: a plain read that woke every visible lane into a
+    # watched task event file: a plain read waking every visible lane into a
     # full payload re-push (transcript re-read + history) on invisible GC is an
     # unrelated-work stall on the topology path.
     task_config.set_backend(str(tmp_path / "task-backend"))
@@ -139,15 +139,17 @@ def test_read_path_prune_does_not_wake_task_event_file(tmp_path):
 
         snapshot = store.team_snapshot()  # the pruning read
 
-        assert event_path.read_text(encoding="utf-8") == before  # read did NOT wake
-        open_ids = [team.team_id for team in snapshot.teams]
-        assert keep.team_id in open_ids  # the untouched team survived
-        assert retire.team_id not in open_ids
+        assert event_path.read_text(encoding="utf-8") == before
+        snapshot_team_ids = [team.team_id for team in snapshot.teams]
         with store.connect() as connection:
-            surviving = connection.execute(
-                "SELECT team_id FROM teams WHERE team_id = ?", (retire.team_id,)
-            ).fetchone()
-        assert surviving is None  # the prune actually collected the closed team
+            persisted_team_ids = [
+                str(row["team_id"])
+                for row in connection.execute(
+                    "SELECT team_id FROM teams ORDER BY created_at"
+                ).fetchall()
+            ]
+        assert snapshot_team_ids == [keep.team_id]
+        assert persisted_team_ids == [keep.team_id]
     finally:
         task_config.set_backend(None)
 
