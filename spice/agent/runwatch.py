@@ -78,7 +78,7 @@ def watch_agent_side_channel(
     side_socket.settimeout(AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S)
     parent_exit = _parent_exit_watcher(parent_pid)
     try:
-        if parent_pid > 0 and parent_exit is None and not _process_exists(parent_pid):
+        if parent_pid > 0 and parent_exit is None and _process_has_exited(parent_pid):
             return
         side_socket.connect(str(socket_path))
         side_socket.sendall(
@@ -216,3 +216,26 @@ def _process_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+
+
+def _process_has_exited(pid: int) -> bool:
+    """Detect an exited child without reaping it from the command owner.
+
+    A child that has exited but has not yet been reaped still answers
+    ``kill(pid, 0)``. On kqueue platforms that same zombie is too late for a new
+    process-exit registration, so existence alone would leave the side-channel
+    watcher with no exit handle. ``waitid(..., WNOWAIT)`` closes that gap while
+    preserving the caller's later ``Popen.wait()``.
+    """
+    waitid = getattr(os, "waitid", None)
+    waitid_names = ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    if waitid is not None and all(hasattr(os, name) for name in waitid_names):
+        options = os.WEXITED | os.WNOHANG | os.WNOWAIT
+        try:
+            if waitid(os.P_PID, pid, options) is not None:
+                return True
+        except ChildProcessError:
+            pass
+        except OSError:
+            pass
+    return not _process_exists(pid)

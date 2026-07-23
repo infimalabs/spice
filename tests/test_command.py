@@ -1360,32 +1360,38 @@ def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(
     assert output.count("Inbox Steering") == 1
 
 
-def test_side_channel_watch_exits_when_parent_pid_exits_without_shell_trap(
+def test_side_channel_watch_exits_when_parent_already_exited_before_registration(
     tmp_path, monkeypatch
 ):
     watcher = wrap._parent_exit_watcher(os.getpid())
     if watcher is None:
         pytest.skip("platform does not expose process-exit watch handles")
     watcher.close()
+    waitid_names = ("waitid", "P_PID", "WEXITED", "WNOWAIT")
+    if not all(hasattr(os, name) for name in waitid_names):
+        pytest.skip("platform cannot observe an exited child without reaping it")
     stderr = io.StringIO()
     monkeypatch.chdir(tmp_path)
-    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
+    parent = subprocess.Popen([sys.executable, "-c", ""])
+    completed = Event()
 
-    with sidechannel.AgentSideChannelServer(tmp_path):
-        thread = Thread(
-            target=wrap.watch_agent_side_channel,
-            kwargs={
-                "repo_root": tmp_path,
-                "parent_pid": parent.pid,
-                "stderr": stderr,
-            },
+    def watch_to_completion():
+        wrap.watch_agent_side_channel(
+            tmp_path,
+            parent_pid=parent.pid,
+            stderr=stderr,
         )
-        thread.start()
-        parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
-        thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
-        alive = thread.is_alive()
+        completed.set()
 
-    assert not alive
+    try:
+        os.waitid(os.P_PID, parent.pid, os.WEXITED | os.WNOWAIT)
+        with sidechannel.AgentSideChannelServer(tmp_path):
+            thread = Thread(target=watch_to_completion)
+            thread.start()
+            assert completed.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+            thread.join()
+    finally:
+        parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
 
 
 def _eventually(factory, *, contains: str):
