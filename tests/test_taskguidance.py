@@ -82,7 +82,8 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     assert (
         "next: YOU ARE NOT DONE. Run spice task next for reviewer "
         "assignment; "
-        "a review you authored routes to a peer, never back to you"
+        "a review you authored routes to a peer unless the board holds "
+        "nothing else, when it may return to you as a last resort"
     ) in done_output
     assert KEEP_DRAINING in done_output
     assert (
@@ -90,11 +91,20 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
         in render.render_show(handle)
     )
 
+    # Sibling ready work keeps the -100 self-review penalty observable: the
+    # author is routed to the other task and the review stays for a peer.
+    other = create.add(
+        "Sibling ready work",
+        project="task.guidance",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["sibling work is covered"],
+    )
     author_assignment = alloc.next_task()
     monkeypatch.setenv(DRIVER.thread_id_env, REVIEWER)
     reviewer_assignment = alloc.next_task()
 
-    assert author_assignment is None
+    assert identity.render_handle(author_assignment or {}) == other
     assert identity.render_handle(reviewer_assignment or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")
@@ -163,7 +173,10 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_ORIGIN_HINT in done_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in done_output
     assert STEER_MANUAL_CLAIM in done_output
-    assert "a review you authored routes to a peer, never back to you" in done_output
+    assert (
+        "a review you authored routes to a peer unless the board holds "
+        "nothing else, when it may return to you as a last resort"
+    ) in done_output
     shown = render.render_show(handle)
     assert "YOU ARE NOT DONE" not in shown
     assert STEER_EXPLICIT_DIRECTION in shown
@@ -174,11 +187,20 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
+    # Sibling ready work keeps the -100 self-review penalty observable: the
+    # author is routed to the other task and the review stays for a peer.
+    other = create.add(
+        "Sibling ready work",
+        project="task.guidance",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["sibling work is covered"],
+    )
     author_assignment = alloc.next_task()
     monkeypatch.setenv(DRIVER.thread_id_env, REVIEWER)
     reviewer_assignment = alloc.next_task()
 
-    assert author_assignment is None
+    assert identity.render_handle(author_assignment or {}) == other
     assert identity.render_handle(reviewer_assignment or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")

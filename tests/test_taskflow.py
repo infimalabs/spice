@@ -543,11 +543,23 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
         "spice.tasks.lanes.team_route_for_actor",
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
+    # Ordinary ready work sits alongside the review the author just produced.
+    # The -100 penalty keeps a self-review below ordinary work, so the author
+    # is routed to the other task and the review stays for a peer -- rather
+    # than being hard-excluded from allocation entirely.
+    other = create.add(
+        "Sibling ready work",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["sibling work is covered"],
+    )
     author_assignment = alloc.next_task()
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
     reviewer_assignment = alloc.next_task()
 
-    assert author_assignment is None
+    assert identity.render_handle(author_assignment or {}) == other
+    assert author_assignment["claim_by"] == ACTOR_A
     assert identity.render_handle(reviewer_assignment or {}) == handle
     assert reviewer_assignment["claim_by"] == PEER_ACTOR
 
