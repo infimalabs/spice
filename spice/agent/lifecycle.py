@@ -537,12 +537,15 @@ def agent_state_matches_startup_log(
 # is dirty -- uncaptured work that cannot land until a task is claimed.
 SUPERVISOR_LANE_WATCH_SECONDS = 20.0
 SUPERVISOR_UNCAPTURED_NUDGE_SECONDS = 45.0
-# A supervisor-owned handoff claim is renewed every watch tick while the child
-# lives. Its lease is derived from that heartbeat, so supervisor death makes
-# the row visible again within a bounded three missed beats while an arbitrarily
-# long healthy startup or compaction stays continuously owned.
+# A supervisor-owned handoff claim starts with three watch beats: enough for a
+# launch to prove health without letting a child that never comes up strand the
+# row. Once startup reaches READY, healthy renewal promotes the claim to five
+# beats. Its worst-case floor after a normal watch interval then stays above the
+# CLI's critical band, while supervisor death still returns the row after a
+# bounded number of missed beats.
 SUPERVISOR_CLAIM_RENEWAL_SECONDS = SUPERVISOR_LANE_WATCH_SECONDS
 SUPERVISOR_CLAIM_LEASE_SECONDS = 3.0 * SUPERVISOR_CLAIM_RENEWAL_SECONDS
+SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS = 5.0 * SUPERVISOR_CLAIM_RENEWAL_SECONDS
 LANE_UNCAPTURED_NUDGE = (
     "your worktree has uncommitted or uncaptured changes but you hold no "
     "claimed task -- work cannot land without one. Claim a task before "
@@ -628,6 +631,18 @@ def _claim_renewal_report_key(result: Any) -> str:
     )
 
 
+def _supervised_claim_lease_seconds(repo_root: Path, thread_id: str) -> float:
+    """Keep startup claims short, then promote the confirmed healthy holder."""
+    state = read_agent_state(repo_root)
+    state_thread_id = canonical_thread_id(state.get("thread_id"))
+    if (
+        state_thread_id == canonical_thread_id(thread_id)
+        and str(state.get("startup_status") or "") == AGENT_STARTUP_READY
+    ):
+        return SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS
+    return SUPERVISOR_CLAIM_LEASE_SECONDS
+
+
 def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> Any:
     """Renew the exact row last held, so a claim that moved names its new owner.
 
@@ -641,8 +656,9 @@ def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> 
     from spice.tasks import claimstate
 
     try:
+        lease_seconds = _supervised_claim_lease_seconds(repo_root, thread_id)
         witness = claimstate.read_claim_witness(repo_root, thread_id)
-    except SpiceError as exc:
+    except (OSError, SpiceError) as exc:
         return claimstate.ClaimRenewalResult(
             False,
             "backend_error",
@@ -661,12 +677,12 @@ def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> 
     result = claimstate.renew_claim(
         handle=target or None,
         actor=thread_id,
-        lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+        lease_seconds=lease_seconds,
     )
     if target and not result.renewed and result.reason == "no_active_claim":
         result = claimstate.renew_claim(
             actor=thread_id,
-            lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+            lease_seconds=lease_seconds,
         )
         if not result.renewed and result.reason == "no_active_claim":
             result = replace(
