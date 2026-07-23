@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.agent import lifecycle
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.tasks import (
@@ -302,15 +303,21 @@ def test_task_reclaim_parser_rejects_renew_alias():
 
 
 def test_task_reclaim_renders_result(monkeypatch):
-    monkeypatch.setattr(
-        claimstate,
-        "renew_claim",
-        lambda _handle, *, lease_seconds=None: claimstate.ClaimRenewalResult(
+    renewals: list[dict[str, object]] = []
+
+    def renew_claim(handle, *, lease_seconds=None):
+        renewals.append({"handle": handle, "lease_seconds": lease_seconds})
+        return claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-1jN54zJK",
             claim_until="2026-07-09T06:00:00.000000Z",
-        ),
+        )
+
+    monkeypatch.setattr(
+        claimstate,
+        "renew_claim",
+        renew_claim,
     )
 
     output = task_cli._reclaim(
@@ -321,20 +328,81 @@ def test_task_reclaim_renders_result(monkeypatch):
     )
 
     assert output == "reclaimed TASK-1jN54zJK until 2026-07-09T06:00:00.000000Z"
+    assert renewals == [
+        {
+            "handle": "TASK-1jN54zJK",
+            "lease_seconds": REQUESTED_LEASE_SECONDS,
+        }
+    ]
 
 
 def test_task_reclaim_renders_noop(monkeypatch):
+    renewals: list[dict[str, object]] = []
+
+    def renew_claim(handle, *, lease_seconds=None):
+        renewals.append({"handle": handle, "lease_seconds": lease_seconds})
+        return claimstate.ClaimRenewalResult(False, "no_active_claim")
+
     monkeypatch.setattr(
         claimstate,
         "renew_claim",
-        lambda _handle, *, lease_seconds=None: claimstate.ClaimRenewalResult(
-            False, "no_active_claim"
-        ),
+        renew_claim,
     )
 
     output = task_cli._reclaim(argparse.Namespace(handle=None, lease_seconds=None))
 
     assert output == "reclaim skipped no_active_claim"
+    assert renewals == [
+        {"handle": None, "lease_seconds": float(config.CLAIM_TTL_SECONDS)}
+    ]
+
+
+@pytest.mark.parametrize("name_handle", [False, True])
+def test_bare_task_reclaim_promotes_supervisor_lease_to_manual_ownership(
+    task_repo, monkeypatch, name_handle
+):
+    handle = create.add(
+        "Promote the provisional supervisor lease",
+        project="task.cli",
+        origin="ack:1kGGJKqn",
+        acceptance=["bare manual reclaim records the configured ownership lease"],
+    )
+    row = identity.resolve(handle)
+    site = claimstate.current_claim_site()
+    claimstate.do_claim(
+        identity.uuid_of(row),
+        ACTOR_A,
+        site=site,
+        context_thread=ACTOR_A,
+        lease_seconds=lifecycle.SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS,
+    )
+    monkeypatch.setattr(claimstate, "current_claim_site", lambda: site)
+
+    output = task_cli._reclaim(
+        argparse.Namespace(
+            handle=handle if name_handle else None,
+            lease_seconds=None,
+        )
+    )
+    promoted = identity.resolve(handle)
+    supervisor_result = claimstate.renew_claim(
+        handle,
+        actor=ACTOR_A,
+        lease_seconds=lifecycle.SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS,
+    )
+    after_supervisor = identity.resolve(handle)
+
+    assert {
+        "afterSupervisorLease": after_supervisor["claim_lease_seconds"],
+        "output": output,
+        "promotedLease": promoted["claim_lease_seconds"],
+        "supervisorRenewed": supervisor_result.renewed,
+    } == {
+        "afterSupervisorLease": str(config.CLAIM_TTL_SECONDS),
+        "output": (f"reclaimed {handle} until {promoted['claim_until']}"),
+        "promotedLease": str(config.CLAIM_TTL_SECONDS),
+        "supervisorRenewed": True,
+    }
 
 
 def test_task_delete_parser_accepts_force_claimed():
