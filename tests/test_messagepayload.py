@@ -1341,7 +1341,6 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "lifetime",
         "renewalIntent",
         "taskFilterInventory",
-        "laneMetrics",
         "laneInfo",
         "agentProcessStatus",
         "error",

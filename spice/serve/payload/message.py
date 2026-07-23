@@ -603,9 +603,6 @@ def _messages_worktree_payload(
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
         "taskFilterInventory": task_filter_inventory(),
-        "laneMetrics": lane_metrics_payload(
-            state, target, thread_id=thread_id, items=items, status=status
-        ),
         "laneInfo": _lane_info_payload(target, serve_identity),
         "agentProcessStatus": status.process_status,
         "error": error or "",
@@ -624,6 +621,22 @@ def _messages_worktree_payload(
         payload["removedMessageKeys"] = list(removed_keys)
     return validate_emitter_payload(
         "payload.message._messages_worktree_payload", payload
+    )
+
+
+def lane_metrics_summary_payload(state: Any, target: WorktreeTarget) -> dict[str, Any]:
+    """Build one lane's metrics on demand for the metrics pane.
+
+    Kept out of the eager per-lane message payload: the metrics tab is never the
+    first view, so a closed pane must not pay for the status:completed export
+    that _drained_task_count runs. The live bus fetches this only when the
+    metrics view is opened, mirroring the metrics.series request.
+    """
+    thread_id = resolve_thread_id_for_target(state, target) or ""
+    items, _error, _transcript = target_activity_items(target, thread_id)
+    status = agent_status(target.repo_root)
+    return lane_metrics_payload(
+        state, target, thread_id=thread_id, items=items, status=status
     )
 
 

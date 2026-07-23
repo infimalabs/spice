@@ -45,7 +45,6 @@ function renderLaneChrome(lane, payload) {
     applyTaskFilterInventory(payload.taskFilterInventory);
   if (payload.privateTaskCount !== undefined)
     lane.privateTaskCount = Math.max(0, Number(payload.privateTaskCount) || 0);
-  if (payload.laneMetrics) lane.laneMetrics = payload.laneMetrics;
   if (payload.laneInfo) lane.laneInfo = payload.laneInfo;
   if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
   if (!staleTeamConfig && payload.lifetime)

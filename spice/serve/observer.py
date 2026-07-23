@@ -412,7 +412,6 @@ def _observer_lane_payload(session: ObserverSession) -> dict[str, Any]:
         "lifetime": "Steer",
         "renewalIntent": {},
         "taskFilterInventory": {},
-        "laneMetrics": {},
         "laneInfo": {"summaryRows": [], "members": []},
         "statusLine": {
             "agentVisualStatus": "idle",

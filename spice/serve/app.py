@@ -890,6 +890,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                         "ok": False,
                         "error": "metrics are unavailable in observer mode",
                     },
+                    lane_metrics_payload=lambda _target: {},
                     thread_id=lambda target: (
                         observer.session_for_target(target).thread_id
                     ),
@@ -932,6 +933,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 ),
                 metric_series_payload=lambda query: metric.metric_series_payload(
                     state, query
+                ),
+                lane_metrics_payload=lambda target: (
+                    message.lane_metrics_summary_payload(state, target)
                 ),
                 thread_id=lambda target: identity.resolve_thread_id_for_target(
                     state, target

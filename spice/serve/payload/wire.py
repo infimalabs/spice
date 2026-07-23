@@ -443,7 +443,6 @@ WIRE_OBJECTS = (
             "lifetime": STRING,
             "renewalIntent": _ref("RenewalIntentPayload"),
             "taskFilterInventory": _ref("TaskFilterInventory"),
-            "laneMetrics": _ref("LaneMetrics"),
             "laneInfo": _ref("LaneInfo"),
             "agentEnsure": _ref("AgentEnsurePayload"),
             "statusLine": _ref("StatusLine"),
@@ -486,7 +485,6 @@ WIRE_OBJECTS = (
             "taskFilterEntries": _array(_ref("TaskFilterEntry")),
             "laneFilterVersion": STRING,
             "taskFilterInventory": _ref("TaskFilterInventory"),
-            "laneMetrics": _ref("LaneMetrics"),
             "laneInfo": _ref("LaneInfo"),
             "privateTaskCount": INTEGER,
             "teamIdentity": _ref("TeamIdentity"),
@@ -529,7 +527,6 @@ WIRE_OBJECTS = (
             "lifetime": STRING,
             "renewalIntent": _ref("RenewalIntentPayload"),
             "taskFilterInventory": _ref("TaskFilterInventory"),
-            "laneMetrics": _ref("LaneMetrics"),
             "laneInfo": _ref("LaneInfo"),
             "pendingInboxCount": INTEGER,
             "pendingInboxLabel": STRING,
@@ -890,6 +887,14 @@ WIRE_OBJECTS = (
         {"requestId": STRING},
     ),
     _object(
+        "MetricsSummaryFrame",
+        {
+            "type": _literal("metrics.summaryResult"),
+            "result": _ref("LaneMetrics"),
+        },
+        {"requestId": STRING},
+    ),
+    _object(
         "LanePendingFrame",
         {
             "type": _literal("lane.pending"),
@@ -944,6 +949,7 @@ LIVE_BUS_FRAME_SCHEMAS = {
     "lane.sendTiming": "LaneSendTimingFrame",
     "lane.taskDrainResult": "LaneTaskDrainFrame",
     "metrics.seriesResult": "MetricSeriesFrame",
+    "metrics.summaryResult": "MetricsSummaryFrame",
     "lane.pending": "LanePendingFrame",
     "lane.submission": "LaneSubmissionFrame",
 }
