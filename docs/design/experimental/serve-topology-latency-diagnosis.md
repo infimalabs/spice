@@ -1,8 +1,9 @@
 # Serve Topology-Change Latency Diagnosis
 
-Status: research, 2026-07-22 (LATENCY-1kGFQGQN). Measures where time goes when
+Status: research, 2026-07-22. Measures where time goes when
 the UI responds to a topology change (member shift, team create/dissolve,
-order/accent change), to settle which side dominates rather than guess.
+order/accent change), to settle which side dominates rather than guess
+(LATENCY-1kGFQGQN).
 
 The operator interest (1kGFPkNv): topology changes feel slow to reflect in the
 UI, it was unclear whether the backend or the UI is the bottleneck, and the ask
