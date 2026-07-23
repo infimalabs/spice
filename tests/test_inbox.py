@@ -10,6 +10,7 @@ from spice.mail.ackstate import (
     ACK_DISPOSITION_REFUSED,
     AckStateWrite,
     ack_state_database_path,
+    ack_state_records,
     record_acked_inbox_items,
 )
 from spice.mail.attachments import (
@@ -21,7 +22,6 @@ from spice.mail.inbox import (
     INBOX_CONTINUE_NOTE,
     INBOX_GRACEFUL_NOTE,
     INBOX_TASK_HINT_ROW,
-    collect_acked_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
     compose_inbox_text,
@@ -427,14 +427,16 @@ def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     assert shared_attachment_root(tmp_path) in attachment_path.parents
 
     archived = archive_ackd_inbox_items(tmp_path, ["1jNJvRyq"])
-    archived_items = collect_acked_inbox_items(tmp_path)
-    archived_attachment = archived_items[0].attachments[0]
+    archived_records = ack_state_records(tmp_path)
+    archived_attachment = archived_records[0].attachments[0]
     assert archived == [inbox_item_key(name)]
-    assert [(item.name, item.text) for item in archived_items] == [(name, composed)]
-    assert archived_attachment.name == "paste.png"
-    assert archived_attachment.content_type == "image/png"
-    assert archived_attachment.path == attachment_path
-    assert archived_attachment.size == len(b"image-bytes")
+    assert [(record.inbox_name, record.text) for record in archived_records] == [
+        (name, composed)
+    ]
+    assert archived_attachment["name"] == "paste.png"
+    assert archived_attachment["content_type"] == "image/png"
+    assert Path(archived_attachment["path"]) == attachment_path
+    assert archived_attachment["size"] == len(b"image-bytes")
     assert attachment_path.is_file()
 
 

@@ -13,9 +13,8 @@ from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.errors import SpiceError
 from spice.mail.replies import read_reply_records
 from spice.mail.inbox import (
-    collect_acked_inbox_items,
+    collect_consumed_inbox_items_for_keys,
     collect_inbox_items,
-    collect_refused_inbox_items,
     inbox_item_key,
     inbox_request_body,
     inbox_request_priority,
@@ -48,8 +47,6 @@ from spice.tasks import claimstate
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
 from spice.tasks import tw
-
-ACK_CONTEXT_ARCHIVE_LIMIT = 50
 
 
 TASK_CARD_SOURCE_KIND = "cli_task_created"
@@ -653,14 +650,15 @@ def _ack_contexts_for_worktree(
     if not wanted:
         return []
     by_key: dict[str, dict[str, Any]] = {}
-    acked = collect_acked_inbox_items(
-        str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
-    )
-    refused = collect_refused_inbox_items(
-        str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
-    )
+    # ACK retirement commits durable state before deleting the pending file.
+    # Read in the same monotonic direction: a pre-delete pending snapshot finds
+    # the item, while a post-delete snapshot is followed by an exact durable
+    # lookup that must see the committed record. Reversing these reads creates
+    # a gap where normal hydration can observe neither source and permanently
+    # cache a valid key as missing.
     pending = collect_inbox_items(str(target.repo_root))
-    for item in (*acked, *refused, *pending):
+    consumed = collect_consumed_inbox_items_for_keys(str(target.repo_root), keys=wanted)
+    for item in (*consumed, *pending):
         item_key = inbox_item_key(item.name)
         matching_keys = [
             key

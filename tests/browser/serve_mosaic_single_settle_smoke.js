@@ -62,6 +62,7 @@ function ssLaneMessages(id, start, step, perLane, ackKeyForFirst) {
     if (n === 0 && ackKeyForFirst) {
       message.ack_count = 1;
       message.ack_keys = [ackKeyForFirst];
+      message.ack_segments = [{ keys: [ackKeyForFirst], html: "" }];
     }
     return message;
   });
@@ -219,7 +220,13 @@ async function ssMeasure(config) {
     soloPresentCount: soloExpectedKeys.filter((key) => soloCardKeys.includes(key)).length,
     fusedMessageRenderCount: window.__ssHostMessageBearingRenders(state, fusedHost).length,
     soloMessageRenderCount: window.__ssHostMessageBearingRenders(state, soloHost).length,
-    ackContextPresent: fusedHost.ackContextByKey.has(config.ackKey),
+    ackContextState: fusedHost.ackContextByKey.has(config.ackKey)
+      ? "resolved"
+      : fusedHost.missingAckContextKeys.has(config.ackKey)
+        ? "missing"
+        : "pending",
+    ackQuoteText:
+      fusedHost.messagesEl.querySelector(".ack-quote")?.textContent.trim() || "",
     fusedReplayInitial,
     soloReplayInitial,
     fusedReplayFinal: window.__ssFullReplayCount(fusedHost),
@@ -263,8 +270,10 @@ function assertSingleSettleResult(result) {
       result.fusedMessageRenderCount !== 1,
     "solo lane painted more than one settled message render on cold load":
       result.soloMessageRenderCount !== 1,
-    "ack context did not hydrate on the fused host's first settled paint":
-      result.ackContextPresent !== true,
+    "ack context did not resolve on the fused host's first settled paint":
+      result.ackContextState !== "resolved",
+    "resolved ack context was not visible on the first settled paint":
+      result.ackQuoteText !== "acked steering context",
     "fused host did not record a settled full-replay at mount":
       result.fusedReplayInitial < 1,
     "solo lane did not record a settled full-replay at mount":

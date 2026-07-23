@@ -39,7 +39,6 @@ from spice.mail.ackstate import (
 )
 from spice.mail.inbox import (
     InboxResendAttempt,
-    collect_acked_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
     compose_inbox_text,
@@ -454,9 +453,7 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
 
     assert archive_ackd_inbox_items(tmp_path, [KEY_A]) == [KEY_A]
 
-    archived = collect_acked_inbox_items(tmp_path)
     records = ack_state_records(tmp_path)
-    assert [(item.name, item.text) for item in archived] == [(name, text)]
     assert [
         (record.key, record.inbox_name, record.text, record.disposition)
         for record in records
@@ -737,7 +734,11 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     assert outcomes == [
         AckArchivalSummary(archived=[KEY_A], already_acked=[], unmatched=[])
     ]
-    archived = {item.name: item.text for item in collect_acked_inbox_items(tmp_path)}
+    archived = {
+        record.inbox_name: record.text
+        for record in ackstate.ack_state_records(tmp_path)
+        if record.disposition == ACK_DISPOSITION_ACKED
+    }
     assert archived[name] == compose_inbox_text(
         body="shared writer contention", priority=None, stop=False
     )
@@ -849,12 +850,13 @@ def test_summarize_ack_archival_retires_lineage_record_by_exact_key(
         f"ACK {KEY_A}: handled after retry.",
     )
 
-    archived = collect_acked_inbox_items(tmp_path)
     records = ack_state_records(tmp_path)
     assert summary.archived == [KEY_A]
     assert pending_inbox_count(tmp_path) == 0
     assert [
-        (item.name, parse_inbox_payload(item.text).resend_count) for item in archived
+        (record.inbox_name, parse_inbox_payload(record.text).resend_count)
+        for record in records
+        if record.disposition == ACK_DISPOSITION_ACKED
     ] == [(name, 2)]
     assert [
         (record.key, record.inbox_name, record.ack_content, record.lineage)
@@ -902,7 +904,6 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     assert summary.already_acked == []
     assert summary.unmatched == []
     assert summary.reasonless == []
-    assert collect_acked_inbox_items(tmp_path) == []
     assert [
         record.key for record in records if record.disposition == ACK_DISPOSITION_ACKED
     ] == []
@@ -1166,9 +1167,7 @@ def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
 
     archive_ackd_inbox_items(tmp_path, [KEY_B])
 
-    archived = collect_acked_inbox_items(tmp_path)
     records = ack_state_records(tmp_path)
-    assert [(item.name, item.text) for item in archived] == [(name, text)]
     assert [(record.key, record.inbox_name, record.text) for record in records] == [
         (KEY_B, name, text)
     ]
