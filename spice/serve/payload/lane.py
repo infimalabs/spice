@@ -351,6 +351,7 @@ def _lane_info_payload(
     serve_identity: dict[str, Any],
     *,
     agent_name: str | None = None,
+    review_exports: ReviewExportSnapshot | None = None,
 ) -> dict[str, Any]:
     # ``agent_name`` lets the inventory caller pass the say-voice name it already
     # resolved for this target so the lane build reuses it instead of resolving
@@ -385,7 +386,7 @@ def _lane_info_payload(
         {"key": "thread", "value": thread_id or "-", "span": True},
         {"key": "session", "value": session_owner or "-", "span": False},
     ]
-    review_pressure = review_pressure_payload(serve_identity)
+    review_pressure = review_pressure_payload(serve_identity, exports=review_exports)
     if review_pressure["count"]:
         rows.append(
             {
@@ -412,18 +413,56 @@ def _identity_value_rows(
     return [{"key": key, "value": desired or actual or "-", "span": False}]
 
 
-def review_pressure_payload(serve_identity: dict[str, Any]) -> dict[str, Any]:
-    """Recent non-clean task reviews for the lane actor."""
+class ReviewExportSnapshot:
+    """Load the two global review-pressure task exports once and reuse them.
+
+    ``review_pressure_payload`` filters completed and open task rows per lane in
+    Python, but the underlying ``tw.export`` filters carry no per-target argument
+    -- their result is identical for every target. Resolving them once per
+    inventory build and sharing this snapshot across lanes replaces one
+    Taskwarrior subprocess pair per target with a single pair per build. The
+    exports are loaded lazily on first use, so a build whose lanes never need
+    review pressure still spawns no Taskwarrior process.
+    """
+
+    def __init__(self) -> None:
+        self._loaded = False
+        self._rows: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None
+
+    def rows(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+        """Return ``(completed, open)`` rows, or ``None`` when the export failed."""
+        if not self._loaded:
+            self._loaded = True
+            try:
+                completed = tw.export(["status:completed"])
+                open_rows = tw.export(
+                    ["(", "status:pending", "or", "status:waiting", ")"]
+                )
+            except SpiceError:
+                self._rows = None
+            else:
+                self._rows = (completed, open_rows)
+        return self._rows
+
+
+def review_pressure_payload(
+    serve_identity: dict[str, Any],
+    *,
+    exports: ReviewExportSnapshot | None = None,
+) -> dict[str, Any]:
+    """Recent non-clean task reviews for the lane actor.
+
+    ``exports`` shares one lazily-loaded export snapshot across every lane in an
+    inventory build. Left unset, this call loads its own single-use snapshot.
+    """
     actors = _review_pressure_actor_keys(serve_identity)
     if not actors:
         return _empty_review_pressure()
-    from spice.errors import SpiceError
-
-    try:
-        completed = tw.export(["status:completed"])
-        open_rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
-    except SpiceError:
+    snapshot = exports if exports is not None else ReviewExportSnapshot()
+    rows = snapshot.rows()
+    if rows is None:
         return _empty_review_pressure()
+    completed, open_rows = rows
     followups_by_reviewed = _review_followup_counts(open_rows)
     reviewed_rows = [
         row
