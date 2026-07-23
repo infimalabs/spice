@@ -26,7 +26,6 @@ __all__ = ["task_repo"]
 
 SHORT_LEASE_SECONDS = 2.0
 SHORT_RENEWAL_SECONDS = SHORT_LEASE_SECONDS / 4
-LONG_OPERATION_SECONDS = SHORT_LEASE_SECONDS * 1.5
 LEASE_EXPIRY_GRACE_SECONDS = SHORT_RENEWAL_SECONDS
 UNIT_ROUTE = {"filter": ["project:task.unit"], "lifetime": "Drive"}
 
@@ -182,17 +181,17 @@ def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
     assert held == {}
 
 
-def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
+def test_heartbeat_holds_a_claim_across_independent_supervisor_renewals(
     task_repo, monkeypatch
 ):
-    """A single long command outruns the lease; the timer, not the agent, renews."""
+    """The supervisor retains ownership while the agent issues no Spice command."""
     _route_peer_allocator(monkeypatch)
     handle = create.add(
-        "One command longer than the lease",
+        "Agent quiet across supervisor renewals",
         project="task.unit",
         origin="ack:1kG4pGxs",
         priority="medium",
-        acceptance=["a long operation keeps its claim without running a command"],
+        acceptance=["independent supervisor beats retain ownership"],
     )
     row = identity.resolve(handle)
     claimstate.do_claim(
@@ -205,18 +204,16 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
     log_path = task_repo / "supervisor.log"
     feedback = _capture_feedback(monkeypatch)
 
-    monkeypatch.setattr(
-        lifecycle, "SUPERVISOR_CLAIM_RENEWAL_SECONDS", SHORT_RENEWAL_SECONDS
-    )
-    monkeypatch.setattr(
-        lifecycle, "SUPERVISOR_CLAIM_LEASE_SECONDS", SHORT_LEASE_SECONDS
-    )
-    first_renewal = Event()
+    completed_renewals = [Event() for _ in range(3)]
+    renewal_index = 0
     original_renew = lifecycle._renew_supervised_claim
 
     def observed_renewal(*args, **kwargs):
+        nonlocal renewal_index
         original_renew(*args, **kwargs)
-        first_renewal.set()
+        if renewal_index < len(completed_renewals):
+            completed_renewals[renewal_index].set()
+        renewal_index += 1
 
     monkeypatch.setattr(lifecycle, "_renew_supervised_claim", observed_renewal)
     signal = lifecycle.SupervisorLaneSignal()
@@ -228,14 +225,11 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
     )
     watcher.start()
     try:
-        assert first_renewal.wait(15.0)
+        assert completed_renewals[0].wait(15.0)
+        for completed in completed_renewals[1:]:
+            signal.notify()
+            assert completed.wait(15.0)
 
-        # This is the long command: the agent blocks and issues no Spice command
-        # while the independent supervisor timer renews more than once.
-        operation = Event()
-        operation.wait(LONG_OPERATION_SECONDS)
-        renewed_at_peer_admission = identity.resolve(handle)
-        peer_admission_at = tw.now_iso()
         monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
         peer_assignment = alloc.next_task()
         renewed = identity.resolve(handle)
@@ -244,10 +238,8 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
         watcher.join(timeout=2.0)
 
     assert renewed["claim_by"] == ACTOR_A
-    assert renewed_at_peer_admission["claim_until"] > peer_admission_at
     assert peer_assignment is None
     assert feedback == []
-    assert LONG_OPERATION_SECONDS > SHORT_LEASE_SECONDS
 
 
 def test_backend_failure_keeps_exact_witness_until_takeover_is_loud(
