@@ -46,6 +46,21 @@ ESCAPE_COUNTDOWN_TOLERANCE_SECONDS = 5.0
 # lane, which is what keeps a launch that dies on arrival from being retried at
 # the speed of the board it keeps re-dirtying.
 CAPACITY_RETRY_SECONDS = 5.0
+# The short settle a burst that clears the count threshold must let its chosen
+# row sit READY before a new lane claims it -- spelled out, not read from the
+# production constant, so it stays the property under test.
+SETTLE_SECONDS = 3.0
+# The settle countdown one second into the chosen row's wait: pins the ~3s
+# production interval the way the escape remainder pins the three-minute one.
+SETTLE_REMAINING_AFTER_ONE_SECOND = 2.0
+# The tolerance for the settle countdown, read off a row stamped moments before
+# the call. Wide enough for that stamp gap, tight enough to exclude both a spent
+# interval (0s) and the whole starvation escape (180s).
+SETTLE_COUNTDOWN_TOLERANCE_SECONDS = 1.0
+# Aged past the settle above but short of the lone-row starvation escape: a row
+# already settled, so its burst dispatches at once and the test exercises the
+# claim/start path rather than the settle wait.
+SETTLED_WAIT_SECONDS = 30.0
 
 
 def _ready_row(uuid: str, *, waiting_seconds: float = 0.0) -> dict[str, str]:
@@ -264,7 +279,12 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[tuple[str, object]] = []
-    candidates = [_ready_row("task-a"), _ready_row("task-spare")]
+    # The chosen row is already settled, so this exercises the claim/start path
+    # rather than the settle wait a fresh burst would take.
+    candidates = [
+        _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-spare"),
+    ]
 
     monkeypatch.setattr(
         agentapi.alloc,
@@ -336,7 +356,12 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[str] = []
-    candidates = [_ready_row("task-raced"), _ready_row("task-next")]
+    # Settled chosen row: the pass reaches the claim it then loses, rather than
+    # declining for the settle first.
+    candidates = [
+        _ready_row("task-raced", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-next"),
+    ]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -372,7 +397,12 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     trace: list[str] = []
-    candidates = [_ready_row("task-failed"), _ready_row("task-spare")]
+    # Settled chosen row: the pass reaches the claim/start it must then release,
+    # rather than declining for the settle first.
+    candidates = [
+        _ready_row("task-failed", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-spare"),
+    ]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -429,7 +459,12 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
         agentapi.WorktreeTarget("lane-b", repo_b, "lane-b", "main-b"),
     ]
     actors = [THREAD_A, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
-    candidates = [_ready_row("task-a"), _ready_row("task-b")]
+    # The chosen row is already settled, so exactly one lane claims and starts it;
+    # the losing lane sees a single fresh row left and declines for capacity.
+    candidates = [
+        _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-b"),
+    ]
     claims: dict[str, str] = {}
     starts: list[str] = []
     results: list[dict[str, object] | None] = []
@@ -481,10 +516,16 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
     ) == ["capacity", "started"]
 
 
-def test_second_ready_task_dispatches_without_waiting_out_debounce_or_age(
-    tmp_path, monkeypatch
-):
-    """The pass that declined one row leaves the interval for the pass that acts."""
+def test_second_ready_task_settles_before_dispatching_a_new_lane(tmp_path, monkeypatch):
+    """A fresh burst waits out the settle, yet a decline never spends an interval.
+
+    The lone first row declines for capacity with its whole starvation interval
+    left. A second, fresh row clears the count threshold, but the chosen row is
+    still freshly READY -- so the burst declines again for the short settle
+    rather than beating a running agent's own done+next cycle to it. Once the
+    chosen row has sat READY past the settle, the next pass dispatches: neither
+    decline spent an interval, because both are read off the rows.
+    """
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     candidates = [_ready_row("task-a")]
@@ -519,7 +560,16 @@ def test_second_ready_task_dispatches_without_waiting_out_debounce_or_age(
         thread_id=THREAD_A,
         attempt_cache=attempt_cache,
     )
+    # A second, fresh row clears the count threshold, but the chosen row is still
+    # freshly READY, so the burst holds for the settle instead of starting.
     candidates.append(_ready_row("task-b"))
+    settling = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        attempt_cache=attempt_cache,
+    )
+    # Once the chosen row has sat READY past the settle, the pass dispatches it.
+    candidates[0] = _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS)
     at_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
@@ -537,14 +587,74 @@ def test_second_ready_task_dispatches_without_waiting_out_debounce_or_age(
             LONE_TASK_ESCAPE_SECONDS, abs=ESCAPE_COUNTDOWN_TOLERANCE_SECONDS
         ),
     }
+    assert settling == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "settle",
+        # A freshly READY chosen row has the whole short settle left to sit.
+        "retryAfterSeconds": pytest.approx(
+            SETTLE_SECONDS, abs=SETTLE_COUNTDOWN_TOLERANCE_SECONDS
+        ),
+    }
     assert at_capacity == {
         "ok": True,
         "action": "start",
         "trigger": "available-work",
         "taskHandle": identity.render_handle(candidates[0]),
     }
+    # One claim, taken on the dispatching pass -- never on the capacity or settle
+    # decline, each of which reschedules the watcher rather than reserving early.
     assert claims == ["task-a"]
     assert launch_policies == ["restart-held"]
+
+
+def test_available_work_fresh_burst_settles_before_starting_a_lane(
+    tmp_path, monkeypatch
+):
+    """Two freshly-READY rows hold for the settle before any lane is claimed.
+
+    The count threshold is clear, so the old zero-wait path would have started a
+    lane at once. Both rows are still fresh, so the burst instead declines with
+    the settle remainder for the watcher to reschedule on -- a timer it acts on
+    when the row has settled, not a busy poll -- and it takes no claim meanwhile.
+    """
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    claims: list[str] = []
+    fresh_burst = [_ready_row("task-fresh-a"), _ready_row("task-fresh-b")]
+    monkeypatch.setattr(
+        agentapi.alloc,
+        "ordered_visible_ready_rows",
+        lambda _actor: list(fresh_burst),
+    )
+    monkeypatch.setattr(
+        agentapi.claimstate,
+        "do_claim",
+        lambda task_uuid, *_args, **_kwargs: claims.append(task_uuid) or True,
+    )
+
+    settling = agentapi.ensure_agent_for_available_work(
+        target,
+        thread_id=THREAD_A,
+        retry_seconds=0.0,
+    )
+
+    assert settling == {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "settle",
+        "retryAfterSeconds": pytest.approx(
+            SETTLE_SECONDS, abs=SETTLE_COUNTDOWN_TOLERANCE_SECONDS
+        ),
+    }
+    # The wait is a countdown the watcher reschedules on, not a claim reserved
+    # early and held: nothing was claimed while the chosen row settled.
+    assert claims == []
+    # Like every decline, the settle skip rides into the worktree inventory as
+    # `agentEnsure`; that schema must accept its reason and countdown.
+    assert wire.validate_wire_payload("AgentEnsurePayload", settling) == settling
 
 
 def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeypatch):
@@ -559,7 +669,12 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
     target = _target(repo)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     launches = 0
-    candidates = [_ready_row("task-a"), _ready_row("task-b")]
+    # Settled chosen row: every pass reaches the launch that dies on arrival,
+    # isolating the rapid-death refusal from the settle wait.
+    candidates = [
+        _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-b"),
+    ]
 
     def fake_start_agent(repo_root, **_kwargs):
         nonlocal launches
@@ -629,7 +744,12 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     attempt_cache: dict[str, float] = {}
     starts: list[str] = []
-    candidates = [_ready_row("task-a"), _ready_row("task-b")]
+    # Settled chosen row: the first pass dispatches, so the second pass exercises
+    # the recorded-attempt debounce rather than declining for the settle.
+    candidates = [
+        _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS),
+        _ready_row("task-b"),
+    ]
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -877,6 +997,25 @@ def test_available_work_next_deadline_counts_down_from_the_oldest_candidate():
 
     assert empty == LONE_TASK_ESCAPE_SECONDS
     assert watched == ESCAPE_REMAINING_AFTER_ONE_MINUTE
+
+
+def test_available_work_settle_remaining_counts_down_from_the_chosen_row():
+    """The settle bound is what is left of the first ordered row's interval."""
+    now = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    # The chosen row is first; an older row behind it does not shorten the wait,
+    # so the settle tracks the row a burst would actually claim.
+    rows = [
+        {"ready_at": (now - age).isoformat().replace("+00:00", "Z")}
+        for age in (timedelta(seconds=1), timedelta(seconds=90))
+    ]
+
+    empty = agentapi.available_work_settle_remaining([], now=now)
+    watched = agentapi.available_work_settle_remaining(rows, now=now)
+
+    # No candidates leaves nothing to wait on; one second in, the short settle
+    # has its remainder left -- pinning the production interval.
+    assert empty == 0.0
+    assert watched == SETTLE_REMAINING_AFTER_ONE_SECOND
 
 
 def test_available_work_age_refreshes_when_task_rejoins_the_backlog(
