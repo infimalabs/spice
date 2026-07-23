@@ -115,6 +115,43 @@ def test_team_metric_write_does_not_wake_task_event_file(tmp_path):
         task_config.set_backend(None)
 
 
+def test_read_path_prune_does_not_wake_task_event_file(tmp_path):
+    # team_snapshot() backs every teams.refresh poll and garbage-collects closed
+    # zero-activity teams. A pruned team is already closed -- absent from the
+    # open-team topology every client renders -- so the prune must NOT bump the
+    # watched task event file: a plain read that woke every visible lane into a
+    # full payload re-push (transcript re-read + history) on invisible GC is an
+    # unrelated-work stall on the topology path.
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    try:
+        event_path = task_config.ensure_task_event_file()
+        store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+        keep = store.create_team(members=["agent-keep"])
+        retire = store.create_team(members=["agent-retire"])
+
+        # Close the retiring team with a raw locked close rather than a command
+        # (whose response snapshot would prune in the same transaction), leaving
+        # a closed zero-activity team for the next read to collect. `keep` stays
+        # open so the snapshot's ensure-open path never fires and wakes.
+        with store.connect() as connection:
+            store._close_team_locked(connection, retire.team_id)
+        before = event_path.read_text(encoding="utf-8")
+
+        snapshot = store.team_snapshot()  # the pruning read
+
+        assert event_path.read_text(encoding="utf-8") == before  # read did NOT wake
+        open_ids = [team.team_id for team in snapshot.teams]
+        assert keep.team_id in open_ids  # the untouched team survived
+        assert retire.team_id not in open_ids
+        with store.connect() as connection:
+            surviving = connection.execute(
+                "SELECT team_id FROM teams WHERE team_id = ?", (retire.team_id,)
+            ).fetchone()
+        assert surviving is None  # the prune actually collected the closed team
+    finally:
+        task_config.set_backend(None)
+
+
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
