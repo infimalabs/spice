@@ -176,6 +176,8 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
         # while the independent supervisor timer renews more than once.
         operation = Event()
         operation.wait(LONG_OPERATION_SECONDS)
+        renewed_at_peer_admission = identity.resolve(handle)
+        peer_admission_at = tw.now_iso()
         monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
         peer_assignment = alloc.next_task()
         renewed = identity.resolve(handle)
@@ -184,7 +186,7 @@ def test_heartbeat_holds_a_claim_across_an_operation_longer_than_its_lease(
         watcher.join(timeout=2.0)
 
     assert renewed["claim_by"] == ACTOR_A
-    assert renewed["claim_until"] > tw.now_iso()
+    assert renewed_at_peer_admission["claim_until"] > peer_admission_at
     assert peer_assignment is None
     assert feedback == []
     assert LONG_OPERATION_SECONDS > SHORT_LEASE_SECONDS

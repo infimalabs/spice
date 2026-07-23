@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
+from spice.errors import SpiceError
 from spice.serve import messages as message_reader
 from spice.serve.payload.identity import (
     _agent_name_for_target,
@@ -59,8 +60,6 @@ def _task_row_dependencies(row: dict[str, Any]) -> set[str]:
 
 
 def _task_filter_rows() -> tuple[list[dict[str, Any]], set[str], set[str], set[str]]:
-    from spice.errors import SpiceError
-
     try:
         rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
     except SpiceError:
@@ -96,6 +95,16 @@ def _task_filter_rows() -> tuple[list[dict[str, Any]], set[str], set[str], set[s
     return rows, ready, waiting, blocked
 
 
+def _hidden_project_stem(project: str, hidden_stems: set[str]) -> str:
+    if not project.startswith(task_config.HIDDEN_PROJECT_PREFIX):
+        return ""
+    try:
+        stem = task_config.project_stem(project)
+    except SpiceError:
+        return ""
+    return stem if stem in hidden_stems else ""
+
+
 def _task_filter_row_state(
     row: dict[str, Any],
     *,
@@ -122,14 +131,15 @@ def _task_filter_project_counts(
     ready_uuids: set[str],
     waiting_uuids: set[str],
     blocked_uuids: set[str],
+    *,
+    hidden_stems: set[str],
 ) -> tuple[dict[str, dict[str, int]], int, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     waiting_count = 0
     hidden_counts: dict[str, int] = {}
     for row in rows:
         project = str(row.get("project") or "")
-        if task_config.is_hidden_project(project):
-            stem = task_config.project_stem(project)
+        if stem := _hidden_project_stem(project, hidden_stems):
             hidden_counts[stem] = hidden_counts.get(stem, 0) + 1
             continue
         uuid = str(row.get("uuid") or "")
@@ -168,11 +178,12 @@ def _task_filter_payload_rows(
     counts: dict[str, dict[str, int]],
     waiting_count: int,
     hidden_counts: dict[str, int],
+    *,
+    assignable_stems: set[str],
+    visible_stems: set[str],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     filters: list[dict[str, Any]] = []
     stems: dict[str, dict[str, Any]] = {}
-    assignable_stems = set(task_config.assignable_stems())
-    visible_stems = set(task_config.approved_stems())
     for project, project_counts in sorted(counts.items()):
         stem = project.split(".", 1)[0]
         if stem not in visible_stems:
@@ -204,11 +215,24 @@ def task_filter_inventory() -> dict[str, Any]:
     """Open-task state counts per assignable project, plus system header signals."""
     revision = task_filter_inventory_revision()
     catalog = task_config.task_project_validation_catalog()
+    assignable_stems = set(cast(list[str], catalog["approvedStems"]))
+    hidden_stems = set(cast(list[str], catalog["hiddenStems"]))
+    visible_stems = assignable_stems | set(task_config.INTERNAL_STEMS)
     rows, ready_uuids, waiting_uuids, blocked_uuids = _task_filter_rows()
     counts, waiting_count, hidden_counts = _task_filter_project_counts(
-        rows, ready_uuids, waiting_uuids, blocked_uuids
+        rows,
+        ready_uuids,
+        waiting_uuids,
+        blocked_uuids,
+        hidden_stems=hidden_stems,
     )
-    filters, stems = _task_filter_payload_rows(counts, waiting_count, hidden_counts)
+    filters, stems = _task_filter_payload_rows(
+        counts,
+        waiting_count,
+        hidden_counts,
+        assignable_stems=assignable_stems,
+        visible_stems=visible_stems,
+    )
     return {
         "revision": revision,
         "filters": filters,
