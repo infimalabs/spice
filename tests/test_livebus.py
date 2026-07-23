@@ -28,6 +28,12 @@ from tests.test_wirefixtures import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# These correctness tests already synchronize watcher activation and frame
+# arrival with Events and Conditions. This is only the final deadlock ceiling,
+# not a performance budget: under host contention the release proof observed
+# the change promptly but payload scheduling legitimately exceeded three
+# seconds. A healthy path still returns immediately when its frame arrives.
+LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -777,7 +783,9 @@ def _write_inbox_item_from_subprocess(repo: Path) -> None:
 
 
 def _wait_for_watch_push(
-    connection: _Connection, *, timeout_seconds: float = 3.0
+    connection: _Connection,
+    *,
+    timeout_seconds: float = LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     def first_push() -> dict[str, Any] | None:
         for payload in connection.sent:
@@ -796,7 +804,7 @@ def _wait_for_reply(
     connection: _Connection,
     *,
     request_id: str | None = None,
-    timeout_seconds: float = 3.0,
+    timeout_seconds: float = LIVE_BUS_ASYNC_TEST_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     """Await a direct reply frame (no push `source`), optionally by requestId.
 
