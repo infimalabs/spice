@@ -213,6 +213,18 @@ class ServeTeamStore(
             self._task_event_wake_connection_ids.add(id(connection))
         return revision
 
+    def _mark_team_revisions_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_ids: Iterable[str],
+        revision: int,
+    ) -> None:
+        for team_id in dict.fromkeys(team_ids):
+            connection.execute(
+                "UPDATE teams SET revision = ? WHERE team_id = ?",
+                (revision, team_id),
+            )
+
     def global_fast_mode_enabled(self) -> bool:
         with self.connect() as connection:
             return self._global_settings_locked(connection).fast_mode
@@ -421,16 +433,20 @@ class ServeTeamStore(
         self._replace_task_filters_locked(
             connection, resolved_team_id, config.task_filters
         )
+        previous_team_ids: list[str] = []
         for agent_id in member_list:
-            self._assign_locked(
-                connection,
-                resolved_team_id,
-                agent_id,
-                aliases=aliases_by_member.get(agent_id, ()),
+            previous_team_ids.extend(
+                self._assign_locked(
+                    connection,
+                    resolved_team_id,
+                    agent_id,
+                    aliases=aliases_by_member.get(agent_id, ()),
+                )
             )
-        self._record_event(
+        revision = self._record_event(
             connection, "createTeam", resolved_team_id, {"members": member_list}
         )
+        self._mark_team_revisions_locked(connection, previous_team_ids, revision)
         return self._team_state_locked(connection, resolved_team_id)
 
     def _reuse_open_shell_team_locked(
@@ -467,19 +483,23 @@ class ServeTeamStore(
         self._replace_task_filters_locked(
             connection, shell_team_id, config.task_filters
         )
+        previous_team_ids: list[str] = []
         for agent_id in member_list:
-            self._assign_locked(
-                connection,
-                shell_team_id,
-                agent_id,
-                aliases=member_aliases.get(agent_id, ()),
+            previous_team_ids.extend(
+                self._assign_locked(
+                    connection,
+                    shell_team_id,
+                    agent_id,
+                    aliases=member_aliases.get(agent_id, ()),
+                )
             )
-        self._record_event(
+        revision = self._record_event(
             connection,
             "createTeam",
             shell_team_id,
             {"members": member_list, "reusedOpenShell": True},
         )
+        self._mark_team_revisions_locked(connection, previous_team_ids, revision)
         return self._team_state_locked(connection, shell_team_id)
 
     def _close_team_locked(self, connection: sqlite3.Connection, team_id: str) -> int:
@@ -508,10 +528,14 @@ class ServeTeamStore(
         aliases: Iterable[str] = (),
     ) -> int:
         self._require_team(connection, team_id)
-        self._assign_locked(connection, team_id, agent_id, aliases=aliases)
-        return self._record_event(
+        previous_team_ids = self._assign_locked(
+            connection, team_id, agent_id, aliases=aliases
+        )
+        revision = self._record_event(
             connection, "assignAgent", team_id, {"agentId": agent_id}
         )
+        self._mark_team_revisions_locked(connection, previous_team_ids, revision)
+        return revision
 
     def _assign_locked(
         self,
@@ -519,7 +543,7 @@ class ServeTeamStore(
         team_id: str,
         agent_id: str,
         aliases: Iterable[str] = (),
-    ) -> None:
+    ) -> list[str]:
         agent_id = _normalized_id(agent_id, "agent_id")
         alias_ids = _agent_alias_ids(agent_id, aliases)
         for alias_id in alias_ids:
@@ -564,6 +588,7 @@ class ServeTeamStore(
             ),
         )
         self._close_empty_teams_locked(connection, previous_team_ids)
+        return previous_team_ids
 
     def _vacate_assigned_slots_locked(
         self,
@@ -903,6 +928,62 @@ class ServeTeamStore(
     def team_snapshot(self, *, since_revision: int | None = None) -> TeamSnapshot:
         with self.connect() as connection:
             return self._team_snapshot_locked(connection)
+
+    def team_snapshot_delta_payload(
+        self, snapshot: TeamSnapshot, *, since_revision: int
+    ) -> dict[str, Any]:
+        active_team_ids = {team.team_id for team in snapshot.teams}
+        with self.connect() as connection:
+            removed_team_ids = self._removed_team_ids_since_locked(
+                connection,
+                active_team_ids=active_team_ids,
+                since_revision=since_revision,
+                through_revision=snapshot.global_revision,
+            )
+        changed_teams = [
+            team.to_payload()
+            for team in snapshot.teams
+            if team.revision > since_revision
+        ]
+        return {
+            "globalRevision": snapshot.global_revision,
+            "globalSettings": snapshot.global_settings.to_payload(),
+            "teamCount": len(snapshot.teams),
+            "teams": changed_teams,
+            "removedTeamIds": removed_team_ids,
+        }
+
+    def _removed_team_ids_since_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        active_team_ids: set[str],
+        since_revision: int,
+        through_revision: int,
+    ) -> list[str]:
+        rows = connection.execute(
+            "SELECT kind, team_id, payload FROM events "
+            "WHERE revision > ? AND revision <= ? ORDER BY revision",
+            (since_revision, through_revision),
+        ).fetchall()
+        removed: list[str] = []
+        for row in rows:
+            event_team_id = str(row["team_id"])
+            if event_team_id not in active_team_ids and event_team_id not in {
+                GLOBAL_SETTINGS_EVENT_TEAM_ID,
+                PRUNE_EVENT_TEAM_ID,
+            }:
+                removed.append(event_team_id)
+            payload = json.loads(str(row["payload"]) or "{}")
+            if row["kind"] == "mergeTeams":
+                removed.append(str(payload.get("sourceTeamId") or ""))
+            if row["kind"] == "pruneZeroActivityTeams":
+                removed.extend(str(team_id) for team_id in payload.get("teams", ()))
+        return [
+            team_id
+            for team_id in dict.fromkeys(removed)
+            if team_id and team_id not in active_team_ids
+        ]
 
     def _team_snapshot_locked(self, connection: sqlite3.Connection) -> TeamSnapshot:
         self._prune_zero_activity_closed_teams_locked(connection)

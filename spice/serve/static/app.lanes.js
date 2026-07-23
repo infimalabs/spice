@@ -179,7 +179,12 @@ async function requestTeamCommand(payload) {
   const result = response.result;
   if (result.snapshot)
     applyTeamSnapshotPayload(
-      { revision: result.revision, changed: true, snapshot: result.snapshot },
+      {
+        revision: result.revision,
+        changed: true,
+        differential: Boolean(result.differential),
+        snapshot: result.snapshot,
+      },
       { force: true },
     );
   if (result.ok === false) {

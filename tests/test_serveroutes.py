@@ -325,8 +325,11 @@ def test_team_command_payloads_reject_stale_expected_revision(
     assert stale_status == HTTPStatus.CONFLICT
     assert stale["ok"] is False
     assert "stale team command" in stale["error"]
-    assert fresh_snapshot["changed"] is False
-    assert fresh_snapshot["revision"] == advanced["revision"]
+    assert fresh_snapshot == {
+        "ok": True,
+        "revision": advanced["revision"],
+        "changed": False,
+    }
     current = team_snapshot_response_payload(state, since_revision=None)
     assert current["snapshot"]["teams"][0]["config"]["lifetime"] == "Drive"
     assert sorted(current["snapshot"]["teams"][0]["config"]) == [
@@ -339,7 +342,61 @@ def test_team_command_payloads_reject_stale_expected_revision(
     unchanged = team_snapshot_response_payload(
         state, since_revision=advanced["revision"]
     )
-    assert unchanged["changed"] is False
+    assert unchanged == {
+        "ok": True,
+        "revision": advanced["revision"],
+        "changed": False,
+    }
+
+
+def test_team_topology_responses_emit_complete_per_team_differentials(tmp_path):
+    state = _serve_state(tmp_path, _target(_repo(tmp_path)))
+    first = state.team_store.create_team(
+        team_id="team-first",
+        members=[ACTOR_A, ACTOR_B],
+    )
+    second = state.team_store.create_team(team_id="team-second")
+    baseline = state.team_store.team_snapshot().global_revision
+
+    moved, moved_status = team_command_response_payload(
+        state,
+        {
+            "command": "moveAgentToTeam",
+            "teamId": second.team_id,
+            "agentId": ACTOR_A,
+            "expectedRevision": baseline,
+        },
+    )
+    refreshed = team_snapshot_response_payload(state, since_revision=baseline)
+    closed, closed_status = team_command_response_payload(
+        state,
+        {
+            "command": "closeTeam",
+            "teamId": second.team_id,
+            "expectedRevision": moved["revision"],
+        },
+    )
+
+    assert moved_status == HTTPStatus.OK
+    assert moved["differential"] is True
+    assert moved["snapshot"]["teamCount"] == 2
+    assert [team["teamId"] for team in moved["snapshot"]["teams"]] == [
+        first.team_id,
+        second.team_id,
+    ]
+    assert moved["snapshot"]["removedTeamIds"] == []
+    assert refreshed == {
+        "ok": True,
+        "revision": moved["revision"],
+        "changed": True,
+        "differential": True,
+        "snapshot": moved["snapshot"],
+    }
+    assert closed_status == HTTPStatus.OK
+    assert closed["differential"] is True
+    assert closed["snapshot"]["teamCount"] == 1
+    assert closed["snapshot"]["teams"] == []
+    assert closed["snapshot"]["removedTeamIds"] == [second.team_id]
 
 
 def test_team_command_payload_preserves_explicit_actor_ids(tmp_path):

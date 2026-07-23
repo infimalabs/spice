@@ -78,8 +78,15 @@ def team_snapshot_response_payload(
         "ok": True,
         "revision": snapshot.global_revision,
         "changed": changed,
-        "snapshot": snapshot.to_payload(),
     }
+    if changed:
+        if since_revision is None:
+            payload["snapshot"] = snapshot.to_payload()
+        else:
+            payload["differential"] = True
+            payload["snapshot"] = state.team_store.team_snapshot_delta_payload(
+                snapshot, since_revision=since_revision
+            )
     return validate_emitter_payload("httpapi.team_snapshot_response_payload", payload)
 
 
@@ -87,23 +94,32 @@ def team_command_response_payload(
     state: Any, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
-        result = state.team_commands.apply(
-            identity.normalize_team_command_payload(
-                payload, targets=state.worktree_targets()
-            )
+        normalized = identity.normalize_team_command_payload(
+            payload, targets=state.worktree_targets()
         )
+        result = state.team_commands.apply(normalized)
     except SpiceError as exc:
         payload = validate_emitter_payload(
             "httpapi.team_command_response_payload",
             {"ok": False, "error": str(exc)},
         )
         return payload, HTTPStatus.CONFLICT
+    previous_revision = normalized.get("expectedRevision")
+    differential = previous_revision is not None
+    snapshot_payload = (
+        state.team_store.team_snapshot_delta_payload(
+            result.snapshot, since_revision=int(previous_revision)
+        )
+        if differential
+        else result.snapshot.to_payload()
+    )
     payload = validate_emitter_payload(
         "httpapi.team_command_response_payload",
         {
             "ok": True,
             "revision": result.revision,
-            "snapshot": result.snapshot.to_payload(),
+            "snapshot": snapshot_payload,
+            "differential": differential,
         },
     )
     return (

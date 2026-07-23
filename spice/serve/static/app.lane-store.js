@@ -62,7 +62,11 @@ class ServeLaneStore {
     return this.#publishTeamSnapshotTransition({
       ...acceptance,
       globalSettings: snapshot.globalSettings,
-      ...this.#reconcileTeamSnapshot(snapshot, options),
+      ...this.#reconcileTeamSnapshot(
+        snapshot,
+        options,
+        Boolean((payload || {}).differential),
+      ),
     });
   }
 
@@ -73,9 +77,11 @@ class ServeLaneStore {
     );
     const previousRevision = this.#teamSnapshotRevision;
     const forced = Boolean(options.force);
+    const differential = Boolean((payload || {}).differential);
     if (revision < previousRevision)
       return {
         disposition: "stale",
+        differential,
         forced,
         incomingRevision: revision,
         previousRevision,
@@ -86,6 +92,7 @@ class ServeLaneStore {
     if ((payload || {}).changed === false && !forced)
       return {
         disposition: "unchanged",
+        differential,
         forced,
         incomingRevision: revision,
         previousRevision,
@@ -93,6 +100,7 @@ class ServeLaneStore {
       };
     return {
       disposition: "applied",
+      differential,
       forced,
       incomingRevision: revision,
       previousRevision,
@@ -100,8 +108,15 @@ class ServeLaneStore {
     };
   }
 
-  #reconcileTeamSnapshot(snapshot, options) {
+  #reconcileTeamSnapshot(snapshot, options, differential) {
     const teams = Array.isArray(snapshot.teams) ? snapshot.teams : [];
+    const removedTeamIds = new Set(
+      Array.isArray(snapshot.removedTeamIds) ? snapshot.removedTeamIds : [],
+    );
+    const affectedTeamIds = new Set([
+      ...teams.map((team) => String((team || {}).teamId || "")),
+      ...removedTeamIds,
+    ]);
     const state = {
       desiredTargetIds: new Set(),
       adds: [],
@@ -110,17 +125,26 @@ class ServeLaneStore {
       groupRuns: [],
     };
     const adapters = this.#teamSnapshotAdapters(options);
+    const teamCount = differential
+      ? Math.max(0, Number(snapshot.teamCount) || 0)
+      : teams.length;
     for (const team of teams)
-      this.#reconcileTeam(team, state, adapters, teams.length > 1);
+      this.#reconcileTeam(team, state, adapters, teamCount > 1);
     const laneChanges = this.#teamSnapshotLaneChanges(
       state.desiredTargetIds,
       adapters.canRemoveLane,
+      affectedTeamIds,
+      differential,
     );
     return {
       adds: state.adds,
       updates: state.updates,
       renewals: state.renewals,
-      groupRuns: state.groupRuns,
+      groupRuns: this.#teamSnapshotGroupRuns(
+        state.groupRuns,
+        affectedTeamIds,
+        differential,
+      ),
       desiredTargetIds: Array.from(state.desiredTargetIds),
       ...laneChanges,
     };
@@ -240,15 +264,38 @@ class ServeLaneStore {
     else memberTargetIds.splice(Math.min(priorIndex, memberTargetIds.length), 0, targetId);
   }
 
-  #teamSnapshotLaneChanges(desiredTargetIds, canRemoveLane) {
+  #teamSnapshotLaneChanges(
+    desiredTargetIds,
+    canRemoveLane,
+    affectedTeamIds,
+    differential,
+  ) {
     const removes = [];
     const retained = [];
     for (const lane of this.#lanes.values()) {
       if (desiredTargetIds.has(lane.targetId)) continue;
+      if (differential && !affectedTeamIds.has(String(lane.teamId || "")))
+        continue;
       if (canRemoveLane(lane)) removes.push(lane);
       else retained.push(lane);
     }
     return { removes, retained };
+  }
+
+  #teamSnapshotGroupRuns(changedRuns, affectedTeamIds, differential) {
+    if (!differential) return changedRuns;
+    const changedTargetIds = new Set(changedRuns.flat());
+    const retainedRuns = [];
+    for (const topology of this.#groupTopologyByTargetId.values()) {
+      if (topology.role !== "host") continue;
+      const affected = topology.memberTargetIds.some((targetId) => {
+        if (changedTargetIds.has(targetId)) return true;
+        const lane = this.#lanes.get(targetId);
+        return affectedTeamIds.has(String((lane || {}).teamId || ""));
+      });
+      if (!affected) retainedRuns.push(topology.memberTargetIds.slice());
+    }
+    return [...retainedRuns, ...changedRuns];
   }
 
   lanesSnapshot() {
@@ -405,6 +452,7 @@ class ServeLaneStore {
   #publishTeamSnapshotTransition(fields) {
     const transition = Object.freeze({
       disposition: fields.disposition,
+      differential: fields.differential,
       forced: fields.forced,
       incomingRevision: fields.incomingRevision,
       previousRevision: fields.previousRevision,

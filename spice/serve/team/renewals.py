@@ -61,7 +61,7 @@ class _TeamRenewalStore(Protocol):
         team_id: str,
         agent_id: str,
         aliases: Iterable[str] = (),
-    ) -> None: ...
+    ) -> list[str]: ...
 
     def _rewrite_agent_metric_cursors_locked(
         self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
