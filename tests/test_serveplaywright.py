@@ -278,6 +278,9 @@ def test_serve_composer_pending_send_smoke_covers_fifo_readiness_and_restore() -
     assert "grouped.commandRepeatedPending.payloads.length" in smoke
     assert "grouped.commandRepeatedSettled.focusState" in smoke
     assert "grouped.buttonPayloads.length" in smoke
+    assert "function runGroupedCloseProtectionScenario(" in smoke
+    assert "closeProtection.closeCanceled.warningTexts.length" in smoke
+    assert '"fused close retains failed queued and newer drafts in order"' in smoke
     assert "waitForPendingSendCount(lane, 0)" in smoke
     assert "function waitForNextSend(events)" in smoke
     assert 'attributeFilter: ["data-pending-send-count"]' in smoke
