@@ -409,7 +409,6 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
     assert pressures[1]["count"] == 1
     assert pressures[0]["items"][0]["reviewedTask"] == "review-a"
     assert pressures[1]["items"][0]["reviewedTask"] == "review-b"
-    assert pressures[0] != pressures[1]
 
 
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
