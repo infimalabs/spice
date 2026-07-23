@@ -7,6 +7,8 @@ const REPEATED_TEXT = "second keyboard submission without clicking";
 const SHARED_BODY = "shared focused body";
 const SHARED_QUOTE = "shared quote";
 const SHARED_CONTEXT = "shared context";
+const FOCUS_RESTORE_TEXT = "restore focus to submitting composer";
+const FOCUS_PRESERVE_TEXT = "preserve focus on the second composer";
 
 async function run() {
   return withServePage(
@@ -24,6 +26,7 @@ async function run() {
           pendingSendSnapshot,
           pendingSendSubmission,
           resolveSuccessfulPendingSend,
+          runCrossComposerFocusScenarios,
           runGroupedButtonSubmission,
           runGroupedComposerScenarios,
           runRepeatedKeyboardSubmission,
@@ -34,6 +37,8 @@ async function run() {
       });
       const config = {
         failureText: FAILURE_TEXT,
+        focusPreserveText: FOCUS_PRESERVE_TEXT,
+        focusRestoreText: FOCUS_RESTORE_TEXT,
         repeatedText: REPEATED_TEXT,
         sharedBody: SHARED_BODY,
         sharedContext: SHARED_CONTEXT,
@@ -97,8 +102,10 @@ async function runPendingSendScenarios(config) {
     await failureUnlocked;
     const failureSettled = pendingSendSnapshot(lane, textarea, sends.length);
     const grouped = await runGroupedComposerScenarios(sends, config);
+    const crossFocus = await runCrossComposerFocusScenarios(sends, config);
     return {
       afterSecondSubmit,
+      crossFocus,
       failurePending,
       failureSettled,
       grouped,
@@ -191,6 +198,88 @@ async function runGroupedComposerScenarios(sends, config) {
 
 function configureGroupedComposer(host, member) {
   laneStore.applyLaneGroups([[host.targetId, member.targetId]], { isLaneOpen });
+}
+
+// Two independent (ungrouped) composers. A keyboard submit captures its own
+// textarea as the post-completion focus target; the pending lock drops focus to
+// <body>. If the send is slow and the caret stayed put, completion restores it
+// (same-composer restoration); if the user moved to the second composer first,
+// completion must leave that focus alone (cross-composer preservation).
+async function runCrossComposerFocusScenarios(sends, config) {
+  const first = resolveIsolatedLane("composer-focus-first");
+  const second = resolveIsolatedLane("composer-focus-second");
+  syncComposerShards(
+    laneGroupHost(first),
+    laneGroupMemberLanes(laneGroupHost(first)),
+  );
+  syncComposerShards(
+    laneGroupHost(second),
+    laneGroupMemberLanes(laneGroupHost(second)),
+  );
+  const firstTextarea = first.shardTextareas.get(first.targetId);
+  const secondTextarea = second.shardTextareas.get(second.targetId);
+  if (!firstTextarea || !secondTextarea)
+    throw new Error("cross-composer focus smoke needs both composer textareas");
+
+  const submitByKeyboard = (textarea, text) => {
+    textarea.value = text;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    const start = sends.length;
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Enter",
+        metaKey: true,
+      }),
+    );
+    return sends.slice(start);
+  };
+  const resolveSends = (pending, keyPrefix, version) =>
+    pending.forEach((send, index) =>
+      resolveSuccessfulPendingSend(
+        send,
+        laneStore.laneForId(send.fields.targetId),
+        keyPrefix + index,
+        send.fields.payload.text,
+        version,
+      ),
+    );
+  const focusLabel = () => {
+    if (document.activeElement === firstTextarea) return "first";
+    if (document.activeElement === secondTextarea) return "second";
+    return "blurred";
+  };
+
+  const restorePending = submitByKeyboard(firstTextarea, config.focusRestoreText);
+  const restorePendingFocus = focusLabel();
+  const restoreUnlocked = waitForComposerState(firstTextarea, "editable");
+  resolveSends(restorePending, "composer-focus-restore-", 5);
+  await restoreUnlocked;
+  const restoreSettledFocus = focusLabel();
+
+  const preservePending = submitByKeyboard(
+    firstTextarea,
+    config.focusPreserveText,
+  );
+  secondTextarea.focus();
+  const preservePendingFocus = focusLabel();
+  const preserveUnlocked = waitForComposerState(firstTextarea, "editable");
+  resolveSends(preservePending, "composer-focus-preserve-", 6);
+  await preserveUnlocked;
+  const preserveSettledFocus = focusLabel();
+
+  return {
+    firstTargetId: first.targetId,
+    preservePendingFocus,
+    preserveSends: preservePending.length,
+    preserveSettledFocus,
+    restorePendingFocus,
+    restoreSends: restorePending.length,
+    restoreSettledFocus,
+    secondTargetId: second.targetId,
+  };
 }
 
 async function runRepeatedKeyboardSubmission(
@@ -463,6 +552,30 @@ function assertPendingSendScenarios(result, config) {
     grouped.buttonSettled.memberQuoteState,
     "cleared",
     "button member quote state",
+  );
+
+  const crossFocus = result.crossFocus;
+  expectEqual(crossFocus.restoreSends, 1, "restore keyboard send count");
+  expectEqual(
+    crossFocus.restorePendingFocus,
+    "blurred",
+    "restore pending lock drops focus",
+  );
+  expectEqual(
+    crossFocus.restoreSettledFocus,
+    "first",
+    "same-composer restoration after delayed completion",
+  );
+  expectEqual(crossFocus.preserveSends, 1, "preserve keyboard send count");
+  expectEqual(
+    crossFocus.preservePendingFocus,
+    "second",
+    "user focus moved to second composer while pending",
+  );
+  expectEqual(
+    crossFocus.preserveSettledFocus,
+    "second",
+    "cross-composer focus preserved through delayed completion",
   );
 }
 
