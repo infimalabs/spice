@@ -9,9 +9,11 @@ from pathlib import Path
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import AgentStatus, agent_status
 from spice.agent.paths import (
+    AgentWorktreeStatePaths,
     agent_thread_pointer_lock,
     agent_thread_pointer_path,
     read_agent_thread_pointer,
+    resolve_agent_worktree_state_paths,
 )
 from spice.errors import SpiceError
 from spice.serve.worktree.target import WorktreeTarget
@@ -21,6 +23,7 @@ from spice.serve.worktree.target import WorktreeTarget
 class _TargetThreadBinding:
     target: WorktreeTarget
     status: AgentStatus
+    state_paths: AgentWorktreeStatePaths
     pointer_path: Path
     pointer_fingerprint: tuple[int, int, int, int]
 
@@ -66,11 +69,18 @@ def _target_thread_binding(
     # thread pointer.
     if not (target.repo_root / ".git").exists():
         return None
-    pointer_path = agent_thread_pointer_path(target.repo_root)
-    thread_id = read_agent_thread_pointer(target.repo_root)
+    state_paths = resolve_agent_worktree_state_paths(target.repo_root)
+    pointer_path = agent_thread_pointer_path(
+        target.repo_root,
+        state_paths=state_paths,
+    )
+    thread_id = read_agent_thread_pointer(
+        target.repo_root,
+        state_paths=state_paths,
+    )
     if not thread_id:
         return None
-    status = agent_status(target.repo_root)
+    status = agent_status(target.repo_root, state_paths=state_paths)
     if canonical_thread_id(status.thread_id) != thread_id:
         raise SpiceError(
             "retry the serve target refresh after the agent binding settles; "
@@ -86,6 +96,7 @@ def _target_thread_binding(
     return _TargetThreadBinding(
         target=target,
         status=status,
+        state_paths=state_paths,
         pointer_path=pointer_path,
         pointer_fingerprint=_pointer_fingerprint(stat),
     )
@@ -142,8 +153,14 @@ def _clear_stale_binding(thread_id: str, binding: _TargetThreadBinding) -> None:
     # Revalidate and unlink while holding the same lock as atomic pointer
     # replacement. Otherwise a writer can replace the verified inode in the
     # check-to-unlink gap and have its new binding deleted as stale.
-    with agent_thread_pointer_lock(binding.target.repo_root):
-        current = read_agent_thread_pointer(binding.target.repo_root)
+    with agent_thread_pointer_lock(
+        binding.target.repo_root,
+        state_paths=binding.state_paths,
+    ):
+        current = read_agent_thread_pointer(
+            binding.target.repo_root,
+            state_paths=binding.state_paths,
+        )
         try:
             stat = binding.pointer_path.stat()
         except FileNotFoundError:
