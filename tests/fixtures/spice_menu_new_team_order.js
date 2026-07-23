@@ -73,16 +73,20 @@ setTargets([
   target("loose", "mmm-loose"),
 ]);
 
-context.moveTargetToMenuTeamOptimisticUi("__new_team_drop__", "created");
+context.rememberSpiceMenuNewTeamPlacement("created");
 assertOrder(
   orderedMenuTeamIds(),
   [
+    "team-old:created",
     "team-existing:existing",
-    "new-team:created:created",
     "new-team-drop",
     "unassigned",
   ],
-  "optimistic new-team drop stays next to the drop zone",
+  "placement hint leaves server-authored source topology untouched",
+);
+assert(
+  laneStore.targetForId("created").teamIdentity.teamId === "team-old",
+  "placement hint does not author a target team identity",
 );
 
 setTargets([

@@ -472,6 +472,7 @@ async function openTargetTeam(targetId, options = {}) {
     await requestTeamCommand(
       teamCommandPayload("createTeam", {
         members: [targetTeamAgentId(target)],
+        agentAliases: targetTeamAgentAliases(target),
         config: defaultTeamConfig(),
       }),
     );
