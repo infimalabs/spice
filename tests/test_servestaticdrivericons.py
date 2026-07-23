@@ -89,9 +89,9 @@ def test_composer_driver_icon_rerender_keeps_matching_dom_node():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_accepted_composer_send_clears_only_target_draft_stack():
+def test_detached_composer_send_restores_only_target_draft_stack():
     app_composer = STATIC_ROOT / "app.composer.js"
-    script = Path(__file__).with_name("fixtures") / "composer_accepted_draft_clear.js"
+    script = Path(__file__).with_name("fixtures") / "composer_draft_detach_restore.js"
 
     result = subprocess.run(
         ["node", str(script), str(app_composer)],

@@ -298,6 +298,7 @@ function assertSubmitLatencyResult(result) {
   const serverTiming = sample.serverTiming || {};
   const requiredDurations = [
     "optimisticRenderMs",
+    "composerReadyMs",
     "liveBusOpenMs",
     "sendResultWaitMs",
     "responseHandlingMs",
@@ -310,6 +311,7 @@ function assertSubmitLatencyResult(result) {
   for (const key of [
     "startedAt",
     "optimisticRenderedAt",
+    "composerReadyAt",
     "liveBusConnectStartAt",
     "liveBusConnectReadyAt",
     "liveBusFrameSentAt",

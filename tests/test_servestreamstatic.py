@@ -685,7 +685,7 @@ def test_static_cmd_enter_submits_focused_composer_target_only():
     assert "lane.formEl.requestSubmit();" not in app_shell
 
 
-def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
+def test_static_keyboard_submit_refocuses_target_composer_before_backend_reply():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     submit_start = app_controls.index("function submitLaneForm(")
@@ -730,10 +730,10 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
         app_stream
     )
     assert 'markLaneSubmitLatency(latencyProbe, "optimisticRenderedAt");' in app_stream
-    assert (
-        "sendLanePayload(lane, payload, sourceLane, { ...options, latencyProbe });"
-        in app_stream
-    )
+    assert "const composerDraft = detachLaneComposerDraft(" in app_stream
+    assert "lane.pendingSendQueue.push({" in app_stream
+    assert "drainLaneSendQueue(lane);" in app_stream
+    assert 'markLaneSubmitLatency(latencyProbe, "composerReadyAt");' in app_stream
     assert 'markLaneSubmitLatency(latencyProbe, "requestAwaitStartAt");' in (
         send_payload_body
     )
@@ -743,7 +743,7 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "closed");' in (
         send_payload_body
     )
-    assert "applyLaneSendResult(lane, payload, result, sourceLane, options);" in (
+    assert "applyLaneSendResult(lane, payload, result, sourceLane);" in (
         send_payload_body
     )
     assert 'markLaneSubmitLatency(latencyProbe, "resultAppliedAt");' in (
@@ -752,11 +752,7 @@ def test_static_keyboard_submit_refocuses_target_composer_after_unlock():
     assert 'result.ok ? "accepted" : "rejected"' in send_payload_body
     assert 'markLaneSubmitLatency(latencyProbe, "errorAt");' in send_payload_body
     assert 'finishLaneSubmitLatencyProbe(latencyProbe, "error");' in (send_payload_body)
-    assert "options = {}," in result_body
-    assert result_body.index("finishLanePendingSubmission(lane") < result_body.index(
-        "focusAfterComposerReset(options.focusAfterReset);"
-    )
-    assert "clearAcceptedComposerDrafts(sourceLane, lane.targetId);" in result_body
+    assert "finishLanePendingSubmission(lane" in result_body
     assert (
         'throw new Error("composer focus target must remain in the document");'
         in focus_reset_body
@@ -783,6 +779,7 @@ def test_static_send_latency_probe_records_submit_timing_buckets():
     assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_static
     assert "function laneSubmitLatencyDurations(marks)" in app_static
     assert "optimisticRenderMs:" in app_static
+    assert "composerReadyMs:" in app_static
     assert "liveBusOpenMs:" in app_static
     assert "sendResultWaitMs:" in app_static
     assert "responseHandlingMs:" in app_static

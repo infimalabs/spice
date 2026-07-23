@@ -643,14 +643,56 @@ function enqueueSend(lane, payload, sourceLane = lane, options = {}) {
     setLaneTransientStatus(sourceLane, "Message text is required.");
     return;
   }
-  if (lane.sendAwaitingBackendCount > 0) {
-    setLaneTransientStatus(sourceLane, "send already in progress");
-    return;
-  }
   const latencyProbe = startLaneSubmitLatencyProbe(lane, payload);
+  const composerDraft = detachLaneComposerDraft(sourceLane, lane.targetId);
   beginLanePendingSubmission(lane);
   markLaneSubmitLatency(latencyProbe, "optimisticRenderedAt");
-  sendLanePayload(lane, payload, sourceLane, { ...options, latencyProbe });
+  focusAfterComposerReset(options.focusAfterReset);
+  markLaneSubmitLatency(latencyProbe, "composerReadyAt");
+  lane.pendingSendQueue.push({
+    composerDraft,
+    latencyProbe,
+    options,
+    payload,
+    sourceLane,
+  });
+  drainLaneSendQueue(lane);
+}
+
+async function drainLaneSendQueue(lane) {
+  if (lane.pendingSendQueueActive) return;
+  lane.pendingSendQueueActive = true;
+  try {
+    while (lane.pendingSendQueue.length) {
+      const entry = lane.pendingSendQueue.shift();
+      const accepted = await sendLanePayload(
+        lane,
+        entry.payload,
+        entry.sourceLane,
+        { ...entry.options, latencyProbe: entry.latencyProbe },
+      );
+      if (accepted) continue;
+      restoreFailedLaneSendQueue(lane, entry);
+      return;
+    }
+  } finally {
+    lane.pendingSendQueueActive = false;
+  }
+}
+
+function restoreFailedLaneSendQueue(lane, failedEntry) {
+  const queued = lane.pendingSendQueue.splice(0);
+  for (const entry of queued) {
+    finishLanePendingSubmission(lane, { accepted: false });
+    markLaneSubmitLatency(entry.latencyProbe, "errorAt");
+    finishLaneSubmitLatencyProbe(entry.latencyProbe, "canceled");
+  }
+  if (!isLaneOpen(failedEntry.sourceLane)) return;
+  restoreLaneComposerDrafts(
+    failedEntry.sourceLane,
+    lane.targetId,
+    [failedEntry, ...queued].map((entry) => entry.composerDraft),
+  );
 }
 
 async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
@@ -674,14 +716,15 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
     latencyProbe.serverTiming = result.serverTiming || {};
     if (!isLaneOpen(lane)) {
       finishLaneSubmitLatencyProbe(latencyProbe, "closed");
-      return;
+      return false;
     }
-    applyLaneSendResult(lane, payload, result, sourceLane, options);
+    applyLaneSendResult(lane, payload, result, sourceLane);
     markLaneSubmitLatency(latencyProbe, "resultAppliedAt");
     finishLaneSubmitLatencyProbe(
       latencyProbe,
       result.ok ? "accepted" : "rejected",
     );
+    return Boolean(result.ok);
   } catch (error) {
     markLaneSubmitLatency(latencyProbe, "errorAt");
     if (isLaneOpen(lane)) {
@@ -690,6 +733,7 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
       setLaneTransientStatus(sourceLane, "steer failed");
     }
     finishLaneSubmitLatencyProbe(latencyProbe, "error");
+    return false;
   } finally {
     lane.sendAwaitingBackendCount = Math.max(
       0,
@@ -742,6 +786,10 @@ function laneSubmitLatencyDurations(marks) {
       marks.startedAt,
       marks.optimisticRenderedAt,
     ),
+    composerReadyMs: laneSubmitLatencyDelta(
+      marks.startedAt,
+      marks.composerReadyAt,
+    ),
     liveBusOpenMs: laneSubmitLatencyDelta(
       marks.liveBusConnectStartAt,
       marks.liveBusConnectReadyAt,
@@ -771,18 +819,15 @@ function applyLaneSendResult(
   payload,
   result,
   sourceLane = lane,
-  options = {},
 ) {
   result = /** @type {WorkTreeSendResult} */ (result);
   const previousThreadId = lane.targetThreadId || "";
   applyTaskDrainRouteConfig(lane, result);
   if (!result.ok) {
     finishLanePendingSubmission(lane, { accepted: false });
-    focusAfterComposerReset(options.focusAfterReset);
     setLaneTransientStatus(sourceLane, result.error || "send failed");
     return;
   }
-  clearAcceptedComposerDrafts(sourceLane, lane.targetId);
   finishLanePendingSubmission(lane, {
     accepted: true,
     inboxKey: result.key,
@@ -791,7 +836,6 @@ function applyLaneSendResult(
     pendingInboxRevision: result.pendingInboxRevision,
     pendingInboxVersion: result.pendingInboxVersion,
   });
-  focusAfterComposerReset(options.focusAfterReset);
   rememberAckContext(
     lane,
     result.key,
