@@ -407,7 +407,6 @@
  * @property {string} lifetime
  * @property {RenewalIntentPayload} renewalIntent
  * @property {TaskFilterInventory} taskFilterInventory
- * @property {LaneMetrics} laneMetrics
  * @property {LaneInfo} laneInfo
  * @property {AgentEnsurePayload} agentEnsure
  * @property {StatusLine} statusLine
@@ -445,7 +444,6 @@
  * @property {Array.<TaskFilterEntry>=} taskFilterEntries
  * @property {string=} laneFilterVersion
  * @property {TaskFilterInventory=} taskFilterInventory
- * @property {LaneMetrics=} laneMetrics
  * @property {LaneInfo=} laneInfo
  * @property {number=} privateTaskCount
  * @property {TeamIdentity=} teamIdentity
@@ -485,7 +483,6 @@
  * @property {string=} lifetime
  * @property {RenewalIntentPayload=} renewalIntent
  * @property {TaskFilterInventory=} taskFilterInventory
- * @property {LaneMetrics=} laneMetrics
  * @property {LaneInfo=} laneInfo
  * @property {number=} pendingInboxCount
  * @property {string=} pendingInboxLabel
@@ -872,6 +869,13 @@
  * @typedef {Object} MetricSeriesFrame
  * @property {"metrics.seriesResult"} type
  * @property {MetricSeriesPayload} result
+ * @property {string=} requestId
+ */
+
+/**
+ * @typedef {Object} MetricsSummaryFrame
+ * @property {"metrics.summaryResult"} type
+ * @property {LaneMetrics} result
  * @property {string=} requestId
  */
 

@@ -597,6 +597,33 @@ function renderLaneMetricsPane(lane) {
   lane.metricsSummaryEl.textContent = model.status;
   renderLaneMetricsVanilla(lane.metricsGridEl, model);
   requestLaneMetricSeries(lane, model);
+  requestLaneMetrics(lane);
+}
+
+function requestLaneMetrics(lane) {
+  if (typeof liveBusRequest !== "function") return;
+  // On demand only: the metrics tab is never the first view, so the counters --
+  // and the status:completed export that backs "drained" -- load exactly once
+  // the pane is opened, never in the eager per-lane message payload.
+  if (laneViewMode(lane.selectedView) !== "metrics") return;
+  const key = lane.targetId;
+  if (!key) return;
+  if (lane.laneMetricsRequestKey === key || lane.laneMetricsPendingKey === key)
+    return;
+  lane.laneMetricsPendingKey = key;
+  liveBusRequest("metrics.summary", { targetId: key }).then(
+    (message) => {
+      if (lane.laneMetricsPendingKey !== key) return;
+      lane.laneMetricsPendingKey = "";
+      lane.laneMetricsRequestKey = key;
+      lane.laneMetrics = message.result || {};
+      renderLaneMetricsPane(lane);
+    },
+    () => {
+      if (lane.laneMetricsPendingKey !== key) return;
+      lane.laneMetricsPendingKey = "";
+    },
+  );
 }
 
 function renderLaneMetricsVanilla(grid, model) {

@@ -735,6 +735,47 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     assert results[0]["result"] == valid_metric_series_payload(metric="burndown")
 
 
+def test_metrics_summary_builds_lane_metrics_on_demand(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    connection = _Connection()
+    seen: list[Any] = []
+    summary = {
+        "drained": 4,
+        "acked": 2,
+        "sends": 1,
+        "toolCalls": 9,
+        "uptimeSeconds": 30,
+        "sparkline": [1, 2],
+    }
+
+    def lane_metrics(bus_target):
+        seen.append(bus_target)
+        return summary
+
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        lane_metrics_payload=lane_metrics,
+    )
+    session = LiveBusSession(connection, callbacks)
+
+    session._handle_metrics_summary(
+        {"type": "metrics.summary", "requestId": "s1", "targetId": "lane"}
+    )
+    # The heavy build runs on the metrics worker; teardown drains it behind the
+    # stop sentinel so the reply is delivered deterministically.
+    session._teardown()
+
+    assert seen == [target]
+    results = [m for m in connection.sent if m.get("type") == "metrics.summaryResult"]
+    assert len(results) == 1
+    assert results[0]["requestId"] == "s1"
+    assert results[0]["result"] == summary
+
+
 class _DeadConnection:
     """Peer that vanished: every write raises like a closed socket."""
 

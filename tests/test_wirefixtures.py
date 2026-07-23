@@ -61,6 +61,7 @@ def valid_live_bus_callback_payloads(**overrides: Any) -> dict[str, Any]:
             None,
         ),
         "metric_series_payload": lambda _query: valid_metric_series_payload(),
+        "lane_metrics_payload": lambda _target: valid_wire_payload("LaneMetrics"),
     }
     callbacks.update(overrides)
     return callbacks
@@ -171,6 +172,18 @@ LIVE_BUS_FRAME_FIXTURES = {
     "metrics.seriesResult": valid_wire_payload(
         "MetricSeriesFrame",
         result=_METRIC_PAYLOAD,
+    ),
+    "metrics.summaryResult": valid_wire_payload(
+        "MetricsSummaryFrame",
+        result=valid_wire_payload(
+            "LaneMetrics",
+            drained=3,
+            acked=5,
+            sends=7,
+            toolCalls=11,
+            uptimeSeconds=42,
+            sparkline=[1, 2, 3],
+        ),
     ),
     "lane.pending": valid_wire_payload(
         "LanePendingFrame",

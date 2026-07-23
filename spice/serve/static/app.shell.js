@@ -170,7 +170,7 @@ function laneControlState(target, hint) {
     taskFilterEntries: normalizedTaskFilterEntries(target.taskFilterEntries),
     laneFilterVersion: target.laneFilterVersion || "",
     taskFilterInventory: target.taskFilterInventory || null,
-    laneMetrics: target.laneMetrics || {},
+    laneMetrics: {},
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
     renewalIntent: target.renewalIntent || {},
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),

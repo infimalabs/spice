@@ -630,6 +630,7 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
             team_snapshot_payload=lambda _since_revision: {},
             team_command_payload=lambda _payload: ({}, None),
             metric_series_payload=lambda _query: {"ok": True, "points": []},
+            lane_metrics_payload=lambda _target: {},
             thread_id=lambda _target: "thread",
             transcript_resolution=lambda _thread_id: None,
             lane_watch_paths=lambda *_args: (),

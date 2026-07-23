@@ -75,6 +75,7 @@ class LiveBusCallbacks:
     team_snapshot_payload: Callable[[int | None], dict[str, Any]]
     team_command_payload: Callable[[dict[str, Any]], tuple[dict[str, Any], Any]]
     metric_series_payload: Callable[[dict[str, Any]], dict[str, Any]]
+    lane_metrics_payload: Callable[[Any], dict[str, Any]]
     thread_id: Callable[[Any], str | None]
     transcript_resolution: Callable[[str], TranscriptResolution | None]
     lane_watch_paths: Callable[
@@ -171,7 +172,7 @@ class LiveBusSession(LiveBusMutationMixin):
         # them inline would block interactive frames (lane.send, acks) on this
         # one socket. A dedicated worker drains them so the dispatch loop stays
         # responsive — replies still carry the requestId the client matches on.
-        self._metrics_queue: Queue[dict[str, Any] | None] = Queue()
+        self._metrics_queue: Queue[tuple[dict[str, Any], Any] | None] = Queue()
         self._metrics_worker: Thread | None = None
         # A subscribe's blocking completion -- waiting out watcher activation and
         # reading the initial batch payload -- drains here off the dispatch
@@ -339,6 +340,7 @@ class LiveBusSession(LiveBusMutationMixin):
                 "lane.send": self._handle_lane_send,
                 "lane.taskDrain": self._handle_lane_task_drain,
                 "metrics.series": self._handle_metrics_series,
+                "metrics.summary": self._handle_metrics_summary,
             }.get(kind)
             if handler is None:
                 self._reply(
@@ -743,7 +745,7 @@ class LiveBusSession(LiveBusMutationMixin):
         )
         self._reply(message, {"type": "lane.taskDrainResult", "result": result})
 
-    def _handle_metrics_series(self, message: dict[str, Any]) -> None:
+    def _ensure_metrics_worker(self) -> None:
         if self._metrics_worker is None:
             self._metrics_worker = Thread(
                 target=self._metrics_loop,
@@ -751,24 +753,42 @@ class LiveBusSession(LiveBusMutationMixin):
                 daemon=True,
             )
             self._metrics_worker.start()
-        self._metrics_queue.put(message)
+
+    def _handle_metrics_series(self, message: dict[str, Any]) -> None:
+        self._ensure_metrics_worker()
+        self._metrics_queue.put((message, None))
+
+    def _handle_metrics_summary(self, message: dict[str, Any]) -> None:
+        # Resolve the lane inline (cheap) so a bad selector is refused on the
+        # dispatch thread; only the heavy metrics build is offloaded, matching
+        # every other per-target handler.
+        target = self._require_target(message)
+        if target is None:
+            return
+        self._ensure_metrics_worker()
+        self._metrics_queue.put((message, target))
 
     def _metrics_loop(self) -> None:
         while True:
-            message = self._metrics_queue.get()
-            if message is None:
+            item = self._metrics_queue.get()
+            if item is None:
                 return
+            message, target = item
             try:
-                result = self.callbacks.metric_series_payload(
-                    message.get("query") or {}
-                )
-                frame = {"type": "metrics.seriesResult", "result": result}
+                frame = self._metrics_frame(message, target)
             except Exception as exc:  # surface, never kill the worker silently
                 frame = {"type": "bus.error", "error": str(exc)}
             try:
                 self._reply(message, frame)
             except (OSError, WebSocketProtocolError, WebSocketDisconnect):
                 return
+
+    def _metrics_frame(self, message: dict[str, Any], target: Any) -> dict[str, Any]:
+        if str(message.get("type") or "") == "metrics.summary":
+            result = self.callbacks.lane_metrics_payload(target)
+            return {"type": "metrics.summaryResult", "result": result}
+        result = self.callbacks.metric_series_payload(message.get("query") or {})
+        return {"type": "metrics.seriesResult", "result": result}
 
     # ---- watchers ------------------------------------------------------
 
