@@ -128,8 +128,11 @@ checklist.
   default, every env access site. Env-name ledger separately accounts exact
   env names.
 - The fully-staged rule rejects partially staged files.
-- Negative tests are prohibited: tests assert intended behavior, not absence or
-  migration residue.
+- Prefer asserting real, present invariants over absence, migration-residue, or
+  vestige assertions: pin an observable property of a value that is actually
+  produced, not the non-appearance of one. This is a strong preference, not a
+  blanket ban on negatively-phrased comparisons -- `a != b` between two real
+  produced outputs asserts a present differentiation invariant and is encouraged.
 - A successful gate prunes sticky state that no longer measures over base.
 - Dirty work renders the same pressure against the uncommitted tree as steering,
   not as a block.

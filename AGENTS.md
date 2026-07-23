@@ -56,7 +56,9 @@ rules apply to the agents working here.
   `spice dev pre-commit` for the staged gate — never `pre-commit` standalone or
   `uv run pre-commit`; the standalone pre-commit framework is not installed and
   is not how spice runs the gate.
-- Do not add negative tests or negative assertions.
+- Prefer asserting real, present invariants over absence, migration-residue, or
+  vestige assertions; this is a strong preference, not a blanket ban on
+  negatively-phrased comparisons (`a != b` on two real outputs is fine).
 - Keep driving while progress is real; when outcomes oscillate, instrument
   instead of endlessly tuning.
 - Do not spawn sub-agents. Preserve the prompt boundary.
