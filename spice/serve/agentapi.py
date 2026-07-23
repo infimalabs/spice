@@ -51,6 +51,13 @@ AVAILABLE_WORK_START_THRESHOLD = 2
 # task that may never be filed. After this long a lone ready task starts a lane
 # by itself. It is the age at which one is enough, not a retry interval.
 AVAILABLE_WORK_STARVATION_SECONDS = 3.0 * 60.0
+# A two-or-more-ready burst clears the threshold with no wait spent, so it would
+# otherwise start a lane the instant the board tips over -- beating a running
+# agent's own done+next cycle or grabbing a row the moment it leaves plan phase.
+# The chosen row must sit READY for this short settle interval first; a row
+# already older than it, or a lone row riding the starvation escape above, starts
+# without further delay.
+AVAILABLE_WORK_SETTLE_SECONDS = 3.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
@@ -293,9 +300,12 @@ def ensure_agent_for_available_work(
     Expansion requires two ready tasks unless one candidate has been waiting
     for the starvation interval. READY rows exclude active claims, so this
     fixed threshold starts one lane and leaves one task on the board regardless
-    of how many lanes are already working. Two rows are an immediate capacity
-    signal: they skip the lone-row age threshold and need not wait out an
-    interval spent by an earlier pass. They are not a reason to relaunch a lane
+    of how many lanes are already working. Two rows clear the count threshold
+    and skip the lone-row age threshold, but the chosen row must still sit ready
+    for a short settle interval first -- long enough that a running agent's own
+    done+next cycle reaches it before a new lane does. Neither interval is spent
+    by an earlier pass; both are read off the rows, so a decline costs the board
+    nothing. Two ready rows are still not a reason to relaunch a lane
     whose launches keep dying -- queue pressure is a demand for a working
     agent, and the rapid-death hold is the standing answer that this lane is
     not one. This is deliberately a single-candidate decision: a lost claim
@@ -316,9 +326,20 @@ def ensure_agent_for_available_work(
         candidates = alloc.ordered_visible_ready_rows(actor)
         if not candidates:
             return None
-        remaining = available_work_next_deadline(candidates, now=datetime.now(UTC))
+        now = datetime.now(UTC)
+        remaining = available_work_next_deadline(candidates, now=now)
         if len(candidates) < AVAILABLE_WORK_START_THRESHOLD and remaining > 0.0:
             return _available_work_skip("capacity", retry_after_seconds=remaining)
+        # A burst that clears the threshold reaches here with no wait spent; hold
+        # the chosen row for a short settle interval so a new lane does not beat a
+        # running agent's done+next cycle or grab a row the instant it leaves plan
+        # phase. A lone row past its starvation escape (len below the threshold)
+        # skips the settle and starts now. The skip carries the settle remainder,
+        # so the watcher reschedules on it rather than spinning.
+        if len(candidates) >= AVAILABLE_WORK_START_THRESHOLD:
+            settle = available_work_settle_remaining(candidates, now=now)
+            if settle > 0.0:
+                return _available_work_skip("settle", retry_after_seconds=settle)
         # Read after the board, not before it: a pass that declines above spends
         # nothing here, so a second row arriving mid-interval finds the interval
         # unspent and dispatches on arrival. What it does bound is attempts,
@@ -398,6 +419,25 @@ def available_work_next_deadline(
         default=0.0,
     )
     return starvation_seconds - oldest
+
+
+def available_work_settle_remaining(
+    candidates: Sequence[dict[str, Any]],
+    *,
+    now: datetime,
+    settle_seconds: float = AVAILABLE_WORK_SETTLE_SECONDS,
+) -> float:
+    """Seconds until the chosen candidate has settled enough to auto-start.
+
+    The zero-wait expansion claims the first ordered row, so a fresh burst of
+    two or more ready tasks must let that row sit READY for the settle interval
+    before a new lane grabs it -- long enough for a running agent's own done+next
+    cycle to reach it first. Zero or less means the row has already settled; no
+    candidates leaves nothing to wait on.
+    """
+    if not candidates:
+        return 0.0
+    return settle_seconds - available_work_queue_age_seconds(candidates[0], now=now)
 
 
 def _available_work_skip(
