@@ -496,6 +496,103 @@ def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkey
     assert claimed[1] == {"handle": "claim-b", "phase": "review", "title": "task b"}
 
 
+def test_work_trees_payload_exports_task_cards_once_and_filters_each_lane(
+    tmp_path, monkeypatch
+):
+    targets = [
+        _Target(id="wt-a", repo_root=tmp_path / "a"),
+        _Target(id="wt-b", repo_root=tmp_path / "b"),
+    ]
+    threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
+
+    def running_status(repo_root: Path) -> _Status:
+        return _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=threads[repo_root],
+        )
+
+    task_rows = [
+        {
+            "id": 1,
+            "uuid": "task-a",
+            "entry": "20260610T120001Z",
+            "description": "Lane A follow-up",
+            "project": "serve.alpha",
+            "origin_thread": "agenta",
+            "creation_surface": "cli",
+            "status": "pending",
+        },
+        {
+            "id": 2,
+            "uuid": "task-b",
+            "entry": "20260610T120002Z",
+            "description": "Lane B follow-up",
+            "project": "serve.beta",
+            "origin_thread": "agentb",
+            "creation_surface": "cli",
+            "status": "pending",
+        },
+    ]
+    export_calls: list[list[str]] = []
+
+    def counting_export(filters: list[str] | None = None, **_kwargs: object):
+        recorded = list(filters or [])
+        export_calls.append(recorded)
+        return [dict(row) for row in task_rows] if recorded == ["status.any:"] else []
+
+    monkeypatch.setattr(message.tw, "export", counting_export)
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        inventory,
+        "resolve_thread_id_for_target",
+        lambda _state, target: threads[target.repo_root],
+    )
+    monkeypatch.setattr(inventory, "agent_status", running_status)
+    monkeypatch.setattr(identity, "agent_status", running_status)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_a, **_k: _message_read(),
+    )
+
+    payload = inventory.work_trees_payload(_MultiInventoryState(targets))
+
+    assert export_calls.count(["status.any:"]) == 1
+    task_activity = [
+        {
+            "kind": tree["statusLine"]["latestActivityKind"],
+            "timestamp": tree["statusLine"]["lastAssistantAt"],
+            "preview": tree["statusLine"]["preview"],
+        }
+        for tree in payload["workTrees"]
+    ]
+    assert task_activity == [
+        {
+            "kind": "task_card",
+            "timestamp": "2026-06-10T12:00:01.000000Z",
+            "preview": "Task capture: Lane A follow-up (serve.alpha)",
+        },
+        {
+            "kind": "task_card",
+            "timestamp": "2026-06-10T12:00:02.000000Z",
+            "preview": "Task capture: Lane B follow-up (serve.beta)",
+        },
+    ]
+
+
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
     thread_id = "019f6eddab8c7ab2870af6b81dfc5b7f"
     target = _Target(id="wt", repo_root=tmp_path)

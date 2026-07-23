@@ -52,8 +52,39 @@ from spice.tasks import tw
 TASK_CARD_SOURCE_KIND = "cli_task_created"
 
 
+class TaskCardExportSnapshot:
+    """Load all task-card rows once and filter them per inventory lane.
+
+    Inventory builds render the same global task board through every bound
+    lane. Loading it lazily keeps unbound inventories free of this export,
+    while caching a failed export as empty lets every lane degrade uniformly
+    without repeatedly spawning the failing command.
+    """
+
+    def __init__(self) -> None:
+        self._rows: list[dict[str, Any]] = []
+        self._loaded = False
+
+    def rows_for_actor(self, actor: str) -> list[dict[str, Any]]:
+        """Return rows whose stored origin_thread exactly matches ``actor``."""
+        if not actor:
+            return []
+        if not self._loaded:
+            self._loaded = True
+            try:
+                self._rows = tw.export(["status.any:"])
+            except SpiceError:
+                self._rows = []
+        return [
+            row for row in self._rows if str(row.get("origin_thread") or "") == actor
+        ]
+
+
 def target_activity_items(
-    target: WorktreeTarget, thread_id: str
+    target: WorktreeTarget,
+    thread_id: str,
+    *,
+    task_cards: TaskCardExportSnapshot | None = None,
 ) -> tuple[
     list[message_reader.AssistantMessage],
     str | None,
@@ -67,7 +98,12 @@ def target_activity_items(
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
-    merged = _merge_task_card_messages(thread_id, read.items, limit=1)
+    merged = _merge_task_card_messages(
+        thread_id,
+        read.items,
+        limit=1,
+        task_cards=task_cards,
+    )
     merged = _merge_reply_card_messages(
         thread_id,
         merged,
@@ -123,9 +159,13 @@ def _merge_task_card_messages(
     limit: int,
     after: str | None = None,
     before: str | None = None,
+    task_cards: TaskCardExportSnapshot | None = None,
 ) -> list[message_reader.AssistantMessage]:
     cards = _task_card_messages_for_thread(
-        thread_id, after=_card_window_after(items, after, before), before=before
+        thread_id,
+        after=_card_window_after(items, after, before),
+        before=before,
+        task_cards=task_cards,
     )
     return _merge_synthetic_cards(items, cards, limit=limit, after=after, before=before)
 
@@ -181,19 +221,23 @@ def _task_card_messages_for_thread(
     *,
     after: str | None,
     before: str | None,
+    task_cards: TaskCardExportSnapshot | None = None,
 ) -> list[message_reader.AssistantMessage]:
     actor = tw.canonical_actor(thread_id)
     if not actor:
         return []
-    try:
-        rows = tw.export(
-            [
-                "status.any:",
-                f"origin_thread.is:{actor}",
-            ]
-        )
-    except SpiceError:
-        return []
+    if task_cards is not None:
+        rows = task_cards.rows_for_actor(actor)
+    else:
+        try:
+            rows = tw.export(
+                [
+                    "status.any:",
+                    f"origin_thread.is:{actor}",
+                ]
+            )
+        except SpiceError:
+            return []
     cards = [
         card for row in rows if (card := _task_card_message_from_row(row)) is not None
     ]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
@@ -34,8 +34,13 @@ from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import claimstate
 
+if TYPE_CHECKING:
+    from spice.serve.payload.message import TaskCardExportSnapshot
+
 
 def work_trees_payload(state: Any) -> dict[str, Any]:
+    from spice.serve.payload.message import TaskCardExportSnapshot
+
     targets = state.worktree_targets()
     inventory = task_filter_inventory()
     # Review pressure reads two global taskwarrior exports that are identical
@@ -46,9 +51,20 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     # identical across lanes; share one snapshot so the build spawns it at most
     # once regardless of how many lanes are bound.
     active_claims = claimstate.ActiveClaimSnapshot()
+    # Task-card activity filters one global status.any export by origin actor.
+    # Share one lazy snapshot so bound lanes reuse it and an all-unbound build
+    # never loads it.
+    task_cards = TaskCardExportSnapshot()
     payload: dict[str, Any] = {
         "workTrees": [
-            _work_tree_payload(state, target, inventory, review_exports, active_claims)
+            _work_tree_payload(
+                state,
+                target,
+                inventory,
+                review_exports,
+                active_claims,
+                task_cards,
+            )
             for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
@@ -70,6 +86,7 @@ def _work_tree_payload(
     inventory: dict[str, Any],
     review_exports: ReviewExportSnapshot,
     active_claims: claimstate.ActiveClaimSnapshot,
+    task_cards: TaskCardExportSnapshot,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
@@ -100,6 +117,7 @@ def _work_tree_payload(
         pending_identity=pending_identity,
         desired_config=desired_config,
         active_claims=active_claims,
+        task_cards=task_cards,
     )
     return {
         "id": target.id,
@@ -197,10 +215,15 @@ def _work_tree_status_payloads(
     pending_identity: dict[str, Any],
     desired_config: dict[str, str] | None = None,
     active_claims: claimstate.ActiveClaimSnapshot | None = None,
+    task_cards: TaskCardExportSnapshot | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from spice.serve.payload.message import target_activity_items
 
-    items, error, transcript = target_activity_items(target, thread_id)
+    items, error, transcript = target_activity_items(
+        target,
+        thread_id,
+        task_cards=task_cards,
+    )
     transcript_owner = transcript.owner_driver.name if transcript else ""
     serve_identity = serve_agent_identity_payload(
         target,
