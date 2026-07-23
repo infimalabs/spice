@@ -598,7 +598,6 @@ def test_wal_write_commits_while_a_reader_is_open_unlike_rollback(tmp_path):
 
     wal_outcome = _write_outcome_with_reader_open(wal_db, do_write=wal_write)
 
-    assert wal_outcome != rollback_outcome
     assert wal_outcome == "committed"
     assert rollback_outcome.startswith("locked")
     # The WAL write committed while the reader was open and is durable.
