@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
+import pytest
 
 from spice.agent import watchdog
 from spice.serve.messages import AssistantMessage
@@ -860,6 +861,21 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
     }
 
 
+@pytest.fixture(autouse=True)
+def _reset_task_filter_inventory_cache():
+    """Clear the revision-keyed inventory memo around every test.
+
+    ``task_filter_inventory`` memoizes on ``task_filter_inventory_revision()``.
+    These tests fake distinct boards under the same real task event revision, so
+    a warm cache from one test would otherwise serve another test's board (and
+    hide its export). Resetting the module cache before and after each test keeps
+    every faked board computed fresh.
+    """
+    lane._task_filter_inventory_cache = None
+    yield
+    lane._task_filter_inventory_cache = None
+
+
 def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     seen: list[list[str]] = []
 
@@ -995,6 +1011,12 @@ def test_task_filter_inventory_resolves_config_once_independent_of_row_count(
         # An invalid project remains ignored without triggering another config
         # resolution or disturbing valid inventory counts.
         rows.append({"uuid": f"malformed-{row_count}", "project": ".bad-stem"})
+        # Each row count is a distinct board, so give it its own revision: the
+        # inventory memoizes on the revision, and reusing one token would serve
+        # the first build's payload instead of re-resolving against these rows.
+        monkeypatch.setattr(
+            lane, "task_filter_inventory_revision", lambda rc=row_count: f"rows-{rc}"
+        )
         calls_before = resolver_calls
 
         inventory = task_filter_inventory()
@@ -1106,3 +1128,51 @@ def test_task_filter_inventory_empty_board_has_empty_counts(monkeypatch):
     assert inventory["filters"] == []
     assert inventory["primaryStems"] == []
     assert inventory["openTaskCount"] == 0
+
+
+def test_task_filter_inventory_memoizes_until_a_task_backend_change(
+    tmp_path, monkeypatch
+):
+    """One export serves every same-revision build; a backend change re-exports.
+
+    The pending/waiting export is the dominant repeated cost on the messages and
+    work-trees builds, so unchanged-board builds must reuse a single export.
+    Driving the real task event file (rather than stubbing the revision) proves
+    the memo keys on the very token ``mark_task_backend_changed`` advances, so a
+    genuine board change is never served stale.
+    """
+    monkeypatch.setenv(lane.task_config.TASK_BACKEND_ENV, str(tmp_path))
+    board = [{"uuid": "ready", "project": "serve.latency"}]
+    exports: list[list[str]] = []
+
+    def counting_export(args: list[str]) -> list[dict[str, object]]:
+        exports.append(args)
+        return [dict(row) for row in board]
+
+    monkeypatch.setattr(tw, "export", counting_export)
+
+    bootstrap_revision = lane.task_config.task_event_revision()
+    first = task_filter_inventory()
+    second = task_filter_inventory()
+    third = task_filter_inventory()
+
+    # Three same-revision builds resolve to one underlying export and one payload.
+    assert len(exports) == 1
+    assert first == second == third
+    assert first["revision"] == bootstrap_revision
+    assert first["openTaskCount"] == 1
+
+    lane.task_config.mark_task_backend_changed()
+    advanced_revision = lane.task_config.task_event_revision()
+    assert advanced_revision != bootstrap_revision
+
+    fourth = task_filter_inventory()
+
+    # The revision advanced, so the next build recomputes against the live board.
+    assert len(exports) == 2
+    assert fourth["revision"] == advanced_revision
+    # Same board => the recompute reproduces the memoized values exactly, so the
+    # cache changes nothing but the revision token it is keyed on.
+    assert {key: value for key, value in fourth.items() if key != "revision"} == {
+        key: value for key, value in first.items() if key != "revision"
+    }
