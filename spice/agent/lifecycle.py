@@ -337,8 +337,11 @@ def start_agent(
 ) -> Path:
     # This shared boundary covers both launch modes. It intentionally runs in
     # the globally installed parent before the detached ``python -m spice``
-    # supervisor can import the worktree checkout.
-    boundaries.prepare_for_agent_launch(repo_root)
+    # supervisor can import the worktree checkout. It is the same opportunistic
+    # fast-forward-quiet-advance activation uses: it never raises and never
+    # mangles the tree, so an unsafe checkout still launches the agent that can
+    # reconcile it rather than dying pre-start.
+    boundaries.fast_forward_if_safe(repo_root)
     log_path = next_agent_log_path(repo_root)
     if supervise_stdout:
         supervisor = spawn_agent_supervisor(

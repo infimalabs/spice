@@ -852,75 +852,18 @@ def test_fast_forward_if_safe_reports_updated_then_current(tmp_path):
     assert boundaries.fast_forward_if_safe(repo).notes == ["current"]
 
 
-def test_prepare_for_agent_launch_reports_updated_then_current(tmp_path):
-    repo = _repo_with_upstream(tmp_path)
-    _advance_upstream(tmp_path)
-
-    advanced = boundaries.prepare_for_agent_launch(repo)
-
-    assert advanced.notes == ["updated working tree to the current baseline"]
-    assert boundaries.prepare_for_agent_launch(repo).notes == ["current"]
-
-
-def test_prepare_for_agent_launch_accepts_current_local_only_tree(tmp_path):
-    repo = _init_repo(tmp_path / "agent")
-
-    assert boundaries.prepare_for_agent_launch(repo).notes == ["current:local-only"]
-
-
-def test_prepare_for_agent_launch_skips_dirty_user_work(tmp_path):
-    repo = _repo_with_upstream(tmp_path)
-    (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
-    _run(repo, "git", "add", "dirty.txt")
-
-    result = boundaries.prepare_for_agent_launch(repo)
-
-    assert result.notes == ["skipped:dirty"]
-    assert (repo / "dirty.txt").read_text(encoding="utf-8") == "uncommitted\n"
-
-
-def test_prepare_for_agent_launch_skips_ahead_work_for_the_agent(tmp_path):
-    repo = _repo_with_upstream(tmp_path)
-    (repo / "ahead.txt").write_text("local commit\n", encoding="utf-8")
-    _run(repo, "git", "add", "ahead.txt")
-    _run(repo, "git", "commit", "-m", "ahead of baseline")
-    local_head = _git(repo, "rev-parse", "HEAD")
-
-    result = boundaries.prepare_for_agent_launch(repo)
-
-    assert result.notes == ["skipped:ahead"]
-    assert _git(repo, "rev-parse", "HEAD") == local_head
-
-
-def test_prepare_for_agent_launch_skips_diverged_work_for_the_agent(tmp_path):
-    repo = _repo_with_upstream(tmp_path)
-    (repo / "local.txt").write_text("local commit\n", encoding="utf-8")
-    _run(repo, "git", "add", "local.txt")
-    _run(repo, "git", "commit", "-m", "local work")
-    local_head = _git(repo, "rev-parse", "HEAD")
-    _advance_upstream(tmp_path)
-
-    result = boundaries.prepare_for_agent_launch(repo)
-
-    assert result.notes == ["skipped:diverged"]
-    assert _git(repo, "rev-parse", "HEAD") == local_head
-    assert _git(repo, "log", "-1", "--format=%s") == "local work"
-
-
-def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
-    tmp_path,
-):
-    # The serve pre-supervisor-launch autoupdate is `prepare_for_agent_launch`
-    # (start_agent -> here, before the supervisor spawns). It must behave like
-    # `git merge --ff-only --quiet @{u}`: advance strictly to the tracked
-    # upstream, and leave anything that needs a merge to the agent it starts.
+def test_fast_forward_if_safe_fast_forwards_then_skips_divergence(tmp_path):
+    # The pre-supervisor-launch autoupdate (start_agent) and activation share
+    # this one safe advance. It must behave like `git merge --ff-only --quiet
+    # @{u}`: advance strictly to the tracked upstream, and leave anything that
+    # needs a merge to the agent it starts -- never raising, never mangling.
     repo = _repo_with_upstream(tmp_path)
     _advance_upstream(tmp_path)
 
     # Clean fast-forward: HEAD lands on exactly the fetched upstream tip, the
     # upstream file arrives, and history holds no merge commit -- a strict
     # fast-forward, not a merge.
-    advanced = boundaries.prepare_for_agent_launch(repo)
+    advanced = boundaries.fast_forward_if_safe(repo)
     assert advanced.notes == ["updated working tree to the current baseline"]
     assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "origin/main")
     assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
@@ -938,10 +881,10 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
     _run(peer, "git", "push", "origin", "main")
     diverged_head = _git(repo, "rev-parse", "HEAD")
 
-    # Non-fast-forward: the launch skips its update and leaves HEAD exactly
-    # where it was -- the local commit is still the tip, no merge commit was
-    # created, and no half-finished merge state is left behind.
-    result = boundaries.prepare_for_agent_launch(repo)
+    # Non-fast-forward: the advance skips and leaves HEAD exactly where it was --
+    # the local commit is still the tip, no merge commit was created, and no
+    # half-finished merge state is left behind.
+    result = boundaries.fast_forward_if_safe(repo)
     assert result.notes == ["skipped:diverged"]
     assert _git(repo, "rev-parse", "HEAD") == diverged_head
     assert _git(repo, "log", "-1", "--format=%s") == "local work"
@@ -949,77 +892,15 @@ def test_prepare_for_agent_launch_fast_forwards_then_skips_divergence(
     assert _merge_head_missing(repo)
 
 
-def test_prepare_for_agent_launch_reports_fetch_failure(tmp_path, monkeypatch):
+def test_fast_forward_if_safe_skips_a_baseline_missing_after_fetch(
+    tmp_path, monkeypatch
+):
+    # A baseline that vanishes after fetch is a control-plane anomaly, not a
+    # reason to kill the lane before it starts: the advance skips quietly and
+    # leaves the checkout untouched for the started agent to reconcile -- where
+    # the old launch path raised and left the lane dead pre-start.
     repo = _repo_with_upstream(tmp_path)
     original_head = _git(repo, "rev-parse", "HEAD")
-    real_run = plumbing.run
-
-    def fail_fetch(repo_root, *args):
-        if args and args[0] == "fetch":
-            return subprocess.CompletedProcess(list(args), 128, "", "offline")
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(plumbing, "run", fail_fetch)
-
-    result = boundaries.prepare_for_agent_launch(repo)
-
-    assert result.notes == ["skipped:fetch-failed"]
-    assert _git(repo, "rev-parse", "HEAD") == original_head
-    assert _git(repo, "status", "--porcelain") == ""
-
-
-def test_prepare_for_agent_launch_refuses_an_unverifiable_relationship(
-    tmp_path, monkeypatch
-):
-    repo = _repo_with_upstream(tmp_path)
-    real_run = plumbing.run
-
-    def fail_relationship(repo_root, *args):
-        if args[:3] == ("rev-list", "--left-right", "--count"):
-            return subprocess.CompletedProcess(list(args), 128, "", "cannot inspect")
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(plumbing, "run", fail_relationship)
-
-    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
-
-    assert outcome == GitsyncOutcome(
-        "rejected",
-        "repair Git and retry; cannot launch agent: the relationship to "
-        "origin/main could not be inspected\n"
-        "could not inspect relationship to origin/main (git exit 128)\n"
-        "cannot inspect",
-    )
-
-
-def test_prepare_for_agent_launch_refuses_an_uninspectable_working_tree(
-    tmp_path, monkeypatch
-):
-    repo = _repo_with_upstream(tmp_path)
-    real_run = plumbing.run
-
-    def fail_status(repo_root, *args):
-        if args[:2] == ("status", "--porcelain"):
-            return subprocess.CompletedProcess(list(args), 128, "", "cannot stat")
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(plumbing, "run", fail_status)
-
-    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
-
-    assert outcome == GitsyncOutcome(
-        "rejected",
-        "repair Git and retry; cannot launch agent: the working tree state "
-        "could not be inspected\n"
-        "could not inspect working tree for agent launch (git exit 128)\n"
-        "cannot stat",
-    )
-
-
-def test_prepare_for_agent_launch_refuses_a_baseline_missing_after_fetch(
-    tmp_path, monkeypatch
-):
-    repo = _repo_with_upstream(tmp_path)
     real_read = plumbing.read
 
     def lose_baseline(repo_root, *args):
@@ -1029,35 +910,11 @@ def test_prepare_for_agent_launch_refuses_a_baseline_missing_after_fetch(
 
     monkeypatch.setattr(plumbing, "read", lose_baseline)
 
-    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
+    result = boundaries.fast_forward_if_safe(repo)
 
-    assert outcome == GitsyncOutcome(
-        "rejected",
-        "repair branch tracking and retry; cannot launch agent: baseline "
-        "origin/main was not found after fetching origin",
-    )
-
-
-def test_prepare_for_agent_launch_refuses_a_failed_fast_forward(tmp_path, monkeypatch):
-    repo = _repo_with_upstream(tmp_path)
-    real_run = plumbing.run
-
-    def fail_fast_forward(repo_root, *args):
-        if args[:2] == ("merge", "--ff-only"):
-            return subprocess.CompletedProcess(list(args), 1, "", "cannot fast-forward")
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(plumbing, "run", fail_fast_forward)
-
-    outcome = _gitsync_outcome(lambda: boundaries.prepare_for_agent_launch(repo))
-
-    assert outcome == GitsyncOutcome(
-        "rejected",
-        "repair the branch and retry; cannot launch agent: the working tree "
-        "could not fast-forward to origin/main\n"
-        "could not fast-forward agent launch to origin/main (git exit 1)\n"
-        "cannot fast-forward",
-    )
+    assert result.notes == ["skipped:baseline-uninspectable"]
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "status", "--porcelain") == ""
 
 
 def test_prepare_for_claim_refuses_a_dirty_working_tree(tmp_path):
