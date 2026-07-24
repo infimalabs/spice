@@ -12,12 +12,14 @@ control-plane boundaries:
   from the local line. A real content
   conflict is the one and only thing surfaced to the agent — framed as an
   overlap with the baseline, never as a sync with an upstream.
-* **agent launch** (`prepare_for_agent_launch`): fetch and opportunistically
-  fast-forward a clean, uncommitted lane immediately before its supervisor or
-  native harness starts. Dirty or locally committed work stays untouched and
-  starts with an explicit skip reason. A remote that cannot be fetched also
-  leaves the checkout untouched and starts the agent that can repair it, so a
-  lane is never locked out by either its own checkout or an unavailable remote.
+* **agent launch** (`fast_forward_if_safe`): opportunistically fast-forward a
+  clean, uncommitted lane immediately before its supervisor or native harness
+  starts — the very same safe advance activation applies from inside the
+  checkout, so both pre-run refreshes share one code path. It never raises:
+  dirty, locally committed, divergent, or unfetchable lanes keep their work
+  exactly as-is and start with an explicit skip note. A lane is thus never
+  locked out — nor its tree mangled or reset — by its own checkout or an
+  unavailable remote; the agent it starts reconciles whatever the advance skips.
 
 The default baseline is the current branch's user-managed merge target on the
 conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
@@ -127,17 +129,6 @@ def _worktree_dirty(repo_root: Path) -> bool:
     return plumbing.read(repo_root, "status", "--porcelain") != ""
 
 
-def _agent_launch_worktree_dirty(repo_root: Path) -> bool:
-    completed = plumbing.run(repo_root, "status", "--porcelain")
-    if completed.returncode != 0:
-        raise SpiceError(
-            "repair Git and retry; cannot launch agent: the working tree state "
-            "could not be inspected\n"
-            + plumbing.fail("inspect working tree for agent launch", completed)
-        )
-    return bool(completed.stdout.strip())
-
-
 def _ahead_behind(repo_root: Path, baseline: str) -> tuple[int, int]:
     completed = plumbing.run(
         repo_root, "rev-list", "--left-right", "--count", f"{baseline}...HEAD"
@@ -222,73 +213,21 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     return SyncResult(notes=notes)
 
 
-def prepare_for_agent_launch(repo_root: Path | None = None) -> SyncResult:
-    """Update a startable lane immediately before its agent process starts.
-
-    Launch is the last boundary at which the globally installed control plane
-    can update the checkout before ``python -m spice`` and the native harness
-    import from it. Fetching is read-only with respect to user work. A dirty,
-    ahead, or divergent lane keeps that work intact and starts the agent that
-    can reconcile it; each condition returns an explicit skip note. A failed
-    fetch is equally non-mutating and starts with its own skip note. Failures to
-    inspect local Git state still refuse because no safe fact was established.
-    """
-    root = repo_root or config.repo_root()
-    resolved = _resolve_target(root)
-    if resolved is None:
-        return SyncResult(notes=["current:local-only"])
-    remote, baseline = resolved
-    fetched = plumbing.run(root, "fetch", remote)
-    if fetched.returncode != 0:
-        return SyncResult(notes=["skipped:fetch-failed"])
-    if not plumbing.read(root, "rev-parse", baseline):
-        raise SpiceError(
-            "repair branch tracking and retry; cannot launch agent: baseline "
-            f"{baseline} was not found after fetching {remote}"
-        )
-    if _agent_launch_worktree_dirty(root):
-        return SyncResult(notes=["skipped:dirty"])
-    try:
-        behind, ahead = _ahead_behind(root, baseline)
-    except SpiceError as exc:
-        headline, separator, git_failure = str(exc).partition("\n")
-        message = f"repair Git and retry; cannot launch agent: {headline}"
-        if separator:
-            message += f"\n{git_failure}"
-        raise SpiceError(message) from exc
-    if ahead:
-        if behind:
-            return SyncResult(notes=["skipped:diverged"])
-        return SyncResult(notes=["skipped:ahead"])
-    before = plumbing.read(root, "rev-parse", "HEAD")
-    completed = plumbing.run(root, "merge", "--ff-only", baseline)
-    if completed.returncode != 0:
-        raise SpiceError(
-            "repair the branch and retry; cannot launch agent: the working tree "
-            f"could not fast-forward to {baseline}\n"
-            + plumbing.fail(f"fast-forward agent launch to {baseline}", completed)
-        )
-    after = plumbing.read(root, "rev-parse", "HEAD")
-    blocked = plumbing.purge_stale_bytecode(root, before, after)
-    notes = [
-        "updated working tree to the current baseline" if after != before else "current"
-    ]
-    if blocked:
-        notes.append(plumbing.bytecode_cleanup_note(blocked))
-    return SyncResult(notes=notes)
-
-
 def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     """Bring the tree up to the current baseline when, and only when, it is
     safe.
 
-    Lenient sibling of :func:`prepare_for_claim` for activation: it applies
-    the same rules (clean tree, zero commits ahead, fast-forward-only) but
-    never raises, so activation always succeeds. Every outcome is reported as
+    The single safe advance shared by the two opportunistic pre-run refreshes:
+    the control plane's **agent launch** (from the globally installed spice,
+    before ``python -m spice`` and the native harness import from the checkout)
+    and the agent's own **activation** (from inside the checkout). Lenient
+    sibling of :func:`prepare_for_claim`: it applies the same rules (clean tree,
+    zero commits ahead, fast-forward-only) but never raises, so a lane always
+    starts and its tree is never mangled or reset. Every outcome is reported as
     a note rather than a silent no-op: ``current`` when already up to date,
     or a specific ``skipped:`` note for each safe no-op, so a non-advance is
-    observable in the activation packet instead of invisible. A missing remote,
-    failed fetch, and uninspectable baseline remain three distinct outcomes.
+    observable in the packet instead of invisible. A missing remote, failed
+    fetch, and uninspectable baseline remain distinct outcomes.
     """
     root = repo_root or config.repo_root()
     try:
