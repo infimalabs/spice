@@ -21,10 +21,10 @@ spice is building itself, but it was not created in a vacuum: the loop was born
 from a harsher polyglot environment where many languages, conventions, and
 agent lanes had to survive contact with one another.
 
-![Live steering and semantic ACK loop](https://raw.githubusercontent.com/infimalabs/spice/main/docs/screenshots/spice-live-review-steering.png)
+![Spice fleet operations console across active agent lanes](https://raw.githubusercontent.com/infimalabs/spice/main/docs/screenshots/spice.png)
 
-<sub>Operator steering arrives in the live stream; an assistant ACK retires the
-exact inbox key from the durable filesystem queue.</sub>
+<sub>A live Spice fleet: concurrent agent lanes, allocator work, peer review,
+steering, and task state in one operator console.</sub>
 
 ## What it does
 
