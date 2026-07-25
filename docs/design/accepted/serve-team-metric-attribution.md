@@ -6,6 +6,10 @@ This is the canonical decision record for how serve attributes lane metrics
 across teams and agents. The decisions below are implemented and locked by the
 current schema, query paths, and focused tests.
 
+The durability and migration boundary for the co-resident team authority and
+observation projections is defined separately in
+`serve-team-observation-authority.md`.
+
 ## Historical Problem
 
 Lane metrics double-book their counters. `record_agent_metric_delta` always
