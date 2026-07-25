@@ -24,7 +24,6 @@ from spice.tasks import (
 from spice.tasks.git import plumbing
 
 
-SHOW_ANNOTATIONS_LIMIT = 6
 SECONDS_PER_MINUTE = 60
 MINUTES_PER_HOUR = 60
 _ACTIVE_CLAIM_FIELD_PROBLEMS = (
@@ -547,8 +546,13 @@ def render_show(handle: str, *, include_recovery_context: bool | None = None) ->
     lines.extend(artifacts.render_artifact_lines(rendered))
     annotations = row.get("annotations") or []
     if annotations:
+        # The single-task detail view renders the COMPLETE annotation record: a
+        # board-level review reads this to reconstruct every point already made,
+        # so silently dropping older annotations would let it re-litigate or
+        # misattribute settled notes. Board views (status/list) carry no
+        # annotations, so nothing else grows from showing them all here.
         lines.append("annotations:")
-        for ann in annotations[-SHOW_ANNOTATIONS_LIMIT:]:
+        for ann in annotations:
             lines.append(f"  {ann.get('description', '')}")
     lines.append(_next_command_line(row, rendered))
     return "\n".join(lines)
