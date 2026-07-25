@@ -1,4 +1,4 @@
-"""Message payload cursor, identity, renewal, attachment, and inbox tests."""
+"""Message payload cursor, state, renewal, attachment, and inbox tests."""
 
 from pathlib import Path
 

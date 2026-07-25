@@ -1,4 +1,4 @@
-"""Lane metrics: sparkline buckets, uptime, and counter assembly."""
+"""Message payload task-card rendering tests."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
