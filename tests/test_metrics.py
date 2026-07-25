@@ -8,6 +8,10 @@ from datetime import UTC, datetime
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.metrics import record_transcript_metrics_for_agent
 from spice.serve.team.store import ServeTeamStore
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 
 
 def _write_rollout(path, entries):
@@ -39,7 +43,13 @@ def _presence_entry(timestamp: str, payload_type: str) -> dict[str, object]:
 
 def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.record_directive_sent("1k4Yh5gP", agent_id="agent-a", team_id="agent-a")
+    publish_directive_fact(
+        store.directive_state_path,
+        "1k4Yh5gP",
+        agent_id="agent-a",
+        team_id="agent-a",
+    )
+    complete_directive_fact(store.directive_state_path, "1k4Yh5gP")
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
         rollout,
@@ -96,11 +106,13 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
         ],
     )
 
-    store.record_directive_sent(
+    publish_directive_fact(
+        store.directive_state_path,
         "1k4Yh5gP",
         agent_id="thread:predecessor",
         team_id=team.team_id,
     )
+    complete_directive_fact(store.directive_state_path, "1k4Yh5gP")
     record_transcript_metrics_for_agent(
         store, agent_id="thread:predecessor", transcript_path=predecessor_rollout
     )
@@ -109,11 +121,13 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
         "thread:successor",
         aliases=["thread:predecessor"],
     )
-    store.record_directive_sent(
+    publish_directive_fact(
+        store.directive_state_path,
         "1k4YhWsF",
         agent_id="thread:successor",
         team_id=team.team_id,
     )
+    complete_directive_fact(store.directive_state_path, "1k4YhWsF")
     record_transcript_metrics_for_agent(
         store, agent_id="thread:successor", transcript_path=predecessor_rollout
     )
@@ -174,10 +188,15 @@ def test_lane_metric_sparkline_ages_old_buckets_out(tmp_path):
     assert expired.sparkline == (0, 0, 0, 0)
 
 
-def test_transcript_ack_flips_its_sent_directive(tmp_path):
+def test_transcript_ack_does_not_duplicate_canonical_ack_consumption(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     directive_key = "1k4Yh5gP"
-    store.record_directive_sent(directive_key, agent_id="agent-a", team_id="team-1")
+    publish_directive_fact(
+        store.directive_state_path,
+        directive_key,
+        agent_id="agent-a",
+        team_id="team-1",
+    )
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
         rollout,
@@ -192,7 +211,12 @@ def test_transcript_ack_flips_its_sent_directive(tmp_path):
         store, agent_id="agent-a", transcript_path=rollout
     )
 
-    # The agent acknowledged the key, so its sent directive flips to acked.
+    # Transcript ingestion owns activity/cursors only. The durable ACK archive
+    # is the sole directive disposition writer.
+    assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
+        sends=1, acked=0
+    )
+    assert complete_directive_fact(store.directive_state_path, directive_key) is True
     assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
         sends=1, acked=1
     )

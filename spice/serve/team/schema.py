@@ -17,9 +17,8 @@ TASK_FILTER_SOURCES = frozenset(
     }
 )
 TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
-# Generous horizon for the high-growth per-minute/per-directive history series.
-# Bounds storage without losing graphable range; the durable aggregates
-# (agent_metrics, directive_totals) are never pruned.
+# Generous horizon for the high-growth per-minute observation series.
+# Directive retention belongs to the canonical steering/ACK plane.
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 OBSERVATION_ATTRIBUTION_SAFE = "immutable"
@@ -130,8 +129,6 @@ TEAM_PROJECTION_TABLES = frozenset(
         "agent_metric_buckets",
         "agent_metric_cursors",
         "task_events",
-        "directives",
-        "directive_totals",
         "observation_attribution_state",
     }
 )
@@ -168,21 +165,6 @@ CREATE TABLE IF NOT EXISTS task_events (
     agent_id TEXT NOT NULL,
     team_id TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS directives (
-    directive_key TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    sent_at REAL NOT NULL,
-    acked INTEGER NOT NULL DEFAULT 0,
-    acked_at REAL
-);
-CREATE TABLE IF NOT EXISTS directive_totals (
-    agent_id TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    sends INTEGER NOT NULL DEFAULT 0,
-    acked INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, team_id)
-);
 CREATE TABLE IF NOT EXISTS observation_attribution_state (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     status TEXT NOT NULL CHECK (status IN ('immutable', 'rebuildRequired'))
@@ -193,8 +175,6 @@ CREATE INDEX IF NOT EXISTS task_events_by_ts
     ON task_events (ts);
 CREATE INDEX IF NOT EXISTS task_events_by_agent_team_ts
     ON task_events (agent_id, team_id, ts);
-CREATE INDEX IF NOT EXISTS directives_by_sent_at
-    ON directives (sent_at);
 """
 
 # Authority migrations are append-only and keyed by their destination version.

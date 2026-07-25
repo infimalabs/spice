@@ -7,9 +7,14 @@ import time
 import pytest
 
 from spice.errors import SpiceError
+from spice.mail.ackstate import directive_history_records_from_database
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.team.metrics import METRIC_HISTORY_RETENTION_DAYS_ENV
 from spice.serve.team.store import ServeTeamStore, TeamConfig
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 from spice.serve.team.schema import METRIC_HISTORY_RETENTION_SECONDS
 
 RECENT_TOOL_CALLS = 4
@@ -26,7 +31,7 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
     old = now - METRIC_HISTORY_RETENTION_SECONDS - 60
     recent = now - 60
 
-    # Old + recent activity buckets, and old + recent directives.
+    # Old + recent activity buckets and canonical directives.
     store.record_agent_metric_delta(
         "agent-a", tool_calls=RECENT_TOOL_CALLS, message_timestamps=[old, recent]
     )
@@ -36,10 +41,18 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
     store.record_task_lifecycle_event(
         "claim", task_id="new-task", agent_id="agent-a", team_id="t", ts=recent
     )
-    store.record_directive_sent("old", agent_id="agent-a", team_id="t", sent_at=old)
-    store.record_directive_sent("new", agent_id="agent-a", team_id="t", sent_at=recent)
-    store.mark_directive_acked("old", acked_at=old)
-    store.mark_directive_acked("new", acked_at=recent)
+    publish_directive_fact(
+        store.directive_state_path, "old", agent_id="agent-a", team_id="t", sent_at=old
+    )
+    publish_directive_fact(
+        store.directive_state_path,
+        "new",
+        agent_id="agent-a",
+        team_id="t",
+        sent_at=recent,
+    )
+    complete_directive_fact(store.directive_state_path, "old", acked_at=old)
+    complete_directive_fact(store.directive_state_path, "new", acked_at=recent)
 
     store.team_snapshot()  # runs the prune pass
 
@@ -51,10 +64,6 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
                 ("agent-a",),
             )
         ]
-        directive_keys = {
-            str(row["directive_key"])
-            for row in connection.execute("SELECT directive_key FROM directives")
-        }
         task_ids = {
             str(row["task_id"])
             for row in connection.execute("SELECT task_id FROM task_events")
@@ -67,7 +76,12 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
     # Old series rows are gone; the recent ones survive.
     assert all(start >= floor for start in bucket_starts)
     assert bucket_starts  # the recent bucket remains
-    assert directive_keys == {"new"}
+    assert {
+        record.key
+        for record in directive_history_records_from_database(
+            store.directive_state_path
+        )
+    } == {"old", "new"}
     assert task_ids == {"new-task"}
     # Durable aggregates are untouched by retention.
     assert int(tool_calls) == RECENT_TOOL_CALLS
@@ -94,8 +108,16 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
     store.record_task_lifecycle_event(
         "claim", task_id="new-task", agent_id="agent-a", team_id="t", ts=recent
     )
-    store.record_directive_sent("old", agent_id="agent-a", team_id="t", sent_at=old)
-    store.record_directive_sent("new", agent_id="agent-a", team_id="t", sent_at=recent)
+    publish_directive_fact(
+        store.directive_state_path, "old", agent_id="agent-a", team_id="t", sent_at=old
+    )
+    publish_directive_fact(
+        store.directive_state_path,
+        "new",
+        agent_id="agent-a",
+        team_id="t",
+        sent_at=recent,
+    )
 
     store.team_snapshot()
 
@@ -107,10 +129,6 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
                 ("agent-a",),
             )
         ]
-        directive_keys = {
-            str(row["directive_key"])
-            for row in connection.execute("SELECT directive_key FROM directives")
-        }
         task_ids = {
             str(row["task_id"])
             for row in connection.execute("SELECT task_id FROM task_events")
@@ -119,7 +137,12 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
     assert store.metric_history_retention_seconds() == retention_seconds
     assert all(start >= int(now) - retention_seconds for start in bucket_starts)
     assert bucket_starts
-    assert directive_keys == {"new"}
+    assert {
+        record.key
+        for record in directive_history_records_from_database(
+            store.directive_state_path
+        )
+    } == {"old", "new"}
     assert task_ids == {"new-task"}
 
 

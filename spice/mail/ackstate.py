@@ -1,8 +1,11 @@
-"""Durable ACK state for consumed inbox steering.
+"""Canonical durable history for inbox steering and its ACK disposition.
 
-ACKing an inbox item records the consumed text here and removes the pending
-file. The old filesystem archive is intentionally not the source of truth; this
-SQLite store is the ACK history that agent rehydration and UI surfaces read.
+Publishing a metric-bearing directive records its immutable target actor,
+team-at-send, and send time here. ACKing or refusing that inbox item completes
+the same keyed row with its disposition and auditable response content before
+the pending file is removed. The filesystem is the delivery transport; this
+SQLite store is the lifecycle history that metrics, rehydration, and UI
+surfaces read.
 
 The store lives with the other repository-owned SQLite databases under the
 shared git common dir (`git_common_dir/.spice/data`), next to the default task
@@ -21,6 +24,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Iterable
 
+from spice.errors import SpiceError
 from spice.paths import shared_state_path
 from spice.sqliteconnection import sqlite_connection
 
@@ -31,7 +35,20 @@ ACK_STATE_DATA_SUBDIR = "data"
 ACK_STATE_SQLITE_BUSY_TIMEOUT_MS = 5000
 ACK_DISPOSITION_ACKED = "acked"
 ACK_DISPOSITION_REFUSED = "refused"
-ACK_DISPOSITIONS = frozenset({ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED})
+ACK_DISPOSITION_PENDING = "pending"
+ACK_DISPOSITIONS = frozenset(
+    {ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED, ACK_DISPOSITION_PENDING}
+)
+DIRECTIVE_PROVENANCE_ARCHIVE_ONLY = "archiveOnly"
+DIRECTIVE_PROVENANCE_PUBLISHED = "published"
+DIRECTIVE_PROVENANCE_MIGRATED_SERVE = "migratedServe"
+DIRECTIVE_PROVENANCES = frozenset(
+    {
+        DIRECTIVE_PROVENANCE_ARCHIVE_ONLY,
+        DIRECTIVE_PROVENANCE_PUBLISHED,
+        DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
+    }
+)
 
 ACK_STATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS acked_inbox_items (
@@ -43,7 +60,14 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   ack_text TEXT NOT NULL DEFAULT '',
   ack_content TEXT NOT NULL DEFAULT '',
   disposition TEXT NOT NULL DEFAULT 'acked',
-  archived_at REAL NOT NULL
+  archived_at REAL NOT NULL,
+  target_actor TEXT NOT NULL DEFAULT '',
+  team_id TEXT NOT NULL DEFAULT '',
+  sent_at REAL,
+  published_text TEXT NOT NULL DEFAULT '',
+  acknowledged_at REAL,
+  provenance TEXT NOT NULL DEFAULT 'archiveOnly',
+  legacy_metric_json TEXT NOT NULL DEFAULT ''
 );
 """
 ACK_STATE_INDEX_SQL = """
@@ -53,6 +77,13 @@ CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
 ACK_STATE_RECORD_SELECT_SQL = """
 SELECT key, inbox_name, text, attachments_json, lineage_json,
        ack_text, ack_content, disposition, archived_at
+FROM acked_inbox_items
+"""
+DIRECTIVE_HISTORY_RECORD_SELECT_SQL = """
+SELECT key, inbox_name, text, attachments_json, lineage_json,
+       ack_text, ack_content, disposition, archived_at, target_actor,
+       team_id, sent_at, published_text, acknowledged_at, provenance,
+       legacy_metric_json
 FROM acked_inbox_items
 """
 
@@ -93,6 +124,37 @@ class AckStateWrite:
     disposition: str = ACK_DISPOSITION_ACKED
 
 
+@dataclass(frozen=True)
+class DirectivePublicationWrite:
+    key: str
+    inbox_name: str
+    text: str
+    target_actor: str
+    team_id: str
+    sent_at: float
+    attachments: tuple[dict[str, Any], ...] = ()
+    lineage: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class DirectiveHistoryRecord:
+    key: str
+    inbox_name: str
+    text: str
+    published_text: str
+    attachments: tuple[dict[str, Any], ...]
+    lineage: dict[str, Any]
+    target_actor: str
+    team_id: str
+    sent_at: float | None
+    disposition: str
+    acknowledged_at: float | None
+    ack_text: str
+    ack_content: str
+    provenance: str
+    legacy_metric: dict[str, Any]
+
+
 def ack_state_database_path(repo_root: str | Path) -> Path:
     return shared_state_path(
         Path(repo_root),
@@ -103,48 +165,72 @@ def ack_state_database_path(repo_root: str | Path) -> Path:
 def record_acked_inbox_items(
     repo_root: str | Path, items: Iterable[AckStateWrite], *, now: float | None = None
 ) -> list[str]:
-    rows = [
-        (
-            item.key,
-            item.inbox_name,
-            item.text,
-            json.dumps(list(item.attachments), sort_keys=True),
-            json.dumps(item.lineage or {}, sort_keys=True),
-            item.ack_text,
-            item.ack_content,
-            _normalize_disposition(item.disposition),
-            float(time.time() if now is None else now),
-        )
-        for item in items
-    ]
-    if not rows:
+    writes = tuple(items)
+    if not writes:
         return []
-    path = ack_state_database_path(repo_root)
-    _ensure_schema_once(path)
+    when = float(time.time() if now is None else now)
+    return record_acked_inbox_items_to_database(
+        ack_state_database_path(repo_root), writes, now=when
+    )
+
+
+def record_acked_inbox_items_to_database(
+    path: str | Path,
+    items: Iterable[AckStateWrite],
+    *,
+    now: float | None = None,
+) -> list[str]:
+    writes = tuple(items)
+    if not writes:
+        return []
+    when = float(time.time() if now is None else now)
+    database_path = Path(path)
+    _ensure_schema_once(database_path)
     with sqlite_connection(
-        path,
+        database_path,
         busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
         wal=True,
     ) as connection:
-        connection.executemany(
-            """
-            INSERT INTO acked_inbox_items
-              (key, inbox_name, text, attachments_json, lineage_json, ack_text,
-               ack_content, disposition, archived_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-              inbox_name=excluded.inbox_name,
-              text=excluded.text,
-              attachments_json=excluded.attachments_json,
-              lineage_json=excluded.lineage_json,
-              ack_text=excluded.ack_text,
-              ack_content=excluded.ack_content,
-              disposition=excluded.disposition,
-              archived_at=excluded.archived_at
-            """,
-            rows,
-        )
-    return [row[0] for row in rows]
+        for item in writes:
+            _record_ack_locked(connection, item, acknowledged_at=when)
+    return [item.key for item in writes]
+
+
+def record_directive_publications(
+    repo_root: str | Path,
+    items: Iterable[DirectivePublicationWrite],
+) -> list[str]:
+    """Publish immutable metric provenance for one or more steering keys.
+
+    Exact duplicate delivery is idempotent. Reusing a key for a different
+    actor, team, timestamp, body, or attachment set is a hard collision because
+    silently replacing any of those values would rewrite a historical fact.
+    """
+    writes = tuple(items)
+    if not writes:
+        return []
+    return record_directive_publications_to_database(
+        ack_state_database_path(repo_root), writes
+    )
+
+
+def record_directive_publications_to_database(
+    path: str | Path,
+    items: Iterable[DirectivePublicationWrite],
+) -> list[str]:
+    writes = tuple(items)
+    if not writes:
+        return []
+    database_path = Path(path)
+    _ensure_schema_once(database_path)
+    with sqlite_connection(
+        database_path,
+        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+        wal=True,
+    ) as connection:
+        for item in writes:
+            _record_publication_locked(connection, item)
+    return [item.key for item in writes]
 
 
 def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
@@ -162,7 +248,10 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
         return []
     with sqlite_connection(path, wal=True) as connection:
         rows = connection.execute(
-            ACK_STATE_RECORD_SELECT_SQL + " ORDER BY archived_at DESC, key DESC"
+            ACK_STATE_RECORD_SELECT_SQL
+            + " WHERE disposition IN (?, ?) "
+            + "ORDER BY archived_at DESC, key DESC",
+            (ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED),
         ).fetchall()
     return [_ack_state_record(row) for row in rows]
 
@@ -188,10 +277,190 @@ def ack_state_records_for_keys(
         rows = connection.execute(
             ACK_STATE_RECORD_SELECT_SQL
             + f" WHERE key IN ({placeholders})"
+            + " AND disposition IN (?, ?)"
             + " ORDER BY archived_at DESC, key DESC",
-            wanted,
+            (*wanted, ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED),
         ).fetchall()
     return [_ack_state_record(row) for row in rows]
+
+
+def directive_history_records_from_database(
+    path: str | Path,
+) -> list[DirectiveHistoryRecord]:
+    """Read canonical directive lifecycle facts without running schema DDL."""
+    database_path = Path(path)
+    if not database_path.is_file():
+        return []
+    with sqlite_connection(database_path, wal=True) as connection:
+        rows = connection.execute(
+            DIRECTIVE_HISTORY_RECORD_SELECT_SQL
+            + " WHERE target_actor != '' ORDER BY sent_at, key"
+        ).fetchall()
+    return [_directive_history_record(row) for row in rows]
+
+
+def prepare_directive_history_database(path: str | Path) -> None:
+    """Upgrade an existing ACK database before Serve begins read projection."""
+    database_path = Path(path)
+    if database_path.is_file():
+        _ensure_schema_once(database_path)
+
+
+def migrate_serve_directive_history(
+    path: str | Path,
+    directive_rows: Iterable[Any],
+    total_rows: Iterable[Any],
+) -> None:
+    """Move the retired Serve directive projection into canonical ACK history.
+
+    Legacy running totals must equal the still-present keyed rows. A mismatch
+    means pruning already discarded directive identities, so there is no
+    lossless automatic migration; the diagnostic tells the operator to replay
+    native steering/ACK facts instead of silently inventing keys.
+    """
+    directives = tuple(directive_rows)
+    totals = tuple(total_rows)
+    _validate_legacy_directive_totals(directives, totals)
+    if not directives:
+        return
+    database_path = Path(path)
+    _ensure_schema_once(database_path)
+    with sqlite_connection(
+        database_path,
+        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+        wal=True,
+    ) as connection:
+        for row in directives:
+            _migrate_serve_directive_locked(connection, row)
+
+
+def _validate_legacy_directive_totals(
+    directives: tuple[Any, ...], totals: tuple[Any, ...]
+) -> None:
+    derived: dict[tuple[str, str], tuple[int, int]] = {}
+    for row in directives:
+        identity = (str(row["agent_id"]), str(row["team_id"]))
+        sends, acked = derived.get(identity, (0, 0))
+        derived[identity] = (sends + 1, acked + int(bool(row["acked"])))
+    stored = {
+        (str(row["agent_id"]), str(row["team_id"])): (
+            int(row["sends"]),
+            int(row["acked"]),
+        )
+        for row in totals
+        if int(row["sends"]) or int(row["acked"])
+    }
+    if derived == stored:
+        return
+    raise SpiceError(
+        "cannot migrate legacy Serve directive metrics losslessly: "
+        "directive_totals do not equal the remaining keyed directive rows "
+        "(historical rows may have been pruned). Restore/replay canonical "
+        "steering and ACK facts, then retry; legacy tables were left unchanged"
+    )
+
+
+def _migrate_serve_directive_locked(connection: sqlite3.Connection, row: Any) -> None:
+    key = str(row["directive_key"])
+    target_actor = str(row["agent_id"])
+    team_id = str(row["team_id"])
+    sent_at = float(row["sent_at"])
+    legacy_acked = bool(row["acked"])
+    legacy_acked_at = float(row["acked_at"]) if row["acked_at"] is not None else None
+    legacy_metric = json.dumps(
+        {
+            "directive_key": key,
+            "agent_id": target_actor,
+            "team_id": team_id,
+            "sent_at": sent_at,
+            "acked": int(legacy_acked),
+            "acked_at": legacy_acked_at,
+        },
+        sort_keys=True,
+    )
+    existing = connection.execute(
+        DIRECTIVE_HISTORY_RECORD_SELECT_SQL + " WHERE key = ?", (key,)
+    ).fetchone()
+    if existing is None:
+        if legacy_acked:
+            raise SpiceError(
+                f"cannot migrate acknowledged legacy directive {key!r}: no "
+                "durable ACK archive contains its disposition and auditable "
+                "content. Restore/replay the ACK history, then retry; legacy "
+                "tables were left unchanged"
+            )
+        connection.execute(
+            """
+            INSERT INTO acked_inbox_items
+              (key, inbox_name, text, attachments_json, lineage_json, ack_text,
+               ack_content, disposition, archived_at, target_actor, team_id,
+               sent_at, published_text, acknowledged_at, provenance,
+               legacy_metric_json)
+            VALUES (?, ?, '', '[]', '{}', '', '', ?, 0, ?, ?, ?, '', NULL, ?, ?)
+            """,
+            (
+                key,
+                f"{key}.txt",
+                ACK_DISPOSITION_PENDING,
+                target_actor,
+                team_id,
+                sent_at,
+                DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
+                legacy_metric,
+            ),
+        )
+        return
+    record = _directive_history_record(existing)
+    if record.target_actor:
+        existing_provenance = (record.target_actor, record.team_id, record.sent_at)
+        proposed_provenance = (target_actor, team_id, sent_at)
+        if existing_provenance != proposed_provenance:
+            raise SpiceError(
+                f"cannot migrate legacy directive {key!r}: canonical and Serve "
+                "publication provenance collide "
+                f"({existing_provenance!r} != {proposed_provenance!r}); "
+                "both stores were left unchanged"
+            )
+    if legacy_acked and record.disposition != ACK_DISPOSITION_ACKED:
+        raise SpiceError(
+            f"cannot migrate legacy directive {key!r}: Serve records it as "
+            f"acknowledged but canonical ACK history is {record.disposition!r}; "
+            "both stores were left unchanged"
+        )
+    if legacy_acked and not (record.ack_text.strip() or record.ack_content.strip()):
+        raise SpiceError(
+            f"cannot migrate acknowledged legacy directive {key!r}: its ACK "
+            "archive has no auditable response content. Restore/replay the ACK "
+            "history, then retry; legacy tables were left unchanged"
+        )
+    if record.legacy_metric and record.legacy_metric != json.loads(legacy_metric):
+        raise SpiceError(
+            f"cannot migrate legacy directive {key!r}: an earlier cutover "
+            "record contains different legacy metric values; both stores were "
+            "left unchanged"
+        )
+    if not record.target_actor:
+        connection.execute(
+            """
+            UPDATE acked_inbox_items
+            SET target_actor = ?, team_id = ?, sent_at = ?, provenance = ?,
+                legacy_metric_json = ?
+            WHERE key = ?
+            """,
+            (
+                target_actor,
+                team_id,
+                sent_at,
+                DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
+                legacy_metric,
+                key,
+            ),
+        )
+    elif not record.legacy_metric:
+        connection.execute(
+            "UPDATE acked_inbox_items SET legacy_metric_json = ? WHERE key = ?",
+            (legacy_metric, key),
+        )
 
 
 def _ensure_schema_once(path: Path) -> None:
@@ -227,6 +496,356 @@ def _ack_state_record(row: tuple[Any, ...]) -> AckStateRecord:
         ack_content=row[6],
         disposition=_normalize_disposition(row[7]),
         archived_at=row[8],
+    )
+
+
+def _directive_history_record(row: tuple[Any, ...]) -> DirectiveHistoryRecord:
+    record = DirectiveHistoryRecord(
+        key=str(row[0]),
+        inbox_name=str(row[1]),
+        text=str(row[2]),
+        attachments=_decode_attachments_json(str(row[3])),
+        lineage=_decode_lineage_json(str(row[4])),
+        ack_text=str(row[5]),
+        ack_content=str(row[6]),
+        disposition=_canonical_disposition(str(row[7])),
+        acknowledged_at=(float(row[13]) if row[13] is not None else None),
+        target_actor=str(row[9]),
+        team_id=str(row[10]),
+        sent_at=float(row[11]) if row[11] is not None else None,
+        published_text=str(row[12]),
+        provenance=str(row[14]),
+        legacy_metric=_decode_lineage_json(str(row[15])),
+    )
+    if record.target_actor and (not record.team_id or record.sent_at is None):
+        raise SpiceError(
+            f"canonical directive {record.key!r} has incomplete publication "
+            "provenance (target actor requires team-at-send and sent time); "
+            "restore/replay the steering publication"
+        )
+    if record.target_actor and record.provenance not in DIRECTIVE_PROVENANCES:
+        raise SpiceError(
+            f"canonical directive {record.key!r} has unknown provenance "
+            f"{record.provenance!r}; repair or replay the steering publication"
+        )
+    if (
+        record.target_actor
+        and record.disposition != ACK_DISPOSITION_PENDING
+        and record.acknowledged_at is None
+    ):
+        raise SpiceError(
+            f"canonical directive {record.key!r} has a consumed disposition "
+            "without an ACK time; restore/replay the ACK record"
+        )
+    return record
+
+
+def _record_publication_locked(
+    connection: sqlite3.Connection, item: DirectivePublicationWrite
+) -> None:
+    key = _required_value(item.key, "directive key")
+    inbox_name = _required_value(item.inbox_name, "directive inbox name")
+    target_actor = _required_value(item.target_actor, "directive target actor")
+    team_id = _required_value(item.team_id, "directive team-at-send")
+    sent_at = max(0.0, float(item.sent_at))
+    attachments_json = json.dumps(list(item.attachments), sort_keys=True)
+    lineage_json = json.dumps(item.lineage or {}, sort_keys=True)
+    existing = connection.execute(
+        DIRECTIVE_HISTORY_RECORD_SELECT_SQL + " WHERE key = ?", (key,)
+    ).fetchone()
+    if existing is None:
+        connection.execute(
+            """
+            INSERT INTO acked_inbox_items
+              (key, inbox_name, text, attachments_json, lineage_json, ack_text,
+               ack_content, disposition, archived_at, target_actor, team_id,
+               sent_at, published_text, acknowledged_at, provenance,
+               legacy_metric_json)
+            VALUES (?, ?, ?, ?, ?, '', '', ?, 0, ?, ?, ?, ?, NULL, ?, '')
+            """,
+            (
+                key,
+                inbox_name,
+                item.text,
+                attachments_json,
+                lineage_json,
+                ACK_DISPOSITION_PENDING,
+                target_actor,
+                team_id,
+                sent_at,
+                item.text,
+                DIRECTIVE_PROVENANCE_PUBLISHED,
+            ),
+        )
+        return
+    record = _directive_history_record(existing)
+    immutable = (
+        record.inbox_name,
+        record.published_text,
+        json.dumps(list(record.attachments), sort_keys=True),
+        record.target_actor,
+        record.team_id,
+        record.sent_at,
+    )
+    proposed = (
+        inbox_name,
+        item.text,
+        attachments_json,
+        target_actor,
+        team_id,
+        sent_at,
+    )
+    if record.target_actor and immutable != proposed:
+        raise _directive_collision(key, immutable, proposed)
+    if not record.target_actor:
+        if record.inbox_name != inbox_name or record.text != item.text:
+            raise SpiceError(
+                f"directive history collision for {key!r}: archived steering "
+                "content does not match the publication; preserve both stores "
+                "and replay with an explicit key mapping"
+            )
+        connection.execute(
+            """
+            UPDATE acked_inbox_items
+            SET target_actor = ?, team_id = ?, sent_at = ?,
+                published_text = ?, provenance = ?
+            WHERE key = ?
+            """,
+            (
+                target_actor,
+                team_id,
+                sent_at,
+                item.text,
+                DIRECTIVE_PROVENANCE_PUBLISHED,
+                key,
+            ),
+        )
+
+
+def _record_ack_locked(
+    connection: sqlite3.Connection,
+    item: AckStateWrite,
+    *,
+    acknowledged_at: float,
+) -> None:
+    key = _required_value(item.key, "ACK key")
+    disposition = _normalize_consumed_disposition(item.disposition)
+    attachments_json = json.dumps(list(item.attachments), sort_keys=True)
+    lineage_json = json.dumps(item.lineage or {}, sort_keys=True)
+    existing = connection.execute(
+        DIRECTIVE_HISTORY_RECORD_SELECT_SQL + " WHERE key = ?", (key,)
+    ).fetchone()
+    if existing is None:
+        _insert_archive_only_ack_locked(
+            connection,
+            item,
+            key=key,
+            disposition=disposition,
+            attachments_json=attachments_json,
+            lineage_json=lineage_json,
+            acknowledged_at=acknowledged_at,
+        )
+        return
+    record = _directive_history_record(existing)
+    if record.target_actor and not (item.ack_text.strip() or item.ack_content.strip()):
+        raise SpiceError(
+            f"directive ACK for {key!r} is missing auditable response content; "
+            "record the transcript-visible ACK/NACK text and retry"
+        )
+    if record.disposition != ACK_DISPOSITION_PENDING:
+        _validate_or_upgrade_consumed_ack_locked(
+            connection,
+            record,
+            item,
+            disposition=disposition,
+            attachments_json=attachments_json,
+            lineage_json=lineage_json,
+            acknowledged_at=acknowledged_at,
+        )
+        return
+    _complete_pending_ack_locked(
+        connection,
+        item,
+        key=key,
+        disposition=disposition,
+        attachments_json=attachments_json,
+        lineage_json=lineage_json,
+        acknowledged_at=acknowledged_at,
+    )
+
+
+def _insert_archive_only_ack_locked(
+    connection: sqlite3.Connection,
+    item: AckStateWrite,
+    *,
+    key: str,
+    disposition: str,
+    attachments_json: str,
+    lineage_json: str,
+    acknowledged_at: float,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO acked_inbox_items
+          (key, inbox_name, text, attachments_json, lineage_json, ack_text,
+           ack_content, disposition, archived_at, target_actor, team_id,
+           sent_at, published_text, acknowledged_at, provenance,
+           legacy_metric_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', NULL, ?, ?, ?, '')
+        """,
+        (
+            key,
+            item.inbox_name,
+            item.text,
+            attachments_json,
+            lineage_json,
+            item.ack_text,
+            item.ack_content,
+            disposition,
+            acknowledged_at,
+            item.text,
+            acknowledged_at,
+            DIRECTIVE_PROVENANCE_ARCHIVE_ONLY,
+        ),
+    )
+
+
+def _validate_or_upgrade_consumed_ack_locked(
+    connection: sqlite3.Connection,
+    record: DirectiveHistoryRecord,
+    item: AckStateWrite,
+    *,
+    disposition: str,
+    attachments_json: str,
+    lineage_json: str,
+    acknowledged_at: float,
+) -> None:
+    if (
+        record.provenance == DIRECTIVE_PROVENANCE_ARCHIVE_ONLY
+        and not record.text
+        and not record.ack_text
+        and not record.ack_content
+    ):
+        _replace_incomplete_archive_locked(
+            connection,
+            item,
+            key=record.key,
+            disposition=disposition,
+            attachments_json=attachments_json,
+            lineage_json=lineage_json,
+            acknowledged_at=acknowledged_at,
+        )
+        return
+    existing_ack = _recorded_ack_signature(record)
+    proposed_ack = _proposed_ack_signature(
+        item,
+        disposition=disposition,
+        attachments_json=attachments_json,
+        lineage_json=lineage_json,
+    )
+    if existing_ack != proposed_ack:
+        raise SpiceError(
+            f"directive ACK collision for {record.key!r}: the key already has "
+            f"disposition {record.disposition!r} with different auditable "
+            "content; the existing record was left unchanged"
+        )
+
+
+def _replace_incomplete_archive_locked(
+    connection: sqlite3.Connection,
+    item: AckStateWrite,
+    *,
+    key: str,
+    disposition: str,
+    attachments_json: str,
+    lineage_json: str,
+    acknowledged_at: float,
+) -> None:
+    connection.execute(
+        """
+        UPDATE acked_inbox_items
+        SET inbox_name = ?, text = ?, attachments_json = ?,
+            lineage_json = ?, ack_text = ?, ack_content = ?,
+            disposition = ?, archived_at = ?, published_text = ?,
+            acknowledged_at = ?
+        WHERE key = ?
+        """,
+        (
+            item.inbox_name,
+            item.text,
+            attachments_json,
+            lineage_json,
+            item.ack_text,
+            item.ack_content,
+            disposition,
+            acknowledged_at,
+            item.text,
+            acknowledged_at,
+            key,
+        ),
+    )
+
+
+def _complete_pending_ack_locked(
+    connection: sqlite3.Connection,
+    item: AckStateWrite,
+    *,
+    key: str,
+    disposition: str,
+    attachments_json: str,
+    lineage_json: str,
+    acknowledged_at: float,
+) -> None:
+    connection.execute(
+        """
+        UPDATE acked_inbox_items
+        SET inbox_name = ?, text = ?, attachments_json = ?, lineage_json = ?,
+            ack_text = ?, ack_content = ?, disposition = ?, archived_at = ?,
+            acknowledged_at = ?
+        WHERE key = ?
+        """,
+        (
+            item.inbox_name,
+            item.text,
+            attachments_json,
+            lineage_json,
+            item.ack_text,
+            item.ack_content,
+            disposition,
+            acknowledged_at,
+            acknowledged_at,
+            key,
+        ),
+    )
+
+
+def _recorded_ack_signature(record: DirectiveHistoryRecord) -> tuple[Any, ...]:
+    return (
+        record.inbox_name,
+        record.text,
+        json.dumps(list(record.attachments), sort_keys=True),
+        json.dumps(record.lineage, sort_keys=True),
+        record.ack_text,
+        record.ack_content,
+        record.disposition,
+    )
+
+
+def _proposed_ack_signature(
+    item: AckStateWrite,
+    *,
+    disposition: str,
+    attachments_json: str,
+    lineage_json: str,
+) -> tuple[Any, ...]:
+    return (
+        item.inbox_name,
+        item.text,
+        attachments_json,
+        lineage_json,
+        item.ack_text,
+        item.ack_content,
+        disposition,
     )
 
 
@@ -275,6 +894,53 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         "archived_at",
         "ALTER TABLE acked_inbox_items ADD COLUMN archived_at REAL NOT NULL DEFAULT 0",
     )
+    _ensure_column(
+        connection,
+        "target_actor",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN target_actor TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "team_id",
+        "ALTER TABLE acked_inbox_items ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "sent_at",
+        "ALTER TABLE acked_inbox_items ADD COLUMN sent_at REAL",
+    )
+    _ensure_column(
+        connection,
+        "published_text",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN published_text TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "acknowledged_at",
+        "ALTER TABLE acked_inbox_items ADD COLUMN acknowledged_at REAL",
+    )
+    _ensure_column(
+        connection,
+        "provenance",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN provenance TEXT NOT NULL DEFAULT 'archiveOnly'",
+    )
+    _ensure_column(
+        connection,
+        "legacy_metric_json",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN legacy_metric_json TEXT NOT NULL DEFAULT ''",
+    )
+    connection.execute(
+        "UPDATE acked_inbox_items SET published_text = text WHERE published_text = ''"
+    )
+    connection.execute(
+        "UPDATE acked_inbox_items SET acknowledged_at = archived_at "
+        "WHERE acknowledged_at IS NULL AND disposition IN (?, ?)",
+        (ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED),
+    )
     connection.execute(ACK_STATE_INDEX_SQL)
 
 
@@ -312,3 +978,51 @@ def _normalize_disposition(value: str) -> str:
     if clean in ACK_DISPOSITIONS:
         return clean
     return ACK_DISPOSITION_ACKED
+
+
+def _normalize_consumed_disposition(value: str) -> str:
+    clean = str(value or "").strip().lower()
+    if clean in {ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED}:
+        return clean
+    raise SpiceError(
+        f"ACK archival disposition must be 'acked' or 'refused'; got {value!r}"
+    )
+
+
+def _canonical_disposition(value: str) -> str:
+    clean = str(value or "").strip().lower()
+    if clean in ACK_DISPOSITIONS:
+        return clean
+    raise SpiceError(
+        f"canonical directive history has unknown disposition {value!r}; "
+        "repair or replay the steering/ACK record"
+    )
+
+
+def _required_value(value: str, label: str) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        raise SpiceError(f"{label} must be non-empty")
+    return clean
+
+
+def _directive_collision(
+    key: str, existing: tuple[Any, ...], proposed: tuple[Any, ...]
+) -> SpiceError:
+    labels = (
+        "inbox_name",
+        "published_text",
+        "attachments",
+        "target_actor",
+        "team_id",
+        "sent_at",
+    )
+    differences = ", ".join(
+        f"{label}={old!r}->{new!r}"
+        for label, old, new in zip(labels, existing, proposed, strict=True)
+        if old != new
+    )
+    return SpiceError(
+        f"directive history collision for {key!r}: immutable publication "
+        f"provenance differs ({differences}); the existing record was left unchanged"
+    )

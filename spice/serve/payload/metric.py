@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
 from spice.errors import SpiceError
+from spice.mail.ackstate import ACK_DISPOSITION_ACKED
+from spice.serve.directivestats import directive_history_for_subject
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
@@ -100,6 +103,7 @@ def _series_points(
             store,
             subject,
             metric=metric,
+            lens=lens,
             start=start,
             end=end,
             bucket_seconds=bucket_seconds,
@@ -207,37 +211,51 @@ def _directive_points(
     subject: _SeriesSubject,
     *,
     metric: str,
+    lens: str,
     start: float,
     end: float,
     bucket_seconds: int,
 ) -> list[dict[str, Any]]:
-    field = "team_id" if subject.scope == "team" else "agent_id"
-    ids = subject.team_ids if subject.scope == "team" else subject.agent_ids
-    if not ids:
+    if subject.scope == "team":
+        agent_ids: tuple[str, ...] = ()
+        team_ids = subject.team_ids
+    else:
+        attribution = (
+            ObservationAttributionMode.PER_SESSION
+            if lens == "perSession"
+            else ObservationAttributionMode.LINEAGE_CUMULATIVE
+        )
+        agent_ids = store.observation_actor_ids(
+            subject.agent_ids, attribution=attribution
+        )
+        team_ids = ()
+    if not agent_ids and not team_ids:
         return []
-    placeholders = ",".join("?" for _id in ids)
-    timestamp_column = "sent_at" if metric == "sends" else "acked_at"
-    ack_filter = "AND acked = 1 " if metric == "acks" else ""
-    bucket_expr = (
-        f"CAST({timestamp_column} AS INTEGER) - "
-        f"(CAST({timestamp_column} AS INTEGER) % ?)"
+    records = directive_history_for_subject(
+        store.directive_state_path,
+        agent_ids=agent_ids,
+        team_ids=team_ids,
+        start=start,
+        end=end,
     )
-    with store.connect() as connection:
-        rows = connection.execute(
-            f"SELECT {bucket_expr} AS bucket_start, COUNT(*) AS count FROM directives "
-            f"WHERE {field} IN ({placeholders}) "
-            f"AND {timestamp_column} >= ? AND {timestamp_column} <= ? "
-            f"{ack_filter}"
-            "GROUP BY bucket_start ORDER BY bucket_start",
-            (bucket_seconds, *ids, start, end),
-        ).fetchall()
+    buckets: Counter[int] = Counter()
+    for record in records:
+        timestamp = record.sent_at
+        if metric == "acks":
+            if record.disposition != ACK_DISPOSITION_ACKED:
+                continue
+            timestamp = record.acknowledged_at
+        if timestamp is None or timestamp < start or timestamp > end:
+            continue
+        bucket_start = int(timestamp) - (int(timestamp) % bucket_seconds)
+        buckets[bucket_start] += 1
     return [
         {
-            "bucketStart": int(row["bucket_start"]),
-            "value": int(row["count"] or 0),
-            metric: int(row["count"] or 0),
+            "bucketStart": bucket_start,
+            "value": count,
+            metric: count,
         }
-        for row in rows
+        for bucket_start, count in sorted(buckets.items())
     ]
 
 
