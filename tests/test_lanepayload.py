@@ -28,6 +28,16 @@ IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 FIVE_MINUTES_SECONDS = 300
 
 
+def _task_board(rows):
+    return taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision="fixture",
+            rows=tuple(rows),
+        )
+    )
+
+
 def _record_identity(
     store: ServeTeamStore,
     actor_id: str,
@@ -292,27 +302,27 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
-    monkeypatch.setattr(
-        lane.tw,
-        "export",
-        lambda filters=None, **_k: (
-            [
-                {
-                    "claim_by": "019f6eddab8c7ab2870af6b81dfc5b7f",
-                    "claim_at": "2026-06-10T00:00:00Z",
-                    "description": "Show  claimed task\nwithout breaking the card",
-                    "incepted": "1kF5xdSM",
-                    "phase": "todo",
-                    "project": "serve.ui",
-                    "start": "20260610T000000Z",
-                }
-            ]
-            if list(filters or []) == ["status.any:"]
-            else []
-        ),
+    projection = _task_board(
+        [
+            {
+                "claim_by": "019f6eddab8c7ab2870af6b81dfc5b7f",
+                "claim_at": "2026-06-10T00:00:00Z",
+                "description": "Show  claimed task\nwithout breaking the card",
+                "incepted": "1kF5xdSM",
+                "phase": "todo",
+                "project": "serve.ui",
+                "start": "20260610T000000Z",
+            }
+        ]
     )
 
-    line = lane.status_line_payload(_State(), target, items=[], error=None)
+    line = lane.status_line_payload(
+        _State(),
+        target,
+        items=[],
+        error=None,
+        task_board=projection,
+    )
 
     assert line["claimedTask"] == {
         "handle": "UI-1kF5xdSM",
@@ -770,6 +780,7 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
         thread_id="agent-a",
         items=items,
         status=status,
+        task_board=_task_board([]),
     )
     assert metrics["acked"] == 2
     assert metrics["sends"] == 3
@@ -780,52 +791,64 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
 
 
 def test_lane_info_payload_reports_review_pressure(monkeypatch):
-    seen: list[list[str]] = []
-
-    def fake_export(args: list[str]) -> list[dict[str, object]]:
-        seen.append(args)
-        if args == ["status:completed"]:
-            return [
-                {
-                    "uuid": "reviewed-uuid",
-                    "incepted": "1jNJvRyn",
-                    "project": "task.review",
-                    "description": "Fix reviewed issue",
-                    "review_author": "agent-a",
-                    "review_by": "agent-b",
-                    "review_finding": "changes",
-                    "review_at": "2026-01-02T00:00:00Z",
-                },
-                {
-                    "uuid": "clean-uuid",
-                    "incepted": "1jNJvRyp",
-                    "project": "task.review",
-                    "description": "Clean review",
-                    "review_author": "agent-a",
-                    "review_by": "agent-c",
-                    "review_finding": "clean",
-                    "review_at": "2026-01-03T00:00:00Z",
-                },
-                {
-                    "uuid": "other-uuid",
-                    "incepted": "1jNJvRyq",
-                    "project": "task.review",
-                    "description": "Other actor review",
-                    "review_author": "agent-z",
-                    "review_by": "agent-b",
-                    "review_finding": "changes",
-                    "review_at": "2026-01-04T00:00:00Z",
-                },
-            ]
-        if args == ["(", "status:pending", "or", "status:waiting", ")"]:
-            return [
-                {"uuid": "followup-a", "depends": ["reviewed-uuid"]},
-                {"uuid": "followup-b", "depends": "reviewed-uuid"},
-                {"uuid": "unrelated", "depends": ["other-uuid"]},
-            ]
-        raise AssertionError(f"unexpected export args: {args}")
-
-    monkeypatch.setattr(tw, "export", fake_export)
+    projection = _task_board(
+        [
+            {
+                "uuid": "reviewed-uuid",
+                "incepted": "1jNJvRyn",
+                "project": "task.review",
+                "description": "Fix reviewed issue",
+                "status": "completed",
+                "claim_by": "agent-a",
+                "review_author": "agent-a",
+                "review_by": "agent-b",
+                "review_finding": "changes",
+                "review_at": "2026-01-02T00:00:00Z",
+            },
+            {
+                "uuid": "clean-uuid",
+                "incepted": "1jNJvRyp",
+                "project": "task.review",
+                "description": "Clean review",
+                "status": "completed",
+                "review_author": "agent-a",
+                "review_by": "agent-c",
+                "review_finding": "clean",
+                "review_at": "2026-01-03T00:00:00Z",
+            },
+            {
+                "uuid": "other-uuid",
+                "incepted": "1jNJvRyq",
+                "project": "task.review",
+                "description": "Other actor review",
+                "status": "completed",
+                "review_author": "agent-z",
+                "review_by": "agent-b",
+                "review_finding": "changes",
+                "review_at": "2026-01-04T00:00:00Z",
+            },
+            {
+                "uuid": "followup-a",
+                "status": "pending",
+                "depends": ["reviewed-uuid"],
+            },
+            {
+                "uuid": "followup-b",
+                "status": "waiting",
+                "depends": "reviewed-uuid",
+            },
+            {
+                "uuid": "unrelated",
+                "status": "pending",
+                "depends": ["other-uuid"],
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("shared row queries must not export"),
+    )
     serve_identity = {
         "actorId": "thread:agent-a",
         "thread": {"threadId": "agent-a"},
@@ -833,14 +856,14 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
         "launch": {"desired": {}, "actual": {}},
     }
 
-    payload = lane._lane_info_payload(_Target(id="wt"), serve_identity)
+    payload = lane._lane_info_payload(
+        _Target(id="wt"),
+        serve_identity,
+        task_board=projection,
+    )
     pressure = payload["reviewPressure"]
     rows = {row["key"]: row for row in payload["summaryRows"]}
 
-    assert seen == [
-        ["status:completed"],
-        ["(", "status:pending", "or", "status:waiting", ")"],
-    ]
     assert pressure["count"] == 1
     assert pressure["openFollowupCount"] == 2
     assert pressure["items"] == [

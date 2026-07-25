@@ -338,6 +338,10 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
         lambda: SimpleNamespace(
             task_filter_inventory={},
             active_claim=lambda _actor: None,
+            task_card_rows=lambda _actor: (),
+            completed_review_rows=lambda _actors: (),
+            open_review_followup_count=lambda _uuid: 0,
+            drained_task_count=lambda _actor: 0,
         ),
     )
     refresh_payload = message.messages_payload_for_worktree(state, target, limit=5)

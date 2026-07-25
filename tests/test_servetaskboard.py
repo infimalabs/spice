@@ -390,3 +390,101 @@ def test_open_projection_indexes_latest_claim_without_copying_rows(monkeypatch):
     assert projection.active_claim("agenta") is observation.rows[1]
     assert projection.active_claim("missing") is None
     assert taskboard.open_task_board_projection(observation) is projection
+
+
+def test_projection_reuses_card_review_followup_and_drained_indexes(monkeypatch):
+    rows = (
+        {"uuid": "pending-card", "status": "pending", "origin_thread": "agenta"},
+        {"uuid": "waiting-card", "status": "waiting", "origin_thread": "agenta"},
+        {
+            "uuid": "completed-card",
+            "status": "completed",
+            "origin_thread": "agenta",
+        },
+        {
+            "uuid": "exact-origin-only",
+            "status": "pending",
+            "origin_thread": "agent-a",
+        },
+        {
+            "uuid": "reviewed-older",
+            "status": "completed",
+            "claim_by": "another-actor",
+            "review_author": "reviewer-a",
+            "review_finding": "changes",
+            "review_at": "2026-07-24T20:00:00Z",
+        },
+        {
+            "uuid": "reviewed-newer",
+            "status": "completed",
+            "claim_by": "another-actor",
+            "review_author": "reviewer-a",
+            "review_finding": "blocked",
+            "review_at": "2026-07-25T20:00:00Z",
+        },
+        {
+            "uuid": "reviewed-other",
+            "status": "completed",
+            "review_author": "reviewer-b",
+            "review_finding": "changes",
+            "review_at": "2026-07-26T20:00:00Z",
+        },
+        {
+            "uuid": "pending-followup",
+            "status": "pending",
+            "depends": ["reviewed-newer"],
+        },
+        {
+            "uuid": "waiting-followup",
+            "status": "waiting",
+            "depends": "reviewed-newer",
+        },
+        {
+            "uuid": "completed-followup",
+            "status": "completed",
+            "depends": ["reviewed-newer"],
+        },
+        {"uuid": "drained-claim", "status": "completed", "claim_by": "agenta"},
+        {
+            "uuid": "drained-thread",
+            "status": "completed",
+            "claim_thread": "agenta",
+        },
+        {
+            "uuid": "drained-review-author",
+            "status": "completed",
+            "review_author": "agenta",
+        },
+        {
+            "uuid": "drained-reviewer",
+            "status": "completed",
+            "review_by": "agenta",
+            "claim_by": "agenta",
+        },
+        {"uuid": "not-drained", "status": "pending", "claim_by": "agenta"},
+    )
+    observation = taskboard.TaskBoardObservation(
+        backend_identity="test",
+        revision="shared-indexes",
+        rows=rows,
+    )
+    projection = taskboard.open_task_board_projection(observation)
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("projection queries must not export"),
+    )
+
+    cards = projection.task_card_rows("agent-a")
+    reviews = projection.completed_review_rows({"reviewer-a", "thread:reviewer-a"})
+
+    assert cards is projection.task_card_rows("agent-a")
+    assert cards == observation.rows[:3]
+    assert reviews is projection.completed_review_rows(
+        {"thread:reviewer-a", "reviewer-a"}
+    )
+    assert reviews == (observation.rows[5], observation.rows[4])
+    assert reviews[0] is observation.rows[5]
+    assert projection.open_review_followup_count("reviewed-newer") == 2
+    assert projection.drained_task_count("agent-a") == 4
+    assert projection.drained_task_count("") == 0

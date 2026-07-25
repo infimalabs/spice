@@ -43,8 +43,6 @@ ROUND_TRIP_OFFSET_SECONDS = 3600
 TW_TOUCHPOINTS: dict[str, frozenset[str]] = {
     "spice/agent/watchdog.py": frozenset({"canonical_actor"}),
     "spice/agent/wrap.py": frozenset({"export"}),
-    "spice/serve/payload/lane.py": frozenset({"canonical_actor", "export"}),
-    "spice/serve/payload/message.py": frozenset({"canonical_actor", "export"}),
     "spice/serve/payload/metric.py": frozenset({"export"}),
     "spice/serve/taskboard.py": frozenset({"canonical_actor", "export"}),
     "spice/sessions/briefingtaskplane.py": frozenset({"current_actor", "now_iso"}),
@@ -125,7 +123,6 @@ TW_COMMAND_VOCABULARY: dict[str, str] = {
     "project:": "project assignment or filter prefix",
     "project.is:": "exact project filter prefix",
     "origin.is:": "exact origin filter prefix",
-    "origin_thread.is:": "exact origin-thread filter prefix",
     "incepted.is:": "exact inception-token filter prefix",
     "claim_by.is:": "exact claim-owner filter prefix",
     "claim_until.is:": "exact claim-deadline filter prefix",

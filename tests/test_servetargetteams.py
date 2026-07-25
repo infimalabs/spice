@@ -425,6 +425,10 @@ def _patch_payload_dependencies(
     empty_task_board = SimpleNamespace(
         task_filter_inventory={},
         active_claim=lambda _actor: None,
+        task_card_rows=lambda _actor: (),
+        completed_review_rows=lambda _actors: (),
+        open_review_followup_count=lambda _uuid: 0,
+        drained_task_count=lambda _actor: 0,
     )
     monkeypatch.setattr(message, "open_task_board_projection", lambda: empty_task_board)
     monkeypatch.setattr(

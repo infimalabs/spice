@@ -11,7 +11,6 @@ import pytest
 
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
-from spice.errors import SpiceError
 from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
@@ -19,6 +18,7 @@ from spice.paths import shared_attachment_root
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
+from spice.serve import taskboard
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.steering import submit_steering_message
@@ -35,6 +35,28 @@ class _EmptyOpenTaskBoard:
 
     def active_claim(self, actor: str):
         return None
+
+    def task_card_rows(self, actor: str):
+        return ()
+
+    def completed_review_rows(self, actors):
+        return ()
+
+    def open_review_followup_count(self, reviewed_uuid: str):
+        return 0
+
+    def drained_task_count(self, actor: str):
+        return 0
+
+
+def _task_board(rows):
+    return taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision="fixture",
+            rows=tuple(rows),
+        )
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -591,15 +613,8 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         "creation_surface": "cli",
         "status": "pending",
     }
-    seen: dict[str, object] = {}
-
-    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
-        if filters and f"origin_thread.is:{actor}" in filters:
-            seen["filters"] = filters
-            return [row]
-        return []
-
-    monkeypatch.setattr(message.tw, "export", fake_export)
+    projection = _task_board([row])
+    monkeypatch.setattr(message, "open_task_board_projection", lambda: projection)
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -667,10 +682,6 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         limit=5,
     )
 
-    assert seen["filters"] == [
-        "status.any:",
-        f"origin_thread.is:{actor}",
-    ]
     item = payload["messages"][0]
     assert item["kind"] == "task_card"
     assert item["source_kind"] == "cli_task_created"
@@ -715,9 +726,12 @@ def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
         "origin_thread": actor,
     }
 
-    monkeypatch.setattr(message.tw, "export", lambda _filters: [row])
-
-    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
+    cards = message._task_card_messages_for_thread(
+        actor,
+        after=None,
+        before=None,
+        task_board=_task_board([row]),
+    )
 
     card = cards[0]
     # The card fronts title/project/acceptance, then surfaces the provenance and
@@ -743,39 +757,57 @@ def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
     assert "<dt>handle</dt><dd>TASKCAR-1k4Yh62d</dd>" in card.display_html
 
 
-def test_shared_task_card_export_is_lazy_and_caches_failure(tmp_path, monkeypatch):
-    export_calls: list[list[str]] = []
-
-    def failing_export(filters: list[str] | None = None) -> list[dict[str, object]]:
-        export_calls.append(list(filters or []))
-        raise SpiceError("task export unavailable")
-
-    monkeypatch.setattr(message.tw, "export", failing_export)
-    snapshot = message.TaskCardExportSnapshot()
-
+def test_shared_task_card_index_is_lazy_for_unbound_lane_and_reuses_rows(
+    tmp_path, monkeypatch
+):
+    rows = [
+        {
+            "uuid": "agent-a-card",
+            "incepted": "1k4Yh62d",
+            "description": "Agent A card",
+            "project": "serve.ui",
+            "origin_thread": "agenta",
+        },
+        {
+            "uuid": "agent-b-card",
+            "incepted": "1k4Yh6Ps",
+            "description": "Agent B card",
+            "project": "serve.ui",
+            "origin_thread": "agentb",
+        },
+    ]
+    projection = _task_board(rows)
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("shared row queries must not export"),
+    )
     assert message.target_activity_items(
         _Target(id="wt", repo_root=tmp_path),
         "",
-        task_cards=snapshot,
+        task_board=projection,
     ) == ([], None, None)
-    assert export_calls == []
 
     first = message._task_card_messages_for_thread(
         "agent-a",
         after=None,
         before=None,
-        task_cards=snapshot,
+        task_board=projection,
     )
     second = message._task_card_messages_for_thread(
         "agent-b",
         after=None,
         before=None,
-        task_cards=snapshot,
+        task_board=projection,
     )
 
-    assert first == []
-    assert second == []
-    assert export_calls == [["status.any:"]]
+    assert [item.display_text for item in first] == [
+        "Task capture: Agent A card (serve.ui)"
+    ]
+    assert [item.display_text for item in second] == [
+        "Task capture: Agent B card (serve.ui)"
+    ]
+    assert projection.task_card_rows("agent-a") is projection.task_card_rows("agent-a")
 
 
 def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
@@ -806,21 +838,46 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
             "origin_thread": actor,
             "acceptance": "Private acceptance renders.",
         },
+        {
+            "id": 44,
+            "uuid": "completed-task-44",
+            "entry": "20260610T120003Z",
+            "description": "Completed task card",
+            "project": "serve.cards",
+            "status": "completed",
+            "phase": "review",
+            "origin_thread": actor,
+        },
+        {
+            "id": 45,
+            "uuid": "different-origin-45",
+            "incepted": "1k4Yh7AC",
+            "description": "Different origin",
+            "project": "serve.cards",
+            "status": "pending",
+            "origin_thread": f"thread:{actor}",
+        },
     ]
-    seen: dict[str, object] = {}
+    projection = _task_board(rows)
+    cards = message._task_card_messages_for_thread(
+        actor,
+        after=None,
+        before=None,
+        task_board=projection,
+    )
+    expected = [
+        card
+        for row in rows[:3]
+        if (card := message._task_card_message_from_row(row)) is not None
+    ]
 
-    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
-        seen["filters"] = filters
-        return rows
-
-    monkeypatch.setattr(message.tw, "export", fake_export)
-
-    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
-
-    assert seen["filters"] == ["status.any:", f"origin_thread.is:{actor}"]
+    assert [card.to_payload() for card in cards] == [
+        card.to_payload() for card in expected
+    ]
     assert [card.display_text for card in cards] == [
         f"Task capture: Oops task card ({task_config.OOPS_PROJECT})",
         f"Task capture: Private task card ({task_config.private_project(actor)})",
+        "Task capture: Completed task card (serve.cards)",
     ]
     oops_card = cards[0]
     private_card = cards[1]
@@ -870,7 +927,8 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
         seen["reader_kwargs"] = kwargs
         return _message_read([_message("2026-06-10T12:00:03.000000Z")])
 
-    monkeypatch.setattr(message.tw, "export", lambda _filters: [row])
+    projection = _task_board([row])
+    monkeypatch.setattr(message, "open_task_board_projection", lambda: projection)
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -962,20 +1020,12 @@ def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
         "depends": ["reviewed-task-uuid"],
         "status": "pending",
     }
-    seen: dict[str, object] = {}
-
-    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
-        seen["filters"] = filters
-        return [row]
-
-    monkeypatch.setattr(message.tw, "export", fake_export)
-
-    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
-
-    assert seen["filters"] == [
-        "status.any:",
-        f"origin_thread.is:{actor}",
-    ]
+    cards = message._task_card_messages_for_thread(
+        actor,
+        after=None,
+        before=None,
+        task_board=_task_board([row]),
+    )
     assert len(cards) == 1
     card = cards[0]
     assert card.kind == "task_card"
@@ -1013,13 +1063,12 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
     ]
     boundary_key = "2026-06-10T12:00:01.001000Z#task-card:older-task"
 
-    monkeypatch.setattr(message.tw, "export", lambda _filters: rows)
-
     merged = message._merge_task_card_messages(
         actor,
         [_message("2026-06-10T12:00:03.000000Z")],
         limit=5,
         after=boundary_key,
+        task_board=_task_board(rows),
     )
 
     assert [item.display_text for item in merged] == [
@@ -1057,12 +1106,11 @@ def test_task_card_tail_merge_drops_cards_older_than_visible_window(monkeypatch)
             "creation_surface": "cli",
         },
     ]
-    monkeypatch.setattr(message.tw, "export", lambda _filters: rows)
-
     merged = message._merge_task_card_messages(
         actor,
         [_message("2026-06-10T12:00:00.000000Z")],
         limit=5,
+        task_board=_task_board(rows),
     )
 
     assert [item.display_text for item in merged] == [
