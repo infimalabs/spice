@@ -75,6 +75,7 @@ from spice.serve.observer import (
     observer_lane_signature,
     observer_messages_payload,
 )
+from spice.serve import taskboard
 from spice.serve.team.store import ServeTeamStore, TeamCommandService
 from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
@@ -103,6 +104,9 @@ TASK_BACKEND_LIVE_LANE_ERROR = (
     "live lane mutations are unavailable while the spice serve "
     "--task-backend override is active"
 )
+# The process-wide board reader is registered at the Serve composition root.
+# Payload consumers migrate onto this boundary in dependency-ordered changes.
+TASK_BOARD_OBSERVATION_READER = taskboard.current_task_board_observation
 
 
 def _live_lane_mutation_payload(
