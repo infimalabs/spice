@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -54,7 +55,7 @@ def flow_args(phases: list[str]) -> list[str]:
     return args
 
 
-def phases_of(row: dict[str, Any]) -> list[str]:
+def phases_of(row: Mapping[str, Any]) -> list[str]:
     phases: list[str] = []
     for i in range(config.PHASE_SLOT_COUNT):
         value = str(row.get(f"phase_{i}") or "").strip()

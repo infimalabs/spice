@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +22,7 @@ TASK_FILTER_STATE_COUNT_FIELDS = (
     "blockedTaskCount",
     "deferredTaskCount",
 )
+TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
 TASK_BOARD_OBSERVATION_TIMEOUT_SECONDS = 2 * (
     tw.TASK_COMMAND_TIMEOUT_SECONDS + task_config.TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS
 )
@@ -49,17 +50,79 @@ class TaskBoardObservation:
 
 @dataclass(frozen=True, slots=True)
 class OpenTaskBoardProjection:
-    """Open-task indexes and payload projections over one observation."""
+    """Task indexes and the open-task payload over one observation."""
 
     backend_identity: str
     revision: str
     task_filter_inventory: dict[str, Any]
     _active_claims: Mapping[str, Mapping[str, Any]]
+    _task_cards_by_origin: Mapping[str, tuple[Mapping[str, Any], ...]]
+    _completed_reviews_by_author: Mapping[str, tuple[Mapping[str, Any], ...]]
+    _open_followups_by_reviewed: Mapping[str, int]
+    _drained_counts_by_actor: Mapping[str, int]
+    _row_positions: Mapping[int, int]
+    _query_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        compare=False,
+        repr=False,
+    )
+    _completed_review_queries: dict[frozenset[str], tuple[Mapping[str, Any], ...]] = (
+        field(
+            default_factory=dict,
+            compare=False,
+            repr=False,
+        )
+    )
 
     def active_claim(self, actor: str) -> Mapping[str, Any] | None:
         """Return the canonical actor's latest active claim, if any."""
         canonical_actor = tw.canonical_actor(actor)
         return self._active_claims.get(canonical_actor) if canonical_actor else None
+
+    def task_card_rows(self, actor: str) -> tuple[Mapping[str, Any], ...]:
+        """Return rows whose origin_thread exactly matches the canonical actor."""
+        canonical_actor = tw.canonical_actor(actor)
+        if not canonical_actor:
+            return ()
+        return self._task_cards_by_origin.get(canonical_actor, ())
+
+    def completed_review_rows(
+        self, actors: Iterable[str]
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return completed rows indexed by their exact review_author."""
+        keys = frozenset(str(value) for value in actors if value)
+        if not keys:
+            return ()
+        with self._query_lock:
+            cached = self._completed_review_queries.get(keys)
+            if cached is not None:
+                return cached
+            rows = [
+                row
+                for actor in keys
+                for row in self._completed_reviews_by_author.get(actor, ())
+            ]
+            rows.sort(
+                key=lambda row: (
+                    _review_pressure_sort_key(row),
+                    -self._row_positions[id(row)],
+                ),
+                reverse=True,
+            )
+            result = tuple(rows)
+            self._completed_review_queries[keys] = result
+            return result
+
+    def open_review_followup_count(self, reviewed_uuid: str) -> int:
+        """Return the number of open rows depending on one reviewed UUID."""
+        return self._open_followups_by_reviewed.get(reviewed_uuid, 0)
+
+    def drained_task_count(self, actor: str) -> int:
+        """Return completed rows associated with the canonical actor."""
+        canonical_actor = tw.canonical_actor(actor)
+        if not canonical_actor:
+            return 0
+        return self._drained_counts_by_actor.get(canonical_actor, 0)
 
 
 _task_board_condition = threading.Condition()
@@ -310,6 +373,65 @@ def _active_claim_index(
     return MappingProxyType(latest)
 
 
+def _row_tuple_index(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    field_name: str,
+) -> Mapping[str, tuple[Mapping[str, Any], ...]]:
+    indexed: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        key = str(row.get(field_name) or "")
+        if key:
+            indexed.setdefault(key, []).append(row)
+    return MappingProxyType({key: tuple(values) for key, values in indexed.items()})
+
+
+def _review_pressure_sort_key(row: Mapping[str, Any]) -> str:
+    return str(
+        row.get("review_at")
+        or row.get("end")
+        or row.get("modified")
+        or row.get("entry")
+        or ""
+    )
+
+
+def _completed_review_index(
+    rows: tuple[Mapping[str, Any], ...],
+) -> Mapping[str, tuple[Mapping[str, Any], ...]]:
+    completed = (row for row in rows if str(row.get("status") or "") == "completed")
+    return _row_tuple_index(completed, field_name="review_author")
+
+
+def _open_review_followup_index(
+    rows: tuple[Mapping[str, Any], ...],
+) -> Mapping[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _is_open_task_row(row):
+            continue
+        for reviewed_uuid in _task_row_dependencies(row):
+            counts[reviewed_uuid] = counts.get(reviewed_uuid, 0) + 1
+    return MappingProxyType(counts)
+
+
+def _drained_task_count_index(
+    rows: tuple[Mapping[str, Any], ...],
+) -> Mapping[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if str(row.get("status") or "") != "completed":
+            continue
+        actors = {
+            str(row.get(field_name) or "")
+            for field_name in TASK_ACTOR_FIELDS
+            if row.get(field_name)
+        }
+        for actor in actors:
+            counts[actor] = counts.get(actor, 0) + 1
+    return MappingProxyType(counts)
+
+
 def _build_open_task_board_projection(
     observation: TaskBoardObservation,
 ) -> OpenTaskBoardProjection:
@@ -327,6 +449,16 @@ def _build_open_task_board_projection(
             catalog,
         ),
         _active_claims=_active_claim_index(open_rows),
+        _task_cards_by_origin=_row_tuple_index(
+            observation.rows,
+            field_name="origin_thread",
+        ),
+        _completed_reviews_by_author=_completed_review_index(observation.rows),
+        _open_followups_by_reviewed=_open_review_followup_index(observation.rows),
+        _drained_counts_by_actor=_drained_task_count_index(observation.rows),
+        _row_positions=MappingProxyType(
+            {id(row): position for position, row in enumerate(observation.rows)}
+        ),
     )
 
 

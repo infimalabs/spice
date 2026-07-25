@@ -145,6 +145,10 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         lambda: SimpleNamespace(
             task_filter_inventory={},
             active_claim=lambda _actor: None,
+            task_card_rows=lambda _actor: (),
+            completed_review_rows=lambda _actors: (),
+            open_review_followup_count=lambda _uuid: 0,
+            drained_task_count=lambda _actor: 0,
         ),
     )
     monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")
@@ -225,6 +229,10 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         lambda: SimpleNamespace(
             task_filter_inventory={},
             active_claim=lambda _actor: None,
+            task_card_rows=lambda _actor: (),
+            completed_review_rows=lambda _actors: (),
+            open_review_followup_count=lambda _uuid: 0,
+            drained_task_count=lambda _actor: 0,
         ),
     )
     monkeypatch.setattr(
