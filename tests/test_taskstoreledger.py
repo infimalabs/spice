@@ -238,7 +238,7 @@ def test_ledger_records_every_command_fragment_spice_emits():
     assert fragments == set(TW_COMMAND_VOCABULARY)
 
 
-def test_tw_module_exposes_exactly_the_ledgered_entry_points():
+def test_tw_module_still_exposes_every_ledgered_entry_point():
     ledgered = {name for names in TW_TOUCHPOINTS.values() for name in names}
     public = {
         name
