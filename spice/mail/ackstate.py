@@ -598,11 +598,17 @@ def _record_publication_locked(
     if record.target_actor and immutable != proposed:
         raise _directive_collision(key, immutable, proposed)
     if not record.target_actor:
-        if record.inbox_name != inbox_name or record.text != item.text:
+        archived_publication = (
+            record.inbox_name,
+            record.text,
+            json.dumps(list(record.attachments), sort_keys=True),
+        )
+        proposed_publication = (inbox_name, item.text, attachments_json)
+        if archived_publication != proposed_publication:
             raise SpiceError(
                 f"directive history collision for {key!r}: archived steering "
-                "content does not match the publication; preserve both stores "
-                "and replay with an explicit key mapping"
+                "content or attachments do not match the publication; preserve "
+                "both stores and replay with an explicit key mapping"
             )
         connection.execute(
             """
