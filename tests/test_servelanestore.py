@@ -1,8 +1,10 @@
 """Serve lane-store ownership and load-order contracts."""
 
+import re
 import subprocess
 from pathlib import Path
 
+from spice.serve.payload import wire
 from spice.serve.web import STATIC_ROOT, render_index_html
 
 
@@ -43,6 +45,31 @@ def test_lane_store_owns_group_topology_as_declarative_transitions():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_lane_store_reduces_lane_chrome_facets_as_declarative_transitions():
+    fixture = Path(__file__).with_name("fixtures") / "lane_store_chrome.js"
+
+    result = subprocess.run(
+        ["node", str(fixture), str(STATIC_ROOT / "app.lane-store.js")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_lane_chrome_facet_authorities_mirror_the_wire_contract():
+    """The browser reducer refuses a facet whose authority is not the one the
+    wire contract assigns it, so the two tables have to say the same thing."""
+    store_source = (STATIC_ROOT / "app.lane-store.js").read_text(encoding="utf-8")
+    declaration = store_source.split("const LANE_CHROME_FACET_AUTHORITIES")[1]
+    mirrored = dict(
+        re.findall(r"(\w+): \"([\w-]+)\"", declaration.split("});")[0]),
+    )
+
+    assert mirrored == wire.LANE_CHROME_FACET_AUTHORITIES
 
 
 def test_lane_store_loads_before_every_production_consumer():
