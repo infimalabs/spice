@@ -70,14 +70,18 @@ from spice.serve.team.renewals import (
 )
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
+    LEGACY_TEAM_SCHEMA_FINGERPRINT,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
     TASK_FILTER_SOURCES as TASK_FILTER_SOURCES,
+    TEAM_AUTHORITY_MIGRATIONS,
+    TEAM_AUTHORITY_SCHEMAS,
+    TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_ID_HEX_CHARS as TEAM_ID_HEX_CHARS,
-    TEAM_SCHEMA,
-    TEAM_SCHEMA_FINGERPRINT,
+    TEAM_PROJECTION_SCHEMA,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
@@ -103,6 +107,69 @@ GLOBAL_FAST_MODE_KEY = "fast_mode"
 MAX_TEAM_MEMBERS = 6
 
 
+def _schema_statements(script: str) -> tuple[str, ...]:
+    statements: list[str] = []
+    pending = ""
+    for character in script:
+        pending += character
+        if character == ";" and sqlite3.complete_statement(pending):
+            statement = pending.strip()
+            if statement:
+                statements.append(statement)
+            pending = ""
+    if pending.strip():
+        raise SpiceError("team schema contains an incomplete SQL statement")
+    return tuple(statements)
+
+
+def _execute_schema_script(connection: sqlite3.Connection, script: str) -> None:
+    # sqlite3.executescript() commits an existing transaction before running.
+    # Execute complete statements individually so the caller's migration
+    # transaction remains the sole atomic boundary.
+    for statement in _schema_statements(script):
+        connection.execute(statement)
+
+
+def _authority_table_shape(
+    connection: sqlite3.Connection,
+) -> dict[str, tuple[str, tuple[tuple[object, ...], ...]]]:
+    shape: dict[str, tuple[str, tuple[tuple[object, ...], ...]]] = {}
+    for table in TEAM_AUTHORITY_TABLES:
+        rows = connection.execute(f'PRAGMA table_xinfo("{table}")').fetchall()
+        if rows:
+            sql_row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            table_sql = " ".join(str(sql_row[0]).split()) if sql_row else ""
+            shape[table] = (
+                table_sql,
+                tuple(
+                    (
+                        str(row[1]),
+                        str(row[2]).upper(),
+                        int(row[3]),
+                        row[4],
+                        int(row[5]),
+                        int(row[6]),
+                    )
+                    for row in rows
+                ),
+            )
+    return shape
+
+
+def _authority_schema_shape(
+    schema: str,
+) -> dict[str, tuple[str, tuple[tuple[object, ...], ...]]]:
+    expected = sqlite3.connect(":memory:")
+    try:
+        _execute_schema_script(expected, schema)
+        return _authority_table_shape(expected)
+    finally:
+        expected.close()
+
+
 def team_database_path() -> Path:
     from spice.tasks import config as task_config
 
@@ -116,12 +183,10 @@ class ServeTeamStore(
     TeamMetricStoreMixin,
     DirectiveStatsStoreMixin,
 ):
-    # Schema is created once per database path per process. Running the DDL on
-    # every connect took an exclusive lock each time, serializing all access
-    # (reads included) and stalling on `busy_timeout` under concurrency. There
-    # are no migrations: the database is disposable and recreated from the
-    # current TEAM_SCHEMA, so the schema is edited in place and a database whose
-    # shape no longer matches is rebuilt (see `_sync_schema_locked`).
+    # Schema is checked once per database path per process. Running even
+    # idempotent DDL on every connect takes an exclusive lock and serializes
+    # readers. Authority changes are forward migrations; projection DDL may
+    # evolve independently without changing the authority version.
     _init_lock = Lock()
     _initialized_paths: set[Path] = set()
 
@@ -136,30 +201,106 @@ class ServeTeamStore(
             if self.path in self._initialized_paths:
                 return
             with sqlite_connection(
-                self.path, wal=True, ensure_parent=True
+                self.path,
+                busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS,
+                ensure_parent=True,
             ) as connection:
                 self._sync_schema_locked(connection)
+                # Compatibility is established before journal mode mutates the
+                # database. A newer writer therefore fails without even a WAL
+                # mode change.
+                connection.execute("PRAGMA journal_mode = WAL")
             self._initialized_paths.add(self.path)
 
     def _sync_schema_locked(self, connection: sqlite3.Connection) -> None:
-        # Reconcile the on-disk database with the current TEAM_SCHEMA. The
-        # stamped `user_version` fingerprint changes with every schema edit, so
-        # a database created under an older shape (or by pre-fingerprint code,
-        # which reports 0) no longer matches and is rebuilt from scratch. This
-        # is deliberate: `CREATE TABLE IF NOT EXISTS` alone leaves a stale table
-        # in place, so an in-place column change would otherwise strand old
-        # NOT NULL columns that new INSERTs cannot satisfy. Rebuilding drops the
-        # disposable team state once on drift rather than serving 500s forever.
+        # Do a read-only compatibility pass before acquiring a write
+        # transaction. The same checks run again after BEGIN IMMEDIATE so a
+        # concurrent migrator cannot make this decision stale while waiting.
+        self._authority_source_version_locked(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            source_version = self._authority_source_version_locked(connection)
+            migration_scripts = [
+                self._authority_migration(version)
+                for version in range(
+                    source_version + 1, TEAM_AUTHORITY_SCHEMA_VERSION + 1
+                )
+            ]
+            for script in migration_scripts:
+                _execute_schema_script(connection, script)
+            _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
+            self._validate_authority_schema_locked(
+                connection, TEAM_AUTHORITY_SCHEMA_VERSION
+            )
+            connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
+    def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if stored != TEAM_SCHEMA_FINGERPRINT:
-            stale_tables = connection.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-            ).fetchall()
-            for (name,) in stale_tables:
-                connection.execute(f'DROP TABLE IF EXISTS "{name}"')
-        connection.executescript(TEAM_SCHEMA)
-        connection.execute(f"PRAGMA user_version = {TEAM_SCHEMA_FINGERPRINT}")
+        if stored == LEGACY_TEAM_SCHEMA_FINGERPRINT:
+            self._validate_authority_schema_locked(connection, 1)
+            return 1
+        if stored == 0:
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            if not tables:
+                return 0
+            raise SpiceError(
+                "unversioned populated team database has no supported migration; "
+                "refusing to rebuild or open durable team state"
+            )
+        if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
+            raise SpiceError(
+                "team authority database was written by newer schema version "
+                f"{stored}; this writer supports through "
+                f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
+            )
+        if stored not in TEAM_AUTHORITY_SCHEMAS:
+            raise SpiceError(
+                f"unsupported team authority schema version {stored}; "
+                "refusing to mutate durable team state"
+            )
+        self._validate_authority_schema_locked(connection, stored)
+        return stored
+
+    def _authority_migration(self, version: int) -> str:
+        try:
+            return TEAM_AUTHORITY_MIGRATIONS[version]
+        except KeyError as exc:
+            raise SpiceError(
+                f"missing team authority migration for version {version}"
+            ) from exc
+
+    def _validate_authority_schema_locked(
+        self, connection: sqlite3.Connection, version: int
+    ) -> None:
+        try:
+            expected_schema = TEAM_AUTHORITY_SCHEMAS[version]
+        except KeyError as exc:
+            raise SpiceError(
+                f"missing team authority schema contract for version {version}"
+            ) from exc
+        expected = _authority_schema_shape(expected_schema)
+        actual = _authority_table_shape(connection)
+        mismatches = [
+            table
+            for table in sorted(TEAM_AUTHORITY_TABLES)
+            if actual.get(table) != expected.get(table)
+        ]
+        if mismatches:
+            names = ", ".join(mismatches)
+            raise SpiceError(
+                f"team authority schema version {version} has incompatible "
+                f"durable table shape ({names}); refusing to rebuild or open it"
+            )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -168,6 +309,16 @@ class ServeTeamStore(
         connection.row_factory = sqlite3.Row
         try:
             connection.execute(f"PRAGMA busy_timeout = {TEAM_SQLITE_BUSY_TIMEOUT_MS}")
+            stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if stored != TEAM_AUTHORITY_SCHEMA_VERSION:
+                relation = (
+                    "newer" if stored > TEAM_AUTHORITY_SCHEMA_VERSION else "unsupported"
+                )
+                raise SpiceError(
+                    f"team authority database changed to {relation} schema "
+                    f"version {stored}; this writer requires "
+                    f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
+                )
             yield connection
             connection.commit()
             if id(connection) in self._task_event_wake_connection_ids:

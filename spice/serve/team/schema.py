@@ -1,7 +1,5 @@
 """SQLite schema and defaults for serve team storage."""
 
-import zlib
-
 TEAM_DATABASE_FILENAME = "spiceteams.sqlite3"
 DEFAULT_LIFETIME = "Drive"
 TEAM_ID_HEX_CHARS = 12
@@ -25,7 +23,26 @@ TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 
-TEAM_SCHEMA = """
+TEAM_AUTHORITY_SCHEMA_VERSION = 1
+# Databases written before authority versions used this CRC32 value for the
+# exact schema below. It is recognized only as a one-time source version; new
+# databases and every successful upgrade are stamped with the explicit version.
+LEGACY_TEAM_SCHEMA_FINGERPRINT = 783663365
+
+TEAM_AUTHORITY_TABLES = frozenset(
+    {
+        "events",
+        "global_settings",
+        "teams",
+        "memberships",
+        "team_task_filters",
+        "team_merge_subgroups",
+        "renewals",
+        "agent_identities",
+    }
+)
+
+TEAM_AUTHORITY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     revision INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -103,6 +120,20 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     renewal_revision INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL
 );
+"""
+
+TEAM_PROJECTION_TABLES = frozenset(
+    {
+        "agent_metrics",
+        "agent_metric_buckets",
+        "agent_metric_cursors",
+        "task_events",
+        "directives",
+        "directive_totals",
+    }
+)
+
+TEAM_PROJECTION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT NOT NULL,
     team_id TEXT NOT NULL,
@@ -159,13 +190,16 @@ CREATE INDEX IF NOT EXISTS directives_by_sent_at
     ON directives (sent_at);
 """
 
-# Fingerprint of the current schema, stamped into each database's
-# `PRAGMA user_version`. There are no migrations: the team database is
-# disposable and recreated from the current TEAM_SCHEMA. Any edit here -- a
-# column added or dropped in place -- changes this fingerprint, so a database
-# carrying an older shape no longer matches and is rebuilt on its next open
-# instead of retaining stale columns that later INSERTs cannot satisfy. A
-# whitespace-only edit also bumps it and forces a harmless rebuild; that is the
-# safe direction for a disposable store. `| 1` keeps the value non-zero so it
-# never collides with the 0 that a freshly created database reports.
-TEAM_SCHEMA_FINGERPRINT = (zlib.crc32(TEAM_SCHEMA.encode("utf-8")) & 0x7FFFFFFF) | 1
+# Authority migrations are append-only and keyed by their destination version.
+# A future authority change adds the next integer and its forward migration;
+# projection-only changes do not bump this version.
+TEAM_AUTHORITY_MIGRATIONS = {
+    1: TEAM_AUTHORITY_SCHEMA,
+}
+
+# Canonical shapes let the opener validate a source database before any
+# migration acquires a write transaction. Preserve an entry when adding a
+# later version so every supported source remains independently recognizable.
+TEAM_AUTHORITY_SCHEMAS = {
+    1: TEAM_AUTHORITY_SCHEMA,
+}
