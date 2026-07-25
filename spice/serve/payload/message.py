@@ -33,11 +33,11 @@ from spice.serve.payload.lane import (
     _lane_info_payload,
     lane_metrics_payload,
     status_line_payload,
-    task_filter_inventory,
 )
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.taskboard import open_task_board_projection
 from spice.serve.worktree.inventory import (
     _ensure_work_tree_agent,
     _work_tree_renewal_intent,
@@ -607,6 +607,7 @@ def _messages_worktree_payload(
     error: str | None,
     transcript: message_reader.TranscriptResolution | None,
 ) -> dict[str, Any]:
+    task_board = open_task_board_projection()
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
     renewal_intent = _work_tree_renewal_intent(
@@ -646,7 +647,7 @@ def _messages_worktree_payload(
         "teamIdentity": team_identity,
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
-        "taskFilterInventory": task_filter_inventory(),
+        "taskFilterInventory": task_board.task_filter_inventory,
         "laneInfo": _lane_info_payload(target, serve_identity),
         "agentProcessStatus": status.process_status,
         "error": error or "",
@@ -659,6 +660,7 @@ def _messages_worktree_payload(
             error=error,
             pending_count=pending,
             pending_identity=pending_identity,
+            task_board=task_board,
         ),
     }
     if removed_keys:

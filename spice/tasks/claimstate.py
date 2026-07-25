@@ -536,36 +536,6 @@ def _active_claims_for(actor: str) -> list[dict[str, Any]]:
     return _claims_by_actor(_export_active(), actor)
 
 
-class ActiveClaimSnapshot:
-    """One shared +ACTIVE export reused across an inventory build.
-
-    ``active_claim`` answers per actor from the same global +ACTIVE rows as the
-    module-level function, but spawns the Taskwarrior export at most once: a
-    build with many bound lanes would otherwise re-run an identical query per
-    lane. A SpiceError on the single export is cached as empty, so every caller
-    then degrades to "no claim" without re-spawning the failing export.
-    """
-
-    def __init__(self) -> None:
-        self._rows: list[dict[str, Any]] = []
-        self._loaded = False
-
-    def _rows_once(self) -> list[dict[str, Any]]:
-        if not self._loaded:
-            self._loaded = True
-            try:
-                self._rows = _export_active()
-            except SpiceError:
-                self._rows = []
-        return self._rows
-
-    def active_claim(self, actor: str) -> dict[str, Any] | None:
-        """The actor's active task claim (latest claim_at), or None."""
-        if not actor:
-            return None
-        return _latest_claim(_claims_by_actor(self._rows_once(), actor))
-
-
 def has_active_claim() -> bool:
     """Whether the current actor holds an active task claim."""
     return bool(_active_claims_for(tw.current_actor()))

@@ -10,13 +10,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from spice.agent.driver import CODEX_DRIVER
-from spice.serve import agentapi, app, workroutes
+from spice.serve import agentapi, app, taskboard, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.websocket import EncodedTextFrame
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import config as task_config
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -126,17 +127,18 @@ def test_task_filter_inventory_carries_task_event_revision(tmp_path, monkeypatch
         calls.append("revision")
         return event_path
 
-    def export_tasks(_args):
+    def export_tasks(_args, **_kwargs):
         calls.append("export")
         return []
 
-    monkeypatch.setattr(lane.task_config, "ensure_task_event_file", ensure_event_file)
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(tmp_path))
+    monkeypatch.setattr(task_config, "ensure_task_event_file", ensure_event_file)
     monkeypatch.setattr(tw, "export", export_tasks)
 
-    inventory_payload = lane.task_filter_inventory()
+    inventory_payload = taskboard.open_task_board_projection().task_filter_inventory
 
     assert inventory_payload["revision"] == "123456789"
-    assert calls == ["revision", "export"]
+    assert calls == ["revision", "revision", "export", "revision"]
 
 
 def _record_identity(

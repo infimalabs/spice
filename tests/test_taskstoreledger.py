@@ -46,6 +46,7 @@ TW_TOUCHPOINTS: dict[str, frozenset[str]] = {
     "spice/serve/payload/lane.py": frozenset({"canonical_actor", "export"}),
     "spice/serve/payload/message.py": frozenset({"canonical_actor", "export"}),
     "spice/serve/payload/metric.py": frozenset({"export"}),
+    "spice/serve/taskboard.py": frozenset({"canonical_actor", "export"}),
     "spice/sessions/briefingtaskplane.py": frozenset({"current_actor", "now_iso"}),
     "spice/studies/taskgen.py": frozenset({"export"}),
     "spice/tasks/alloc.py": frozenset({"current_actor", "export", "now_iso"}),

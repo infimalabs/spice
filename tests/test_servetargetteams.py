@@ -422,8 +422,14 @@ def _patch_payload_dependencies(
     monkeypatch.setattr(message, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    empty_task_board = SimpleNamespace(
+        task_filter_inventory={},
+        active_claim=lambda _actor: None,
+    )
+    monkeypatch.setattr(message, "open_task_board_projection", lambda: empty_task_board)
+    monkeypatch.setattr(
+        inventory, "open_task_board_projection", lambda: empty_task_board
+    )
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",

@@ -139,7 +139,14 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        inventory,
+        "open_task_board_projection",
+        lambda: SimpleNamespace(
+            task_filter_inventory={},
+            active_claim=lambda _actor: None,
+        ),
+    )
     monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(
         message.message_reader,
@@ -212,7 +219,14 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         )
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        message,
+        "open_task_board_projection",
+        lambda: SimpleNamespace(
+            task_filter_inventory={},
+            active_claim=lambda _actor: None,
+        ),
+    )
     monkeypatch.setattr(
         message.message_reader,
         "assistant_messages_for_thread_id",
