@@ -2,6 +2,25 @@
 
 "use strict";
 
+// Lane chrome is a faceted projection of server state: each facet has exactly
+// one authority, so every channel -- target inventory, a lane push, a team
+// snapshot, a renewal, a pending-only live-bus event, route feedback -- carries
+// only the facets its authority owns, and any of them can arrive first, twice,
+// or out of order. Mirrors LANE_CHROME_FACET_AUTHORITIES in serve/payload/wire.
+const LANE_CHROME_FACET_AUTHORITIES = Object.freeze({
+  identity: "target-registry",
+  teamConfig: "team-store",
+  pendingInbox: "inbox",
+  taskBoard: "task-board",
+  lifecycle: "lifecycle-reconciler",
+  renewal: "team-store",
+  activity: "transcript",
+});
+
+const LANE_CHROME_FACETS = Object.freeze(
+  Object.keys(LANE_CHROME_FACET_AUTHORITIES),
+);
+
 class ServeLaneStore {
   #targets = [];
   #targetById = new Map();
@@ -9,6 +28,8 @@ class ServeLaneStore {
   #listeners = [];
   #teamSnapshotRevision = 0;
   #groupTopologyByTargetId = new Map();
+  #chromeByTargetId = new Map();
+  #chromeOrderByTargetId = new Map();
 
   targetsSnapshot() {
     return this.#targets.slice();
@@ -405,6 +426,64 @@ class ServeLaneStore {
     return memberTargetIds[0];
   }
 
+  laneChrome(targetId) {
+    return this.#chromeByTargetId.get(String(targetId || "")) || null;
+  }
+
+  // One canonical record per target, merged facet by facet. The record carries
+  // values only; freshness lives beside it, so a facet that re-announces the
+  // value it already published advances the high-water mark without replacing
+  // the record every consumer renders from.
+  applyLaneChrome(payload) {
+    const targetId = String((payload || {}).targetId || "");
+    if (!targetId) throw new Error("lane chrome target id is required");
+    const record =
+      this.#chromeByTargetId.get(targetId) || emptyLaneChromeRecord(targetId);
+    // Freshness advances only once the whole payload has been read, so a facet
+    // that breaks the contract cannot leave the target half-advanced against
+    // values the record never took.
+    const orderByFacet = new Map(this.#chromeOrderByTargetId.get(targetId));
+    const changedFacets = [];
+    const staleFacets = [];
+    const values = {};
+    for (const name of LANE_CHROME_FACETS) {
+      const facet = laneChromeFacet(payload, name);
+      if (!facet) continue;
+      const order = laneChromeFacetOrder(facet);
+      if (!isNewerLaneChromeOrder(order, orderByFacet.get(name))) {
+        staleFacets.push(name);
+        continue;
+      }
+      orderByFacet.set(name, order);
+      const value = facet.value === undefined ? null : facet.value;
+      if (sameLaneChromeValue(value, record[name])) continue;
+      values[name] = value;
+      changedFacets.push(name);
+    }
+    this.#chromeOrderByTargetId.set(targetId, orderByFacet);
+    const nextRecord = changedFacets.length
+      ? Object.freeze({ ...record, ...values })
+      : record;
+    this.#chromeByTargetId.set(targetId, nextRecord);
+    return this.#publishLaneChromeTransition(
+      nextRecord,
+      changedFacets,
+      staleFacets,
+    );
+  }
+
+  #publishLaneChromeTransition(record, changedFacets, staleFacets) {
+    const transition = Object.freeze({
+      targetId: record.targetId,
+      disposition: laneChromeDisposition(changedFacets, staleFacets),
+      changedFacets: Object.freeze(changedFacets.slice()),
+      staleFacets: Object.freeze(staleFacets.slice()),
+      record,
+    });
+    this.#notify(Object.freeze({ kind: "laneChrome", transition }));
+    return transition;
+  }
+
   subscribe(listener) {
     if (typeof listener !== "function")
       throw new TypeError("lane store listener must be a function");
@@ -474,6 +553,60 @@ class ServeLaneStore {
     for (const registration of this.#listeners.slice())
       registration.listener(change);
   }
+}
+
+function emptyLaneChromeRecord(targetId) {
+  const record = { targetId };
+  for (const name of LANE_CHROME_FACETS) record[name] = null;
+  return Object.freeze(record);
+}
+
+// An absent facet is one this payload's channel has nothing to say about; a
+// present facet always names its authority, so a payload that reaches the wrong
+// facet -- a team-store renewal landing as inbox chrome -- is a contract break
+// rather than data the reducer should guess at.
+function laneChromeFacet(payload, name) {
+  const facet = payload[name];
+  if (facet === undefined) return null;
+  if (!facet || typeof facet !== "object")
+    throw new TypeError("lane chrome facet must be an object: " + name);
+  if (String(facet.authority || "") !== LANE_CHROME_FACET_AUTHORITIES[name])
+    throw new Error("lane chrome facet authority mismatch: " + name);
+  return facet;
+}
+
+function laneChromeFacetOrder(facet) {
+  const order = facet.order || {};
+  return Object.freeze({
+    epoch: String(order.epoch || ""),
+    revision: Math.max(0, Number(order.revision) || 0),
+  });
+}
+
+// Freshness is per facet and totally ordered by (epoch, revision). The epoch
+// names the authority's counter generation and only ever advances, so an
+// authority that restarted and resumed from a lower revision still supersedes,
+// while inside one epoch a lower revision is always a redelivery.
+function isNewerLaneChromeOrder(order, previous) {
+  if (!previous) return true;
+  if (order.epoch !== previous.epoch) return order.epoch > previous.epoch;
+  return order.revision > previous.revision;
+}
+
+function sameLaneChromeValue(value, other) {
+  if (value === other) return true;
+  if (!value || !other || typeof value !== "object" || typeof other !== "object")
+    return false;
+  if (Array.isArray(value) !== Array.isArray(other)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== Object.keys(other).length) return false;
+  return keys.every((key) => sameLaneChromeValue(value[key], other[key]));
+}
+
+function laneChromeDisposition(changedFacets, staleFacets) {
+  if (changedFacets.length) return "applied";
+  if (staleFacets.length) return "stale";
+  return "unchanged";
 }
 
 const laneStore = new ServeLaneStore();
