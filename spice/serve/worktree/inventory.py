@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
@@ -24,46 +24,26 @@ from spice.serve.payload.identity import (
     team_identity_payload,
 )
 from spice.serve.payload.lane import (
-    ReviewExportSnapshot,
     _lane_info_payload,
     _status_line_payload_from_status,
-    task_filter_inventory,
 )
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import claimstate
-
-if TYPE_CHECKING:
-    from spice.serve.payload.message import TaskCardExportSnapshot
 
 
 def work_trees_payload(state: Any) -> dict[str, Any]:
-    from spice.serve.payload.message import TaskCardExportSnapshot
-
     targets = state.worktree_targets()
-    inventory = task_filter_inventory()
-    # Review pressure reads two global taskwarrior exports that are identical
-    # across every lane; share one snapshot so the build spawns them at most
-    # once instead of once per target.
-    review_exports = ReviewExportSnapshot()
-    # Claimed-task resolution reads one global +ACTIVE export per BOUND lane,
-    # identical across lanes; share one snapshot so the build spawns it at most
-    # once regardless of how many lanes are bound.
-    active_claims = claimstate.ActiveClaimSnapshot()
-    # Task-card activity filters one global status.any export by origin actor.
-    # Share one lazy snapshot so bound lanes reuse it and an all-unbound build
-    # never loads it.
-    task_cards = TaskCardExportSnapshot()
+    task_board = open_task_board_projection()
+    inventory = task_board.task_filter_inventory
     payload: dict[str, Any] = {
         "workTrees": [
             _work_tree_payload(
                 state,
                 target,
                 inventory,
-                review_exports,
-                active_claims,
-                task_cards,
+                task_board,
             )
             for target in targets
         ],
@@ -84,9 +64,7 @@ def _work_tree_payload(
     state: Any,
     target: WorktreeTarget,
     inventory: dict[str, Any],
-    review_exports: ReviewExportSnapshot,
-    active_claims: claimstate.ActiveClaimSnapshot,
-    task_cards: TaskCardExportSnapshot,
+    task_board: OpenTaskBoardProjection,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
@@ -116,8 +94,7 @@ def _work_tree_payload(
         status=status,
         pending_identity=pending_identity,
         desired_config=desired_config,
-        active_claims=active_claims,
-        task_cards=task_cards,
+        task_board=task_board,
     )
     return {
         "id": target.id,
@@ -145,7 +122,7 @@ def _work_tree_payload(
             target,
             serve_identity,
             agent_name=agent_name,
-            review_exports=review_exports,
+            task_board=task_board,
         ),
         "pendingCount": pending,
         "pendingLabel": str(pending),
@@ -214,15 +191,14 @@ def _work_tree_status_payloads(
     status: Any,
     pending_identity: dict[str, Any],
     desired_config: dict[str, str] | None = None,
-    active_claims: claimstate.ActiveClaimSnapshot | None = None,
-    task_cards: TaskCardExportSnapshot | None = None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from spice.serve.payload.message import target_activity_items
 
     items, error, transcript = target_activity_items(
         target,
         thread_id,
-        task_cards=task_cards,
+        task_board=task_board,
     )
     transcript_owner = transcript.owner_driver.name if transcript else ""
     serve_identity = serve_agent_identity_payload(
@@ -241,7 +217,7 @@ def _work_tree_status_payloads(
         items=items,
         error=error,
         pending_identity=pending_identity,
-        active_claims=active_claims,
+        active_claims=task_board,
     )
     return serve_identity, status_line
 

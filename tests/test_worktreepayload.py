@@ -7,9 +7,11 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
+import pytest
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
+from spice.serve import taskboard
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore
@@ -17,6 +19,34 @@ from spice.serve.team.store import ServeTeamStore
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 FIVE_MINUTES_SECONDS = 300
+
+
+class _EmptyOpenTaskBoard:
+    task_filter_inventory: dict[str, object] = {}
+
+    def active_claim(self, actor: str):
+        return None
+
+    def task_card_rows(self, actor: str):
+        return ()
+
+    def completed_review_rows(self, actors):
+        return ()
+
+    def open_review_followup_count(self, reviewed_uuid: str):
+        return 0
+
+    def drained_task_count(self, actor: str):
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def _stub_open_task_board(monkeypatch):
+    monkeypatch.setattr(
+        inventory,
+        "open_task_board_projection",
+        lambda: _EmptyOpenTaskBoard(),
+    )
 
 
 def _record_identity(
@@ -193,7 +223,6 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             [_message(latest, kind="presence:reasoning", preview="thinking")]
         )
 
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         inventory,
         "pending_inbox_identity_payload",
@@ -298,7 +327,6 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
     monkeypatch.setattr(inventory, "effective_agent_config", counting_config)
     monkeypatch.setattr(identity, "effective_agent_config", counting_config)
     monkeypatch.setattr(identity, "configured_say_voice", counting_voice)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
@@ -325,13 +353,7 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
     assert voice_calls == [targets[0].repo_root, targets[1].repo_root]
 
 
-def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeypatch):
-    # review_pressure filters two GLOBAL taskwarrior exports -- completed reviews
-    # and open follow-ups -- that carry no per-target argument, so their result is
-    # identical for every lane. The inventory build loads one shared snapshot and
-    # threads it through every lane, so the build spawns the export pair exactly
-    # once regardless of target count while each lane still filters that shared
-    # data down to its own actor.
+def test_work_trees_payload_indexes_shared_review_rows_per_lane(tmp_path, monkeypatch):
     targets = [
         _Target(id="wt-a", repo_root=tmp_path / "a"),
         _Target(id="wt-b", repo_root=tmp_path / "b"),
@@ -349,6 +371,8 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
     completed = [
         {
             "uuid": "review-a",
+            "status": "completed",
+            "claim_by": "agent-a",
             "review_author": "agent-a",
             "review_finding": "changes",
             "review_by": "peer-a",
@@ -356,23 +380,27 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
         },
         {
             "uuid": "review-b",
+            "status": "completed",
+            "claim_by": "agent-b",
             "review_author": "agent-b",
             "review_finding": "blocked",
             "review_by": "peer-b",
             "review_at": "2026-06-11T00:00:00Z",
         },
     ]
-    export_calls: list[list[str]] = []
-
-    def counting_export(filters: list[str] | None = None, **_kwargs: object):
-        recorded = list(filters or [])
-        export_calls.append(recorded)
-        if recorded == ["status:completed"]:
-            return [dict(row) for row in completed]
-        return []
-
-    monkeypatch.setattr(lane.tw, "export", counting_export)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    task_board = taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision="reviews",
+            rows=tuple(completed),
+        )
+    )
+    monkeypatch.setattr(inventory, "open_task_board_projection", lambda: task_board)
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("shared row queries must not export"),
+    )
     monkeypatch.setattr(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
@@ -397,28 +425,20 @@ def test_work_trees_payload_exports_review_rows_once_per_build(tmp_path, monkeyp
 
     payload = inventory.work_trees_payload(_MultiInventoryState(targets))
 
-    # Two targets, two lanes -- but the review-pressure export pair runs exactly
-    # once each across the whole build. Claimed-task resolution shares its own
-    # single +ACTIVE export (pinned by the sibling test), interleaved here, so
-    # .count() pins each review filter rather than asserting the whole call list.
-    assert export_calls.count(["status:completed"]) == 1
-    assert export_calls.count(["(", "status:pending", "or", "status:waiting", ")"]) == 1
     pressures = [tree["laneInfo"]["reviewPressure"] for tree in payload["workTrees"]]
-    # The shared snapshot is still filtered per lane: each actor sees only its own
+    # The shared projection is still filtered per lane: each actor sees only its own
     # completed review, so the two lanes carry distinct pressure.
     assert pressures[0]["count"] == 1
     assert pressures[1]["count"] == 1
     assert pressures[0]["items"][0]["reviewedTask"] == "review-a"
     assert pressures[1]["items"][0]["reviewedTask"] == "review-b"
+    assert pressures[0]["items"][0]["findingSeverity"] == "changes"
+    assert pressures[1]["items"][0]["findingSeverity"] == "blocked"
 
 
-def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkeypatch):
-    # Claimed-task resolution filters a GLOBAL +ACTIVE taskwarrior export by
-    # claim_by per actor. The filter carries no per-target argument, so its
-    # result is identical for every bound lane. The inventory build loads one
-    # shared snapshot and threads it through every lane, so the build spawns the
-    # +ACTIVE export exactly once regardless of bound-lane count while each lane
-    # still resolves only its own actor's claim.
+def test_work_trees_payload_projects_active_claims_without_an_export(
+    tmp_path, monkeypatch
+):
     targets = [
         _Target(id="wt-a", repo_root=tmp_path / "a"),
         _Target(id="wt-b", repo_root=tmp_path / "b"),
@@ -443,6 +463,7 @@ def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkey
             "claim_at": "2026-06-10T00:00:00Z",
             "phase": "todo",
             "description": "task a",
+            "start": "20260610T000000Z",
         },
         {
             "uuid": "claim-b",
@@ -450,19 +471,21 @@ def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkey
             "claim_at": "2026-06-11T00:00:00Z",
             "phase": "review",
             "description": "task b",
+            "start": "20260611T000000Z",
         },
     ]
-    export_calls: list[list[str]] = []
-
-    def counting_export(filters: list[str] | None = None, **_kwargs: object):
-        recorded = list(filters or [])
-        export_calls.append(recorded)
-        if recorded == ["+ACTIVE"]:
-            return [dict(row) for row in active]
-        return []
-
-    monkeypatch.setattr(lane.tw, "export", counting_export)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    observation = taskboard.TaskBoardObservation(
+        backend_identity="test",
+        revision="active",
+        rows=tuple(active),
+    )
+    task_board = taskboard.open_task_board_projection(observation)
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("shared row queries must not export"),
+    )
+    monkeypatch.setattr(inventory, "open_task_board_projection", lambda: task_board)
     monkeypatch.setattr(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
@@ -487,8 +510,6 @@ def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkey
 
     payload = inventory.work_trees_payload(_MultiInventoryState(targets))
 
-    # Two bound lanes, but one shared +ACTIVE export for the whole build.
-    assert export_calls.count(["+ACTIVE"]) == 1
     claimed = [tree["statusLine"]["claimedTask"] for tree in payload["workTrees"]]
     # The shared snapshot is still filtered per lane: each actor resolves only
     # its own claim.
@@ -496,7 +517,7 @@ def test_work_trees_payload_exports_active_claim_once_per_build(tmp_path, monkey
     assert claimed[1] == {"handle": "claim-b", "phase": "review", "title": "task b"}
 
 
-def test_work_trees_payload_exports_task_cards_once_and_filters_each_lane(
+def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
     tmp_path, monkeypatch
 ):
     targets = [
@@ -535,15 +556,19 @@ def test_work_trees_payload_exports_task_cards_once_and_filters_each_lane(
             "status": "pending",
         },
     ]
-    export_calls: list[list[str]] = []
-
-    def counting_export(filters: list[str] | None = None, **_kwargs: object):
-        recorded = list(filters or [])
-        export_calls.append(recorded)
-        return [dict(row) for row in task_rows] if recorded == ["status.any:"] else []
-
-    monkeypatch.setattr(message.tw, "export", counting_export)
-    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    task_board = taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision="task-cards",
+            rows=tuple(task_rows),
+        )
+    )
+    monkeypatch.setattr(inventory, "open_task_board_projection", lambda: task_board)
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail("shared row queries must not export"),
+    )
     monkeypatch.setattr(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
@@ -570,7 +595,6 @@ def test_work_trees_payload_exports_task_cards_once_and_filters_each_lane(
 
     payload = inventory.work_trees_payload(_MultiInventoryState(targets))
 
-    assert export_calls.count(["status.any:"]) == 1
     task_activity = [
         {
             "kind": tree["statusLine"]["latestActivityKind"],

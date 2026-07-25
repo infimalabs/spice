@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,7 +11,6 @@ from typing import Any
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.agent.renewal import strip_renewal_handoff_request_suffix
-from spice.errors import SpiceError
 from spice.mail.replies import read_reply_records
 from spice.mail.inbox import (
     collect_consumed_inbox_items_for_keys,
@@ -33,11 +33,11 @@ from spice.serve.payload.lane import (
     _lane_info_payload,
     lane_metrics_payload,
     status_line_payload,
-    task_filter_inventory,
 )
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
 from spice.serve.worktree.inventory import (
     _ensure_work_tree_agent,
     _work_tree_renewal_intent,
@@ -46,45 +46,16 @@ from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import claimstate
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
-from spice.tasks import tw
 
 
 TASK_CARD_SOURCE_KIND = "cli_task_created"
-
-
-class TaskCardExportSnapshot:
-    """Load all task-card rows once and filter them per inventory lane.
-
-    Inventory builds render the same global task board through every bound
-    lane. Loading it lazily keeps unbound inventories free of this export,
-    while caching a failed export as empty lets every lane degrade uniformly
-    without repeatedly spawning the failing command.
-    """
-
-    def __init__(self) -> None:
-        self._rows: list[dict[str, Any]] = []
-        self._loaded = False
-
-    def rows_for_actor(self, actor: str) -> list[dict[str, Any]]:
-        """Return rows whose stored origin_thread exactly matches ``actor``."""
-        if not actor:
-            return []
-        if not self._loaded:
-            self._loaded = True
-            try:
-                self._rows = tw.export(["status.any:"])
-            except SpiceError:
-                self._rows = []
-        return [
-            row for row in self._rows if str(row.get("origin_thread") or "") == actor
-        ]
 
 
 def target_activity_items(
     target: WorktreeTarget,
     thread_id: str,
     *,
-    task_cards: TaskCardExportSnapshot | None = None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> tuple[
     list[message_reader.AssistantMessage],
     str | None,
@@ -102,7 +73,7 @@ def target_activity_items(
         thread_id,
         read.items,
         limit=1,
-        task_cards=task_cards,
+        task_board=task_board,
     )
     merged = _merge_reply_card_messages(
         thread_id,
@@ -159,13 +130,13 @@ def _merge_task_card_messages(
     limit: int,
     after: str | None = None,
     before: str | None = None,
-    task_cards: TaskCardExportSnapshot | None = None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> list[message_reader.AssistantMessage]:
     cards = _task_card_messages_for_thread(
         thread_id,
         after=_card_window_after(items, after, before),
         before=before,
-        task_cards=task_cards,
+        task_board=task_board,
     )
     return _merge_synthetic_cards(items, cards, limit=limit, after=after, before=before)
 
@@ -221,23 +192,9 @@ def _task_card_messages_for_thread(
     *,
     after: str | None,
     before: str | None,
-    task_cards: TaskCardExportSnapshot | None = None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> list[message_reader.AssistantMessage]:
-    actor = tw.canonical_actor(thread_id)
-    if not actor:
-        return []
-    if task_cards is not None:
-        rows = task_cards.rows_for_actor(actor)
-    else:
-        try:
-            rows = tw.export(
-                [
-                    "status.any:",
-                    f"origin_thread.is:{actor}",
-                ]
-            )
-        except SpiceError:
-            return []
+    rows = (task_board or open_task_board_projection()).task_card_rows(thread_id)
     cards = [
         card for row in rows if (card := _task_card_message_from_row(row)) is not None
     ]
@@ -249,7 +206,7 @@ def _task_card_messages_for_thread(
 
 
 def _task_card_message_from_row(
-    row: dict[str, Any],
+    row: Mapping[str, Any],
 ) -> message_reader.AssistantMessage | None:
     timestamp = _task_row_timestamp(row)
     if not timestamp:
@@ -270,7 +227,7 @@ def _task_card_message_from_row(
     )
 
 
-def _task_card_fields(row: dict[str, Any]) -> list[tuple[str, str]]:
+def _task_card_fields(row: Mapping[str, Any]) -> list[tuple[str, str]]:
     """Ordered (label, value) rows a task card surfaces for one export row.
 
     Order is explicit: identity (title/description/project), then provenance and
@@ -303,7 +260,7 @@ def _task_card_fields(row: dict[str, Any]) -> list[tuple[str, str]]:
     return [(label, value) for label, value in candidates if value]
 
 
-def _task_card_source_kind(row: dict[str, Any]) -> str:
+def _task_card_source_kind(row: Mapping[str, Any]) -> str:
     if (
         str(row.get(task_config.TASK_CREATION_SURFACE_UDA) or "")
         == task_config.TASK_CREATION_SURFACE_CLI
@@ -312,7 +269,7 @@ def _task_card_source_kind(row: dict[str, Any]) -> str:
     return "task_created"
 
 
-def _task_card_presentation(row: dict[str, Any]) -> tuple[list[str], str]:
+def _task_card_presentation(row: Mapping[str, Any]) -> tuple[list[str], str]:
     project = str(row.get("project") or "").strip()
     is_oops = task_config.is_oops_project(project)
     is_hidden = task_config.is_hidden_project(project)
@@ -338,7 +295,7 @@ def _task_card_is_private_project(project: str) -> bool:
     return len(segments) == 3 and segments[0] == "agent" and segments[2] == "task"
 
 
-def _task_card_index(row: dict[str, Any]) -> int:
+def _task_card_index(row: Mapping[str, Any]) -> int:
     raw_id = row.get("id")
     if raw_id is None:
         task_id = 0
@@ -350,7 +307,7 @@ def _task_card_index(row: dict[str, Any]) -> int:
     return 9_000_000_000_000_000_000 + max(0, task_id)
 
 
-def _task_row_timestamp(row: dict[str, Any]) -> str:
+def _task_row_timestamp(row: Mapping[str, Any]) -> str:
     incepted = str(row.get("incepted") or "").strip()
     if task_identity.INCEPTED_RE.match(incepted):
         parsed: datetime | None = task_identity.incepted_datetime(incepted)
@@ -504,6 +461,7 @@ def _read_thread_messages(
     before: str | None,
     append_only: bool,
     client_id: str | None = None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> _ThreadMessages:
     if not thread_id:
         return _ThreadMessages(
@@ -533,6 +491,7 @@ def _read_thread_messages(
         limit=limit,
         after=after,
         before=before,
+        task_board=task_board,
     )
     items = _merge_reply_card_messages(
         thread_id,
@@ -566,6 +525,7 @@ def messages_payload_for_worktree(
     resolved = _resolve_messages_thread(
         state, target, expected_thread_id=expected_thread_id
     )
+    task_board = open_task_board_projection()
     messages = _read_thread_messages(
         state,
         target,
@@ -575,6 +535,7 @@ def messages_payload_for_worktree(
         before=before,
         append_only=append_only,
         client_id=client_id,
+        task_board=task_board,
     )
     return _messages_worktree_payload(
         state,
@@ -589,6 +550,7 @@ def messages_payload_for_worktree(
         removed_keys=messages.removed_keys,
         error=messages.error,
         transcript=messages.transcript,
+        task_board=task_board,
     )
 
 
@@ -606,7 +568,9 @@ def _messages_worktree_payload(
     removed_keys: list[str],
     error: str | None,
     transcript: message_reader.TranscriptResolution | None,
+    task_board: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
+    task_board = task_board or open_task_board_projection()
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
     renewal_intent = _work_tree_renewal_intent(
@@ -646,8 +610,12 @@ def _messages_worktree_payload(
         "teamIdentity": team_identity,
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
-        "taskFilterInventory": task_filter_inventory(),
-        "laneInfo": _lane_info_payload(target, serve_identity),
+        "taskFilterInventory": task_board.task_filter_inventory,
+        "laneInfo": _lane_info_payload(
+            target,
+            serve_identity,
+            task_board=task_board,
+        ),
         "agentProcessStatus": status.process_status,
         "error": error or "",
         **pending_identity,
@@ -659,6 +627,7 @@ def _messages_worktree_payload(
             error=error,
             pending_count=pending,
             pending_identity=pending_identity,
+            task_board=task_board,
         ),
     }
     if removed_keys:
@@ -672,15 +641,24 @@ def lane_metrics_summary_payload(state: Any, target: WorktreeTarget) -> dict[str
     """Build one lane's metrics on demand for the metrics pane.
 
     Kept out of the eager per-lane message payload: the metrics tab is never the
-    first view, so a closed pane must not pay for the status:completed export
-    that _drained_task_count runs. The live bus fetches this only when the
-    metrics view is opened, mirroring the metrics.series request.
+    first view. The live bus fetches this only when the metrics view is opened,
+    mirroring the metrics.series request.
     """
+    task_board = open_task_board_projection()
     thread_id = resolve_thread_id_for_target(state, target) or ""
-    items, _error, _transcript = target_activity_items(target, thread_id)
+    items, _error, _transcript = target_activity_items(
+        target,
+        thread_id,
+        task_board=task_board,
+    )
     status = agent_status(target.repo_root)
     return lane_metrics_payload(
-        state, target, thread_id=thread_id, items=items, status=status
+        state,
+        target,
+        thread_id=thread_id,
+        items=items,
+        status=status,
+        task_board=task_board,
     )
 
 

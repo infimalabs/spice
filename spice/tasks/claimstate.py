@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -54,7 +55,7 @@ def flow_args(phases: list[str]) -> list[str]:
     return args
 
 
-def phases_of(row: dict[str, Any]) -> list[str]:
+def phases_of(row: Mapping[str, Any]) -> list[str]:
     phases: list[str] = []
     for i in range(config.PHASE_SLOT_COUNT):
         value = str(row.get(f"phase_{i}") or "").strip()
@@ -534,36 +535,6 @@ def _latest_claim(claims: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def _active_claims_for(actor: str) -> list[dict[str, Any]]:
     return _claims_by_actor(_export_active(), actor)
-
-
-class ActiveClaimSnapshot:
-    """One shared +ACTIVE export reused across an inventory build.
-
-    ``active_claim`` answers per actor from the same global +ACTIVE rows as the
-    module-level function, but spawns the Taskwarrior export at most once: a
-    build with many bound lanes would otherwise re-run an identical query per
-    lane. A SpiceError on the single export is cached as empty, so every caller
-    then degrades to "no claim" without re-spawning the failing export.
-    """
-
-    def __init__(self) -> None:
-        self._rows: list[dict[str, Any]] = []
-        self._loaded = False
-
-    def _rows_once(self) -> list[dict[str, Any]]:
-        if not self._loaded:
-            self._loaded = True
-            try:
-                self._rows = _export_active()
-            except SpiceError:
-                self._rows = []
-        return self._rows
-
-    def active_claim(self, actor: str) -> dict[str, Any] | None:
-        """The actor's active task claim (latest claim_at), or None."""
-        if not actor:
-            return None
-        return _latest_claim(_claims_by_actor(self._rows_once(), actor))
 
 
 def has_active_claim() -> bool:

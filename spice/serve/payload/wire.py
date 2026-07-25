@@ -567,7 +567,6 @@ WIRE_OBJECTS = (
             "latestMessagePreview": STRING,
             "latestActivityPreview": STRING,
             "preview": STRING,
-            "claimedTask": _ref("ClaimedTask"),
         },
     ),
     _object(

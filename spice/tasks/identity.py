@@ -17,6 +17,7 @@ millisecond value it encodes.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -114,7 +115,7 @@ def key_for(project: str | None, title: str) -> str:
     return (compact or "TASK")[:_KEY_MAX]
 
 
-def render_handle(row: dict[str, Any]) -> str:
+def render_handle(row: Mapping[str, Any]) -> str:
     incepted = str(row.get("incepted") or "").strip()
     if not incepted:
         return str(row.get("uuid") or "?")
