@@ -22,10 +22,12 @@ The durable authority table set is:
   renewal identity.
 
 The currently co-resident `agent_metrics`, `agent_metric_buckets`,
-`agent_metric_cursors`, `task_events`, `directives`, and `directive_totals`
-tables are not members of the authority schema. Their present storage location
-is transitional. Changing or recreating one of those projection tables does not
-change the authority schema version.
+`agent_metric_cursors`, and `task_events` tables are not members of the
+authority schema. Their present storage location is transitional. Changing or
+recreating one of those projection tables does not change the authority schema
+version. Directive facts have completed that transition: their canonical rows
+now live in repository-owned `spiceacks.sqlite3`, and the former `directives`
+and `directive_totals` tables are removed after checked migration.
 
 ## Context
 
@@ -97,7 +99,8 @@ Observation `agent_id`, event time, event identity, team-at-capture, and payload
 are immutable source facts. Renewal appends one idempotent `renewalStarted`
 event linking predecessor and successor; alias-bearing assignment appends the
 same relationship in its topology event. Neither path updates, merges, or
-deletes an older activity, directive, task-lifecycle, total, or cursor row.
+deletes an older activity, task-lifecycle, total, cursor, or canonical
+steering/ACK row.
 
 The observation query layer exposes four named modes:
 
@@ -129,13 +132,43 @@ prove which source session contributed it. Fresh or empty projections are
 stamped `immutable`. This marker is not authority schema state and does not
 change `PRAGMA user_version`.
 
+## Directive Authority Cutover
+
+`spiceacks.sqlite3` carries the complete lifecycle of metric-bearing steering
+under the inbox key. Publication writes immutable `target_actor`, `team_id`
+(team-at-send), `sent_at`, original body, attachments, and key. Consumption
+completes that same row with `acked` or `refused`, an ACK time, the final
+delivered body and resend lineage, the complete ACK/NACK message, and its
+per-key content. A pending row has no ACK time. Exact duplicate publication and
+consumption are idempotent; reuse of a key with different immutable provenance
+or auditable disposition content is a collision and leaves the prior row
+unchanged.
+
+Serve reads this repository-owned history for lane totals and range series.
+Lineage-cumulative and per-session views replay team renewal events to select
+source actors; team-historical views filter the immutable team-at-send field.
+Renewal never updates a steering row. Transcript activity ingestion no longer
+parses ACK keys into metric mutations, and team snapshot pruning never touches
+directive history.
+
+The one-time cutover reads both legacy team tables before removal. It first
+proves that `directive_totals` exactly equals the surviving keyed `directives`
+rows; a mismatch identifies prior pruning and requires native-fact replay.
+Pending legacy rows can migrate from their complete metric provenance. A
+legacy acknowledged row must join an ACK archive containing its auditable
+disposition and content. Conflicting actor/team/time values,
+refused-versus-acked collisions, incomplete table pairs, pruned totals, and
+missing ACK archives fail with recovery guidance and leave both legacy tables
+intact. Only after every row is durably represented in the ACK database does
+the team transaction drop `directives` and `directive_totals`.
+
 ## Constraints
 
-- This decision makes the current authority safe while projection tables still
-  coexist in `spiceteams.sqlite3`; it does not make every co-resident table
-  durable authority.
-- It does not settle the eventual native owner or replay source for activity,
-  task-lifecycle, or directive facts. Their dedicated cutovers do that.
+- This decision makes the current authority safe while remaining activity and
+  task-lifecycle projection tables still coexist in `spiceteams.sqlite3`; it
+  does not make every co-resident table durable authority.
+- Directive authority is settled by the steering/ACK cutover above. Activity
+  and task-lifecycle facts retain dedicated follow-up cutovers.
 - Schema validation compares each durable `CREATE TABLE` definition and its
   complete column shape, including column order, types, nullability, defaults,
   primary-key positions, and hidden-column flags. Extra, missing, or
@@ -164,7 +197,7 @@ Focused migration tests seed every authority table and prove:
 ## Follow-Ups
 
 - `TEAM-1kGsmG2B`: preserve immutable source actor and renewal lineage.
-- `TEAM-1kGsmLMf`: cut directive facts over to their steering/ACK authority.
+- `TEAM-1kGsmLMf`: directive facts cut over to steering/ACK authority.
 - `TEAM-1kGsmQdq`: project activity from the typed transcript stream.
 - `TEAM-1kGsmWFT`: read canonical task-lifecycle facts from the task plane.
 - `TEAM-1kGsmbtF`: physically isolate rebuildable Serve projections.

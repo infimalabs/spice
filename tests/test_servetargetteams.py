@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -351,6 +352,7 @@ def test_worktree_discovery_failure_keeps_prior_targets_and_reports_it(
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     return repo
 
 

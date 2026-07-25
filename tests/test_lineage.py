@@ -9,6 +9,10 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 from spice.serve.team.schema import (
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
     OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
@@ -53,13 +57,15 @@ def _record_session_facts(
         source_path=f"/transcripts/{suffix}.jsonl",
         offset=int(timestamp),
     )
-    store.record_directive_sent(
+    publish_directive_fact(
+        store.directive_state_path,
         f"directive-{suffix}",
         agent_id=actor_id,
         team_id=team_id,
         sent_at=timestamp,
     )
-    store.mark_directive_acked(
+    complete_directive_fact(
+        store.directive_state_path,
         f"directive-{suffix}",
         acked_at=timestamp + 1,
     )
@@ -89,8 +95,6 @@ def _actor_observation_rows(
                 "agent_metric_buckets",
                 "agent_metric_cursors",
                 "task_events",
-                "directives",
-                "directive_totals",
             )
         }
 

@@ -137,16 +137,28 @@ class _TeamMetricStore(Protocol):
         start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals: ...
 
-    def _prune_directive_history_locked(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        now: float,
-        retention_seconds: int = METRIC_HISTORY_RETENTION_SECONDS,
-    ) -> None: ...
-
 
 class TeamMetricStoreMixin:
+    def observation_actor_ids(
+        self: _TeamMetricStore,
+        agent_ids: Iterable[str],
+        *,
+        attribution: ObservationAttributionMode,
+    ) -> tuple[str, ...]:
+        requested = _normalized_ids(agent_ids, "agent_id")
+        if not requested:
+            return ()
+        with self.connect() as connection:
+            if attribution is ObservationAttributionMode.SOURCE_ACTOR:
+                return requested
+            if attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
+                return _lineage_actor_ids_locked(connection, requested)
+            if attribution is ObservationAttributionMode.PER_SESSION:
+                return requested
+        raise SpiceError(
+            "teamAtEventTime attribution uses immutable team-at-event provenance"
+        )
+
     def record_agent_metric_delta(
         self: _TeamMetricStore,
         agent_id: str,
@@ -675,18 +687,15 @@ class TeamMetricStoreMixin:
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:
-        # Bound the high-growth per-minute bucket and per-directive series at the
-        # retention horizon; the durable aggregates (agent_metrics tool_calls,
-        # directive_totals) are never pruned. Runs in the snapshot prune pass.
+        # Bound the high-growth activity and task series at the retention
+        # horizon. Directive lifecycle retention belongs to its canonical
+        # steering/ACK store and is never mutated by a team snapshot prune.
         retention_seconds = _metric_history_retention_seconds_locked(connection)
         floor = int(now) - retention_seconds
         connection.execute(
             "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
         )
         connection.execute("DELETE FROM task_events WHERE ts < ?", (float(floor),))
-        self._prune_directive_history_locked(
-            connection, now=now, retention_seconds=retention_seconds
-        )
 
     def _record_agent_metric_delta_locked(
         self,
@@ -1128,11 +1137,9 @@ def _require_source_attribution_locked(
             "WHERE agent_id = ? AND bucket_start < ? "
             "UNION ALL SELECT 1 FROM agent_metrics "
             "WHERE agent_id = ? AND updated_at < ? "
-            "UNION ALL SELECT 1 FROM directives "
-            "WHERE agent_id = ? AND sent_at < ? "
             "UNION ALL SELECT 1 FROM task_events "
             "WHERE agent_id = ? AND ts < ? LIMIT 1",
-            (actor_id, start, actor_id, start, actor_id, start, actor_id, start),
+            (actor_id, start, actor_id, start, actor_id, start),
         ).fetchone()
         if row is not None:
             raise SpiceError(OBSERVATION_SOURCE_REBUILD_REQUIRED)

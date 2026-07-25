@@ -1,6 +1,11 @@
 import itertools
 import random
 
+from spice.mail.ackstate import directive_history_records_from_database
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 from spice.serve.team.store import (
     ObservationAttributionMode,
     ServeTeamStore,
@@ -36,10 +41,15 @@ def _seed_lane_metrics(
     keys = []
     for _ in range(sends):
         key = f"dir-{next(_directive_seq)}"
-        store.record_directive_sent(key, agent_id=agent_id, team_id=team)
+        publish_directive_fact(
+            store.directive_state_path,
+            key,
+            agent_id=agent_id,
+            team_id=team,
+        )
         keys.append(key)
     for key in keys[:acked]:
-        store.mark_directive_acked(key)
+        complete_directive_fact(store.directive_state_path, key)
     if tool_calls or message_timestamps:
         store.record_agent_metric_delta(
             agent_id, tool_calls=tool_calls, message_timestamps=message_timestamps
@@ -121,18 +131,16 @@ def _agent_metric_totals(
             "SELECT agent_id, COALESCE(SUM(tool_calls), 0) AS tool_calls "
             "FROM agent_metrics GROUP BY agent_id"
         ).fetchall()
-        directive_rows = connection.execute(
-            "SELECT agent_id, COALESCE(SUM(sends), 0) AS sends, "
-            "COALESCE(SUM(acked), 0) AS acked "
-            "FROM directive_totals GROUP BY agent_id"
-        ).fetchall()
     tool_calls = {
         str(row["agent_id"]): int(row["tool_calls"] or 0) for row in tool_rows
     }
-    directives = {
-        str(row["agent_id"]): (int(row["acked"] or 0), int(row["sends"] or 0))
-        for row in directive_rows
-    }
+    directives: dict[str, tuple[int, int]] = {}
+    for record in directive_history_records_from_database(store.directive_state_path):
+        acked, sends = directives.get(record.target_actor, (0, 0))
+        directives[record.target_actor] = (
+            acked + int(record.disposition == "acked"),
+            sends + 1,
+        )
     for agent_id in agents:
         acked, sends = directives.get(agent_id, (0, 0))
         totals[agent_id] = (acked, sends, tool_calls.get(agent_id, 0))
@@ -559,13 +567,14 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
 
     team = store.create_team(members=[predecessor])
     _record_identity(store, predecessor, thread_id="predecessor")
-    store.record_directive_sent(
+    publish_directive_fact(
+        store.directive_state_path,
         "dir-pre",
         agent_id=predecessor,
         team_id=team.team_id,
         sent_at=60,
     )
-    store.mark_directive_acked("dir-pre", acked_at=70)
+    complete_directive_fact(store.directive_state_path, "dir-pre", acked_at=70)
     store.record_agent_metric_delta(
         predecessor,
         tool_calls=3,
@@ -579,13 +588,14 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
         successor_agent_id=successor,
         ancestor_thread_id="predecessor",
     )
-    store.record_directive_sent(
+    publish_directive_fact(
+        store.directive_state_path,
         "dir-post",
         agent_id=successor,
         team_id=team.team_id,
         sent_at=180,
     )
-    store.mark_directive_acked("dir-post", acked_at=190)
+    complete_directive_fact(store.directive_state_path, "dir-post", acked_at=190)
     store.record_agent_metric_delta(
         successor,
         tool_calls=5,
@@ -615,13 +625,15 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
             ).fetchone()["count"]
             == 1
         )
-        assert (
-            connection.execute(
-                "SELECT COUNT(*) AS count FROM directives WHERE agent_id = ?",
-                (predecessor,),
-            ).fetchone()["count"]
-            == 1
+    assert (
+        sum(
+            record.target_actor == predecessor
+            for record in directive_history_records_from_database(
+                store.directive_state_path
+            )
         )
+        == 1
+    )
 
 
 def test_started_renewal_preserves_task_source_and_derives_lineage(

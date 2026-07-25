@@ -22,6 +22,10 @@ from spice.serve.payload.lane import (
 from spice.serve.team.store import ServeTeamStore
 from spice.tasks import config as task_config
 from spice.tasks import tw
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
@@ -757,11 +761,14 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.create_team(members=["thread:agent-a"])
     for index in range(3):
-        store.record_directive_sent(
-            f"d{index}", agent_id="thread:agent-a", team_id="thread:agent-a"
+        publish_directive_fact(
+            store.directive_state_path,
+            f"d{index}",
+            agent_id="thread:agent-a",
+            team_id="thread:agent-a",
         )
-    store.mark_directive_acked("d0")
-    store.mark_directive_acked("d1")
+    complete_directive_fact(store.directive_state_path, "d0")
+    complete_directive_fact(store.directive_state_path, "d1")
     store.record_agent_metric_delta(
         "thread:agent-a",
         tool_calls=2,
