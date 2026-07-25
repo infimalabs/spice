@@ -39,6 +39,11 @@ SHOW_DEFAULT_REASONING_OUTPUT_TOKENS = 5
 SHOW_STUBBED_TASK_VERSION = 7
 
 
+# More annotations than the former six-annotation display cap render_show once
+# silently dropped, so the regression proves the oldest survive the detail view.
+SHOW_ANNOTATION_OVERFLOW_COUNT = 8
+
+
 @pytest.fixture(autouse=True)
 def stubbed_task_version(monkeypatch):
     # Version-value correctness against the real operations log is proven in
@@ -261,6 +266,33 @@ def test_task_show_requires_context_check_before_implementation(monkeypatch):
     assert "context_check:" in output
     assert "Before editing, run the rehydrate command(s) above" in output
     assert "assert the task description/acceptance still match" in output
+
+
+def test_task_show_renders_every_annotation_without_truncation(monkeypatch):
+    # The single-task detail view is where a board-level review reconstructs
+    # every point already made. Older annotations must never be silently
+    # dropped: a task carrying more than the former six-annotation cap shows
+    # all of them, oldest included and in order, so the review reads the
+    # complete record instead of re-litigating settled notes.
+    row = _row(
+        "Fully annotated",
+        project="task.render",
+        incepted="1k4yrMDR",
+    )
+    row["annotations"] = [
+        {"description": f"annotation {index:02d}"}
+        for index in range(SHOW_ANNOTATION_OVERFLOW_COUNT)
+    ]
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
+
+    section = _section_lines(render.render_show("TASK-test"), "annotations:")
+
+    assert section[1:] == [
+        f"  annotation {index:02d}" for index in range(SHOW_ANNOTATION_OVERFLOW_COUNT)
+    ]
 
 
 def test_task_next_includes_recovery_context_for_assignment(monkeypatch):
