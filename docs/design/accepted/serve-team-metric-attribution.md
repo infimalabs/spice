@@ -105,13 +105,15 @@ the predecessor checkpoint remains and is not fact attribution.
 
 ## Views & projections
 
-**D10 — One fact log.** Every metric derives from append-only, timestamped,
-actor+team-tagged facts: directives (send/ack), activity buckets
-(messages/tool_calls), task-lifecycle events (claim/phase/complete/drain), and
-membership events from the team event log. `directive_totals` and
-`agent_metrics` are materialized running totals over those facts, not separate
-truths. Every displayed number is a projection over the fact log plus event log;
-new views add folds, not mutable aggregate stores.
+**D10 — One native fact per observation.** Every metric derives from
+timestamped, actor+team-tagged facts: canonical steering/ACK lifecycle rows,
+activity buckets (messages/tool_calls), task-lifecycle events
+(claim/phase/complete/drain), and membership events from the team event log.
+Directive sends and dispositions live only in repository-owned
+`spiceacks.sqlite3`; Serve folds those rows directly and owns neither a
+`directives` copy nor `directive_totals`. `agent_metrics` remains a transitional
+materialized activity total, not a second directive truth. New views add folds
+over native facts plus the team event log, not mutable directive aggregates.
 
 **D11 — Explicit lenses, one default.** Lane default = LINEAGE-CUMULATIVE: D9
 event folding means the lane shows total work achieved by that lineage across
@@ -142,10 +144,11 @@ append-only started-renewal events for the successor actor. PER-SESSION
 projections compute their windows from those events; no mutable session counter
 exists.
 
-**D14 — Retention is configurable.** The retention horizon is config-driven
-(default 30d). Durable aggregates are never pruned; retention limits only the
-raw fact/event material that the configured horizon allows, and any retained
-materialized totals remain derivable from surviving durable facts.
+**D14 — Retention follows fact ownership.** Serve's observation retention
+horizon is config-driven (default 30d) for its transitional activity and task
+series. It never prunes canonical steering/ACK history. Each native fact owner
+defines its own retention contract, and every retained materialized total must
+remain derivable from the native facts that survive that contract.
 
 ## The invariant
 

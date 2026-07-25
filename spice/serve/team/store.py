@@ -23,6 +23,12 @@ from threading import Lock
 from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from spice.errors import SpiceError
+from spice.mail.ackstate import (
+    ACK_STATE_DATABASE_FILENAME,
+    ack_state_database_path,
+    migrate_serve_directive_history,
+    prepare_directive_history_database,
+)
 from spice.sqliteconnection import sqlite_connection
 from spice.serve.team.filters import (
     TeamFilterStoreMixin,
@@ -180,6 +186,14 @@ def team_database_path() -> Path:
     return task_config.data_dir() / TEAM_DATABASE_FILENAME
 
 
+def _default_directive_state_path(team_path: Path | None) -> Path:
+    if team_path is not None:
+        return Path(team_path).with_name(ACK_STATE_DATABASE_FILENAME)
+    from spice.tasks import config as task_config
+
+    return ack_state_database_path(task_config.repo_root())
+
+
 class ServeTeamStore(
     TeamIdentityStoreMixin,
     TeamRenewalStoreMixin,
@@ -194,8 +208,18 @@ class ServeTeamStore(
     _init_lock = Lock()
     _initialized_paths: set[Path] = set()
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        directive_state_path: Path | None = None,
+    ) -> None:
         self.path = path or team_database_path()
+        self.directive_state_path = (
+            directive_state_path
+            if directive_state_path is not None
+            else _default_directive_state_path(path)
+        )
         self._task_event_wake_connection_ids: set[int] = set()
 
     def _ensure_schema(self) -> None:
@@ -224,6 +248,7 @@ class ServeTeamStore(
         connection.execute("BEGIN IMMEDIATE")
         try:
             source_version = self._authority_source_version_locked(connection)
+            prepare_directive_history_database(self.directive_state_path)
             migration_scripts = [
                 self._authority_migration(version)
                 for version in range(
@@ -232,6 +257,7 @@ class ServeTeamStore(
             ]
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
+            self._migrate_legacy_directive_projection_locked(connection)
             _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
             self._initialize_observation_attribution_state_locked(connection)
             self._validate_authority_schema_locked(
@@ -242,6 +268,58 @@ class ServeTeamStore(
         except BaseException:
             connection.rollback()
             raise
+
+    def _migrate_legacy_directive_projection_locked(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('directives', 'directive_totals')"
+            )
+        }
+        if not tables:
+            return
+        if tables != {"directives", "directive_totals"}:
+            raise SpiceError(
+                "legacy Serve directive projection is incomplete: expected both "
+                "directives and directive_totals. Restore both tables or replay "
+                "canonical steering/ACK facts; no legacy table was removed"
+            )
+        raw_directive_rows = connection.execute(
+            "SELECT directive_key, agent_id, team_id, sent_at, acked, acked_at "
+            "FROM directives ORDER BY sent_at, directive_key"
+        ).fetchall()
+        directive_rows = [
+            {
+                "directive_key": row[0],
+                "agent_id": row[1],
+                "team_id": row[2],
+                "sent_at": row[3],
+                "acked": row[4],
+                "acked_at": row[5],
+            }
+            for row in raw_directive_rows
+        ]
+        raw_total_rows = connection.execute(
+            "SELECT agent_id, team_id, sends, acked FROM directive_totals "
+            "ORDER BY agent_id, team_id"
+        ).fetchall()
+        total_rows = [
+            {
+                "agent_id": row[0],
+                "team_id": row[1],
+                "sends": row[2],
+                "acked": row[3],
+            }
+            for row in raw_total_rows
+        ]
+        migrate_serve_directive_history(
+            self.directive_state_path, directive_rows, total_rows
+        )
+        connection.execute("DROP TABLE directives")
+        connection.execute("DROP TABLE directive_totals")
 
     def _initialize_observation_attribution_state_locked(
         self, connection: sqlite3.Connection
@@ -254,9 +332,7 @@ class ServeTeamStore(
         observation_row = connection.execute(
             "SELECT 1 FROM agent_metrics "
             "UNION ALL SELECT 1 FROM agent_metric_buckets "
-            "UNION ALL SELECT 1 FROM task_events "
-            "UNION ALL SELECT 1 FROM directives "
-            "UNION ALL SELECT 1 FROM directive_totals LIMIT 1"
+            "UNION ALL SELECT 1 FROM task_events LIMIT 1"
         ).fetchone()
         status = (
             OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED

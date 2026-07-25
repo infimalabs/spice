@@ -14,6 +14,10 @@ import pytest
 
 from spice.cli.parser import build_parser
 from spice.mail.ackarchive import archive_ackd_inbox_items
+from spice.mail.ackstate import (
+    ack_state_database_path,
+    directive_history_records_from_database,
+)
 from spice.mail.inbox import (
     collect_inbox_items,
     compose_inbox_text,
@@ -335,7 +339,12 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     refresh_payload = message.messages_payload_for_worktree(state, target, limit=5)
     assert refresh_payload["ackContexts"][0]["found"] is True
     assert refresh_payload["ackContexts"][0]["attachments"][0] == live_attachment
-    assert archive_ackd_inbox_items(repo, [payload["key"]]) == [payload["key"]]
+    assert archive_ackd_inbox_items(
+        repo,
+        [payload["key"]],
+        ack_text=f"ACK {payload['key']}: inspected the image",
+        ack_content_by_key={payload["key"]: "inspected the image"},
+    ) == [payload["key"]]
     archived_refresh_payload = message.messages_payload_for_worktree(
         state, target, limit=5
     )
@@ -343,7 +352,12 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert archived_refresh_payload["ackContexts"][0]["attachments"][0] == (
         live_attachment
     )
-    assert state.team_store.lane_metric_summary(ACTOR_A, bucket_count=12).sends == 1
+    assert [
+        (record.key, record.target_actor, record.disposition)
+        for record in directive_history_records_from_database(
+            ack_state_database_path(repo)
+        )
+    ] == [(payload["key"], ACTOR_A, "acked")]
     assert pending_inbox_count(repo) == 0
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"

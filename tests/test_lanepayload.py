@@ -13,6 +13,10 @@ from spice.agent import watchdog
 from spice.serve.messages import AssistantMessage
 from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
     agent_uptime_seconds,
@@ -745,11 +749,14 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.create_team(members=["thread:agent-a"])
     for index in range(3):
-        store.record_directive_sent(
-            f"d{index}", agent_id="thread:agent-a", team_id="thread:agent-a"
+        publish_directive_fact(
+            store.directive_state_path,
+            f"d{index}",
+            agent_id="thread:agent-a",
+            team_id="thread:agent-a",
         )
-    store.mark_directive_acked("d0")
-    store.mark_directive_acked("d1")
+    complete_directive_fact(store.directive_state_path, "d0")
+    complete_directive_fact(store.directive_state_path, "d1")
     store.record_agent_metric_delta(
         "thread:agent-a",
         tool_calls=2,

@@ -7,7 +7,13 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from spice.agent.renewal import renewal_rehydration_text
+from spice.mail.ackstate import (
+    ack_state_database_path,
+    directive_history_records_from_database,
+)
 from spice.mail.inbox import (
     collect_inbox_items,
     compose_inbox_text,
@@ -19,7 +25,10 @@ from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore
-from spice.serve.workroutes import work_tree_send_response_payload
+from spice.serve.workroutes import (
+    work_tree_send_accepted_response_payload,
+    work_tree_send_response_payload,
+)
 from spice.serve.worktree.target import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -28,8 +37,12 @@ ACTOR_A = f"thread:{THREAD_A}"
 ACTOR_B = f"thread:{THREAD_B}"
 
 
+@pytest.mark.parametrize(
+    "send_response",
+    (work_tree_send_response_payload, work_tree_send_accepted_response_payload),
+)
 def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, send_response
 ):
     repo = _repo(tmp_path)
     target = _target(repo)
@@ -40,8 +53,6 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
         agent_id=ACTOR_A, ancestor_thread_id=THREAD_A
     )
     ensure_calls: list[dict[str, object]] = []
-    send_records: list[dict[str, object]] = []
-    record_directive_sent = state.team_store.record_directive_sent
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
         identity,
@@ -53,26 +64,10 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
         ensure_calls.append({"target": ensured_target, **kwargs})
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
-    def observe_directive_sent(
-        directive_key: str, *, agent_id: str, team_id: str
-    ) -> None:
-        send_records.append(
-            {
-                "agent_id": agent_id,
-                "team_id": team_id,
-                "predecessor_team": state.team_store.current_team_for_agent(ACTOR_A),
-                "successor_team": state.team_store.current_team_for_agent(ACTOR_B),
-            }
-        )
-        record_directive_sent(directive_key, agent_id=agent_id, team_id=team_id)
-
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(
-        state.team_store, "record_directive_sent", observe_directive_sent
-    )
     state.team_store.set_global_fast_mode_enabled(True)
 
-    payload, status = work_tree_send_response_payload(
+    payload, status = send_response(
         state,
         target,
         {"text": "continue from pending handoff"},
@@ -98,14 +93,13 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
             "automatic": False,
         }
     ]
-    assert send_records == [
-        {
-            "agent_id": ACTOR_B,
-            "team_id": created.team_id,
-            "predecessor_team": None,
-            "successor_team": created.team_id,
-        }
+    directive = directive_history_records_from_database(ack_state_database_path(repo))[
+        0
     ]
+    assert (directive.target_actor, directive.team_id) == (
+        ACTOR_B,
+        created.team_id,
+    )
     assert state.team_store.current_team_for_agent(ACTOR_A) is None
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 

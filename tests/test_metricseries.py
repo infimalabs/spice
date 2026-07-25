@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from spice.errors import SpiceError
+from tests.test_directivefacthelpers import (
+    complete_directive_fact,
+    publish_directive_fact,
+)
 from spice.serve.payload import metric
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
@@ -84,10 +88,14 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
     state = SimpleNamespace(team_store=store)
     team = store.create_team(team_id="team-a", members=["agent-a"])
     store.record_agent_metric_delta("agent-a", message_timestamps=[60, 120])
-    store.record_directive_sent(
-        "dir-1", agent_id="agent-a", team_id="team-a", sent_at=60
+    publish_directive_fact(
+        store.directive_state_path,
+        "dir-1",
+        agent_id="agent-a",
+        team_id="team-a",
+        sent_at=60,
     )
-    store.mark_directive_acked("dir-1", acked_at=120)
+    complete_directive_fact(store.directive_state_path, "dir-1", acked_at=120)
     store.record_task_lifecycle_event(
         "complete", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=180
     )

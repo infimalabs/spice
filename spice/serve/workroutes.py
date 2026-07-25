@@ -9,6 +9,10 @@ from typing import Any
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
+from spice.mail.ackstate import (
+    DirectivePublicationWrite,
+    record_directive_publications,
+)
 from spice.serve.payload import identity
 from spice.serve.agentapi import (
     pending_inbox_launch_lock,
@@ -141,7 +145,7 @@ def _work_tree_send_response_payload(
             # The synchronous route starts the lane itself and grants the
             # explicit-send restart exception. Only the accepted/asynchronous
             # route needs the background watcher to own that decision.
-            wake_server=not ensure_agent_before_reply,
+            wake_server=not ensure_agent_before_reply and not force_new,
         )
     except (RuntimeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}, steering_submit_error_status(exc)
@@ -205,7 +209,7 @@ def _work_tree_send_result_payload(
     predecessor_actor: str,
     ensure_agent_before_reply: bool,
 ) -> dict[str, Any]:
-    if not ensure_agent_before_reply:
+    if not ensure_agent_before_reply and not force_new:
         response_payload = sent_steering_payload(
             sent,
             target=target,
@@ -215,7 +219,7 @@ def _work_tree_send_result_payload(
             state.team_store, target, predecessor
         )
         if not force_new:
-            _record_directive_sent(state, sent.key, send_actor=send_actor)
+            _record_directive_publication(state, target, sent, send_actor=send_actor)
         return response_payload
 
     response_payload = sent_steering_response_payload(
@@ -241,8 +245,11 @@ def _work_tree_send_result_payload(
         send_actor = identity.team_actor_for_target(
             state.team_store, target, send_agent_id
         )
-    if send_actor:
-        _record_directive_sent(state, sent.key, send_actor=send_actor)
+    deadlettered = isinstance(agent_ensure, dict) and agent_ensure.get(
+        "deadletteredInboxKey"
+    )
+    if send_actor and not deadlettered:
+        _record_directive_publication(state, target, sent, send_actor=send_actor)
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
         response_payload["renewalIntent"] = identity.renewal_intent_for_actor(
@@ -261,16 +268,36 @@ def _work_tree_send_result_payload(
     return response_payload
 
 
-def _record_directive_sent(state: Any, directive_key: str, *, send_actor: str) -> None:
+def _record_directive_publication(
+    state: Any, target: WorktreeTarget, sent: Any, *, send_actor: str
+) -> None:
     if not send_actor:
         return
-    # One operator directive = one send, keyed by its inbox key, attributed to
-    # the actor that will process it. team-at-capture is that actor's current
-    # team, or the actor itself when solo / in no team. It is acked when the
-    # agent acknowledges the key (see metrics.record_transcript_metrics_for_agent).
+    # One operator directive = one canonical steering fact, keyed by its inbox
+    # key and attributed to the actor/team that will process it. ACK archival
+    # completes this same row; Serve never owns a second directive write.
     capture_team = state.team_store.current_team_for_agent(send_actor) or send_actor
-    state.team_store.record_directive_sent(
-        directive_key, agent_id=send_actor, team_id=capture_team
+    record_directive_publications(
+        target.repo_root,
+        [
+            DirectivePublicationWrite(
+                key=sent.key,
+                inbox_name=sent.path.name,
+                text=sent.text,
+                target_actor=send_actor,
+                team_id=capture_team,
+                sent_at=sent.path.stat().st_mtime,
+                attachments=tuple(
+                    {
+                        "path": str(attachment.path),
+                        "name": attachment.name,
+                        "content_type": attachment.content_type,
+                        "size": attachment.size,
+                    }
+                    for attachment in sent.attachments
+                ),
+            )
+        ],
     )
 
 
