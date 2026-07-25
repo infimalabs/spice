@@ -25,6 +25,7 @@ from spice.serve.team.filters import shell_settings_from_json
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     LaneMetricSummary,
+    ObservationAttributionMode,
     TeamHistoricalMetricSummary,
     empty_lane_metric_summary,
     historical_agent_ids,
@@ -41,6 +42,7 @@ from spice.serve.team.membership import (
 from spice.serve.team.schema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
+    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
 )
 
 METRIC_HISTORY_RETENTION_DAYS_ENV = (
@@ -48,6 +50,10 @@ METRIC_HISTORY_RETENTION_DAYS_ENV = (
 )
 TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
 _SECONDS_PER_DAY = 24 * 60 * 60
+OBSERVATION_SOURCE_REBUILD_REQUIRED = (
+    "immutable source attribution is unavailable for pre-transition observation "
+    "rows; rebuild Serve observation projections from their native facts"
+)
 
 
 @dataclass(frozen=True)
@@ -238,7 +244,7 @@ class TeamMetricStoreMixin:
                 (event_time, kind, task_id, agent_id, capture_team_id),
             )
 
-    def _rewrite_agent_metric_cursors_locked(
+    def _inherit_agent_metric_cursors_locked(
         self,
         connection: sqlite3.Connection,
         old_agent_id: str,
@@ -258,65 +264,6 @@ class TeamMetricStoreMixin:
             "updated_at = max(agent_metric_cursors.updated_at, excluded.updated_at)",
             (new_agent_id, old_agent_id),
         )
-        connection.execute(
-            "DELETE FROM agent_metric_cursors WHERE agent_id = ?", (old_agent_id,)
-        )
-
-    def _rewrite_agent_metrics_locked(
-        self,
-        connection: sqlite3.Connection,
-        old_agent_id: str,
-        new_agent_id: str,
-    ) -> None:
-        # Renewal unifies the predecessor's id into the successor (the canonical
-        # actor), so the predecessor's per-agent counters fold into the successor
-        # and only one id survives. This is what makes lineage accumulate under
-        # the membership-derived read; see serve-team-metric-attribution.md (D9).
-        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
-        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
-        if old_agent_id == new_agent_id:
-            return
-        connection.execute(
-            "INSERT INTO agent_metrics "
-            "(agent_id, team_id, tool_calls, updated_at) "
-            "SELECT ?, team_id, tool_calls, updated_at "
-            "FROM agent_metrics WHERE agent_id = ? "
-            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
-            "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
-            "updated_at = max(agent_metrics.updated_at, excluded.updated_at)",
-            (new_agent_id, old_agent_id),
-        )
-        connection.execute(
-            "INSERT INTO agent_metric_buckets "
-            "(agent_id, team_id, bucket_start, messages, tool_calls) "
-            "SELECT ?, team_id, bucket_start, messages, tool_calls "
-            "FROM agent_metric_buckets WHERE agent_id = ? "
-            "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
-            "messages = agent_metric_buckets.messages + excluded.messages, "
-            "tool_calls = agent_metric_buckets.tool_calls + excluded.tool_calls",
-            (new_agent_id, old_agent_id),
-        )
-        connection.execute(
-            "DELETE FROM agent_metrics WHERE agent_id = ?", (old_agent_id,)
-        )
-        connection.execute(
-            "DELETE FROM agent_metric_buckets WHERE agent_id = ?", (old_agent_id,)
-        )
-
-    def _rewrite_task_lifecycle_events_locked(
-        self,
-        connection: sqlite3.Connection,
-        old_agent_id: str,
-        new_agent_id: str,
-    ) -> None:
-        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
-        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
-        if old_agent_id == new_agent_id:
-            return
-        connection.execute(
-            "UPDATE task_events SET agent_id = ? WHERE agent_id = ?",
-            (new_agent_id, old_agent_id),
-        )
 
     def lane_metric_summary(
         self: _TeamMetricStore,
@@ -325,7 +272,9 @@ class TeamMetricStoreMixin:
         bucket_count: int,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
         now: float | None = None,
-        since_latest_renewal: bool = False,
+        attribution: ObservationAttributionMode = (
+            ObservationAttributionMode.LINEAGE_CUMULATIVE
+        ),
     ) -> LaneMetricSummary:
         if not str(agent_id or "").strip():
             return empty_lane_metric_summary(bucket_count)
@@ -350,18 +299,37 @@ class TeamMetricStoreMixin:
                 member_ids = tuple(str(member["agent_id"]) for member in member_rows)
             else:
                 member_ids = (agent_id,)
-            start_time_by_agent = (
-                _latest_renewal_start_times_locked(connection, member_ids)
-                if since_latest_renewal
-                else None
-            )
-            return self._agent_lane_metric_summary_locked(
+            if attribution is ObservationAttributionMode.SOURCE_ACTOR:
+                _require_source_attribution_locked(connection, member_ids)
+                query_agent_ids = member_ids
+                start_time_by_agent = None
+            elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
+                query_agent_ids = _lineage_actor_ids_locked(connection, member_ids)
+                start_time_by_agent = None
+            elif attribution is ObservationAttributionMode.PER_SESSION:
+                query_agent_ids = member_ids
+                start_time_by_agent = _latest_renewal_start_times_locked(
+                    connection, member_ids
+                )
+            else:
+                raise SpiceError(
+                    "teamAtEventTime attribution requires "
+                    "team_historical_metric_summary"
+                )
+            summary = self._agent_lane_metric_summary_locked(
                 connection,
-                member_ids,
+                query_agent_ids,
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
                 now=summary_time,
                 start_time_by_agent=start_time_by_agent,
+            )
+            return LaneMetricSummary(
+                agent_ids=member_ids,
+                acked=summary.acked,
+                sends=summary.sends,
+                tool_calls=summary.tool_calls,
+                sparkline=summary.sparkline,
             )
 
     def team_historical_metric_summary(
@@ -371,7 +339,14 @@ class TeamMetricStoreMixin:
         bucket_count: int,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
         now: float | None = None,
+        attribution: ObservationAttributionMode = (
+            ObservationAttributionMode.TEAM_AT_EVENT_TIME
+        ),
     ) -> TeamHistoricalMetricSummary:
+        if attribution is not ObservationAttributionMode.TEAM_AT_EVENT_TIME:
+            raise SpiceError(
+                "team historical metrics require teamAtEventTime attribution"
+            )
         team_id = _normalized_id(team_id, "team_id")
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
@@ -385,6 +360,10 @@ class TeamMetricStoreMixin:
                 if interval.team_id == team_id
             ]
             agent_ids = historical_agent_ids(intervals)
+            _require_source_attribution_locked(
+                connection,
+                _lineage_related_actor_ids_locked(connection, agent_ids),
+            )
             buckets = historical_metric_buckets(
                 _agent_message_bucket_rows_locked(connection, agent_ids), intervals
             )
@@ -407,31 +386,58 @@ class TeamMetricStoreMixin:
         start: float,
         end: float,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
+        attribution: ObservationAttributionMode = (
+            ObservationAttributionMode.SOURCE_ACTOR
+        ),
     ) -> tuple[MetricSeriesPoint, ...]:
         """Stable, full-fidelity activity series for graphing: summed messages
         per bucket over the given agents within [start, end]. Unlike the lane
         sparkline this applies no rolling window or aging — re-querying the same
         range always yields identical points, so it can be plotted over an
         arbitrary range (bounded only by the retention horizon)."""
-        ids = tuple(dict.fromkeys(str(agent_id) for agent_id in agent_ids if agent_id))
-        if not ids:
+        requested_ids = tuple(
+            dict.fromkeys(str(agent_id) for agent_id in agent_ids if agent_id)
+        )
+        if not requested_ids:
             return ()
         bucket_seconds = max(1, int(bucket_seconds))
         floor = metric_bucket_start(start, bucket_seconds)
         ceiling = metric_bucket_start(end, bucket_seconds)
-        placeholders = ",".join("?" for _ in ids)
         with self.connect() as connection:
+            if attribution is ObservationAttributionMode.SOURCE_ACTOR:
+                _require_source_attribution_locked(connection, requested_ids)
+                ids = requested_ids
+                start_times: Mapping[str, float] = {}
+            elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
+                ids = _lineage_actor_ids_locked(connection, requested_ids)
+                start_times = {}
+            elif attribution is ObservationAttributionMode.PER_SESSION:
+                ids = requested_ids
+                start_times = _latest_renewal_start_times_locked(connection, ids)
+            else:
+                raise SpiceError(
+                    "teamAtEventTime attribution requires "
+                    "team_historical_metric_summary"
+                )
+            placeholders = ",".join("?" for _ in ids)
             rows = connection.execute(
-                "SELECT bucket_start, SUM(messages) AS messages "
+                "SELECT agent_id, bucket_start, messages "
                 "FROM agent_metric_buckets "
                 f"WHERE agent_id IN ({placeholders}) "
                 "AND bucket_start >= ? AND bucket_start <= ? "
-                "GROUP BY bucket_start ORDER BY bucket_start",
+                "ORDER BY bucket_start",
                 (*ids, floor, ceiling),
             ).fetchall()
+        messages_by_bucket: Counter[int] = Counter()
+        for row in rows:
+            actor_id = str(row["agent_id"])
+            bucket_start = int(row["bucket_start"])
+            if bucket_start < start_times.get(actor_id, 0.0):
+                continue
+            messages_by_bucket[bucket_start] += int(row["messages"] or 0)
         return tuple(
-            MetricSeriesPoint(int(row["bucket_start"]), int(row["messages"] or 0))
-            for row in rows
+            MetricSeriesPoint(bucket_start, messages)
+            for bucket_start, messages in sorted(messages_by_bucket.items())
         )
 
     def task_lifecycle_series(
@@ -442,14 +448,17 @@ class TeamMetricStoreMixin:
         start: float,
         end: float,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
+        attribution: ObservationAttributionMode = (
+            ObservationAttributionMode.SOURCE_ACTOR
+        ),
     ) -> tuple[TaskLifecycleSeriesPoint, ...]:
         """Stable task-flow series for graphing: task lifecycle facts folded
         into per-bucket movement counts. The substrate is append-only
         task_events tagged with actor and team-at-capture, so re-querying the
         same range yields the same projection until retention prunes it."""
-        agents = _normalized_ids(agent_ids, "agent_id")
+        requested_agents = _normalized_ids(agent_ids, "agent_id")
         teams = _normalized_ids(team_ids, "team_id")
-        if not agents and not teams:
+        if not requested_agents and not teams:
             return ()
         bucket_seconds = max(1, int(bucket_seconds))
         start_time = max(0.0, float(start))
@@ -457,15 +466,25 @@ class TeamMetricStoreMixin:
         bucket_expr = (
             f"(CAST(ts AS INTEGER) - (CAST(ts AS INTEGER) % {bucket_seconds}))"
         )
-        filters = ["ts >= ?", "ts <= ?"]
-        params: list[object] = [start_time, end_time]
-        if agents:
-            filters.append(f"agent_id IN ({_placeholders(agents)})")
-            params.extend(agents)
-        if teams:
-            filters.append(f"team_id IN ({_placeholders(teams)})")
-            params.extend(teams)
         with self.connect() as connection:
+            if attribution is ObservationAttributionMode.SOURCE_ACTOR:
+                _require_source_attribution_locked(connection, requested_agents)
+                agents = requested_agents
+            elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
+                agents = _lineage_actor_ids_locked(connection, requested_agents)
+            else:
+                raise SpiceError(
+                    "task lifecycle series supports sourceActor or "
+                    "lineageCumulative attribution"
+                )
+            filters = ["ts >= ?", "ts <= ?"]
+            params: list[object] = [start_time, end_time]
+            if agents:
+                filters.append(f"agent_id IN ({_placeholders(agents)})")
+                params.extend(agents)
+            if teams:
+                filters.append(f"team_id IN ({_placeholders(teams)})")
+                params.extend(teams)
             rows = connection.execute(
                 "SELECT "
                 f"{bucket_expr} AS bucket_start, "
@@ -995,6 +1014,128 @@ def _latest_renewal_start_times_locked(
             float(row["ts"] or 0.0),
         )
     return start_times
+
+
+def _lineage_edges_locked(
+    connection: sqlite3.Connection,
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, float]]:
+    rows = connection.execute(
+        "SELECT ts, kind, payload FROM events "
+        "WHERE kind IN ('renewalStarted', 'assignAgent') ORDER BY revision"
+    ).fetchall()
+    predecessors: dict[str, list[str]] = {}
+    successors: dict[str, list[str]] = {}
+    successor_starts: dict[str, float] = {}
+    for row in rows:
+        payload = event_payload(row)
+        kind = str(row["kind"])
+        if kind == "renewalStarted":
+            successor = event_agent_id(payload, "successor")
+            sources = (event_agent_id(payload, "predecessor"),)
+            starts_session = True
+        else:
+            successor = event_agent_id(payload, "agentId")
+            raw_aliases = payload.get("aliases", [])
+            if not isinstance(raw_aliases, list) or not all(
+                isinstance(alias, str) and alias for alias in raw_aliases
+            ):
+                raise SpiceError(
+                    "team event payload aliases must be a list of agent ids"
+                )
+            sources = tuple(str(alias) for alias in raw_aliases)
+            starts_session = False
+        for source in sources:
+            if source == successor:
+                continue
+            parents = predecessors.setdefault(successor, [])
+            if source not in parents:
+                parents.append(source)
+            children = successors.setdefault(source, [])
+            if successor not in children:
+                children.append(successor)
+            if starts_session:
+                successor_starts[successor] = min(
+                    successor_starts.get(successor, float(row["ts"] or 0.0)),
+                    float(row["ts"] or 0.0),
+                )
+    return predecessors, successors, successor_starts
+
+
+def _lineage_actor_ids_locked(
+    connection: sqlite3.Connection,
+    actor_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    predecessors, _, _ = _lineage_edges_locked(connection)
+    ordered: list[str] = []
+    visited: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(actor_id: str) -> None:
+        if actor_id in visited:
+            return
+        if actor_id in visiting:
+            raise SpiceError(f"observation lineage contains a cycle at {actor_id}")
+        visiting.add(actor_id)
+        for predecessor in predecessors.get(actor_id, ()):
+            visit(predecessor)
+        visiting.remove(actor_id)
+        visited.add(actor_id)
+        ordered.append(actor_id)
+
+    for actor_id in actor_ids:
+        visit(actor_id)
+    return tuple(ordered)
+
+
+def _lineage_related_actor_ids_locked(
+    connection: sqlite3.Connection,
+    actor_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    predecessors, successors, _ = _lineage_edges_locked(connection)
+    related: list[str] = []
+    seen: set[str] = set()
+    pending = list(actor_ids)
+    while pending:
+        actor_id = pending.pop(0)
+        if actor_id in seen:
+            continue
+        seen.add(actor_id)
+        related.append(actor_id)
+        pending.extend(predecessors.get(actor_id, ()))
+        pending.extend(successors.get(actor_id, ()))
+    return tuple(related)
+
+
+def _require_source_attribution_locked(
+    connection: sqlite3.Connection,
+    actor_ids: tuple[str, ...],
+) -> None:
+    state = connection.execute(
+        "SELECT status FROM observation_attribution_state WHERE singleton = 1"
+    ).fetchone()
+    if (
+        state is not None
+        and str(state["status"]) == OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
+    ):
+        raise SpiceError(OBSERVATION_SOURCE_REBUILD_REQUIRED)
+    _, _, successor_starts = _lineage_edges_locked(connection)
+    for actor_id in actor_ids:
+        start = successor_starts.get(actor_id)
+        if start is None:
+            continue
+        row = connection.execute(
+            "SELECT 1 FROM agent_metric_buckets "
+            "WHERE agent_id = ? AND bucket_start < ? "
+            "UNION ALL SELECT 1 FROM agent_metrics "
+            "WHERE agent_id = ? AND updated_at < ? "
+            "UNION ALL SELECT 1 FROM directives "
+            "WHERE agent_id = ? AND sent_at < ? "
+            "UNION ALL SELECT 1 FROM task_events "
+            "WHERE agent_id = ? AND ts < ? LIMIT 1",
+            (actor_id, start, actor_id, start, actor_id, start, actor_id, start),
+        ).fetchone()
+        if row is not None:
+            raise SpiceError(OBSERVATION_SOURCE_REBUILD_REQUIRED)
 
 
 def _metric_start_times(

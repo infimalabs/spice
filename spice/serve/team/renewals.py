@@ -63,19 +63,7 @@ class _TeamRenewalStore(Protocol):
         aliases: Iterable[str] = (),
     ) -> list[str]: ...
 
-    def _rewrite_agent_metric_cursors_locked(
-        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
-    ) -> None: ...
-
-    def _rewrite_agent_metrics_locked(
-        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
-    ) -> None: ...
-
-    def _rewrite_directive_stats_locked(
-        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
-    ) -> None: ...
-
-    def _rewrite_task_lifecycle_events_locked(
+    def _inherit_agent_metric_cursors_locked(
         self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
     ) -> None: ...
 
@@ -148,7 +136,7 @@ class _TeamRenewalStore(Protocol):
 
 
 class TeamRenewalStoreMixin:
-    def _rewrite_renewal_agent_locked(
+    def _transfer_active_renewal_locked(
         self,
         connection: sqlite3.Connection,
         old_agent_id: str,
@@ -162,22 +150,17 @@ class TeamRenewalStoreMixin:
         if old_row is None:
             return
         if str(old_row["state"]) == RENEWAL_STATE_STARTED:
-            # A started row documents a finished predecessor->successor
-            # transition. Re-keying it onto the successor would leave the
-            # live agent permanently mid-renewal and silently refuse every
-            # future renewal request for that lane.
-            connection.execute(
-                "DELETE FROM renewals WHERE agent_id = ?", (old_agent_id,)
-            )
+            # Completed transitions are immutable lineage authority. Alias
+            # promotion must not re-key or delete them.
             return
         new_row = connection.execute(
             "SELECT agent_id FROM renewals WHERE agent_id = ?", (new_agent_id,)
         ).fetchone()
         if new_row is not None:
-            connection.execute(
-                "DELETE FROM renewals WHERE agent_id = ?", (old_agent_id,)
+            raise SpiceError(
+                "cannot transfer active renewal state onto an agent that "
+                f"already has renewal state: {new_agent_id}"
             )
-            return
         connection.execute(
             "UPDATE renewals SET agent_id = ?, team_id = ? WHERE agent_id = ?",
             (new_agent_id, team_id, old_agent_id),
@@ -435,8 +418,26 @@ class TeamRenewalStoreMixin:
             predecessor_agent_id, "predecessor_agent_id"
         )
         successor_agent_id = _normalized_id(successor_agent_id, "successor_agent_id")
-        team_id = self.open_team_for_agent(predecessor_agent_id)
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._renewal_state_locked(connection, predecessor_agent_id)
+            if current is not None and current.state == RENEWAL_STATE_STARTED:
+                if current.successor_agent_id == successor_agent_id:
+                    return current
+                raise SpiceError(
+                    f"renewal for {predecessor_agent_id} already started "
+                    f"with successor {current.successor_agent_id}"
+                )
+            existing_event = _started_renewal_event_locked(
+                connection,
+                predecessor_agent_id=predecessor_agent_id,
+                successor_agent_id=successor_agent_id,
+            )
+            team_id = (
+                str(existing_event["team_id"])
+                if existing_event is not None
+                else self._open_team_for_agent_locked(connection, predecessor_agent_id)
+            )
             (
                 team_slot,
                 predecessor_identity,
@@ -448,27 +449,30 @@ class TeamRenewalStoreMixin:
                 predecessor_agent_id=predecessor_agent_id,
                 successor_agent_id=successor_agent_id,
             )
-            revision = self._record_event(
-                connection,
-                "renewalStarted",
-                team_id,
-                {
-                    "predecessor": predecessor_agent_id,
-                    "successor": successor_agent_id,
-                    "successorThreadId": successor_thread_id,
-                    "teamSlot": team_slot,
-                },
-            )
-            self._rewrite_agent_metric_cursors_locked(
-                connection, predecessor_agent_id, successor_agent_id
-            )
-            self._rewrite_agent_metrics_locked(
-                connection, predecessor_agent_id, successor_agent_id
-            )
-            self._rewrite_directive_stats_locked(
-                connection, predecessor_agent_id, successor_agent_id
-            )
-            self._rewrite_task_lifecycle_events_locked(
+            if existing_event is None:
+                revision = self._record_event(
+                    connection,
+                    "renewalStarted",
+                    team_id,
+                    {
+                        "predecessor": predecessor_agent_id,
+                        "successor": successor_agent_id,
+                        "ancestor": ancestor_thread_id,
+                        "successorThreadId": successor_thread_id,
+                        "teamSlot": team_slot,
+                    },
+                )
+            else:
+                revision = int(existing_event["revision"])
+                event_payload = json.loads(str(existing_event["payload"] or "{}"))
+                if isinstance(event_payload, dict):
+                    stored_slot = event_payload.get("teamSlot")
+                    if isinstance(stored_slot, int):
+                        team_slot = stored_slot
+                    ancestor_thread_id = str(
+                        event_payload.get("ancestor") or ancestor_thread_id
+                    )
+            self._inherit_agent_metric_cursors_locked(
                 connection, predecessor_agent_id, successor_agent_id
             )
             self._assign_locked(connection, team_id, successor_agent_id)
@@ -605,6 +609,28 @@ class TeamRenewalStoreMixin:
 
 def _renewal_identity_json(identity: Mapping[str, Any]) -> str:
     return json.dumps(dict(identity), sort_keys=True, separators=(",", ":"))
+
+
+def _started_renewal_event_locked(
+    connection: sqlite3.Connection,
+    *,
+    predecessor_agent_id: str,
+    successor_agent_id: str,
+) -> sqlite3.Row | None:
+    rows = connection.execute(
+        "SELECT revision, team_id, payload FROM events "
+        "WHERE kind = 'renewalStarted' ORDER BY revision DESC"
+    ).fetchall()
+    for row in rows:
+        payload = json.loads(str(row["payload"] or "{}"))
+        if not isinstance(payload, dict):
+            continue
+        if (
+            str(payload.get("predecessor") or "") == predecessor_agent_id
+            and str(payload.get("successor") or "") == successor_agent_id
+        ):
+            return row
+    return None
 
 
 def _renewal_identity_from_json(raw: str) -> dict[str, Any]:

@@ -46,8 +46,8 @@ the source of every symptom above.
 ## Decisions (locked)
 
 **D1 — Single source of truth.** Per-agent, time-bucketed counters
-(`agent_metrics` and `agent_metric_buckets`, keyed by canonical actor id) are
-the only durable metric store. Every other number is a projection.
+(`agent_metrics` and `agent_metric_buckets`, keyed by immutable source actor id)
+are the only durable metric store. Every other number is a projection.
 
 **D2 — Delete the team counter store.** `team_agent_metrics` and
 `team_agent_metric_buckets` are removed entirely, along with all code that
@@ -96,10 +96,12 @@ churn no longer fragments anything, so a permanent home team is evaluated on UX
 merits only, never for metric reasons.
 
 <a id="d9"></a>
-**D9 — Renewal lineage accumulates by id-unification.** Per-agent counters
-accumulate across a renewal because the successor's id is unified to the
-canonical actor by the existing alias rewrite. The successor inherits the
-predecessor's counters by id-unification, never by copying rows.
+**D9 — Renewal lineage is a read model.** Per-agent facts retain the actor that
+produced them. A `renewalStarted` event links predecessor to successor, and the
+LINEAGE-CUMULATIVE lens recursively folds source actors at query time. Renewal
+never updates, merges, or deletes historical fact rows. Replay checkpoints may
+be copied forward so a successor does not reread a predecessor transcript, but
+the predecessor checkpoint remains and is not fact attribution.
 
 ## Views & projections
 
@@ -111,13 +113,14 @@ membership events from the team event log. `directive_totals` and
 truths. Every displayed number is a projection over the fact log plus event log;
 new views add folds, not mutable aggregate stores.
 
-**D11 — Three lenses, one default.** Lane default =
-LINEAGE-CUMULATIVE: D9 inheritance means the lane shows total work achieved by
-that lineage across renewals. PER-SESSION is the selectable lens over facts
-since the lineage's last renewal boundary. TEAM-HISTORICAL is the selectable D7
-lens over facts inside reconstructed team membership intervals. The monotonic
-lifetime number is therefore one view in a triad, never the only number the UI
-can expose.
+**D11 — Explicit lenses, one default.** Lane default = LINEAGE-CUMULATIVE: D9
+event folding means the lane shows total work achieved by that lineage across
+renewals. SOURCE-ACTOR reads only facts emitted by the named actor. PER-SESSION
+reads source facts since that actor's latest renewal boundary.
+TEAM-AT-EVENT-TIME is the selectable D7 lens over facts inside reconstructed
+team membership intervals. Current membership is never back-projected onto an
+older fact. The monotonic lifetime number is therefore one explicit view,
+never the only number the UI can expose.
 
 This is the canonical answer to the renewal-monotonicity concern: long-lived
 trees and renewal inheritance intentionally make the default lane total
@@ -157,7 +160,7 @@ randomized lifecycle sequence.
 
 ## The behavioral flip (worked examples)
 
-These are the exact rewrites the read-path and lifecycle tickets bake in, so
+These are the exact outcomes the read-path and lifecycle tickets bake in, so
 implementers have no ambiguity. Setup numbers are `acked / sends / tool_calls`.
 
 - **Removed member drops from the lane.** Team holds `agent-a` (1/2/3) and
@@ -187,10 +190,11 @@ foreclose it.
 
 - `spice/serve/team/schema.py` stores immutable membership timestamps,
   explicit positions, per-agent facts, task events, and renewal facts.
-- `spice/serve/team/store.py` derives live, lineage-cumulative, per-session,
-  and team-historical views from agent facts plus membership/event state.
-- Lane payloads consume those projections; moving or renewing an agent keeps
-  work with the canonical actor rather than a transient team row.
+- `spice/serve/team/store.py` derives source-actor, lineage-cumulative,
+  per-session, and team-at-event-time views from immutable agent facts plus
+  renewal/alias and membership event state.
+- Lane payloads consume those projections; moving an agent changes the current
+  membership lens, while renewal links immutable source sessions at read time.
 - Team metric unit/property tests and real browser smokes pin attribution,
   ordering, move, merge, split, renewal, lens selection, and task-flow views.
 

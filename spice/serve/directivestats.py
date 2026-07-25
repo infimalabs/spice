@@ -118,36 +118,6 @@ class DirectiveStatsStoreMixin:
         floor = float(now) - max(0, int(retention_seconds))
         connection.execute("DELETE FROM directives WHERE sent_at < ?", (floor,))
 
-    def _rewrite_directive_stats_locked(
-        self,
-        connection: sqlite3.Connection,
-        old_agent_id: str,
-        new_agent_id: str,
-    ) -> None:
-        # Renewal folds the predecessor's directives into the successor (the
-        # canonical actor) so sends/acks accumulate across the lineage and only
-        # one id survives — same id-unification as the other per-agent stores.
-        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
-        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
-        if old_agent_id == new_agent_id:
-            return
-        connection.execute(
-            "UPDATE directives SET agent_id = ? WHERE agent_id = ?",
-            (new_agent_id, old_agent_id),
-        )
-        connection.execute(
-            "INSERT INTO directive_totals (agent_id, team_id, sends, acked) "
-            "SELECT ?, team_id, sends, acked FROM directive_totals "
-            "WHERE agent_id = ? "
-            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
-            "sends = directive_totals.sends + excluded.sends, "
-            "acked = directive_totals.acked + excluded.acked",
-            (new_agent_id, old_agent_id),
-        )
-        connection.execute(
-            "DELETE FROM directive_totals WHERE agent_id = ?", (old_agent_id,)
-        )
-
     def directive_totals_for_agents(
         self: _DirectiveStatsStore, agent_ids: Iterable[str]
     ) -> DirectiveTotals:

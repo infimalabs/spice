@@ -68,7 +68,9 @@ def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_pa
     assert sum(summary.sparkline) == 3
 
 
-def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path):
+def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoint(
+    tmp_path,
+):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["thread:predecessor"])
     predecessor_rollout = tmp_path / "predecessor.jsonl"
@@ -136,6 +138,11 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
     assert [
         (row["agent_id"], row["source_path"], row["offset"]) for row in cursor_rows
     ] == [
+        (
+            "thread:predecessor",
+            str(predecessor_rollout),
+            predecessor_rollout.stat().st_size,
+        ),
         (
             "thread:successor",
             str(predecessor_rollout),
