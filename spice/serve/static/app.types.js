@@ -493,7 +493,6 @@
  * @property {string=} latestMessagePreview
  * @property {string=} latestActivityPreview
  * @property {string=} preview
- * @property {ClaimedTask=} claimedTask
  */
 
 /**
