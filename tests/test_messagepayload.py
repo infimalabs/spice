@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
+import pytest
 
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
@@ -27,6 +28,22 @@ from spice.tasks import config as task_config
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 FIVE_MINUTES_SECONDS = 300
+
+
+class _EmptyOpenTaskBoard:
+    task_filter_inventory: dict[str, object] = {}
+
+    def active_claim(self, actor: str):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _stub_open_task_board(monkeypatch):
+    monkeypatch.setattr(
+        message,
+        "open_task_board_projection",
+        lambda: _EmptyOpenTaskBoard(),
+    )
 
 
 def _record_identity(
@@ -116,7 +133,6 @@ def _stub_messages_payload(
         "agent_status",
         lambda _repo: _Status(running=False, started_at=""),
     )
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
 
 
 @dataclass(frozen=True)
@@ -584,7 +600,6 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         return []
 
     monkeypatch.setattr(message.tw, "export", fake_export)
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -856,7 +871,6 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
         return _message_read([_message("2026-06-10T12:00:03.000000Z")])
 
     monkeypatch.setattr(message.tw, "export", lambda _filters: [row])
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -1072,7 +1086,6 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
     )
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -1167,7 +1180,6 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     store.create_team(members=["thread:agent-a"])
     _record_identity(store, "thread:agent-a", thread_id="agent-a")
     store.set_agent_renewal_request("thread:agent-a", requested=True)
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         message,
         "pending_inbox_identity_payload",
@@ -1355,7 +1367,6 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "agent_status",
         lambda _repo: _Status(running=False, started_at=""),
     )
-    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
 
     payload = message.messages_payload_for_worktree(
         _State(),

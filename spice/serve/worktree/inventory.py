@@ -27,12 +27,11 @@ from spice.serve.payload.lane import (
     ReviewExportSnapshot,
     _lane_info_payload,
     _status_line_payload_from_status,
-    task_filter_inventory,
 )
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import claimstate
 
 if TYPE_CHECKING:
     from spice.serve.payload.message import TaskCardExportSnapshot
@@ -42,15 +41,12 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     from spice.serve.payload.message import TaskCardExportSnapshot
 
     targets = state.worktree_targets()
-    inventory = task_filter_inventory()
+    task_board = open_task_board_projection()
+    inventory = task_board.task_filter_inventory
     # Review pressure reads two global taskwarrior exports that are identical
     # across every lane; share one snapshot so the build spawns them at most
     # once instead of once per target.
     review_exports = ReviewExportSnapshot()
-    # Claimed-task resolution reads one global +ACTIVE export per BOUND lane,
-    # identical across lanes; share one snapshot so the build spawns it at most
-    # once regardless of how many lanes are bound.
-    active_claims = claimstate.ActiveClaimSnapshot()
     # Task-card activity filters one global status.any export by origin actor.
     # Share one lazy snapshot so bound lanes reuse it and an all-unbound build
     # never loads it.
@@ -62,7 +58,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                 target,
                 inventory,
                 review_exports,
-                active_claims,
+                task_board,
                 task_cards,
             )
             for target in targets
@@ -85,7 +81,7 @@ def _work_tree_payload(
     target: WorktreeTarget,
     inventory: dict[str, Any],
     review_exports: ReviewExportSnapshot,
-    active_claims: claimstate.ActiveClaimSnapshot,
+    active_claims: OpenTaskBoardProjection,
     task_cards: TaskCardExportSnapshot,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
@@ -214,7 +210,7 @@ def _work_tree_status_payloads(
     status: Any,
     pending_identity: dict[str, Any],
     desired_config: dict[str, str] | None = None,
-    active_claims: claimstate.ActiveClaimSnapshot | None = None,
+    active_claims: OpenTaskBoardProjection | None = None,
     task_cards: TaskCardExportSnapshot | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from spice.serve.payload.message import target_activity_items

@@ -13,13 +13,14 @@ from spice.agent import watchdog
 from spice.serve.messages import AssistantMessage
 from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
+from spice.serve import taskboard
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
     agent_uptime_seconds,
     lane_metrics_payload,
-    task_filter_inventory,
 )
 from spice.serve.team.store import ServeTeamStore
+from spice.tasks import config as task_config
 from spice.tasks import tw
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -303,9 +304,10 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
                     "incepted": "1kF5xdSM",
                     "phase": "todo",
                     "project": "serve.ui",
+                    "start": "20260610T000000Z",
                 }
             ]
-            if list(filters or []) == ["+ACTIVE"]
+            if list(filters or []) == ["status.any:"]
             else []
         ),
     )
@@ -862,26 +864,23 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _reset_task_filter_inventory_cache():
-    """Clear the revision-keyed inventory memo around every test.
-
-    ``task_filter_inventory`` memoizes on ``task_filter_inventory_revision()``.
-    These tests fake distinct boards under the same real task event revision, so
-    a warm cache from one test would otherwise serve another test's board (and
-    hide its export). Resetting the module cache before and after each test keeps
-    every faked board computed fresh.
-    """
-    lane._task_filter_inventory_cache = None
+def _reset_task_board_observation():
+    """Isolate each test's faked task board from the process-wide observation."""
+    with taskboard._task_board_condition:
+        taskboard._task_board_observations.clear()
+        taskboard._task_board_builds.clear()
     yield
-    lane._task_filter_inventory_cache = None
+    with taskboard._task_board_condition:
+        taskboard._task_board_observations.clear()
+        taskboard._task_board_builds.clear()
 
 
 def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     seen: list[list[str]] = []
 
-    def fake_export(args: list[str]) -> list[dict[str, object]]:
+    def fake_export(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
         seen.append(args)
-        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
+        assert args == ["status.any:"]
         return [
             {"uuid": "ready-serve-a", "project": "serve.ui"},
             {"uuid": "ready-serve-b", "project": "serve.ui"},
@@ -929,10 +928,10 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
         "export",
         fake_export,
     )
-    inventory = task_filter_inventory()
+    inventory = taskboard.open_task_board_projection().task_filter_inventory
     filters = {item["name"]: item for item in inventory["filters"]}
     stems = {item["name"]: item for item in inventory["primaryStems"]}
-    assert seen == [["(", "status:pending", "or", "status:waiting", ")"]]
+    assert seen == [["status.any:"]]
     assert inventory["openTaskCount"] == 6
     assert filters["serve.ui"] == {
         "name": "serve.ui",
@@ -993,15 +992,14 @@ def test_task_filter_inventory_resolves_config_once_independent_of_row_count(
 ):
     rows: list[dict[str, object]] = []
     resolver_calls = 0
-    real_resolver = lane.task_config._tasks_config_table
+    real_resolver = task_config._tasks_config_table
 
     def counted_resolver(*args, **kwargs):
         nonlocal resolver_calls
         resolver_calls += 1
         return real_resolver(*args, **kwargs)
 
-    monkeypatch.setattr(lane.task_config, "_tasks_config_table", counted_resolver)
-    monkeypatch.setattr(tw, "export", lambda _args: list(rows))
+    monkeypatch.setattr(task_config, "_tasks_config_table", counted_resolver)
 
     for row_count in (1, 64):
         rows[:] = [
@@ -1011,16 +1009,18 @@ def test_task_filter_inventory_resolves_config_once_independent_of_row_count(
         # An invalid project remains ignored without triggering another config
         # resolution or disturbing valid inventory counts.
         rows.append({"uuid": f"malformed-{row_count}", "project": ".bad-stem"})
-        # Each row count is a distinct board, so give it its own revision: the
-        # inventory memoizes on the revision, and reusing one token would serve
-        # the first build's payload instead of re-resolving against these rows.
-        monkeypatch.setattr(
-            lane, "task_filter_inventory_revision", lambda rc=row_count: f"rows-{rc}"
+        observation = taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision=f"rows-{row_count}",
+            rows=tuple(rows),
         )
         calls_before = resolver_calls
 
-        inventory = task_filter_inventory()
+        projection = taskboard.open_task_board_projection(observation)
+        inventory = projection.task_filter_inventory
 
+        assert resolver_calls == calls_before + 1
+        assert taskboard.open_task_board_projection(observation) is projection
         assert resolver_calls == calls_before + 1
         assert inventory["openTaskCount"] == row_count
         assert inventory["filters"] == [
@@ -1052,8 +1052,8 @@ def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monke
         encoding="utf-8",
     )
 
-    def fake_export(args: list[str]) -> list[dict[str, object]]:
-        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
+    def fake_export(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
+        assert args == ["status.any:"]
         return [
             {"uuid": "ready-serve", "project": "serve.ui"},
             {"uuid": "oops-a", "project": ".oops"},
@@ -1064,7 +1064,7 @@ def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monke
         ]
 
     monkeypatch.setattr(tw, "export", fake_export)
-    inventory = task_filter_inventory()
+    inventory = taskboard.open_task_board_projection().task_filter_inventory
     stems = {item["name"]: item for item in inventory["primaryStems"]}
 
     # The project-configured stem merges onto the built-in hidden stems, so the
@@ -1097,15 +1097,15 @@ def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monke
 def test_task_filter_inventory_preserves_all_deferred_project_as_zero_ready(
     monkeypatch,
 ):
-    def fake_export(args: list[str]) -> list[dict[str, object]]:
-        assert args == ["(", "status:pending", "or", "status:waiting", ")"]
+    def fake_export(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
+        assert args == ["status.any:"]
         return [
             {"uuid": "deferred-a", "project": "serve.ui", "wait": "20990101T000000Z"},
             {"uuid": "deferred-b", "project": "serve.ui", "wait": "20990101T000000Z"},
         ]
 
     monkeypatch.setattr(tw, "export", fake_export)
-    inventory = task_filter_inventory()
+    inventory = taskboard.open_task_board_projection().task_filter_inventory
     stems = {item["name"]: item for item in inventory["primaryStems"]}
 
     assert stems["serve"] == {
@@ -1121,9 +1121,9 @@ def test_task_filter_inventory_preserves_all_deferred_project_as_zero_ready(
 
 
 def test_task_filter_inventory_empty_board_has_empty_counts(monkeypatch):
-    monkeypatch.setattr(tw, "export", lambda _args: [])
+    monkeypatch.setattr(tw, "export", lambda _args, **_kwargs: [])
 
-    inventory = task_filter_inventory()
+    inventory = taskboard.open_task_board_projection().task_filter_inventory
 
     assert inventory["filters"] == []
     assert inventory["primaryStems"] == []
@@ -1135,26 +1135,26 @@ def test_task_filter_inventory_memoizes_until_a_task_backend_change(
 ):
     """One export serves every same-revision build; a backend change re-exports.
 
-    The pending/waiting export is the dominant repeated cost on the messages and
-    work-trees builds, so unchanged-board builds must reuse a single export.
+    The current-board export is shared by filters and claims, so unchanged-board
+    builds must reuse a single export.
     Driving the real task event file (rather than stubbing the revision) proves
     the memo keys on the very token ``mark_task_backend_changed`` advances, so a
     genuine board change is never served stale.
     """
-    monkeypatch.setenv(lane.task_config.TASK_BACKEND_ENV, str(tmp_path))
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(tmp_path))
     board = [{"uuid": "ready", "project": "serve.latency"}]
     exports: list[list[str]] = []
 
-    def counting_export(args: list[str]) -> list[dict[str, object]]:
+    def counting_export(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
         exports.append(args)
         return [dict(row) for row in board]
 
     monkeypatch.setattr(tw, "export", counting_export)
 
-    bootstrap_revision = lane.task_config.task_event_revision()
-    first = task_filter_inventory()
-    second = task_filter_inventory()
-    third = task_filter_inventory()
+    bootstrap_revision = task_config.task_event_revision()
+    first = taskboard.open_task_board_projection().task_filter_inventory
+    second = taskboard.open_task_board_projection().task_filter_inventory
+    third = taskboard.open_task_board_projection().task_filter_inventory
 
     # Three same-revision builds resolve to one underlying export and one payload.
     assert len(exports) == 1
@@ -1162,11 +1162,11 @@ def test_task_filter_inventory_memoizes_until_a_task_backend_change(
     assert first["revision"] == bootstrap_revision
     assert first["openTaskCount"] == 1
 
-    lane.task_config.mark_task_backend_changed()
-    advanced_revision = lane.task_config.task_event_revision()
+    task_config.mark_task_backend_changed()
+    advanced_revision = task_config.task_event_revision()
     assert advanced_revision != bootstrap_revision
 
-    fourth = task_filter_inventory()
+    fourth = taskboard.open_task_board_projection().task_filter_inventory
 
     # The revision advanced, so the next build recomputes against the live board.
     assert len(exports) == 2
