@@ -91,6 +91,44 @@ Projection-only DDL does not bump `PRAGMA user_version`. Conversely, an
 authority-table change must never be smuggled into projection DDL to avoid an
 authority migration.
 
+## Immutable Attribution
+
+Observation `agent_id`, event time, event identity, team-at-capture, and payload
+are immutable source facts. Renewal appends one idempotent `renewalStarted`
+event linking predecessor and successor; alias-bearing assignment appends the
+same relationship in its topology event. Neither path updates, merges, or
+deletes an older activity, directive, task-lifecycle, total, or cursor row.
+
+The observation query layer exposes four named modes:
+
+- `sourceActor`: only facts physically emitted by the requested source actor;
+- `lineageCumulative`: the requested actor plus predecessor actors reached by
+  replaying renewal and alias events;
+- `perSession`: the source actor's facts at or after its latest
+  `renewalStarted` boundary; and
+- `teamAtEventTime`: source facts joined to membership intervals replayed from
+  team topology and renewal events.
+
+Current membership selects a live lane; it never rewrites the actor or team of
+an older fact. A replay checkpoint may be copied to a successor so the same
+source file is not ingested twice, but the predecessor checkpoint remains
+unchanged and does not confer attribution.
+
+Rows written by the former rewrite path can be recognized when a successor is
+credited with timestamped activity before its lineage edge. Source-actor and
+team-at-event-time reads fail with the named instruction to rebuild Serve
+observation projections from native facts. They never silently assign those
+rows to the successor.
+
+An existing non-empty projection is also stamped `rebuildRequired` in
+projection-local attribution state when this contract first opens it. The
+former writer did not persist enough alias provenance to prove that even a
+projection without renewal events escaped reassignment. The marker also covers
+pruned histories where only a lifetime aggregate remains and no timestamp can
+prove which source session contributed it. Fresh or empty projections are
+stamped `immutable`. This marker is not authority schema state and does not
+change `PRAGMA user_version`.
+
 ## Constraints
 
 - This decision makes the current authority safe while projection tables still

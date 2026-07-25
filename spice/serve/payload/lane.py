@@ -15,6 +15,7 @@ from spice.serve.payload.identity import (
 )
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
+from spice.serve.team.history import ObservationAttributionMode
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import identity as task_identity
 from spice.tasks import tw
@@ -372,6 +373,7 @@ def lane_metrics_payload(
         actor,
         bucket_count=LANE_METRIC_SPARKLINE_BUCKETS,
         bucket_seconds=LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
+        attribution=ObservationAttributionMode.LINEAGE_CUMULATIVE,
     )
     return {
         "drained": _drained_task_count(thread_id),

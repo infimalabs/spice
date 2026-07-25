@@ -24,6 +24,7 @@ from spice.serve.payload import identity
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
+    ObservationAttributionMode,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
     metric_bucket_start,
 )
@@ -167,6 +168,7 @@ def team_historical_metrics_response_payload(
         bucket_count=bucket_count,
         bucket_seconds=bucket_seconds,
         now=summary_time,
+        attribution=ObservationAttributionMode.TEAM_AT_EVENT_TIME,
     )
     window_end = metric_bucket_start(summary_time, bucket_seconds)
     window_start = window_end - ((len(summary.sparkline) - 1) * bucket_seconds)
@@ -226,6 +228,7 @@ def task_burndown_metrics_response_payload(
         start=window_start,
         end=window_end,
         bucket_seconds=bucket_seconds,
+        attribution=ObservationAttributionMode.SOURCE_ACTOR,
     )
     points = [
         {

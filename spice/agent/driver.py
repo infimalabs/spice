@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, overload
 
 from spice import defaults
+from spice.agent.claudetranscript import claude_line_events, project_claude_events
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -821,23 +822,7 @@ class ClaudeDriver(AgentDriver):
         return command
 
     def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        rtype = raw.get("type")
-        timestamp = raw.get("timestamp")
-        message = raw.get("message")
-        if rtype == "assistant" and isinstance(message, dict):
-            return _claude_assistant_event(timestamp, message)
-        if rtype == "user" and isinstance(message, dict):
-            return _claude_user_event(timestamp, message, raw.get("promptId"))
-        compacting = _claude_compaction_activity(raw)
-        if compacting is not None:
-            return {
-                "type": "compacting",
-                "timestamp": timestamp,
-                "payload": {"active": compacting},
-            }
-        if _claude_is_compaction(raw):
-            return {"type": "compacted", "timestamp": timestamp, "payload": {}}
-        return None
+        return project_claude_events(claude_line_events(raw), raw.get("timestamp"))
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         if raw.get("type") != "assistant":
@@ -936,186 +921,6 @@ def _claude_transcript_cwd(path: Path) -> str:
     except OSError:
         return ""
     return ""
-
-
-def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "response_item", "timestamp": timestamp, "payload": payload}
-
-
-def _claude_content_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
-    content = message.get("content")
-    if not isinstance(content, list):
-        return []
-    return [block for block in content if isinstance(block, dict)]
-
-
-def _claude_text_content(message: dict[str, Any]) -> str:
-    texts = [
-        text
-        for block in _claude_content_blocks(message)
-        if block.get("type") == "text"
-        for text in [block.get("text")]
-        if isinstance(text, str) and text.strip()
-    ]
-    return "\n\n".join(texts).strip()
-
-
-def _claude_assistant_event(
-    timestamp: Any, message: dict[str, Any]
-) -> dict[str, Any] | None:
-    text = _claude_text_content(message)
-    if text:
-        payload: dict[str, Any] = {
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": text}],
-        }
-        if message.get("stop_reason") == "end_turn":
-            payload["phase"] = "final_answer"
-        return _claude_response_item(timestamp, payload)
-    thinking_block: dict[str, Any] | None = None
-    for block in _claude_content_blocks(message):
-        block_type = block.get("type")
-        if block_type == "thinking":
-            thinking_block = thinking_block or block
-            continue
-        if block_type == "tool_use":
-            return _claude_response_item(timestamp, _claude_tool_call_payload(block))
-        if block_type == "image":
-            item = _claude_image_item(block)
-            if item is not None:
-                return _claude_response_item(
-                    timestamp,
-                    {"type": "message", "role": "assistant", "content": [item]},
-                )
-    if thinking_block is not None:
-        summary = thinking_block.get("thinking")
-        text = summary if isinstance(summary, str) else ""
-        return _claude_response_item(
-            timestamp,
-            {"type": "reasoning", "summary": [{"type": "summary_text", "text": text}]},
-        )
-    return None
-
-
-def _claude_image_item(block: dict[str, Any]) -> dict[str, Any] | None:
-    """Canonical `image_url` item from a Claude image block, or None.
-
-    Claude stores `{source:{type:"base64",media_type,data}}` (or a `url`
-    source); the canonical item carries a `data:`/http URL the existing image
-    extraction already understands.
-    """
-    source = block.get("source")
-    if not isinstance(source, dict):
-        return None
-    if source.get("type") == "url":
-        url = source.get("url")
-        return {"type": "image", "image_url": {"url": str(url)}} if url else None
-    media_type = source.get("media_type")
-    data = source.get("data")
-    if not isinstance(media_type, str) or not isinstance(data, str):
-        return None
-    return {"type": "image", "image_url": {"url": f"data:{media_type};base64,{data}"}}
-
-
-def _claude_tool_result_images(content: Any) -> list[dict[str, Any]]:
-    if not isinstance(content, list):
-        return []
-    items: list[dict[str, Any]] = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "image":
-            item = _claude_image_item(block)
-            if item is not None:
-                items.append(item)
-    return items
-
-
-def _claude_tool_call_payload(block: dict[str, Any]) -> dict[str, Any]:
-    name = str(block.get("name") or "tool")
-    raw_input = block.get("input")
-    arguments = raw_input if isinstance(raw_input, dict) else {}
-    if name == "TodoWrite":
-        return {
-            "type": "function_call",
-            "name": "update_plan",
-            "arguments": json.dumps({"plan": _claude_plan_steps(arguments)}),
-        }
-    return {
-        "type": "function_call",
-        "name": name,
-        "arguments": json.dumps(arguments),
-    }
-
-
-def _claude_plan_steps(arguments: dict[str, Any]) -> list[dict[str, str]]:
-    todos = arguments.get("todos")
-    if not isinstance(todos, list):
-        return []
-    steps: list[dict[str, str]] = []
-    for todo in todos:
-        if isinstance(todo, dict):
-            steps.append(
-                {
-                    "step": str(todo.get("content") or todo.get("activeForm") or ""),
-                    "status": str(todo.get("status") or ""),
-                }
-            )
-    return steps
-
-
-def _claude_user_event(
-    timestamp: Any, message: dict[str, Any], prompt_id: Any = None
-) -> dict[str, Any] | None:
-    content = message.get("content")
-    if isinstance(content, str):
-        if not content.strip():
-            return None
-        payload: dict[str, Any] = {
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "text", "text": content}],
-        }
-        # A real user prompt carries Claude's per-turn id; tool-result `user`
-        # lines below do not, so turn boundaries land on actual prompts.
-        if isinstance(prompt_id, str) and prompt_id:
-            payload["prompt_id"] = prompt_id
-        return _claude_response_item(timestamp, payload)
-    if isinstance(content, list):
-        block = next((item for item in content if isinstance(item, dict)), None)
-        if block is not None and block.get("type") == "tool_result":
-            return _claude_response_item(
-                timestamp,
-                {
-                    "type": "function_call_output",
-                    "output": _claude_tool_result_images(block.get("content")),
-                },
-            )
-    return None
-
-
-def _claude_is_compaction(raw: dict[str, Any]) -> bool:
-    if raw.get("type") == "summary":
-        return True
-    return raw.get("type") == "system" and raw.get("subtype") == "compact_boundary"
-
-
-def _claude_compaction_activity(raw: dict[str, Any]) -> bool | None:
-    """True while a compaction runs, False when it settles, None otherwise.
-
-    Resuming a large thread compacts before the agent can act at all, and the
-    CLI narrates that on bare status lines: `status: "compacting"` when the
-    compaction starts and a `compact_result` when it succeeds or fails. The
-    boundary and summary lines that `_claude_is_compaction` matches only ever
-    arrive *after* a compaction produced new context, so they cannot tell a
-    supervisor that a silent process is busy rather than wedged.
-    """
-    if raw.get("type") != "system" or raw.get("subtype") != "status":
-        return None
-    if raw.get("status") == "compacting":
-        return True
-    if raw.get("compact_result") is not None:
-        return False
-    return None
 
 
 def rewrite_claude_eval_envelope_command(

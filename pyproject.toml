@@ -208,6 +208,7 @@ env_names = [
 seconds = 200
 run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
 paths = [
+    "spice/agent/claudetranscript.py",
     "spice/agent/driver.py",
     "spice/agent/identity.py",
     "spice/agent/paths.py",
@@ -232,6 +233,7 @@ paths = [
     "spice/tasks/config.py",
     "spice/tasks/identity.py",
     "spice/tasks/tw.py",
+    "spice/transcript/events.py",
 ]
 
 # Low-value words this repo rejects, merged over the built-in defaults

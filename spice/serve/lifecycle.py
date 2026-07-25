@@ -181,12 +181,16 @@ class LifecycleReconciler:
                 return
             self._closing = True
             self._cancelled.set()
+            dropped: list[_QueuedInput] = []
             for queue in self._queues.values():
-                while queue:
-                    item = queue.popleft()
-                    item.future.cancel()
-                    if item.automatic_key is not None:
-                        self._automatic_futures.pop(item.automatic_key, None)
+                dropped.extend(queue)
+                queue.clear()
+            for item in dropped:
+                self._forget_automatic_locked(item)
+        # Future.cancel runs done callbacks inline, so cancelling under the
+        # lock would deadlock any callback that reads an outcome or submits.
+        for item in dropped:
+            item.future.cancel()
 
     def join(self, timeout: float = LIFECYCLE_RECONCILER_JOIN_SECONDS) -> bool:
         """Wait within ``timeout`` and report whether every target worker exited."""
@@ -232,9 +236,13 @@ class LifecycleReconciler:
             outcome = self._run_input(item.value)
             with self._lock:
                 self._latest_outcomes[target_id] = outcome
-                if item.automatic_key is not None:
-                    self._automatic_futures.pop(item.automatic_key, None)
+            # Publish before releasing the key so a wake landing on the
+            # completion boundary coalesces onto this same Future instead of
+            # running the handler a second time for one durable fact.  Both
+            # calls stay outside the lock because set_result runs done
+            # callbacks inline and those callbacks may re-enter this runtime.
             item.future.set_result(outcome)
+            self._forget_automatic(item)
 
     def _run_input(self, value: LifecycleInput) -> LifecycleOutcome:
         try:
@@ -257,7 +265,18 @@ class LifecycleReconciler:
         if item.automatic_key is None:
             return
         with self._lock:
-            self._automatic_futures.pop(item.automatic_key, None)
+            self._forget_automatic_locked(item)
+
+    def _forget_automatic_locked(self, item: _QueuedInput) -> None:
+        """Release a key only while it still names this item's own Future.
+
+        Cancellation and the completion boundary can both reach the same key,
+        and a later wake may already own it by then; matching on the Future
+        keeps one release from discarding the next wake's coalescing entry.
+        """
+        key = item.automatic_key
+        if key is not None and self._automatic_futures.get(key) is item.future:
+            del self._automatic_futures[key]
 
 
 def start_lifecycle_reconciler(

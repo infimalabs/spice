@@ -11,6 +11,7 @@ from spice.errors import SpiceError
 from spice.serve.payload import metric
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
+    ObservationAttributionMode,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
 )
 from spice.serve.team.metrics import (
@@ -408,7 +409,7 @@ def test_task_lifecycle_events_are_tagged_with_team_at_capture(tmp_path):
     )
 
 
-def test_task_lifecycle_events_rewrite_across_agent_id_assignment(tmp_path):
+def test_task_lifecycle_events_keep_source_actor_and_derive_alias_lineage(tmp_path):
     store = _store(tmp_path)
     store.create_team(team_id="team-a", members=())
     store.record_task_lifecycle_event(
@@ -417,8 +418,7 @@ def test_task_lifecycle_events_rewrite_across_agent_id_assignment(tmp_path):
 
     store.assign_agent("team-a", "agent-new", aliases=["agent-old"])
 
-    assert store.task_lifecycle_series(["agent-old"], start=0, end=180) == ()
-    assert store.task_lifecycle_series(["agent-new"], start=0, end=180) == (
+    expected = (
         TaskLifecycleSeriesPoint(
             bucket_start=60,
             claimed=1,
@@ -426,6 +426,17 @@ def test_task_lifecycle_events_rewrite_across_agent_id_assignment(tmp_path):
             completed=0,
             drained=0,
         ),
+    )
+    assert store.task_lifecycle_series(["agent-old"], start=0, end=180) == expected
+    assert store.task_lifecycle_series(["agent-new"], start=0, end=180) == ()
+    assert (
+        store.task_lifecycle_series(
+            ["agent-new"],
+            start=0,
+            end=180,
+            attribution=ObservationAttributionMode.LINEAGE_CUMULATIVE,
+        )
+        == expected
     )
 
 

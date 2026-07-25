@@ -12,6 +12,7 @@ from spice.errors import SpiceError
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
+    ObservationAttributionMode,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
 )
 
@@ -160,6 +161,11 @@ def _activity_points(
             start=start,
             end=end,
             bucket_seconds=bucket_seconds,
+            attribution=(
+                ObservationAttributionMode.PER_SESSION
+                if lens == "perSession"
+                else ObservationAttributionMode.LINEAGE_CUMULATIVE
+            ),
         )
     ]
 
@@ -185,6 +191,7 @@ def _historical_activity_points(
         bucket_count=bucket_count,
         bucket_seconds=bucket_seconds,
         now=end,
+        attribution=ObservationAttributionMode.TEAM_AT_EVENT_TIME,
     )
     first_bucket = end_bucket - ((len(summary.sparkline) - 1) * bucket_seconds)
     return [
@@ -261,6 +268,7 @@ def _task_points(
             start=start,
             end=end,
             bucket_seconds=bucket_seconds,
+            attribution=ObservationAttributionMode.SOURCE_ACTOR,
         )
         if int(getattr(point, field))
     ]
