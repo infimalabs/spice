@@ -26,7 +26,7 @@ let globalActivityStatusText = "";
 
 /**
  * @param {Object} lane
- * @param {LaneChromePayload} payload
+ * @param {LaneChromeSourcePayload} payload
  */
 function renderLaneChrome(lane, payload) {
   const staleTeamConfig = lanePayloadTeamConfigIsStale(lane, payload);

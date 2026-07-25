@@ -253,7 +253,7 @@ function lanePaneState() {
 
 function createLaneState(targetId, hint = null, options = {}) {
   const emptyTeam = Boolean(options.emptyTeam);
-  /** @type {LaneChromePayload | undefined} */
+  /** @type {LaneChromeSourcePayload | undefined} */
   const target = emptyTeam ? {} : laneStore.targetForId(targetId);
   if (!target) throw new Error("lane target payload is required: " + targetId);
   const targetIdentity = target.targetIdentity || {};
