@@ -124,9 +124,12 @@ def test_lane_chrome_value_fields_have_one_explicit_facet_home():
     expected = {
         "LaneChromeIdentity": {
             "displayName",
-            "branch",
-            "targetIdentity",
-            "serveAgentIdentity",
+            "target",
+            "driver",
+            "thread",
+            "launch",
+            "actorId",
+            "agentName",
         },
         "LaneChromeTeamConfig": {"teamIdentity"},
         "LaneChromePendingInbox": {"count", "label", "keys"},
@@ -135,8 +138,9 @@ def test_lane_chrome_value_fields_have_one_explicit_facet_home():
             "taskFilterEntries",
             "effectiveTaskFilters",
             "taskFilterInventory",
-            "laneInfo",
             "privateTaskCount",
+            "reviewPressure",
+            "claimedTask",
         },
         "LaneChromeLifecycle": {
             "processStatus",
@@ -201,6 +205,43 @@ def test_lane_chrome_patch_rejects_cross_authority_and_global_ordering():
         )
 
 
+def test_lane_chrome_identity_cannot_absorb_renewal_facts():
+    identity = valid_wire_payload("LaneChromeIdentity")
+    identity_references = {
+        field.value_type.name
+        for field in wire.WIRE_OBJECTS_BY_NAME["LaneChromeIdentity"].fields
+        if field.value_type.kind == "reference"
+    }
+    assert identity_references == {
+        "ServeTargetIdentity",
+        "ServeAgentDriverIdentity",
+        "ThreadIdentity",
+        "ServeAgentLaunchIdentity",
+    }
+    assert {
+        "ServeAgentIdentity",
+        "ServeRenewalIdentity",
+        "RenewalIntentPayload",
+    }.isdisjoint(identity_references)
+
+    for field in ("renewal", "renewalIntent"):
+        with pytest.raises(SpiceError, match=f"undeclared fields: {field}"):
+            wire.validate_wire_payload(
+                "LaneChromeIdentity",
+                {**identity, field: {}},
+            )
+
+
+def test_lane_chrome_task_board_rejects_lane_info_and_team_topology():
+    task_board = valid_wire_payload("LaneChromeTaskBoard")
+    for field in ("laneInfo", "members", "memberAgents", "teams"):
+        with pytest.raises(SpiceError, match=f"undeclared fields: {field}"):
+            wire.validate_wire_payload(
+                "LaneChromeTaskBoard",
+                {**task_board, field: []},
+            )
+
+
 def test_lane_chrome_contract_rejects_authority_expansion_fields():
     assert wire.LANE_CHROME_EXCLUDED_FIELDS == {
         "messages",
@@ -210,6 +251,7 @@ def test_lane_chrome_contract_rejects_authority_expansion_fields():
         "teams",
         "members",
         "memberAgents",
+        "laneInfo",
         "composerState",
         "submission",
         "presentationState",

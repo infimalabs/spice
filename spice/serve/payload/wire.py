@@ -117,6 +117,7 @@ LANE_CHROME_EXCLUDED_FIELDS = frozenset(
         "teams",
         "members",
         "memberAgents",
+        "laneInfo",
         "composerState",
         "submission",
         "presentationState",
@@ -516,10 +517,12 @@ WIRE_OBJECTS = (
         "LaneChromeIdentity",
         {
             "displayName": STRING,
-            "branch": STRING,
-            "targetIdentity": _ref("TargetIdentity"),
-            "serveAgentIdentity": _ref("ServeAgentIdentity"),
+            "target": _ref("ServeTargetIdentity"),
+            "driver": _ref("ServeAgentDriverIdentity"),
+            "thread": _ref("ThreadIdentity"),
+            "launch": _ref("ServeAgentLaunchIdentity"),
         },
+        {"actorId": STRING, "agentName": STRING},
     ),
     _object(
         "LaneChromeTeamConfig",
@@ -536,8 +539,11 @@ WIRE_OBJECTS = (
             "taskFilterEntries": _array(_ref("TaskFilterEntry")),
             "effectiveTaskFilters": STRINGS,
             "taskFilterInventory": _ref("TaskFilterInventory"),
-            "laneInfo": _ref("LaneInfo"),
             "privateTaskCount": INTEGER,
+        },
+        {
+            "reviewPressure": _ref("ReviewPressure"),
+            "claimedTask": _ref("ClaimedTask"),
         },
     ),
     _object(

@@ -441,9 +441,12 @@
 /**
  * @typedef {Object} LaneChromeIdentity
  * @property {string} displayName
- * @property {string} branch
- * @property {TargetIdentity} targetIdentity
- * @property {ServeAgentIdentity} serveAgentIdentity
+ * @property {ServeTargetIdentity} target
+ * @property {ServeAgentDriverIdentity} driver
+ * @property {ThreadIdentity} thread
+ * @property {ServeAgentLaunchIdentity} launch
+ * @property {string=} actorId
+ * @property {string=} agentName
  */
 
 /**
@@ -464,8 +467,9 @@
  * @property {Array.<TaskFilterEntry>} taskFilterEntries
  * @property {Array.<string>} effectiveTaskFilters
  * @property {TaskFilterInventory} taskFilterInventory
- * @property {LaneInfo} laneInfo
  * @property {number} privateTaskCount
+ * @property {ReviewPressure=} reviewPressure
+ * @property {ClaimedTask=} claimedTask
  */
 
 /**
