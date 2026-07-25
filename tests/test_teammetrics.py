@@ -1,7 +1,12 @@
 import itertools
 import random
 
-from spice.serve.team.store import ServeTeamStore, TaskLifecycleSeriesPoint, TeamConfig
+from spice.serve.team.store import (
+    ObservationAttributionMode,
+    ServeTeamStore,
+    TaskLifecycleSeriesPoint,
+    TeamConfig,
+)
 from tests.test_teamstorehelpers import (
     store_close_team,
     store_merge_teams,
@@ -593,7 +598,7 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
         successor,
         bucket_count=5,
         now=240,
-        since_latest_renewal=True,
+        attribution=ObservationAttributionMode.PER_SESSION,
     )
 
     assert lineage.agent_ids == (successor,)
@@ -608,18 +613,20 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
                 "SELECT COUNT(*) AS count FROM agent_metrics WHERE agent_id = ?",
                 (predecessor,),
             ).fetchone()["count"]
-            == 0
+            == 1
         )
         assert (
             connection.execute(
                 "SELECT COUNT(*) AS count FROM directives WHERE agent_id = ?",
                 (predecessor,),
             ).fetchone()["count"]
-            == 0
+            == 1
         )
 
 
-def test_started_renewal_rewrites_task_lifecycle_events(tmp_path, monkeypatch):
+def test_started_renewal_preserves_task_source_and_derives_lineage(
+    tmp_path, monkeypatch
+):
     clock = {"now": 0.0}
     monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
@@ -650,8 +657,7 @@ def test_started_renewal_rewrites_task_lifecycle_events(tmp_path, monkeypatch):
         ancestor_thread_id="predecessor",
     )
 
-    assert store.task_lifecycle_series([predecessor], start=0, end=120) == ()
-    assert store.task_lifecycle_series([successor], start=0, end=120) == (
+    expected = (
         TaskLifecycleSeriesPoint(
             bucket_start=60,
             claimed=0,
@@ -660,13 +666,24 @@ def test_started_renewal_rewrites_task_lifecycle_events(tmp_path, monkeypatch):
             drained=1,
         ),
     )
+    assert store.task_lifecycle_series([predecessor], start=0, end=120) == expected
+    assert store.task_lifecycle_series([successor], start=0, end=120) == ()
+    assert (
+        store.task_lifecycle_series(
+            [successor],
+            start=0,
+            end=120,
+            attribution=ObservationAttributionMode.LINEAGE_CUMULATIVE,
+        )
+        == expected
+    )
     with store.connect() as connection:
         assert (
             connection.execute(
                 "SELECT COUNT(*) AS count FROM task_events WHERE agent_id = ?",
                 (predecessor,),
             ).fetchone()["count"]
-            == 0
+            == 2
         )
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Iterable
 
 from spice.serve.team.membership import MembershipInterval, StoreRow
@@ -19,6 +20,15 @@ METRIC_BUCKET_SECONDS = 60
 # Cap high-growth historical metric payloads before callers allocate sparkline
 # or series buckets for accidental unbounded ranges.
 TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
+
+
+class ObservationAttributionMode(StrEnum):
+    """The actor/team lens applied to immutable observation facts."""
+
+    SOURCE_ACTOR = "sourceActor"
+    LINEAGE_CUMULATIVE = "lineageCumulative"
+    PER_SESSION = "perSession"
+    TEAM_AT_EVENT_TIME = "teamAtEventTime"
 
 
 @dataclass(frozen=True)

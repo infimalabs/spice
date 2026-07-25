@@ -54,10 +54,28 @@ def membership_intervals_from_events(
                     open_memberships, intervals, agent_id, team_id, timestamp
                 )
         elif kind == "assignAgent":
+            for alias_id in _event_optional_agent_ids(payload, "aliases"):
+                _close_membership_if_open(
+                    open_memberships, intervals, alias_id, timestamp
+                )
             _move_membership(
                 open_memberships,
                 intervals,
                 event_agent_id(payload, "agentId"),
+                team_id,
+                timestamp,
+            )
+        elif kind == "renewalStarted":
+            _close_membership_if_open(
+                open_memberships,
+                intervals,
+                event_agent_id(payload, "predecessor"),
+                timestamp,
+            )
+            _move_membership(
+                open_memberships,
+                intervals,
+                event_agent_id(payload, "successor"),
                 team_id,
                 timestamp,
             )
@@ -146,6 +164,15 @@ def _event_agent_ids(payload: dict[str, object], key: str) -> list[str]:
     return [str(agent_id) for agent_id in value]
 
 
+def _event_optional_agent_ids(payload: dict[str, object], key: str) -> list[str]:
+    value = payload.get(key, [])
+    if not isinstance(value, list) or not all(
+        isinstance(agent_id, str) and agent_id for agent_id in value
+    ):
+        raise SpiceError(f"team event payload {key} must be a list of agent ids")
+    return [str(agent_id) for agent_id in value]
+
+
 def _move_membership(
     open_memberships: dict[str, tuple[str, float]],
     intervals: list[MembershipInterval],
@@ -198,6 +225,24 @@ def _close_membership(
             start=current[1],
             end=timestamp,
         )
+    )
+
+
+def _close_membership_if_open(
+    open_memberships: dict[str, tuple[str, float]],
+    intervals: list[MembershipInterval],
+    agent_id: str,
+    timestamp: float,
+) -> None:
+    current = open_memberships.get(agent_id)
+    if current is None:
+        return
+    _close_membership(
+        open_memberships,
+        intervals,
+        agent_id,
+        current[0],
+        timestamp,
     )
 
 

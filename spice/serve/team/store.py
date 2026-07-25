@@ -44,6 +44,7 @@ from spice.serve.directivestats import (
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
+    ObservationAttributionMode as ObservationAttributionMode,
     TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
 )
 from spice.serve.team.metrics import (
@@ -71,6 +72,9 @@ from spice.serve.team.renewals import (
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
+    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
+    OBSERVATION_ATTRIBUTION_SAFE,
+    RENEWAL_STATE_STARTED,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
@@ -229,6 +233,7 @@ class ServeTeamStore(
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
             _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
+            self._initialize_observation_attribution_state_locked(connection)
             self._validate_authority_schema_locked(
                 connection, TEAM_AUTHORITY_SCHEMA_VERSION
             )
@@ -237,6 +242,32 @@ class ServeTeamStore(
         except BaseException:
             connection.rollback()
             raise
+
+    def _initialize_observation_attribution_state_locked(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        existing = connection.execute(
+            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
+        ).fetchone()
+        if existing is not None:
+            return
+        observation_row = connection.execute(
+            "SELECT 1 FROM agent_metrics "
+            "UNION ALL SELECT 1 FROM agent_metric_buckets "
+            "UNION ALL SELECT 1 FROM task_events "
+            "UNION ALL SELECT 1 FROM directives "
+            "UNION ALL SELECT 1 FROM directive_totals LIMIT 1"
+        ).fetchone()
+        status = (
+            OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
+            if observation_row is not None
+            else OBSERVATION_ATTRIBUTION_SAFE
+        )
+        connection.execute(
+            "INSERT INTO observation_attribution_state (singleton, status) "
+            "VALUES (1, ?)",
+            (status,),
+        )
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
@@ -688,11 +719,20 @@ class ServeTeamStore(
         aliases: Iterable[str] = (),
     ) -> int:
         self._require_team(connection, team_id)
+        aliases = tuple(aliases)
         previous_team_ids = self._assign_locked(
             connection, team_id, agent_id, aliases=aliases
         )
+        alias_ids = [
+            alias_id
+            for alias_id in _agent_alias_ids(agent_id, aliases)
+            if alias_id != agent_id
+        ]
         revision = self._record_event(
-            connection, "assignAgent", team_id, {"agentId": agent_id}
+            connection,
+            "assignAgent",
+            team_id,
+            {"agentId": agent_id, "aliases": alias_ids},
         )
         self._mark_team_revisions_locked(connection, previous_team_ids, revision)
         return revision
@@ -708,17 +748,12 @@ class ServeTeamStore(
         alias_ids = _agent_alias_ids(agent_id, aliases)
         for alias_id in alias_ids:
             if alias_id != agent_id:
-                self._rewrite_renewal_agent_locked(
+                self._transfer_active_renewal_locked(
                     connection, alias_id, agent_id, team_id
                 )
-                self._rewrite_agent_metric_cursors_locked(
+                self._inherit_agent_metric_cursors_locked(
                     connection, alias_id, agent_id
                 )
-                self._rewrite_agent_metrics_locked(connection, alias_id, agent_id)
-                self._rewrite_task_lifecycle_events_locked(
-                    connection, alias_id, agent_id
-                )
-                self._rewrite_directive_stats_locked(connection, alias_id, agent_id)
         inherited_position, previous_team_ids = self._vacate_assigned_slots_locked(
             connection, team_id, agent_id, alias_ids
         )
@@ -851,7 +886,10 @@ class ServeTeamStore(
                 "DELETE FROM memberships WHERE agent_id = ? AND team_id = ?",
                 (alias_id, team_id),
             )
-            connection.execute("DELETE FROM renewals WHERE agent_id = ?", (alias_id,))
+            connection.execute(
+                "DELETE FROM renewals WHERE agent_id = ? AND state != ?",
+                (alias_id, RENEWAL_STATE_STARTED),
+            )
         self._close_empty_teams_locked(connection, [team_id])
         revision = self._record_event(
             connection, "removeAgent", team_id, {"agentId": agent_id}

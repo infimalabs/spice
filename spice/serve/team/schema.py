@@ -22,6 +22,8 @@ TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 # (agent_metrics, directive_totals) are never pruned.
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
+OBSERVATION_ATTRIBUTION_SAFE = "immutable"
+OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED = "rebuildRequired"
 
 TEAM_AUTHORITY_SCHEMA_VERSION = 1
 # Databases written before authority versions used this CRC32 value for the
@@ -130,6 +132,7 @@ TEAM_PROJECTION_TABLES = frozenset(
         "task_events",
         "directives",
         "directive_totals",
+        "observation_attribution_state",
     }
 )
 
@@ -179,6 +182,10 @@ CREATE TABLE IF NOT EXISTS directive_totals (
     sends INTEGER NOT NULL DEFAULT 0,
     acked INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, team_id)
+);
+CREATE TABLE IF NOT EXISTS observation_attribution_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    status TEXT NOT NULL CHECK (status IN ('immutable', 'rebuildRequired'))
 );
 CREATE INDEX IF NOT EXISTS agent_metric_buckets_by_start
     ON agent_metric_buckets (bucket_start);
