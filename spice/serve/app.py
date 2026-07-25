@@ -9,6 +9,7 @@ import json
 import mimetypes
 import os
 import subprocess
+from concurrent.futures import Future
 from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +34,15 @@ from spice.serve.audio import (
 )
 from spice.serve.filewatch import start_exit_file_watch
 from spice.serve.launch import start_available_work_watch
+from spice.serve.lifecycle import (
+    AutomaticLifecycleWake,
+    ExplicitLifecycleIntent,
+    LifecycleOutcome,
+    LifecycleReconciler,
+    cancel_lifecycle_reconciler,
+    join_lifecycle_reconciler,
+    start_lifecycle_reconciler,
+)
 from spice.serve.images import rollout_image_from_offset
 from spice.serve.httpapi import (
     METRICS_CONTENT_TYPE,
@@ -169,6 +179,7 @@ class ServeState:
         self.rollout_cursors: dict[tuple[str, str], RolloutCursor] = {}
         self.pending_agent_ensure_attempts: dict[str, float] = {}
         self.http_request_counts: dict[tuple[str, str], int] = {}
+        self.lifecycle_reconciler: LifecycleReconciler | None = None
         self._team_store = (
             team_store
             if team_store is not None
@@ -195,6 +206,29 @@ class ServeState:
         if self._team_commands is None:
             raise RuntimeError("team commands are unavailable in observer mode")
         return self._team_commands
+
+    def submit_lifecycle_wake(
+        self,
+        wake: AutomaticLifecycleWake,
+    ) -> Future[LifecycleOutcome]:
+        reconciler = self._require_lifecycle_reconciler()
+        return LifecycleReconciler.submit_automatic(reconciler, wake)
+
+    def submit_lifecycle_intent(
+        self,
+        intent: ExplicitLifecycleIntent,
+    ) -> Future[LifecycleOutcome]:
+        reconciler = self._require_lifecycle_reconciler()
+        return LifecycleReconciler.submit_intent(reconciler, intent)
+
+    def lifecycle_outcome(self, target_id: str) -> LifecycleOutcome | None:
+        reconciler = self._require_lifecycle_reconciler()
+        return LifecycleReconciler.latest_outcome(reconciler, target_id)
+
+    def _require_lifecycle_reconciler(self) -> LifecycleReconciler:
+        if self.lifecycle_reconciler is None:
+            raise RuntimeError("lifecycle reconciliation is unavailable")
+        return self.lifecycle_reconciler
 
     def worktree_targets(self) -> list[WorktreeTarget]:
         if self.observer is not None:
@@ -333,6 +367,7 @@ def run_serve(args: argparse.Namespace) -> int:
     server = _ServeHttpServer((args.host, args.port), _ServeHandler, state)
     watch_stop = Event()
     watch_thread = start_exit_file_watch(server, args, stop_event=watch_stop)
+    lifecycle_reconciler = start_lifecycle_reconciler(state)
     available_work_watch = start_available_work_watch(state)
     bound_host, bound_port = server.server_address[:2]
     host = str(bound_host)
@@ -352,11 +387,15 @@ def run_serve(args: argparse.Namespace) -> int:
         # wait while the socket teardown runs, rather than after it.
         if available_work_watch is not None:
             available_work_watch.cancel()
+        if lifecycle_reconciler is not None:
+            cancel_lifecycle_reconciler(lifecycle_reconciler)
         server.server_close()
         if watch_thread is not None:
             watch_thread.join(timeout=SERVE_UNTIL_WATCHER_JOIN_SECONDS)
         if available_work_watch is not None:
             available_work_watch.join()
+        if lifecycle_reconciler is not None:
+            join_lifecycle_reconciler(lifecycle_reconciler)
     return 0
 
 
