@@ -88,6 +88,42 @@ STRINGS = _array(STRING)
 NUMBERS = _array(NUMBER)
 STRING_MAP = _record(STRING)
 
+LANE_CHROME_FACET_AUTHORITIES = {
+    "identity": "target-registry",
+    "teamConfig": "team-store",
+    "pendingInbox": "inbox",
+    "taskBoard": "task-board",
+    "lifecycle": "lifecycle-reconciler",
+    "renewal": "team-store",
+    "activity": "transcript",
+}
+
+LANE_CHROME_FACET_SCHEMAS = {
+    "identity": "LaneChromeIdentityFacet",
+    "teamConfig": "LaneChromeTeamConfigFacet",
+    "pendingInbox": "LaneChromePendingInboxFacet",
+    "taskBoard": "LaneChromeTaskBoardFacet",
+    "lifecycle": "LaneChromeLifecycleFacet",
+    "renewal": "LaneChromeRenewalFacet",
+    "activity": "LaneChromeActivityFacet",
+}
+
+LANE_CHROME_EXCLUDED_FIELDS = frozenset(
+    {
+        "messages",
+        "ackContexts",
+        "removedMessageKeys",
+        "error",
+        "teams",
+        "members",
+        "memberAgents",
+        "composerState",
+        "submission",
+        "presentationState",
+        "dom",
+    }
+)
+
 
 WIRE_OBJECTS = (
     _object(
@@ -473,16 +509,133 @@ WIRE_OBJECTS = (
         },
     ),
     _object(
-        "LaneChromePayload",
-        optional={
-            "id": STRING,
+        "LaneChromeFacetOrder",
+        {"epoch": STRING, "revision": INTEGER},
+    ),
+    _object(
+        "LaneChromeIdentity",
+        {
             "displayName": STRING,
             "branch": STRING,
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
+        },
+    ),
+    _object(
+        "LaneChromeTeamConfig",
+        {"teamIdentity": _ref("TeamIdentity")},
+    ),
+    _object(
+        "LaneChromePendingInbox",
+        {"count": INTEGER, "label": STRING, "keys": STRINGS},
+    ),
+    _object(
+        "LaneChromeTaskBoard",
+        {
             "taskFilters": STRINGS,
-            "effectiveTaskFilters": STRINGS,
             "taskFilterEntries": _array(_ref("TaskFilterEntry")),
+            "effectiveTaskFilters": STRINGS,
+            "taskFilterInventory": _ref("TaskFilterInventory"),
+            "laneInfo": _ref("LaneInfo"),
+            "privateTaskCount": INTEGER,
+        },
+    ),
+    _object(
+        "LaneChromeLifecycle",
+        {"processStatus": STRING},
+        optional={
+            "visualStatus": STRING,
+            "bindingStatus": STRING,
+            "rolloutStatus": STRING,
+        },
+    ),
+    _object(
+        "LaneChromeRenewal",
+        {"lifetime": STRING, "renewalIntent": _ref("RenewalIntentPayload")},
+    ),
+    _object(
+        "LaneChromeActivity",
+        {"lastAssistantAt": STRING},
+        optional={
+            "latestActivityKind": STRING,
+            "latestMessagePreview": STRING,
+            "latestActivityPreview": STRING,
+            "preview": STRING,
+            "claimedTask": _ref("ClaimedTask"),
+        },
+    ),
+    _object(
+        "LaneChromeIdentityFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["identity"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeIdentity"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromeTeamConfigFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["teamConfig"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeTeamConfig"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromePendingInboxFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["pendingInbox"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromePendingInbox"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromeTaskBoardFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["taskBoard"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeTaskBoard"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromeLifecycleFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["lifecycle"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeLifecycle"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromeRenewalFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["renewal"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeRenewal"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromeActivityFacet",
+        {
+            "authority": _literal(LANE_CHROME_FACET_AUTHORITIES["activity"]),
+            "order": _ref("LaneChromeFacetOrder"),
+            "value": _union(_ref("LaneChromeActivity"), _literal(None)),
+        },
+    ),
+    _object(
+        "LaneChromePayload",
+        {"targetId": STRING},
+        {
+            facet_name: _ref(schema_name)
+            for facet_name, schema_name in LANE_CHROME_FACET_SCHEMAS.items()
+        },
+    ),
+    _object(
+        "LaneChromeSourcePayload",
+        optional={
+            "targetIdentity": _ref("TargetIdentity"),
+            "serveAgentIdentity": _ref("ServeAgentIdentity"),
+            "taskFilters": STRINGS,
+            "taskFilterEntries": _array(_ref("TaskFilterEntry")),
+            "effectiveTaskFilters": STRINGS,
             "laneFilterVersion": STRING,
             "taskFilterInventory": _ref("TaskFilterInventory"),
             "laneInfo": _ref("LaneInfo"),
@@ -490,16 +643,7 @@ WIRE_OBJECTS = (
             "teamIdentity": _ref("TeamIdentity"),
             "lifetime": STRING,
             "renewalIntent": _ref("RenewalIntentPayload"),
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
             "statusLine": _ref("StatusLine"),
-            "messages": _array(_ref("LaneMessage")),
-            "ackContexts": _array(_ref("AckContext")),
-            "removedMessageKeys": STRINGS,
-            "error": STRING,
         },
     ),
     _object(
@@ -1017,6 +1161,24 @@ def _validate(
     path: str,
     descend_references: bool,
 ) -> None:
+    if value_type.kind in {"reference", "array", "record", "union"}:
+        _validate_composite(
+            value_type,
+            value,
+            path=path,
+            descend_references=descend_references,
+        )
+        return
+    _validate_scalar(value_type, value, path=path)
+
+
+def _validate_composite(
+    value_type: WireType,
+    value: Any,
+    *,
+    path: str,
+    descend_references: bool,
+) -> None:
     if value_type.kind == "reference":
         if not descend_references:
             if not isinstance(value, dict):
@@ -1074,6 +1236,10 @@ def _validate(
             except SpiceError:
                 continue
         raise SpiceError(f"{path} does not match {_jsdoc_type(value_type)}")
+    raise AssertionError(f"unknown composite wire type: {value_type.kind}")
+
+
+def _validate_scalar(value_type: WireType, value: Any, *, path: str) -> None:
     if value_type.kind == "literal":
         if value != value_type.literal:
             raise SpiceError(f"{path} must equal {value_type.literal!r}")

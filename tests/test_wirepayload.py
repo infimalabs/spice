@@ -6,6 +6,9 @@ import ast
 import inspect
 from pathlib import Path
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.serve import (
     agentapi,
     httpapi,
@@ -17,7 +20,7 @@ from spice.serve import (
 )
 from spice.serve.payload import message, metric, wire
 from spice.serve.worktree import inventory
-from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES
+from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -94,3 +97,137 @@ def test_named_opaque_json_fields_have_the_exact_intentional_allowlist():
 
 def test_browser_only_frame_registry_names_the_append_variant():
     assert wire.BROWSER_ONLY_FRAME_SCHEMAS == {"lane.append": "LaneAppendFrame"}
+
+
+def test_lane_chrome_contract_names_the_exact_independent_authorities():
+    assert wire.LANE_CHROME_FACET_AUTHORITIES == {
+        "identity": "target-registry",
+        "teamConfig": "team-store",
+        "pendingInbox": "inbox",
+        "taskBoard": "task-board",
+        "lifecycle": "lifecycle-reconciler",
+        "renewal": "team-store",
+        "activity": "transcript",
+    }
+    assert wire.LANE_CHROME_FACET_SCHEMAS == {
+        "identity": "LaneChromeIdentityFacet",
+        "teamConfig": "LaneChromeTeamConfigFacet",
+        "pendingInbox": "LaneChromePendingInboxFacet",
+        "taskBoard": "LaneChromeTaskBoardFacet",
+        "lifecycle": "LaneChromeLifecycleFacet",
+        "renewal": "LaneChromeRenewalFacet",
+        "activity": "LaneChromeActivityFacet",
+    }
+
+
+def test_lane_chrome_value_fields_have_one_explicit_facet_home():
+    expected = {
+        "LaneChromeIdentity": {
+            "displayName",
+            "branch",
+            "targetIdentity",
+            "serveAgentIdentity",
+        },
+        "LaneChromeTeamConfig": {"teamIdentity"},
+        "LaneChromePendingInbox": {"count", "label", "keys"},
+        "LaneChromeTaskBoard": {
+            "taskFilters",
+            "taskFilterEntries",
+            "effectiveTaskFilters",
+            "taskFilterInventory",
+            "laneInfo",
+            "privateTaskCount",
+        },
+        "LaneChromeLifecycle": {
+            "processStatus",
+            "visualStatus",
+            "bindingStatus",
+            "rolloutStatus",
+        },
+        "LaneChromeRenewal": {"lifetime", "renewalIntent"},
+        "LaneChromeActivity": {
+            "lastAssistantAt",
+            "latestActivityKind",
+            "latestMessagePreview",
+            "latestActivityPreview",
+            "preview",
+            "claimedTask",
+        },
+    }
+
+    assert {
+        schema_name: {
+            field.name for field in wire.WIRE_OBJECTS_BY_NAME[schema_name].fields
+        }
+        for schema_name in expected
+    } == expected
+
+
+def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
+    facets = {
+        name: valid_wire_payload(schema_name)
+        for name, schema_name in wire.LANE_CHROME_FACET_SCHEMAS.items()
+    }
+    payload = valid_wire_payload(
+        "LaneChromePayload",
+        targetId="target-fixture",
+        **facets,
+    )
+
+    assert wire.validate_wire_payload("LaneChromePayload", payload) == payload
+    assert "revision" not in payload
+
+    for name, schema_name in wire.LANE_CHROME_FACET_SCHEMAS.items():
+        clear = valid_wire_payload(schema_name, value=None)
+        patch = {"targetId": "target-fixture", name: clear}
+        assert wire.validate_wire_payload("LaneChromePayload", patch) == patch
+
+
+def test_lane_chrome_patch_rejects_cross_authority_and_global_ordering():
+    identity = valid_wire_payload(
+        "LaneChromeIdentityFacet",
+        authority=wire.LANE_CHROME_FACET_AUTHORITIES["teamConfig"],
+    )
+    with pytest.raises(SpiceError, match="must equal 'target-registry'"):
+        wire.validate_wire_payload(
+            "LaneChromePayload",
+            {"targetId": "target-fixture", "identity": identity},
+        )
+
+    with pytest.raises(SpiceError, match="undeclared fields: revision"):
+        wire.validate_wire_payload(
+            "LaneChromePayload",
+            {"targetId": "target-fixture", "revision": 3},
+        )
+
+
+def test_lane_chrome_contract_rejects_authority_expansion_fields():
+    assert wire.LANE_CHROME_EXCLUDED_FIELDS == {
+        "messages",
+        "ackContexts",
+        "removedMessageKeys",
+        "error",
+        "teams",
+        "members",
+        "memberAgents",
+        "composerState",
+        "submission",
+        "presentationState",
+        "dom",
+    }
+    for field in wire.LANE_CHROME_EXCLUDED_FIELDS:
+        with pytest.raises(SpiceError, match=f"undeclared fields: {field}"):
+            wire.validate_wire_payload(
+                "LaneChromePayload",
+                {"targetId": "target-fixture", field: None},
+            )
+
+
+def test_lane_chrome_contract_is_not_yet_an_emitter_migration():
+    assert "LaneChromePayload" not in wire.BROWSER_PAYLOAD_EMITTER_SCHEMAS.values()
+
+    rendered = wire.render_app_types_js()
+    assert " * @typedef {Object} LaneChromePayload" in rendered
+    assert " * @property {string} targetId" in rendered
+    assert " * @property {LaneChromeIdentityFacet=} identity" in rendered
+    assert " * @property {LaneChromeActivityFacet=} activity" in rendered

@@ -433,15 +433,133 @@
  */
 
 /**
+ * @typedef {Object} LaneChromeFacetOrder
+ * @property {string} epoch
+ * @property {number} revision
+ */
+
+/**
+ * @typedef {Object} LaneChromeIdentity
+ * @property {string} displayName
+ * @property {string} branch
+ * @property {TargetIdentity} targetIdentity
+ * @property {ServeAgentIdentity} serveAgentIdentity
+ */
+
+/**
+ * @typedef {Object} LaneChromeTeamConfig
+ * @property {TeamIdentity} teamIdentity
+ */
+
+/**
+ * @typedef {Object} LaneChromePendingInbox
+ * @property {number} count
+ * @property {string} label
+ * @property {Array.<string>} keys
+ */
+
+/**
+ * @typedef {Object} LaneChromeTaskBoard
+ * @property {Array.<string>} taskFilters
+ * @property {Array.<TaskFilterEntry>} taskFilterEntries
+ * @property {Array.<string>} effectiveTaskFilters
+ * @property {TaskFilterInventory} taskFilterInventory
+ * @property {LaneInfo} laneInfo
+ * @property {number} privateTaskCount
+ */
+
+/**
+ * @typedef {Object} LaneChromeLifecycle
+ * @property {string} processStatus
+ * @property {string=} visualStatus
+ * @property {string=} bindingStatus
+ * @property {string=} rolloutStatus
+ */
+
+/**
+ * @typedef {Object} LaneChromeRenewal
+ * @property {string} lifetime
+ * @property {RenewalIntentPayload} renewalIntent
+ */
+
+/**
+ * @typedef {Object} LaneChromeActivity
+ * @property {string} lastAssistantAt
+ * @property {string=} latestActivityKind
+ * @property {string=} latestMessagePreview
+ * @property {string=} latestActivityPreview
+ * @property {string=} preview
+ * @property {ClaimedTask=} claimedTask
+ */
+
+/**
+ * @typedef {Object} LaneChromeIdentityFacet
+ * @property {"target-registry"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeIdentity|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromeTeamConfigFacet
+ * @property {"team-store"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeTeamConfig|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromePendingInboxFacet
+ * @property {"inbox"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromePendingInbox|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromeTaskBoardFacet
+ * @property {"task-board"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeTaskBoard|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromeLifecycleFacet
+ * @property {"lifecycle-reconciler"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeLifecycle|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromeRenewalFacet
+ * @property {"team-store"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeRenewal|null)} value
+ */
+
+/**
+ * @typedef {Object} LaneChromeActivityFacet
+ * @property {"transcript"} authority
+ * @property {LaneChromeFacetOrder} order
+ * @property {(LaneChromeActivity|null)} value
+ */
+
+/**
  * @typedef {Object} LaneChromePayload
- * @property {string=} id
- * @property {string=} displayName
- * @property {string=} branch
+ * @property {string} targetId
+ * @property {LaneChromeIdentityFacet=} identity
+ * @property {LaneChromeTeamConfigFacet=} teamConfig
+ * @property {LaneChromePendingInboxFacet=} pendingInbox
+ * @property {LaneChromeTaskBoardFacet=} taskBoard
+ * @property {LaneChromeLifecycleFacet=} lifecycle
+ * @property {LaneChromeRenewalFacet=} renewal
+ * @property {LaneChromeActivityFacet=} activity
+ */
+
+/**
+ * @typedef {Object} LaneChromeSourcePayload
  * @property {TargetIdentity=} targetIdentity
  * @property {ServeAgentIdentity=} serveAgentIdentity
  * @property {Array.<string>=} taskFilters
- * @property {Array.<string>=} effectiveTaskFilters
  * @property {Array.<TaskFilterEntry>=} taskFilterEntries
+ * @property {Array.<string>=} effectiveTaskFilters
  * @property {string=} laneFilterVersion
  * @property {TaskFilterInventory=} taskFilterInventory
  * @property {LaneInfo=} laneInfo
@@ -449,16 +567,7 @@
  * @property {TeamIdentity=} teamIdentity
  * @property {string=} lifetime
  * @property {RenewalIntentPayload=} renewalIntent
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
  * @property {StatusLine=} statusLine
- * @property {Array.<LaneMessage>=} messages
- * @property {Array.<AckContext>=} ackContexts
- * @property {Array.<string>=} removedMessageKeys
- * @property {string=} error
  */
 
 /**
