@@ -155,16 +155,23 @@ def test_lane_chrome_value_fields_have_one_explicit_facet_home():
             "latestMessagePreview",
             "latestActivityPreview",
             "preview",
-            "claimedTask",
         },
     }
 
-    assert {
+    actual = {
         schema_name: {
             field.name for field in wire.WIRE_OBJECTS_BY_NAME[schema_name].fields
         }
         for schema_name in expected
-    } == expected
+    }
+    field_homes = [
+        (field, schema_name)
+        for schema_name, fields in actual.items()
+        for field in fields
+    ]
+
+    assert actual == expected
+    assert len(field_homes) == len({field for field, _schema_name in field_homes})
 
 
 def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
