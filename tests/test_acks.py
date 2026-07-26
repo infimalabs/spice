@@ -12,6 +12,7 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail import ackstate
+from spice.mail.ackschema import ACK_STATE_MIGRATION_SOURCES
 from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.ackarchive import (
@@ -468,22 +469,14 @@ def test_ack_state_database_is_centralized_under_git_common_dir(tmp_path):
     assert path == common / ".spice" / "data" / "spiceacks.sqlite3"
 
 
-def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
+def test_ack_state_migrates_immediately_previous_rows_to_store_operator_text(
+    tmp_path,
+):
     _init_repo(tmp_path)
     path = ack_state_database_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite_connection(path) as connection:
-        connection.execute(
-            """
-            CREATE TABLE acked_inbox_items (
-              key TEXT PRIMARY KEY,
-              inbox_name TEXT NOT NULL,
-              text TEXT NOT NULL,
-              attachments_json TEXT NOT NULL DEFAULT '[]',
-              archived_at REAL NOT NULL
-            )
-            """
-        )
+        connection.execute(ACK_STATE_MIGRATION_SOURCES["v0.27"])
         connection.execute(
             """
             INSERT INTO acked_inbox_items

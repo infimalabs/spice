@@ -34,51 +34,12 @@ ACK_STATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
   ON acked_inbox_items(archived_at);
 """
-_RETIRED_METRIC_TABLE_SQL = ACK_STATE_TABLE_SQL.replace(
-    "  provenance TEXT NOT NULL DEFAULT 'archiveOnly'\n);",
-    "  provenance TEXT NOT NULL DEFAULT 'archiveOnly',\n"
-    "  legacy_metric_json TEXT NOT NULL DEFAULT ''\n);",
-)
 
-# Every released spiceacks.sqlite3 table was unversioned. These are its exact
-# source contracts, grouped only when releases emitted byte-identical DDL:
-# v0.8; v0.10; v0.11-v0.16; and v0.17-v0.27. A fifth supported unversioned
-# source is the exact current table shipped between v0.27 and this versioning
-# boundary; it needs only the version stamp and must not be rewritten.
-ACK_STATE_LEGACY_TABLE_SCHEMAS = {
-    "v0.8": """
-CREATE TABLE IF NOT EXISTS acked_inbox_items (
-  key TEXT PRIMARY KEY,
-  inbox_name TEXT NOT NULL,
-  text TEXT NOT NULL,
-  attachments_json TEXT NOT NULL DEFAULT '[]',
-  archived_at REAL NOT NULL
-);
-""",
-    "v0.10": """
-CREATE TABLE IF NOT EXISTS acked_inbox_items (
-  key TEXT PRIMARY KEY,
-  inbox_name TEXT NOT NULL,
-  text TEXT NOT NULL,
-  attachments_json TEXT NOT NULL DEFAULT '[]',
-  ack_text TEXT NOT NULL DEFAULT '',
-  ack_content TEXT NOT NULL DEFAULT '',
-  archived_at REAL NOT NULL
-);
-""",
-    "v0.11-v0.16": """
-CREATE TABLE IF NOT EXISTS acked_inbox_items (
-  key TEXT PRIMARY KEY,
-  inbox_name TEXT NOT NULL,
-  text TEXT NOT NULL,
-  attachments_json TEXT NOT NULL DEFAULT '[]',
-  ack_text TEXT NOT NULL DEFAULT '',
-  ack_content TEXT NOT NULL DEFAULT '',
-  disposition TEXT NOT NULL DEFAULT 'acked',
-  archived_at REAL NOT NULL
-);
-""",
-    "v0.17-v0.27": """
+# A writer converts exactly one predecessor: the final table shipped by
+# v0.27.0. Physical column order is normalized separately, so an alter-grown
+# v0.27 table and a freshly-created one are one semantic source contract.
+ACK_STATE_MIGRATION_SOURCES = {
+    "v0.27": """
 CREATE TABLE IF NOT EXISTS acked_inbox_items (
   key TEXT PRIMARY KEY,
   inbox_name TEXT NOT NULL,
@@ -90,41 +51,57 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   disposition TEXT NOT NULL DEFAULT 'acked',
   archived_at REAL NOT NULL
 );
-""",
+"""
 }
 
-_LEGACY_ROW_SELECTS = {
+# Older released DDL remains only so preflight can identify it and name the
+# release that still owns its conversion. No row projection exists for these
+# shapes, so recognizing one cannot accidentally make it migratable again.
+ACK_STATE_RETIRED_SOURCE_SCHEMAS = {
     "v0.8": """
-key, inbox_name, text, attachments_json, '{}', '', '', 'acked', archived_at,
-'', '', NULL, text, archived_at, 'archiveOnly'
+CREATE TABLE IF NOT EXISTS acked_inbox_items (
+  key TEXT PRIMARY KEY,
+  inbox_name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  archived_at REAL NOT NULL
+);
 """,
     "v0.10": """
-key, inbox_name, text, attachments_json, '{}', ack_text, ack_content, 'acked',
-archived_at, '', '', NULL, text, archived_at, 'archiveOnly'
+CREATE TABLE IF NOT EXISTS acked_inbox_items (
+  key TEXT PRIMARY KEY,
+  inbox_name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  ack_text TEXT NOT NULL DEFAULT '',
+  ack_content TEXT NOT NULL DEFAULT '',
+  archived_at REAL NOT NULL
+);
 """,
     "v0.11-v0.16": """
-key, inbox_name, text, attachments_json, '{}', ack_text, ack_content,
-disposition, archived_at, '', '', NULL, text,
-CASE WHEN disposition IN ('acked', 'refused') THEN archived_at ELSE NULL END,
-'archiveOnly'
-""",
-    "v0.17-v0.27": """
-key, inbox_name, text, attachments_json, lineage_json, ack_text, ack_content,
-disposition, archived_at, '', '', NULL, text,
-CASE WHEN disposition IN ('acked', 'refused') THEN archived_at ELSE NULL END,
-'archiveOnly'
+CREATE TABLE IF NOT EXISTS acked_inbox_items (
+  key TEXT PRIMARY KEY,
+  inbox_name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  ack_text TEXT NOT NULL DEFAULT '',
+  ack_content TEXT NOT NULL DEFAULT '',
+  disposition TEXT NOT NULL DEFAULT 'acked',
+  archived_at REAL NOT NULL
+);
 """,
 }
 
-_FRESH_SOURCE = "fresh"
-_CURRENT_UNVERSIONED_SOURCE = "post-v0.27"
-_ACCRETED_CURRENT_SOURCE = "post-v0.27-accreted"
-_RETIRED_METRIC_SOURCE = "post-v0.27-retired-metric"
-_CURRENT_ROW_SELECT = """
+_MIGRATION_SOURCE = "v0.27"
+_RETIRED_SOURCE_CONVERTER_RELEASE = "v0.27.0"
+_MIGRATION_ROW_SELECT = """
 key, inbox_name, text, attachments_json, lineage_json, ack_text, ack_content,
-disposition, archived_at, target_actor, team_id, sent_at, published_text,
-acknowledged_at, provenance
+disposition, archived_at, '', '', NULL, text,
+CASE WHEN disposition IN ('acked', 'refused') THEN archived_at ELSE NULL END,
+'archiveOnly'
 """
+
+_FRESH_SOURCE = "fresh"
 type _TableShape = tuple[str, tuple[tuple[object, ...], ...]]
 
 
@@ -136,8 +113,8 @@ def sync_ack_state_schema(connection: sqlite3.Connection) -> None:
         source = _ack_source_contract_locked(connection)
         if source == _FRESH_SOURCE:
             connection.execute(ACK_STATE_TABLE_SQL)
-        elif source not in (None, _CURRENT_UNVERSIONED_SOURCE):
-            _migrate_legacy_ack_table_locked(connection, source)
+        elif source == _MIGRATION_SOURCE:
+            _migrate_previous_ack_table_locked(connection)
         _validate_ack_table_shape_locked(connection)
         connection.execute(ACK_STATE_INDEX_SQL)
         connection.execute(f"PRAGMA user_version = {ACK_STATE_SCHEMA_VERSION}")
@@ -191,33 +168,25 @@ def _ack_source_contract_locked(connection: sqlite3.Connection) -> str | None:
             "unversioned populated ACK state database has no supported canonical "
             "table; refusing to rebuild or mutate ACK history"
         )
-    if actual == _schema_table_shape(ACK_STATE_TABLE_SQL):
-        return _CURRENT_UNVERSIONED_SOURCE
     semantic = _semantic_table_shape(actual)
-    if semantic == _semantic_table_shape(_schema_table_shape(ACK_STATE_TABLE_SQL)):
-        return _ACCRETED_CURRENT_SOURCE
-    if semantic == _semantic_table_shape(
-        _schema_table_shape(_RETIRED_METRIC_TABLE_SQL)
-    ):
-        _validate_retired_metric_column_locked(connection)
-        return _RETIRED_METRIC_SOURCE
-    for source, schema in ACK_STATE_LEGACY_TABLE_SCHEMAS.items():
+    for source, schema in ACK_STATE_MIGRATION_SOURCES.items():
         if semantic == _semantic_table_shape(_schema_table_shape(schema)):
             return source
+    for source, schema in ACK_STATE_RETIRED_SOURCE_SCHEMAS.items():
+        if semantic == _semantic_table_shape(_schema_table_shape(schema)):
+            raise SpiceError(
+                "unversioned ACK state database uses retired "
+                f"{source} table shape; run spice "
+                f"{_RETIRED_SOURCE_CONVERTER_RELEASE} once to convert it before "
+                "using this release; refusing to mutate canonical ACK history"
+            )
     raise SpiceError(
         "unversioned ACK state database has incompatible canonical table shape; "
         "refusing to rebuild or mutate ACK history"
     )
 
 
-def _migrate_legacy_ack_table_locked(
-    connection: sqlite3.Connection, source: str
-) -> None:
-    select_columns = (
-        _CURRENT_ROW_SELECT
-        if source in (_ACCRETED_CURRENT_SOURCE, _RETIRED_METRIC_SOURCE)
-        else _LEGACY_ROW_SELECTS[source]
-    )
+def _migrate_previous_ack_table_locked(connection: sqlite3.Connection) -> None:
     connection.execute(
         f'ALTER TABLE "{ACK_STATE_TABLE_NAME}" RENAME TO "{_LEGACY_TABLE_NAME}"'
     )
@@ -228,24 +197,11 @@ def _migrate_legacy_ack_table_locked(
           (key, inbox_name, text, attachments_json, lineage_json, ack_text,
            ack_content, disposition, archived_at, target_actor, team_id,
            sent_at, published_text, acknowledged_at, provenance)
-        SELECT {select_columns}
+        SELECT {_MIGRATION_ROW_SELECT}
         FROM "{_LEGACY_TABLE_NAME}"
         """
     )
     connection.execute(f'DROP TABLE "{_LEGACY_TABLE_NAME}"')
-
-
-def _validate_retired_metric_column_locked(
-    connection: sqlite3.Connection,
-) -> None:
-    row = connection.execute(
-        "SELECT key FROM acked_inbox_items WHERE legacy_metric_json != '' LIMIT 1"
-    ).fetchone()
-    if row is not None:
-        raise SpiceError(
-            "unversioned ACK state database retains nonempty retired metric "
-            f"audit content for {str(row[0])!r}; refusing to drop or mutate it"
-        )
 
 
 def _validate_ack_table_shape_locked(connection: sqlite3.Connection) -> None:

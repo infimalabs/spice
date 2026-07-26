@@ -125,8 +125,9 @@ TEAM_AUTHORITY_MIGRATIONS = {
 }
 
 # Canonical shapes let the opener validate a source database before any
-# migration acquires a write transaction. Preserve an entry when adding a
-# later version so every supported source remains independently recognizable.
+# migration acquires a write transaction. When adding a later version, retain
+# only that new current shape and its immediate predecessor; an older source
+# must pass through the release that still owns its conversion.
 TEAM_AUTHORITY_SCHEMAS = {
     1: TEAM_AUTHORITY_SCHEMA,
 }
