@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
-from spice.mail.ackgrammar import iter_control_lines, split_keyed_response
+from spice.mail.ackgrammar import (
+    iter_control_lines,
+    split_keyed_response,
+    task_directive_fields,
+)
 from spice.transcript.events import (
     AssistantText,
     CommandExecution,
@@ -47,9 +51,6 @@ __all__ = [
 ]
 
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
-_TASK_DIRECTIVE_TOKEN = "TASK"
-_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-_TASK_DIRECTIVE_REQUIRED_FIELDS = frozenset({"title", "project"})
 _EVENT_TYPES = (
     AssistantText,
     Reasoning,
@@ -379,30 +380,9 @@ def _mask_directives(text: str) -> tuple[str, dict[str, _Directive]]:
 def _directive_kind(line: str) -> DirectiveKind | None:
     if _APP_DIRECTIVE_LINE_RE.match(line) is not None:
         return DirectiveKind.APP
-    if _is_task_directive_line(line):
+    if task_directive_fields(line) is not None:
         return DirectiveKind.TASK
     return None
-
-
-def _is_task_directive_line(line: str) -> bool:
-    stripped = line.strip()
-    token_end = len(_TASK_DIRECTIVE_TOKEN)
-    if not stripped.startswith(_TASK_DIRECTIVE_TOKEN):
-        return False
-    if (
-        len(stripped) > token_end
-        and stripped[token_end] not in _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        return False
-    payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
-    keys = {
-        key.strip()
-        for part in payload.split("|")
-        if "=" in part
-        for key, value in [part.split("=", 1)]
-        if key.strip() and value.strip()
-    }
-    return _TASK_DIRECTIVE_REQUIRED_FIELDS.issubset(keys)
 
 
 def _tool_text(event: ToolCall | ToolOutput | WebSearch) -> str:
