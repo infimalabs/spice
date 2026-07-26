@@ -4,7 +4,8 @@ The transcript remains the sole stored truth.  This module only owns access to
 that truth: opening plain or gzip files, byte-offset seeks, bounded and reverse
 windows, cursor offsets, malformed-line handling, and one internal parsed
 line-record handoff to the driver-backed decoder. Public reads expose only the
-resulting typed event stream. Consumer-specific projection stays above it.
+resulting typed event stream -- a whole access pass, or the prose a single
+record carries. Consumer-specific projection stays above it.
 """
 
 from __future__ import annotations
@@ -20,8 +21,8 @@ from threading import RLock
 from typing import Any, BinaryIO, Literal
 
 from spice.agent.driver import AgentDriver
-from spice.transcript.decode import _decode_parsed_line
-from spice.transcript.events import TranscriptEvent
+from spice.transcript.decode import decode_parsed_line
+from spice.transcript.events import UNLOCATED_SOURCE, AssistantText, TranscriptEvent
 
 REVERSE_WINDOW_BYTES = 8 * 1024 * 1024
 BinaryTranscript = BinaryIO | gzip.GzipFile
@@ -34,6 +35,7 @@ __all__ = [
     "cursor_offset",
     "locked_cursor",
     "offset_after_line",
+    "record_assistant_text",
     "render_cursor",
     "transcript_size",
 ]
@@ -146,7 +148,7 @@ class TranscriptEventReader:
         events: list[TranscriptEvent] = []
         for record in read.records:
             events.extend(
-                _decode_parsed_line(
+                decode_parsed_line(
                     record.parsed,
                     self.driver,
                     source=source,
@@ -185,6 +187,36 @@ def dispatch_records(
 
 
 EventConsumer = Callable[[TranscriptEvent], None]
+
+
+def record_assistant_text(
+    record: TranscriptLine,
+    driver: AgentDriver,
+    *,
+    source: str = UNLOCATED_SOURCE,
+    source_actor: str | None = None,
+) -> tuple[AssistantText, ...]:
+    """The typed prose one already-read record carries, in source order.
+
+    The driver's line hint runs first, so the overwhelming majority of records --
+    tool calls and their results -- cost a substring search instead of a decode.
+    The hint is permissive by contract, so a record it admits still has to
+    survive the crossing. Skipping it changes nothing but the work: a record the
+    hint rejects carries no prose for the decoder to find either.
+
+    Consumers above the engine ask for facts, never for the line the hint reads.
+    """
+    if not driver.line_may_carry_assistant_text(record.raw):
+        return ()
+    events = decode_parsed_line(
+        record.parsed,
+        driver,
+        source=source,
+        line=record.offset,
+        offset=record.offset,
+        source_actor=source_actor,
+    )
+    return tuple(event for event in events if isinstance(event, AssistantText))
 
 
 @contextmanager
@@ -233,11 +265,16 @@ def read_forward(
     *,
     cursor: TranscriptCursor,
 ) -> TranscriptRead:
-    """Read from the cursor's exact resume offset to EOF.
+    """Read from the cursor's exact resume offset to the last complete line.
 
     A truncated source resets the resume offset to zero, matching the existing
     append-only contract.  Filesystem identity detects a replaced source
     independently of size.  Successful reads advance both pieces of state.
+
+    An unterminated final line is held back rather than delivered: a live
+    transcript can flush one record in several writes, and resuming past the
+    prefix would split that record into fragments no consumer ever reassembles.
+    The cursor stops at its offset so the completed line is read exactly once.
     """
     with locked_cursor(cursor):
         try:
@@ -258,6 +295,7 @@ def read_forward(
                     file_size=file_size,
                     file_identity=file_identity,
                     align_partial_start=False,
+                    hold_partial_end=True,
                 )
         except OSError as exc:
             read = _failed_read(exc)
@@ -375,6 +413,7 @@ def _read_open_range(
     file_size: int,
     file_identity: TranscriptFileIdentity,
     align_partial_start: bool,
+    hold_partial_end: bool = False,
 ) -> TranscriptRead:
     handle.seek(start)
     if align_partial_start and not _is_line_boundary(handle, start):
@@ -387,6 +426,13 @@ def _read_open_range(
             break
         raw = handle.readline()
         if not raw:
+            break
+        if hold_partial_end and not raw.endswith(b"\n"):
+            # A writer mid-flush leaves its last line unterminated. Resuming
+            # after that prefix would decode it as garbage and then decode the
+            # rest of the same line as more garbage, so the complete record
+            # would never be seen. Leave it for the pass that finds it whole.
+            handle.seek(offset)
             break
         records.append(_line_record(offset, raw))
     return TranscriptRead(
