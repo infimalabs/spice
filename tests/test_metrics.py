@@ -14,6 +14,16 @@ from tests.test_directivefacthelpers import (
 )
 
 
+# A Claude transcript is recognized by its thread-id filename, which is what
+# routes these fixtures to the Claude dialect instead of Codex's rollout shape.
+CLAUDE_TRANSCRIPT_NAME = "0123456789abcdef0123456789abcdef.jsonl"
+METRIC_PROJECTION_TABLES = (
+    "agent_metrics",
+    "agent_metric_buckets",
+    "agent_metric_cursors",
+)
+
+
 def _write_rollout(path, entries):
     path.write_text(
         "".join(json.dumps(entry, separators=(",", ":")) + "\n" for entry in entries),
@@ -33,11 +43,43 @@ def _assistant_entry(timestamp: str, text: str) -> dict[str, object]:
     }
 
 
-def _presence_entry(timestamp: str, payload_type: str) -> dict[str, object]:
+def _tool_call_entry(timestamp: str, payload_type: str) -> dict[str, object]:
+    argument_key = "input" if payload_type == "custom_tool_call" else "arguments"
     return {
         "timestamp": timestamp,
         "type": "response_item",
-        "payload": {"type": payload_type, "name": "exec_command"},
+        "payload": {
+            "type": payload_type,
+            "name": "exec_command",
+            "call_id": f"call-{timestamp}",
+            argument_key: "{}",
+        },
+    }
+
+
+def _claude_turn_entry(timestamp: str, text: str, tool_name: str) -> dict[str, object]:
+    """One Claude line carrying prose and a tool call, as the CLI writes it."""
+    return {
+        "timestamp": timestamp,
+        "type": "assistant",
+        "message": {
+            "stop_reason": "end_turn",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "tool_use", "id": "toolu-1", "name": tool_name, "input": {}},
+            ],
+        },
+    }
+
+
+def _reasoning_entry(timestamp: str, summary: str) -> dict[str, object]:
+    return {
+        "timestamp": timestamp,
+        "type": "response_item",
+        "payload": {
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": summary}],
+        },
     }
 
 
@@ -58,8 +100,8 @@ def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_pa
                 "2026-06-10T12:00:00.000000Z",
                 "ACK 1k4Yh5gP: handled",
             ),
-            _presence_entry("2026-06-10T12:00:01.000000Z", "function_call"),
-            _presence_entry("2026-06-10T12:00:02.000000Z", "reasoning"),
+            _tool_call_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+            _reasoning_entry("2026-06-10T12:00:02.000000Z", "weighing options"),
         ],
     )
 
@@ -92,7 +134,7 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
                 "2026-06-10T12:00:00.000000Z",
                 "ACK 1k4Yh5gP: predecessor",
             ),
-            _presence_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+            _tool_call_entry("2026-06-10T12:00:01.000000Z", "function_call"),
         ],
     )
     _write_rollout(
@@ -102,7 +144,7 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
                 "2026-06-10T12:01:00.000000Z",
                 "ACK 1k4YhWsF: successor",
             ),
-            _presence_entry("2026-06-10T12:01:01.000000Z", "custom_tool_call"),
+            _tool_call_entry("2026-06-10T12:01:01.000000Z", "custom_tool_call"),
         ],
     )
 
@@ -243,3 +285,158 @@ def test_transcript_ack_of_unsent_key_is_a_noop(tmp_path):
     assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
         sends=0, acked=0
     )
+
+
+def test_one_line_carrying_prose_and_a_tool_call_counts_both_facts(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / CLAUDE_TRANSCRIPT_NAME
+    _write_rollout(
+        transcript,
+        [_claude_turn_entry("2026-06-10T12:00:00.000Z", "on it", "Bash")],
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    # The typed stream carries both blocks of the one line, and the second pass
+    # resumes past them rather than counting them again.
+    assert summary.tool_calls == 1
+    assert sum(summary.sparkline) == 2
+
+
+def test_replaced_transcript_restarts_from_its_first_byte(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    _write_rollout(
+        transcript, [_tool_call_entry("2026-06-10T12:00:00.000000Z", "function_call")]
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+    resumed_from = transcript.stat().st_size
+    replacement = tmp_path / "replacement.jsonl"
+    _write_rollout(
+        replacement,
+        [
+            _tool_call_entry("2026-06-10T12:01:00.000000Z", "function_call"),
+            _tool_call_entry("2026-06-10T12:01:01.000000Z", "function_call"),
+            _tool_call_entry("2026-06-10T12:01:02.000000Z", "function_call"),
+        ],
+    )
+    replacement.replace(transcript)
+    replaced_inode = transcript.stat().st_ino
+    # The new file is longer than the old resume point, so a byte offset alone
+    # would have resumed into the middle of it and lost the leading calls.
+    assert transcript.stat().st_size > resumed_from
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    now = datetime(2026, 6, 10, 12, 1, 2, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+    with store.connect() as connection:
+        checkpoint = connection.execute(
+            "SELECT offset, source_inode FROM agent_metric_cursors "
+            "WHERE agent_id = ? AND source_path = ?",
+            ("agent-a", str(transcript)),
+        ).fetchone()
+
+    assert summary.tool_calls == 4
+    assert (checkpoint["offset"], checkpoint["source_inode"]) == (
+        transcript.stat().st_size,
+        replaced_inode,
+    )
+
+
+def test_truncated_transcript_replays_the_same_source_from_zero(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    _write_rollout(
+        transcript,
+        [
+            _tool_call_entry("2026-06-10T12:00:00.000000Z", "function_call"),
+            _tool_call_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+        ],
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+    original_inode = transcript.stat().st_ino
+    _write_rollout(
+        transcript, [_tool_call_entry("2026-06-10T12:00:02.000000Z", "function_call")]
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    # Same file, fewer bytes: the shortened source is replayed from its start,
+    # so the surviving call is counted rather than skipped.
+    assert transcript.stat().st_ino == original_inode
+    assert summary.tool_calls == 3
+
+
+def test_malformed_line_stays_uncounted_without_blocking_later_facts(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(
+        json.dumps(_assistant_entry("2026-06-10T12:00:00.000000Z", "before"))
+        + "\n{ this line is not JSON\n"
+        + json.dumps(_tool_call_entry("2026-06-10T12:00:02.000000Z", "function_call"))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    # An undecodable line is a visible fact, not lane activity, and the reader
+    # carries on to the lines behind it.
+    assert summary.tool_calls == 1
+    assert sum(summary.sparkline) == 2
+
+
+def test_metric_projections_replay_equivalently_after_deletion(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    _write_rollout(
+        transcript,
+        [
+            _assistant_entry("2026-06-10T12:00:00.000000Z", "starting"),
+            _tool_call_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+            _reasoning_entry("2026-06-10T12:00:02.000000Z", "weighing options"),
+        ],
+    )
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+    now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
+    ingested = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    with store.connect() as connection:
+        for table in METRIC_PROJECTION_TABLES:
+            connection.execute(f"DELETE FROM {table}")
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    # Buckets, lifetime totals, and cursors are projections: dropping their rows
+    # and replaying the same facts lands on the same answers.
+    assert store.lane_metric_summary("agent-a", bucket_count=12, now=now) == ingested

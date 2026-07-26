@@ -92,6 +92,7 @@ from spice.serve.team.schema import (
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_ID_HEX_CHARS as TEAM_ID_HEX_CHARS,
     TEAM_PROJECTION_SCHEMA,
+    TEAM_PROJECTION_TABLES,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
@@ -138,6 +139,36 @@ def _execute_schema_script(connection: sqlite3.Connection, script: str) -> None:
     # transaction remains the sole atomic boundary.
     for statement in _schema_statements(script):
         connection.execute(statement)
+
+
+def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    return tuple(
+        str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')
+    )
+
+
+def _canonical_projection_columns() -> dict[str, tuple[str, ...]]:
+    """The columns each projection table has when built from the current DDL."""
+    probe = sqlite3.connect(":memory:")
+    try:
+        _execute_schema_script(probe, TEAM_PROJECTION_SCHEMA)
+        return {table: _table_columns(probe, table) for table in TEAM_PROJECTION_TABLES}
+    finally:
+        probe.close()
+
+
+def _drop_drifted_projections_locked(connection: sqlite3.Connection) -> None:
+    """Discard projection tables whose shape no longer matches the current DDL.
+
+    A projection is derived state, so a shape change costs a replay rather than
+    a migration ladder: the drifted table is dropped and recreated empty by the
+    schema script that follows. Authority tables never reach here -- they carry
+    versioned migrations and are validated against their canonical shape.
+    """
+    for table, columns in _canonical_projection_columns().items():
+        live = _table_columns(connection, table)
+        if live and live != columns:
+            connection.execute(f'DROP TABLE "{table}"')
 
 
 def _authority_table_shape(
@@ -258,6 +289,7 @@ class ServeTeamStore(
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
             self._migrate_legacy_directive_projection_locked(connection)
+            _drop_drifted_projections_locked(connection)
             _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
             self._initialize_observation_attribution_state_locked(connection)
             self._validate_authority_schema_locked(
