@@ -18,9 +18,9 @@ from tests.test_servehelpers import (
     _task_cards,
 )
 
-# Each battery below reads one board, so its generation only has to be distinct
-# from every other battery's: a shared generation would let one fold answer for
-# rows another one seeded.
+# A board revision is the generation its authority minted, so these fixtures
+# carry counts rather than labels: the chrome producer publishes an epoch only
+# where it could have counted forward from it.
 SEMANTIC_EDGE_GENERATION = "1785044000000300"
 SEMANTIC_ERROR_GENERATION = "1785044000000400"
 OPEN_STATE_GENERATION = "1785044000000500"

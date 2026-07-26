@@ -102,7 +102,7 @@ def _clear_task_board_observations():
 # candidate has been rebuilt against the store that replaced it.
 FIRST_EXPORT = 1
 RETRIED_EXPORTS = 2
-# Rows a board holding one seeded task exports, per export it costs.
+# Rows one export returns from a store holding a single seeded task.
 KEPT_TASK_ROW_COUNT = 1
 
 
