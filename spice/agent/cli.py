@@ -6,11 +6,14 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from spice.agent.driver import DRIVER, POST_TOOL_HOOK_EVENT
 from spice.errors import SpiceError
 from spice.paths import require_repo_root
+
+if TYPE_CHECKING:
+    from spice.agent.rtkhealth import RtkHealth
 
 
 def configure_agent_parser(subparsers: Any) -> None:
@@ -309,6 +312,49 @@ def shell_display_part(value: str) -> str:
     return repr(value)
 
 
+def _activation_rtk_health(repo_root: Path) -> tuple[RtkHealth, str]:
+    from spice.agent.rtkhealth import probe_rtk_health
+
+    health = probe_rtk_health(repo_root)
+    return health, health.activation_status_line()
+
+
+def _bind_activation_thread(repo_root: Path):
+    from spice.agent.lifecycle import bind_ambient_agent_thread
+
+    return bind_ambient_agent_thread(repo_root)
+
+
+def _install_activation_hooks(repo_root: Path) -> list[str]:
+    from spice.hooks.install import install_hooks_for_repo
+
+    return install_hooks_for_repo(repo_root)
+
+
+def _materialize_activation_skill(repo_root: Path) -> Path | None:
+    from spice.agent.lifecycle import materialize_worktree_skill
+
+    return materialize_worktree_skill(repo_root)
+
+
+def _refresh_activation_baseline(repo_root: Path):
+    from spice.tasks.git.boundaries import fast_forward_if_safe
+
+    return fast_forward_if_safe(repo_root)
+
+
+def _renew_activation_claim(*, actor: str | None):
+    from spice.tasks.claimstate import renew_claim_or_report
+
+    return renew_claim_or_report(actor=actor)
+
+
+def _activation_steering_token(repo_root: Path) -> str:
+    from spice.mail.steeringkey import steering_token
+
+    return steering_token(repo_root)
+
+
 def render_activation_packet(repo_root: Path) -> str:
     from spice.agent.activation import (
         activation_browser_validation_lines,
@@ -316,30 +362,22 @@ def render_activation_packet(repo_root: Path) -> str:
         activation_git_hygiene_lines,
         activation_source_root_lines,
     )
-    from spice.agent.lifecycle import (
-        bind_ambient_agent_thread,
-        materialize_worktree_skill,
-    )
-    from spice.hooks.install import install_hooks_for_repo
-    from spice.mail.steeringkey import steering_token
     from spice.tasks import claimstate
-    from spice.tasks.git import boundaries
-    from spice.agent.rtkhealth import probe_rtk_health
 
-    rtk_health = probe_rtk_health(repo_root)
-    status = bind_ambient_agent_thread(repo_root)
-    hook_rows = install_hooks_for_repo(repo_root)
-    skill = materialize_worktree_skill(repo_root)
-    refresh = boundaries.fast_forward_if_safe(repo_root)
-    claim_renewal = claimstate.renew_claim_or_report(actor=status.thread_id or None)
-    token = steering_token(repo_root)
+    rtk_health, rtk_status_line = _activation_rtk_health(repo_root)
+    status = _bind_activation_thread(repo_root)
+    hook_rows = _install_activation_hooks(repo_root)
+    skill = _materialize_activation_skill(repo_root)
+    refresh = _refresh_activation_baseline(repo_root)
+    claim_renewal = _renew_activation_claim(actor=status.thread_id or None)
+    token = _activation_steering_token(repo_root)
     return "\n".join(
         [
             "spice_agent_activation",
             f"worktree={repo_root.resolve()}",
             f"thread={status.thread_id or '-'}",
             f"driver={DRIVER.name}",
-            rtk_health.activation_status_line(),
+            rtk_status_line,
             f"steering_key={token}",
             (
                 "steering_authenticity=real spice steering reaches you on shell "

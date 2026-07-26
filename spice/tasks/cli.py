@@ -891,22 +891,32 @@ def _project_filter(raw: str) -> str:
     return value
 
 
-def _list(args: argparse.Namespace) -> str:
+def _export_list_tasks(filters: list[str] | None) -> list[dict[str, Any]]:
     from spice.tasks import tw
 
+    return tw.export(filters)
+
+
+def _list_actor() -> str:
+    from spice.tasks import tw
+
+    return tw.current_actor()
+
+
+def _list(args: argparse.Namespace) -> str:
     filters = _list_status_filters(args)
     project = getattr(args, "project", None)
     if project:
-        rows = tw.export(filters or ["status:pending"])
+        rows = _export_list_tasks(filters or ["status:pending"])
         scope = "explicit-project"
         scope_detail = f"project:{project}"
     elif args.all:
-        rows = tw.export(filters)
+        rows = _export_list_tasks(filters)
         scope = "global"
         scope_detail = ""
     else:
         rows, scope_filter = alloc.visible_rows_with_scope(
-            tw.current_actor(), filters or ["status:pending"]
+            _list_actor(), filters or ["status:pending"]
         )
         rows = [r for r in rows if not alloc.is_hidden(r)]
         scope = "actor-route"

@@ -850,7 +850,7 @@ def test_task_list_project_scope_filters_board_and_sorts_newest(monkeypatch):
         seen["filters"] = filters
         return rows
 
-    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    monkeypatch.setattr(task_cli, "_export_list_tasks", fake_export)
 
     output = task_cli._list(
         argparse.Namespace(all=False, status=None, project="serve", limit=2)
@@ -897,7 +897,7 @@ def test_task_list_status_filter_uses_visible_rows(monkeypatch):
             ["project:task.cli"],
         )
 
-    monkeypatch.setattr("spice.tasks.tw.current_actor", lambda: "actor-a")
+    monkeypatch.setattr(task_cli, "_list_actor", lambda: "actor-a")
     monkeypatch.setattr(
         task_cli.alloc, "visible_rows_with_scope", fake_visible_rows_with_scope
     )
@@ -925,7 +925,7 @@ def test_task_list_explicit_hidden_project_uses_raw_export(monkeypatch):
         seen["filters"] = filters
         return rows
 
-    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    monkeypatch.setattr(task_cli, "_export_list_tasks", fake_export)
 
     output = task_cli._list(
         argparse.Namespace(
@@ -982,7 +982,7 @@ def test_task_list_all_marks_completed_and_deleted_rows(monkeypatch):
         seen["filters"] = filters
         return rows
 
-    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    monkeypatch.setattr(task_cli, "_export_list_tasks", fake_export)
 
     output = task_cli._list(
         argparse.Namespace(all=True, status=None, project=None, limit=None)

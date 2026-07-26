@@ -146,7 +146,7 @@ def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
             }
         ]
 
-    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    monkeypatch.setattr(wrap, "_export_working_state_tasks", fake_export)
     return claim_phase
 
 
