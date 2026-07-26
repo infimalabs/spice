@@ -23,6 +23,7 @@ from spice.serve.taskdirectives import (
     _task_directive_count,
     _task_directive_html,
     _task_directive_summary,
+    captured_directive_lines,
 )
 from spice.transcript.assembly import (
     AssembledMessage,
@@ -577,6 +578,7 @@ def _normalize_terminal_colon_for_display(
 def _ack_segment(
     segment: _TextGroup,
     body: str,
+    captured: frozenset[str],
     *,
     withheld: bool,
     worktree_id: str | None,
@@ -590,7 +592,7 @@ def _ack_segment(
     return {
         "keys": [] if withheld else list(segment.keys),
         "html": _render_message_html_with_task_directives(
-            body, worktree_id=worktree_id
+            body, captured, worktree_id=worktree_id
         ),
         "disposition": SEGMENT_DISPOSITION_WITHHELD
         if withheld
@@ -609,6 +611,9 @@ def _assistant_message(
     source_kind: str = "assistant_text",
     worktree_id: str | None = None,
 ) -> AssistantMessage:
+    # Read the message whole before splitting it: a segment body opens where
+    # its header was cut away, which is context recognition cannot recover.
+    captured = captured_directive_lines(text)
     preamble = "\n\n".join(
         group.body for group in groups if group.kind is SpanKind.PROSE and group.body
     )
@@ -630,9 +635,9 @@ def _assistant_message(
     ack_utterances: list[str] = []
     display_sources: list[str] = [preamble] if preamble else []
     display_parts: list[str] = (
-        [_display_text_with_task_directives(preamble)] if preamble else []
+        [_display_text_with_task_directives(preamble, captured)] if preamble else []
     )
-    task_card_count = _task_directive_count(preamble)
+    task_card_count = _task_directive_count(preamble, captured)
     for segment, segment_body in zip(segments, segment_bodies, strict=True):
         refused = segment.kind is SpanKind.NACK
         # The archival authority leaves a reasonless NACK pending. It must not
@@ -646,10 +651,12 @@ def _assistant_message(
         # refusal that said nothing at all captured nothing to show.
         if withheld and not body:
             continue
-        task_card_count += _task_directive_count(body)
-        display_body = _display_text_with_task_directives(body)
+        task_card_count += _task_directive_count(body, captured)
+        display_body = _display_text_with_task_directives(body, captured)
         ack_segments.append(
-            _ack_segment(segment, body, withheld=withheld, worktree_id=worktree_id)
+            _ack_segment(
+                segment, body, captured, withheld=withheld, worktree_id=worktree_id
+            )
         )
         if not withheld:
             for keyed in segment.keys:
@@ -669,7 +676,9 @@ def _assistant_message(
     display_text = "\n".join(display_parts)
     image_only = _image_only_markdown(display_text)
     preamble_html = (
-        _render_message_html_with_task_directives(preamble, worktree_id=worktree_id)
+        _render_message_html_with_task_directives(
+            preamble, captured, worktree_id=worktree_id
+        )
         if preamble and segments
         else ""
     )
@@ -681,7 +690,7 @@ def _assistant_message(
         text=text,
         display_text=display_text,
         display_html=_render_message_html_with_task_directives(
-            display_source, worktree_id=worktree_id
+            display_source, captured, worktree_id=worktree_id
         ),
         ack_count=len(acked_keys),
         ack_keys=ack_keys,

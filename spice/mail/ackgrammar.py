@@ -561,17 +561,17 @@ def _task_batch_lines(text: str) -> list[str]:
     for line, suppressed in iter_control_lines(text):
         if suppressed:
             continue
-        payload = _task_batch_line_from_directive(line)
+        payload = task_directive_line(line)
         if payload is not None:
             lines.append(payload)
     return lines
 
 
 def _is_task_directive_line(line: str) -> bool:
-    return _task_batch_line_from_directive(line) is not None
+    return task_directive_line(line) is not None
 
 
-def _task_batch_line_from_directive(line: str) -> str | None:
+def task_directive_line(line: str) -> str | None:
     token_pos = line.find(TASK_DIRECTIVE_TOKEN)
     token_end = token_pos + len(TASK_DIRECTIVE_TOKEN)
     if (
@@ -600,7 +600,7 @@ def task_directive_fields(line: str) -> list[tuple[str, str]] | None:
     reader shares it, so a capture card cannot appear for a line the
     supervisor ignored, nor go missing for a line it captured.
     """
-    normalized = _task_batch_line_from_directive(line)
+    normalized = task_directive_line(line)
     if normalized is None:
         return None
     payload = normalized[len(TASK_DIRECTIVE_TOKEN) :].lstrip(

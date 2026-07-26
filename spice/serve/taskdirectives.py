@@ -12,7 +12,12 @@ import html
 from collections.abc import Iterator
 from typing import Any
 
-from spice.mail.ackgrammar import iter_control_lines, task_directive_fields
+from spice.mail.ackgrammar import (
+    extract_task_batch_lines_from_text,
+    iter_control_lines,
+    task_directive_fields,
+    task_directive_line,
+)
 from spice.serve.markdown import render_message_html
 
 # Display order for the capture card; ordering only. Whether a line is a
@@ -22,7 +27,7 @@ _TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
 
 
 def _render_message_html_with_task_directives(
-    text: str, *, worktree_id: str | None = None
+    text: str, captured: frozenset[str], *, worktree_id: str | None = None
 ) -> str:
     if not text or not text.strip():
         return ""
@@ -51,7 +56,7 @@ def _render_message_html_with_task_directives(
             )
         directive_run = []
 
-    for line, directive in _iter_directive_lines(text):
+    for line, directive in _iter_directive_lines(text, captured):
         if directive is None:
             flush_directives()
             pending.append(line)
@@ -63,34 +68,56 @@ def _render_message_html_with_task_directives(
     return "".join(rendered)
 
 
-def _iter_directive_lines(text: str) -> Iterator[tuple[str, dict[str, Any] | None]]:
+def captured_directive_lines(text: str) -> frozenset[str]:
+    """Return the directives the supervisor reads out of a whole message.
+
+    Resolved before the message is split, because splitting is what destroys
+    the context recognition depends on: a segment body begins where its
+    ACK/NACK header was cut away, so a marker that sat mid-header is left
+    opening the line. Reading the undivided message once answers that, and
+    the display consults the answer while rendering the pieces.
+    """
+    return frozenset(extract_task_batch_lines_from_text(text))
+
+
+def _iter_directive_lines(
+    text: str, captured: frozenset[str]
+) -> Iterator[tuple[str, dict[str, Any] | None]]:
     """Pair each line with its directive, or None when the line does not act.
 
-    Suppression comes from the mail grammar, so a directive that is merely
-    being shown -- fenced, quoted, indented, or carried in rendered source
-    context -- reads as prose here exactly as it does to the supervisor that
-    would otherwise capture it. Sharing the walk is what keeps a card from
-    appearing for a task nothing will create.
+    Two authorities must agree before a card appears, because this text is a
+    piece the reducer cut. The local walk drops a directive that is merely
+    being shown -- fenced, quoted, indented, or in rendered source context.
+    `captured` drops one this piece no longer has the context to judge: a
+    segment body opens where its header was cut away, so a marker that sat
+    mid-header is left looking like it opens the line.
     """
     for line, suppressed in iter_control_lines(text):
-        yield line, None if suppressed else _task_directive_from_line(line)
+        directive = None if suppressed else _task_directive_from_line(line, captured)
+        yield line, directive
 
 
-def _display_text_with_task_directives(text: str) -> str:
+def _display_text_with_task_directives(text: str, captured: frozenset[str]) -> str:
     lines = [
         line if directive is None else _task_directive_summary(directive)
-        for line, directive in _iter_directive_lines(text)
+        for line, directive in _iter_directive_lines(text, captured)
     ]
     return "\n".join(lines).strip()
 
 
-def _task_directive_count(text: str) -> int:
-    return sum(1 for _line, directive in _iter_directive_lines(text) if directive)
+def _task_directive_count(text: str, captured: frozenset[str]) -> int:
+    return sum(
+        1 for _line, directive in _iter_directive_lines(text, captured) if directive
+    )
 
 
-def _task_directive_from_line(line: str) -> dict[str, Any] | None:
+def _task_directive_from_line(
+    line: str, captured: frozenset[str]
+) -> dict[str, Any] | None:
     fields = task_directive_fields(line)
-    return None if fields is None else {"fields": fields}
+    if fields is None or task_directive_line(line) not in captured:
+        return None
+    return {"fields": fields}
 
 
 def _task_directive_summary(directive: dict[str, Any]) -> str:
