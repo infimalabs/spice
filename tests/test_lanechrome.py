@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,12 @@ from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 
 TARGET = "target-a"
 OTHER_TARGET = "target-b"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LANE_STORE_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.lane-store.js"
+CHROME_FIXTURE_JS = Path(__file__).with_name("fixtures") / "lane_store_chrome.js"
+# The revision a superseded generation climbs to while trying to reclaim the
+# facet, matching SWEEP_LAPSED_REVISION in the browser's own sweep.
+LAPSED_REVISION = 99
 
 IDENTITY = {
     "displayName": "spice-h",
@@ -238,6 +246,72 @@ def test_a_later_epoch_supersedes_under_natural_order() -> None:
     }
 
 
+def test_the_server_names_the_authorities_the_browser_checks_for() -> None:
+    """A drifted name would make the browser throw on every facet sent.
+
+    The reducer refuses a facet whose authority is not the one it holds for that
+    name, so these two tables are one contract spelled in two languages.
+    """
+    assert browser_facet_authorities() == dict(LANE_CHROME_FACET_AUTHORITIES)
+
+
+def test_the_server_advances_generations_the_way_the_browser_does() -> None:
+    """Sweep the browser's own epoch spellings through the server's ordering.
+
+    Divergence here is silent in production: the server would publish a facet
+    the browser reads as a redelivery and drops, leaving chrome frozen with no
+    error anywhere. Running the browser's vectors is what keeps that honest.
+    """
+    encodings = browser_epoch_encodings()
+
+    swept = {
+        encoding: sweep_generations(encoding, epochs) for encoding, epochs in encodings
+    }
+
+    assert swept == {
+        encoding: {
+            "applied": [("activity",)] * len(epochs),
+            "lapsed": [()] * (len(epochs) - 1),
+            "held": epochs[-1],
+        }
+        for encoding, epochs in encodings
+    }
+
+
+def sweep_generations(encoding: str, epochs: list[str]) -> dict[str, object]:
+    """Advance through ``epochs``, then let every lapsed one try to reclaim."""
+    published: dict[str, LaneChromeOrder] = {}
+    applied = []
+    for index, epoch in enumerate(epochs):
+        projection = assemble_lane_chrome(
+            TARGET,
+            [generation_observed(encoding, index, LaneChromeOrder(epoch))],
+            published=published,
+        )
+        applied.append(projection.changed)
+        published = dict(projection.orders)
+    lapsed = [
+        assemble_lane_chrome(
+            TARGET,
+            [
+                generation_observed(
+                    encoding, index, LaneChromeOrder(epoch, LAPSED_REVISION)
+                )
+            ],
+            published=published,
+        ).changed
+        for index, epoch in enumerate(epochs[:-1])
+    ]
+    return {"applied": applied, "lapsed": lapsed, "held": published["activity"].epoch}
+
+
+def generation_observed(
+    encoding: str, index: int, order: LaneChromeOrder
+) -> LaneChromeObservation:
+    value = {"lastAssistantAt": f"{encoding} generation {index}"}
+    return LaneChromeObservation("activity", order, value)
+
+
 def test_a_target_id_is_required() -> None:
     with pytest.raises(SpiceError, match="requires a target id"):
         assemble_lane_chrome("   ", every_facet_observed())
@@ -253,6 +327,25 @@ def test_a_facet_outside_the_contract_is_refused() -> None:
 def test_a_revision_cannot_count_backwards() -> None:
     with pytest.raises(SpiceError, match="cannot count backwards"):
         LaneChromeOrder(revision=-1)
+
+
+def browser_facet_authorities() -> dict[str, str]:
+    """The authority each facet name carries in the browser reducer."""
+    source = LANE_STORE_JS.read_text(encoding="utf-8")
+    declared = source.split("const LANE_CHROME_FACET_AUTHORITIES", 1)[1]
+    return dict(re.findall(r"(\w+): \"([^\"]+)\"", declared.split("});", 1)[0]))
+
+
+def browser_epoch_encodings() -> list[tuple[str, list[str]]]:
+    """The generation spellings the browser's own reducer sweep is run against.
+
+    Read from that sweep rather than restated here: vectors copied into a second
+    language stop being a parity check the moment one copy is extended.
+    """
+    source = CHROME_FIXTURE_JS.read_text(encoding="utf-8")
+    declared = source.split("const EPOCH_ENCODINGS = ", 1)[1].split("\n];", 1)[0]
+    table = re.sub(r",(\s*[\]}])", r"\1", f"{declared}\n]")
+    return [(encoding, epochs) for encoding, epochs in json.loads(table)]
 
 
 def spice_import_closure(root: str) -> set[str]:
