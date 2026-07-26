@@ -2,51 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
 
 from spice.agent.driver import AgentDriver
-from spice.sessions.util import first_text
-
-
-def _line_might_carry_assistant_message(line: str) -> bool:
-    return '"message"' in line and (
-        '"role":"assistant"' in line or '"type":"assistant"' in line
-    )
-
-
-def _safe_loads(line: str) -> dict[str, Any] | None:
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return obj if isinstance(obj, dict) else None
+from spice.transcript.decode import decode_assistant_text
 
 
 def extract_assistant_text(line: str, driver: AgentDriver) -> str | None:
     """Return the assistant prose carried by a transcript JSONL `line`, or None.
 
-    Cheap substring prefilter first: an overwhelming majority of transcript
-    lines are tool calls / function results that we can reject without a JSON
-    parse. Only the lines that COULD be an assistant message reach
-    `json.loads` — then we validate shape and pull the first text frame.
+    The dialect knowledge lives in the driver hooks the substrate consumes: the
+    cheap prefilter that rejects the overwhelming majority of lines without a
+    JSON parse, and the decode of what survives. The first text frame is the one
+    this consumer wants, matching the single frame the dict seam used to carry.
     """
-    if not _line_might_carry_assistant_message(line):
-        return None
-    obj = _safe_loads(line)
-    if obj is None:
-        return None
-    event = driver.normalize_transcript_line(obj)
-    if event is None:
-        return None
-    payload = event.get("payload") or {}
-    if event.get("type") != "response_item":
-        return None
-    if payload.get("type") != "message" or payload.get("role") != "assistant":
-        return None
-    text = first_text(payload.get("content"))
-    return text or None
+    texts = decode_assistant_text(line, driver)
+    return next((text.text for text in texts if text.text), None)
 
 
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
