@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from struct import pack
 from threading import Event, Thread
 from time import monotonic
 from typing import Any
@@ -244,7 +245,7 @@ class AvailableWorkWatch:
         due = monotonic() + delay
         self._timers[wake.target_id] = _LifecycleTimer(
             due=due,
-            source_identity=f"{outcome.input_identity}@{due:.9f}",
+            source_identity=_timer_source_identity(due),
         )
 
     def next_timer_timeout(self) -> float | None:
@@ -288,3 +289,8 @@ def _event_identity(path: Path) -> str:
         return "0"
     token = (text.split(maxsplit=1) or ["0"])[0]
     return token if token.isdigit() else "0"
+
+
+def _timer_source_identity(due: float) -> str:
+    """Encode one absolute monotonic deadline as a fixed-size opaque token."""
+    return pack("!d", due).hex()
