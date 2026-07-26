@@ -6,11 +6,12 @@ import json
 import sqlite3
 from typing import Any, Iterable
 
+from spice.errors import SpiceError
 from spice.mail.ackstate import directive_history_records_from_database
 from spice.serve.team.store import ServeTeamStore, TeamState
 from spice.tasks import config as task_config
 from spice.tasks import lanes
-from spice.tasks.opslog import operations_db_path
+from spice.tasks.opslog import latest_operation_epoch, operations_db_path
 
 
 def team_diagnostics_payload(store: ServeTeamStore | None = None) -> dict[str, Any]:
@@ -145,8 +146,13 @@ def _metric_family_rows(
     )
     task_path = operations_db_path()
     try:
-        task_freshness = task_path.stat().st_mtime
-    except OSError:
+        # The two canonical authorities beside this one date themselves by the
+        # instants they recorded, and the task log answers the same way. Its
+        # file times cannot: Taskwarrior rewrites the database on every read,
+        # so a store mtime is pinned to now under any live drive and could
+        # never show this authority going quiet.
+        task_freshness = latest_operation_epoch()
+    except SpiceError:
         task_freshness = None
     authority_freshness = max(
         (float(event["timestamp"]) for event in events),

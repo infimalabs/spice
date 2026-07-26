@@ -27,7 +27,11 @@ from tests.test_teamstorehelpers import store_remove_agent
 AGENT_A = "agent-a"
 ANCESTOR_THREAD = "ancestor-thread-a"
 EXIT_OK = 0
+TASK_A = "task-a"
 TASK_FILTERS = ("serve.ui", "task.review")
+# The one instant the task plane records, stated as the epoch seconds every
+# other canonical family in this table publishes.
+TASK_OPERATION_EPOCH = 1785095505.29108
 TEAM_ID = "team-main"
 
 
@@ -110,6 +114,50 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     assert "metric families:" in text
     assert "agentActivity owner=" in text
     assert "directiveLifecycle owner=" in text
+
+
+def test_task_lifecycle_freshness_dates_the_recorded_operation(tmp_path, task_plane):
+    """The instant the task plane recorded, carried through to both surfaces.
+
+    Freshness here is the same kind of answer the neighbouring canonical
+    families give -- epoch seconds naming when that authority last recorded
+    something -- so a reader comparing the column across families is comparing
+    one thing. The store's own file times cannot supply it: Taskwarrior
+    rewrites the database on every read, and this value must move only when an
+    operation lands.
+    """
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.create_team(team_id=TEAM_ID, members=[AGENT_A])
+    _record_identity(store)
+    task_plane.record(
+        "claim", task_id=TASK_A, agent_id=AGENT_A, ts=TASK_OPERATION_EPOCH
+    )
+
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+    families = {row["family"]: row for row in payload["metricFamilies"]}
+
+    assert families["taskLifecycle"]["freshness"] == TASK_OPERATION_EPOCH
+    assert "taskLifecycle owner=" in text
+    assert f"freshness={TASK_OPERATION_EPOCH} " in text
+
+
+def test_task_lifecycle_freshness_degrades_when_the_log_is_unreachable(
+    tmp_path, monkeypatch
+):
+    """An absent authority costs the column, never the whole diagnostics read."""
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.create_team(team_id=TEAM_ID, members=[AGENT_A])
+    _record_identity(store)
+    monkeypatch.setattr(task_config, "data_dir", lambda: tmp_path / "absent")
+
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+    families = {row["family"]: row for row in payload["metricFamilies"]}
+
+    assert families["taskLifecycle"]["freshness"] is None
+    assert families["taskLifecycle"]["status"] == "canonical"
+    assert "taskLifecycle owner=" in text
 
 
 def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
