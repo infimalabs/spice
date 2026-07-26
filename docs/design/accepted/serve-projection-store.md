@@ -28,16 +28,18 @@ checkpoint recording how far they were built cannot survive each other. Keeping
 a surviving half would read as fact exactly what the replay is about to
 contradict.
 
-Every family registers, in code, five things:
+Every family registers, in code, six things:
 
 1. **source** — the canonical native facts it is derived from;
 2. **cursor** — what records how far the last build got;
 3. **horizon** — how far back that source can still be replayed;
 4. **rebuild** — the entry point that refills it; and
 5. **beyond horizon** — what the family can still say when the source no longer
-   reaches back far enough.
+   reaches back far enough; and
+6. **recovery action** — the exact operator command that starts a replacement
+   build.
 
-A table with no answer to those five does not belong in this store. The
+A table with no answer to those six does not belong in this store. The
 registration is executable, not prose in a document: a test resolves every
 dotted `spice.` symbol named in it, so a rebuild entry point that is renamed or
 deleted fails the suite rather than rotting into a false claim.
@@ -52,29 +54,45 @@ counts against, so a replaced transcript reusing a path is recognized as a
 replacement rather than resumed into. Its horizon is the transcript files still
 on disk; per-bucket counts are pruned at the metric history retention horizon
 and lifetime counters are not. It is refilled by
-`spice.serve.metrics.record_transcript_metrics_for_agent`, which resumes each
-source from its checkpoint and therefore from its first byte once a reset
-removed that checkpoint. Beyond the horizon it rebuilds from the transcript
-bytes that remain: activity whose source file is gone does not come back, and
-the rebuilt family says so by starting at the earliest bucket the surviving
-sources produce.
+`spice.serve.metrics.rebuild_transcript_metrics`. Recovery resolves sources in
+one documented order: the exact checkpoint manifest of a servable generation,
+then authority identities whose recorded transcript owner can still discover
+their recorded thread. Each selected source is replayed from its first byte
+through the typed transcript reader. Beyond the horizon it rebuilds from the
+transcript bytes that remain: activity whose source file is gone does not come
+back, and the rebuilt family says so by starting at the earliest bucket the
+surviving sources produce.
 
-## Publication and Reset
+## Publication, Rebuild, and Reset
 
 `projection_generations` records which build of each family a reader is looking
-at. It is store bookkeeping rather than a family of its own.
+at. `projection_status` records `ready`, `rebuilding`, `stale`, `unavailable`,
+or `incompatible`, whether the published generation remains servable, source
+freshness, the published retention floor, the last successful rebuild, failure
+detail, and the exact recovery action. Both are store bookkeeping rather than
+families of their own.
 
-`reset(*families)` empties each named family's tables and advances its
-generation inside one `BEGIN IMMEDIATE` transaction. A concurrent reader
-therefore sees either the whole previous build or an empty new one, never a new
-generation stamped over surviving rows. Running it twice empties nothing the
-second time and still advances the generation, which is what makes a reset
-retried after an interrupted one arrive where a single clean run would.
+`rebuild(family, populate)` marks the family rebuilding, creates a temporary
+projection file beside the live file, replays the native facts into that
+isolated file, and validates the staged family. Readers continue serving the
+whole prior generation while this work runs. One final `BEGIN IMMEDIATE`
+transaction deletes the live family rows, copies every staged table, advances
+the generation, and marks the result ready. There is no observable empty or
+partially copied generation.
 
-A family discarded for schema drift is republished the same way, so an operator
-reading generations sees the rebuild rather than inferring one from empty
-tables. `spice serve diagnostics` reports the projection store path and, per
-family, its generation, update time, row counts, and full registration.
+If population fails, the temporary file is discarded. A previously published
+generation becomes `stale` and remains servable; a family with no prior
+generation becomes explicitly `unavailable`. A killed process can leave the
+status `rebuilding`, but its prior generation remains the only servable rows.
+Retrying the recovery command stages another complete replacement.
+
+`spice serve reset-projections` performs the isolated rebuild despite its
+historical command name.
+
+`spice serve diagnostics` reports the projection store path and, per family,
+its generation, status, servability, cursor, horizon, source freshness,
+retention floor, last successful rebuild, row counts, failure detail, and exact
+recovery action.
 
 ## No Migration Ladder
 
@@ -83,12 +101,15 @@ preserve every row. The projection store deliberately has none of that.
 
 - An unrecognized `user_version` — older, newer, or a half-created file — means
   this writer has no contract for what the file describes. Every table in it is
-  replayable, so all of them are dropped and rebuilt rather than migrated or
-  refused.
+  replayable, so all of them are discarded and recreated at the current shape.
+  The recreated family is `incompatible` and unavailable until the explicit
+  rebuild publishes native facts.
 - A family whose table shape no longer matches the current DDL is dropped whole
-  and rebuilt.
-- A file SQLite cannot open at all is discarded and recreated. Refusing instead
-  would let a corrupt projection block the reads it exists to accelerate.
+  and marked incompatible.
+- A file SQLite cannot open at all is discarded, recreated, and marked
+  incompatible. Refusing instead would let a corrupt projection block the
+  reads it exists to accelerate; presenting the recreated empty rows as a
+  valid answer would be equally wrong.
 
 A shape change here costs a replay. Paying that is cheaper and safer than
 carrying migration code for facts that can be produced again.
@@ -115,10 +136,14 @@ databases that would be a projection write inside an authority transaction, with
 a crash window between them. Deriving it is crash-safe by construction and
 covers actors the copy never ran for.
 
-**Retention is two transactions.** The retention horizon is an authority
-setting and the pruned rows are a projection, so reading the horizon and
-deleting the rows cannot be one transaction. Ageing out counts the projection
-can rebuild is exactly the work that is allowed to fail alone.
+**Retention is two transactions and a published cursor.** The retention horizon
+is an authority setting and the pruned rows are a projection, so reading the
+horizon and deleting the rows cannot be one authority transaction. The
+resulting `retention_floor` is committed beside the deleted buckets. An
+isolated rebuild reapplies that exact floor before publication, so surviving
+transcript bytes cannot resurrect already aged-out series. Recovery after an
+incompatible file, where the old floor itself is gone, derives the current
+authority-configured floor.
 
 ## Constraints
 
@@ -133,14 +158,18 @@ can rebuild is exactly the work that is allowed to fail alone.
 
 ## Validation
 
-Executable proofs in `tests/test_serveprojection.py` and
-`tests/test_teamschema.py` establish that:
+Executable proofs in `tests/test_serveprojection.py`,
+`tests/test_serveprojectionparity.py`, and `tests/test_teamschema.py` establish
+that:
 
-- every registered family answers all five questions and every `spice.` symbol
+- every registered family answers all six questions and every `spice.` symbol
   its registration names resolves;
 - the schema builds exactly the registered family tables plus bookkeeping, so no
   table exists that nobody registered;
-- reset is idempotent and republishes on every run;
+- a successful isolated rebuild serves the prior generation until one atomic
+  publication, and a failed rebuild keeps that generation stale and servable;
+- a schema discard and failed recovery expose an exact unavailable error, never
+  an empty metric answer;
 - a reader on a separate connection, observing mid-transaction, never sees a new
   generation beside old rows;
 - topology, routing, filters, renewals, and identities all read back with the
@@ -148,10 +177,12 @@ Executable proofs in `tests/test_serveprojection.py` and
 - deleting the projection file leaves the authority dump byte-identical;
 - an unrecognized projection version discards the whole file, including tables
   this writer does not know, and rebuilds at the current version;
-- a corrupt projection file is rebuilt rather than reported; and
+- a corrupt projection file is recreated as explicitly incompatible; and
 - a drifted family is dropped whole, rebuilt from current DDL, and republished
-  as a new generation while the authority file is untouched.
-
-## Follow-Ups
-
-- `TEAM-1kGsmjZY`: prove destructive projection rebuild and parity end to end.
+  as a new generation while the authority file is untouched;
+- a representative history containing directives/ACKs, activity, task
+  lifecycle, a team move, chained idempotent renewals, restart/retry, retention,
+  and a projection schema discard yields identical supported Serve metrics
+  after deterministic rebuild; and
+- authority contents, schema, version, revision history, and logical checksum
+  remain identical across that reset and replay.

@@ -8,7 +8,10 @@ from datetime import UTC, datetime
 import pytest
 
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.metrics import record_transcript_metrics_for_agent
+from spice.serve.metrics import (
+    rebuild_transcript_metrics,
+    record_transcript_metrics_for_agent,
+)
 from spice.serve.team import metrics as team_metrics
 from spice.serve.team.metrics import AgentMetricCheckpoint
 from spice.serve.team.projection import (
@@ -16,7 +19,7 @@ from spice.serve.team.projection import (
     PROJECTION_SCHEMA,
     PROJECTION_SCHEMA_VERSION,
 )
-from spice.serve.team.store import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.sqliteconnection import sqlite_connection
 from spice.transcript.reader import TranscriptFileIdentity
 from tests.test_directivefacthelpers import (
@@ -612,8 +615,9 @@ def test_a_drifted_checkpoint_shape_replays_its_whole_family(tmp_path):
 
     store = ServeTeamStore(path=path)
     surviving = _projection_row_counts(store)
-    record_transcript_metrics_for_agent(
-        store, agent_id="agent-a", transcript_path=transcript
+    rebuild_transcript_metrics(
+        store,
+        sources=(("agent-a", transcript),),
     )
 
     # The checkpoint shape changed, so its aggregates went with it: a surviving
@@ -642,13 +646,46 @@ def test_metric_projections_replay_equivalently_after_deletion(tmp_path):
     now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
     ingested = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
 
-    store.projections.reset()
-    emptied = _projection_row_counts(store)
+    rebuilt = rebuild_transcript_metrics(store)
+
+    # Buckets, lifetime totals, and cursors are rebuilt in isolation. Only the
+    # complete replay becomes generation 2, so no empty or partial build is
+    # presented between the two equivalent answers.
+    assert rebuilt.generation == 2
+    assert rebuilt.status == "ready"
+    assert store.lane_metric_summary("agent-a", bucket_count=12, now=now) == ingested
+
+
+def test_metric_rebuild_preserves_the_published_retention_boundary(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(
+        team_id="team-retention",
+        members=["agent-a"],
+        config=TeamConfig(shell_settings={"metrics": {"historyRetentionDays": 1}}),
+    )
+    transcript = tmp_path / "rollout-retention.jsonl"
+    _write_rollout(
+        transcript,
+        [
+            _assistant_entry("2026-06-08T12:00:00.000000Z", "outside horizon"),
+            _tool_call_entry("2026-06-08T12:00:01.000000Z", "function_call"),
+            _assistant_entry("2026-06-10T11:59:00.000000Z", "inside horizon"),
+            _tool_call_entry("2026-06-10T11:59:01.000000Z", "function_call"),
+        ],
+    )
     record_transcript_metrics_for_agent(
         store, agent_id="agent-a", transcript_path=transcript
     )
+    now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC).timestamp()
+    store.prune_metric_history(now=now)
+    before = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+    before_state = store.projections.family_states()[0]
 
-    # Buckets, lifetime totals, and cursors are projections: the reset empties
-    # them, and replaying the same facts lands on the same answers.
-    assert emptied == dict.fromkeys(METRIC_PROJECTION_TABLES, 0)
-    assert store.lane_metric_summary("agent-a", bucket_count=12, now=now) == ingested
+    rebuilt = rebuild_transcript_metrics(store)
+    after = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    assert before.tool_calls == 2
+    assert sum(before.sparkline) == 2
+    assert after == before
+    assert before_state.retention_floor == now - 24 * 60 * 60
+    assert rebuilt.retention_floor == before_state.retention_floor

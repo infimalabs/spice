@@ -15,12 +15,13 @@ answer to those does not belong in this store.
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
@@ -29,6 +30,15 @@ PROJECTION_DATABASE_FILENAME = "spiceprojections.sqlite3"
 PROJECTION_SQLITE_BUSY_TIMEOUT_MS = 5000
 PROJECTION_SCHEMA_VERSION = 1
 FIRST_GENERATION = 1
+PROJECTION_STATUS_READY = "ready"
+PROJECTION_STATUS_REBUILDING = "rebuilding"
+PROJECTION_STATUS_STALE = "stale"
+PROJECTION_STATUS_UNAVAILABLE = "unavailable"
+PROJECTION_STATUS_INCOMPATIBLE = "incompatible"
+
+
+class ProjectionUnavailableError(SpiceError):
+    """A family has no writable/servable generation for this operation."""
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,7 @@ class ProjectionFamily:
     horizon: str
     rebuild: str
     beyond_horizon: str
+    recovery_action: str
 
 
 AGENT_ACTIVITY = ProjectionFamily(
@@ -59,22 +70,25 @@ AGENT_ACTIVITY = ProjectionFamily(
     ),
     cursor=(
         "agent_metric_cursors: a byte offset per (agent_id, source_path), "
-        "carrying the source device and inode that offset counts against"
+        "carrying the source device and inode that offset counts against; "
+        "recovery supplements a servable cursor manifest with transcript paths "
+        "discoverable from authority identities"
     ),
     horizon=(
         "the transcript files still on disk; per-bucket counts are pruned at the "
         "metric history retention horizon, and lifetime counters are not"
     ),
     rebuild=(
-        "spice.serve.metrics.record_transcript_metrics_for_agent, which resumes "
-        "each source from its checkpoint and therefore from its first byte once "
-        "reset removed the checkpoint"
+        "spice.serve.metrics.rebuild_transcript_metrics, which replays every "
+        "selected source into an isolated store and atomically publishes the "
+        "complete family"
     ),
     beyond_horizon=(
         "counts rebuild from the transcript bytes that remain; activity whose "
         "source file is gone does not come back, and the rebuilt family says so "
         "by starting at the earliest bucket the surviving sources produce"
     ),
+    recovery_action="spice serve reset-projections agentActivity",
 )
 
 PROJECTION_FAMILIES: tuple[ProjectionFamily, ...] = (AGENT_ACTIVITY,)
@@ -94,6 +108,20 @@ CREATE TABLE IF NOT EXISTS projection_generations (
     family TEXT PRIMARY KEY,
     generation INTEGER NOT NULL,
     updated_at REAL NOT NULL
+);
+-- Rebuild state is bookkeeping beside the published generation, not a
+-- projection family. A failed isolated build leaves `servable = 1` when an
+-- older complete generation still exists; a destructive reset or incompatible
+-- schema has no published answer and says so explicitly.
+CREATE TABLE IF NOT EXISTS projection_status (
+    family TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    servable INTEGER NOT NULL,
+    last_successful_rebuild REAL,
+    freshness REAL,
+    retention_floor REAL,
+    detail TEXT NOT NULL,
+    recovery_action TEXT NOT NULL
 );
 -- Counted activity carries the source that produced it, so losing one
 -- source's checkpoint reverses that source's contribution and leaves every
@@ -142,6 +170,13 @@ class ProjectionFamilyState:
     generation: int
     updated_at: float
     row_counts: dict[str, int]
+    status: str
+    servable: bool
+    last_successful_rebuild: float | None
+    freshness: float | None
+    retention_floor: float | None
+    detail: str
+    recovery_action: str
 
 
 def projection_database_path() -> Path:
@@ -242,29 +277,44 @@ class ServeProjectionStore:
                 # reported. Refusing instead would let a corrupt projection
                 # block the reads it exists to accelerate.
                 self._discard_file_locked()
-                self._open_and_sync_locked()
+                self._open_and_sync_locked(
+                    incompatible_detail=(
+                        "projection file was unreadable and was recreated"
+                    )
+                )
             self._initialized_paths.add(self.path)
 
-    def _open_and_sync_locked(self) -> None:
+    def _open_and_sync_locked(self, *, incompatible_detail: str = "") -> None:
         with sqlite_connection(
             self.path,
             busy_timeout_ms=PROJECTION_SQLITE_BUSY_TIMEOUT_MS,
             ensure_parent=True,
         ) as connection:
-            self._sync_schema_locked(connection)
+            self._sync_schema_locked(
+                connection,
+                incompatible_detail=incompatible_detail,
+            )
             connection.execute("PRAGMA journal_mode = WAL")
 
     def _discard_file_locked(self) -> None:
-        for path in (
-            self.path,
-            self.path.with_name(f"{self.path.name}-wal"),
-            self.path.with_name(f"{self.path.name}-shm"),
-        ):
-            path.unlink(missing_ok=True)
+        _discard_projection_files(self.path)
 
-    def _sync_schema_locked(self, connection: sqlite3.Connection) -> None:
+    def _sync_schema_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        incompatible_detail: str = "",
+    ) -> None:
         connection.execute("BEGIN IMMEDIATE")
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        existing_tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        discarded_all = bool(existing_tables) and stored != PROJECTION_SCHEMA_VERSION
         if stored != PROJECTION_SCHEMA_VERSION:
             self._drop_all_locked(connection)
             dropped: tuple[ProjectionFamily, ...] = ()
@@ -278,11 +328,45 @@ class ServeProjectionStore:
                 "VALUES (?, ?, ?) ON CONFLICT(family) DO NOTHING",
                 (family.name, FIRST_GENERATION, now),
             )
+            connection.execute(
+                "INSERT INTO projection_status "
+                "(family, status, servable, last_successful_rebuild, freshness, "
+                "retention_floor, detail, recovery_action) "
+                "VALUES (?, ?, 1, NULL, NULL, NULL, '', ?) "
+                "ON CONFLICT(family) DO NOTHING",
+                (
+                    family.name,
+                    PROJECTION_STATUS_READY,
+                    family.recovery_action,
+                ),
+            )
         # A family discarded for drift is republished exactly as a reset one is,
         # so an operator reading generations sees the rebuild rather than having
         # to infer it from empty tables.
         for family in dropped:
             _bump_generation_locked(connection, family, now)
+            _set_family_status_locked(
+                connection,
+                family,
+                status=PROJECTION_STATUS_INCOMPATIBLE,
+                servable=False,
+                detail=(
+                    "projection table shape was incompatible and the family was emptied"
+                ),
+            )
+        if discarded_all or incompatible_detail:
+            detail = incompatible_detail or (
+                f"projection schema version {stored} was incompatible with "
+                f"version {PROJECTION_SCHEMA_VERSION} and was recreated"
+            )
+            for family in PROJECTION_FAMILIES:
+                _set_family_status_locked(
+                    connection,
+                    family,
+                    status=PROJECTION_STATUS_INCOMPATIBLE,
+                    servable=False,
+                    detail=detail,
+                )
         connection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION}")
         connection.commit()
 
@@ -325,6 +409,11 @@ class ServeProjectionStore:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
+        """Open the physical store for schema, diagnostics, and test tooling.
+
+        Production fact readers and writers use ``read`` and ``write`` below so
+        an unavailable generation cannot be mistaken for an empty answer.
+        """
         self._ensure_schema()
         with sqlite_connection(
             self.path, busy_timeout_ms=PROJECTION_SQLITE_BUSY_TIMEOUT_MS
@@ -332,24 +421,100 @@ class ServeProjectionStore:
             connection.row_factory = sqlite3.Row
             yield connection
 
-    def reset(self, *family_names: str) -> tuple[ProjectionFamily, ...]:
-        """Empty each named family and publish it as a new generation.
+    @contextmanager
+    def read(self, family: ProjectionFamily) -> Iterator[sqlite3.Connection]:
+        """Read a complete published generation, including a prior stale one."""
+        with self.connect() as connection:
+            connection.execute("BEGIN")
+            status = _family_status_locked(connection, family)
+            if not status["servable"]:
+                raise ProjectionUnavailableError(_unavailable_message(family, status))
+            yield connection
 
-        Emptying the rows and bumping the generation are one transaction, so a
-        concurrent reader sees either the whole previous build or an empty new
-        one, never a generation stamped over surviving rows. Running it twice
-        empties nothing the second time and still advances the generation, which
-        is what makes a retried reset safe after an interrupted one.
+    @contextmanager
+    def _write(self, family: ProjectionFamily) -> Iterator[sqlite3.Connection]:
+        """Mutate only the current ready generation.
+
+        A staged rebuild writes to its own fresh store. The published store
+        rejects concurrent mutations while rebuilding so the atomic swap cannot
+        omit activity that landed after the staging snapshot.
         """
-        families = _requested_families(family_names)
-        now = time.time()
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            for family in families:
-                for table in family.tables:
-                    connection.execute(f'DELETE FROM "{table}"')
-                _bump_generation_locked(connection, family, now)
-        return families
+            status = _family_status_locked(connection, family)
+            if status["status"] != PROJECTION_STATUS_READY:
+                raise ProjectionUnavailableError(_unavailable_message(family, status))
+            yield connection
+
+    def _mark_rebuilding(self, family: ProjectionFamily) -> None:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = _family_status_locked(connection, family)
+            _set_family_status_locked(
+                connection,
+                family,
+                status=PROJECTION_STATUS_REBUILDING,
+                servable=bool(current["servable"]),
+                detail="isolated rebuild is in progress",
+            )
+
+    def _mark_rebuild_failed(
+        self, family: ProjectionFamily, error: BaseException
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = _family_status_locked(connection, family)
+            servable = bool(current["servable"])
+            _set_family_status_locked(
+                connection,
+                family,
+                status=(
+                    PROJECTION_STATUS_STALE
+                    if servable
+                    else PROJECTION_STATUS_UNAVAILABLE
+                ),
+                servable=servable,
+                detail=f"isolated rebuild failed: {error}",
+            )
+
+    def _publish_rebuild(
+        self,
+        family: ProjectionFamily,
+        rows: dict[str, tuple[tuple[object, ...], ...]],
+        *,
+        freshness: float | None,
+        retention_floor: float | None,
+    ) -> None:
+        now = time.time()
+        columns = _canonical_columns()
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for table in family.tables:
+                connection.execute(f'DELETE FROM "{table}"')
+                values = rows[table]
+                if values:
+                    names = columns[table]
+                    placeholders = ",".join("?" for _ in names)
+                    connection.executemany(
+                        f'INSERT INTO "{table}" '
+                        f"({','.join(names)}) VALUES ({placeholders})",
+                        values,
+                    )
+            _bump_generation_locked(connection, family, now)
+            connection.execute(
+                "UPDATE projection_status SET status = ?, servable = 1, "
+                "last_successful_rebuild = ?, freshness = ?, "
+                "retention_floor = COALESCE(?, retention_floor), detail = '', "
+                "recovery_action = ? WHERE family = ?",
+                (
+                    PROJECTION_STATUS_READY,
+                    now,
+                    freshness,
+                    retention_floor,
+                    family.recovery_action,
+                    family.name,
+                ),
+            )
 
     def family_states(self) -> tuple[ProjectionFamilyState, ...]:
         with self.connect() as connection:
@@ -357,6 +522,14 @@ class ServeProjectionStore:
                 str(row["family"]): (int(row["generation"]), float(row["updated_at"]))
                 for row in connection.execute(
                     "SELECT family, generation, updated_at FROM projection_generations"
+                )
+            }
+            statuses = {
+                str(row["family"]): row
+                for row in connection.execute(
+                    "SELECT family, status, servable, last_successful_rebuild, "
+                    "freshness, retention_floor, detail, recovery_action "
+                    "FROM projection_status"
                 )
             }
             states = []
@@ -372,12 +545,153 @@ class ServeProjectionStore:
                     )
                     for table in family.tables
                 }
+                status = statuses[family.name]
                 states.append(
                     ProjectionFamilyState(
                         family=family,
                         generation=generation,
                         updated_at=updated_at,
                         row_counts=counts,
+                        status=str(status["status"]),
+                        servable=bool(status["servable"]),
+                        last_successful_rebuild=(
+                            None
+                            if status["last_successful_rebuild"] is None
+                            else float(status["last_successful_rebuild"])
+                        ),
+                        freshness=(
+                            None
+                            if status["freshness"] is None
+                            else float(status["freshness"])
+                        ),
+                        retention_floor=(
+                            None
+                            if status["retention_floor"] is None
+                            else float(status["retention_floor"])
+                        ),
+                        detail=str(status["detail"]),
+                        recovery_action=str(status["recovery_action"]),
                     )
                 )
         return tuple(states)
+
+
+def rebuild_projection_family(
+    store: ServeProjectionStore,
+    family_name: str,
+    populate: Callable[[ServeProjectionStore], float | None],
+) -> ProjectionFamilyState:
+    """Populate an isolated store and atomically publish one complete family.
+
+    Readers keep the prior published generation while ``populate`` runs. A
+    failed or interrupted callback never copies staging rows into the live
+    file; diagnostics retain either a stale servable generation or an
+    explicitly unavailable state.
+    """
+    family = _requested_families((family_name,))
+    if len(family) != 1:
+        raise SpiceError("projection rebuild requires exactly one family")
+    selected = family[0]
+    store._mark_rebuilding(selected)
+    stage_path = _staging_path(store.path, selected)
+    stage = ServeProjectionStore(stage_path)
+    try:
+        freshness = populate(stage)
+        rows = _family_rows(stage, selected)
+        staged_state = next(
+            state for state in stage.family_states() if state.family == selected
+        )
+        store._publish_rebuild(
+            selected,
+            rows,
+            freshness=freshness,
+            retention_floor=staged_state.retention_floor,
+        )
+    except BaseException as exc:
+        store._mark_rebuild_failed(selected, exc)
+        raise
+    finally:
+        ServeProjectionStore._initialized_paths.discard(stage_path)
+        _discard_projection_files(stage_path)
+    return next(state for state in store.family_states() if state.family == selected)
+
+
+def _set_family_status_locked(
+    connection: sqlite3.Connection,
+    family: ProjectionFamily,
+    *,
+    status: str,
+    servable: bool,
+    detail: str,
+) -> None:
+    connection.execute(
+        "UPDATE projection_status SET status = ?, servable = ?, detail = ?, "
+        "recovery_action = ? WHERE family = ?",
+        (
+            status,
+            int(servable),
+            detail,
+            family.recovery_action,
+            family.name,
+        ),
+    )
+
+
+def _family_status_locked(
+    connection: sqlite3.Connection, family: ProjectionFamily
+) -> sqlite3.Row:
+    row = connection.execute(
+        "SELECT status, servable, detail, recovery_action "
+        "FROM projection_status WHERE family = ?",
+        (family.name,),
+    ).fetchone()
+    if row is None:
+        raise SpiceError(f"projection family status is missing: {family.name}")
+    return row
+
+
+def _unavailable_message(family: ProjectionFamily, status: sqlite3.Row) -> str:
+    detail = str(status["detail"] or status["status"])
+    recovery = str(status["recovery_action"] or family.recovery_action)
+    return (
+        f"Serve projection {family.name} is {status['status']}: {detail}; "
+        f"recover with `{recovery}`"
+    )
+
+
+def _staging_path(path: Path, family: ProjectionFamily) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        prefix=f".{path.name}.{family.name}.",
+        suffix=".rebuild",
+        dir=path.parent,
+        delete=False,
+    )
+    handle.close()
+    return Path(handle.name)
+
+
+def _discard_projection_files(path: Path) -> None:
+    for candidate in (
+        path,
+        path.with_name(f"{path.name}-wal"),
+        path.with_name(f"{path.name}-shm"),
+    ):
+        candidate.unlink(missing_ok=True)
+
+
+def _family_rows(
+    store: ServeProjectionStore, family: ProjectionFamily
+) -> dict[str, tuple[tuple[object, ...], ...]]:
+    columns = _canonical_columns()
+    with store.read(family) as connection:
+        return {
+            table: tuple(
+                tuple(row[column] for column in columns[table])
+                for row in connection.execute(
+                    f'SELECT * FROM "{table}" ORDER BY '
+                    + ", ".join(f'"{column}"' for column in columns[table])
+                )
+            )
+            for table in family.tables
+        }
