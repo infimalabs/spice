@@ -420,6 +420,47 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
+def test_supervised_decorated_ack_and_task_headers_land_together(
+    task_repo, quiet_supervisor
+):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture these", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            f"**ACK {INBOX_KEY}:** capturing both now.\n"
+            "**TASK** title=Bold header | project=task.unit | acceptance=Exists\n"
+            "- TASK title=Bulleted header | project=task.unit | acceptance=Exists"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    rows = tw.export(["status:pending"])
+    handle_of = {row["description"]: identity.render_handle(row) for row in rows}
+    route = "route_filter=skipped:task.unit:no_team"
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
+    assert sorted(handle_of) == ["Bold header", "Bulleted header"]
+    # The published handles carry the message's own order, so a reversed or
+    # dropped directive shows up here even though the export order is its own.
+    assert sidechannelnotify.consume_side_channel_notices(task_repo) == [
+        _ack_feedback("ack.archived", INBOX_KEY),
+        supervisor_feedback_line(
+            "task.created",
+            handles=[handle_of["Bold header"], handle_of["Bulleted header"]],
+            projects=["task.unit", "task.unit"],
+            routes=[route, route],
+            **{"allowed-project-stems": _allowed_project_stems()},
+        ),
+        _task_backlog_note_feedback(),
+    ]
+
+
 def test_supervised_standalone_task_without_origin_is_refused(
     task_repo, quiet_supervisor
 ):
