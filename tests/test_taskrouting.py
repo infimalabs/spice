@@ -7,6 +7,7 @@ import subprocess
 from spice import paths
 from spice.agent.driver import DRIVER
 from spice.config import layers
+from spice.serve.team.lifecycle import team_task_transitions
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -830,24 +831,26 @@ def test_task_lifecycle_events_are_emitted_for_scripted_task_lifecycle(
         team_ids=[team.team_id], start=0, end=4_102_444_800
     )
     with store.connect() as connection:
-        rows = connection.execute(
-            "SELECT kind, task_id, agent_id, team_id FROM task_events "
-            "WHERE task_id = ? ORDER BY rowid",
-            (task_uuid,),
-        ).fetchall()
+        facts = [
+            transition
+            for transition in team_task_transitions(connection, end_time=4_102_444_800)
+            if transition.task_id == task_uuid
+        ]
 
     assert identity.render_handle(assigned or {}) == handle
     assert identity.render_handle(review or {}) == handle
-    assert [str(row["kind"]) for row in rows] == [
+    # Completing the last phase is the movement that drains the task, so the
+    # scripted lifecycle reads back as five movements and still counts one
+    # completion and one drain.
+    assert [str(fact.kind) for fact in facts] == [
         "claim",
         "phaseAdvance",
         "claim",
         "review",
         "complete",
-        "drain",
     ]
-    assert {str(row["agent_id"]) for row in rows} == {ACTOR_A_MEMBER, PEER_ACTOR_MEMBER}
-    assert {str(row["team_id"]) for row in rows} == {team.team_id}
+    assert {fact.agent_id for fact in facts} == {ACTOR_A_MEMBER, PEER_ACTOR_MEMBER}
+    assert {fact.team_id for fact in facts} == {team.team_id}
     assert (
         sum(point.claimed for point in series),
         sum(point.active for point in series),

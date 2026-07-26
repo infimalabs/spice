@@ -24,8 +24,13 @@ from spice.serve.team.metrics import (
     TaskLifecycleSeriesPoint,
     TaskStallState,
 )
+from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import ServeTeamStore
 
+AGENT_A = thread_actor_id("agent-a")
+AGENT_B = thread_actor_id("agent-b")
+AGENT_NEW = thread_actor_id("agent-new")
+AGENT_OLD = thread_actor_id("agent-old")
 FIRST_RENEWAL_TS = 120
 LATEST_RENEWAL_TS = 240
 POST_RENEWAL_ACTIVITY_TS = 300
@@ -41,7 +46,7 @@ class _NoHistoricalSummaryStore:
         self.summary_calls = 0
 
     def team_state(self, _team_id):
-        return SimpleNamespace(members=[SimpleNamespace(agent_id="agent-a")])
+        return SimpleNamespace(members=[SimpleNamespace(agent_id=AGENT_A)])
 
     def team_historical_metric_summary(self, *_args, **_kwargs):
         self.summary_calls += 1
@@ -50,10 +55,10 @@ class _NoHistoricalSummaryStore:
 
 def test_activity_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
     store = _store(tmp_path)
-    store.record_agent_metric_delta("agent-a", message_timestamps=[60, 120, 180])
+    store.record_agent_metric_delta(AGENT_A, message_timestamps=[60, 120, 180])
 
-    first = store.agent_activity_series(["agent-a"], start=0, end=240)
-    second = store.agent_activity_series(["agent-a"], start=0, end=240)
+    first = store.agent_activity_series([AGENT_A], start=0, end=240)
+    second = store.agent_activity_series([AGENT_A], start=0, end=240)
 
     # Stable: re-querying the same range yields identical points.
     assert first == second
@@ -64,7 +69,7 @@ def test_activity_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
         MetricSeriesPoint(180, 1),
     )
     # Arbitrary sub-range.
-    assert store.agent_activity_series(["agent-a"], start=120, end=180) == (
+    assert store.agent_activity_series([AGENT_A], start=120, end=180) == (
         MetricSeriesPoint(120, 1),
         MetricSeriesPoint(180, 1),
     )
@@ -73,44 +78,44 @@ def test_activity_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
 
 def test_activity_series_sums_across_agents(tmp_path):
     store = _store(tmp_path)
-    store.record_agent_metric_delta("agent-a", message_timestamps=[60])
-    store.record_agent_metric_delta("agent-b", message_timestamps=[60, 120])
+    store.record_agent_metric_delta(AGENT_A, message_timestamps=[60])
+    store.record_agent_metric_delta(AGENT_B, message_timestamps=[60, 120])
 
-    series = store.agent_activity_series(["agent-a", "agent-b"], start=0, end=180)
+    series = store.agent_activity_series([AGENT_A, AGENT_B], start=0, end=180)
 
     assert series == (MetricSeriesPoint(60, 2), MetricSeriesPoint(120, 1))
 
 
 def test_metric_series_payload_returns_stable_activity_directive_and_task_points(
     tmp_path,
+    task_plane,
 ):
     store = _store(tmp_path)
     state = SimpleNamespace(team_store=store)
-    team = store.create_team(team_id="team-a", members=["agent-a"])
-    store.record_agent_metric_delta("agent-a", message_timestamps=[60, 120])
+    team = store.create_team(team_id="team-a", members=[AGENT_A])
+    store.record_agent_metric_delta(AGENT_A, message_timestamps=[60, 120])
     publish_directive_fact(
         store.directive_state_path,
         "dir-1",
-        agent_id="agent-a",
+        agent_id=AGENT_A,
         team_id="team-a",
         sent_at=60,
     )
     complete_directive_fact(store.directive_state_path, "dir-1", acked_at=120)
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=180
-    )
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=120)
+    task_plane.record("complete", task_id="task-1", agent_id=AGENT_A, ts=180)
 
     activity = metric.metric_series_payload(
         state,
-        {"agentId": "agent-a", "metric": "activity", "start": 0, "end": 180},
+        {"agentId": AGENT_A, "metric": "activity", "start": 0, "end": 180},
     )
     sends = metric.metric_series_payload(
         state,
-        {"agentId": "agent-a", "metric": "sends", "start": 0, "end": 180},
+        {"agentId": AGENT_A, "metric": "sends", "start": 0, "end": 180},
     )
     acks = metric.metric_series_payload(
         state,
-        {"agentId": "agent-a", "metric": "acks", "start": 0, "end": 180},
+        {"agentId": AGENT_A, "metric": "acks", "start": 0, "end": 180},
     )
     team_sends = metric.metric_series_payload(
         state,
@@ -118,7 +123,7 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
     )
     burndown = metric.metric_series_payload(
         state,
-        {"agentId": "agent-a", "metric": "burndown", "start": 0, "end": 180},
+        {"agentId": AGENT_A, "metric": "burndown", "start": 0, "end": 180},
     )
 
     assert activity["points"] == [
@@ -136,36 +141,29 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
             "claimed": 0,
             "active": 0,
             "completed": 1,
-            "drained": 0,
+            "drained": 1,
         }
     ]
 
 
-def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path):
+def test_metric_series_payload_distribution_returns_agent_share_points(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
     state = SimpleNamespace(team_store=store)
-    store.create_team(team_id="team-a", members=["agent-a", "agent-b"])
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "phaseAdvance",
-        task_id="task-a",
-        agent_id="agent-a",
-        team_id="team-a",
-        ts=61,
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=62
-    )
-    store.record_task_lifecycle_event(
-        "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
-    )
+    # The projection names the lane's team now; the event log dates when that
+    # membership began, which is what the movements are credited against.
+    store.create_team(team_id="team-a", members=[AGENT_A, AGENT_B])
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A, AGENT_B])
+    task_plane.record("claim", task_id="task-a", agent_id=AGENT_A, ts=60)
+    task_plane.record("phaseAdvance", task_id="task-a", agent_id=AGENT_A, ts=61)
+    task_plane.record("claim", task_id="task-b", agent_id=AGENT_B, ts=62)
+    task_plane.record("review", task_id="task-b", agent_id=AGENT_B, ts=120)
 
     payload = metric.metric_series_payload(
         state,
         {
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "metric": "distribution",
             "start": 0,
             "end": 180,
@@ -187,42 +185,42 @@ def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path)
     ] == [
         {
             "bucketStart": 60,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 60,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 1,
             "active": 0,
             "work": 1,
         },
         {
             "bucketStart": 120,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 120,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 180,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 180,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 0,
             "active": 1,
             "work": 1,
@@ -325,36 +323,27 @@ def test_metric_series_payload_team_historical_rejects_unbounded_ranges(
     assert store.summary_calls == 0
 
 
-def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
+def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "phaseAdvance",
-        task_id="task-1",
-        agent_id="agent-a",
-        team_id="team-a",
-        ts=65,
-    )
-    store.record_task_lifecycle_event(
-        "review", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=70
-    )
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=120
-    )
-    store.record_task_lifecycle_event(
-        "drain", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=121
-    )
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A])
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=60)
+    task_plane.record("phaseAdvance", task_id="task-1", agent_id=AGENT_A, ts=65)
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=70)
+    task_plane.record("review", task_id="task-1", agent_id=AGENT_A, ts=75)
+    # Completing drains the task off the open board in the same movement, so
+    # one completion is one completed and one drained.
+    task_plane.record("complete", task_id="task-1", agent_id=AGENT_A, ts=120)
 
-    first = store.task_lifecycle_series(["agent-a"], start=0, end=180)
-    second = store.task_lifecycle_series(["agent-a"], start=0, end=180)
+    first = store.task_lifecycle_series([AGENT_A], start=0, end=180)
+    second = store.task_lifecycle_series([AGENT_A], start=0, end=180)
 
     assert first == second
     assert first == (
         TaskLifecycleSeriesPoint(
             bucket_start=60,
-            claimed=1,
+            claimed=2,
             active=2,
             completed=0,
             drained=0,
@@ -367,7 +356,7 @@ def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(tmp_p
             drained=1,
         ),
     )
-    assert store.task_lifecycle_series(["agent-a"], start=120, end=180) == (
+    assert store.task_lifecycle_series([AGENT_A], start=120, end=180) == (
         TaskLifecycleSeriesPoint(
             bucket_start=120,
             claimed=0,
@@ -378,24 +367,21 @@ def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(tmp_p
     )
     assert store.task_lifecycle_series(team_ids=["team-a"], start=0, end=180) == first
     assert (
-        store.task_lifecycle_series(["agent-a"], team_ids=["team-b"], start=0, end=180)
+        store.task_lifecycle_series([AGENT_A], team_ids=["team-b"], start=0, end=180)
         == ()
     )
     assert store.task_lifecycle_series(start=0, end=180) == ()
 
 
-def test_task_lifecycle_events_are_tagged_with_team_at_capture(tmp_path):
+def test_task_lifecycle_events_are_tagged_with_team_at_capture(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.create_team(team_id="team-a", members=["agent-a"])
-    store.create_team(team_id="team-b", members=())
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A])
 
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-1", agent_id="agent-a", ts=60
-    )
-    store.assign_agent("team-b", "agent-a")
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-1", agent_id="agent-a", ts=120
-    )
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=60)
+    team_event(store, "assignAgent", team_id="team-b", ts=90, agentId=AGENT_A)
+    task_plane.record("complete", task_id="task-1", agent_id=AGENT_A, ts=120)
 
     assert store.task_lifecycle_series(team_ids=["team-a"], start=0, end=180) == (
         TaskLifecycleSeriesPoint(
@@ -412,19 +398,19 @@ def test_task_lifecycle_events_are_tagged_with_team_at_capture(tmp_path):
             claimed=0,
             active=0,
             completed=1,
-            drained=0,
+            drained=1,
         ),
     )
 
 
-def test_task_lifecycle_events_keep_source_actor_and_derive_alias_lineage(tmp_path):
+def test_task_lifecycle_events_keep_source_actor_and_derive_alias_lineage(
+    tmp_path, task_plane
+):
     store = _store(tmp_path)
     store.create_team(team_id="team-a", members=())
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-1", agent_id="agent-old", team_id="team-a", ts=60
-    )
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_OLD, ts=60)
 
-    store.assign_agent("team-a", "agent-new", aliases=["agent-old"])
+    store.assign_agent("team-a", AGENT_NEW, aliases=[AGENT_OLD])
 
     expected = (
         TaskLifecycleSeriesPoint(
@@ -435,11 +421,11 @@ def test_task_lifecycle_events_keep_source_actor_and_derive_alias_lineage(tmp_pa
             drained=0,
         ),
     )
-    assert store.task_lifecycle_series(["agent-old"], start=0, end=180) == expected
-    assert store.task_lifecycle_series(["agent-new"], start=0, end=180) == ()
+    assert store.task_lifecycle_series([AGENT_OLD], start=0, end=180) == expected
+    assert store.task_lifecycle_series([AGENT_NEW], start=0, end=180) == ()
     assert (
         store.task_lifecycle_series(
-            ["agent-new"],
+            [AGENT_NEW],
             start=0,
             end=180,
             attribution=ObservationAttributionMode.LINEAGE_CUMULATIVE,
@@ -448,27 +434,17 @@ def test_task_lifecycle_events_keep_source_actor_and_derive_alias_lineage(tmp_pa
     )
 
 
-def test_task_distribution_series_shows_per_agent_work_share(tmp_path):
+def test_task_distribution_series_shows_per_agent_work_share(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "phaseAdvance",
-        task_id="task-a",
-        agent_id="agent-a",
-        team_id="team-a",
-        ts=61,
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=62
-    )
-    store.record_task_lifecycle_event(
-        "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
-    )
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=180
-    )
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A, AGENT_B])
+    task_plane.record("claim", task_id="task-a", agent_id=AGENT_A, ts=60)
+    task_plane.record("phaseAdvance", task_id="task-a", agent_id=AGENT_A, ts=61)
+    task_plane.record("claim", task_id="task-b", agent_id=AGENT_B, ts=62)
+    task_plane.record("review", task_id="task-b", agent_id=AGENT_B, ts=120)
+    task_plane.record("claim", task_id="task-a", agent_id=AGENT_A, ts=180)
+    task_plane.record("complete", task_id="task-a", agent_id=AGENT_A, ts=180)
 
     first = store.task_distribution_series(team_ids=["team-a"], start=0, end=180)
     second = store.task_distribution_series(team_ids=["team-a"], start=0, end=180)
@@ -484,11 +460,11 @@ def test_task_distribution_series_shows_per_agent_work_share(tmp_path):
         )
         for point in first
     ] == [
-        TaskDistributionSeriesPoint(60, "agent-a", claimed=0, active=1, share=0.0),
-        TaskDistributionSeriesPoint(60, "agent-b", claimed=1, active=0, share=0.0),
-        TaskDistributionSeriesPoint(120, "agent-a", claimed=0, active=1, share=0.0),
-        TaskDistributionSeriesPoint(120, "agent-b", claimed=0, active=1, share=0.0),
-        TaskDistributionSeriesPoint(180, "agent-b", claimed=0, active=1, share=0.0),
+        TaskDistributionSeriesPoint(60, AGENT_A, claimed=0, active=1, share=0.0),
+        TaskDistributionSeriesPoint(60, AGENT_B, claimed=1, active=0, share=0.0),
+        TaskDistributionSeriesPoint(120, AGENT_A, claimed=0, active=1, share=0.0),
+        TaskDistributionSeriesPoint(120, AGENT_B, claimed=0, active=1, share=0.0),
+        TaskDistributionSeriesPoint(180, AGENT_B, claimed=0, active=1, share=0.0),
     ]
     assert first[0].share == pytest.approx(1 / 2)
     assert first[1].share == pytest.approx(1 / 2)
@@ -496,45 +472,45 @@ def test_task_distribution_series_shows_per_agent_work_share(tmp_path):
     assert first[3].share == pytest.approx(1 / 2)
     assert first[4].share == pytest.approx(1.0)
     assert store.task_distribution_series(
-        ["agent-a"], team_ids=["team-a"], start=0, end=180
+        [AGENT_A], team_ids=["team-a"], start=0, end=180
     ) == (
-        TaskDistributionSeriesPoint(60, "agent-a", 0, 1, 1.0),
-        TaskDistributionSeriesPoint(120, "agent-a", 0, 1, 1.0),
+        TaskDistributionSeriesPoint(60, AGENT_A, 0, 1, 1.0),
+        TaskDistributionSeriesPoint(120, AGENT_A, 0, 1, 1.0),
     )
 
 
-def test_task_distribution_series_carries_staggered_open_claims(tmp_path):
+def test_task_distribution_series_carries_staggered_open_claims(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
-    )
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A, AGENT_B])
+    task_plane.record("claim", task_id="task-a", agent_id=AGENT_A, ts=60)
+    task_plane.record("claim", task_id="task-b", agent_id=AGENT_B, ts=120)
 
     series = store.task_distribution_series(team_ids=["team-a"], start=0, end=180)
 
     assert series == (
-        TaskDistributionSeriesPoint(60, "agent-a", claimed=1, active=0, share=1.0),
-        TaskDistributionSeriesPoint(120, "agent-a", claimed=1, active=0, share=0.5),
-        TaskDistributionSeriesPoint(120, "agent-b", claimed=1, active=0, share=0.5),
-        TaskDistributionSeriesPoint(180, "agent-a", claimed=1, active=0, share=0.5),
-        TaskDistributionSeriesPoint(180, "agent-b", claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(60, AGENT_A, claimed=1, active=0, share=1.0),
+        TaskDistributionSeriesPoint(120, AGENT_A, claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(120, AGENT_B, claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(180, AGENT_A, claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(180, AGENT_B, claimed=1, active=0, share=0.5),
     )
 
 
-def test_task_stall_states_flag_claimed_idle_task_after_threshold(tmp_path):
+def test_task_stall_states_flag_claimed_idle_task_after_threshold(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=60
-    )
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A])
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=60)
 
     states = store.task_stall_states(now=1_000, threshold_seconds=900)
 
     assert states == (
         TaskStallState(
             task_id="task-1",
-            agent_id="agent-a",
+            agent_id=AGENT_A,
             team_id="team-a",
             claimed_at=60.0,
             last_activity_at=0.0,
@@ -546,19 +522,20 @@ def test_task_stall_states_flag_claimed_idle_task_after_threshold(tmp_path):
     )
 
 
-def test_task_stall_states_use_activity_and_phase_progress(tmp_path):
+def test_task_stall_states_use_activity_and_phase_progress(
+    tmp_path, task_plane, team_event
+):
     store = _store(tmp_path)
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_agent_metric_delta("agent-a", message_timestamps=[600])
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A])
+    task_plane.record("claim", task_id="task-1", agent_id=AGENT_A, ts=60)
+    store.record_agent_metric_delta(AGENT_A, message_timestamps=[600])
 
     active = store.task_stall_states(now=800, threshold_seconds=300)
 
     assert active == (
         TaskStallState(
             task_id="task-1",
-            agent_id="agent-a",
+            agent_id=AGENT_A,
             team_id="team-a",
             claimed_at=60.0,
             last_activity_at=600.0,
@@ -570,13 +547,11 @@ def test_task_stall_states_use_activity_and_phase_progress(tmp_path):
     )
     assert (
         store.task_stall_states(
-            ["agent-b"], team_ids=["team-a"], now=800, threshold_seconds=300
+            [AGENT_B], team_ids=["team-a"], now=800, threshold_seconds=300
         )
         == ()
     )
 
-    store.record_task_lifecycle_event(
-        "phaseAdvance", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=900
-    )
+    task_plane.record("phaseAdvance", task_id="task-1", agent_id=AGENT_A, ts=900)
 
     assert store.task_stall_states(now=1_000, threshold_seconds=300) == ()

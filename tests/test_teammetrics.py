@@ -6,12 +6,14 @@ from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
 )
+from spice.serve.team.lifecycle import team_task_transitions
 from spice.serve.team.store import (
     ObservationAttributionMode,
     ServeTeamStore,
     TaskLifecycleSeriesPoint,
     TeamConfig,
 )
+from spice.tasks.transitions import TaskTransitionKind
 from tests.test_teamstorehelpers import (
     store_close_team,
     store_merge_teams,
@@ -637,7 +639,9 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
 
 
 def test_started_renewal_preserves_task_source_and_derives_lineage(
-    tmp_path, monkeypatch
+    tmp_path,
+    monkeypatch,
+    task_plane,
 ):
     clock = {"now": 0.0}
     monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
@@ -647,20 +651,10 @@ def test_started_renewal_preserves_task_source_and_derives_lineage(
 
     team = store.create_team(members=[predecessor])
     _record_identity(store, predecessor, thread_id="predecessor")
-    store.record_task_lifecycle_event(
-        "complete",
-        task_id="task-pre",
-        agent_id=predecessor,
-        team_id=team.team_id,
-        ts=60,
-    )
-    store.record_task_lifecycle_event(
-        "drain",
-        task_id="task-pre",
-        agent_id=predecessor,
-        team_id=team.team_id,
-        ts=61,
-    )
+    task_plane.record("claim", task_id="task-pre", agent_id=predecessor, ts=60)
+    # Completing drains the task off the open board in the same movement, so
+    # one completion is one completed and one drained.
+    task_plane.record("complete", task_id="task-pre", agent_id=predecessor, ts=60)
 
     clock["now"] = 120
     store.record_started_renewal(
@@ -672,7 +666,7 @@ def test_started_renewal_preserves_task_source_and_derives_lineage(
     expected = (
         TaskLifecycleSeriesPoint(
             bucket_start=60,
-            claimed=0,
+            claimed=1,
             active=0,
             completed=1,
             drained=1,
@@ -689,14 +683,22 @@ def test_started_renewal_preserves_task_source_and_derives_lineage(
         )
         == expected
     )
+    # Renewal moved the lane, and rewrote nothing: the task plane still names
+    # the predecessor as the actor who claimed and completed the task, and the
+    # team it was in while it did so.
     with store.connect() as connection:
-        assert (
-            connection.execute(
-                "SELECT COUNT(*) AS count FROM task_events WHERE agent_id = ?",
-                (predecessor,),
-            ).fetchone()["count"]
-            == 2
-        )
+        assert [
+            (
+                transition.kind,
+                transition.agent_id,
+                transition.task_id,
+                transition.team_id,
+            )
+            for transition in team_task_transitions(connection, end_time=120)
+        ] == [
+            (TaskTransitionKind.CLAIM, predecessor, "task-pre", team.team_id),
+            (TaskTransitionKind.COMPLETE, predecessor, "task-pre", team.team_id),
+        ]
 
 
 def test_team_historical_metric_summary_projects_membership_intervals(

@@ -9,6 +9,8 @@ import pytest
 from spice.errors import SpiceError
 from spice.mail.ackstate import directive_history_records_from_database
 from spice.serve.directivestats import DirectiveTotals
+from spice.serve.team.ids import thread_actor_id
+from spice.serve.team.lifecycle import team_task_transitions
 from spice.serve.team.metrics import METRIC_HISTORY_RETENTION_DAYS_ENV
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from tests.test_directivefacthelpers import (
@@ -17,6 +19,7 @@ from tests.test_directivefacthelpers import (
 )
 from spice.serve.team.schema import METRIC_HISTORY_RETENTION_SECONDS
 
+AGENT_A = thread_actor_id("agent-a")
 RECENT_TOOL_CALLS = 4
 SECONDS_PER_DAY = 24 * 60 * 60
 
@@ -25,7 +28,7 @@ def _store(tmp_path):
     return ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
 
-def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
+def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path, task_plane):
     store = _store(tmp_path)
     now = time.time()
     old = now - METRIC_HISTORY_RETENTION_SECONDS - 60
@@ -33,21 +36,17 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
 
     # Old + recent activity buckets and canonical directives.
     store.record_agent_metric_delta(
-        "agent-a", tool_calls=RECENT_TOOL_CALLS, message_timestamps=[old, recent]
+        AGENT_A, tool_calls=RECENT_TOOL_CALLS, message_timestamps=[old, recent]
     )
-    store.record_task_lifecycle_event(
-        "claim", task_id="old-task", agent_id="agent-a", team_id="t", ts=old
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="new-task", agent_id="agent-a", team_id="t", ts=recent
-    )
+    task_plane.record("claim", task_id="old-task", agent_id=AGENT_A, ts=old)
+    task_plane.record("claim", task_id="new-task", agent_id=AGENT_A, ts=recent)
     publish_directive_fact(
-        store.directive_state_path, "old", agent_id="agent-a", team_id="t", sent_at=old
+        store.directive_state_path, "old", agent_id=AGENT_A, team_id="t", sent_at=old
     )
     publish_directive_fact(
         store.directive_state_path,
         "new",
-        agent_id="agent-a",
+        agent_id=AGENT_A,
         team_id="t",
         sent_at=recent,
     )
@@ -61,15 +60,15 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
             int(row["bucket_start"])
             for row in connection.execute(
                 "SELECT bucket_start FROM agent_metric_buckets WHERE agent_id = ?",
-                ("agent-a",),
+                (AGENT_A,),
             )
         ]
         task_ids = {
-            str(row["task_id"])
-            for row in connection.execute("SELECT task_id FROM task_events")
+            transition.task_id
+            for transition in team_task_transitions(connection, end_time=now)
         }
         tool_calls = connection.execute(
-            "SELECT tool_calls FROM agent_metrics WHERE agent_id = ?", ("agent-a",)
+            "SELECT tool_calls FROM agent_metrics WHERE agent_id = ?", (AGENT_A,)
         ).fetchone()["tool_calls"]
 
     floor = int(now) - METRIC_HISTORY_RETENTION_SECONDS
@@ -82,15 +81,17 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
             store.directive_state_path
         )
     } == {"old", "new"}
-    assert task_ids == {"new-task"}
+    # Retention bounds Serve's own series; the task plane keeps every
+    # movement it ever recorded, so the older one still reads back.
+    assert task_ids == {"old-task", "new-task"}
     # Durable aggregates are untouched by retention.
     assert int(tool_calls) == RECENT_TOOL_CALLS
-    assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
+    assert store.directive_totals_for_agents([AGENT_A]) == DirectiveTotals(
         sends=2, acked=2
     )
 
 
-def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
+def test_prune_uses_team_configured_metric_retention_horizon(tmp_path, task_plane):
     store = _store(tmp_path)
     retention_seconds = 7 * SECONDS_PER_DAY
     now = time.time()
@@ -101,20 +102,16 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
         members=[],
         config=TeamConfig(shell_settings={"metrics": {"historyRetentionDays": 7}}),
     )
-    store.record_agent_metric_delta("agent-a", message_timestamps=[old, recent])
-    store.record_task_lifecycle_event(
-        "claim", task_id="old-task", agent_id="agent-a", team_id="t", ts=old
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="new-task", agent_id="agent-a", team_id="t", ts=recent
-    )
+    store.record_agent_metric_delta(AGENT_A, message_timestamps=[old, recent])
+    task_plane.record("claim", task_id="old-task", agent_id=AGENT_A, ts=old)
+    task_plane.record("claim", task_id="new-task", agent_id=AGENT_A, ts=recent)
     publish_directive_fact(
-        store.directive_state_path, "old", agent_id="agent-a", team_id="t", sent_at=old
+        store.directive_state_path, "old", agent_id=AGENT_A, team_id="t", sent_at=old
     )
     publish_directive_fact(
         store.directive_state_path,
         "new",
-        agent_id="agent-a",
+        agent_id=AGENT_A,
         team_id="t",
         sent_at=recent,
     )
@@ -126,12 +123,12 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
             int(row["bucket_start"])
             for row in connection.execute(
                 "SELECT bucket_start FROM agent_metric_buckets WHERE agent_id = ?",
-                ("agent-a",),
+                (AGENT_A,),
             )
         ]
         task_ids = {
-            str(row["task_id"])
-            for row in connection.execute("SELECT task_id FROM task_events")
+            transition.task_id
+            for transition in team_task_transitions(connection, end_time=now)
         }
 
     assert store.metric_history_retention_seconds() == retention_seconds
@@ -143,7 +140,9 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path):
             store.directive_state_path
         )
     } == {"old", "new"}
-    assert task_ids == {"new-task"}
+    # Retention bounds Serve's own series; the task plane keeps every
+    # movement it ever recorded, so the older one still reads back.
+    assert task_ids == {"old-task", "new-task"}
 
 
 def test_metric_retention_horizon_uses_env_fallback(tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -51,9 +52,7 @@ def task_repo(tmp_path, monkeypatch):
         config.set_backend(None)
 
 
-def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkeypatch):
-    clock = {"now": 100.0}
-    monkeypatch.setattr("spice.serve.team.metrics.time.time", lambda: clock["now"])
+def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo):
     store = ServeTeamStore()
     team = store.create_team(members=[ACTOR_A_MEMBER])
     _record_identity(
@@ -72,14 +71,15 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
         acceptance=["phase effort windows split phases"],
     )
 
-    clock["now"] = 100.0
+    # Real commands stamp the task plane with the plane's own clock, so the
+    # window boundaries are whatever instants these four commands wrote, and
+    # the wall clock either side of them is what the test can state about them.
+    opened = time.time()
     ops.claim(handle)
-    clock["now"] = 145.0
     ops.done(handle, validation=["todo complete"])
-    clock["now"] = 160.0
     ops.claim(handle)
-    clock["now"] = 220.0
     ops.done(handle, validation=["verify complete"])
+    closed = time.time()
 
     row = identity.resolve(handle)
     windows = store.task_phase_effort_windows([row])
@@ -96,9 +96,6 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
             window.driver,
             window.model,
             window.effort,
-            window.started_at,
-            window.ended_at,
-            effort.phase_effort_wall_seconds(window),
             window.partial_markers,
         )
         for window in windows
@@ -114,9 +111,6 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
             "codex",
             "gpt-5.5",
             "xhigh",
-            100.0,
-            145.0,
-            45.0,
             (),
         ),
         (
@@ -130,17 +124,22 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
             "codex",
             "gpt-5.5",
             "xhigh",
-            160.0,
-            220.0,
-            60.0,
             (),
         ),
     ]
+    stamps = [
+        stamp for window in windows for stamp in (window.started_at, window.ended_at)
+    ]
+    assert stamps == sorted(stamps)
+    assert opened <= stamps[0] and stamps[-1] <= closed
+    assert [effort.phase_effort_wall_seconds(window) for window in windows] == [
+        window.ended_at - window.started_at for window in windows
+    ]
 
 
-def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
+def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo, task_plane):
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A_MEMBER, ACTOR_B_MEMBER])
+    store.create_team(members=[ACTOR_A_MEMBER, ACTOR_B_MEMBER])
     _record_identity(
         store,
         ACTOR_A_MEMBER,
@@ -165,27 +164,12 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
         acceptance=["partial effort windows are marked"],
     )
     task_id = identity.uuid_of(identity.resolve(handle))
-    store.record_task_lifecycle_event(
-        "phaseAdvance",
-        task_id=task_id,
-        agent_id=ACTOR_A_MEMBER,
-        team_id=team.team_id,
-        ts=20.0,
-    )
-    store.record_task_lifecycle_event(
-        "claim",
-        task_id=task_id,
-        agent_id=ACTOR_A_MEMBER,
-        team_id=team.team_id,
-        ts=30.0,
-    )
-    store.record_task_lifecycle_event(
-        "claim",
-        task_id=task_id,
-        agent_id=ACTOR_B_MEMBER,
-        team_id=team.team_id,
-        ts=45.0,
-    )
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=10.0)
+    task_plane.record("phaseAdvance", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=20.0)
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=30.0)
+    # B takes the phase off A mid-flight, which ends A's segment where B's
+    # begins and leaves B's still running at the end of the history.
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_B_MEMBER, ts=45.0)
 
     windows = store.task_phase_effort_windows([identity.resolve(handle)])
 
@@ -209,10 +193,10 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
             "codex",
             "gpt-5.5",
             "xhigh",
-            None,
+            10.0,
             20.0,
-            None,
-            (effort.PARTIAL_MISSING_START,),
+            10.0,
+            (),
         ),
         (
             "verify",
@@ -236,6 +220,43 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
             None,
             (effort.PARTIAL_MISSING_END,),
         ),
+    ]
+
+
+def test_phase_effort_window_marks_completion_no_actor_ever_held(task_repo, task_plane):
+    store = ServeTeamStore()
+    store.create_team(members=[ACTOR_A_MEMBER])
+    _record_identity(
+        store,
+        ACTOR_A_MEMBER,
+        thread_id=ACTOR_A,
+        driver="codex",
+        model="gpt-5.5",
+        effort_value="xhigh",
+    )
+    handle = create.add(
+        "Complete a phase nobody claimed",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo", "verify", "review"],
+        acceptance=["an unheld completion is marked partial"],
+    )
+    task_id = identity.uuid_of(identity.resolve(handle))
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=10.0)
+    task_plane.record("phaseAdvance", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=20.0)
+    # The verify phase is completed with the claim already released, so the
+    # segment that ends here has no beginning and no actor to bill it to.
+    task_plane.record("complete", task_id=task_id, agent_id="", ts=30.0)
+
+    windows = store.task_phase_effort_windows([identity.resolve(handle)])
+
+    assert [
+        (window.phase, window.actor_id, window.started_at, window.ended_at)
+        for window in windows
+    ] == [("todo", ACTOR_A_MEMBER, 10.0, 20.0), ("verify", "", None, 30.0)]
+    assert [window.partial_markers for window in windows] == [
+        (),
+        (effort.PARTIAL_MISSING_START,),
     ]
 
 
@@ -430,10 +451,10 @@ def test_phase_effort_usage_reads_typed_events_once_per_transcript(
     assert usage[0].total_tokens == USAGE_TRANSCRIPT_TOTAL_TOKENS
 
 
-def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypatch):
+def test_metric_series_phase_effort_matches_task_effort_api(
+    task_repo, task_plane, team_event
+):
     transcript = task_repo / "thread-a.jsonl"
-    clock = {"now": _epoch(0)}
-    monkeypatch.setattr("spice.serve.team.metrics.time.time", lambda: clock["now"])
     store = ServeTeamStore()
     team = store.create_team(members=[ACTOR_A_MEMBER])
     _record_identity(
@@ -444,6 +465,15 @@ def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypat
         model="gpt-5.5",
         effort_value="xhigh",
     )
+    # The team plane stamps the wall clock when a team forms, so a team formed
+    # now held nobody at the epochs this task is worked at.
+    team_event(
+        store,
+        "createTeam",
+        team_id=team.team_id,
+        ts=_epoch(-1),
+        members=[ACTOR_A_MEMBER],
+    )
     handle = create.add(
         "Expose effort metric series",
         project="task.unit",
@@ -451,17 +481,22 @@ def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypat
         flow=["todo", "verify", "review"],
         acceptance=["phase effort appears in serve metrics"],
     )
+    row = identity.resolve(handle)
+    task_id = row["uuid"]
 
-    clock["now"] = _epoch(0)
-    ops.claim(handle)
-    clock["now"] = _epoch(20)
-    ops.done(handle, validation=["todo complete"])
-    ops.claim(handle)
-    clock["now"] = _epoch(40)
-    ops.done(handle, validation=["verify complete"])
+    # The real task exists; its two worked phases are written into the very
+    # operations log its own commands write to, at the instants the recorded
+    # transcript spans, so the windows and the turns can be lined up at all.
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=_epoch(0))
+    task_plane.record(
+        "phaseAdvance", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=_epoch(20)
+    )
+    task_plane.record("claim", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=_epoch(20))
+    task_plane.record(
+        "phaseAdvance", task_id=task_id, agent_id=ACTOR_A_MEMBER, ts=_epoch(40)
+    )
 
     _write_usage_transcript(transcript)
-    row = identity.resolve(handle)
     usage_rows = store.task_phase_effort_usage([row], {ACTOR_A: [transcript]})
     assert [(usage.phase, usage.total_tokens) for usage in usage_rows] == [
         ("todo", 135),

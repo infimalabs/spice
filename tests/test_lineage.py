@@ -13,6 +13,7 @@ from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
 )
+from spice.serve.team.lifecycle import team_task_transitions
 from spice.serve.team.metrics import AgentMetricCheckpoint
 from spice.serve.team.schema import (
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
@@ -22,6 +23,8 @@ from spice.serve.team.schema import (
 )
 from spice.serve.team.store import ObservationAttributionMode, ServeTeamStore
 from spice.transcript.reader import TranscriptFileIdentity
+
+LINEAGE_HORIZON_TS = 360
 
 
 def _record_identity(store: ServeTeamStore, actor_id: str) -> None:
@@ -47,6 +50,7 @@ def _record_session_facts(
     team_id: str,
     timestamp: float,
     suffix: str,
+    task_plane,
 ) -> None:
     store.record_agent_metric_delta(
         actor_id,
@@ -71,11 +75,16 @@ def _record_session_facts(
         f"directive-{suffix}",
         acked_at=timestamp + 1,
     )
-    store.record_task_lifecycle_event(
+    task_plane.record(
+        "claim",
+        task_id=f"task-{suffix}",
+        agent_id=actor_id,
+        ts=timestamp,
+    )
+    task_plane.record(
         "complete",
         task_id=f"task-{suffix}",
         agent_id=actor_id,
-        team_id=team_id,
         ts=timestamp,
     )
 
@@ -96,9 +105,26 @@ def _actor_observation_rows(
                 "agent_metrics",
                 "agent_metric_buckets",
                 "agent_metric_cursors",
-                "task_events",
             )
         }
+
+
+def _actor_task_transitions(
+    store: ServeTeamStore, actor_id: str
+) -> tuple[tuple[object, ...], ...]:
+    """The lifecycle movements the task plane still credits to one actor.
+
+    Renewal rewrites nothing on the task plane, so an actor's movements read
+    back identically after its lane has been renewed twice over.
+    """
+    with store.connect() as connection:
+        return tuple(
+            (transition.id, transition.kind, transition.task_id, transition.ts)
+            for transition in team_task_transitions(
+                connection, end_time=LINEAGE_HORIZON_TS
+            )
+            if transition.agent_id == actor_id
+        )
 
 
 @dataclass(frozen=True)
@@ -107,11 +133,12 @@ class _LineageScenario:
     team_id: str
     actors: tuple[str, str, str]
     original_before: dict[str, tuple[tuple[object, ...], ...]]
+    original_transitions_before: tuple[tuple[object, ...], ...]
     first_revision: int
     first_event_before: tuple[object, ...]
 
 
-def _chained_lineage_scenario(tmp_path, monkeypatch) -> _LineageScenario:
+def _chained_lineage_scenario(tmp_path, monkeypatch, task_plane) -> _LineageScenario:
     clock = {"now": 0.0}
     monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
     monkeypatch.setattr("spice.serve.team.metrics.time.time", lambda: clock["now"])
@@ -129,8 +156,10 @@ def _chained_lineage_scenario(tmp_path, monkeypatch) -> _LineageScenario:
         team_id=team.team_id,
         timestamp=60,
         suffix="original",
+        task_plane=task_plane,
     )
     original_before = _actor_observation_rows(store, original)
+    original_transitions_before = _actor_task_transitions(store, original)
 
     clock["now"] = 120
     first = store.record_started_renewal(
@@ -160,6 +189,7 @@ def _chained_lineage_scenario(tmp_path, monkeypatch) -> _LineageScenario:
         team_id=team.team_id,
         timestamp=180,
         suffix="renewed",
+        task_plane=task_plane,
     )
 
     clock["now"] = 240
@@ -183,12 +213,14 @@ def _chained_lineage_scenario(tmp_path, monkeypatch) -> _LineageScenario:
         team_id=team.team_id,
         timestamp=300,
         suffix="current",
+        task_plane=task_plane,
     )
     return _LineageScenario(
         store=store,
         team_id=team.team_id,
         actors=(original, renewed, current),
         original_before=original_before,
+        original_transitions_before=original_transitions_before,
         first_revision=first.revision,
         first_event_before=first_event_before,
     )
@@ -276,9 +308,9 @@ def _assert_lineage_events(scenario: _LineageScenario) -> None:
 
 
 def test_chained_renewal_keeps_source_rows_and_derives_all_four_lenses(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, task_plane
 ):
-    scenario = _chained_lineage_scenario(tmp_path, monkeypatch)
+    scenario = _chained_lineage_scenario(tmp_path, monkeypatch, task_plane)
     original, renewed, current = scenario.actors
     (
         source,
@@ -309,6 +341,9 @@ def test_chained_renewal_keeps_source_rows_and_derives_all_four_lenses(
     assert session_series == source_series
     assert _actor_observation_rows(scenario.store, original) == (
         scenario.original_before
+    )
+    assert _actor_task_transitions(scenario.store, original) == (
+        scenario.original_transitions_before
     )
     _assert_lineage_events(scenario)
 
