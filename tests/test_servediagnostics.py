@@ -305,6 +305,14 @@ def test_projection_failure_diagnostics_keep_the_stale_generation_and_recovery(
     assert projection["servable"] is True
     assert "rebuild fixture stopped" in projection["detail"]
     assert projection["recoveryAction"] == AGENT_ACTIVITY.recovery_action
+    # A bad rebuild is meant to be diagnosable without the design record, so
+    # every registered answer travels beside the failure detail. Wiring is what
+    # this proves: a dropped key or a crossed field, not the prose itself.
+    assert projection["source"] == AGENT_ACTIVITY.source
+    assert projection["cursor"] == AGENT_ACTIVITY.cursor
+    assert projection["horizon"] == AGENT_ACTIVITY.horizon
+    assert projection["rebuild"] == AGENT_ACTIVITY.rebuild
+    assert projection["beyondHorizon"] == AGENT_ACTIVITY.beyond_horizon
     assert f"status={PROJECTION_STATUS_STALE}" in text
     assert f"recovery={AGENT_ACTIVITY.recovery_action}" in text
 
