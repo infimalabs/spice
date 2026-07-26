@@ -665,12 +665,14 @@ def _exported_task_board_observation(
 def _publish_task_board_observation(
     candidate: TaskBoardObservation,
 ) -> TaskBoardObservation:
-    """Cache the built board unless a newer one already landed, and wake waiters.
+    """Cache the built board, keep any equal one already there, and wake waiters.
 
-    A build that finishes against an authority someone else has already moved
-    past must not overwrite the newer board with its own. Comparing both the
-    revision and the generation is what recognizes that, and the caller is
-    answered with whichever board the cache is actually holding afterwards.
+    Only the holder of the build slot reaches here, so nothing newer can be in
+    the cache to protect. What the comparison protects is object identity: a
+    cached board answering for the same revision and the same store generation
+    is the same board, and readers that coalesced onto this build are handed
+    that one object rather than an equal copy per caller. Anything else is a
+    board this build has superseded, and it is replaced.
     """
     backend_identity = candidate.backend_identity
     with _task_board_condition:
