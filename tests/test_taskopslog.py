@@ -178,7 +178,7 @@ def test_freshness_reads_past_the_separator_that_closes_a_transaction(
 
 
 def test_freshness_declines_a_stamp_that_names_no_zone(tmp_path, monkeypatch):
-    """A zoneless stamp read as local time would be wrong by whole hours."""
+    """A zoneless stamp read as local time dates the log by where it is read."""
     data_dir = _crafted_log(
         tmp_path,
         [
