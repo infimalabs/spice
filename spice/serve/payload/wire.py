@@ -1123,6 +1123,7 @@ BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
     "observer.observer_messages_payload": "LanePayload",
     "observer.targets_payload": "TargetsPayload",
     "observer.team_snapshot_payload": "TeamSnapshotResponse",
+    "payload.chrome.assemble_lane_chrome": "LaneChromePayload",
     "payload.message._messages_worktree_payload": "LanePayload",
     "payload.metric.metric_series_payload": "MetricSeriesPayload",
     "submissions.SubmissionLifecycle.event_payload": "SubmissionLifecycle",
