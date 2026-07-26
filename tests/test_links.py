@@ -16,6 +16,7 @@ from spice.studies.links import (
     markdown_link_case_findings,
     render_markdown_link_case_board,
 )
+from tests.test_reposcaffolding import run as _run
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -176,10 +177,6 @@ def _init_repo(path: Path) -> Path:
     _run(path, "git", "config", "user.email", "spice@example.test")
     _run(path, "git", "config", "user.name", "Spice Tests")
     return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def _run_spice(cwd: Path, *args: str, check: bool) -> subprocess.CompletedProcess[str]:

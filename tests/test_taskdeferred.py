@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.tasks import alloc, claimstate, config, create, identity, ops, render, tw
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -344,17 +343,6 @@ def test_wake_clears_only_wait(task_repo):
     assert handle in _ready_handles()
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _ready_handles() -> set[str]:
     rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
     return {
@@ -362,7 +350,3 @@ def _ready_handles() -> set[str]:
         for row in rows
         if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
     }
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -8,8 +8,6 @@ required so the target is never guessed.
 from __future__ import annotations
 
 import shutil
-import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -17,6 +15,7 @@ from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.tasks import claimstate, config, create, ops
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -117,21 +116,6 @@ def test_done_without_a_handle_completes_the_sole_claim(task_repo):
     with pytest.raises(SpiceError) as exc:
         ops.done(None, validation=["nothing to complete"])
     assert "requires a handle" in str(exc.value)
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 @pytest.fixture

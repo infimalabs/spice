@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -17,6 +15,7 @@ from spice.serve.team.store import (
     TeamConfig,
 )
 from spice.tasks import claimstate, config, create, identity, tw
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -393,18 +392,3 @@ def test_add_batch_results_carry_suspect_wording_matches(task_repo):
             reason="consider 'loose'",
         ),
     )
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from spice.agent.driver import DRIVER
 from spice.tasks import alloc, config, create, identity, ops, tw
+from tests.test_reposcaffolding import (
+    init_committed_repo as _init_repo,
+)
+from tests.test_reposcaffolding import (
+    make_task_repo_fixture,
+)
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -29,18 +32,7 @@ CDT_INSTANT = datetime(2026, 7, 10, 18, 0, 0, 654321, tzinfo=UTC)
 OOPS_INSTANT = datetime(2026, 7, 10, 18, 0, 0, tzinfo=UTC)
 
 
-@pytest.fixture
-def task_repo(tmp_path, monkeypatch):
-    repo = _init_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
-    config.set_backend(str(backend))
-    try:
-        yield repo
-    finally:
-        config.set_backend(None)
+task_repo = make_task_repo_fixture(lambda path: _init_repo(path), actor=ACTOR_A)
 
 
 class _FrozenClock:
@@ -177,18 +169,3 @@ def test_explicit_due_values_retain_declared_semantics(task_repo, monkeypatch):
     # Naive explicit values keep Taskwarrior's local-time reading: noon CDT.
     assert _stored_due(local_handle) == "20300615T170000Z"
     assert _stored_due(local_handle) != "20300615T120000Z"
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

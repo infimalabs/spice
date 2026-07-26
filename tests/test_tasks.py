@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.paths import shared_attachment_root
+from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
     ServeTeamStore,
     TeamConfig,
 )
-from spice.serve.team.ids import thread_actor_id
 from spice.tasks import (
     alloc,
     claimstate,
@@ -28,6 +27,15 @@ from spice.tasks import (
     readiness,
     render,
     tw,
+)
+from tests.test_reposcaffolding import (
+    init_committed_repo as _init_repo,
+)
+from tests.test_reposcaffolding import (
+    make_task_repo_fixture,
+)
+from tests.test_reposcaffolding import (
+    run as _run,
 )
 from tests.test_teamstorehelpers import store_global_revision
 
@@ -41,18 +49,7 @@ ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
 PEER_ACTOR_MEMBER = thread_actor_id(PEER_ACTOR)
 
 
-@pytest.fixture
-def task_repo(tmp_path, monkeypatch):
-    repo = _init_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
-    config.set_backend(str(backend))
-    try:
-        yield repo
-    finally:
-        config.set_backend(None)
+task_repo = make_task_repo_fixture(lambda path: _init_repo(path), actor=ACTOR_A)
 
 
 @pytest.fixture
@@ -1227,16 +1224,6 @@ def _row(
     }
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _configure_git_identity(path)
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
@@ -1293,7 +1280,3 @@ def test_bound_quality_gate_blocks_completion_while_metric_nonzero(
 
 def _git(repo: Path, *args: str) -> str:
     return _run(repo, "git", *args).stdout.strip()
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

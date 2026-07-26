@@ -1,10 +1,10 @@
 """Lane metrics: sparkline buckets, uptime, and counter assembly."""
 
+import json
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import json
 from pathlib import Path
-import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -169,10 +169,6 @@ def _write_response_item(
         + "\n",
         encoding="utf-8",
     )
-
-
-def _init_repo(path: Path) -> None:
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
 def _identity_status(

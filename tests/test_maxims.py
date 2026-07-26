@@ -15,11 +15,11 @@ from threading import Lock
 
 import pytest
 
-from spice.config import edit, layers, values
 from spice.agent import maximcli, maxims, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.maxims import MaximVerdict
 from spice.cli import entry as cli_entry
+from spice.config import edit, layers, values
 from spice.errors import SpiceError
 from spice.flexstate import git_state_path
 from spice.mail.ackarchive import archive_ackd_inbox_items
@@ -30,6 +30,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.scopes import MAXIM_SCOPES, ScopeSelector
+from tests.test_reposcaffolding import init_empty_repo as _init_repo
 
 MAXIM_CORPUS_RECALL_FLOOR = 1.0
 MAXIM_CORPUS_FALSE_POSITIVE_RATE_CEILING = 0.0
@@ -1167,18 +1168,6 @@ class _FakeProcess:
 
     def __init__(self, *, stdout: io.StringIO) -> None:
         self.stdout = stdout
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    subprocess.run(
-        ["git", "init", "-b", "main"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return path
 
 
 def _commit_all(repo: Path) -> None:

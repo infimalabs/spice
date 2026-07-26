@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 import tomllib
 
 import pytest
 
-from spice.agent.driver import DRIVER
 from spice.agent import maxims
+from spice.agent.driver import DRIVER
 from spice.agent.maximcli import (
     MAXIM_PROPOSE_CONTRACT_ROW,
     render_filed_maxim_proposal_tasks,
     render_maxim_proposals,
     render_maxim_sources,
     run_maxim_file_proposals_cli,
-    run_maxim_propose_cli,
     run_maxim_proposals_cli,
+    run_maxim_propose_cli,
     run_maxim_sources_cli,
 )
 from spice.agent.maxims import (
@@ -32,8 +31,8 @@ from spice.agent.maxims import (
     file_maxim_proposal_tasks,
     maxim_proposal_drafts,
     maxim_proposal_source_records,
-    maxim_proposal_themes,
     maxim_proposal_task_description,
+    maxim_proposal_themes,
 )
 from spice.cli.parser import build_parser
 from spice.mail.ackstate import (
@@ -43,7 +42,9 @@ from spice.mail.ackstate import (
     record_acked_inbox_items,
 )
 from spice.mail.inbox import compose_inbox_text
-from spice.tasks import alloc, config as task_config, identity, tw
+from spice.tasks import alloc, identity, tw
+from spice.tasks import config as task_config
+from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
 KEY_A = "1k9hXzJJ"
 KEY_B = "1k9hXzgX"
@@ -55,12 +56,6 @@ ARCHIVED_AT_NEWEST = 300.0
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 RENDER_FIXTURE_SOURCE_COUNT = 10
 RENDER_FIXTURE_EVIDENCE_COUNT = 14
-
-
-def _init_repo(path):
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    return path
 
 
 @pytest.fixture
