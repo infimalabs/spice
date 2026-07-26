@@ -90,6 +90,10 @@ class _ImageHandler(_StaticHandler):
         app._ServeHandler._send_json(self, payload, status)
 
 
+def _task_cards(payload: dict) -> list[dict]:
+    return [item for item in payload["messages"] if item["kind"] == "task_card"]
+
+
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
