@@ -1,26 +1,50 @@
 """Rendering for inline TASK directives embedded in assistant message text.
 
 The serve transcript renders `TASK title=... | project=... | ...` capture
-lines as styled task-capture cards rather than raw text. These helpers detect
-the directive lines, extract their fields, and render the HTML and plain-text
-summaries used by the message builder.
+lines as styled task-capture cards rather than raw text. Which lines those
+are is not decided here: the transcript reducer decides it on the undivided
+raw message and marks them, and these helpers read the marks, extract the
+fields, and render the HTML and plain-text summaries the message builder
+shows.
 """
 
 from __future__ import annotations
 
 import html
 from collections.abc import Iterator
-from typing import Any
-
 from dataclasses import dataclass
+from typing import Any
 
 from spice.mail.ackgrammar import task_directive_fields
 from spice.serve.markdown import render_message_html
 
-# Display order for the capture card; ordering only. Whether a line is a
-# directive at all is not decided here -- spice.mail.ackgrammar owns that, so
-# this display and the supervisor cannot disagree about which lines act.
+# Display order for the capture card; ordering only.
 _TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkedText:
+    """Text carrying which of its lines the reducer read as task directives.
+
+    Position is what admits a capture card, because content cannot tell two
+    occurrences apart. The ACK header is stripped before a segment reaches
+    this display, so a directive that merely shared that header arrives
+    character for character identical to a real one; only where it sits
+    separates them. The reducer decided that on the undivided raw message,
+    suppression included, and the marks carry the decision here so the
+    display and the supervisor cannot disagree about which lines act.
+    """
+
+    text: str
+    directive_lines: frozenset[int]
+
+    @property
+    def line_count(self) -> int:
+        return self.text.count("\n") + 1 if self.text else 0
+
+    def rewritten(self, text: str) -> MarkedText:
+        """Carry these marks onto a rewrite that changed no line's position."""
+        return MarkedText(text=text, directive_lines=self.directive_lines)
 
 
 def _render_message_html_with_task_directives(
@@ -63,31 +87,6 @@ def _render_message_html_with_task_directives(
     flush_directives()
     flush_pending()
     return "".join(rendered)
-
-
-@dataclass(frozen=True, slots=True)
-class MarkedText:
-    """Text carrying which of its lines the reducer read as task directives.
-
-    Position is what admits a capture card, because content cannot tell two
-    occurrences apart. The ACK header is stripped before a segment reaches
-    this display, so a directive that merely shared that header arrives
-    character for character identical to a real one; only where it sits
-    separates them. The reducer decided that on the undivided raw message,
-    suppression included, and the marks carry the decision here so the
-    display and the supervisor cannot disagree about which lines act.
-    """
-
-    text: str
-    directive_lines: frozenset[int]
-
-    @property
-    def line_count(self) -> int:
-        return self.text.count("\n") + 1 if self.text else 0
-
-    def rewritten(self, text: str) -> MarkedText:
-        """Carry these marks onto a rewrite that changed no line's position."""
-        return MarkedText(text=text, directive_lines=self.directive_lines)
 
 
 def _iter_directive_lines(
