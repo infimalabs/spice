@@ -31,6 +31,7 @@ from typing import Any, Callable, Mapping, overload
 
 from spice import defaults
 from spice.agent.claudetranscript import claude_line_events, project_claude_events
+from spice.agent.codextranscript import normalize_codex_line
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -393,6 +394,9 @@ CODEX_SESSION_TURN_ID_ENV = "CODEX_SESSION_TURN_ID"
 
 
 class CodexDriver(AgentDriver):
+    def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any]:
+        return normalize_codex_line(raw)
+
     def current_turn_id(self, env: Mapping[str, str]) -> str | None:
         value = env.get(CODEX_TURN_ID_ENV) or env.get(CODEX_SESSION_TURN_ID_ENV) or ""
         return value.strip() or None

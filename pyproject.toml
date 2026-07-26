@@ -209,6 +209,7 @@ seconds = 200
 run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
 paths = [
     "spice/agent/claudetranscript.py",
+    "spice/agent/codextranscript.py",
     "spice/agent/driver.py",
     "spice/agent/identity.py",
     "spice/agent/paths.py",
