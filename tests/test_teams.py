@@ -651,6 +651,14 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     assert store.agent_renewal_active("thread:agent-a") is False
     assert disabled_member["renewalIntent"]["requested"] is False
     assert disabled_member["renewalIntent"]["state"] == ""
+    identity = store.agent_identity_for_actor("thread:agent-a")
+    assert identity is not None
+    assert (
+        identity.renewal_state,
+        identity.renewal_ancestor_thread_id,
+        identity.renewal_successor_thread_id,
+        identity.renewal_revision,
+    ) == ("", "", "", 0)
 
 
 def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
@@ -1313,6 +1321,22 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
     assert member.agent_facts["actorId"] == "thread:agent-a"
     assert member.agent_facts["actualDriver"] == "claude"
     assert member.agent_facts["desiredEffort"] == "xhigh"
+
+
+def test_partial_identity_merge_reads_inside_write_transaction(tmp_path, monkeypatch):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    observed_transactions: list[bool] = []
+    original = store._agent_identity_row_locked
+
+    def observe_transaction(connection, actor_id):
+        observed_transactions.append(connection.in_transaction)
+        return original(connection, actor_id)
+
+    monkeypatch.setattr(store, "_agent_identity_row_locked", observe_transaction)
+
+    store.record_agent_identity(actor_id="thread:agent-a", actual_driver="codex")
+
+    assert observed_transactions == [True]
 
 
 def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_path):

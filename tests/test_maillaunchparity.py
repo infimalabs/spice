@@ -205,7 +205,7 @@ def test_mail_and_launch_match_reducer_spans_on_recorded_and_one_live_transcript
     ]
 
 
-def test_bodyless_keyed_reply_keeps_both_response_dispositions() -> None:
+def test_bodyless_keyed_reply_honors_ack_but_leaves_reasonless_nack_pending() -> None:
     message = reply_card_message(
         "bodyless",
         1,
@@ -213,16 +213,15 @@ def test_bodyless_keyed_reply_keeps_both_response_dispositions() -> None:
         f"ACK {LIVE_ACK_KEY}:\nNACK {LIVE_NACK_KEY}:",
     )
 
-    assert message.ack_keys == [LIVE_ACK_KEY, LIVE_NACK_KEY]
-    assert message.nack_keys == [LIVE_NACK_KEY]
+    assert message.ack_keys == [LIVE_ACK_KEY]
+    assert message.nack_keys == []
     assert message.ack_count == 1
-    assert message.nack_count == 1
+    assert message.nack_count == 0
     assert message.ack_utterances == []
     assert [
         (segment["keys"], segment["disposition"]) for segment in message.ack_segments
     ] == [
         ([LIVE_ACK_KEY], "acked"),
-        ([LIVE_NACK_KEY], "refused"),
     ]
 
 

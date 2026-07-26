@@ -206,11 +206,13 @@ def summarize_nack_archival(
         dict.fromkeys(
             key
             for segment in segments
-            if not segment.content.strip()
+            if not nack_response_is_honored(segment.content)
             for key in segment.keys
         )
     )
-    reasoned_segments = [segment for segment in segments if segment.content.strip()]
+    reasoned_segments = [
+        segment for segment in segments if nack_response_is_honored(segment.content)
+    ]
     requested = list(
         dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
     )
@@ -269,6 +271,11 @@ def summarize_nack_archival(
         unmatched=unmatched,
         reasonless=reasonless,
     )
+
+
+def nack_response_is_honored(content: str) -> bool:
+    """Whether a NACK segment carries the reason required to retire its keys."""
+    return bool(content.strip())
 
 
 def _empty_ack_archival_summary() -> AckArchivalSummary:

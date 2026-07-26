@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
+from spice.mail.ackarchive import nack_response_is_honored
 from spice.mail.feedback import supervisor_feedback_notices
 from spice.serve.images import image_markdown, view_image_markdown
 from spice.serve.markdown import render_message_html
@@ -573,10 +574,10 @@ def _assistant_message(
         text, preamble, segment_bodies
     )
     ack_segments: list[dict[str, Any]] = []
-    # `ack_keys` is the polarity-agnostic set of keys this message responded to
-    # (ACK and NACK alike): it drives context fetch, cache retention, copy, and
-    # pending-clear, all of which apply to a refusal exactly as to an ack. The
-    # positive/negative split lives in ack_keys/nack_keys for tinting only.
+    # `ack_keys` is the polarity-agnostic set of keys this message validly
+    # responded to (ACK and reason-bearing NACK alike): it drives context fetch,
+    # cache retention, copy, and pending-clear. The positive/negative split
+    # lives in ack_keys/nack_keys for tinting only.
     ack_keys: list[str] = []
     nack_keys: list[str] = []
     seen_keys: set[str] = set()
@@ -590,6 +591,11 @@ def _assistant_message(
     task_card_count = _task_directive_count(preamble)
     for segment, segment_body in zip(segments, segment_bodies, strict=True):
         refused = segment.kind is SpanKind.NACK
+        if refused and not nack_response_is_honored(segment.body):
+            # The archival authority leaves a reasonless NACK pending. It must
+            # not become a refused/retired key merely because the transcript
+            # reducer correctly identified its negative polarity.
+            continue
         # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(segment_body)

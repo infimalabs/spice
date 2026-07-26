@@ -220,3 +220,47 @@ def test_import_carry_seats_the_imported_driver_on_the_member(tmp_path, monkeypa
     assert identity is not None
     assert identity.actual_driver == "codex"
     assert identity.desired_driver == "codex"
+
+
+def test_import_carry_preserves_the_successor_renewal_identity_mirror(
+    tmp_path, monkeypatch
+):
+    store_path = tmp_path / "teams.sqlite3"
+    store = ServeTeamStore(path=store_path)
+    store.create_team(members=["thread:pred", "thread:succ"])
+    store.record_agent_identity(
+        actor_id="thread:succ",
+        target_id="worktree",
+        thread_id="succ",
+        actual_driver="claude",
+        desired_driver="claude",
+    )
+    store.record_started_renewal(
+        predecessor_agent_id="thread:succ",
+        successor_agent_id="thread:after-succ",
+        ancestor_thread_id="ancestor",
+    )
+    monkeypatch.setattr(
+        "spice.serve.team.store.ServeTeamStore",
+        lambda: ServeTeamStore(path=store_path),
+    )
+
+    lifecycle._carry_team_membership("thread:pred", "thread:succ", "codex")
+
+    identity = store.agent_identity_for_actor("thread:succ")
+    renewal = store.renewal_state_for_agent("thread:succ")
+    assert identity is not None
+    assert renewal is not None
+    assert identity.actual_driver == "codex"
+    assert identity.desired_driver == "codex"
+    assert (
+        identity.renewal_state,
+        identity.renewal_ancestor_thread_id,
+        identity.renewal_successor_thread_id,
+        identity.renewal_revision,
+    ) == (
+        renewal.state,
+        renewal.ancestor_thread_id,
+        renewal.successor_thread_id,
+        renewal.revision,
+    )
