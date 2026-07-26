@@ -13,7 +13,7 @@ import pytest
 
 from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, AgentDriver
 from spice.transcript import reader
-from spice.transcript.decode import decode_line
+from spice.transcript.decode import decode_parsed_line
 from spice.transcript.events import AssistantText, Reasoning, ToolCall, Unknown
 from spice.transcript.reader import (
     TranscriptCursor,
@@ -231,8 +231,8 @@ def test_public_reader_decodes_each_driver_fixture_into_located_typed_events(
             ),
         )
         for offset, raw in zip(offsets, raw_lines, strict=True)
-        for event in decode_line(
-            raw.decode(),
+        for event in decode_parsed_line(
+            json.loads(raw.decode()),
             driver,
             source=str(path),
             line=offset,
