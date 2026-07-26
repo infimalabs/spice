@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -37,11 +38,11 @@ class TaskBoardObservation:
     revision: str
     rows: tuple[Mapping[str, Any], ...]
     error: str | None = None
-    # Which store these rows were read out of, beside the revision that says
-    # when. Defaulting to the empty witness is what an observation assembled
-    # without one deserves: it matches no store that exists, so it is replaced
-    # rather than reused.
-    store_identity: str = ""
+    # Which store these rows were read out of and which version of it, beside
+    # the revision that says when. Defaulting to the empty witness is what an
+    # observation assembled without one deserves: it matches no store that
+    # exists, so it is replaced rather than reused.
+    store_generation: str = ""
     _projection_lock: threading.Lock = field(
         default_factory=threading.Lock,
         compare=False,
@@ -132,8 +133,45 @@ def _backend_identity(root: Path) -> str:
     return str(root.expanduser().resolve())
 
 
-def _store_identity(root: Path) -> str:
-    """Witness which TaskChampion store a backend root is holding right now.
+def _store_stat(root: Path) -> os.stat_result | None:
+    """Stat the TaskChampion store once, for every witness taken of it.
+
+    Both witnesses below are read off one stat rather than one each, so the two
+    can never describe stores from different instants: a comparison built from
+    two stats could straddle a replacement and call it coherent.
+
+    An absent or unstattable store answers `None`, which every witness renders
+    as the empty string. That is itself an answer: it equals no store that
+    exists, so an observation taken across that boundary is replaced instead of
+    reused.
+    """
+    try:
+        return (task_config.data_dir(root) / OPERATIONS_DB_FILENAME).stat()
+    except OSError:
+        return None
+
+
+def _store_identity(stat: os.stat_result | None) -> str:
+    """Witness which file the store is, unmoved by writing to it.
+
+    Device and inode name the file, so a replacement renamed into place is a
+    different store the moment it lands. Deliberately not size, modification
+    time, or change time: an export writes the store it reads, so all of those
+    move whenever the board is built and would make every store look replaced
+    by the very read that observed it.
+
+    This is the witness the across-the-export check compares, where being
+    unmoved by writing is the whole requirement. It cannot tell a remade store
+    from the one whose inode number it inherited; `_store_generation` is what
+    answers that, on the comparison that is free to move under a write.
+    """
+    if stat is None:
+        return ""
+    return f"{stat.st_dev}:{stat.st_ino}"
+
+
+def _store_generation(stat: os.stat_result | None) -> str:
+    """Witness which store, and which version of it, a cached board came from.
 
     The revision that dates the board is carried by the wake file, which is a
     different file from the store the rows are read out of. A store deleted,
@@ -141,26 +179,24 @@ def _store_identity(root: Path) -> str:
     therefore leaves that revision saying nothing happened, and rows exported
     from the store that is gone would keep being served as current.
 
-    Device and inode name which file the store is, so a replacement renamed
-    into place is a different store the moment it lands. Deliberately not size
-    or modification time: an export writes the store it reads, so those move
-    whenever the board is built and would make every store look replaced by the
-    very read that observed it. Identity has to say which store, not which
-    version of it -- the revision already says that.
+    Change time joins device and inode here because a filesystem is free to
+    hand a remade store the inode number the deleted one just freed, and on
+    that filesystem device and inode alone would call the replacement the
+    original. A store that is created after another is unlinked carries the
+    later change time, so the two witness different generations. What this
+    rests on is the platform separating those two events at all: a filesystem
+    whose timestamps are too coarse to tell them apart can still collide, and
+    no protection stronger than that is claimed.
 
-    Creation time joins them wherever the platform records it, so that a
-    filesystem free to reuse a freed inode number cannot hand a remade store
-    the identity of the one it replaced.
-
-    A store that is absent or cannot be stat'd witnesses nothing, and that is
-    itself an identity: it equals no store that exists, so an observation taken
-    across that boundary is replaced instead of reused.
+    Being moved by an ordinary write is correct here and wrong for
+    `_store_identity`. This witness is compared between one build and the next,
+    where a store written since the last board is a store worth re-reading;
+    settling it from the same stat that ended the build is what keeps the
+    read after a rebuild measuring what the rebuild settled on, and hitting.
     """
-    try:
-        stat = (task_config.data_dir(root) / OPERATIONS_DB_FILENAME).stat()
-    except OSError:
+    if stat is None:
         return ""
-    return f"{stat.st_dev}:{stat.st_ino}:{getattr(stat, 'st_birthtime', '')}"
+    return f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
 
 
 def _store_held_still(before: str, after: str) -> bool:
@@ -172,6 +208,14 @@ def _store_held_still(before: str, after: str) -> bool:
     that has just come into being cannot be stale against a store that was not
     there. Anything else is a store swapped under the read, and the rows belong
     to no single authority.
+
+    Which file is the only question this can ask, so the one swap it cannot see
+    is a store unlinked and remade onto the same inode number inside a single
+    export. Every other property of a store moves when the export writes it, and
+    a witness that moved would call every build a replacement. That residual is
+    left visible here rather than closed on the platforms that happen to record
+    a creation time, because a witness meaning different things on different
+    platforms is what let a recreated store pass as the original to begin with.
     """
     return after == before or not before
 
@@ -513,39 +557,33 @@ def _release_task_board_build(backend_identity: str) -> None:
         _task_board_condition.notify_all()
 
 
-def current_task_board_observation(
-    *, backend_root: Path | None = None
-) -> TaskBoardObservation:
-    """Return the current coherent board, coalescing concurrent cache misses.
+def _reusable_task_board_observation(
+    backend_identity: str, selected_root: Path, wait_deadline: float
+) -> TaskBoardObservation | None:
+    """Answer a board this caller may reuse, or `None` once it owns the build.
 
-    Coherent means both that the revision held still across the export and that
-    the rows came out of the store still in place afterwards. The revision alone
-    cannot say the second, because it is carried by the wake file rather than by
-    the store, so a store replaced under an untouched wake file would leave the
-    old rows looking current for as long as nothing else moved.
+    Two questions decide reuse, because two files answer for a board. The
+    revision says when the authority last moved, and `_store_generation` says
+    which store and which version of it the cached rows came out of. A store
+    rewritten, replaced, or remade onto a recycled inode number under an
+    untouched wake file moves the second and not the first, so asking both is
+    what keeps a board that is gone from reading as current.
 
-    Re-reading the identity keeps the export off the hot path all the same: an
-    unchanged authority still matches on both and returns the cached rows
-    without an export, and only a genuine change costs one.
-
-    A backend failure degrades only the current call. Its empty observation is
-    deliberately not cached, so a peer or later request can recover without a
-    task revision change.
+    Both answers are read before the lock and re-read on every pass, so a
+    caller that waited behind someone else's build sees whatever that build
+    published rather than the state it queued against. A peer already building
+    is waited on to its deadline; the empty observation past that deadline is
+    this call giving up, not an answer about the board.
     """
-
-    selected_root = (backend_root or task_config.backend_root()).expanduser().resolve()
-    backend_identity = _backend_identity(selected_root)
-    wait_deadline = time.monotonic() + TASK_BOARD_OBSERVATION_TIMEOUT_SECONDS
-
     while True:
         revision = task_config.task_event_revision(selected_root)
-        store_identity = _store_identity(selected_root)
+        store_generation = _store_generation(_store_stat(selected_root))
         with _task_board_condition:
             cached = _task_board_observations.get(backend_identity)
             if (
                 cached is not None
                 and cached.revision == revision
-                and cached.store_identity == store_identity
+                and cached.store_generation == store_generation
             ):
                 return cached
             if backend_identity in _task_board_builds:
@@ -556,69 +594,134 @@ def current_task_board_observation(
                         revision=revision,
                         rows=(),
                         error="timed out waiting for the current task board",
-                        store_identity=store_identity,
+                        store_generation=store_generation,
                     )
                 _task_board_condition.wait(timeout=remaining)
                 continue
             _task_board_builds.add(backend_identity)
-            break
+            return None
 
+
+def _exported_task_board_observation(
+    backend_identity: str, selected_root: Path, wait_deadline: float
+) -> TaskBoardObservation:
+    """Export until one authority answers for the rows, and settle on it.
+
+    Coherent means both that the revision held still across the export and that
+    the rows came out of the store still in place afterwards. Neither check
+    subsumes the other: the revision is carried by the wake file rather than by
+    the store, and the store is written by the very export being checked.
+
+    So the two comparisons take different witnesses. `_store_identity` is asked
+    here, across the export, because it answers which file and nothing that
+    writing moves. `_store_generation` is what the observation settles on,
+    because the next caller is asking which version it is holding.
+
+    Rows read across a swap belong to no single authority and are discarded for
+    another pass. Past the deadline the caller is answered with the emptiness it
+    actually got; that observation reports the revision and generation seen last
+    so a reader can tell how far the churn had run.
+    """
+    revision = ""
     try:
         while True:
             revision = task_config.task_event_revision(selected_root)
-            store_identity = _store_identity(selected_root)
+            store_identity = _store_identity(_store_stat(selected_root))
             rows = _read_task_board(selected_root)
             normalized = tuple(_normalize_task_row(row) for row in rows)
             observed_revision = task_config.task_event_revision(selected_root)
-            observed_store_identity = _store_identity(selected_root)
+            # One stat answers both questions asked of the store after the
+            # export: which file it is, for the held-still check, and which
+            # version of it, for the generation this observation settles on.
+            # Measuring them apart would let a replacement land between them.
+            observed_stat = _store_stat(selected_root)
             if observed_revision == revision and _store_held_still(
-                store_identity, observed_store_identity
+                store_identity, _store_identity(observed_stat)
             ):
-                break
+                return TaskBoardObservation(
+                    backend_identity=backend_identity,
+                    revision=revision,
+                    rows=normalized,
+                    store_generation=_store_generation(observed_stat),
+                )
             if time.monotonic() >= wait_deadline:
-                _release_task_board_build(backend_identity)
                 return TaskBoardObservation(
                     backend_identity=backend_identity,
                     revision=observed_revision,
                     rows=(),
                     error="timed out building the current task board",
-                    store_identity=observed_store_identity,
+                    store_generation=_store_generation(observed_stat),
                 )
     except SpiceError as exc:
-        _release_task_board_build(backend_identity)
         return TaskBoardObservation(
             backend_identity=backend_identity,
             revision=revision,
             rows=(),
             error=str(exc),
-            store_identity=_store_identity(selected_root),
+            store_generation=_store_generation(_store_stat(selected_root)),
         )
-    except BaseException:
-        _release_task_board_build(backend_identity)
-        raise
 
-    # The store the rows are known to have come out of, which is the one seen
-    # after the export rather than before it: on first use no store existed
-    # until that export created it.
-    settled_store_identity = observed_store_identity
-    candidate = TaskBoardObservation(
-        backend_identity=backend_identity,
-        revision=revision,
-        rows=normalized,
-        store_identity=settled_store_identity,
-    )
+
+def _publish_task_board_observation(
+    candidate: TaskBoardObservation,
+) -> TaskBoardObservation:
+    """Cache the built board unless a newer one already landed, and wake waiters.
+
+    A build that finishes against an authority someone else has already moved
+    past must not overwrite the newer board with its own. Comparing both the
+    revision and the generation is what recognizes that, and the caller is
+    answered with whichever board the cache is actually holding afterwards.
+    """
+    backend_identity = candidate.backend_identity
     with _task_board_condition:
         current = _task_board_observations.get(backend_identity)
         if (
             current is None
-            or current.revision != revision
-            or current.store_identity != settled_store_identity
+            or current.revision != candidate.revision
+            or current.store_generation != candidate.store_generation
         ):
             _task_board_observations[backend_identity] = candidate
             current = candidate
         _task_board_builds.discard(backend_identity)
         _task_board_condition.notify_all()
         return current
+
+
+def current_task_board_observation(
+    *, backend_root: Path | None = None
+) -> TaskBoardObservation:
+    """Return the current coherent board, coalescing concurrent cache misses.
+
+    Re-reading the revision and the store generation keeps the export off the
+    hot path: an unchanged authority matches on both and returns the cached
+    rows without an export, and only a genuine change costs one.
+
+    A backend failure degrades only the current call. Its empty observation is
+    deliberately not cached, so a peer or later request can recover without a
+    task revision change. The build slot is released on every way out, including
+    an exception this module never converted into an observation.
+    """
+
+    selected_root = (backend_root or task_config.backend_root()).expanduser().resolve()
+    backend_identity = _backend_identity(selected_root)
+    wait_deadline = time.monotonic() + TASK_BOARD_OBSERVATION_TIMEOUT_SECONDS
+
+    reusable = _reusable_task_board_observation(
+        backend_identity, selected_root, wait_deadline
+    )
+    if reusable is not None:
+        return reusable
+    try:
+        candidate = _exported_task_board_observation(
+            backend_identity, selected_root, wait_deadline
+        )
+    except BaseException:
+        _release_task_board_build(backend_identity)
+        raise
+    if candidate.error:
+        _release_task_board_build(backend_identity)
+        return candidate
+    return _publish_task_board_observation(candidate)
 
 
 def open_task_board_projection(
