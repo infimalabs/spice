@@ -113,6 +113,48 @@ def test_append_only_read_uses_cursor_delta_and_matches_full_window(
     assert cursor.offset > old_offset
 
 
+def test_append_only_cursor_restarts_on_a_larger_rotated_transcript(tmp_path) -> None:
+    transcript = tmp_path / "rollout.jsonl"
+    _append_codex_message(transcript, TIMESTAMP, "old")
+    cursor = RolloutCursor()
+    initial = read_assistant_messages(
+        transcript,
+        limit=5,
+        cursor=cursor,
+        driver=CODEX_DRIVER,
+    )
+    old_offset = cursor.offset
+    old_identity = cursor.file_identity
+
+    transcript.rename(tmp_path / "rotated-rollout.jsonl")
+    replacement = ["new-0-long", "new-1-long", "new-2-long"]
+    for index, text in enumerate(replacement, start=1):
+        _append_codex_message(
+            transcript,
+            f"2026-06-20T04:46:0{index}.000000Z",
+            text,
+        )
+    replacement_size = transcript_reader.transcript_size(transcript)
+    assert replacement_size is not None
+    assert replacement_size > old_offset
+
+    resumed = read_assistant_messages(
+        transcript,
+        limit=5,
+        append_only=True,
+        cursor=cursor,
+        driver=CODEX_DRIVER,
+    )
+
+    assert [item.display_text for item in initial] == ["old"]
+    assert [item.display_text for item in resumed] == list(reversed(replacement))
+    assert [item.display_text for item in cursor.window or []] == list(
+        reversed(replacement)
+    )
+    assert cursor.file_identity != old_identity
+    assert cursor.offset == replacement_size
+
+
 def test_append_only_read_reports_cross_boundary_image_pair_removal(
     tmp_path, monkeypatch
 ):

@@ -6,7 +6,7 @@ import gzip
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Event
 
 import pytest
 
@@ -280,7 +280,7 @@ def test_oversized_single_line_is_delivered_and_followed_by_a_stable_cursor(
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
-def test_reverse_page_snapshot_does_not_duplicate_a_concurrent_append(
+def test_reverse_page_boundary_excludes_an_independent_later_append(
     tmp_path: Path, *, compressed: bool
 ) -> None:
     original_lines = [
@@ -293,11 +293,13 @@ def test_reverse_page_snapshot_does_not_duplicate_a_concurrent_append(
     ]
     transcript = _transcript_path(tmp_path, compressed=compressed)
     _write_transcript(transcript, b"".join(original_lines), compressed=compressed)
-    page_end = sum(map(len, original_lines))
-    append_gate = Barrier(2)
+    cursor = TranscriptCursor()
+    initial = read_forward(transcript, cursor=cursor)
+    page_end = cursor.offset
+    boundary_fixed = Event()
 
-    def append_during_page() -> None:
-        append_gate.wait()
+    def append_after_boundary() -> None:
+        boundary_fixed.wait()
         _append_transcript(
             transcript,
             b"".join(appended_lines),
@@ -305,22 +307,27 @@ def test_reverse_page_snapshot_does_not_duplicate_a_concurrent_append(
         )
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        append = executor.submit(append_during_page)
-        append_gate.wait()
+        append = executor.submit(append_after_boundary)
+        # The writer cannot mutate before page_end is fixed.  Waiting for it
+        # here, then asserting page.file_size grew, witnesses that the reader
+        # opened the larger source while still honoring the older boundary.
+        boundary_fixed.set()
+        append.result()
         page = read_reverse_window(
             transcript,
             end_offset=page_end,
             max_bytes=page_end,
         )
-        append.result()
 
-    resumed = read_forward(transcript, start_offset=page.end_offset)
+    resumed = read_forward(transcript, cursor=cursor)
     values = [
         record.parsed["value"]
         for record in (*page.records, *resumed.records)
         if record.parsed is not None
     ]
 
+    assert initial.end_offset == page_end
+    assert page.file_size > page_end
     assert page.end_offset == page_end
     assert [record.parsed["value"] for record in page.records] == [
         "before-0",
@@ -332,7 +339,7 @@ def test_reverse_page_snapshot_does_not_duplicate_a_concurrent_append(
     ]
     assert values == ["before-0", "before-1", "after-0", "after-1"]
     assert len(values) == len(set(values))
-    assert resumed.end_offset == transcript_size(transcript)
+    assert cursor.offset == resumed.end_offset == transcript_size(transcript)
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
@@ -344,20 +351,26 @@ def test_cursor_resume_after_shrink_or_rotation_loses_and_duplicates_no_records(
         _raw({"timestamp": TIMESTAMP, "value": "old-0-long-record"}),
         _raw({"timestamp": TIMESTAMP, "value": "old-1-long-record"}),
     ]
-    new_lines = [
-        _raw({"timestamp": TIMESTAMP, "value": "new-0"}),
-        _raw({"timestamp": TIMESTAMP, "value": "new-1"}),
-    ]
+    new_values = (
+        ["new-0-long-replacement", "new-1-long-replacement", "new-2-long-replacement"]
+        if rotate
+        else ["new-0", "new-1"]
+    )
+    new_lines = [_raw({"timestamp": TIMESTAMP, "value": value}) for value in new_values]
     transcript = _transcript_path(tmp_path, compressed=compressed)
     _write_transcript(transcript, b"".join(old_lines), compressed=compressed)
-    first = read_forward(transcript)
+    cursor = TranscriptCursor()
+    first = read_forward(transcript, cursor=cursor)
 
     if rotate:
         transcript.rename(tmp_path / f"rotated-{transcript.name}")
     _write_transcript(transcript, b"".join(new_lines), compressed=compressed)
-    assert transcript_size(transcript) < first.end_offset
+    if rotate:
+        assert transcript_size(transcript) >= first.end_offset
+    else:
+        assert transcript_size(transcript) < first.end_offset
 
-    resumed = read_forward(transcript, start_offset=first.end_offset)
+    resumed = read_forward(transcript, cursor=cursor)
     first_values = [
         record.parsed["value"] for record in first.records if record.parsed is not None
     ]
@@ -368,6 +381,12 @@ def test_cursor_resume_after_shrink_or_rotation_loses_and_duplicates_no_records(
     ]
 
     assert resumed.access_start_offset == resumed.start_offset == 0
-    assert resumed_values == ["new-0", "new-1"]
+    assert resumed_values == new_values
     assert len(first_values + resumed_values) == len(set(first_values + resumed_values))
-    assert resumed.end_offset == resumed.file_size == transcript_size(transcript)
+    if rotate:
+        assert first.file_identity != resumed.file_identity
+    else:
+        assert first.file_identity == resumed.file_identity
+    assert cursor.file_identity == resumed.file_identity
+    assert cursor.offset == resumed.end_offset == resumed.file_size
+    assert resumed.file_size == transcript_size(transcript)

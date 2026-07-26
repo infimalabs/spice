@@ -58,6 +58,7 @@ from spice.transcript.reader import (
     read_line,
     read_reverse_window,
     render_cursor,
+    transcript_file_identity,
     transcript_size,
 )
 
@@ -448,13 +449,15 @@ def _read_appended_window(
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
     file_size = transcript_size(transcript_path)
-    if file_size is None:
+    file_identity = transcript_file_identity(transcript_path)
+    if file_size is None or file_identity is None:
         return []
     if (
         cursor.window is None
         or cursor.window_limit != limit
         or file_size < cursor.offset
         or file_size < cursor.window_size
+        or (cursor.file_identity is not None and cursor.file_identity != file_identity)
     ):
         return _read_window(
             transcript_path,
@@ -467,15 +470,24 @@ def _read_appended_window(
     if file_size == cursor.window_size:
         cursor.offset = file_size
         return []
-    try:
-        appended, end_offset = _read_chronological_from_offset(
+    read = read_forward(transcript_path, cursor=cursor)
+    if read.error is not None:
+        return []
+    if read.file_identity != file_identity:
+        return _read_window(
             transcript_path,
-            start_offset=cursor.offset,
+            limit=limit,
+            end_offset=None,
+            cursor=cursor,
             worktree_id=worktree_id,
             driver=driver,
         )
-    except OSError:
-        return []
+    appended = _messages_from_records(
+        read.records,
+        driver=driver,
+        worktree_id=worktree_id,
+    )
+    end_offset = read.end_offset
     previous = list(reversed(cursor.window))
     previous_tail = previous[-1:] if previous else []
     combined = previous + appended
@@ -526,7 +538,8 @@ def _read_window(
 ) -> list[AssistantMessage]:
     """Newest-first window ending at `end_offset` (or EOF), tail-scanned."""
     file_size = transcript_size(transcript_path)
-    if file_size is None:
+    file_identity = transcript_file_identity(transcript_path)
+    if file_size is None or file_identity is None:
         return []
     if (
         end_offset is None
@@ -534,6 +547,7 @@ def _read_window(
         and cursor.window is not None
         and cursor.window_size == file_size
         and cursor.window_limit == limit
+        and cursor.file_identity == file_identity
     ):
         return list(cursor.window)
     read = read_reverse_window(
@@ -592,6 +606,7 @@ def _read_window(
         cursor.window = result
         cursor.window_size = file_size
         cursor.window_limit = limit
+        cursor.file_identity = read.file_identity
     return result
 
 

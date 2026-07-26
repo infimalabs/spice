@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -34,6 +35,14 @@ LineConsumer = Callable[[TranscriptLine], None]
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptFileIdentity:
+    """Filesystem identity of the opened source behind one read."""
+
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True, slots=True)
 class TranscriptRead:
     """One bounded access pass whose records were each parsed exactly once."""
 
@@ -42,6 +51,7 @@ class TranscriptRead:
     start_offset: int
     end_offset: int
     file_size: int
+    file_identity: TranscriptFileIdentity | None
     error: str | None = None
 
 
@@ -51,6 +61,7 @@ class TranscriptCursor:
 
     offset: int = 0
     last_key: str | None = None
+    file_identity: TranscriptFileIdentity | None = None
     lock: RLock = field(default_factory=RLock, repr=False)
 
 
@@ -95,23 +106,64 @@ def transcript_size(path: Path) -> int | None:
         return None
 
 
-def read_forward(path: Path, *, start_offset: int = 0) -> TranscriptRead:
+def transcript_file_identity(path: Path) -> TranscriptFileIdentity | None:
+    """Return the current filesystem identity for a transcript path."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return TranscriptFileIdentity(device=stat.st_dev, inode=stat.st_ino)
+
+
+def read_forward(
+    path: Path,
+    *,
+    start_offset: int = 0,
+    cursor: TranscriptCursor | None = None,
+) -> TranscriptRead:
     """Read from an exact resume offset to EOF.
 
     A truncated source resets the resume offset to zero, matching the existing
-    append-only cursor contract.
+    append-only cursor contract.  Supplying ``cursor`` additionally detects a
+    replaced source by filesystem identity, uses its offset instead of
+    ``start_offset``, and advances both pieces of state after a successful read.
     """
+    if cursor is not None:
+        with locked_cursor(cursor):
+            read = _read_forward(
+                path,
+                start_offset=cursor.offset,
+                expected_identity=cursor.file_identity,
+            )
+            if read.error is None:
+                cursor.offset = read.end_offset
+                cursor.file_identity = read.file_identity
+            return read
+    return _read_forward(path, start_offset=start_offset)
+
+
+def _read_forward(
+    path: Path,
+    *,
+    start_offset: int,
+    expected_identity: TranscriptFileIdentity | None = None,
+) -> TranscriptRead:
     try:
         with _open_binary(path) as handle:
+            file_identity = _handle_identity(handle)
             file_size = _handle_size(handle)
             start = max(start_offset, 0)
-            if start > file_size:
+            source_replaced = (
+                expected_identity is not None and file_identity != expected_identity
+            )
+            if source_replaced or start > file_size:
                 start = 0
             return _read_open_range(
                 handle,
                 start=start,
                 end=file_size,
                 file_size=file_size,
+                file_identity=file_identity,
                 align_partial_start=False,
             )
     except OSError as exc:
@@ -128,6 +180,7 @@ def read_bounded(
     """Read one byte-offset range in source order."""
     try:
         with _open_binary(path) as handle:
+            file_identity = _handle_identity(handle)
             file_size = _handle_size(handle)
             start = min(max(start_offset, 0), file_size)
             end = min(max(end_offset, start), file_size)
@@ -136,6 +189,7 @@ def read_bounded(
                 start=start,
                 end=end,
                 file_size=file_size,
+                file_identity=file_identity,
                 align_partial_start=align_partial_start,
             )
     except OSError as exc:
@@ -151,6 +205,7 @@ def read_reverse_window(
     """Read the bounded tail ending before ``end_offset``, chronologically."""
     try:
         with _open_binary(path) as handle:
+            file_identity = _handle_identity(handle)
             file_size = _handle_size(handle)
             end = (
                 file_size if end_offset is None else min(max(end_offset, 0), file_size)
@@ -161,6 +216,7 @@ def read_reverse_window(
                 start=start,
                 end=end,
                 file_size=file_size,
+                file_identity=file_identity,
                 align_partial_start=start > 0,
             )
     except OSError as exc:
@@ -209,12 +265,18 @@ def _handle_size(handle: BinaryTranscript) -> int:
     return size
 
 
+def _handle_identity(handle: BinaryTranscript) -> TranscriptFileIdentity:
+    stat = os.fstat(handle.fileno())
+    return TranscriptFileIdentity(device=stat.st_dev, inode=stat.st_ino)
+
+
 def _read_open_range(
     handle: BinaryTranscript,
     *,
     start: int,
     end: int,
     file_size: int,
+    file_identity: TranscriptFileIdentity,
     align_partial_start: bool,
 ) -> TranscriptRead:
     handle.seek(start)
@@ -236,6 +298,7 @@ def _read_open_range(
         start_offset=actual_start,
         end_offset=handle.tell(),
         file_size=file_size,
+        file_identity=file_identity,
     )
 
 
@@ -268,5 +331,6 @@ def _failed_read(exc: OSError) -> TranscriptRead:
         start_offset=0,
         end_offset=0,
         file_size=0,
+        file_identity=None,
         error=str(exc),
     )
