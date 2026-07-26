@@ -269,8 +269,17 @@ def _segment_keys(segments: Sequence[AckSegment]) -> tuple[str, ...]:
 
 
 def _span_keys(message: AssembledMessage, kind: SpanKind) -> tuple[str, ...]:
+    """The keys the message's `kind` headers carried.
+
+    A control line takes the kind and keys of the run it sits in, so counting
+    every span's keys would report a header once more for each directive its
+    run happens to contain. Only the prose the header introduced carries it.
+    """
     return tuple(
-        key for span in message.spans if span.kind is kind for key in span.keys
+        key
+        for span in message.spans
+        if span.kind is kind and span.directive_kind is None
+        for key in span.keys
     )
 
 

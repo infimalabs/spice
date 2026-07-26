@@ -624,10 +624,9 @@ TEXT_STARVATION_THRESHOLD = 12
 
 # The spans an assistant's own text produces. Any of them is prose the agent
 # materialized, which is what starvation is the absence of; a directive line is
-# still text the agent wrote, so it breaks a streak exactly as narration does.
-TEXT_SPAN_KINDS = frozenset(
-    {SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK, SpanKind.DIRECTIVE}
-)
+# still text the agent wrote, and it carries the kind of the run it sits in, so
+# it breaks a streak exactly as narration does.
+TEXT_SPAN_KINDS = frozenset({SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK})
 
 # The facts that mean the agent is producing rather than being produced for.
 ACTIVITY_EVENTS = (AssistantText, Image, ToolCall)

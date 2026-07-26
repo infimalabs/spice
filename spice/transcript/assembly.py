@@ -72,7 +72,6 @@ class SpanKind(StrEnum):
     PROSE = "prose"
     ACK = "ack"
     NACK = "nack"
-    DIRECTIVE = "directive"
     TOOL = "tool"
     REASONING = "reasoning"
     IMAGE = "image"
@@ -90,7 +89,17 @@ class DirectiveKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ClassifiedSpan:
-    """One ordered semantic span backed by its original typed event."""
+    """One ordered semantic span backed by its original typed event.
+
+    `kind` always names the run the span sits in, so a control line carries the
+    polarity of the response that contains it rather than a kind of its own. A
+    consumer that must re-join a run therefore reads the polarity off any of its
+    spans instead of inferring one for the lines it cannot classify.
+    `directive_kind` is what marks a span as a control line and names its family.
+    `response_index` is which keyed response of the message the span came from,
+    unset for preamble prose, and it is what keeps two responses that agree on
+    both polarity and keys from re-joining into one run.
+    """
 
     kind: SpanKind
     at: Provenance
@@ -99,7 +108,6 @@ class ClassifiedSpan:
     keys: tuple[str, ...] = ()
     directive_kind: DirectiveKind | None = None
     response_index: int | None = None
-    response_kind: SpanKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,7 +293,6 @@ def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
                     event=event,
                     keys=response.keys,
                     response_index=response_index,
-                    response_kind=kind,
                 ),
             )
         )
@@ -316,7 +323,6 @@ def _segment_spans(
                     text=text,
                     keys=keys,
                     response_index=response_index,
-                    response_kind=kind if response_index is not None else None,
                 )
             )
 
@@ -328,14 +334,13 @@ def _segment_spans(
         flush_pending()
         spans.append(
             ClassifiedSpan(
-                kind=SpanKind.DIRECTIVE,
+                kind=kind,
                 at=event.at,
                 event=event,
                 text=directive.text,
                 keys=keys,
                 directive_kind=directive.kind,
                 response_index=response_index,
-                response_kind=kind if response_index is not None else None,
             )
         )
     flush_pending()

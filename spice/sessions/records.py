@@ -280,7 +280,6 @@ _ASSISTANT_TEXT_SPANS = frozenset(
         SpanKind.PROSE,
         SpanKind.ACK,
         SpanKind.NACK,
-        SpanKind.DIRECTIVE,
         SpanKind.FINAL_ANSWER,
     }
 )
