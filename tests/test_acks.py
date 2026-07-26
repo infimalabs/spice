@@ -7,6 +7,8 @@ import subprocess
 from contextlib import contextmanager
 from threading import Barrier, Event, Thread
 
+import pytest
+
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail import ackstate
@@ -368,6 +370,36 @@ def test_decorated_ack_and_task_headers_agree_in_one_message():
 
     assert list(extract_ack_keys_from_text(text)) == [KEY_A]
     assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Captured | project=task.unit | acceptance=Tracked"
+    ]
+
+
+@pytest.mark.parametrize(
+    "decoration",
+    (
+        "{}",
+        "**{}**",
+        "- {}",
+        "+ {}",
+        "* {}",
+        "1. {}",
+        "- [ ] {}",
+        "### {}",
+        "- **{}**",
+    ),
+)
+def test_line_leading_control_decorations_agree_for_ack_nack_and_task(decoration):
+    ack = decoration.format(f"ACK {KEY_A}: accepted")
+    nack = decoration.format(f"NACK {KEY_B}: declined")
+    task = decoration.format(
+        "TASK title=Captured | project=task.unit | acceptance=Tracked"
+    )
+
+    assert list(extract_ack_keys_from_text(ack)) == [KEY_A]
+    assert [segment.keys for segment in extract_nack_segments_from_text(nack)] == [
+        (KEY_B,)
+    ]
+    assert extract_task_batch_lines_from_text(task) == [
         "TASK title=Captured | project=task.unit | acceptance=Tracked"
     ]
 

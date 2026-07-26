@@ -55,7 +55,11 @@ _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
 # is the wrapper's opening delimiter and its close is consumed with it.
 _EMPHASIS_CHARS = "*_"
 _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-_CONTROL_LINE_LIST_MARKERS = ("- ", "* ", "+ ")
+_CONTROL_LINE_PREFIX_RE = re.compile(
+    r" {0,3}"
+    r"(?:(?:(?:[-+*]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?)|(?:#{1,6}\s+))?"
+    r"[*_]*"
+)
 _SOURCE_CONTEXT_LINE_RE = re.compile(r"^\s*(?:[./\w-]+/)*[\w.-]+:\d+(?::\d+)?:")
 _ACK_HYPOTHETICAL_WORDS = frozenset(
     {"could", "hypothetically", "if", "should", "whether", "would"}
@@ -92,7 +96,7 @@ def extract_ack_keys_from_text(text: str) -> Iterator[str]:
         parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
         if parsed is None:
             continue
-        _header_end, keys, _body_wrapper = parsed
+        _marker_start, _header_end, keys, _body_wrapper = parsed
         yield from keys
 
 
@@ -288,8 +292,9 @@ def _marker_bounds(
 ) -> list[tuple[int, int, tuple[str, ...], str]]:
     """Return `(marker_start, header_end, keys, body_wrapper)` per keyed marker.
 
-    `marker_start` backs the position up over any markdown-emphasis wrapper the
-    header opened with, so the leading `**` is excluded from the preamble.
+    `marker_start` backs the position up over the shared line-leading control
+    decoration, so a bullet, heading, or emphasis wrapper is excluded from the
+    preamble.
     `body_wrapper` is the same delimiter when its close still trails the body
     (`**ACK k: body**`), so the segment cleaner can strip the dangling run.
     """
@@ -297,8 +302,7 @@ def _marker_bounds(
     for token_pos in _iter_header_tokens(text, token):
         parsed = _parse_keyed_header(text, token_pos, token)
         if parsed is not None:
-            header_end, keys, body_wrapper = parsed
-            marker_start, _wrapper = _emphasis_run_before(text, token_pos)
+            marker_start, header_end, keys, body_wrapper = parsed
             bounds.append((marker_start, header_end, keys, body_wrapper))
     return bounds
 
@@ -380,8 +384,8 @@ def _ack_token_is_quoted(text: str, ack_pos: int) -> bool:
 
 def _parse_keyed_header(
     text: str, token_pos: int, token: str
-) -> tuple[int, tuple[str, ...], str] | None:
-    """Validate a keyed header; return `(header_end, keys, body_wrapper)` or None.
+) -> tuple[int, int, tuple[str, ...], str] | None:
+    """Return marker start, header end, keys, and body wrapper for one header.
 
     When the header opened with a markdown-emphasis wrapper (`**ACK k:** ...`)
     whose close sits right after the separator, that close is consumed into
@@ -390,7 +394,10 @@ def _parse_keyed_header(
     so the segment cleaner strips the dangling run.
     """
     limit = len(text)
-    _marker_start, lead_wrapper = _emphasis_run_before(text, token_pos)
+    emphasis_start, lead_wrapper = _emphasis_run_before(text, token_pos)
+    marker_start = _control_line_marker_start(text, token_pos)
+    if marker_start is None:
+        marker_start = emphasis_start
     cursor = token_pos + len(token)
     first_key = _next_header_key(text, cursor, limit, allow_filler_words=True)
     if first_key is None:
@@ -421,10 +428,10 @@ def _parse_keyed_header(
             body_wrapper = ""
     keys = tuple(match[2] for match in header_key_matches)
     if consumed_separator or header_end >= limit:
-        return header_end, keys, body_wrapper
+        return marker_start, header_end, keys, body_wrapper
     if text[header_end] not in _ACK_BODY_SPACE_CHARS:
         return None
-    return header_end, keys, body_wrapper
+    return marker_start, header_end, keys, body_wrapper
 
 
 def _next_header_key(
@@ -560,64 +567,35 @@ def _is_task_directive_line(line: str) -> bool:
 
 
 def _task_batch_line_from_directive(line: str) -> str | None:
-    stripped = _undecorated_control_line(line)
-    token_end = len(TASK_DIRECTIVE_TOKEN)
-    if not stripped.startswith(TASK_DIRECTIVE_TOKEN):
+    token_pos = line.find(TASK_DIRECTIVE_TOKEN)
+    token_end = token_pos + len(TASK_DIRECTIVE_TOKEN)
+    if (
+        token_pos < 0
+        or not _is_standalone_word(line, token_pos, token_end)
+        or _control_line_marker_start(line, token_pos) is None
+    ):
         return None
-    rest = stripped[token_end:]
-    # `**TASK** payload` closes its wrapper before the separator; the run is the
-    # decoration, not the directive, so it is consumed rather than refused.
-    wrapper_end = _emphasis_run_size(rest)
-    if wrapper_end:
-        rest = rest[wrapper_end:]
+    _wrapper_start, lead_wrapper = _emphasis_run_before(line, token_pos)
+    rest = line[token_end:].rstrip()
+    if lead_wrapper and rest.startswith(lead_wrapper):
+        rest = rest[len(lead_wrapper) :]
+    elif lead_wrapper and rest.endswith(lead_wrapper):
+        rest = rest[: -len(lead_wrapper)].rstrip()
     if rest and rest[0] not in _TASK_DIRECTIVE_SEPARATOR_CHARS:
         return None
     return TASK_DIRECTIVE_TOKEN + rest
 
 
-def _undecorated_control_line(line: str) -> str:
-    """Return `line` without the markdown decoration a directive may wear.
+def _control_line_marker_start(text: str, token_pos: int) -> int | None:
+    """Return the start of a token's shared line-leading decoration.
 
-    A control line is recognized by its token, not by how the agent chose to
-    render it, and the ACK grammar already reads through emphasis wrappers and
-    list markers to find its own token. This is that same permission stated once
-    for a whole line, so a bold or bulleted TASK header is the directive it
-    plainly is instead of silently becoming prose. Whether a line is eligible at
-    all remains the suppression rule's decision, which is unchanged.
+    ACK, NACK, and TASK all call this boundary. A control token may follow up
+    to three spaces, one Markdown list/checkbox or heading marker, and emphasis
+    runs. Anything else is prose, not line-leading control decoration.
     """
-    stripped = line.strip()
-    marker = _list_marker_size(stripped)
-    if marker:
-        stripped = stripped[marker:].lstrip()
-    wrapper_size = _emphasis_run_size(stripped)
-    if not wrapper_size:
-        return stripped
-    delimiter = stripped[:wrapper_size]
-    stripped = stripped[wrapper_size:]
-    # Only the run that closes this wrapper comes off, so a payload ending in
-    # its own emphasis character keeps it.
-    if stripped.endswith(delimiter):
-        stripped = stripped[:-wrapper_size].rstrip()
-    return stripped
-
-
-def _list_marker_size(text: str) -> int:
-    """Length of a leading markdown list marker, including its trailing space."""
-    for marker in _CONTROL_LINE_LIST_MARKERS:
-        if text.startswith(marker):
-            return len(marker)
-    return 0
-
-
-def _emphasis_run_size(text: str) -> int:
-    """Length of the uniform leading run of markdown-emphasis characters."""
-    if not text or text[0] not in _EMPHASIS_CHARS:
-        return 0
-    char = text[0]
-    size = 0
-    while size < len(text) and text[size] == char:
-        size += 1
-    return size
+    line_start = text.rfind("\n", 0, token_pos) + 1
+    prefix = text[line_start:token_pos]
+    return line_start if _CONTROL_LINE_PREFIX_RE.fullmatch(prefix) else None
 
 
 def _suppressed_control_line_ranges(text: str) -> list[tuple[int, int]]:
