@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from collections.abc import Iterator
 from concurrent.futures import CancelledError, Future
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Callable, Sequence, TypeAlias
@@ -66,18 +64,7 @@ AVAILABLE_WORK_SETTLE_SECONDS = 3.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
-# Serialize the actuator itself across callers. The lifecycle authority owns
-# the wider target-local publication-through-decision scope and enters this
-# guard only after taking that target lock.
-_PENDING_INBOX_LAUNCH_LOCK = threading.RLock()
 _RetryDue: TypeAlias = Callable[[str, float], bool]
-
-
-@contextmanager
-def pending_inbox_launch_lock() -> Iterator[None]:
-    """Serialize actual pending-inbox launch decisions."""
-    with _PENDING_INBOX_LAUNCH_LOCK:
-        yield
 
 
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
@@ -251,28 +238,10 @@ def ensure_agent_for_pending_inbox(
     """Start an idle agent when its inbox has pending steering.
 
     Inbox steering must never sit unheard: a send to an off lane brings the lane's
-    agent up (or its renewed successor, under `force_new`).
+    agent up (or its renewed successor, under `force_new`). Production calls are
+    owned and target-serialized by ``LifecycleDecisionAuthority``; this low-level
+    function deliberately owns no second coordination policy.
     """
-    with pending_inbox_launch_lock():
-        return _ensure_agent_for_pending_inbox_locked(
-            target,
-            retry_due=retry_due,
-            retry_seconds=retry_seconds,
-            fast_mode=fast_mode,
-            force_new=force_new,
-            automatic=automatic,
-        )
-
-
-def _ensure_agent_for_pending_inbox_locked(
-    target: WorktreeTarget,
-    *,
-    retry_due: _RetryDue | None,
-    retry_seconds: float,
-    fast_mode: bool,
-    force_new: bool,
-    automatic: bool,
-) -> dict[str, Any] | None:
     operator_items = pending_operator_inbox_items(target.repo_root)
     pending_count = len(operator_items)
     if pending_count <= 0:

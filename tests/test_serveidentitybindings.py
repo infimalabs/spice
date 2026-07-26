@@ -13,6 +13,7 @@ from spice.agent.paths import (
 )
 from spice.serve.app import ServeState
 from spice.serve.payload.identity import (
+    record_serve_agent_identity,
     serve_agent_identity_payload,
     target_bound_actor,
 )
@@ -98,9 +99,16 @@ def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
         f"target:{target_a.id}",
         f"thread:{THREAD_ID}",
     ]
-    assert [
-        store.agent_identity_for_actor(item["actorId"]).target_id for item in identities
-    ] == [target_a.id, target_c.id]
+    # The projection above is inert. The lifecycle actuation boundary records
+    # exactly those distinct actors after it has resolved the lane bindings.
+    for target, thread in zip((target_a, target_c), resolved_threads):
+        record_serve_agent_identity(store, target, thread)
+    recorded_targets: list[str] = []
+    for item in identities:
+        recorded = store.agent_identity_for_actor(item["actorId"])
+        assert recorded is not None
+        recorded_targets.append(recorded.target_id)
+    assert recorded_targets == [target_a.id, target_c.id]
 
 
 def test_rebound_pointer_survives_stale_cleanup_interleaving(tmp_path, monkeypatch):
