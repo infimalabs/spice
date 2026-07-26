@@ -163,6 +163,12 @@ def lane_chrome_payload(
     """
     observations: list[LaneChromeObservation] = []
     team_revision = int((team_identity or {}).get("teamRevision", 0))
+    # The team store counts that revision, so a store deleted and remade counts
+    # it from the start again and nothing counted inside it can say so. The two
+    # facets it alone orders are dated by the instant that store was created.
+    team_generation = lane_chrome_generation(
+        (team_facts or {}).get("storeGeneration", "")
+    )
     if team_identity is not None:
         observations.append(
             LaneChromeObservation(
@@ -170,7 +176,7 @@ def lane_chrome_payload(
                 # Team revision is the store's global event counter for this
                 # team. It advances for membership, config, and renewal
                 # mutations, whereas configRevision advances for config only.
-                LaneChromeOrder(revision=team_revision),
+                LaneChromeOrder(epoch=team_generation, revision=team_revision),
                 {"teamIdentity": dict(team_identity)},
             )
         )
@@ -220,10 +226,11 @@ def lane_chrome_payload(
                 # a legacy renewal row carrying a later explicit revision
                 # ordered without inventing a second browser authority.
                 LaneChromeOrder(
+                    epoch=team_generation,
                     revision=max(
                         team_revision,
                         int(renewal_intent.get("revision", 0)),
-                    )
+                    ),
                 ),
                 {
                     "lifetime": team_facts.get("lifetime", ""),
