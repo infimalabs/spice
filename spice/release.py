@@ -13,6 +13,7 @@ import tempfile
 import time
 import urllib.request
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,10 +171,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
 
     if mode in {"prepare", "release"}:
         ensure_release_preconditions(root)
-        clean_build_artifacts(root)
-        run_constitution_gate()
-        version = bump_version(str(args.bump))
-        run_artifact_gate(version)
+        version = run_release_gates(root, lambda: bump_version(str(args.bump)))
         run(["git", "add", "pyproject.toml", "uv.lock"])
         run(["git", "commit", "-m", f"release: bump to {version}"])
         if mode == "prepare":
@@ -227,8 +225,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     if mode == "check":
-        version = current_version()
-        run_release_gates(root, version)
+        version = run_release_gates(root, current_version)
         print(
             f"release gates passed for {version}; nothing was bumped, "
             "committed, tagged, pushed, or published"
@@ -241,7 +238,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             version, getattr(args, "release_commit", None)
         )
         ensure_publish_release_commit_is_head(release_commit)
-        run_release_gates(root, version)
+        run_release_gates(root, lambda: version)
         publish_release(
             version, getattr(args, "notes_file", None), release_commit=release_commit
         )
@@ -303,17 +300,33 @@ def ensure_notes_file(path: Path | None) -> None:
         raise SpiceError(f"release notes file not found: {path}")
 
 
-def run_release_gates(root: Path, version: str) -> None:
-    """Every gate a release passes before it is allowed to change anything.
+def run_release_gates(root: Path, choose_version: Callable[[], str]) -> str:
+    """Every gate a release passes, and the one decision that varies between modes.
 
-    `check` stops here; `publish` continues into publish_release. Sharing one
-    body is what makes the check honest: a verification path maintained
-    alongside the release path would eventually prove something the release
-    does not actually run.
+    All four gate-running modes share this body, so a change to what a release
+    verifies reaches every one of them in the same edit. A verification path
+    maintained alongside the release path would drift until it proved something
+    the release does not actually run.
+
+    What differs is only which version the artifact gate builds, so that is the
+    single seam. `check` reads the tree, so it passes `current_version` directly.
+    `publish` passes the version it already pinned, because it resolved a release
+    commit against that version and must build the one it validated, not whatever
+    the tree says by the time the gates finish. `prepare` and `release` ship a new
+    version and pass the bump, because the artifact that gets uploaded has to be
+    the artifact that was twine-checked and import-probed.
+
+    The seam sits here, between the two gates, and not at either end: a bump
+    before the constitution gate would leave a rewritten `pyproject.toml` behind
+    whenever the suite comes back red, and a bump after the artifact gate would
+    ship a version nothing ever built. Returning the chosen version keeps that
+    decision readable at the call site.
     """
     clean_build_artifacts(root)
     run_constitution_gate()
+    version = choose_version()
     run_artifact_gate(version)
+    return version
 
 
 def run_constitution_gate() -> None:
