@@ -12,7 +12,6 @@ from typing import Any, Iterable, Mapping, Protocol
 from spice.agent.driver import driver_for_transcript
 from spice.serve.team.ids import thread_id_for_actor
 from spice.serve.team.lifecycle import TeamTaskTransition, team_task_transitions
-from spice.tasks.transitions import TaskTransitionKind
 from spice.serve.team.store import ServeTeamStore
 from spice.sessions import records
 from spice.sessions.meter import (
@@ -21,6 +20,7 @@ from spice.sessions.meter import (
 )
 from spice.sessions.slices import turn_activity_ts
 from spice.tasks import claimstate, identity
+from spice.tasks.transitions import TaskTransitionKind
 from spice.transcript.events import ContextUsage, TranscriptEvent
 from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import parse_timestamp
