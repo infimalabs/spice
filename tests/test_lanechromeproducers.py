@@ -28,7 +28,7 @@ from spice.serve.payload.chrome import (
     assemble_lane_chrome,
 )
 from spice.serve.payload.identity import team_facts_for_actor, team_identity_payload
-from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
+from spice.serve.payload.wireschema import LANE_CHROME_FACET_AUTHORITIES
 from spice.serve.team.schema import DEFAULT_LIFETIME
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.worktree import inventory

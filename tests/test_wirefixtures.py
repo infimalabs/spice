@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spice.serve.payload import wire
+from spice.serve.payload import wire, wiretypes
 
 
 def valid_wire_payload(schema_name: str, **fields: Any) -> dict[str, Any]:
@@ -67,7 +67,7 @@ def valid_live_bus_callback_payloads(**overrides: Any) -> dict[str, Any]:
     return callbacks
 
 
-def _valid_wire_value(value_type: wire.WireType) -> Any:
+def _valid_wire_value(value_type: wiretypes.WireType) -> Any:
     if value_type.kind == "reference":
         if value_type.name in wire.WIRE_ALIASES:
             return _valid_wire_value(wire.WIRE_ALIASES[value_type.name])

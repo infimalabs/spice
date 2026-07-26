@@ -15,10 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.serve.payload.wire import (
-    LANE_CHROME_FACET_AUTHORITIES,
-    validate_emitter_payload,
-)
+from spice.serve.payload.wire import validate_emitter_payload
+from spice.serve.payload.wireschema import LANE_CHROME_FACET_AUTHORITIES
 
 # Mirrors LANE_CHROME_EPOCH_RUNS in serve/static/app.lane-store.js. The server
 # decides what to send under the same natural order the browser decides what to
