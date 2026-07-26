@@ -525,11 +525,14 @@ WIRE_OBJECTS = (
     # across a store deleted and remade, which is the one moment a revision
     # counted within it can restart lower. Activity counts the transcript
     # instant it carries rather than spelling it out, because a stamp written
-    # at one offset sorts ahead of a later stamp written at another. Both are
-    # microseconds because the reducer orders digit runs as doubles: a
-    # nanosecond count is already past the range a double holds exactly, where
-    # two distinct instants compare equal. payload.chrome.lane_chrome_generation
-    # admits only a count, so a hash identity cannot become an epoch -- it would
+    # at one offset sorts ahead of a later stamp written at another. teamConfig
+    # and renewal share one generation, stamped into the team store's global
+    # settings when it is created, because both count inside that store and
+    # both restart together when it is remade. All three are counted in
+    # microseconds so that a reader meeting more than one meets one kind of
+    # token rather than one encoding per authority.
+    # payload.chrome.lane_chrome_generation admits only a count, so a hash
+    # identity cannot become an epoch -- it would
     # arrive as an order the reducer cannot fault and then mis-order silently
     # behind it.
     _object(
