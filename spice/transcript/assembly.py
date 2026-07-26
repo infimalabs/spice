@@ -21,6 +21,7 @@ from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
 from spice.mail.ackgrammar import split_keyed_response
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -29,6 +30,7 @@ from spice.transcript.events import (
     ToolCall,
     ToolOutput,
     TranscriptEvent,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -52,8 +54,10 @@ _EVENT_TYPES = (
     Reasoning,
     ToolCall,
     ToolOutput,
+    CommandExecution,
     Image,
     UserMessage,
+    TurnBoundary,
     Compaction,
     WebSearch,
     ContextUsage,
@@ -217,7 +221,10 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
                 event=event,
             ),
         )
-    if isinstance(event, (UserMessage, ContextUsage, Unknown)):
+    if isinstance(
+        event,
+        (CommandExecution, UserMessage, TurnBoundary, ContextUsage, Unknown),
+    ):
         return ()
     raise TypeError(f"unsupported transcript event: {type(event).__name__}")
 
