@@ -34,6 +34,11 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "immediate task capture, not allocator selection" in text
     assert "on its own line with the task-add batch format" in text
     assert "`spice task status` and `spice task doctor` report" in text
+    assert "Small findings may be fixed, validated, and committed during review" in text
+    assert (
+        "only unresolved non-clean findings require `--then` or `--followup` "
+        "tracking" in text
+    )
     assert "A spice session is a real-time interactive loop" in text
     assert (
         "lead your next working assistant message with a plain-text ACK header "
