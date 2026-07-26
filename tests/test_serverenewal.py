@@ -20,7 +20,7 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, workroutes
+from spice.serve import agentapi, lifecycle, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
@@ -105,7 +105,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
-def test_target_refresh_force_news_pending_renewal_into_original_team(
+def test_inbox_wake_force_news_pending_renewal_then_inventory_projects_it(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -157,6 +157,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         ),
     )
 
+    lifecycle.submit_inbox_wake(state, target, "test-renewal-inventory").result()
     result = inventory.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
@@ -180,7 +181,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
-def test_messages_refresh_force_news_pending_renewal_into_original_team(
+def test_inbox_wake_force_news_pending_renewal_then_messages_project_it(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -236,9 +237,8 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         fake_messages,
     )
 
-    result = message.messages_payload_for_worktree(
-        state, target, limit=5, expected_thread_id=THREAD_A
-    )
+    lifecycle.submit_inbox_wake(state, target, "test-renewal-messages").result()
+    result = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert result["targetIdentity"]["thread"] == {
         "state": "bound",

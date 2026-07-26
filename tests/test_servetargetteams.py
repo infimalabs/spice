@@ -9,11 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.serve import agentapi, app, lifecycle, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.lifecycle import start_lifecycle_reconciler
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.serve.workroutes import (
     work_tree_send_response_payload,
@@ -21,7 +23,7 @@ from spice.serve.workroutes import (
 )
 from spice.serve.worktree import target
 from spice.serve.worktree.target import WorktreeTarget
-from spice.tasks import config
+from spice.tasks import claimstate, config
 from spice.worktrees import WorktreeRecord
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -53,7 +55,9 @@ def test_available_work_expansion_is_scoped_to_drain_lifetime(
         lambda *_args, **_kwargs: {"ok": True, "trigger": "available-work"},
     )
 
-    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
+    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
+        target, thread_id=THREAD_A
+    )
 
     assert result.agent_ensure == expected_ensure
 
@@ -81,7 +85,9 @@ def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
         capture_available_work,
     )
 
-    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
+    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
+        target, thread_id=THREAD_A
+    )
 
     assert result.agent_ensure == {"ok": True, "trigger": "available-work"}
     retry_due = observed[0]["retry_due"]
@@ -116,7 +122,9 @@ def test_operator_wake_bypasses_steer_available_work_gate(tmp_path, monkeypatch)
         lambda *_args, **_kwargs: operator_wake,
     )
 
-    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
+    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
+        target, thread_id=THREAD_A
+    )
 
     assert result.agent_ensure == operator_wake
 
@@ -172,7 +180,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     assert signature.other[0] == created.team_id
 
 
-def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
+def test_lifecycle_wake_rewrites_placeholder_membership_and_renewal_atomically(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -186,6 +194,7 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
         monkeypatch, thread_id=THREAD_A, running=False, ensure_calls=ensure_calls
     )
 
+    lifecycle.submit_inbox_wake(state, target, "test-membership-revision").result()
     result = inventory.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
@@ -212,6 +221,109 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
             "force_new": True,
         }
     ]
+
+
+def test_inventory_message_and_history_builders_are_pure_lifecycle_projections(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(
+        config=TeamConfig(lifetime="Drain"),
+        members=[ACTOR_A],
+    )
+    state.team_store.record_agent_identity(
+        actor_id=ACTOR_A,
+        target_id=target.id,
+        thread_id=THREAD_A,
+        actual_driver="codex",
+        actual_model="gpt-test",
+        actual_effort="low",
+        actual_service_tier="fast",
+        desired_driver="codex",
+        desired_model="gpt-next",
+        desired_effort="high",
+        transcript_owner="codex",
+    )
+    state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
+    write_inbox_item(
+        repo,
+        "1jN54zJK.txt",
+        compose_inbox_text(body="pending operator steering", priority=None, stop=False),
+    )
+    _patch_payload_dependencies(monkeypatch, thread_id=THREAD_A, running=False)
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", pending_inbox_identity_payload
+    )
+    monkeypatch.setattr(
+        message, "pending_inbox_identity_payload", pending_inbox_identity_payload
+    )
+
+    mutations: list[str] = []
+
+    def reject(label):
+        def rejected(*_args, **_kwargs):
+            mutations.append(label)
+            raise AssertionError(f"projection attempted lifecycle mutation: {label}")
+
+        return rejected
+
+    monkeypatch.setattr(
+        lifecycle, "ensure_agent_for_pending_inbox", reject("pending ensure")
+    )
+    monkeypatch.setattr(
+        lifecycle, "ensure_agent_for_available_work", reject("work ensure")
+    )
+    monkeypatch.setattr(agentapi, "deadletter_inbox_item", reject("inbox deadletter"))
+    monkeypatch.setattr(
+        lifecycle.LifecycleDecisionAuthority,
+        "evaluate_target",
+        reject("lifecycle evaluation"),
+    )
+    monkeypatch.setattr(claimstate, "do_claim", reject("task claim"))
+    monkeypatch.setattr(claimstate, "release_claim", reject("task release"))
+    monkeypatch.setattr(state.team_store, "assign_agent", reject("membership write"))
+    monkeypatch.setattr(
+        state.team_store, "record_agent_identity", reject("identity write")
+    )
+    monkeypatch.setattr(
+        state.team_store, "record_pending_renewal", reject("pending renewal write")
+    )
+    monkeypatch.setattr(
+        state.team_store, "record_started_renewal", reject("started renewal write")
+    )
+
+    inventories = [inventory.work_trees_payload(state) for _ in range(2)]
+    messages = [
+        message.messages_payload_for_worktree(state, target, limit=5) for _ in range(2)
+    ]
+    history = message.messages_payload_for_worktree(
+        state,
+        target,
+        limit=5,
+        before="2026-01-01T00:00:00.000000Z#0",
+        expected_thread_id=THREAD_A,
+    )
+
+    lanes = [payload["workTrees"][0] for payload in inventories]
+    assert mutations == []
+    assert not hasattr(inventory, "ensure_work_tree_agent")
+    assert [lane["agentEnsure"] for lane in lanes] == [{}, {}]
+    assert [payload["agentEnsure"] for payload in messages] == [{}, {}]
+    assert history["agentEnsure"] == {}
+    assert all(lane["lifetime"] == "Drain" for lane in lanes)
+    assert all(lane["pendingInboxCount"] == 1 for lane in lanes)
+    assert all(payload["pendingInboxCount"] == 1 for payload in messages)
+    assert all(
+        lane["renewalIntent"]["agentId"] == ACTOR_A
+        and lane["renewalIntent"]["requested"] is True
+        for lane in lanes
+    )
+    assert [
+        member.agent_id
+        for member in state.team_store.team_state(created.team_id).members
+    ] == [ACTOR_A]
 
 
 def test_unstarted_target_ignores_stale_cached_thread_when_already_imported(
@@ -339,6 +451,7 @@ def test_worktree_discovery_failure_keeps_prior_targets_and_reports_it(
     # which discovery used to collapse to [] and the client closed every lane.
     state.invalidate_targets()
     degraded = inventory.work_trees_payload(state)
+    degraded_again = inventory.work_trees_payload(state)
 
     healthy_ids = [tree["id"] for tree in healthy["workTrees"]]
     assert healthy_ids == sorted(healthy_ids)
@@ -351,6 +464,7 @@ def test_worktree_discovery_failure_keeps_prior_targets_and_reports_it(
     assert degraded["targetsDiscoveryErrors"] == [
         "could not list git worktrees from repo"
     ]
+    assert degraded_again == degraded
 
     # Recovery is immediate: the next successful listing resumes enumeration
     # and clears the reported failure.
