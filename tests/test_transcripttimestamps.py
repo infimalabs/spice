@@ -1,12 +1,14 @@
-"""Every transcript consumer reads one instant out of one dialect timestamp."""
+"""Every timestamp reader in the tree agrees on the instant a stamp names."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from spice.agent import launchhistory, lifecyclebinding, wrap
 from spice.serve import messages as message_reader
+from spice.serve import submissions
 from spice.serve.payload import message
-from spice.tasks import effort
+from spice.tasks import artifacts, effort
 from spice.transcript.timestamps import normalize_timestamp, parse_timestamp
 
 # Both dialects stamp lines with millisecond Zulu text; these two are copied off a
@@ -32,6 +34,24 @@ SUB_MILLISECOND_TIMESTAMP = "2026-04-21T22:27:37.177999Z"
 
 CODEX_INSTANT = datetime(2026, 4, 21, 22, 27, 37, 177000, tzinfo=UTC)
 WINDOW_STEP_SECONDS = 0.001
+
+# Record vocabularies outside the transcript — artifact ledger entries, launch
+# outcomes, lifecycle bindings, the context meter cache, and serve submissions —
+# read their stamps through the same primitive, so zoneless text resolves as UTC
+# there too rather than as whatever the machine's offset happens to be.
+RECORD_TIMESTAMP_SHAPES = (
+    "2026-04-21T22:27:37.177000Z",
+    "2026-04-21T22:27:37.177000",
+    "2026-04-21T18:27:37.177000-04:00",
+)
+LATER_RECORD_TIMESTAMP = "2026-04-21T22:27:37.178000Z"
+RECORD_READER_NAMES = (
+    "artifact-ledger",
+    "launch-history",
+    "lifecycle-binding",
+    "context-meter-cache",
+    "serve-submission",
+)
 
 
 def _assistant_message(
@@ -93,6 +113,24 @@ def _forensic_window_placement(timestamp: str, epoch: float) -> tuple[bool, bool
     )
 
 
+def _record_reader_epochs(text: str) -> dict[str, float | None]:
+    """One epoch per record reader that now shares the primitive."""
+    created = artifacts._created_at({"created_at": text})
+    return dict(
+        zip(
+            RECORD_READER_NAMES,
+            (
+                created.timestamp() if created is not None else None,
+                launchhistory._epoch_seconds(text),
+                lifecyclebinding._timestamp_epoch(text),
+                wrap._iso_timestamp_seconds(text),
+                submissions._optional_timestamp_epoch(text),
+            ),
+            strict=True,
+        )
+    )
+
+
 def test_every_dialect_timestamp_shape_reads_one_instant():
     parsed = [parse_timestamp(shape) for shape in SAME_INSTANT_SHAPES]
 
@@ -139,6 +177,28 @@ def test_rendering_truncates_to_milliseconds_while_parsing_keeps_the_microsecond
     assert parse_timestamp(SUB_MILLISECOND_TIMESTAMP) == CODEX_INSTANT.replace(
         microsecond=177999
     )
+
+
+def test_every_record_reader_agrees_on_one_instant():
+    epoch = CODEX_INSTANT.timestamp()
+
+    readings = {
+        shape: _record_reader_epochs(shape) for shape in RECORD_TIMESTAMP_SHAPES
+    }
+
+    assert readings == {
+        shape: dict.fromkeys(RECORD_READER_NAMES, epoch)
+        for shape in RECORD_TIMESTAMP_SHAPES
+    }
+
+
+def test_record_readers_keep_neighbouring_instants_apart():
+    zulu_shape, naive_shape, offset_shape = RECORD_TIMESTAMP_SHAPES
+
+    later = _record_reader_epochs(LATER_RECORD_TIMESTAMP)
+
+    assert later != _record_reader_epochs(zulu_shape)
+    assert _record_reader_epochs(naive_shape) == _record_reader_epochs(offset_shape)
 
 
 def test_unreadable_timestamp_text_leaves_every_scan_running():

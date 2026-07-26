@@ -6,7 +6,6 @@ import json
 import os
 import re
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,6 +15,7 @@ from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
+from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
 LAUNCH_OUTCOMES_LIMIT = 32
@@ -110,12 +110,8 @@ def launch_refusal(
 
 
 def _epoch_seconds(stamp: Any) -> float:
-    if not isinstance(stamp, str) or not stamp:
-        return 0.0
-    try:
-        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0.0
+    parsed = parse_timestamp(stamp)
+    return parsed.timestamp() if parsed is not None else 0.0
 
 
 def record_launch_outcome(repo_root: Path, outcome: dict[str, Any]) -> None:

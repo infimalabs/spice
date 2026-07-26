@@ -232,6 +232,10 @@ def _normalized_due(value: str) -> str:
             )
         except ValueError:
             pass
+    # ``task calc`` answers in naive local text, so this resolves it with
+    # ``astimezone`` rather than the shared transcript reader, which reads
+    # zoneless text as UTC. An unreadable due date is an operator error worth
+    # raising, not an absent timestamp.
     result = tw.run(["calc", value])
     try:
         resolved = datetime.fromisoformat(result.stdout.strip()).astimezone(UTC)

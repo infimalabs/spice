@@ -16,6 +16,7 @@ from typing import Any
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json, fsync_directory, shared_state_path
 from spice.tasks import config, identity
+from spice.transcript.timestamps import parse_timestamp
 
 TASK_ARTIFACT_DIR = Path("artifacts") / "tasks"
 MANIFEST_NAME = "manifest.json"
@@ -407,13 +408,7 @@ def _cutoff(duration: str) -> datetime:
 
 
 def _created_at(entry: dict[str, Any]) -> datetime | None:
-    raw = str(entry.get("created_at") or "")
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return parse_timestamp(str(entry.get("created_at") or ""))
 
 
 def _prune_candidate(entry: dict[str, Any], cutoff: datetime | None) -> bool:

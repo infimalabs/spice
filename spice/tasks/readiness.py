@@ -154,6 +154,10 @@ def queue_ready_epoch(row: dict[str, Any]) -> float:
 
 
 def _datetime_epoch(value: str, *, field: str) -> float:
+    # Queue-age origins are read strictly here rather than through the shared
+    # transcript reader: Taskwarrior's compact ``20260722T201234Z`` form belongs
+    # to this vocabulary, and malformed or zoneless text has to raise instead of
+    # resolving, because a silently dropped origin resets a task's age to now.
     try:
         if value.endswith("Z") and len(value) == len("20260722T201234Z"):
             parsed = datetime.strptime(value, tw.TW_DATETIME_FORMAT).replace(tzinfo=UTC)

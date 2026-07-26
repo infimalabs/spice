@@ -35,6 +35,7 @@ from spice.locking import bounded_exclusive_lock
 from spice.paths import atomic_write_json, atomic_write_text
 from spice.process.git import git_probe
 from spice.process.groups import process_group_is_running, process_id_is_running
+from spice.transcript.timestamps import parse_timestamp
 
 # The one skill location: the standard agent-skills path, in every worktree.
 # The launch prompt must link a file inside the agent's own worktree: an
@@ -234,12 +235,8 @@ def _output_observation(
 
 
 def _timestamp_epoch(value: str) -> float | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    parsed = parse_timestamp(value)
+    return parsed.timestamp() if parsed is not None else None
 
 
 def agent_binding_error(repo_root: Path, status: Any) -> str:
