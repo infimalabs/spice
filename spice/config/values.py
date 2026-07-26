@@ -304,8 +304,17 @@ def scale_say_words_per_minute(base: int, rate_multiplier: float) -> int:
     """The words-per-minute one rate multiplier resolves to, for any backend.
 
     Both speech backends scale the same configured base, so a listener changing
-    the rate hears the same proportion whichever engine renders the clip.
+    the rate hears the same proportion whichever engine renders the clip. The
+    rate a listener sends is coerced once, where it enters, by the serve handler
+    that reads it off the request; whatever reaches here is already a proportion.
+    So a value that is not one is a broken caller rather than input to absorb,
+    and it says so instead of resolving to a silently plausible word count.
     """
+    if not math.isfinite(rate_multiplier) or rate_multiplier <= 0:
+        raise SpiceError(
+            "say rate multiplier must be a positive finite number, "
+            f"got {rate_multiplier!r}"
+        )
     return max(1, int(base * rate_multiplier + 0.5))
 
 
