@@ -20,6 +20,7 @@ from spice.serve.team.schema import (
     TEAM_PROJECTION_SCHEMA,
 )
 from spice.serve.team.store import ObservationAttributionMode, ServeTeamStore
+from spice.transcript.reader import TranscriptFileIdentity
 
 
 def _record_identity(store: ServeTeamStore, actor_id: str) -> None:
@@ -56,6 +57,7 @@ def _record_session_facts(
         actor_id,
         source_path=f"/transcripts/{suffix}.jsonl",
         offset=int(timestamp),
+        file_identity=TranscriptFileIdentity(device=1, inode=int(timestamp)),
     )
     publish_directive_fact(
         store.directive_state_path,

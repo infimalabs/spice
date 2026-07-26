@@ -14,7 +14,13 @@ import pytest
 from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, AgentDriver
 from spice.transcript import reader
 from spice.transcript.decode import decode_parsed_line
-from spice.transcript.events import AssistantText, Reasoning, ToolCall, Unknown
+from spice.transcript.events import (
+    AssistantText,
+    ContextUsage,
+    Reasoning,
+    ToolCall,
+    Unknown,
+)
 from spice.transcript.reader import (
     TranscriptCursor,
     TranscriptEventReader,
@@ -34,6 +40,14 @@ TIMESTAMP = "2026-07-26T01:15:00.000Z"
 UPDATED_CURSOR_OFFSET = 11
 SOURCE_ACTOR = "thread:reader-contract"
 SESSION_FIXTURES = Path(__file__).parent / "fixtures" / "session"
+CLAUDE_INPUT_TOKENS = 100
+CLAUDE_CACHE_READ_TOKENS = 200
+CLAUDE_CACHE_CREATE_TOKENS = 30
+CLAUDE_OUTPUT_TOKENS = 20
+CLAUDE_CACHED_INPUT_TOKENS = CLAUDE_CACHE_READ_TOKENS + CLAUDE_CACHE_CREATE_TOKENS
+CLAUDE_TOTAL_TOKENS = (
+    CLAUDE_INPUT_TOKENS + CLAUDE_CACHED_INPUT_TOKENS + CLAUDE_OUTPUT_TOKENS
+)
 
 
 def _raw(payload: dict) -> bytes:
@@ -287,6 +301,46 @@ def test_public_reader_keeps_every_event_on_one_multiblock_claude_line(
     assert {event.at.line for event in read.events} == {0}
     assert {event.at.source_actor for event in read.events} == {SOURCE_ACTOR}
     assert {event.at.timestamp for event in read.events} == {TIMESTAMP}
+
+
+def test_public_reader_attaches_claude_context_usage_after_message_blocks(
+    tmp_path,
+) -> None:
+    path = tmp_path / "claude.jsonl"
+    path.write_bytes(
+        _raw(
+            {
+                "type": "assistant",
+                "timestamp": TIMESTAMP,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "measured"}],
+                    "usage": {
+                        "input_tokens": CLAUDE_INPUT_TOKENS,
+                        "cache_read_input_tokens": CLAUDE_CACHE_READ_TOKENS,
+                        "cache_creation_input_tokens": CLAUDE_CACHE_CREATE_TOKENS,
+                        "output_tokens": CLAUDE_OUTPUT_TOKENS,
+                    },
+                },
+            }
+        )
+    )
+
+    read = TranscriptEventReader(path, CLAUDE_DRIVER, SOURCE_ACTOR).read("forward")
+
+    assert [type(event) for event in read.events] == [AssistantText, ContextUsage]
+    usage = read.events[1]
+    assert isinstance(usage, ContextUsage)
+    assert usage.last.input_tokens == CLAUDE_INPUT_TOKENS
+    assert usage.last.cached_input_tokens == CLAUDE_CACHED_INPUT_TOKENS
+    assert usage.last.output_tokens == CLAUDE_OUTPUT_TOKENS
+    assert usage.last.total_tokens == CLAUDE_TOTAL_TOKENS
+    assert usage.cumulative == usage.last
+    assert usage.model_context_window == CLAUDE_DRIVER.default_context_window
+    assert usage.at.source == str(path)
+    assert usage.at.offset == 0
+    assert usage.at.source_actor == SOURCE_ACTOR
+    assert usage.at.ordinal == 1
 
 
 def test_public_reader_preserves_malformed_lines_as_located_unknowns(tmp_path) -> None:

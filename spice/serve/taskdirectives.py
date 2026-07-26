@@ -81,13 +81,6 @@ def _display_text_with_task_directives(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _strip_task_directive_lines(text: str) -> str:
-    lines = [
-        line for line in text.splitlines() if _task_directive_from_line(line) is None
-    ]
-    return "\n".join(lines).strip()
-
-
 def _task_directive_count(text: str) -> int:
     return sum(1 for line in text.splitlines() if _task_directive_from_line(line))
 

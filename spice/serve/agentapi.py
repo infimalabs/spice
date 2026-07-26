@@ -37,6 +37,7 @@ from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.lifecycle import (
     LIFECYCLE_DECISION_WAIT_SECONDS,
+    LifecycleDecision,
     LifecycleOutcome,
 )
 from spice.serve.payload.wire import validate_emitter_payload
@@ -199,30 +200,34 @@ def sent_steering_payload(
     return payload
 
 
-def explicit_send_agent_ensure(
+def explicit_send_decision(
     grant: Future[LifecycleOutcome],
-) -> dict[str, Any] | None:
+) -> LifecycleDecision | None:
     """Await the reconciler decision this send reserved its launch attempt for.
 
     The inbox item is already durable when this runs, so a decision that never
     arrives is a lane that did not start -- not a send that did not land. Report
     the send either way and let the lane's own signals start it.
+
+    The whole decision comes back, not just its launch: the reply reports the
+    ensured thread and renewal state the reconciler settled, and re-deriving
+    those from the payload would be a second opinion on a fact that already has
+    an authority.
     """
     try:
         outcome = grant.result(timeout=LIFECYCLE_DECISION_WAIT_SECONDS)
     except (TimeoutError, CancelledError):
         return None
-    decision = outcome.decision
-    return decision.agent_ensure if decision is not None else None
+    return outcome.decision
 
 
 def sent_steering_response_payload(
     sent: SentSteeringMessage,
     *,
     target: WorktreeTarget,
-    grant: Future[LifecycleOutcome],
+    decision: LifecycleDecision | None,
 ) -> dict[str, Any]:
-    agent_ensure = explicit_send_agent_ensure(grant)
+    agent_ensure = decision.agent_ensure if decision is not None else None
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     return sent_steering_payload(

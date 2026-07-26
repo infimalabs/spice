@@ -44,6 +44,7 @@ from spice.serve.team.schema import (
     METRIC_HISTORY_RETENTION_SECONDS,
     OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
 )
+from spice.transcript.reader import TranscriptFileIdentity
 
 METRIC_HISTORY_RETENTION_DAYS_ENV = (
     "SPICE_METRIC_HISTORY_RETENTION_DAYS"  # env-policy: allow
@@ -54,6 +55,19 @@ OBSERVATION_SOURCE_REBUILD_REQUIRED = (
     "immutable source attribution is unavailable for pre-transition observation "
     "rows; rebuild Serve observation projections from their native facts"
 )
+
+
+@dataclass(frozen=True)
+class AgentMetricCheckpoint:
+    """Where one agent's ingestion of one transcript resumes, and from which file.
+
+    `file_identity` is absent only before the first successful read of a source,
+    which the reader treats as "no replacement claim to check" rather than as a
+    replacement.
+    """
+
+    offset: int
+    file_identity: TranscriptFileIdentity | None
 
 
 @dataclass(frozen=True)
@@ -199,36 +213,54 @@ class TeamMetricStoreMixin:
                 now=now,
             )
 
-    def agent_metric_cursor(
+    def agent_metric_checkpoint(
         self: _TeamMetricStore, agent_id: str, source_path: str
-    ) -> int:
+    ) -> AgentMetricCheckpoint:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT offset FROM agent_metric_cursors "
+                "SELECT offset, source_device, source_inode FROM agent_metric_cursors "
                 "WHERE agent_id = ? AND source_path = ?",
                 (agent_id, source_path),
             ).fetchone()
         if row is None:
-            return 0
-        return max(0, int(row["offset"] or 0))
+            return AgentMetricCheckpoint(offset=0, file_identity=None)
+        return AgentMetricCheckpoint(
+            offset=max(0, int(row["offset"] or 0)),
+            file_identity=_file_identity(row["source_device"], row["source_inode"]),
+        )
 
     def metric_history_retention_seconds(self: _TeamMetricStore) -> int:
         with self.connect() as connection:
             return _metric_history_retention_seconds_locked(connection)
 
     def record_agent_metric_cursor(
-        self: _TeamMetricStore, agent_id: str, *, source_path: str, offset: int
+        self: _TeamMetricStore,
+        agent_id: str,
+        *,
+        source_path: str,
+        offset: int,
+        file_identity: TranscriptFileIdentity | None,
     ) -> None:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             connection.execute(
                 "INSERT INTO agent_metric_cursors "
-                "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, ?) "
+                "(agent_id, source_path, offset, source_device, source_inode, "
+                "updated_at) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
                 "offset = excluded.offset, "
+                "source_device = excluded.source_device, "
+                "source_inode = excluded.source_inode, "
                 "updated_at = excluded.updated_at",
-                (agent_id, source_path, max(0, int(offset)), time.time()),
+                (
+                    agent_id,
+                    source_path,
+                    max(0, int(offset)),
+                    None if file_identity is None else file_identity.device,
+                    None if file_identity is None else file_identity.inode,
+                    time.time(),
+                ),
             )
 
     def record_task_lifecycle_event(
@@ -266,13 +298,21 @@ class TeamMetricStoreMixin:
         new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
         if old_agent_id == new_agent_id:
             return
+        # A successor inherits the predecessor's resume point for a source it
+        # keeps reading, identity included: the file it resumes is the same file,
+        # so an inherited checkpoint must not read as a replacement.
         connection.execute(
             "INSERT INTO agent_metric_cursors "
-            "(agent_id, source_path, offset, updated_at) "
-            "SELECT ?, source_path, offset, updated_at "
+            "(agent_id, source_path, offset, source_device, source_inode, "
+            "updated_at) "
+            "SELECT ?, source_path, offset, source_device, source_inode, updated_at "
             "FROM agent_metric_cursors WHERE agent_id = ? "
             "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
             "offset = max(agent_metric_cursors.offset, excluded.offset), "
+            "source_device = CASE WHEN excluded.offset > agent_metric_cursors.offset "
+            "THEN excluded.source_device ELSE agent_metric_cursors.source_device END, "
+            "source_inode = CASE WHEN excluded.offset > agent_metric_cursors.offset "
+            "THEN excluded.source_inode ELSE agent_metric_cursors.source_inode END, "
             "updated_at = max(agent_metric_cursors.updated_at, excluded.updated_at)",
             (new_agent_id, old_agent_id),
         )
@@ -776,6 +816,15 @@ class TeamMetricStoreMixin:
             bucket_seconds=bucket_seconds,
             now=now,
         )
+
+
+def _file_identity(
+    device: int | None, inode: int | None
+) -> TranscriptFileIdentity | None:
+    """Rebuild a stored source identity, absent until both halves are present."""
+    if device is None or inode is None:
+        return None
+    return TranscriptFileIdentity(device=int(device), inode=int(inode))
 
 
 def _normalized_id(value: str, field_name: str) -> str:
