@@ -230,9 +230,20 @@ class _ToolPreviewIndex:
 
 @dataclass
 class MessagePresenter:
-    """Project typed transcript facts into the public assistant-message model."""
+    """Project typed transcript facts into the public assistant-message model.
 
-    _preview_index: _ToolPreviewIndex = field(default_factory=_ToolPreviewIndex)
+    Only a paged read earns the preview index. It alone meets a tool output
+    whose call sits on a page it has yet to read, which one pass cannot pair on
+    its own. Indexing anyway would rescan every tool output to answer a question
+    a single-pass caller never asks, so that caller leaves the index unbuilt.
+    """
+
+    _preview_index: _ToolPreviewIndex | None = None
+
+    @classmethod
+    def paging(cls) -> MessagePresenter:
+        """A presenter whose previews survive across successive read pages."""
+        return cls(_preview_index=_ToolPreviewIndex())
 
     def project(
         self,
@@ -278,6 +289,8 @@ class MessagePresenter:
 
     def resolve(self, messages: list[AssistantMessage]) -> list[AssistantMessage]:
         """Resolve call previews whose output appeared on a newer read page."""
+        if self._preview_index is None:
+            return messages
         return self._preview_index.resolve(messages)
 
     @staticmethod
