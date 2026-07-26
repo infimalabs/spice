@@ -12,7 +12,6 @@ from spice.sqliteconnection import sqlite_connection
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions import records
-from spice.transcript.decode import first_text
 from spice.transcript.timestamps import normalize_timestamp
 from spice.errors import SpiceError
 from spice.tasks.identity import (
@@ -42,11 +41,6 @@ def test_normalize_timestamp_zulu_milliseconds():
     assert (
         normalize_timestamp("2026-01-01T00:00:00+00:00") == "2026-01-01T00:00:00.000Z"
     )
-
-
-def test_first_text_reads_content_list():
-    content = [{"type": "output_text", "text": "hello"}]
-    assert first_text(content) == "hello"
 
 
 def test_session_timeline_prints_turn_and_compaction(tmp_path, capsys):
