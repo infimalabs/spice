@@ -30,7 +30,8 @@ from spice.sessions.deadline import (
     run_with_rehydration_deadline,
 )
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
-from spice.sessions.util import format_int, normalize_timestamp
+from spice.sessions.util import format_int
+from spice.transcript.timestamps import normalize_timestamp
 
 DEFAULT_SWEEP_WINDOWS = 3
 DEFAULT_SUMMARY_RECENT = 8

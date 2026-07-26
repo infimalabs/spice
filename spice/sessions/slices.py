@@ -8,9 +8,9 @@ from typing import Sequence
 
 from spice.sessions import records as session_records
 from spice.sessions.records import CompactionRecord, TurnRecord
-from spice.sessions.util import normalize_timestamp
 from spice.transcript.events import Compaction
 from spice.transcript.reader import REVERSE_WINDOW_BYTES, TranscriptEventReader
+from spice.transcript.timestamps import normalize_timestamp
 
 
 @dataclass(slots=True)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.sessions.records import iter_events
-from spice.sessions.util import normalize_timestamp
+from spice.transcript.timestamps import normalize_timestamp
 
 EXEC_EXIT_RE = re.compile(r"Process exited with code (-?\d+)")
 COMMAND_TOOL_NAMES = {"exec_command", "shell", "local_shell", "container.exec"}

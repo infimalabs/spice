@@ -49,7 +49,13 @@ def _one_of_every_kind(at: Provenance) -> list[object]:
         AssistantText(at=at, text=PROSE, final=True),
         Reasoning(at=at, summary=THINKING),
         ToolCall(at=at, call_id="call-1", name="Bash", arguments=TOOL_ARGUMENTS),
-        ToolOutput(at=at, call_id="call-1", content="events.py", failed=False),
+        ToolOutput(
+            at=at,
+            call_id="call-1",
+            content="events.py",
+            failed=False,
+            tool_output_type="function_call_output",
+        ),
         Image(at=at, url=PNG_URL),
         UserMessage(at=at, text="drain the board", prompt_id="prompt-7"),
         Compaction(at=at, active=True, boundary=False),
@@ -104,7 +110,13 @@ def test_every_event_kind_is_a_frozen_typed_record() -> None:
 def test_event_fields_keep_their_decoded_values() -> None:
     at = _provenance(FIRST_LINE, ordinal=0)
     call = ToolCall(at=at, call_id="call-1", name="Bash", arguments=TOOL_ARGUMENTS)
-    output = ToolOutput(at=at, call_id="call-1", content="events.py", failed=True)
+    output = ToolOutput(
+        at=at,
+        call_id="call-1",
+        content="events.py",
+        failed=True,
+        tool_output_type="function_call_output",
+    )
     assert (call.call_id, call.name, call.arguments) == (
         "call-1",
         "Bash",
@@ -115,6 +127,12 @@ def test_event_fields_keep_their_decoded_values() -> None:
         "events.py",
         True,
     )
+    output_type_field = next(
+        field
+        for field in dataclasses.fields(ToolOutput)
+        if field.name == "tool_output_type"
+    )
+    assert output_type_field.default is dataclasses.MISSING
 
 
 def test_stamper_hands_out_ascending_ordinals_for_one_line() -> None:
@@ -226,18 +244,23 @@ def test_canonical_dict_falls_through_to_reasoning_when_only_thinking() -> None:
 
 
 def test_canonical_dict_renders_an_image_only_line_as_a_data_url() -> None:
-    event = CLAUDE_DRIVER.normalize_transcript_line(
-        _assistant_line(
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": PNG_DATA,
-                },
-            }
-        )
+    raw = _assistant_line(
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": PNG_DATA,
+            },
+        }
     )
+    decoded = claude_line_events(raw)
+    assert [type(item) for item in decoded] == [Image]
+    image = decoded[0]
+    assert isinstance(image, Image)
+    assert image.tool_output_type is None
+
+    event = CLAUDE_DRIVER.normalize_transcript_line(raw)
     assert event["payload"]["content"] == [
         {"type": "image", "image_url": {"url": PNG_URL}}
     ]
@@ -269,9 +292,14 @@ def test_tool_result_line_decodes_to_output_plus_its_images() -> None:
     }
     events = claude_line_events(raw, source=SOURCE, line=FIRST_LINE)
     assert [type(event) for event in events] == [ToolOutput, Image]
-    assert events[0].call_id == "call-1"
-    assert events[0].failed is True
-    assert events[1].url == PNG_URL
+    output, image = events
+    assert isinstance(output, ToolOutput)
+    assert isinstance(image, Image)
+    assert output.call_id == "call-1"
+    assert output.failed is True
+    assert output.tool_output_type == "function_call_output"
+    assert image.url == PNG_URL
+    assert image.tool_output_type == "function_call_output"
 
     canonical = CLAUDE_DRIVER.normalize_transcript_line(raw)
     assert canonical["payload"]["type"] == "function_call_output"

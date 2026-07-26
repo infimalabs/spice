@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.agent.driver import AgentDriver
-from spice.sessions.util import normalize_timestamp
+from spice.transcript.timestamps import normalize_timestamp
 
 
 @dataclass(slots=True, frozen=True)

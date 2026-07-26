@@ -119,10 +119,10 @@ class ToolOutput:
     call_id: str
     content: str
     failed: bool
+    tool_output_type: ToolOutputType
     item_id: str | None = None
     content_type: str | None = None
     output_is_list: bool = False
-    tool_output_type: ToolOutputType = "function_call_output"
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None

@@ -35,7 +35,6 @@ from spice.sessions.briefingrender import (
 )
 from spice.sessions.briefingtaskplane import collect_task_plane_candidates
 from spice.sessions.slices import select_compaction_windows_from_files
-from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
@@ -45,6 +44,7 @@ from spice.sessions.records import (
     collect_turns,
 )
 from spice.tasks import identity
+from spice.transcript.timestamps import parse_timestamp
 
 STEERING_ROW_LIMIT = 6
 STEERING_TEXT_PREVIEW_CHARS = 200
@@ -699,7 +699,7 @@ def _recency_floor(
     max_seconds: int,
 ) -> str | None:
     reference = _recency_reference_ts(end=end, turns=turns, compactions=compactions)
-    reference_dt = parse_iso_ts(reference)
+    reference_dt = parse_timestamp(reference)
     if reference_dt is None:
         reference_dt = datetime.now(UTC)
     floor = reference_dt.astimezone(UTC) - timedelta(seconds=max(0, max_seconds))
