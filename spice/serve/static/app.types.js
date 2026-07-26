@@ -391,8 +391,6 @@
  * @typedef {Object} LanePayload
  * @property {Array.<LaneMessage>} messages
  * @property {Array.<AckContext>} ackContexts
- * @property {string} targetWorktreeName
- * @property {string} targetBranch
  * @property {number} pendingInboxCount
  * @property {Array.<string>} pendingInboxKeys
  * @property {string} pendingInboxRevision
@@ -582,11 +580,8 @@
  * @property {string} displayName
  * @property {string} branch
  * @property {number} pendingCount
- * @property {string} pendingLabel
  * @property {number} privateTaskCount
  * @property {string} agentProcessStatus
- * @property {string=} targetWorktreeName
- * @property {string=} targetBranch
  * @property {TargetIdentity=} targetIdentity
  * @property {ServeAgentIdentity=} serveAgentIdentity
  * @property {Array.<string>=} taskFilters
@@ -782,7 +777,6 @@
  * @property {ServeAgentIdentity} serveAgentIdentity
  * @property {TeamIdentity} teamIdentity
  * @property {Array.<string>} memberAgents
- * @property {string} laneName
  * @property {Array.<string>} taskFilters
  * @property {Array.<string>} effectiveTaskFilters
  * @property {Array.<TaskFilterEntry>} taskFilterEntries

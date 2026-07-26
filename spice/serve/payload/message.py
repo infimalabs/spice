@@ -636,8 +636,6 @@ def _messages_worktree_payload(
     payload = {
         "messages": [item.to_payload() for item in items],
         "ackContexts": ack_contexts,
-        "targetWorktreeName": target.name,
-        "targetBranch": target.branch or target.name,
         "targetIdentity": target_identity_payload(
             target,
             thread_id,

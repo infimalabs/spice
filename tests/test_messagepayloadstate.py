@@ -562,8 +562,6 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     assert set(payload) == {
         "messages",
         "ackContexts",
-        "targetWorktreeName",
-        "targetBranch",
         "targetIdentity",
         "serveAgentIdentity",
         "taskFilters",

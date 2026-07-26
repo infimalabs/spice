@@ -24,6 +24,20 @@ from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# Every envelope that carries a lane-chrome facet, named beside the producer-only
+# fields that facet superseded. A field is listed here only because the consumer
+# census found no non-chrome reader for it; a field the browser still reads for
+# its own reasons -- laneFilterVersion, privateTaskCount, lastAssistantAt -- stays
+# declared and is absent from these tuples. The two empty tuples are envelopes
+# that gained a facet without ever having hand-built one.
+LANE_CHROME_ENVELOPE_SUPERSESSIONS = {
+    "LanePayload": ("targetWorktreeName", "targetBranch"),
+    "PendingLanePayload": (),
+    "WorkTreePayload": ("pendingLabel", "targetWorktreeName", "targetBranch"),
+    "WorkTreeRoute": ("laneName",),
+    "WorkTreeSendResult": (),
+}
+
 
 def test_browser_payload_emitters_match_the_exact_schema_registry():
     modules = (
@@ -271,6 +285,24 @@ def test_lane_chrome_contract_rejects_authority_expansion_fields():
                 "LaneChromePayload",
                 {"targetId": "target-fixture", field: None},
             )
+
+
+def test_chrome_carrying_envelopes_keep_only_the_facts_they_still_own():
+    carriers = {
+        name
+        for name, schema in wire.WIRE_OBJECTS_BY_NAME.items()
+        for field in schema.fields
+        if field.name == "chrome"
+    }
+    assert carriers == set(LANE_CHROME_ENVELOPE_SUPERSESSIONS)
+
+    for name, superseded in LANE_CHROME_ENVELOPE_SUPERSESSIONS.items():
+        payload = valid_wire_payload(name, chrome={"targetId": "target-fixture"})
+
+        assert wire.validate_wire_payload(name, payload) == payload
+        for field in superseded:
+            with pytest.raises(SpiceError, match=f"undeclared fields: {field}"):
+                wire.validate_wire_payload(name, {**payload, field: "lane-a"})
 
 
 def test_lane_chrome_is_the_assembler_emitted_contract():

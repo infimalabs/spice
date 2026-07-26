@@ -138,7 +138,6 @@ def _work_tree_payload(
             task_board=task_board,
         ),
         "pendingCount": pending["count"],
-        "pendingLabel": pending["label"],
         **pending_identity,
         "privateTaskCount": board["privateTaskCount"],
         "agentProcessStatus": status.process_status,

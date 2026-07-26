@@ -456,7 +456,6 @@ def _work_tree_route_payload(
         ),
         "teamIdentity": team_identity,
         "memberAgents": [actor] if actor else [],
-        "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
         "effectiveTaskFilters": facts.get("effectiveTaskFilters", []),
         "taskFilterEntries": facts.get("taskFilterEntries", []),

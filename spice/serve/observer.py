@@ -336,7 +336,6 @@ def observer_target_payload(session: ObserverSession) -> dict[str, Any]:
         "branch": session.target.branch,
         **payload,
         "pendingCount": 0,
-        "pendingLabel": "0",
         "privateTaskCount": 0,
         "agentProcessStatus": "observer",
     }
@@ -417,8 +416,6 @@ def _observer_lane_payload(session: ObserverSession) -> dict[str, Any]:
         "renewalIntent": {},
     }
     return {
-        "targetWorktreeName": session.target.name,
-        "targetBranch": session.target.branch,
         **pending_identity,
         "targetIdentity": target_identity,
         "serveAgentIdentity": serve_identity,
