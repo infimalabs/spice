@@ -288,6 +288,7 @@ def test_custom_tool_output_images_carry_the_projection_discriminator() -> None:
     assert isinstance(image, Image)
     assert output.tool_output_type == "custom_tool_call_output"
     assert image.tool_output_type == "custom_tool_call_output"
+    assert image.payload_index == 1
     assert (
         project_codex_events(events, TIMESTAMP)
         == CANONICAL_LINES["custom_tool_call_output"]
@@ -307,6 +308,7 @@ def test_image_only_custom_tool_output_projects_its_exact_family() -> None:
     image = events[0]
     assert isinstance(image, Image)
     assert image.tool_output_type == "custom_tool_call_output"
+    assert image.payload_index == 0
     assert project_codex_events(events, TIMESTAMP) == raw
 
 

@@ -148,6 +148,9 @@ class Image:
 
     Base64 blocks arrive as a `data:` URL, so the media type and payload stay
     recoverable from the single field without a second encoding step.
+    `payload_index` is its position in the selected message/tool-output content
+    list; adapters leave it unset when their payload-selection contract hides
+    that image from consumers.
     """
 
     at: Provenance
@@ -158,6 +161,7 @@ class Image:
     item_id: str | None = None
     call_id: str | None = None
     tool_output_type: ToolOutputType | None = None
+    payload_index: int | None = None
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
@@ -256,6 +260,20 @@ class ContextUsage:
 
 
 @dataclass(slots=True, frozen=True)
+class FailureSignal:
+    """A structural process failure carried by the transcript stream.
+
+    This is the plane-neutral result of a driver interpreting its own failure
+    envelope. Consumers see only the stable failure family and optional retry
+    horizon; provider JSON stays behind the driver adapter.
+    """
+
+    at: Provenance
+    kind: str
+    reset_epoch: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class Unknown:
     """A line or block the decoder could not type, kept rather than dropped.
 
@@ -281,6 +299,7 @@ TranscriptEvent = (
     | Compaction
     | WebSearch
     | ContextUsage
+    | FailureSignal
     | Unknown
 )
 

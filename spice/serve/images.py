@@ -20,6 +20,8 @@ from typing import Any
 from urllib.parse import quote
 
 from spice.agent.driver import AgentDriver
+from spice.transcript.events import Image
+from spice.transcript.reader import TranscriptEventReader
 
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
@@ -69,31 +71,31 @@ def view_image_markdown(payload: dict[str, Any]) -> str | None:
 def rollout_image_from_offset(
     rollout_path: Path, *, offset: int, item_index: int, driver: AgentDriver
 ) -> tuple[bytes, str] | None:
-    """Decode the embedded image at (line offset, content item) in a rollout."""
+    """Decode the selected image at one typed transcript payload locus."""
     if offset < 0 or item_index < 0:
         return None
-    try:
-        with rollout_path.open("rb") as handle:
-            handle.seek(offset)
-            raw_line = handle.readline()
-    except OSError:
-        return None
-    try:
-        loaded = json.loads(raw_line.decode("utf-8", errors="replace"))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(loaded, dict):
-        return None
-    event = driver.normalize_transcript_line(loaded)
-    if event is None or event.get("type") != "response_item":
-        return None
-    payload = event.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    items = _image_content_items(payload)
-    if items is None or item_index >= len(items):
-        return None
-    return _decode_data_image(_item_image_url(items[item_index]))
+    read = TranscriptEventReader(rollout_path, driver).read(
+        "bounded",
+        start_offset=offset,
+        # A one-byte range is enough to select the record that starts here;
+        # the reader owns consuming and decoding the complete line.
+        end_offset=offset + 1,
+    )
+    image = next(
+        (
+            event
+            for event in read.events
+            if isinstance(event, Image)
+            and event.at.offset == offset
+            and event.payload_index == item_index
+            and (
+                event.role == "assistant"
+                or event.tool_output_type == "function_call_output"
+            )
+        ),
+        None,
+    )
+    return _decode_data_image(image.url) if image is not None else None
 
 
 def markdown_image_reference(alt: str, target: str) -> str:
@@ -150,16 +152,6 @@ def _image_items_markdown(
             )
         parts.append(markdown_image_reference(alt, target))
     return "\n\n".join(parts) if parts else None
-
-
-def _image_content_items(payload: dict[str, Any]) -> list[Any] | None:
-    if payload.get("type") == "function_call_output":
-        output = payload.get("output")
-        return output if isinstance(output, list) else None
-    if payload.get("type") == "message" and payload.get("role") == "assistant":
-        content = payload.get("content")
-        return content if isinstance(content, list) else None
-    return None
 
 
 def _item_image_url(item: Any) -> str:

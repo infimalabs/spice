@@ -192,7 +192,7 @@ def _codex_message_events(
     phase = _optional_str(payload.get("phase"))
     turn_id, metadata_key = _turn_metadata(payload)
     events: list[TranscriptEvent] = []
-    for block in content:
+    for payload_index, block in enumerate(content):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex message block", None))
             continue
@@ -233,8 +233,8 @@ def _codex_message_events(
                     )
                 )
             continue
-        image_url = block.get("image_url")
-        if isinstance(block_type, str) and isinstance(image_url, str):
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
@@ -243,6 +243,7 @@ def _codex_message_events(
                     detail=_optional_str(block.get("detail")),
                     role=role,
                     item_id=item_id,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -330,7 +331,7 @@ def _codex_tool_output_events(
             )
         ]
     events: list[TranscriptEvent] = []
-    for block in output:
+    for payload_index, block in enumerate(output):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex output block", None))
             continue
@@ -352,8 +353,8 @@ def _codex_tool_output_events(
                 )
             )
             continue
-        image_url = block.get("image_url")
-        if isinstance(block_type, str) and isinstance(image_url, str):
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
@@ -363,6 +364,7 @@ def _codex_tool_output_events(
                     item_id=item_id,
                     call_id=call_id,
                     tool_output_type=output_type,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -639,6 +641,11 @@ def _unknown(stamper: LineStamper, reason: str, raw_type: str | None) -> Unknown
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _codex_image_url(value: Any) -> str | None:
+    raw = value.get("url") if isinstance(value, dict) else value
+    return raw if isinstance(raw, str) and raw else None
 
 
 def _command_value(value: Any) -> str:
