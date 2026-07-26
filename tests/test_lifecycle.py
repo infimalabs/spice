@@ -290,6 +290,20 @@ def test_launch_stays_quiet_about_knobs_nobody_asked_for(tmp_path, monkeypatch):
     assert LAUNCH_REPORT_FIELDS + ("command",) == _report_fields(result)
 
 
+def test_naming_the_default_personality_is_still_an_ask(tmp_path, monkeypatch):
+    # Typing the default is a choice, and on a driver without the seam the agent
+    # gets no personality at all rather than the one that was named — so the ask
+    # is reported, where an untouched config stays quiet.
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: status())
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+
+    result = lifecycle.ensure_agent(
+        tmp_path, dry_run=True, personality=values.DEFAULT_AGENT_PERSONALITY
+    )
+
+    assert result.unhonored_launch_knobs == (PERSONALITY_LAUNCH_KNOB,)
+
+
 def test_codex_carries_both_knobs_the_launch_asks_it_for(tmp_path, monkeypatch):
     # The same request on the driver that does have the seams: nothing is
     # dropped, nothing is reported, and both land in the built command.
