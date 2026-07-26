@@ -6,6 +6,11 @@ windows, cursor offsets, malformed-line handling, and one internal parsed
 line-record handoff to the driver-backed decoder. Public reads expose only the
 resulting typed event stream -- a whole access pass, or the prose a single
 record carries. Consumer-specific projection stays above it.
+
+Access is the whole contract, so any JSONL a driver can decode reads through
+here -- a supervised launch log is the same dialect echoed to stdout, and it
+earns the same gzip, malformed-line, and offset handling for free rather than
+growing a second private loop.
 """
 
 from __future__ import annotations
