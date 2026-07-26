@@ -270,6 +270,21 @@ def test_bold_wrapper_closing_at_body_end_is_stripped():
     assert segments[0].content == "here is the full breakdown"
 
 
+@pytest.mark.parametrize("wrapper", ["**", "*", "__"])
+def test_a_bold_header_keeps_the_next_line_indented(wrapper):
+    # A header whose wrapper closes right after the separator is still only a
+    # marker, so consuming it must stop at the line boundary. Reaching past it
+    # would take the indentation off the first body line, and the bold form
+    # would then read a shown directive as an issued one while the plain form
+    # read the same message correctly.
+    indented = "    TASK title=Shown | project=serve.messages"
+    text = f"{wrapper}ACK {KEY_A}:{wrapper}\n{indented}\nthat is the form."
+    preamble, segments = split_ack_message(text)
+
+    assert preamble == ""
+    assert segments[0].content == f"{indented}\nthat is the form."
+
+
 def test_underscore_wrapped_nack_header_is_consumed():
     text = f"__NACK {KEY_A}:__ cannot comply with this one."
     segments = extract_nack_segments_from_text(text)

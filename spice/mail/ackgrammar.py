@@ -489,11 +489,16 @@ def _emphasis_run_before(text: str, pos: int) -> tuple[int, str]:
 
 
 def _consume_body_wrapper_close(text: str, index: int, limit: int, wrapper: str) -> int:
-    """Skip a wrapper-closing emphasis run (and trailing space) at `index`."""
+    """Skip a wrapper-closing emphasis run (and trailing space) at `index`.
+
+    Like the separator, the run this skips is the marker's own width, so it
+    stops at the line boundary and leaves the next line's indentation for the
+    suppression walk to read.
+    """
     if text[index : index + len(wrapper)] != wrapper:
         return index
     index += len(wrapper)
-    while index < limit and text[index] in _ACK_BODY_SPACE_CHARS:
+    while index < limit and text[index] in _ACK_HEADER_INLINE_SPACE_CHARS:
         index += 1
     return index
 
