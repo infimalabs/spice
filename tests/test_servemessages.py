@@ -281,11 +281,21 @@ def test_gzip_reader_preserves_timestamp_offset_cursors_and_paging(tmp_path) -> 
     ] == ["second"]
 
 
-def test_sparse_reverse_chunks_parse_each_accessed_record_once(
+def test_sparse_reverse_chunks_project_each_accessed_record_once(
     tmp_path, monkeypatch
 ) -> None:
     transcript = tmp_path / "rollout.jsonl"
     _append_codex_message(transcript, TIMESTAMP, "first")
+    _append_codex_payload(
+        transcript,
+        "2026-06-20T04:45:00.250000Z",
+        {
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": json.dumps({"cmd": "echo hi"}),
+            "call_id": "cross-chunk-call",
+        },
+    )
     _append_codex_payload(
         transcript,
         "2026-06-20T04:45:00.500000Z",
@@ -297,26 +307,53 @@ def test_sparse_reverse_chunks_parse_each_accessed_record_once(
             f"2026-06-20T04:45:{index + 1:02d}.000000Z",
             {"type": f"ignored-{index}", "value": index},
         )
+    _append_codex_payload(
+        transcript,
+        "2026-06-20T04:45:59.000000Z",
+        {
+            "type": "function_call_output",
+            "output": "done",
+            "call_id": "cross-chunk-call",
+        },
+    )
     _append_codex_message(
         transcript,
         "2026-06-20T04:46:00.000000Z",
         "last",
     )
-    original = transcript_reader._parse_json_object
+    expected = read_assistant_messages(transcript, limit=2, driver=CODEX_DRIVER)
+    original_parse = transcript_reader._parse_json_object
+    original_projection = message_reader._build_message
     parses: Counter[str] = Counter()
+    projections: Counter[int] = Counter()
 
     def count_parse(raw: str):
         parses[raw] += 1
-        return original(raw)
+        return original_parse(raw)
+
+    def count_projection(*args, **kwargs):
+        projections[args[0].offset] += 1
+        return original_projection(*args, **kwargs)
 
     monkeypatch.setattr(message_reader, "REVERSE_WINDOW_BYTES", 256)
     monkeypatch.setattr(transcript_reader, "_parse_json_object", count_parse)
+    monkeypatch.setattr(message_reader, "_build_message", count_projection)
 
     items = read_assistant_messages(transcript, limit=2, driver=CODEX_DRIVER)
 
-    assert [item.display_text for item in items] == ["last", "first"]
+    assert [item.to_payload() for item in items] == [
+        item.to_payload() for item in expected
+    ]
+    assert [
+        item.display_text for item in items if not item.kind.startswith("presence:")
+    ] == ["last", "first"]
+    assert [item.preview for item in items if item.kind.startswith("presence:")] == [
+        "exec command: echo hi -> done"
+    ]
     assert parses
     assert set(parses.values()) == {1}
+    assert projections
+    assert set(projections.values()) == {1}
 
 
 def _repo(path: Path) -> Path:

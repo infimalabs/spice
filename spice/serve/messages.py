@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -176,6 +176,64 @@ class AssistantMessageRead:
     items: list[AssistantMessage]
     error: str | None
     transcript: TranscriptResolution | None
+
+
+@dataclass
+class _ToolPreviewIndex:
+    """Call/output preview facts collected during one record projection pass."""
+
+    calls: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
+    outputs: dict[int, tuple[str, str]] = field(default_factory=dict)
+
+    def observe(
+        self,
+        *,
+        offset: int,
+        payload: dict[str, Any],
+        payload_type: str,
+        preview: str,
+    ) -> None:
+        call_id = _payload_call_id(payload)
+        if payload_type in {"function_call", "custom_tool_call"}:
+            if call_id and preview:
+                self.calls.setdefault(call_id, []).append((offset, preview))
+            return
+        if payload_type not in {"function_call_output", "custom_tool_call_output"}:
+            return
+        if _supervisor_feedback_preview(payload):
+            return
+        self.outputs[offset] = (
+            call_id,
+            _preview_from_text(_payload_output_text(payload)),
+        )
+
+    def resolve(self, messages: list[AssistantMessage]) -> list[AssistantMessage]:
+        resolved: list[AssistantMessage] = []
+        for message in messages:
+            output = self.outputs.get(message.index)
+            if output is None:
+                resolved.append(message)
+                continue
+            call_id, output_preview = output
+            call_preview = self._call_preview_before(call_id, message.index)
+            resolved.append(
+                replace(
+                    message,
+                    preview=_render_tool_output_preview(
+                        call_preview=call_preview,
+                        output_preview=output_preview,
+                    ),
+                )
+            )
+        return resolved
+
+    def _call_preview_before(self, call_id: str, output_offset: int) -> str:
+        candidates = (
+            (offset, preview)
+            for offset, preview in self.calls.get(call_id, ())
+            if offset < output_offset
+        )
+        return max(candidates, default=(-1, ""))[1]
 
 
 def resolve_thread_transcript(
@@ -483,19 +541,16 @@ def _read_window(
         end_offset=end_offset,
         max_bytes=REVERSE_WINDOW_BYTES,
     )
-    records = list(read.records)
+    preview_index = _ToolPreviewIndex()
+    scanned = _messages_from_records(
+        read.records,
+        driver=driver,
+        worktree_id=worktree_id,
+        preview_index=preview_index,
+    )
+    visible_count = sum(not message.kind.startswith("presence:") for message in scanned)
     scan_start = read.access_start_offset
-    while True:
-        scanned = _messages_from_records(
-            tuple(records),
-            driver=driver,
-            worktree_id=worktree_id,
-        )
-        visible = [
-            message for message in scanned if not message.kind.startswith("presence:")
-        ]
-        if len(visible) >= limit or scan_start == 0:
-            break
+    while visible_count < limit and scan_start > 0:
         older = read_bounded(
             transcript_path,
             start_offset=max(0, scan_start - REVERSE_WINDOW_BYTES),
@@ -505,8 +560,21 @@ def _read_window(
         if older.access_start_offset >= scan_start:
             break
         if older.records:
-            records[0:0] = older.records
+            projected = _messages_from_records(
+                older.records,
+                driver=driver,
+                worktree_id=worktree_id,
+                preview_index=preview_index,
+            )
+            scanned[0:0] = projected
+            visible_count += sum(
+                not message.kind.startswith("presence:") for message in projected
+            )
         scan_start = older.access_start_offset
+    scanned = preview_index.resolve(scanned)
+    visible = [
+        message for message in scanned if not message.kind.startswith("presence:")
+    ]
     presence = [message for message in scanned if message.kind.startswith("presence:")]
     kept = list(visible[-limit:])
     if end_offset is None:
@@ -532,6 +600,7 @@ def _messages_from_records(
     *,
     driver: AgentDriver,
     worktree_id: str | None,
+    preview_index: _ToolPreviewIndex | None = None,
 ) -> list[AssistantMessage]:
     messages: list[AssistantMessage] = []
     call_previews: dict[str, str] = {}
@@ -542,6 +611,7 @@ def _messages_from_records(
             driver=driver,
             worktree_id=worktree_id,
             call_previews=call_previews,
+            preview_index=preview_index,
         )
         if message is not None:
             messages.append(message)
@@ -669,6 +739,7 @@ def _build_message(
     driver: AgentDriver,
     worktree_id: str | None = None,
     call_previews: dict[str, str] | None = None,
+    preview_index: _ToolPreviewIndex | None = None,
 ) -> AssistantMessage | None:
     loaded = record.parsed
     if loaded is None:
@@ -728,6 +799,13 @@ def _build_message(
             payload, payload_type, call_previews=call_previews
         )
         _remember_call_preview(payload, payload_type, preview, call_previews)
+        if preview_index is not None:
+            preview_index.observe(
+                offset=offset,
+                payload=payload,
+                payload_type=payload_type,
+                preview=preview,
+            )
         return _presence_message(
             key,
             offset,
@@ -1192,6 +1270,13 @@ def _preview_for_tool_output(
     call_preview = (
         call_previews.get(_payload_call_id(payload), "") if call_previews else ""
     )
+    return _render_tool_output_preview(
+        call_preview=call_preview,
+        output_preview=output_preview,
+    )
+
+
+def _render_tool_output_preview(*, call_preview: str, output_preview: str) -> str:
     if call_preview and output_preview:
         return _preview_from_text(f"{call_preview} -> {output_preview}")
     if call_preview:
