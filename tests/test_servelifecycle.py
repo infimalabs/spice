@@ -19,6 +19,8 @@ from spice.serve.lifecycle import (
     start_lifecycle_reconciler,
 )
 
+RECONCILER_RETRY_AFTER_SECONDS = 17.5
+
 
 def _outcome(
     value: AutomaticLifecycleWake | ExplicitLifecycleIntent,
@@ -298,6 +300,7 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
         "trigger": "available-work",
         "reason": "claim-lost",
         "taskHandle": "LIFECYC-example",
+        "retryAfterSeconds": RECONCILER_RETRY_AFTER_SECONDS,
     }
     monkeypatch.setattr(
         lifecycle,
@@ -361,6 +364,7 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
         "force_new": False,
     }
     assert outcome.detail == "available-work:skipped:claim-lost"
+    assert outcome.retry_after_seconds == RECONCILER_RETRY_AFTER_SECONDS
     assert calls == [
         ("actor", "bound-thread"),
         ("pending", ensure_kwargs),

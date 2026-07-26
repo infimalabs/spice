@@ -30,11 +30,12 @@ LIFECYCLE_RECONCILER_THREAD_PREFIX = "spice-serve-lifecycle"
 
 
 class LifecycleWakeSource(StrEnum):
-    """Durable fact families that can make an automatic decision relevant."""
+    """Compact signals that can make an automatic decision relevant."""
 
     TASK = "task"
     TEAM = "team"
     INBOX = "inbox"
+    TIMER = "timer"
 
 
 class LifecycleOutcomeStatus(StrEnum):
@@ -99,6 +100,7 @@ class LifecycleOutcome:
     input_kind: str
     status: LifecycleOutcomeStatus
     detail: str = ""
+    retry_after_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +194,7 @@ class LifecycleDecisionAuthority:
             input_kind=value.input_kind,
             status=LifecycleOutcomeStatus.OBSERVED,
             detail=_automatic_decision_detail(decision),
+            retry_after_seconds=_automatic_retry_after_seconds(decision),
         )
 
     def evaluate_target(
@@ -302,6 +305,18 @@ def _automatic_decision_detail(decision: AutomaticLifecycleDecision) -> str:
         for field in ("trigger", "action", "reason", "failure")
     ]
     return ":".join(part for part in parts if part) or "agent-ensure"
+
+
+def _automatic_retry_after_seconds(
+    decision: AutomaticLifecycleDecision,
+) -> float | None:
+    agent_ensure = decision.agent_ensure
+    if agent_ensure is None:
+        return None
+    value = agent_ensure.get("retryAfterSeconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 class LifecycleReconciler:

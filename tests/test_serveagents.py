@@ -19,7 +19,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi, launch, workroutes
+from spice.serve import agentapi, launch, lifecycle as serve_lifecycle, workroutes
 from spice.serve.payload import wire
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import identity
@@ -1181,7 +1181,9 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
 
     class ObservedPendingInboxLaunchLock:
         def __enter__(self):
-            if threading.current_thread().name == "background-launch-evaluation":
+            if threading.current_thread().name.startswith(
+                serve_lifecycle.LIFECYCLE_RECONCILER_THREAD_PREFIX
+            ):
                 background_at_launch_lock.set()
             return real_launch_lock.__enter__()
 
@@ -1224,6 +1226,8 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         "_PENDING_INBOX_LAUNCH_LOCK",
         ObservedPendingInboxLaunchLock(),
     )
+    reconciler = serve_lifecycle.start_lifecycle_reconciler(state)
+    assert reconciler is not None
 
     def send_directly() -> None:
         direct_result["response"] = work_tree_send_response_payload(
@@ -1232,7 +1236,15 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
 
     def evaluate_in_background() -> None:
         watch = launch.AvailableWorkWatch(state, events_path=tmp_path / "task-events")
-        watch.evaluate()
+        watch.evaluate(
+            (
+                serve_lifecycle.AutomaticLifecycleWake(
+                    target.id,
+                    serve_lifecycle.LifecycleWakeSource.INBOX,
+                    "explicit-send-race",
+                ),
+            )
+        )
         background_finished.set()
 
     direct_thread = threading.Thread(target=send_directly, daemon=True)
@@ -1258,6 +1270,8 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     assert attempts[0] is False
     assert agent_started.is_set() is True
     assert background_finished.is_set() is True
+    reconciler.cancel()
+    assert reconciler.join(timeout=1.0) is True
     assert [inbox_item_key(item.name) for item in collect_inbox_items(repo)] == [
         response["key"]
     ]
