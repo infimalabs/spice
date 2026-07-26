@@ -768,22 +768,21 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(typecheck, "run_tool_command", fake_run)
+    monkeypatch.setattr(typecheck, "run_typecheck_command", fake_run)
 
     typecheck.run_serve_web_typecheck(tmp_path)
 
     assert len(calls) == 1
     argv, kwargs = calls[0]
-    assert argv[:6] == [
+    assert argv[:6] == (
         "/usr/bin/npm",
         "exec",
         "--yes",
         "--package",
         "typescript",
         "tsc",
-    ]
+    )
     assert "--checkJs" in argv
     assert "--noEmit" in argv
     assert "spice/serve/static/app.types.js" in argv
@@ -791,6 +790,7 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
     assert "spice/serve/static/app.menu.js" in argv
     assert "spice/serve/static/app.js" in argv
     assert kwargs["cwd"] == tmp_path
+    assert kwargs["operation"] == "run serve web typecheck"
 
 
 def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):

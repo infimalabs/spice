@@ -12,14 +12,13 @@ layouts, the Python interpreter pyright should resolve against.
 from __future__ import annotations
 
 import os
-import shlex
 from pathlib import Path
 
-from spice.errors import SpiceError
-from spice.paths import find_tool
-from spice.process.tool import run_tool_command
 from spice.config.layers import effective_table
 from spice.config.pyproject import read_pyproject
+from spice.errors import SpiceError
+from spice.paths import find_tool
+from spice.process.tool import run_tool_command, run_typecheck_command
 from spice.studies.shape import configured_package_roots
 
 # Fixed, opinionated: fail on type errors, in the repo's [tool.pyright] mode.
@@ -82,24 +81,11 @@ def run_python_typecheck(repo_root: Path) -> None:
         # derives none has nothing in this lane.
         return
     argv = python_typecheck_argv(repo_root, targets)
-    result = run_tool_command(
-        list(argv),
-        policy="typecheck",
+    run_typecheck_command(
+        argv,
         operation="run Python typecheck",
-        capture_output=True,
-        text=True,
         cwd=repo_root,
-        check=False,
     )
-    if result.returncode == 0:
-        return
-    output = "\n".join(
-        part for part in (result.stdout.strip(), result.stderr.strip()) if part
-    )
-    message = f"{shlex.join(argv)} exited {result.returncode}"
-    if output:
-        message += ":\n" + output
-    raise SpiceError(message)
 
 
 def _configured_typecheck_interpreter(repo_root: Path) -> Path | None:

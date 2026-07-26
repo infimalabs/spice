@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.process import tool
+from spice.serve import typecheck as serve_typecheck
+from spice.studies import typecheck as python_typecheck
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
@@ -46,9 +50,8 @@ EXPECTED_TOOL_POLICY_CALLERS = {
     "study": {"spice/studies/mutations.py:_collect_test_nodeids:capture=true"},
     "suite": {"spice/studies/suiteseam.py:_measure_suite:capture=true"},
     "typecheck": {
-        "spice/serve/typecheck.py:_run_serve_web_typecheck_argv:capture=true",
+        "spice/process/tool.py:run_typecheck_command:capture=true",
         "spice/studies/typecheck.py:_uv_project_interpreter:capture=true",
-        "spice/studies/typecheck.py:run_python_typecheck:capture=true",
     },
 }
 
@@ -87,6 +90,96 @@ def test_each_bounded_tool_policy_reports_stalled_command_identity(policy, monke
         "input": f"stalled {policy} representative",
         "command": tuple(command),
     }
+
+
+@pytest.mark.parametrize(
+    ("caller", "operation"),
+    (
+        ("serve", "run serve web typecheck"),
+        ("python", "run Python typecheck"),
+    ),
+)
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "expected_error"),
+    (
+        (0, "", "", None),
+        (
+            7,
+            "stdout failure\n",
+            "",
+            "typecheck-tool --flag 'two words' exited 7:\nstdout failure",
+        ),
+        (
+            9,
+            "",
+            "stderr failure\n",
+            "typecheck-tool --flag 'two words' exited 9:\nstderr failure",
+        ),
+    ),
+)
+def test_typecheck_callers_share_the_stable_exit_contract(
+    tmp_path,
+    monkeypatch,
+    caller,
+    operation,
+    returncode,
+    stdout,
+    stderr,
+    expected_error,
+):
+    argv = ("typecheck-tool", "--flag", "two words")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+
+    monkeypatch.setattr(tool, "run_tool_command", fake_run)
+    if caller == "serve":
+        monkeypatch.setattr(
+            serve_typecheck, "serve_web_js_targets", lambda _root: ("app.js",)
+        )
+        monkeypatch.setattr(serve_typecheck, "check_app_types_js", lambda _root: None)
+        monkeypatch.setattr(
+            serve_typecheck, "serve_web_typecheck_argv", lambda _targets: argv
+        )
+
+        def invoke():
+            return serve_typecheck.run_serve_web_typecheck(tmp_path)
+
+    else:
+        monkeypatch.setattr(
+            python_typecheck, "python_typecheck_targets", lambda _root: ("app",)
+        )
+        monkeypatch.setattr(
+            python_typecheck,
+            "python_typecheck_argv",
+            lambda _root, _targets: argv,
+        )
+
+        def invoke():
+            return python_typecheck.run_python_typecheck(tmp_path)
+
+    if expected_error is None:
+        assert invoke() is None
+    else:
+        with pytest.raises(SpiceError) as exc_info:
+            invoke()
+        assert str(exc_info.value) == expected_error
+
+    assert calls == [
+        (
+            list(argv),
+            {
+                "policy": "typecheck",
+                "operation": operation,
+                "capture_output": True,
+                "text": True,
+                "cwd": tmp_path,
+                "check": False,
+            },
+        )
+    ]
 
 
 def test_parent_lifetime_command_propagates_parent_cancellation(monkeypatch):
