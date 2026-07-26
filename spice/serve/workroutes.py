@@ -217,11 +217,11 @@ def _work_tree_renewal_request_text(
     predecessor_actor: str,
 ) -> tuple[str, bool]:
     status = agent_status(target.repo_root)
-    identity.serve_agent_identity_payload(
+    identity.record_serve_agent_identity(
+        state.team_store,
         target,
         predecessor,
         actor_id=predecessor_actor,
-        store=state.team_store,
     )
     if status.running:
         # Renew never yanks a running agent; the message asks for a clean
@@ -417,10 +417,10 @@ def _work_tree_route_payload(
     return {
         "actor": actor,
         "targetIdentity": identity.target_identity_payload(target, thread_id),
-        "serveAgentIdentity": identity.serve_agent_identity_payload(
+        "serveAgentIdentity": identity.record_serve_agent_identity(
+            state.team_store,
             target,
             thread_id,
-            store=state.team_store,
         ),
         "teamIdentity": identity.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],

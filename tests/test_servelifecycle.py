@@ -391,7 +391,7 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
     )
     monkeypatch.setattr(
         lifecycle,
-        "serve_agent_identity_payload",
+        "record_serve_agent_identity",
         lambda *_args, **_kwargs: calls.append("renewal-identity") or {},
     )
 
@@ -620,7 +620,7 @@ def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(
     )
     monkeypatch.setattr(
         lifecycle,
-        "serve_agent_identity_payload",
+        "record_serve_agent_identity",
         lambda *_args, **_kwargs: writes.append("renewal-identity") or {},
     )
 

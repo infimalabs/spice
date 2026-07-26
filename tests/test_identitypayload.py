@@ -306,10 +306,10 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
 
     store = ServeTeamStore(tmp_path / "teams.sqlite")
 
-    payload = identity.serve_agent_identity_payload(
+    payload = identity.record_serve_agent_identity(
+        store,
         target,
         transcript_owner="claude",
-        store=store,
     )
     stored = store.agent_identity_for_actor("thread:thread-a")
 
