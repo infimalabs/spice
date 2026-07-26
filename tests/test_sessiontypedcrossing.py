@@ -77,6 +77,23 @@ def test_turn_records_match_across_recorded_whole_and_split_replays() -> None:
     )
 
 
+def test_briefing_turns_and_compactions_share_one_read_without_changing_rows(
+    monkeypatch,
+) -> None:
+    transcript = SUPERVISED_FIXTURES[0]
+    with transcript_driver_for_fixture(monkeypatch, transcript):
+        all_compactions = records.collect_compactions([transcript])
+        start = all_compactions[-2].ts
+        expected_turns = records.collect_turns([transcript], start=start)
+        expected_compactions = records.collect_compactions([transcript], start=start)
+        turns, compactions = records.collect_turns_and_compactions(
+            [transcript], start=start
+        )
+
+    assert turns == expected_turns
+    assert compactions == expected_compactions
+
+
 def test_crossed_consumers_read_and_reduce_the_public_typed_stream(
     monkeypatch,
 ) -> None:

@@ -1,11 +1,8 @@
-"""The Codex transcript dialect adapter: canonical lines to typed events.
+"""The Codex transcript dialect adapter: raw lines to typed events.
 
-Codex already writes the dictionary vocabulary consumed above the driver seam,
-so its compatibility projection has a stronger contract than Claude's: for
-every supported payload family, decoding and projecting must reproduce the
-input dictionary exactly. ``normalize_codex_line`` enforces that equality
-before returning the projection. An unfamiliar extension therefore retains the
-existing identity behavior instead of being partially rewritten.
+Codex writes the dictionary vocabulary consumed by this adapter. It crosses
+that dialect boundary once and emits only the shared lossless typed vocabulary;
+there is no reverse compatibility projection or canonical dictionary seam.
 
 Context usage joins this vocabulary through ``AgentDriver.context_snapshot_fields``
 instead: that hook is the sole dialect-local usage decoder, and the driver
@@ -22,11 +19,9 @@ from spice.transcript.events import (
     AssistantText,
     CommandExecution,
     Compaction,
-    ContextUsage,
     Image,
     LineStamper,
     Reasoning,
-    TokenUsage,
     ToolCall,
     ToolOutput,
     ToolOutputType,
@@ -146,41 +141,6 @@ def _codex_event_message_events(
     return []
 
 
-def normalize_codex_line(raw: dict[str, Any]) -> dict[str, Any]:
-    """Return the exact typed projection when possible, otherwise identity."""
-    events = codex_line_events(raw)
-    projected = project_codex_events(events, raw.get("timestamp"))
-    if projected is not None and projected == raw:
-        return projected
-    return raw
-
-
-def project_codex_events(
-    events: list[TranscriptEvent], timestamp: Any
-) -> dict[str, Any] | None:
-    """Rebuild the current canonical Codex dictionary from typed events."""
-    if not events or any(isinstance(event, Unknown) for event in events):
-        return None
-    first = events[0]
-    if isinstance(first, Compaction):
-        return {"timestamp": timestamp, "type": "compacted", "payload": {}}
-    if isinstance(first, ContextUsage):
-        return _project_context_usage(first, timestamp)
-    if isinstance(first, ToolCall):
-        return _response_item(timestamp, _project_tool_call(first))
-    if isinstance(first, Reasoning):
-        return _response_item(timestamp, _project_reasoning(events))
-    if isinstance(first, WebSearch):
-        return _response_item(timestamp, _project_web_search(first))
-    if isinstance(first, ToolOutput) or (
-        isinstance(first, Image) and first.call_id is not None
-    ):
-        return _response_item(timestamp, _project_tool_output(events))
-    if isinstance(first, (AssistantText, UserMessage, Image)):
-        return _response_item(timestamp, _project_message(events))
-    return None
-
-
 def _codex_message_events(
     stamper: LineStamper, payload: dict[str, Any]
 ) -> list[TranscriptEvent]:
@@ -201,8 +161,7 @@ def _codex_message_events(
         if isinstance(text, str):
             # Text is the discriminant, not the declared type. Codex writes the
             # type on every block it emits itself, but transcripts in the wild
-            # carry bare `{"text": ...}` blocks, and the dict seam this decoder
-            # replaces read those as prose. Requiring the type here would file
+            # carry bare `{"text": ...}` blocks. Requiring the type here would file
             # real assistant text as `Unknown` and silently stop delivering it.
             content_type = block_type if isinstance(block_type, str) else "text"
             if role == "assistant":
@@ -449,163 +408,6 @@ def _codex_web_search_events(
     ]
 
 
-def _project_message(events: list[TranscriptEvent]) -> dict[str, Any]:
-    first = events[0]
-    role = (
-        "assistant"
-        if isinstance(first, AssistantText)
-        else first.role
-        if isinstance(first, (UserMessage, Image))
-        else "user"
-    )
-    payload: dict[str, Any] = {"type": "message"}
-    item_id = _event_item_id(first)
-    if item_id is not None:
-        payload["id"] = item_id
-    payload["role"] = role
-    content: list[dict[str, Any]] = []
-    for event in events:
-        if isinstance(event, AssistantText):
-            content.append({"type": event.content_type, "text": event.text})
-        elif isinstance(event, UserMessage):
-            content.append({"type": event.content_type, "text": event.text})
-        elif isinstance(event, Image) and event.role is not None:
-            item: dict[str, Any] = {
-                "type": event.content_type,
-                "image_url": event.url,
-            }
-            if event.detail is not None:
-                item["detail"] = event.detail
-            content.append(item)
-    payload["content"] = content
-    phase = _event_phase(first)
-    if phase is not None:
-        payload["phase"] = phase
-    _add_turn_metadata(payload, first)
-    return payload
-
-
-def _project_tool_call(event: ToolCall) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "type": "custom_tool_call" if event.custom else "function_call"
-    }
-    if event.item_id is not None:
-        payload["id"] = event.item_id
-    if event.status is not None:
-        payload["status"] = event.status
-    payload["call_id"] = event.call_id
-    payload["name"] = event.name
-    if event.namespace is not None:
-        payload["namespace"] = event.namespace
-    payload["input" if event.custom else "arguments"] = event.arguments
-    _add_turn_metadata(payload, event)
-    return payload
-
-
-def _project_tool_output(events: list[TranscriptEvent]) -> dict[str, Any]:
-    first = events[0]
-    if isinstance(first, ToolOutput):
-        output_type = first.tool_output_type
-    else:
-        assert isinstance(first, Image)
-        output_type = first.tool_output_type
-        assert output_type is not None
-    payload: dict[str, Any] = {"type": output_type}
-    item_id = _event_item_id(first)
-    if item_id is not None:
-        payload["id"] = item_id
-    if isinstance(first, ToolOutput):
-        call_id = first.call_id
-    else:
-        assert isinstance(first, Image)
-        call_id = first.call_id
-        assert call_id is not None
-    payload["call_id"] = call_id
-    list_output = isinstance(first, Image) or (
-        isinstance(first, ToolOutput) and first.output_is_list
-    )
-    if list_output:
-        items: list[dict[str, Any]] = []
-        for event in events:
-            if isinstance(event, ToolOutput) and event.content_type is not None:
-                items.append({"type": event.content_type, "text": event.content})
-            elif isinstance(event, Image):
-                item: dict[str, Any] = {
-                    "type": event.content_type,
-                    "image_url": event.url,
-                }
-                if event.detail is not None:
-                    item["detail"] = event.detail
-                items.append(item)
-        payload["output"] = items
-    else:
-        assert isinstance(first, ToolOutput)
-        payload["output"] = first.content
-    _add_turn_metadata(payload, first)
-    return payload
-
-
-def _project_reasoning(events: list[TranscriptEvent]) -> dict[str, Any]:
-    first = events[0]
-    assert isinstance(first, Reasoning)
-    payload: dict[str, Any] = {"type": "reasoning"}
-    if first.item_id is not None:
-        payload["id"] = first.item_id
-    payload["summary"] = [
-        {"type": event.summary_type, "text": event.summary}
-        for event in events
-        if isinstance(event, Reasoning) and event.summary_type is not None
-    ]
-    if first.content_present:
-        payload["content"] = None
-    if first.encrypted_content is not None:
-        payload["encrypted_content"] = first.encrypted_content
-    _add_turn_metadata(payload, first)
-    return payload
-
-
-def _project_web_search(event: WebSearch) -> dict[str, Any]:
-    payload: dict[str, Any] = {"type": "web_search_call"}
-    if event.status is not None:
-        payload["status"] = event.status
-    if event.action_type is not None:
-        action: dict[str, Any] = {"type": event.action_type}
-        if event.query is not None:
-            action["query"] = event.query
-        if event.queries:
-            action["queries"] = list(event.queries)
-        if event.url is not None:
-            action["url"] = event.url
-        if event.pattern is not None:
-            action["pattern"] = event.pattern
-        payload["action"] = action
-    return payload
-
-
-def _project_context_usage(event: ContextUsage, timestamp: Any) -> dict[str, Any]:
-    info: dict[str, Any] = {"last_token_usage": _project_token_usage(event.last)}
-    if event.cumulative is not None:
-        info["total_token_usage"] = _project_token_usage(event.cumulative)
-    if event.model_context_window is not None:
-        info["model_context_window"] = event.model_context_window
-    return {
-        "timestamp": timestamp,
-        "type": "event_msg",
-        "payload": {"type": "token_count", "info": info},
-    }
-
-
-def _project_token_usage(usage: TokenUsage) -> dict[str, int]:
-    return {
-        "input_tokens": usage.input_tokens,
-        "cached_input_tokens": usage.cached_input_tokens,
-        "cache_write_input_tokens": usage.cache_write_input_tokens,
-        "output_tokens": usage.output_tokens,
-        "reasoning_output_tokens": usage.reasoning_output_tokens,
-        "total_tokens": usage.total_tokens,
-    }
-
-
 def _turn_metadata(
     payload: dict[str, Any],
 ) -> tuple[str | None, TurnMetadataKey | None]:
@@ -616,23 +418,6 @@ def _turn_metadata(
             if isinstance(turn_id, str):
                 return turn_id, key
     return None, None
-
-
-def _add_turn_metadata(payload: dict[str, Any], event: TranscriptEvent) -> None:
-    turn_id = getattr(event, "turn_id", None)
-    metadata_key = getattr(event, "turn_metadata_key", None)
-    if isinstance(turn_id, str) and metadata_key is not None:
-        payload[metadata_key] = {"turn_id": turn_id}
-
-
-def _event_item_id(event: TranscriptEvent) -> str | None:
-    value = getattr(event, "item_id", None)
-    return value if isinstance(value, str) else None
-
-
-def _event_phase(event: TranscriptEvent) -> str | None:
-    value = getattr(event, "phase", None)
-    return value if isinstance(value, str) else None
 
 
 def _unknown(stamper: LineStamper, reason: str, raw_type: str | None) -> Unknown:
@@ -665,7 +450,3 @@ def _command_int(value: Any) -> int | None:
         except ValueError:
             return None
     return None
-
-
-def _response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"timestamp": timestamp, "type": "response_item", "payload": payload}

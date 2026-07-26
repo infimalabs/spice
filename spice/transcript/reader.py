@@ -66,6 +66,22 @@ class TranscriptFileIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptReadStats:
+    """Physical work performed by one reader-engine access."""
+
+    file_opens: int = 0
+    bytes_read: int = 0
+    lines_parsed: int = 0
+
+    def __add__(self, other: TranscriptReadStats) -> TranscriptReadStats:
+        return TranscriptReadStats(
+            file_opens=self.file_opens + other.file_opens,
+            bytes_read=self.bytes_read + other.bytes_read,
+            lines_parsed=self.lines_parsed + other.lines_parsed,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TranscriptRead:
     """Internal access pass whose line records were each parsed exactly once."""
 
@@ -76,6 +92,7 @@ class TranscriptRead:
     file_size: int
     file_identity: TranscriptFileIdentity | None
     error: str | None = None
+    stats: TranscriptReadStats = field(default_factory=TranscriptReadStats)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +106,7 @@ class TranscriptEventRead:
     file_size: int
     file_identity: TranscriptFileIdentity | None = None
     error: str | None = None
+    stats: TranscriptReadStats = field(default_factory=TranscriptReadStats)
 
     def dispatch(self, *consumers: EventConsumer) -> None:
         """Hand each already-decoded fact to every projection in source order."""
@@ -183,6 +201,7 @@ class TranscriptEventReader:
             file_size=read.file_size,
             file_identity=read.file_identity,
             error=read.error,
+            stats=read.stats,
         )
 
 
@@ -349,6 +368,7 @@ def _read_since_timestamp(
     threshold = normalize_timestamp(start_timestamp) or start_timestamp
     context_limit = max(0, context_lines_before_start)
     selected_descending: list[TranscriptLine] = []
+    stats = TranscriptReadStats()
     context_count = 0
     end_offset: int | None = None
     earliest_access = 0
@@ -362,6 +382,7 @@ def _read_since_timestamp(
         )
         if read.error is not None:
             return read
+        stats += read.stats
         earliest_access = read.access_start_offset
         file_size = read.file_size
         file_identity = read.file_identity
@@ -388,6 +409,7 @@ def _read_since_timestamp(
         end_offset=file_size,
         file_size=file_size,
         file_identity=file_identity,
+        stats=stats,
     )
 
 
@@ -441,8 +463,14 @@ def _read_open_range(
     hold_partial_end: bool = False,
 ) -> TranscriptRead:
     handle.seek(start)
-    if align_partial_start and not _is_line_boundary(handle, start):
-        handle.readline()
+    bytes_read = 0
+    if align_partial_start and start > 0:
+        handle.seek(start - 1)
+        boundary = handle.read(1)
+        bytes_read += len(boundary)
+        handle.seek(start)
+        if boundary != b"\n":
+            bytes_read += len(handle.readline())
     actual_start = handle.tell()
     records: list[TranscriptLine] = []
     while True:
@@ -450,6 +478,7 @@ def _read_open_range(
         if offset >= end:
             break
         raw = handle.readline()
+        bytes_read += len(raw)
         if not raw:
             break
         if hold_partial_end and not raw.endswith(b"\n"):
@@ -467,16 +496,12 @@ def _read_open_range(
         end_offset=handle.tell(),
         file_size=file_size,
         file_identity=file_identity,
+        stats=TranscriptReadStats(
+            file_opens=1,
+            bytes_read=bytes_read,
+            lines_parsed=len(records),
+        ),
     )
-
-
-def _is_line_boundary(handle: BinaryTranscript, offset: int) -> bool:
-    if offset <= 0:
-        return True
-    handle.seek(offset - 1)
-    boundary = handle.read(1) == b"\n"
-    handle.seek(offset)
-    return boundary
 
 
 def _line_record(offset: int, raw: bytes) -> TranscriptLine:
@@ -501,4 +526,5 @@ def _failed_read(exc: OSError) -> TranscriptRead:
         file_size=0,
         file_identity=None,
         error=str(exc),
+        stats=TranscriptReadStats(file_opens=1),
     )

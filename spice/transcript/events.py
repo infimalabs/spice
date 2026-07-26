@@ -30,10 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-# The dict seam that predates this substrate hands its decoder one raw line with
-# no idea which file or offset it came from. Events decoded through that legacy
-# path carry this source rather than a fabricated path; real loci arrive with the
-# reader engine, which iterates files and knows both.
+# Stream adapters can hand the decoder one raw line without a file or offset.
+# Those events carry this source rather than a fabricated path; file-backed loci
+# arrive through the reader engine, which knows both.
 UNLOCATED_SOURCE = "<unlocated>"
 ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
 TurnBoundaryKind = Literal["started", "completed", "error"]
@@ -140,6 +139,14 @@ class CommandExecution:
     exit_code: int | None
     status: str | None
     turn_id: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class WorkingDirectory:
+    """The worktree directory a transcript record says the session occupied."""
+
+    at: Provenance
+    path: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -293,6 +300,7 @@ TranscriptEvent = (
     | ToolCall
     | ToolOutput
     | CommandExecution
+    | WorkingDirectory
     | Image
     | UserMessage
     | TurnBoundary

@@ -48,6 +48,41 @@ CLAUDE_TOTAL_TOKENS = (
 )
 
 
+def test_reads_record_physical_work_and_an_unchanged_cursor_reads_no_bytes(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        _raw(
+            {
+                "timestamp": TIMESTAMP,
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": value}],
+                },
+            }
+        )
+        for value in ("first", "second")
+    ]
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_bytes(b"".join(lines))
+    cursor = TranscriptCursor()
+    event_reader = TranscriptEventReader(transcript, CODEX_DRIVER)
+
+    first = event_reader.read("forward", cursor=cursor)
+    unchanged = event_reader.read("forward", cursor=cursor)
+
+    assert first.stats.file_opens == 1
+    assert first.stats.bytes_read == sum(map(len, lines))
+    assert first.stats.lines_parsed == len(lines)
+    assert unchanged.events == ()
+    assert unchanged.stats.bytes_read == unchanged.stats.lines_parsed == 0
+    assert first.stats.file_opens + unchanged.stats.file_opens == 2
+    assert first.stats.bytes_read + unchanged.stats.bytes_read == sum(map(len, lines))
+    assert first.stats.lines_parsed + unchanged.stats.lines_parsed == len(lines)
+
+
 def _raw(payload: dict) -> bytes:
     return (
         json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n"

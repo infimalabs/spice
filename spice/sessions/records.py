@@ -216,6 +216,44 @@ def collect_turns(files: list[Path], *, start: str | None = None) -> list[TurnRe
     return turns
 
 
+def collect_turns_and_compactions(
+    files: list[Path], *, start: str | None = None
+) -> tuple[list[TurnRecord], list[CompactionRecord]]:
+    """Project turns and compactions from one typed access pass per file.
+
+    Compaction recovery needs a small prefix before ``start`` to recover the
+    last assistant text preceding a boundary. The turn projection receives the
+    exact context-free suffix the standalone turn reader would have selected,
+    while both projections reuse the same immutable event objects.
+    """
+    turns: list[TurnRecord] = []
+    compactions: list[CompactionRecord] = []
+    for path in files:
+        events = tuple(iter_events(path, start=start, context_lines_before_start=20))
+        turns.extend(
+            collect_turns_from_events(path, _events_after_start(events, start))
+        )
+        compactions.extend(collect_compactions_from_events(path, events))
+    turns.sort(key=lambda turn: (turn.start_ts, turn.source_file))
+    compactions.sort(key=lambda record: (record.ts, record.source_file))
+    return turns, compactions
+
+
+def _events_after_start(
+    events: tuple[TranscriptEvent, ...], start: str | None
+) -> tuple[TranscriptEvent, ...]:
+    """Remove the context prefix a zero-context ``since`` read would exclude."""
+    if not start:
+        return events
+    threshold = normalize_timestamp(start) or start
+    suffix_index = 0
+    for index, event in enumerate(events):
+        timestamp = normalize_timestamp(event.at.timestamp)
+        if timestamp and timestamp < threshold:
+            suffix_index = index + 1
+    return events[suffix_index:]
+
+
 def _collect_turns_for_file(path: Path, *, start: str | None) -> list[TurnRecord]:
     return collect_turns_from_events(path, iter_events(path, start=start))
 
