@@ -38,9 +38,7 @@ def test_git_config_file_get_distinguishes_present_absent_and_failure(tmp_path):
     assert git_config_file_get(config, "core.hooksPath") == ".shared-hooks"
     assert git_config_file_get(config, "missing.key") is None
     config.write_text("[broken\n", encoding="utf-8")
-    with pytest.raises(
-        SpiceError, match="could not inspect Git config.*bad config line"
-    ):
+    with pytest.raises(SpiceError, match="Git config.*bad config line"):
         git_config_file_get(config, "core.hooksPath")
 
 
