@@ -43,7 +43,7 @@ TASK_DIRECTIVE_TOKEN = "TASK"
 # as optional -- an acceptance-less directive lands in the plan phase but is
 # still created. Mirrors the require_project rule in
 # spice.tasks.create._batch_field_errors.
-TASK_DIRECTIVE_REQUIRED_FIELDS = ("title", "project")
+_TASK_DIRECTIVE_REQUIRED_FIELDS = ("title", "project")
 
 # A valid ACK header runs from `ACK` through its consecutive key-like tokens.
 # Plain `ACK <key> prose` is body-bearing: the header ends at the key and the
@@ -622,17 +622,17 @@ def _task_batch_lines(text: str) -> list[str]:
     for line, suppressed in iter_control_lines(text):
         if suppressed:
             continue
-        payload = task_directive_line(line)
+        payload = _task_directive_line(line)
         if payload is not None:
             lines.append(payload)
     return lines
 
 
 def _is_task_directive_line(line: str) -> bool:
-    return task_directive_line(line) is not None
+    return _task_directive_line(line) is not None
 
 
-def task_directive_line(line: str) -> str | None:
+def _task_directive_line(line: str) -> str | None:
     token_pos = line.find(TASK_DIRECTIVE_TOKEN)
     token_end = token_pos + len(TASK_DIRECTIVE_TOKEN)
     if (
@@ -661,7 +661,7 @@ def task_directive_fields(line: str) -> list[tuple[str, str]] | None:
     reader shares it, so a capture card cannot appear for a line the
     supervisor ignored, nor go missing for a line it captured.
     """
-    normalized = task_directive_line(line)
+    normalized = _task_directive_line(line)
     if normalized is None:
         return None
     payload = normalized[len(TASK_DIRECTIVE_TOKEN) :].lstrip(
@@ -669,7 +669,7 @@ def task_directive_fields(line: str) -> list[tuple[str, str]] | None:
     )
     fields = _task_directive_field_pairs(payload)
     keys = {key for key, _value in fields}
-    if not all(key in keys for key in TASK_DIRECTIVE_REQUIRED_FIELDS):
+    if not all(key in keys for key in _TASK_DIRECTIVE_REQUIRED_FIELDS):
         return None
     return fields
 
