@@ -8,6 +8,11 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve import messages as message_reader
+from spice.serve.payload.chrome import (
+    LaneChromeObservation,
+    LaneChromeOrder,
+    assemble_lane_chrome,
+)
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
@@ -116,6 +121,94 @@ def _agent_visual_status(process_status: str, latest_activity_kind: str) -> str:
     if process_status == "running" and latest_activity_kind == "final":
         return "idle"
     return process_status
+
+
+def lane_chrome_payload(
+    *,
+    target_id: str,
+    team_identity: Mapping[str, Any] | None = None,
+    team_facts: Mapping[str, Any] | None = None,
+    renewal_intent: Mapping[str, Any] | None = None,
+    task_filter_inventory: Mapping[str, Any] | None = None,
+    pending_identity: Mapping[str, Any] | None = None,
+    last_assistant_at: str | None = None,
+    private_task_count: int = 0,
+) -> dict[str, Any]:
+    """Project the chrome facets one pass actually observed.
+
+    Every producer that observes these facts routes through here, so inventory,
+    lane pushes, and route feedback answer with one payload built one way
+    instead of each hand-assembling the same fields.
+
+    A caller passes only what it observed, and only whole facets are published:
+    a route that resolved team facts but read no inbox says nothing about the
+    pending inbox rather than restating a value it did not look at. Omitting a
+    facet leaves whatever the client already holds, which is what keeps a
+    narrow route reply from recopying a lane's whole chrome.
+
+    Facets whose authority keeps no counter are never published, because a
+    producer that cannot say which of two observations is newer must not
+    publish either. That is why ``identity`` and ``lifecycle`` are absent
+    today; WEB-1kGvkZqD settles the epoch source that lets those two join.
+    """
+    observations: list[LaneChromeObservation] = []
+    if team_identity is not None:
+        observations.append(
+            LaneChromeObservation(
+                "teamConfig",
+                LaneChromeOrder(revision=int(team_identity.get("configRevision", 0))),
+                {"teamIdentity": dict(team_identity)},
+            )
+        )
+    if pending_identity is not None:
+        observations.append(
+            LaneChromeObservation(
+                "pendingInbox",
+                LaneChromeOrder(revision=int(pending_identity["pendingInboxVersion"])),
+                {
+                    "count": int(pending_identity["pendingInboxCount"]),
+                    "label": str(pending_identity["pendingInboxLabel"]),
+                    "keys": pending_identity["pendingInboxKeys"],
+                },
+            )
+        )
+    if team_facts is not None and task_filter_inventory is not None:
+        observations.append(
+            LaneChromeObservation(
+                "taskBoard",
+                LaneChromeOrder(epoch=str(task_filter_inventory.get("revision", ""))),
+                {
+                    "taskFilters": team_facts.get("taskFilters", []),
+                    "taskFilterEntries": team_facts.get("taskFilterEntries", []),
+                    "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
+                    "taskFilterInventory": task_filter_inventory,
+                    "privateTaskCount": private_task_count,
+                },
+            )
+        )
+    if team_facts is not None and renewal_intent is not None:
+        observations.append(
+            LaneChromeObservation(
+                "renewal",
+                LaneChromeOrder(revision=int(renewal_intent.get("revision", 0))),
+                {
+                    "lifetime": team_facts.get("lifetime", ""),
+                    "renewalIntent": dict(renewal_intent),
+                },
+            )
+        )
+    if last_assistant_at is not None:
+        # The transcript's own last assistant instant is what advances here:
+        # zero-padded, so it orders naturally, and it moves exactly when the
+        # activity the facet describes does.
+        observations.append(
+            LaneChromeObservation(
+                "activity",
+                LaneChromeOrder(epoch=str(last_assistant_at)),
+                {"lastAssistantAt": last_assistant_at},
+            )
+        )
+    return assemble_lane_chrome(target_id, observations).payload
 
 
 def _lane_info_payload(

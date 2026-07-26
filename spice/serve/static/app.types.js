@@ -414,6 +414,7 @@
  * @property {string=} pendingInboxLabel
  * @property {string=} agentProcessStatus
  * @property {Array.<string>=} removedMessageKeys
+ * @property {LaneChromePayload=} chrome
  */
 
 /**
@@ -605,6 +606,7 @@
  * @property {string=} agentVisualStatus
  * @property {string=} lastAssistantAt
  * @property {StatusLine=} statusLine
+ * @property {LaneChromePayload=} chrome
  */
 
 /**
@@ -783,11 +785,9 @@
  * @property {Array.<string>} taskFilters
  * @property {Array.<string>} effectiveTaskFilters
  * @property {Array.<TaskFilterEntry>} taskFilterEntries
- * @property {Array.<string>} routeFilters
- * @property {Array.<string>} filterTerms
- * @property {Array.<string>} filterArgs
  * @property {string} laneFilterVersion
  * @property {string} lifetime
+ * @property {LaneChromePayload} chrome
  */
 
 /**

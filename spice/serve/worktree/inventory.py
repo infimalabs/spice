@@ -7,11 +7,6 @@ from typing import Any
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
 from spice.serve.lifecycle import project_lifecycle
-from spice.serve.payload.chrome import (
-    LaneChromeObservation,
-    LaneChromeOrder,
-    assemble_lane_chrome,
-)
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
@@ -26,6 +21,7 @@ from spice.serve.payload.identity import (
 from spice.serve.payload.lane import (
     _lane_info_payload,
     _status_line_payload_from_status,
+    lane_chrome_payload,
 )
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.pending import pending_inbox_identity_payload
@@ -101,14 +97,14 @@ def _work_tree_payload(
         desired_config=desired_config,
         task_board=task_board,
     )
-    chrome = _work_tree_chrome(
+    chrome = lane_chrome_payload(
         target_id=target.id,
         team_identity=team_identity,
         team_facts=team_facts,
         renewal_intent=renewal_intent,
-        inventory=inventory,
+        task_filter_inventory=inventory,
         pending_identity=pending_identity,
-        status_line=status_line,
+        last_assistant_at=status_line["lastAssistantAt"],
     )
     board = chrome["taskBoard"]["value"]
     pending = chrome["pendingInbox"]["value"]
@@ -150,72 +146,8 @@ def _work_tree_payload(
         "agentEnsure": agent_ensure or {},
         "lastAssistantAt": chrome["activity"]["value"]["lastAssistantAt"],
         "statusLine": status_line,
+        "chrome": chrome,
     }
-
-
-def _work_tree_chrome(
-    *,
-    target_id: str,
-    team_identity: dict[str, Any],
-    team_facts: dict[str, Any],
-    renewal_intent: dict[str, Any],
-    inventory: dict[str, Any],
-    pending_identity: dict[str, Any],
-    status_line: dict[str, Any],
-) -> dict[str, Any]:
-    """Project this pass's chrome facets, each ordered by its own authority.
-
-    Only facets this pass observes whole and can order from the producing
-    authority's own counter are published: an inventory pass reads no counter
-    behind the identity or lifecycle facets, and a producer that cannot say
-    which of two observations is newer must not publish either. The flat fields
-    above read back out of these values, so the projection is the one place
-    they are decided.
-    """
-    observations = (
-        LaneChromeObservation(
-            "teamConfig",
-            LaneChromeOrder(revision=int(team_identity.get("configRevision", 0))),
-            {"teamIdentity": team_identity},
-        ),
-        LaneChromeObservation(
-            "pendingInbox",
-            LaneChromeOrder(revision=int(pending_identity["pendingInboxVersion"])),
-            {
-                "count": int(pending_identity["pendingInboxCount"]),
-                "label": str(pending_identity["pendingInboxLabel"]),
-                "keys": pending_identity["pendingInboxKeys"],
-            },
-        ),
-        LaneChromeObservation(
-            "taskBoard",
-            LaneChromeOrder(epoch=str(inventory.get("revision", ""))),
-            {
-                "taskFilters": team_facts.get("taskFilters", []),
-                "taskFilterEntries": team_facts.get("taskFilterEntries", []),
-                "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
-                "taskFilterInventory": inventory,
-                "privateTaskCount": 0,
-            },
-        ),
-        LaneChromeObservation(
-            "renewal",
-            LaneChromeOrder(revision=int(renewal_intent.get("revision", 0))),
-            {
-                "lifetime": team_facts.get("lifetime", ""),
-                "renewalIntent": renewal_intent,
-            },
-        ),
-        # The transcript's own last assistant instant is what advances here:
-        # zero-padded, so it orders naturally, and it moves exactly when the
-        # activity the facet describes does.
-        LaneChromeObservation(
-            "activity",
-            LaneChromeOrder(epoch=str(status_line["lastAssistantAt"])),
-            {"lastAssistantAt": status_line["lastAssistantAt"]},
-        ),
-    )
-    return assemble_lane_chrome(target_id, observations).payload
 
 
 def _work_tree_status_payloads(

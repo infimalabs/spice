@@ -489,6 +489,7 @@ WIRE_OBJECTS = (
             "pendingInboxLabel": STRING,
             "agentProcessStatus": STRING,
             "removedMessageKeys": STRINGS,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -694,6 +695,7 @@ WIRE_OBJECTS = (
             "agentVisualStatus": STRING,
             "lastAssistantAt": STRING,
             "statusLine": _ref("StatusLine"),
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -862,11 +864,9 @@ WIRE_OBJECTS = (
             "taskFilters": STRINGS,
             "effectiveTaskFilters": STRINGS,
             "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "routeFilters": STRINGS,
-            "filterTerms": STRINGS,
-            "filterArgs": STRINGS,
             "laneFilterVersion": STRING,
             "lifetime": STRING,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
