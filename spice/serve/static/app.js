@@ -80,6 +80,7 @@ function serveBrandMenuTitle() {
 }
 let targetsLoaded = false;
 let targetsLoading = false;
+/** @type {Promise<void> | null} */
 let targetsLoadPromise = null;
 let taskFilterStemPills = [];
 let taskFilterInventoryRevision = "";
