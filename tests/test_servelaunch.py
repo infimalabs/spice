@@ -24,6 +24,8 @@ ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
 # A deadline already behind us: the lane declining it has been waiting past its
 # escape, so the only thing left to decide is how soon to act.
 ESCAPE_ALREADY_EXPIRED_SECONDS = -20.0
+REPEATED_RETRY_CYCLES = 4
+TIMER_SOURCE_IDENTITY_HEX_LENGTH = 16
 
 
 def _target(name: str, tmp_path: Path) -> WorktreeTarget:
@@ -129,6 +131,43 @@ def test_evaluate_schedules_one_timer_from_the_reconciler_outcome(
     assert watch.next_timer_timeout() is None
 
 
+def test_repeated_retry_timers_keep_fixed_size_independent_identities(
+    tmp_path,
+    monkeypatch,
+):
+    now = [100.0]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    state = _state(
+        [],
+        reconcile=lambda wake: _outcome(
+            wake,
+            retry_after_seconds=ESCAPE_REMAINING_AFTER_ONE_MINUTE,
+        ),
+    )
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    wake = AutomaticLifecycleWake(
+        "lane-a",
+        LifecycleWakeSource.TASK,
+        "task-1",
+    )
+    timer_identities: list[str] = []
+
+    for _cycle in range(REPEATED_RETRY_CYCLES):
+        watch.evaluate((wake,))
+        now[0] += ESCAPE_REMAINING_AFTER_ONE_MINUTE
+        wake = watch.due_timer_wakes()[0]
+        timer_identities.append(wake.source_identity)
+
+    assert all(
+        len(identity) == TIMER_SOURCE_IDENTITY_HEX_LENGTH
+        for identity in timer_identities
+    )
+    assert len(set(timer_identities)) == REPEATED_RETRY_CYCLES
+    assert all(
+        ":" not in identity and "@" not in identity for identity in timer_identities
+    )
+
+
 def test_evaluate_keeps_a_floor_under_an_expired_deadline(
     tmp_path,
     monkeypatch,
@@ -216,11 +255,14 @@ def test_watch_looks_again_when_the_task_board_changes(tmp_path):
     """A task entering the board wakes the decision without waiting out a deadline."""
     events = _events_file(tmp_path)
     target = _target("task-lane", tmp_path)
+    initial_wake = threading.Event()
     second_wake = threading.Event()
     wakes: list[AutomaticLifecycleWake] = []
 
     def reconcile(wake):
         wakes.append(wake)
+        if len(wakes) == 1:
+            initial_wake.set()
         if len(wakes) >= 2:
             second_wake.set()
         return _outcome(wake)
@@ -232,6 +274,7 @@ def test_watch_looks_again_when_the_task_board_changes(tmp_path):
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True
+        assert initial_wake.wait(timeout=15.0) is True
         events.write_text("1 task\n", encoding="utf-8")
         assert second_wake.wait(timeout=15.0) is True
     finally:
@@ -247,11 +290,14 @@ def test_watch_looks_again_when_the_task_board_changes(tmp_path):
 def test_watch_looks_again_when_pending_inbox_is_published(tmp_path):
     """A non-HTTP publish starts an off lane without an inventory request."""
     target = _target("off-lane", tmp_path)
+    initial_wake = threading.Event()
     inbox_wake = threading.Event()
     wakes: list[AutomaticLifecycleWake] = []
 
     def reconcile(wake):
         wakes.append(wake)
+        if len(wakes) == 1:
+            initial_wake.set()
         if wake.source is LifecycleWakeSource.INBOX:
             inbox_wake.set()
         return _outcome(wake)
@@ -264,6 +310,7 @@ def test_watch_looks_again_when_pending_inbox_is_published(tmp_path):
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True
+        assert initial_wake.wait(timeout=15.0) is True
         write_inbox_item(target.repo_root, "operator.txt", "start this lane")
         assert inbox_wake.wait(timeout=2.0) is True
     finally:
