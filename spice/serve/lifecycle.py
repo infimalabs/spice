@@ -239,11 +239,10 @@ class LifecycleDecisionAuthority:
         _cancelled: Event,
     ) -> LifecycleOutcome:
         """Decide one reconciler input against current lane facts."""
-        target = self._target(value.target_id)
         decision = (
-            self.decide_explicit_send(target, value)
+            self._spend_reserved_grant(value)
             if isinstance(value, ExplicitLifecycleIntent)
-            else self.evaluate_target(target)
+            else self.evaluate_target(self._target(value.target_id))
         )
         return LifecycleOutcome(
             target_id=value.target_id,
@@ -255,18 +254,20 @@ class LifecycleDecisionAuthority:
             decision=decision,
         )
 
-    def decide_explicit_send(
-        self,
-        target: WorktreeTarget,
-        intent: ExplicitLifecycleIntent,
+    def _spend_reserved_grant(
+        self, intent: ExplicitLifecycleIntent
     ) -> LifecycleDecision:
-        """Spend one reserved explicit grant on ``target``.
+        """Spend the one grant ``intent`` reserved, and give it back either way.
 
-        The grant is released once the attempt is made -- including when it
-        fails -- because a reservation that outlived its decision would mute
-        automatic decisions for the lane it was meant to protect.
+        The release is keyed on the intent's own target id and covers resolving
+        the target too, so a lane that stopped being discoverable between its
+        publication and this decision still returns its reservation. A grant that
+        outlived the intent that reserved it would decline every later automatic
+        decision for that lane -- the lane it exists to protect would be the one
+        that never starts again.
         """
         try:
+            target = self._target(intent.target_id)
             with self.explicit_pending_inbox(target) as ensure_pending:
                 agent_ensure = ensure_pending(
                     fast_mode=intent.fast_mode,
@@ -274,7 +275,7 @@ class LifecycleDecisionAuthority:
                 )
                 observed = self._observe_target_locked(target, thread_id=None)
         finally:
-            self._release_explicit_grant(target.id)
+            self._release_explicit_grant(intent.target_id)
         return LifecycleDecision(
             thread_id=observed.thread_id,
             predecessor_actor=observed.predecessor_actor,
