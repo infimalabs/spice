@@ -13,6 +13,7 @@ from spice.serve.payload.chrome import (
     LaneChromeOrder,
     assemble_lane_chrome,
     lane_chrome_generation,
+    lane_chrome_generations,
 )
 from spice.serve.payload.identity import (
     _agent_name_for_target,
@@ -164,21 +165,16 @@ def lane_chrome_payload(
     observations: list[LaneChromeObservation] = []
     team_revision = int((team_identity or {}).get("teamRevision", 0))
     # The team store counts that revision, so a store deleted and remade counts
-    # it from the start again and nothing counted inside it can say so. The two
-    # facets it alone orders are dated by the instant that store was created.
+    # it from the start again and nothing counted inside it can say so. Every
+    # facet the revision orders is therefore dated by the instant that store was
+    # created -- alone for the two the team store owns, joined beside the task
+    # store's generation for the board both of them feed.
     team_generation = lane_chrome_generation(
         (team_facts or {}).get("storeGeneration", "")
     )
     if team_identity is not None:
         observations.append(
-            LaneChromeObservation(
-                "teamConfig",
-                # Team revision is the store's global event counter for this
-                # team. It advances for membership, config, and renewal
-                # mutations, whereas configRevision advances for config only.
-                LaneChromeOrder(epoch=team_generation, revision=team_revision),
-                {"teamIdentity": dict(team_identity)},
-            )
+            _team_config_observation(team_identity, team_generation, team_revision)
         )
     if pending_identity is not None:
         observations.append(
@@ -194,48 +190,14 @@ def lane_chrome_payload(
         )
     if team_facts is not None and task_filter_inventory is not None:
         observations.append(
-            LaneChromeObservation(
-                "taskBoard",
-                # The joined lane board changes when either authority feeding
-                # it changes: task rows/catalog advance the board epoch, while
-                # this team's filters/lifetime advance the team revision.
-                LaneChromeOrder(
-                    epoch=lane_chrome_generation(
-                        task_filter_inventory.get("revision", "")
-                    ),
-                    revision=team_revision,
-                ),
-                {
-                    "taskFilters": team_facts.get("taskFilters", []),
-                    "taskFilterEntries": team_facts.get("taskFilterEntries", []),
-                    "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
-                    "taskFilterInventory": task_filter_inventory,
-                    # The filters above are observed; no server pass counts a
-                    # lane's private tasks yet. The board's shape requires a
-                    # number, so it publishes the only one nothing contradicts.
-                    "privateTaskCount": 0,
-                },
+            _task_board_observation(
+                team_facts, task_filter_inventory, team_generation, team_revision
             )
         )
     if team_facts is not None and renewal_intent is not None:
         observations.append(
-            LaneChromeObservation(
-                "renewal",
-                # Lifetime and renewal intent are one team-store observation.
-                # Both mutations advance the team's event revision; max keeps
-                # a legacy renewal row carrying a later explicit revision
-                # ordered without inventing a second browser authority.
-                LaneChromeOrder(
-                    epoch=team_generation,
-                    revision=max(
-                        team_revision,
-                        int(renewal_intent.get("revision", 0)),
-                    ),
-                ),
-                {
-                    "lifetime": team_facts.get("lifetime", ""),
-                    "renewalIntent": dict(renewal_intent),
-                },
+            _renewal_observation(
+                team_facts, renewal_intent, team_generation, team_revision
             )
         )
     if last_assistant_at is not None:
@@ -251,6 +213,82 @@ def lane_chrome_payload(
             )
         )
     return assemble_lane_chrome(target_id, observations).payload
+
+
+def _team_config_observation(
+    team_identity: Mapping[str, Any], generation: str, revision: int
+) -> LaneChromeObservation:
+    """Observe this team's identity, ordered in the store that keeps it.
+
+    Team revision is that store's global event counter for this team: it
+    advances for membership, config, and renewal mutations, whereas
+    configRevision advances for config only.
+    """
+    return LaneChromeObservation(
+        "teamConfig",
+        LaneChromeOrder(epoch=generation, revision=revision),
+        {"teamIdentity": dict(team_identity)},
+    )
+
+
+def _task_board_observation(
+    team_facts: Mapping[str, Any],
+    task_filter_inventory: Mapping[str, Any],
+    generation: str,
+    revision: int,
+) -> LaneChromeObservation:
+    """Observe the lane board, dated by both of the stores that feed it.
+
+    The board moves when either authority does: task rows and catalog re-mint
+    the task store's generation, while this team's filters ride the event
+    revision counted in the team store. Both stores therefore date it, because
+    that revision would restart under an unmoved board generation the moment
+    the team store was remade.
+    """
+    return LaneChromeObservation(
+        "taskBoard",
+        LaneChromeOrder(
+            epoch=lane_chrome_generations(
+                task_filter_inventory.get("revision", ""), generation
+            ),
+            revision=revision,
+        ),
+        {
+            "taskFilters": team_facts.get("taskFilters", []),
+            "taskFilterEntries": team_facts.get("taskFilterEntries", []),
+            "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
+            "taskFilterInventory": task_filter_inventory,
+            # The filters above are observed; no server pass counts a lane's
+            # private tasks yet. The board's shape requires a number, so it
+            # publishes the only one nothing contradicts.
+            "privateTaskCount": 0,
+        },
+    )
+
+
+def _renewal_observation(
+    team_facts: Mapping[str, Any],
+    renewal_intent: Mapping[str, Any],
+    generation: str,
+    revision: int,
+) -> LaneChromeObservation:
+    """Observe lifetime and intent as the one team-store fact they are.
+
+    Both mutations advance the team's event revision; max keeps a legacy
+    renewal row carrying a later explicit revision ordered without inventing a
+    second browser authority.
+    """
+    return LaneChromeObservation(
+        "renewal",
+        LaneChromeOrder(
+            epoch=generation,
+            revision=max(revision, int(renewal_intent.get("revision", 0))),
+        ),
+        {
+            "lifetime": team_facts.get("lifetime", ""),
+            "renewalIntent": dict(renewal_intent),
+        },
+    )
 
 
 def _transcript_generation(last_assistant_at: str) -> str:
