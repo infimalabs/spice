@@ -16,6 +16,11 @@ from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
+from spice.transcript.assembly import (
+    AssembledMessage,
+    AssembledMessageReducer,
+    SpanKind,
+)
 from spice.transcript.events import (
     AssistantText,
     FailureSignal,
@@ -202,29 +207,45 @@ def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
 
 
 def _launch_log_projection(events: Iterable[TranscriptEvent]) -> dict[str, Any]:
-    assistant_loci: set[int] = set()
-    tool_loci: set[int] = set()
-    failure: dict[str, Any] = {}
+    reducer = AssembledMessageReducer()
+    messages: list[AssembledMessage] = []
     for event in events:
-        locus = event.at.line
-        if isinstance(event, AssistantText) or (
-            isinstance(event, Image)
-            and event.role == "assistant"
-            and event.payload_index is not None
-        ):
-            assistant_loci.add(locus)
-        elif isinstance(event, ToolCall):
-            tool_loci.add(locus)
-        if isinstance(event, FailureSignal):
-            failure["kind"] = event.kind
-            if event.reset_epoch is not None:
-                failure["reset_epoch"] = event.reset_epoch
+        messages.extend(reducer.push(event))
+    messages.extend(reducer.finish())
+    return _launch_message_projection(messages)
+
+
+def _launch_message_projection(
+    messages: Iterable[AssembledMessage],
+) -> dict[str, Any]:
+    assistant_messages = 0
+    tool_calls = 0
+    failure: dict[str, Any] = {}
+    for message in messages:
+        assistant = any(
+            isinstance(span.event, AssistantText)
+            or (
+                isinstance(span.event, Image)
+                and span.event.role == "assistant"
+                and span.event.payload_index is not None
+            )
+            for span in message.spans
+        )
+        if assistant:
+            assistant_messages += 1
+        elif any(isinstance(span.event, ToolCall) for span in message.spans):
+            tool_calls += 1
+        for span in message.spans:
+            if span.kind is not SpanKind.FAILURE or not isinstance(
+                span.event, FailureSignal
+            ):
+                continue
+            failure["kind"] = span.event.kind
+            if span.event.reset_epoch is not None:
+                failure["reset_epoch"] = span.event.reset_epoch
     return {
-        "assistant_messages": len(assistant_loci),
-        # Claude's canonical response-item selection historically chose prose
-        # over a tool call carried by the same source line. Keep that launch
-        # outcome contract while the typed reader preserves both facts.
-        "tool_calls": len(tool_loci - assistant_loci),
+        "assistant_messages": assistant_messages,
+        "tool_calls": tool_calls,
         **failure,
     }
 

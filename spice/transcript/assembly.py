@@ -78,6 +78,7 @@ class SpanKind(StrEnum):
     IMAGE = "image"
     FINAL_ANSWER = "final_answer"
     COMPACTION = "compaction"
+    FAILURE = "failure"
 
 
 class DirectiveKind(StrEnum):
@@ -97,6 +98,8 @@ class ClassifiedSpan:
     text: str = ""
     keys: tuple[str, ...] = ()
     directive_kind: DirectiveKind | None = None
+    response_index: int | None = None
+    response_kind: SpanKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +180,11 @@ def span_disposition(kind: SpanKind) -> str:
     put the polarity on a wire ask for its name rather than re-reading the
     header or comparing kinds themselves.
     """
-    return ACK_DISPOSITION_REFUSED if kind is SpanKind.NACK else ACK_DISPOSITION_ACKED
+    if kind is SpanKind.ACK:
+        return ACK_DISPOSITION_ACKED
+    if kind is SpanKind.NACK:
+        return ACK_DISPOSITION_REFUSED
+    raise ValueError(f"span kind {kind} has no ACK disposition")
 
 
 def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
@@ -218,6 +225,15 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
                 event=event,
             ),
         )
+    if isinstance(event, FailureSignal):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.FAILURE,
+                at=event.at,
+                event=event,
+                text=event.kind,
+            ),
+        )
     if isinstance(
         event,
         (
@@ -225,7 +241,6 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
             UserMessage,
             TurnBoundary,
             ContextUsage,
-            FailureSignal,
             Unknown,
         ),
     ):
@@ -247,19 +262,31 @@ def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
             directives=directives,
         )
     )
-    for response in responses:
+    for response_index, response in enumerate(responses):
         kind = (
             SpanKind.NACK
             if response.disposition == ACK_DISPOSITION_REFUSED
             else SpanKind.ACK
         )
+        response_spans = _segment_spans(
+            response.content,
+            event,
+            kind=kind,
+            directives=directives,
+            keys=response.keys,
+            response_index=response_index,
+        )
         spans.extend(
-            _segment_spans(
-                response.content,
-                event,
-                kind=kind,
-                directives=directives,
-                keys=response.keys,
+            response_spans
+            or (
+                ClassifiedSpan(
+                    kind=kind,
+                    at=event.at,
+                    event=event,
+                    keys=response.keys,
+                    response_index=response_index,
+                    response_kind=kind,
+                ),
             )
         )
     return tuple(spans)
@@ -272,6 +299,7 @@ def _segment_spans(
     kind: SpanKind,
     directives: dict[str, _Directive],
     keys: tuple[str, ...] = (),
+    response_index: int | None = None,
 ) -> tuple[ClassifiedSpan, ...]:
     spans: list[ClassifiedSpan] = []
     pending: list[str] = []
@@ -287,6 +315,8 @@ def _segment_spans(
                     event=event,
                     text=text,
                     keys=keys,
+                    response_index=response_index,
+                    response_kind=kind if response_index is not None else None,
                 )
             )
 
@@ -304,6 +334,8 @@ def _segment_spans(
                 text=directive.text,
                 keys=keys,
                 directive_kind=directive.kind,
+                response_index=response_index,
+                response_kind=kind if response_index is not None else None,
             )
         )
     flush_pending()
