@@ -39,8 +39,22 @@ INVALID_DOMAIN_CONFIGS = {
 }
 
 
-def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeypatch):
+def _stand_up_fixture_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the fixture a real repository the argless consumers discover.
+
+    Consumers that take no repo root resolve one from the working directory, so
+    the fixture answers them by being a git worktree rather than by patching
+    ``spice.paths.repo_root_from_cwd``. A stand-in installed there outlives the
+    test: modules on these code paths are imported lazily, and each binds
+    whatever object holds the name at its own first import, so the stand-in
+    becomes the permanent ``repo_root_from_cwd`` of whichever module loads next.
+    """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    monkeypatch.chdir(tmp_path)
+
+
+def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeypatch):
+    _stand_up_fixture_repo(tmp_path, monkeypatch)
     (tmp_path / "pyproject.toml").write_text(
         """
         [project]
@@ -112,8 +126,6 @@ def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeyp
         """,
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("spice.paths.repo_root_from_cwd", lambda: tmp_path)
 
     policy = resolve_policy(tmp_path)
     assert policy.limits.file_loc == REPOSITORY_FILE_LOC
@@ -147,13 +159,11 @@ def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeyp
 def test_invalid_layered_consumer_value_reports_winning_key_source_and_path(
     tmp_path, monkeypatch, source_name, relative_path, domain, configured
 ):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _stand_up_fixture_repo(tmp_path, monkeypatch)
     config_text, effective_key = configured
     source_path = tmp_path / relative_path
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(config_text, encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("spice.paths.repo_root_from_cwd", lambda: tmp_path)
 
     outcome = _validation_outcome(lambda: _load_invalid_domain(domain, tmp_path))
 
