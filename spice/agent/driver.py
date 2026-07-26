@@ -45,6 +45,7 @@ from spice.transcript.events import (
     UNLOCATED_SOURCE,
     ContextUsage,
     ContextUsageFields,
+    FailureSignal,
     LineStamper,
     TokenUsage,
     TranscriptEvent,
@@ -235,14 +236,14 @@ class AgentDriver:
         different schema points this at its own adapter, which is the whole of
         what a new dialect owes the substrate.
         """
-        return self._with_context_usage(
+        return self._with_reader_facts(
             raw,
             codex_line_events(raw, source=source, line=line),
             source=source,
             line=line,
         )
 
-    def _with_context_usage(
+    def _with_reader_facts(
         self,
         raw: dict[str, Any],
         events: list[TranscriptEvent],
@@ -250,9 +251,6 @@ class AgentDriver:
         source: str,
         line: int,
     ) -> list[TranscriptEvent]:
-        fields = self.context_snapshot_fields(raw)
-        if fields is None:
-            return events
         timestamp = raw.get("timestamp")
         stamper = LineStamper(
             source=source,
@@ -260,15 +258,32 @@ class AgentDriver:
             timestamp=timestamp if isinstance(timestamp, str) else None,
             ordinal=len(events),
         )
-        return [
-            *events,
-            ContextUsage(
-                at=stamper.stamp(),
-                last=fields.last,
-                cumulative=fields.cumulative,
-                model_context_window=fields.model_context_window,
-            ),
-        ]
+        decoded = list(events)
+        context = self.context_snapshot_fields(raw)
+        if context is not None:
+            decoded.append(
+                ContextUsage(
+                    at=stamper.stamp(),
+                    last=context.last,
+                    cumulative=context.cumulative,
+                    model_context_window=context.model_context_window,
+                )
+            )
+        failure = self.stream_failure_fields(raw)
+        if failure is not None:
+            failure_kind = failure.get("kind")
+            if isinstance(failure_kind, str) and failure_kind:
+                reset_epoch = failure.get("reset_epoch")
+                decoded.append(
+                    FailureSignal(
+                        at=stamper.stamp(),
+                        kind=failure_kind,
+                        reset_epoch=(
+                            reset_epoch if isinstance(reset_epoch, int) else None
+                        ),
+                    )
+                )
+        return decoded
 
     def line_may_carry_assistant_text(self, line: str) -> bool:
         """Could this unparsed line carry assistant prose? Cheap and permissive.
@@ -922,7 +937,7 @@ class ClaudeDriver(AgentDriver):
     def transcript_line_events(
         self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
     ) -> list[TranscriptEvent]:
-        return self._with_context_usage(
+        return self._with_reader_facts(
             raw,
             claude_line_events(raw, source=source, line=line),
             source=source,

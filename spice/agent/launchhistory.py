@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,6 +16,14 @@ from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
+from spice.transcript.events import (
+    AssistantText,
+    FailureSignal,
+    Image,
+    ToolCall,
+    TranscriptEvent,
+)
+from spice.transcript.reader import TranscriptEventReader, transcript_size
 from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
@@ -172,42 +181,50 @@ def supervised_launch_outcome(
 def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
     """Activity counts and structural failure fields from one launch log.
 
-    Stream-json lines classify through the driver's canonical-event and
-    failure-signal vocabularies; non-JSON lines (marker-format stdout) simply
-    contribute nothing, leaving the text-pattern fallback to the caller.
+    The bounded typed read includes a terminal unterminated record from a
+    process that exited mid-flush. Marker-format stdout decodes only to unknown
+    facts and contributes nothing, leaving text-pattern fallback to the caller.
     """
     driver = driver_for(repo_root)
-    assistant_messages = 0
-    tool_calls = 0
-    failure: dict[str, Any] = {}
-    try:
-        handle = log_path.open(encoding="utf-8", errors="replace")
-    except OSError:
+    end_offset = transcript_size(log_path)
+    if end_offset is None:
         return {"assistant_messages": 0, "tool_calls": 0}
-    with handle:
-        for line in handle:
-            stripped = line.strip()
-            if not stripped.startswith("{"):
-                continue
-            try:
-                raw = json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(raw, dict):
-                continue
-            event = driver.normalize_transcript_line(raw) or {}
-            payload = event.get("payload") or {}
-            payload_type = payload.get("type") if isinstance(payload, dict) else ""
-            if payload_type == "message" and payload.get("role") == "assistant":
-                assistant_messages += 1
-            elif payload_type == "function_call":
-                tool_calls += 1
-            fields = driver.stream_failure_fields(raw)
-            if fields:
-                failure.update(fields)
+    events = (
+        TranscriptEventReader(log_path, driver)
+        .read(
+            "bounded",
+            start_offset=0,
+            end_offset=end_offset,
+        )
+        .events
+    )
+    return _launch_log_projection(events)
+
+
+def _launch_log_projection(events: Iterable[TranscriptEvent]) -> dict[str, Any]:
+    assistant_loci: set[int] = set()
+    tool_loci: set[int] = set()
+    failure: dict[str, Any] = {}
+    for event in events:
+        locus = event.at.line
+        if isinstance(event, AssistantText) or (
+            isinstance(event, Image)
+            and event.role == "assistant"
+            and event.payload_index is not None
+        ):
+            assistant_loci.add(locus)
+        elif isinstance(event, ToolCall):
+            tool_loci.add(locus)
+        if isinstance(event, FailureSignal):
+            failure["kind"] = event.kind
+            if event.reset_epoch is not None:
+                failure["reset_epoch"] = event.reset_epoch
     return {
-        "assistant_messages": assistant_messages,
-        "tool_calls": tool_calls,
+        "assistant_messages": len(assistant_loci),
+        # Claude's canonical response-item selection historically chose prose
+        # over a tool call carried by the same source line. Keep that launch
+        # outcome contract while the typed reader preserves both facts.
+        "tool_calls": len(tool_loci - assistant_loci),
         **failure,
     }
 
