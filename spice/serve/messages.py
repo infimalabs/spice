@@ -339,7 +339,10 @@ def read_metric_messages_from_offset(
 ) -> tuple[list[AssistantMessage], int]:
     """Read metric-relevant transcript records from a byte offset to EOF."""
     driver = driver_for_transcript(transcript_path)
-    read = read_forward(transcript_path, start_offset=start_offset)
+    read = read_forward(
+        transcript_path,
+        cursor=TranscriptCursor(offset=start_offset),
+    )
     return (
         _messages_from_records(
             read.records,
@@ -517,7 +520,10 @@ def _read_chronological_from_offset(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> tuple[list[AssistantMessage], int]:
-    read = read_forward(transcript_path, start_offset=start_offset)
+    read = read_forward(
+        transcript_path,
+        cursor=TranscriptCursor(offset=start_offset),
+    )
     return (
         _messages_from_records(
             read.records,

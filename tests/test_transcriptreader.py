@@ -83,7 +83,7 @@ def test_forward_bounded_reverse_and_cursor_modes_share_byte_offsets(
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_bytes(b"".join(lines))
 
-    forward = read_forward(transcript)
+    forward = read_forward(transcript, cursor=TranscriptCursor())
     assert [record.offset for record in forward.records] == offsets
     assert [record.parsed is not None for record in forward.records] == [
         True,
@@ -144,7 +144,7 @@ def test_gzip_uses_the_same_uncompressed_cursor_coordinates(tmp_path) -> None:
     with gzip.open(transcript, "wb") as handle:
         handle.write(b"".join(lines))
 
-    forward = read_forward(transcript)
+    forward = read_forward(transcript, cursor=TranscriptCursor())
     assert transcript_size(transcript) == len(b"".join(lines))
     assert [record.offset for record in forward.records] == offsets
     assert offset_after_line(transcript, offsets[0]) == offsets[1]
@@ -172,7 +172,7 @@ def test_one_read_parses_once_before_dispatching_to_multiple_consumers(
         return original(raw)
 
     monkeypatch.setattr(reader, "_parse_json_object", count_parse)
-    read = read_forward(transcript)
+    read = read_forward(transcript, cursor=TranscriptCursor())
     first_consumer = []
     second_consumer = []
 
@@ -211,7 +211,8 @@ def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
     transcript = _transcript_path(tmp_path, compressed=compressed)
     _write_transcript(transcript, payload, compressed=compressed)
 
-    read = read_forward(transcript)
+    cursor = TranscriptCursor()
+    read = read_forward(transcript, cursor=cursor)
 
     assert [record.parsed and record.parsed["value"] for record in read.records] == [
         "before",
@@ -223,7 +224,7 @@ def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
     assert "\ufffd" in read.records[1].raw
     assert read.records[-1].raw == truncated.decode()
     assert read.end_offset == read.file_size == len(payload)
-    assert read_forward(transcript, start_offset=read.end_offset).records == ()
+    assert read_forward(transcript, cursor=cursor).records == ()
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
@@ -233,7 +234,7 @@ def test_empty_file_has_a_stable_zero_cursor(
     transcript = _transcript_path(tmp_path, compressed=compressed)
     _write_transcript(transcript, b"", compressed=compressed)
 
-    forward = read_forward(transcript)
+    forward = read_forward(transcript, cursor=TranscriptCursor())
     reverse = read_reverse_window(transcript)
 
     assert forward.records == reverse.records == ()
@@ -262,7 +263,8 @@ def test_oversized_single_line_is_delivered_and_followed_by_a_stable_cursor(
     transcript = _transcript_path(tmp_path, compressed=compressed)
     _write_transcript(transcript, oversized + following, compressed=compressed)
 
-    forward = read_forward(transcript)
+    cursor = TranscriptCursor()
+    forward = read_forward(transcript, cursor=cursor)
     reverse = read_reverse_window(
         transcript,
         max_bytes=reader.REVERSE_WINDOW_BYTES,
@@ -276,7 +278,7 @@ def test_oversized_single_line_is_delivered_and_followed_by_a_stable_cursor(
     ]
     assert reverse.start_offset == len(oversized)
     assert forward.end_offset == reverse.end_offset == len(oversized + following)
-    assert read_forward(transcript, start_offset=forward.end_offset).records == ()
+    assert read_forward(transcript, cursor=cursor).records == ()
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
