@@ -872,7 +872,7 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
                     "output": [
                         {
                             "type": "input_image",
-                            "image_url": {"url": IMAGE_DATA_URL},
+                            "image_url": IMAGE_DATA_URL,
                         }
                     ],
                 },

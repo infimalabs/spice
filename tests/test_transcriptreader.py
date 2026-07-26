@@ -25,12 +25,10 @@ from spice.transcript.reader import (
     TranscriptCursor,
     TranscriptEventReader,
     cursor_offset,
-    dispatch_records,
     locked_cursor,
     offset_after_line,
     read_bounded,
     read_forward,
-    read_line,
     read_reverse_window,
     render_cursor,
     transcript_size,
@@ -135,9 +133,10 @@ def test_forward_bounded_reverse_and_cursor_modes_share_byte_offsets(
     assert cursor_offset("not-a-cursor") is None
     assert cursor_offset("-1") is None
 
-    last = read_line(transcript, offsets[3])
-    assert last is not None
-    assert last.parsed == {"timestamp": TIMESTAMP, "value": "last"}
+    last = read_bounded(transcript, start_offset=offsets[3], end_offset=offsets[3] + 1)
+    assert [record.parsed for record in last.records] == [
+        {"timestamp": TIMESTAMP, "value": "last"}
+    ]
     assert offset_after_line(transcript, offsets[0]) == offsets[1]
 
 
@@ -169,7 +168,9 @@ def test_gzip_uses_the_same_uncompressed_cursor_coordinates(tmp_path) -> None:
     assert transcript_size(transcript) == len(b"".join(lines))
     assert [record.offset for record in forward.records] == offsets
     assert offset_after_line(transcript, offsets[0]) == offsets[1]
-    assert read_line(transcript, offsets[3]) == forward.records[3]
+    assert read_bounded(
+        transcript, start_offset=offsets[3], end_offset=offsets[3] + 1
+    ).records == (forward.records[3],)
 
     reverse = read_reverse_window(
         transcript,
@@ -177,38 +178,6 @@ def test_gzip_uses_the_same_uncompressed_cursor_coordinates(tmp_path) -> None:
         max_bytes=forward.file_size,
     )
     assert reverse.records == forward.records[:3]
-
-
-def test_one_read_parses_once_before_dispatching_to_multiple_consumers(
-    tmp_path, monkeypatch
-) -> None:
-    lines = _fixture_lines()
-    transcript = tmp_path / "rollout.jsonl"
-    transcript.write_bytes(b"".join(lines))
-    original = reader._parse_json_object
-    parsed: list[str] = []
-
-    def count_parse(raw: str):
-        parsed.append(raw)
-        return original(raw)
-
-    monkeypatch.setattr(reader, "_parse_json_object", count_parse)
-    read = read_forward(transcript, cursor=TranscriptCursor())
-    first_consumer = []
-    second_consumer = []
-
-    dispatch_records(
-        read.records,
-        first_consumer.append,
-        second_consumer.append,
-    )
-
-    assert len(parsed) == len(lines)
-    assert first_consumer == list(read.records)
-    assert second_consumer == list(read.records)
-    assert [
-        id(first.parsed) for first in first_consumer if first.parsed is not None
-    ] == [id(second.parsed) for second in second_consumer if second.parsed is not None]
 
 
 def test_cursor_lock_is_reentrant_for_one_incremental_reader() -> None:
@@ -597,7 +566,7 @@ def test_empty_file_has_a_stable_zero_cursor(
         forward.file_size,
     ) == (0, 0, 0, 0)
     assert reverse.end_offset == reverse.file_size == 0
-    assert read_line(transcript, 0) is None
+    assert read_bounded(transcript, start_offset=0, end_offset=1).records == ()
     assert offset_after_line(transcript, 0) == 0
 
 

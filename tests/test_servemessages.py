@@ -180,7 +180,7 @@ def test_append_only_read_reports_cross_boundary_image_pair_removal(
             "output": [
                 {
                     "type": "input_image",
-                    "image_url": {"url": "data:image/png;base64,aW1n"},
+                    "image_url": "data:image/png;base64,aW1n",
                 }
             ],
         },
@@ -235,7 +235,7 @@ def test_append_only_read_with_after_reports_cross_boundary_image_pair_removal(
             "output": [
                 {
                     "type": "input_image",
-                    "image_url": {"url": "data:image/png;base64,aW1n"},
+                    "image_url": "data:image/png;base64,aW1n",
                 }
             ],
         },
@@ -374,7 +374,7 @@ def test_sparse_reverse_chunks_project_each_accessed_record_once(
         return original_parse(raw)
 
     def count_projection(*args, **kwargs):
-        projections[args[0].offset] += 1
+        projections[args[0].at.offset] += 1
         return original_projection(*args, **kwargs)
 
     monkeypatch.setattr(message_reader, "REVERSE_WINDOW_BYTES", 256)

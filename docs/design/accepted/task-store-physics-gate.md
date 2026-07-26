@@ -1,6 +1,6 @@
 # Task-Store Physics Gate
 
-Status: measured recommendation, 2026-07-25.
+Status: recommendation, 2026-07-25.
 
 ## Recommendation
 
