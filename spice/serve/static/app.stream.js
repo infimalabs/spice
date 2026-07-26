@@ -897,6 +897,9 @@ function taskDrainRouteConfig(result) {
 function applyLaneSendChrome(lane, result) {
   const config = taskDrainRouteConfig(result);
   let identityChanged = false;
+  // Named off the applier rather than restated here, so the chrome transition
+  // shape stays one definition instead of a copy that can drift from it.
+  /** @type {ReturnType<typeof applyLaneChromePayload>} */
   let routeTransition = null;
   if (config) {
     identityChanged = routeIdentityDiffers(lane, config);
