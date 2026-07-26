@@ -7,10 +7,28 @@ import threading
 
 import pytest
 
-from spice.sqliteconnection import sqlite_connection
+from spice.sqliteconnection import ensure_sqlite_schema_once, sqlite_connection
 
 CLOSED_DATABASE = "closed database"
 CONFIGURED_BUSY_TIMEOUT_MS = 1500
+
+
+def _table_names(path) -> list[str]:
+    with sqlite_connection(path) as connection:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+        )
+        return [row[0] for row in rows]
+
+
+def _counting_initializer(runs: list, table: str = "entries"):
+    """Build an initializer that records each time the helper actually runs it."""
+
+    def initialize(connection: sqlite3.Connection) -> None:
+        runs.append(table)
+        connection.execute(f"CREATE TABLE {table} (value TEXT)")
+
+    return initialize
 
 
 def _entries(path) -> list[str]:
@@ -134,3 +152,82 @@ def test_pragmas_apply_before_the_caller_runs(tmp_path):
     assert busy_timeout == CONFIGURED_BUSY_TIMEOUT_MS
     assert journal_mode == "wal"
     assert path.parent.is_dir()
+
+
+def test_schema_ddl_runs_once_per_path(tmp_path):
+    path = tmp_path / "entries.sqlite3"
+    runs: list[str] = []
+
+    for _ in range(3):
+        ensure_sqlite_schema_once(
+            path,
+            busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS,
+            initialize=_counting_initializer(runs),
+        )
+
+    assert runs == ["entries"]
+    assert _table_names(path) == ["entries"]
+
+
+def test_each_database_path_is_initialized_on_its_own(tmp_path):
+    """Two unrelated stores each get their DDL; the memo is per path, not global."""
+    first = tmp_path / "first.sqlite3"
+    second = tmp_path / "second.sqlite3"
+    runs: list[str] = []
+
+    ensure_sqlite_schema_once(
+        first,
+        busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS,
+        initialize=_counting_initializer(runs, "first_entries"),
+    )
+    ensure_sqlite_schema_once(
+        second,
+        busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS,
+        initialize=_counting_initializer(runs, "second_entries"),
+    )
+
+    assert runs == ["first_entries", "second_entries"]
+    assert _table_names(first) == ["first_entries"]
+    assert _table_names(second) == ["second_entries"]
+    assert _table_names(first) != _table_names(second)
+
+
+def test_the_initializing_connection_opens_wal_under_a_created_parent(tmp_path):
+    path = tmp_path / "nested" / "entries.sqlite3"
+    observed: list[str] = []
+
+    def initialize(connection: sqlite3.Connection) -> None:
+        observed.append(connection.execute("PRAGMA journal_mode").fetchone()[0])
+        connection.execute("CREATE TABLE entries (value TEXT)")
+
+    ensure_sqlite_schema_once(
+        path, busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS, initialize=initialize
+    )
+
+    assert observed == ["wal"]
+    assert path.parent.is_dir()
+    with sqlite_connection(path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_a_failed_initializer_leaves_the_path_for_the_next_caller(tmp_path):
+    """A database that was never built must not be recorded as initialized."""
+    path = tmp_path / "entries.sqlite3"
+    runs: list[str] = []
+
+    def failing(connection: sqlite3.Connection) -> None:
+        runs.append("failed")
+        raise RuntimeError("schema build stops partway")
+
+    with pytest.raises(RuntimeError, match="schema build stops partway"):
+        ensure_sqlite_schema_once(
+            path, busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS, initialize=failing
+        )
+    ensure_sqlite_schema_once(
+        path,
+        busy_timeout_ms=CONFIGURED_BUSY_TIMEOUT_MS,
+        initialize=_counting_initializer(runs),
+    )
+
+    assert runs == ["failed", "entries"]
+    assert _table_names(path) == ["entries"]
