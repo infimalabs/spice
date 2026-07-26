@@ -1,0 +1,7 @@
+{"timestamp":"2026-07-26T03:00:00.000Z","type":"user","promptId":"parity-claude-1","message":{"content":"replay the parity corpus"}}
+{"timestamp":"2026-07-26T03:00:01.000Z","type":"assistant","message":{"content":[{"type":"text","text":"reading the corpus\nTASK title=Pin parity | project=session.transcript\nACK 1jN54zgX: replaying both interpreters\n::git-commit{\"sha\":\"parity\"}\nNACK 1jN552dN: refused the stale corpus"},{"type":"tool_use","id":"toolu-parity","name":"Bash","input":{"command":"spice task status"}},{"type":"thinking","thinking":"compare both sides once"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aVZCT1J3MEtHZ289"}}]}}
+{"timestamp":"2026-07-26T03:00:02.000Z","type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu-parity","content":"claim TRANSCR-1kGssHlx"}]}}
+{"timestamp":"2026-07-26T03:00:03.000Z","type":"assistant","message":{"content":[{"type":"thinking","thinking":"no prose on this turn"}]}}
+{"timestamp":"2026-07-26T03:00:04.000Z","type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto"}}
+{"timestamp":"2026-07-26T03:00:05.000Z","type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"corpus replayed"}]}}
+{"timestamp":"2026-07-26T03:00:06.000Z","type":"assistant","message":{"content":[{"type":"text","text":"truncated

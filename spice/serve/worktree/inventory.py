@@ -6,10 +6,7 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
-from spice.serve.lifecycle import (
-    LifecycleDecision,
-    evaluate_automatic_lifecycle,
-)
+from spice.serve.lifecycle import project_lifecycle
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
@@ -64,12 +61,16 @@ def _work_tree_payload(
     inventory: dict[str, Any],
     task_board: OpenTaskBoardProjection,
 ) -> dict[str, Any]:
-    thread_id = resolve_thread_id_for_target(state, target) or ""
-    decision = ensure_work_tree_agent(state, target, thread_id)
-    thread_id = decision.thread_id
-    predecessor_actor = decision.predecessor_actor
-    renew_intent = decision.renewal_intent
-    agent_ensure = decision.agent_ensure
+    lifecycle = project_lifecycle(
+        state,
+        target,
+        thread_id=resolve_thread_id_for_target(state, target) or "",
+        prefer_outcome_thread=True,
+    )
+    thread_id = lifecycle.thread_id
+    predecessor_actor = lifecycle.predecessor_actor
+    renew_intent = lifecycle.renewal_intent
+    agent_ensure = lifecycle.agent_ensure
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     status = agent_status(target.repo_root)
@@ -134,17 +135,6 @@ def _work_tree_payload(
         "lastAssistantAt": status_line["lastAssistantAt"],
         "statusLine": status_line,
     }
-
-
-def ensure_work_tree_agent(
-    state: Any, target: WorktreeTarget, thread_id: str
-) -> LifecycleDecision:
-    """Public server-owned entry point for the inventory launch decision."""
-    return evaluate_automatic_lifecycle(
-        state,
-        target,
-        thread_id=thread_id,
-    )
 
 
 def _work_tree_status_payloads(

@@ -317,12 +317,21 @@ def test_observer_http_surface_is_read_only_and_directory_stable(
     target = registry.sessions[0].target
 
     try:
-        status, targets = _request_json(server, "GET", "/api/work/trees")
-        assert status == HTTPStatus.OK
-        assert len(targets["workTrees"]) == 2
-        assert targets["defaultTargetId"] in {
-            session.target.id for session in registry.sessions
-        }
+        for _ in range(2):
+            status, targets = _request_json(server, "GET", "/api/work/trees")
+            assert status == HTTPStatus.OK
+            assert len(targets["workTrees"]) == 2
+            assert targets["defaultTargetId"] in {
+                session.target.id for session in registry.sessions
+            }
+
+            status, messages = _request_json(
+                server,
+                "GET",
+                f"/api/work/trees/{target.id}/messages?limit=5",
+            )
+            assert status == HTTPStatus.OK
+            assert messages["messages"]
 
         status, agent = _request_json(
             server, "GET", f"/api/work/trees/{target.id}/agent/status"

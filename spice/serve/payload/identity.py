@@ -108,13 +108,30 @@ def team_actor_for_target(
 def team_facts_for_target(
     store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
 ) -> dict[str, Any]:
-    # Read-only: this feeds display/poll paths (inventory, messages, the lane
-    # watch signature), which run constantly. Resolving via the read-only
-    # `target_bound_actor` avoids `team_actor_for_target`'s placeholder-promotion
-    # write — that write churned the watched team DB on every signature poll,
-    # contending with real work and forcing the lane watcher to reopen its
-    # kqueue each push. Promotion still happens on the active send path.
-    return team_facts_for_actor(store, target_bound_actor(target, thread_id))
+    return team_facts_for_actor(
+        store, projected_team_actor_for_target(store, target, thread_id)
+    )
+
+
+def projected_team_actor_for_target(
+    store: ServeTeamStore,
+    target: WorktreeTarget,
+    thread_id: str | None,
+) -> str:
+    """Resolve the durable actor visible to a read path without promoting it.
+
+    A newly bound thread may still have a target placeholder or predecessor
+    holding its team slot until a lifecycle signal reconciles that transition.
+    Payload builders must retain those durable team facts without performing
+    the membership move themselves.
+    """
+    actor = target_bound_actor(target, thread_id)
+    if store.current_team_for_agent(actor) is not None:
+        return actor
+    for previous in _target_actor_previous_names(store, target, actor):
+        if store.current_team_for_agent(previous) is not None:
+            return previous
+    return actor
 
 
 def target_bound_actor(target: WorktreeTarget, thread_id: str | None) -> str:
@@ -244,20 +261,36 @@ def serve_agent_identity_payload(
         },
         "renewal": _serve_renewal_identity(store, actor),
     }
-    if store is not None:
-        _record_serve_agent_identity(
-            store, identity, actor, bound_thread, actual_launch
-        )
     return identity
 
 
-def _record_serve_agent_identity(
+def record_serve_agent_identity(
     store: ServeTeamStore,
-    identity: dict[str, Any],
-    actor: str,
-    bound_thread: str,
-    actual_launch: dict[str, str],
-) -> None:
+    target: WorktreeTarget,
+    thread_id: str | None = None,
+    *,
+    actor_id: str = "",
+    binding_status: str = "",
+    binding_error: str = "",
+    transcript_owner: str = "",
+    desired_config: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record identity from an actuation path and return its wire projection."""
+    identity = serve_agent_identity_payload(
+        target,
+        thread_id,
+        actor_id=actor_id,
+        binding_status=binding_status,
+        binding_error=binding_error,
+        transcript_owner=transcript_owner,
+        store=store,
+        desired_config=desired_config,
+    )
+    bound_thread = canonical_thread_id(
+        thread_id or identity["thread"].get("threadId") or ""
+    )
+    actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
+    actual_launch = identity["launch"]["actual"]
     renewal = identity["renewal"]
     store.record_agent_identity(
         actor_id=actor,
@@ -276,12 +309,13 @@ def _record_serve_agent_identity(
         renewal_successor_thread_id=str(renewal.get("successorThreadId") or ""),
         renewal_revision=int(renewal.get("revision") or 0),
     )
+    return identity
 
 
 def renewal_intent_for_target(
     store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
 ) -> dict[str, Any]:
-    actor = team_actor_for_target(store, target, thread_id)
+    actor = projected_team_actor_for_target(store, target, thread_id)
     return renewal_intent_for_actor(store, actor)
 
 
