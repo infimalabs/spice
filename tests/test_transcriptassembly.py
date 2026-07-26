@@ -19,6 +19,7 @@ from spice.transcript.assembly import (
 )
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -28,6 +29,7 @@ from spice.transcript.events import (
     ToolCall,
     ToolOutput,
     TranscriptEvent,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -155,17 +157,26 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
             failed=False,
             tool_output_type="function_call_output",
         ),
-        Image(at=_at(5), url="data:image/png;base64,abc"),
-        UserMessage(at=_at(6), text="prompt", prompt_id="prompt-1"),
-        Compaction(at=_at(7), active=False, boundary=True),
-        WebSearch(at=_at(8), status="completed", action_type="search", query="q"),
+        CommandExecution(
+            at=_at(5),
+            command="git status",
+            cwd="/repo",
+            exit_code=0,
+            status="completed",
+            turn_id="turn-1",
+        ),
+        Image(at=_at(6), url="data:image/png;base64,abc"),
+        UserMessage(at=_at(7), text="prompt", prompt_id="prompt-1"),
+        TurnBoundary(at=_at(8), kind="started", turn_id="turn-1"),
+        Compaction(at=_at(9), active=False, boundary=True),
+        WebSearch(at=_at(10), status="completed", action_type="search", query="q"),
         ContextUsage(
-            at=_at(9),
+            at=_at(11),
             last=usage,
             cumulative=None,
             model_context_window=100,
         ),
-        Unknown(at=_at(10), reason="future", raw_type="future"),
+        Unknown(at=_at(12), reason="future", raw_type="future"),
     ]
 
     messages = _assemble(events)

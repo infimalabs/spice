@@ -27,7 +27,8 @@ from typing import Any
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
 from spice.sessions.jsonl import iter_jsonl_lines, iter_jsonl_lines_reverse
-from spice.sessions.util import first_text, int_or_zero
+from spice.sessions.util import int_or_zero
+from spice.transcript.decode import first_text
 from spice.transcript.timestamps import normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
