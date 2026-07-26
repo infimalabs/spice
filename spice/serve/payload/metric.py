@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from spice.errors import SpiceError
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED
 from spice.serve.directivestats import directive_history_for_subject
 from spice.serve.payload.wire import validate_emitter_payload
+from spice.serve.taskboard import current_task_board_observation
 from spice.serve.team.history import (
     METRIC_BUCKET_SECONDS,
     ObservationAttributionMode,
@@ -330,7 +331,7 @@ def _phase_effort_points(
     end: float,
     bucket_seconds: int,
 ) -> list[dict[str, Any]]:
-    task_rows = _phase_effort_task_rows(state)
+    task_rows = _phase_effort_task_rows()
     windows = store.task_phase_effort_windows(task_rows)
     files_by_thread = _phase_effort_transcript_files_by_thread(state, windows)
     usage_rows = store.task_phase_effort_usage(task_rows, files_by_thread)
@@ -342,15 +343,15 @@ def _phase_effort_points(
     ]
 
 
-def _phase_effort_task_rows(state: Any) -> list[dict[str, Any]]:
-    configured = getattr(state, "phase_effort_task_rows", None)
-    if callable(configured):
-        configured = configured()
-    if isinstance(configured, Iterable):
-        return [dict(cast(Mapping[str, Any], row)) for row in configured]
-    from spice.tasks import tw
+def _phase_effort_task_rows() -> list[dict[str, Any]]:
+    """Phase-effort rows from the revision-owned board every pane shares.
 
-    return tw.export()
+    The series is still built only when a pane asks for it, but it reads the
+    observation the inventory, message, and lane payloads already hold rather
+    than exporting the board again: at one task revision every pane sees the
+    same rows, and a request costs nothing beyond the first observation.
+    """
+    return [dict(row) for row in current_task_board_observation().rows]
 
 
 def _phase_effort_transcript_files_by_thread(

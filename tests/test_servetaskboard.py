@@ -11,9 +11,70 @@ from types import MappingProxyType
 
 import pytest
 
+from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.serve import taskboard
-from spice.tasks import config as task_config
+from spice.serve.payload import message
+from spice.tasks import config as task_config, create
+from tests.test_servehelpers import (
+    THREAD_A,
+    _patch_agent_status,
+    _repo,
+    _serve_state,
+    _target,
+)
+
+CROSSING_REVISION = "crossing"
+# One board every lane read in a message payload answers: an origin-owned card
+# row, the lane's active claim, a completed review carrying a finding, and a
+# second completed row the lane drained. Rendering all four from one export is
+# what proves the payload crossed onto the shared observation.
+CROSSING_ROWS = (
+    {
+        "id": 1,
+        "uuid": "card-row",
+        "incepted": "1kGsk2S1",
+        "description": "Cross the shared observation",
+        "project": "serve.latency",
+        "origin": "ack:1jN54zJJ",
+        "origin_thread": THREAD_A,
+        "creation_surface": "cli",
+        "status": "pending",
+    },
+    {
+        "id": 2,
+        "uuid": "claim-row",
+        "incepted": "1kGsk2S2",
+        "description": "Held by the lane",
+        "project": "serve.latency",
+        "phase": "todo",
+        "claim_by": THREAD_A,
+        "claim_at": "2026-07-25T20:00:00Z",
+        "start": "20260725T200000Z",
+        "status": "pending",
+    },
+    {
+        "id": 3,
+        "uuid": "review-row",
+        "incepted": "1kGsk2S3",
+        "description": "Reviewed with findings",
+        "project": "serve.latency",
+        "status": "completed",
+        "review_author": THREAD_A,
+        "review_by": "peer-thread",
+        "review_finding": "changes",
+        "review_at": "2026-07-25T21:00:00Z",
+    },
+    {
+        "id": 4,
+        "uuid": "drained-row",
+        "incepted": "1kGsk2S4",
+        "description": "Drained by the lane",
+        "project": "serve.latency",
+        "status": "completed",
+        "claim_by": THREAD_A,
+    },
+)
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +94,33 @@ def _stub_backend(monkeypatch, revision):
         task_config,
         "materialize_task_backend",
         lambda root: root / "taskrc",
+    )
+
+
+def _stub_crossing_board(monkeypatch, tmp_path) -> list[list[str]]:
+    """Answer every task read from one stubbed export of ``CROSSING_ROWS``."""
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(tmp_path / "task-backend"))
+    _stub_backend(monkeypatch, lambda root: CROSSING_REVISION)
+    exports: list[list[str]] = []
+
+    def export(filters, *, taskrc):
+        exports.append(list(filters))
+        return [dict(row) for row in CROSSING_ROWS]
+
+    monkeypatch.setattr(taskboard.tw, "export", export)
+    return exports
+
+
+def _task_cards(payload: dict) -> list[dict]:
+    return [item for item in payload["messages"] if item["kind"] == "task_card"]
+
+
+def _task_derived_slice(payload: dict) -> tuple:
+    return (
+        payload["taskFilterInventory"],
+        payload["statusLine"]["claimedTask"],
+        payload["laneInfo"]["reviewPressure"],
+        _task_cards(payload),
     )
 
 
@@ -488,3 +576,129 @@ def test_projection_reuses_card_review_followup_and_drained_indexes(monkeypatch)
     assert projection.open_review_followup_count("reviewed-newer") == 2
     assert projection.drained_task_count("agent-a") == 4
     assert projection.drained_task_count("") == 0
+
+
+def test_repeated_message_payloads_answer_every_task_read_from_one_export(
+    tmp_path, monkeypatch
+):
+    """A standalone message payload is a projection of one board observation.
+
+    Filter inventory, task cards, the claimed task, and review pressure are four
+    separate reads a message payload used to pay for one export each, per call.
+    Two payloads at an unchanged revision now cost one export between them, and
+    the second call reproduces the first payload's task-derived shape exactly.
+    """
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+    exports = _stub_crossing_board(monkeypatch, tmp_path)
+
+    payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
+
+    assert exports == [["status.any:"]]
+    assert payload["taskFilterInventory"]["openTaskCount"] == 2
+    assert [card["source_kind"] for card in _task_cards(payload)] == [
+        "cli_task_created"
+    ]
+    assert payload["statusLine"]["claimedTask"] == {
+        "handle": "LATENCY-1kGsk2S2",
+        "phase": "todo",
+        "title": "Held by the lane",
+    }
+    assert payload["laneInfo"]["reviewPressure"]["count"] == 1
+    assert payload["laneInfo"]["reviewPressure"]["items"][0]["finding"] == "changes"
+    assert _task_derived_slice(repeated) == _task_derived_slice(payload)
+
+
+def test_lane_metrics_stay_lazy_and_draw_drained_from_the_open_observation(
+    tmp_path, monkeypatch
+):
+    """The metrics pane is the only caller that pays for a lane's counters.
+
+    Drained is a completed-row count the observation already indexes, so opening
+    the pane spends no export of its own; the durable per-agent summary is the
+    one thing the request adds, and message payloads never ask for it.
+    """
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+    exports = _stub_crossing_board(monkeypatch, tmp_path)
+    summarized: list[str] = []
+    lane_metric_summary = state.team_store.lane_metric_summary
+
+    def counted_summary(actor, **kwargs):
+        summarized.append(actor)
+        return lane_metric_summary(actor, **kwargs)
+
+    monkeypatch.setattr(state.team_store, "lane_metric_summary", counted_summary)
+
+    message.messages_payload_for_worktree(state, target, limit=5)
+    summarized_before_open = list(summarized)
+    metrics = message.lane_metrics_summary_payload(state, target)
+
+    assert summarized_before_open == []
+    assert len(summarized) == 1
+    # review-row and drained-row are the lane's two completed rows.
+    assert metrics["drained"] == 2
+    assert exports == [["status.any:"]]
+
+
+def test_task_mutation_advances_the_board_a_team_wake_reuses(tmp_path, monkeypatch):
+    """A real backend mutation is the only thing that re-reads the board.
+
+    Team writes wake lane watchers through the same event file, so a team-only
+    wake must leave the task revision -- and therefore the observation every
+    lane payload projects -- exactly where the last task mutation left it.
+    """
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+    backend = tmp_path / "task-backend"
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
+    monkeypatch.setenv(DRIVER.thread_id_env, THREAD_A)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-crossing")
+    monkeypatch.chdir(repo)
+    reads: list[Path] = []
+    read_task_board = taskboard._read_task_board
+
+    def counted_read(root: Path):
+        reads.append(root)
+        return read_task_board(root)
+
+    monkeypatch.setattr(taskboard, "_read_task_board", counted_read)
+
+    empty = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
+    reads_before_mutation = len(reads)
+    create.add(
+        "Cross a real mutation onto the board",
+        project="serve.latency",
+        origin="ack:1jN54zJJ",
+        flow=["todo"],
+        acceptance=["the next payload observes the new row"],
+        creation_surface=task_config.TASK_CREATION_SURFACE_CLI,
+    )
+    task_revision = task_config.task_event_revision(backend)
+    mutated = message.messages_payload_for_worktree(state, target, limit=5)
+    reads_after_mutation = len(reads)
+    state.team_store.set_global_fast_mode_enabled(True)
+    woken = message.messages_payload_for_worktree(state, target, limit=5)
+
+    assert (reads_before_mutation, reads_after_mutation, len(reads)) == (1, 2, 2)
+    assert empty["taskFilterInventory"]["openTaskCount"] == 0
+    assert _task_derived_slice(repeated) == _task_derived_slice(empty)
+    assert mutated["taskFilterInventory"]["openTaskCount"] == 1
+    assert [card["display_text"] for card in _task_cards(mutated)] == [
+        "Task capture: Cross a real mutation onto the board (serve.latency)"
+    ]
+    assert (
+        task_config.task_event_path(backend)
+        .read_text(encoding="utf-8")
+        .endswith(" team\n")
+    )
+    assert task_config.task_event_revision(backend) == task_revision
+    assert _task_derived_slice(woken) == _task_derived_slice(mutated)
