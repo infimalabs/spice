@@ -689,7 +689,6 @@ def do_claim(
             return False
         raise
     record_claim_witness(uuid, actor, site=site)
-    _record_task_lifecycle_event(uuid, "claim", actor)
     return True
 
 
@@ -739,7 +738,6 @@ def take_over_stale_claim(
     except SpiceError:
         return False
     record_claim_witness(uuid, actor, site=site)
-    _record_task_lifecycle_event(uuid, "claim", actor)
     return True
 
 
@@ -811,7 +809,6 @@ def carry_claim(
         )
     record_claim_witness(uuid, next_actor, site=site)
     retire_claim_witness(site.worktree, prior_actor, uuid=uuid, handle=handle)
-    _record_task_lifecycle_event(uuid, "claim", next_actor)
     return ClaimCarryResult(
         True,
         "carried",
@@ -1016,18 +1013,6 @@ def renew_claim_or_report(actor: str | None = None) -> ClaimRenewalResult:
         return renew_claim(actor=actor)
     except SpiceError as exc:
         return ClaimRenewalResult(False, "refused", detail=str(exc))
-
-
-def _record_task_lifecycle_event(task_id: str, kind: str, actor: str) -> None:
-    from spice.serve.team.store import ServeTeamStore
-    from spice.tasks import lanes
-
-    agent_id = lanes.route_actor_id(actor or tw.current_actor())
-    ServeTeamStore().record_task_lifecycle_event(
-        kind,
-        task_id=task_id,
-        agent_id=agent_id,
-    )
 
 
 def _task_continuation_contract(actor: str | None = None):

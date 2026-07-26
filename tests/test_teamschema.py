@@ -13,6 +13,7 @@ from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
 from spice.serve.team.schema import (
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
+    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
     TEAM_AUTHORITY_MIGRATIONS,
     TEAM_AUTHORITY_SCHEMA,
     TEAM_AUTHORITY_SCHEMAS,
@@ -279,8 +280,8 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
             "(agent_id, team_id, tool_calls, updated_at) VALUES ('agent-a', 'team-a', 3, 1.0)"
         )
         connection.execute(
-            "INSERT INTO task_events (ts, kind, task_id, agent_id, team_id) "
-            "VALUES (1.0, 'claim', 'TASK-1', 'agent-a', 'team-a')"
+            "UPDATE observation_attribution_state SET status = ? WHERE singleton = 1",
+            (OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,),
         )
 
     _initialize(path)
@@ -296,8 +297,8 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
         counted_rows = connection.execute(
             "SELECT count(*) FROM agent_metrics WHERE agent_id = 'agent-a'"
         ).fetchone()[0]
-        kept_task_events = connection.execute(
-            "SELECT count(*) FROM task_events"
+        kept_attribution_status = connection.execute(
+            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
         ).fetchone()[0]
 
     # A projection whose shape drifted is discarded and rebuilt from the current
@@ -314,7 +315,7 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
     )
     assert cursor_rows == 0
     assert counted_rows == 0
-    assert kept_task_events == 1
+    assert kept_attribution_status == OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
     assert _authority_state(path) == before
 
 

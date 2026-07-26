@@ -30,7 +30,6 @@ from spice.tasks.claimstate import (
     _claimed_task_capture_recovery_message,
     _live_claim,
     _live_claim_text,
-    _record_task_lifecycle_event,
     _require_manual_claim_allowed,
     _require_owner,
     _require_pending,
@@ -507,8 +506,6 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         readiness.prepare_ready_rows(dependents, at=transitioned_at)
         tw.run([uuid, "done"])
         retire_claim_witness(claim_worktree, actor, uuid=uuid, handle=handle)
-        _record_task_lifecycle_event(uuid, "complete", actor)
-        _record_task_lifecycle_event(uuid, "drain", actor)
         _gc_empty_project_task_filters(project)
         return f"completed {handle}"
     nxt = phases[index + 1]
@@ -530,7 +527,6 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         args.append(f"review_author:{author}")
     tw.run(args)
     retire_claim_witness(claim_worktree, actor, uuid=uuid, handle=handle)
-    _record_task_lifecycle_event(uuid, "phaseAdvance", actor)
     return f"advanced {handle} -> {nxt}"
 
 
@@ -834,7 +830,6 @@ def review(
         reviewer=actor,
         reviewed_at=at,
     )
-    _record_task_lifecycle_event(uuid, "review", actor)
     result = _advance(identity.resolve(handle))
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]

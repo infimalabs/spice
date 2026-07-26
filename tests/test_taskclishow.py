@@ -108,8 +108,11 @@ def test_task_show_cli_renders_lineage_and_creator_context(task_backend, capsys)
         if line.startswith(f"creator_context {ACTOR_A} ")
     )
     assert child_lines[creator_index - 1].startswith("timing wait=")
-    assert child_lines[creator_index + 1] == "rehydrate:"
-    assert child_lines[creator_index + 2].startswith(
+    # A claim is a lifecycle movement the task plane records, so a claimed task
+    # carries a derived phase-effort window and renders it here.
+    assert child_lines[creator_index + 1] == "phase_effort:"
+    rehydrate_index = child_lines.index("rehydrate:")
+    assert child_lines[rehydrate_index + 1].startswith(
         f"  creator context, run: spice session briefing {ACTOR_A} --start "
     )
 

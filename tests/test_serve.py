@@ -33,6 +33,7 @@ from spice.paths import shared_attachment_root
 from spice.serve import app, livebus
 from spice.serve.messages import AssistantMessage, AssistantMessageRead
 from spice.serve.payload import identity, message
+from spice.serve.team.ids import thread_actor_id
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import config as task_config
 from tests.test_teamstorehelpers import (
@@ -54,6 +55,12 @@ from tests.test_servehelpers import (
     _target,
     _transcript_resolution,
 )
+
+# Serve names an agent by the actor built from its thread, and every plane it
+# reads -- memberships, identities, task lifecycle facts -- is keyed that way.
+AGENT_A = thread_actor_id("agent-a")
+AGENT_B = thread_actor_id("agent-b")
+AGENT_C = thread_actor_id("agent-c")
 
 
 def _assistant_ack_message(key: str) -> AssistantMessage:
@@ -620,22 +627,23 @@ def test_team_historical_metrics_endpoint_rejects_unbounded_queries(
 
 def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     tmp_path,
+    task_plane,
+    team_event,
 ):
     repo = _repo(tmp_path)
     state = _serve_state(tmp_path, _target(repo))
     store = state.team_store
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "drain", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=61
-    )
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
-    )
-    store.record_task_lifecycle_event(
-        "drain", task_id="task-c", agent_id="agent-a", team_id="team-b", ts=180
-    )
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A, AGENT_B])
+    task_plane.record("claim", task_id="task-a", agent_id=AGENT_A, ts=60)
+    # Completing drains the task off the open board in the same movement.
+    task_plane.record("complete", task_id="task-a", agent_id=AGENT_A, ts=60)
+    task_plane.record("claim", task_id="task-b", agent_id=AGENT_B, ts=120)
+    task_plane.record("complete", task_id="task-b", agent_id=AGENT_B, ts=120)
+    # The last task is drained from another team, so it counts for its actor
+    # and never for the team the actor has left.
+    team_event(store, "assignAgent", team_id="team-b", ts=150, agentId=AGENT_A)
+    task_plane.record("claim", task_id="task-c", agent_id=AGENT_A, ts=180)
+    task_plane.record("drain", task_id="task-c", agent_id=AGENT_A, ts=180)
 
     team_payload = app.task_burndown_metrics_response_payload(
         state,
@@ -649,7 +657,7 @@ def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     agent_payload = app.task_burndown_metrics_response_payload(
         state,
         {
-            "agentId": ["agent-a"],
+            "agentId": [AGENT_A],
             "start": ["0"],
             "end": ["180"],
             "bucketSeconds": ["60"],
@@ -658,7 +666,7 @@ def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     combined_payload = app.task_burndown_metrics_response_payload(
         state,
         {
-            "agentId": ["agent-a"],
+            "agentId": [AGENT_A],
             "teamId": ["team-a"],
             "start": ["0"],
             "end": ["180"],
@@ -671,14 +679,14 @@ def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     assert team_payload["teamIds"] == ["team-a"]
     assert team_payload["agentIds"] == []
     assert team_payload["completed"] == 2
-    assert team_payload["drained"] == 1
+    assert team_payload["drained"] == 2
     assert team_payload["range"] == {"start": 0, "end": 180}
     assert team_payload["series"] == [
         {"bucketStart": 60, "completed": 1, "drained": 1},
-        {"bucketStart": 120, "completed": 1, "drained": 0},
+        {"bucketStart": 120, "completed": 1, "drained": 1},
     ]
 
-    assert agent_payload["agentIds"] == ["agent-a"]
+    assert agent_payload["agentIds"] == [AGENT_A]
     assert agent_payload["teamIds"] == []
     assert agent_payload["completed"] == 1
     assert agent_payload["drained"] == 2
@@ -695,7 +703,7 @@ def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     assert handler.status == HTTPStatus.OK
     assert endpoint_payload["lens"] == "task-burndown"
     assert endpoint_payload["completed"] == 2
-    assert endpoint_payload["drained"] == 1
+    assert endpoint_payload["drained"] == 2
 
 
 def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
@@ -714,21 +722,30 @@ def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
     assert "exceeds" in payload["error"]
 
 
-def _task_distribution_metrics_state(tmp_path):
+def _task_distribution_metrics_state(tmp_path, task_plane, team_event):
+    """Two teams working three tasks, told entirely in lifecycle movements.
+
+    Which team a movement belongs to is Serve's to derive from the team plane,
+    so the tasks below say only who moved what and when. The last task is
+    claimed by the other team's agent, and task-a is re-claimed before it can
+    be completed, because completing a task nobody holds is not a command any
+    agent can issue.
+    """
     repo = _repo(tmp_path)
     state = _serve_state(tmp_path, _target(repo))
     store = state.team_store
-    for kind, task_id, agent_id, team_id, ts in (
-        ("claim", "task-a", "agent-a", "team-a", 60),
-        ("phaseAdvance", "task-a", "agent-a", "team-a", 61),
-        ("claim", "task-b", "agent-b", "team-a", 62),
-        ("review", "task-b", "agent-b", "team-a", 120),
-        ("claim", "task-c", "agent-a", "team-b", 180),
-        ("complete", "task-a", "agent-a", "team-a", 180),
+    team_event(store, "createTeam", team_id="team-a", ts=0, members=[AGENT_A, AGENT_B])
+    team_event(store, "createTeam", team_id="team-b", ts=0, members=[AGENT_C])
+    for kind, task_id, agent_id, ts in (
+        ("claim", "task-a", AGENT_A, 60),
+        ("phaseAdvance", "task-a", AGENT_A, 61),
+        ("claim", "task-b", AGENT_B, 62),
+        ("review", "task-b", AGENT_B, 120),
+        ("claim", "task-c", AGENT_C, 180),
+        ("claim", "task-a", AGENT_A, 180),
+        ("complete", "task-a", AGENT_A, 180),
     ):
-        store.record_task_lifecycle_event(
-            kind, task_id=task_id, agent_id=agent_id, team_id=team_id, ts=ts
-        )
+        task_plane.record(kind, task_id=task_id, agent_id=agent_id, ts=ts)
     return state
 
 
@@ -742,8 +759,10 @@ def _task_distribution_work_rows(payload):
     ]
 
 
-def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
-    state = _task_distribution_metrics_state(tmp_path)
+def test_task_distribution_metrics_endpoint_projects_per_agent_share(
+    tmp_path, task_plane, team_event
+):
+    state = _task_distribution_metrics_state(tmp_path, task_plane, team_event)
     team_payload = app.task_distribution_metrics_response_payload(
         state,
         {
@@ -766,35 +785,35 @@ def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
     assert _task_distribution_work_rows(team_payload) == [
         {
             "bucketStart": 60,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 60,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 1,
             "active": 0,
             "work": 1,
         },
         {
             "bucketStart": 120,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 120,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
         {
             "bucketStart": 180,
-            "agentId": "agent-b",
+            "agentId": AGENT_B,
             "claimed": 0,
             "active": 1,
             "work": 1,
@@ -807,12 +826,14 @@ def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
     assert team_payload["series"][4]["share"] == pytest.approx(1.0)
 
 
-def test_task_distribution_metrics_endpoint_filters_combined_agent_team(tmp_path):
-    state = _task_distribution_metrics_state(tmp_path)
+def test_task_distribution_metrics_endpoint_filters_combined_agent_team(
+    tmp_path, task_plane, team_event
+):
+    state = _task_distribution_metrics_state(tmp_path, task_plane, team_event)
     combined_payload = app.task_distribution_metrics_response_payload(
         state,
         {
-            "agentId": ["agent-a"],
+            "agentId": [AGENT_A],
             "teamId": ["team-a"],
             "start": ["0"],
             "end": ["180"],
@@ -826,7 +847,7 @@ def test_task_distribution_metrics_endpoint_filters_combined_agent_team(tmp_path
     assert combined_payload["series"] == [
         {
             "bucketStart": 60,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
@@ -834,7 +855,7 @@ def test_task_distribution_metrics_endpoint_filters_combined_agent_team(tmp_path
         },
         {
             "bucketStart": 120,
-            "agentId": "agent-a",
+            "agentId": AGENT_A,
             "claimed": 0,
             "active": 1,
             "work": 1,
@@ -843,8 +864,10 @@ def test_task_distribution_metrics_endpoint_filters_combined_agent_team(tmp_path
     ]
 
 
-def test_task_distribution_metrics_route_projects_per_agent_share(tmp_path):
-    state = _task_distribution_metrics_state(tmp_path)
+def test_task_distribution_metrics_route_projects_per_agent_share(
+    tmp_path, task_plane, team_event
+):
+    state = _task_distribution_metrics_state(tmp_path, task_plane, team_event)
     handler = _ImageHandler(state)
     app._ServeHandler._get_task_distribution_metrics(
         handler,

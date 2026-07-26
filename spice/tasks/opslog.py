@@ -56,7 +56,7 @@ class ContractMutation:
 
 
 @dataclass(frozen=True)
-class _OperationsLogConnection:
+class OperationsLog:
     path: Path
     connection: sqlite3.Connection
 
@@ -72,11 +72,16 @@ def operations_db_uri(path: Path) -> str:
 
 
 @contextmanager
-def _connect() -> Iterator[_OperationsLogConnection]:
-    """Open and verify the one supported TaskChampion operations-log shape."""
+def connect() -> Iterator[OperationsLog]:
+    """Open and verify the one supported TaskChampion operations-log shape.
+
+    Every read of this log opens through here, so an unreadable database, a
+    missing table, a missing column, and a SQL failure mid-read all surface as
+    the same named unsupported-schema error rather than as an empty result.
+    """
     path = operations_db_path()
     if not path.is_file():
-        raise _schema_error(path, "database file is missing")
+        raise unsupported_schema_error(path, "database file is missing")
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(operations_db_uri(path), uri=True)
@@ -85,7 +90,7 @@ def _connect() -> Iterator[_OperationsLogConnection]:
             ("operations",),
         ).fetchone()
         if table is None:
-            raise _schema_error(path, "operations table is missing")
+            raise unsupported_schema_error(path, "operations table is missing")
         # TaskChampion's uuid is a generated VIRTUAL column, so table_info
         # omits it while table_xinfo exposes the complete queryable shape.
         columns = {
@@ -93,18 +98,18 @@ def _connect() -> Iterator[_OperationsLogConnection]:
         }
         missing = sorted(REQUIRED_OPERATIONS_COLUMNS - columns)
         if missing:
-            raise _schema_error(
+            raise unsupported_schema_error(
                 path, f"operations table is missing columns: {', '.join(missing)}"
             )
-        yield _OperationsLogConnection(path=path, connection=connection)
+        yield OperationsLog(path=path, connection=connection)
     except sqlite3.Error as exc:
-        raise _schema_error(path, f"SQLite read failed: {exc}") from exc
+        raise unsupported_schema_error(path, f"SQLite read failed: {exc}") from exc
     finally:
         if connection is not None:
             connection.close()
 
 
-def _schema_error(path: Path, detail: str) -> SpiceError:
+def unsupported_schema_error(path: Path, detail: str) -> SpiceError:
     return SpiceError(
         f"unsupported TaskChampion operations log at {path}: {detail}; "
         "Taskwarrior 3 TaskChampion storage with operations columns "
@@ -119,7 +124,7 @@ def task_version(uuid: str) -> int:
     task's tail id is a cheap monotonic version — any edit lands a strictly
     higher id. One indexed MAX read; 0 only before the first recorded write.
     """
-    with _connect() as log:
+    with connect() as log:
         row = log.connection.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?", (uuid,)
         ).fetchone()
@@ -132,7 +137,7 @@ def claim_baseline_id(uuid: str, actor: str) -> int:
     Baselining at the claim write means edits landed between claim time and
     the first cadence check are still reported, without persisting a cursor.
     """
-    with _connect() as log:
+    with connect() as log:
         row = log.connection.execute(
             "SELECT MAX(id) FROM operations WHERE uuid = ?"
             " AND json_extract(data, '$.Update.property') = 'claim_by'"
@@ -155,7 +160,7 @@ def contract_mutations_since(
     """
     cursor = after_id
     mutations: list[ContractMutation] = []
-    with _connect() as log:
+    with connect() as log:
         rows = log.connection.execute(
             "SELECT id, data FROM operations WHERE uuid = ? AND id > ? ORDER BY id",
             (uuid, after_id),
@@ -184,19 +189,19 @@ def _decode_update(
 ) -> dict[str, object] | None:
     """Decode one Update object; return None for a valid non-Update operation."""
     if not isinstance(data, str):
-        raise _schema_error(
+        raise unsupported_schema_error(
             path,
             f"operation {operation_id} data is {type(data).__name__}, not JSON text",
         )
     try:
         operation = json.loads(data)
     except json.JSONDecodeError as exc:
-        raise _schema_error(
+        raise unsupported_schema_error(
             path,
             f"operation {operation_id} data is not valid JSON: {exc.msg}",
         ) from exc
     if not isinstance(operation, dict):
-        raise _schema_error(
+        raise unsupported_schema_error(
             path,
             f"operation {operation_id} data is not a JSON object",
         )
@@ -204,7 +209,7 @@ def _decode_update(
         return None
     update = operation["Update"]
     if not isinstance(update, dict):
-        raise _schema_error(
+        raise unsupported_schema_error(
             path,
             f"operation {operation_id} Update is {type(update).__name__}, "
             "not a JSON object",

@@ -34,6 +34,11 @@ from spice.serve.team.history import (
     metric_bucket_start,
     metric_sparkline,
 )
+from spice.serve.team.lifecycle import (
+    TeamTaskTransition,
+    team_event_rows,
+    team_task_transitions,
+)
 from spice.serve.team.membership import (
     event_agent_id,
     event_payload,
@@ -44,12 +49,12 @@ from spice.serve.team.schema import (
     METRIC_HISTORY_RETENTION_SECONDS,
     OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
 )
+from spice.tasks.transitions import ACTIVE_KINDS, DRAINING_KINDS, TaskTransitionKind
 from spice.transcript.reader import TranscriptFileIdentity
 
 METRIC_HISTORY_RETENTION_DAYS_ENV = (
     "SPICE_METRIC_HISTORY_RETENTION_DAYS"  # env-policy: allow
 )
-TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
 _SECONDS_PER_DAY = 24 * 60 * 60
 OBSERVATION_SOURCE_REBUILD_REQUIRED = (
     "immutable source attribution is unavailable for pre-transition observation "
@@ -262,31 +267,6 @@ class TeamMetricStoreMixin:
         with self.connect() as connection:
             return _metric_history_retention_seconds_locked(connection)
 
-    def record_task_lifecycle_event(
-        self: _TeamMetricStore,
-        kind: str,
-        *,
-        task_id: str,
-        agent_id: str,
-        team_id: str | None = None,
-        ts: float | None = None,
-    ) -> None:
-        kind = _task_event_kind(kind)
-        task_id = _normalized_id(task_id, "task_id")
-        agent_id = _normalized_id(agent_id, "agent_id")
-        capture_team_id = (
-            _normalized_id(team_id, "team_id")
-            if team_id is not None
-            else self.current_team_for_agent(agent_id) or agent_id
-        )
-        event_time = time.time() if ts is None else max(0.0, float(ts))
-        with self.connect() as connection:
-            connection.execute(
-                "INSERT INTO task_events "
-                "(ts, kind, task_id, agent_id, team_id) VALUES (?, ?, ?, ?, ?)",
-                (event_time, kind, task_id, agent_id, capture_team_id),
-            )
-
     def _inherit_agent_metric_cursors_locked(
         self,
         connection: sqlite3.Connection,
@@ -406,7 +386,7 @@ class TeamMetricStoreMixin:
             intervals = [
                 interval
                 for interval in membership_intervals_from_events(
-                    _team_event_rows_locked(connection), end_time=summary_time
+                    team_event_rows(connection), end_time=summary_time
                 )
                 if interval.team_id == team_id
             ]
@@ -504,9 +484,9 @@ class TeamMetricStoreMixin:
         ),
     ) -> tuple[TaskLifecycleSeriesPoint, ...]:
         """Stable task-flow series for graphing: task lifecycle facts folded
-        into per-bucket movement counts. The substrate is append-only
-        task_events tagged with actor and team-at-capture, so re-querying the
-        same range yields the same projection until retention prunes it."""
+        into per-bucket movement counts. The substrate is the task plane's own
+        append-only history, so re-querying the same range yields the same
+        projection for as long as that history is kept -- which is forever."""
         requested_agents = _normalized_ids(agent_ids, "agent_id")
         teams = _normalized_ids(team_ids, "team_id")
         if not requested_agents and not teams:
@@ -514,9 +494,6 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         start_time = max(0.0, float(start))
         end_time = max(start_time, float(end))
-        bucket_expr = (
-            f"(CAST(ts AS INTEGER) - (CAST(ts AS INTEGER) % {bucket_seconds}))"
-        )
         with self.connect() as connection:
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
                 _require_source_attribution_locked(connection, requested_agents)
@@ -528,36 +505,26 @@ class TeamMetricStoreMixin:
                     "task lifecycle series supports sourceActor or "
                     "lineageCumulative attribution"
                 )
-            filters = ["ts >= ?", "ts <= ?"]
-            params: list[object] = [start_time, end_time]
-            if agents:
-                filters.append(f"agent_id IN ({_placeholders(agents)})")
-                params.extend(agents)
-            if teams:
-                filters.append(f"team_id IN ({_placeholders(teams)})")
-                params.extend(teams)
-            rows = connection.execute(
-                "SELECT "
-                f"{bucket_expr} AS bucket_start, "
-                "SUM(CASE WHEN kind = 'claim' THEN 1 ELSE 0 END) AS claimed, "
-                "SUM(CASE WHEN kind IN ('phaseAdvance', 'review') "
-                "THEN 1 ELSE 0 END) AS active, "
-                "SUM(CASE WHEN kind = 'complete' THEN 1 ELSE 0 END) AS completed, "
-                "SUM(CASE WHEN kind = 'drain' THEN 1 ELSE 0 END) AS drained "
-                "FROM task_events "
-                f"WHERE {' AND '.join(filters)} "
-                "GROUP BY bucket_start ORDER BY bucket_start",
-                params,
-            ).fetchall()
+            facts = team_task_transitions(connection, end_time=end_time)
+        counts: dict[int, Counter[str]] = {}
+        for fact in facts:
+            if fact.ts < start_time:
+                continue
+            if not _credits(fact, agents, teams):
+                continue
+            bucket = counts.setdefault(
+                metric_bucket_start(fact.ts, bucket_seconds), Counter()
+            )
+            bucket[fact.kind] += 1
         return tuple(
             TaskLifecycleSeriesPoint(
-                bucket_start=int(row["bucket_start"]),
-                claimed=int(row["claimed"] or 0),
-                active=int(row["active"] or 0),
-                completed=int(row["completed"] or 0),
-                drained=int(row["drained"] or 0),
+                bucket_start=bucket_start,
+                claimed=bucket[TaskTransitionKind.CLAIM],
+                active=sum(bucket[kind] for kind in ACTIVE_KINDS),
+                completed=bucket[TaskTransitionKind.COMPLETE],
+                drained=sum(bucket[kind] for kind in DRAINING_KINDS),
             )
-            for row in rows
+            for bucket_start, bucket in sorted(counts.items())
         )
 
     def task_distribution_series(
@@ -579,35 +546,23 @@ class TeamMetricStoreMixin:
         end_time = max(start_time, float(end))
         start_bucket = metric_bucket_start(start_time, bucket_seconds)
         end_bucket = metric_bucket_start(end_time, bucket_seconds)
-        filters = ["ts <= ?"]
-        params: list[object] = [end_time]
-        if agents:
-            filters.append(f"agent_id IN ({_placeholders(agents)})")
-            params.extend(agents)
-        if teams:
-            filters.append(f"team_id IN ({_placeholders(teams)})")
-            params.extend(teams)
         with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT ts, kind, task_id, agent_id "
-                "FROM task_events "
-                f"WHERE {' AND '.join(filters)} "
-                "ORDER BY ts, rowid",
-                params,
-            ).fetchall()
+            facts = team_task_transitions(connection, end_time=end_time)
         task_states: dict[str, tuple[str, str]] = {}
-        events_by_bucket: dict[int, list[sqlite3.Row]] = {}
-        for row in rows:
-            event_bucket = metric_bucket_start(float(row["ts"] or 0.0), bucket_seconds)
+        events_by_bucket: dict[int, list[TeamTaskTransition]] = {}
+        for fact in facts:
+            if not _credits(fact, agents, teams):
+                continue
+            event_bucket = metric_bucket_start(fact.ts, bucket_seconds)
             if event_bucket < start_bucket:
-                _apply_task_distribution_event(task_states, row)
+                _apply_task_distribution_event(task_states, fact)
             else:
-                events_by_bucket.setdefault(event_bucket, []).append(row)
+                events_by_bucket.setdefault(event_bucket, []).append(fact)
         points: list[TaskDistributionSeriesPoint] = []
         bucket_start = start_bucket
         while bucket_start <= end_bucket:
-            for row in events_by_bucket.get(bucket_start, ()):
-                _apply_task_distribution_event(task_states, row)
+            for fact in events_by_bucket.get(bucket_start, ()):
+                _apply_task_distribution_event(task_states, fact)
             counts_by_agent: dict[str, list[int]] = {}
             for agent_id, state in task_states.values():
                 counts = counts_by_agent.setdefault(agent_id, [0, 0])
@@ -656,8 +611,10 @@ class TeamMetricStoreMixin:
         sample_time = time.time() if now is None else max(0.0, float(now))
         threshold = max(1, int(threshold_seconds))
         with self.connect() as connection:
-            claims = _active_task_claims_locked(
-                connection, agent_ids=agents, team_ids=teams
+            claims = _active_task_claims(
+                team_task_transitions(connection, end_time=sample_time),
+                agent_ids=agents,
+                team_ids=teams,
             )
             activity_by_agent = _activity_bucket_times_by_agent_locked(
                 connection, claims
@@ -726,15 +683,17 @@ class TeamMetricStoreMixin:
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:
-        # Bound the high-growth activity and task series at the retention
-        # horizon. Directive lifecycle retention belongs to its canonical
-        # steering/ACK store and is never mutated by a team snapshot prune.
+        # Bound the high-growth transcript-sourced activity series at the
+        # retention horizon. Task lifecycle facts are not pruned here: they are
+        # read from the task plane's own permanent history rather than copied,
+        # so there is nothing here to age out. Directive lifecycle retention
+        # belongs to its canonical steering/ACK store and is never mutated by a
+        # team snapshot prune.
         retention_seconds = _metric_history_retention_seconds_locked(connection)
         floor = int(now) - retention_seconds
         connection.execute(
             "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
         )
-        connection.execute("DELETE FROM task_events WHERE ts < ?", (float(floor),))
 
     def _record_agent_metric_delta_locked(
         self,
@@ -976,69 +935,55 @@ def _normalized_ids(values: Iterable[str], field_name: str) -> tuple[str, ...]:
     )
 
 
-def _task_event_kind(value: str) -> str:
-    kind = str(value or "").strip()
-    if kind not in TASK_EVENT_KINDS:
-        allowed = ", ".join(sorted(TASK_EVENT_KINDS))
-        raise SpiceError(f"task event kind must be one of {allowed}: {kind!r}")
-    return kind
+def _credits(
+    fact: TeamTaskTransition, agent_ids: tuple[str, ...], team_ids: tuple[str, ...]
+) -> bool:
+    """Whether one lifecycle fact falls inside the requested actor/team scope."""
+    if agent_ids and fact.agent_id not in agent_ids:
+        return False
+    return not team_ids or fact.team_id in team_ids
 
 
 def _apply_task_distribution_event(
-    task_states: dict[str, tuple[str, str]], row: sqlite3.Row
+    task_states: dict[str, tuple[str, str]], fact: TeamTaskTransition
 ) -> None:
-    task_id = str(row["task_id"])
-    kind = str(row["kind"])
-    if kind == "claim":
-        task_states[task_id] = (str(row["agent_id"]), "claimed")
-    elif kind in {"phaseAdvance", "review"}:
-        task_states[task_id] = (str(row["agent_id"]), "active")
-    elif kind in {"complete", "drain"}:
-        task_states.pop(task_id, None)
+    if fact.kind is TaskTransitionKind.CLAIM:
+        task_states[fact.task_id] = (fact.agent_id, "claimed")
+    elif fact.kind in ACTIVE_KINDS:
+        task_states[fact.task_id] = (fact.agent_id, "active")
+    elif fact.kind in DRAINING_KINDS:
+        task_states.pop(fact.task_id, None)
 
 
 def _placeholders(values: tuple[str, ...]) -> str:
     return ",".join("?" for _value in values)
 
 
-def _active_task_claims_locked(
-    connection: sqlite3.Connection,
+def _active_task_claims(
+    facts: tuple[TeamTaskTransition, ...],
     *,
     agent_ids: tuple[str, ...],
     team_ids: tuple[str, ...],
 ) -> tuple[_ActiveTaskClaim, ...]:
-    filters = ["kind = 'claim'"]
-    params: list[object] = []
-    if agent_ids:
-        filters.append(f"agent_id IN ({_placeholders(agent_ids)})")
-        params.extend(agent_ids)
-    if team_ids:
-        filters.append(f"team_id IN ({_placeholders(team_ids)})")
-        params.extend(team_ids)
-    rows = connection.execute(
-        "WITH latest AS ("
-        "  SELECT task_events.rowid, task_events.ts, task_events.kind, "
-        "         task_events.task_id, task_events.agent_id, task_events.team_id "
-        "  FROM task_events "
-        "  JOIN ("
-        "    SELECT task_id, MAX(rowid) AS rowid "
-        "    FROM task_events GROUP BY task_id"
-        "  ) AS latest_event ON task_events.rowid = latest_event.rowid"
-        ") "
-        "SELECT task_id, agent_id, team_id, ts FROM latest "
-        f"WHERE {' AND '.join(filters)} "
-        "ORDER BY ts, task_id",
-        params,
-    ).fetchall()
-    return tuple(
+    """Tasks whose latest lifecycle movement is still the claim that took them.
+
+    A later advance, review, or drain moves the task on, so keeping only the
+    last movement per task leaves exactly the claims nothing has answered yet.
+    """
+    latest: dict[str, TeamTaskTransition] = {}
+    for fact in facts:
+        latest[fact.task_id] = fact
+    claims = [
         _ActiveTaskClaim(
-            task_id=str(row["task_id"]),
-            agent_id=str(row["agent_id"]),
-            team_id=str(row["team_id"]),
-            claimed_at=float(row["ts"] or 0.0),
+            task_id=fact.task_id,
+            agent_id=fact.agent_id,
+            team_id=fact.team_id,
+            claimed_at=fact.ts,
         )
-        for row in rows
-    )
+        for fact in latest.values()
+        if fact.kind is TaskTransitionKind.CLAIM and _credits(fact, agent_ids, team_ids)
+    ]
+    return tuple(sorted(claims, key=lambda claim: (claim.claimed_at, claim.task_id)))
 
 
 def _activity_bucket_times_by_agent_locked(
@@ -1094,12 +1039,6 @@ def _task_stall_state(
 
 def _nonnegative_int(value: int) -> int:
     return max(0, int(value or 0))
-
-
-def _team_event_rows_locked(connection: sqlite3.Connection) -> list[sqlite3.Row]:
-    return connection.execute(
-        "SELECT ts, kind, team_id, payload FROM events ORDER BY revision"
-    ).fetchall()
 
 
 def _agent_message_bucket_rows_locked(
@@ -1248,10 +1187,8 @@ def _require_source_attribution_locked(
             "SELECT 1 FROM agent_metric_buckets "
             "WHERE agent_id = ? AND bucket_start < ? "
             "UNION ALL SELECT 1 FROM agent_metrics "
-            "WHERE agent_id = ? AND updated_at < ? "
-            "UNION ALL SELECT 1 FROM task_events "
-            "WHERE agent_id = ? AND ts < ? LIMIT 1",
-            (actor_id, start, actor_id, start, actor_id, start),
+            "WHERE agent_id = ? AND updated_at < ? LIMIT 1",
+            (actor_id, start, actor_id, start),
         ).fetchone()
         if row is not None:
             raise SpiceError(OBSERVATION_SOURCE_REBUILD_REQUIRED)

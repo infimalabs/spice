@@ -373,8 +373,7 @@ class ServeTeamStore(
             return
         observation_row = connection.execute(
             "SELECT 1 FROM agent_metrics "
-            "UNION ALL SELECT 1 FROM agent_metric_buckets "
-            "UNION ALL SELECT 1 FROM task_events LIMIT 1"
+            "UNION ALL SELECT 1 FROM agent_metric_buckets LIMIT 1"
         ).fetchone()
         status = (
             OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED

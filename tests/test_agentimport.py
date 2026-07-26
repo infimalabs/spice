@@ -8,6 +8,7 @@ from spice.agent.driver import DRIVER
 from spice.agent.identity import canonical_thread_id
 from spice.serve.team.store import ServeTeamStore
 from spice.tasks import alloc, claimstate, create, identity, ops, tw
+from spice.tasks.transitions import task_transitions
 from tests.test_tasks import task_repo
 
 __all__ = ["task_repo"]
@@ -160,12 +161,7 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     preserved = {field: before.get(field) for field in preserved_fields}
     store = ServeTeamStore()
     team = store.create_team(members=[predecessor])
-    lifecycle_events: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        claimstate,
-        "_record_task_lifecycle_event",
-        lambda task_id, kind, actor: lifecycle_events.append((task_id, kind, actor)),
-    )
+    held = task_transitions([uuid])
     monkeypatch.setenv(
         DRIVER.thread_id_env,
         "cccccccccccccccccccccccccccccccc",
@@ -186,7 +182,14 @@ def test_import_carries_claim_state_and_successor_resumes_it(task_repo, monkeypa
     assert fresh["claim_until"] > before["claim_until"]
     assert fresh["claim_lease_seconds"] == before["claim_lease_seconds"] == "7200"
     assert {field: fresh.get(field) for field in preserved_fields} == preserved
-    assert lifecycle_events == [(uuid, "claim", successor)]
+    # Carrying the claim writes the successor's hold onto the task plane, and
+    # that write is the whole record of the movement: one claim, by the actor
+    # the import seated, on the task the predecessor was holding.
+    carried = [
+        (transition.task_id, str(transition.kind), transition.actor)
+        for transition in task_transitions([uuid])[len(held) :]
+    ]
+    assert carried == [(uuid, "claim", successor)]
     predecessor_witness = claimstate.read_claim_witness(task_repo, predecessor)
     successor_witness = claimstate.read_claim_witness(task_repo, successor)
     assert predecessor_witness is not None and predecessor_witness.active is False
