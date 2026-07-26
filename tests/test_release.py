@@ -296,6 +296,81 @@ def test_release_cleanup_removes_stale_build_and_distribution_trees(tmp_path):
     assert sorted(path.name for path in tmp_path.iterdir()) == ["keep.txt"]
 
 
+def test_prepare_artifacts_do_not_make_the_publish_handoff_dirty(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _git(repo, "config", "user.email", "r@example.test")
+    _git(repo, "config", "user.name", "Release Tester")
+    (repo / ".gitignore").write_text(
+        Path(".gitignore").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "release-fixture"\nversion = "0.9.0"\n',
+        encoding="utf-8",
+    )
+    (repo / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+
+    original_run = release.run
+    published = []
+
+    def git_output(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def artifact_tools(command, **kwargs):
+        if command[0] == "git":
+            return original_run(command, **kwargs)
+        if command[:2] == ["uv", "build"]:
+            artifacts = repo / "dist"
+            artifacts.mkdir()
+            (artifacts / "spice_harness-0.9.1.tar.gz").write_bytes(b"sdist\n")
+            (artifacts / "spice_harness-0.9.1-py3-none-any.whl").write_bytes(b"wheel\n")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def bump_version(bump):
+        assert bump == "patch"
+        project = repo / "pyproject.toml"
+        project.write_text(
+            project.read_text(encoding="utf-8").replace("0.9.0", "0.9.1"),
+            encoding="utf-8",
+        )
+        return "0.9.1"
+
+    monkeypatch.setattr(release, "repo_root", lambda: repo)
+    monkeypatch.setattr(release, "run", artifact_tools)
+    monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
+    monkeypatch.setattr(release, "run_constitution_gate", lambda: None)
+    monkeypatch.setattr(release, "bump_version", bump_version)
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.1")
+    monkeypatch.setattr(
+        release,
+        "publish_release",
+        lambda version, notes_file, *, release_commit=None: published.append(
+            (version, notes_file, release_commit)
+        ),
+    )
+
+    parser = build_release_parser()
+    before = git_output("status", "--porcelain")
+    assert release.handle_release(parser.parse_args(["prepare", "patch"])) == 0
+    after_prepare = git_output("status", "--porcelain")
+    assert (repo / "dist" / "spice_harness-0.9.1.tar.gz").is_file()
+    assert (repo / "dist" / "spice_harness-0.9.1-py3-none-any.whl").is_file()
+
+    assert release.handle_release(parser.parse_args(["publish"])) == 0
+
+    head = git_output("rev-parse", "HEAD")
+    assert published == [("0.9.1", None, head)]
+    assert (after_prepare, git_output("status", "--porcelain")) == (before, before)
+
+
 def test_release_constitution_runs_executable_browser_gate(monkeypatch):
     calls = []
     monkeypatch.setattr(release, "run", lambda command: calls.append(command))

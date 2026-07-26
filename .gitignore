@@ -5,6 +5,7 @@ __pycache__/
 node_modules/
 *.egg-info/
 build/
+dist/
 .ruff_cache/
 .pytest_cache/
 .playwright-mcp/
