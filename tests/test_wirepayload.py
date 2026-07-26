@@ -22,7 +22,14 @@ from spice.serve import (
     web,
     workroutes,
 )
-from spice.serve.payload import chrome, message, metric, wire
+from spice.serve.payload import (
+    chrome,
+    message,
+    metric,
+    wire,
+    wireschema,
+    wiretypes,
+)
 from spice.serve.worktree import inventory
 from spice.version import runtime_version
 from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
@@ -253,7 +260,7 @@ def test_checkjs_lane_rejects_undefined_written_into_a_wire_required_field(tmp_p
     assert _checkjs_probe(tmp_path / "undef", UNDEFINED_WIRE_FIELD_PROBE) != 0
 
 
-def _reaches_opaque_json(value_type: wire.WireType, seen: frozenset[str]) -> bool:
+def _reaches_opaque_json(value_type: wiretypes.WireType, seen: frozenset[str]) -> bool:
     """Whether a declared type bottoms out in the opaque json primitive.
 
     Aliases are followed the way validation follows them, so opacity reached one
@@ -277,7 +284,7 @@ def _opaque_json_fields() -> set[str]:
     """Every field the schema itself leaves opaque, as `Schema.field` keys."""
     return {
         f"{schema.name}.{field.name}"
-        for schema in wire.WIRE_OBJECTS
+        for schema in wireschema.WIRE_OBJECTS
         for field in schema.fields
         if _reaches_opaque_json(field.value_type, frozenset())
     }
@@ -300,7 +307,7 @@ def test_browser_only_frame_registry_names_the_append_variant():
 
 
 def test_lane_chrome_contract_names_the_exact_independent_authorities():
-    assert wire.LANE_CHROME_FACET_AUTHORITIES == {
+    assert wireschema.LANE_CHROME_FACET_AUTHORITIES == {
         "identity": "target-registry",
         "teamConfig": "team-store",
         "pendingInbox": "inbox",
@@ -309,7 +316,7 @@ def test_lane_chrome_contract_names_the_exact_independent_authorities():
         "renewal": "team-store",
         "activity": "transcript",
     }
-    assert wire.LANE_CHROME_FACET_SCHEMAS == {
+    assert wireschema.LANE_CHROME_FACET_SCHEMAS == {
         "identity": "LaneChromeIdentityFacet",
         "teamConfig": "LaneChromeTeamConfigFacet",
         "pendingInbox": "LaneChromePendingInboxFacet",
@@ -320,7 +327,7 @@ def test_lane_chrome_contract_names_the_exact_independent_authorities():
     }
     assert {
         field.name for field in wire.WIRE_OBJECTS_BY_NAME["LaneChromePayload"].fields
-    } == {"targetId", *wire.LANE_CHROME_FACET_AUTHORITIES}
+    } == {"targetId", *wireschema.LANE_CHROME_FACET_AUTHORITIES}
 
 
 def test_lane_chrome_value_fields_have_one_explicit_facet_home():
@@ -380,7 +387,7 @@ def test_lane_chrome_value_fields_have_one_explicit_facet_home():
 def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
     facets = {
         name: valid_wire_payload(schema_name)
-        for name, schema_name in wire.LANE_CHROME_FACET_SCHEMAS.items()
+        for name, schema_name in wireschema.LANE_CHROME_FACET_SCHEMAS.items()
     }
     payload = valid_wire_payload(
         "LaneChromePayload",
@@ -391,7 +398,7 @@ def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
     assert wire.validate_wire_payload("LaneChromePayload", payload) == payload
     assert "revision" not in payload
 
-    for name, schema_name in wire.LANE_CHROME_FACET_SCHEMAS.items():
+    for name, schema_name in wireschema.LANE_CHROME_FACET_SCHEMAS.items():
         clear = valid_wire_payload(schema_name, value=None)
         patch = {"targetId": "target-fixture", name: clear}
         assert wire.validate_wire_payload("LaneChromePayload", patch) == patch
@@ -400,7 +407,7 @@ def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
 def test_lane_chrome_patch_rejects_cross_authority_and_global_ordering():
     identity = valid_wire_payload(
         "LaneChromeIdentityFacet",
-        authority=wire.LANE_CHROME_FACET_AUTHORITIES["teamConfig"],
+        authority=wireschema.LANE_CHROME_FACET_AUTHORITIES["teamConfig"],
     )
     with pytest.raises(SpiceError, match="must equal 'target-registry'"):
         wire.validate_wire_payload(
@@ -453,7 +460,7 @@ def test_lane_chrome_task_board_rejects_lane_info_and_team_topology():
 
 
 def test_lane_chrome_contract_rejects_authority_expansion_fields():
-    assert wire.LANE_CHROME_EXCLUDED_FIELDS == {
+    assert wireschema.LANE_CHROME_EXCLUDED_FIELDS == {
         "messages",
         "ackContexts",
         "removedMessageKeys",
@@ -467,7 +474,7 @@ def test_lane_chrome_contract_rejects_authority_expansion_fields():
         "presentationState",
         "dom",
     }
-    for field in wire.LANE_CHROME_EXCLUDED_FIELDS:
+    for field in wireschema.LANE_CHROME_EXCLUDED_FIELDS:
         with pytest.raises(SpiceError, match=f"undeclared fields: {field}"):
             wire.validate_wire_payload(
                 "LaneChromePayload",
@@ -512,7 +519,7 @@ def _arms_reported(message: str, arms: tuple[str, ...]) -> list[str]:
 
 
 TEAM_COMMAND_ARMS = ("TeamCommandApplied", "TeamCommandRefused")
-LANE_CHROME_ARMS = tuple(wire.LANE_CHROME_FACET_SCHEMAS.values())
+LANE_CHROME_ARMS = tuple(wireschema.LANE_CHROME_FACET_SCHEMAS.values())
 ROUTED_RESULT_ARMS = ("TaskDrainResult", "WorkTreeSendResult")
 
 

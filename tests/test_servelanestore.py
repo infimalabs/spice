@@ -4,7 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from spice.serve.payload import wire
+from spice.serve.payload import wireschema
 from spice.serve.web import STATIC_ROOT, render_index_html
 
 
@@ -69,7 +69,7 @@ def test_lane_chrome_facet_authorities_mirror_the_wire_contract():
         re.findall(r"(\w+): \"([\w-]+)\"", declaration.split("});")[0]),
     )
 
-    assert mirrored == wire.LANE_CHROME_FACET_AUTHORITIES
+    assert mirrored == wireschema.LANE_CHROME_FACET_AUTHORITIES
 
 
 def test_lane_store_loads_before_every_production_consumer():

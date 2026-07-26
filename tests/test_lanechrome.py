@@ -18,7 +18,7 @@ from spice.serve.payload.chrome import (
     assemble_lane_chrome,
     lane_chrome_generation,
 )
-from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
+from spice.serve.payload.wireschema import LANE_CHROME_FACET_AUTHORITIES
 
 TARGET = "target-a"
 OTHER_TARGET = "target-b"
@@ -115,7 +115,17 @@ def test_the_assembler_reaches_only_the_error_type_and_the_wire_contract() -> No
     """
     closure = spice_import_closure("spice.serve.payload.chrome")
 
-    assert closure == {"spice.errors", "spice.serve.payload.wire"}
+    # wireschema and wiretypes are the wire contract's own two halves -- the
+    # declarations and the type vocabulary they are written in. They were one
+    # module with wire.py until it outgrew the file-shape limit; splitting it
+    # widened this closure by two leaves that import nothing else from spice,
+    # so the surface the assembler can reach is the same contract it always was.
+    assert closure == {
+        "spice.errors",
+        "spice.serve.payload.wire",
+        "spice.serve.payload.wireschema",
+        "spice.serve.payload.wiretypes",
+    }
 
 
 def test_an_unchanged_facet_is_left_out_while_a_moved_one_is_sent() -> None:
