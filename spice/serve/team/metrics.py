@@ -127,6 +127,7 @@ class _TeamMetricStore(Protocol):
         agent_id: str,
         *,
         team_id: str,
+        source_path: str,
         tool_calls: int,
         message_buckets: Counter[int],
         tool_call_buckets: Counter[int],
@@ -212,16 +213,21 @@ class TeamMetricStoreMixin:
         # Tag the activity with the team the agent is on at capture time, or the
         # agent itself when it is in no team / a private solo team.
         team_id = self.current_team_for_agent(agent_id) or agent_id
+        # Counts are attributed to the source that produced them, so a replay of
+        # one source reverses only its own contribution. Activity counted
+        # outside a transcript pass has no source to replay from.
+        source_path = "" if checkpoint is None else checkpoint.source_path
         with self.connect() as connection:
             if checkpoint is not None:
                 _reset_unaccountable_metrics_locked(
-                    connection, agent_id, source_path=checkpoint.source_path
+                    connection, agent_id, source_path=source_path
                 )
             if counted:
                 self._record_agent_metric_delta_locked(
                     connection,
                     agent_id,
                     team_id=team_id,
+                    source_path=source_path,
                     tool_calls=tool_calls,
                     message_buckets=message_buckets,
                     tool_call_buckets=tool_call_buckets,
@@ -736,6 +742,7 @@ class TeamMetricStoreMixin:
         agent_id: str,
         *,
         team_id: str,
+        source_path: str,
         tool_calls: int,
         message_buckets: Counter[int],
         tool_call_buckets: Counter[int],
@@ -743,25 +750,27 @@ class TeamMetricStoreMixin:
     ) -> None:
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, team_id, tool_calls, updated_at) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
+            "(agent_id, team_id, source_path, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(agent_id, team_id, source_path) DO UPDATE SET "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = excluded.updated_at",
-            (agent_id, team_id, tool_calls, now),
+            (agent_id, team_id, source_path, tool_calls, now),
         )
         bucket_starts = sorted(set(message_buckets) | set(tool_call_buckets))
         for bucket_start in bucket_starts:
             connection.execute(
                 "INSERT INTO agent_metric_buckets "
-                "(agent_id, team_id, bucket_start, messages, tool_calls) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
+                "(agent_id, team_id, source_path, bucket_start, messages, tool_calls) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(agent_id, team_id, source_path, bucket_start) "
+                "DO UPDATE SET "
                 "messages = agent_metric_buckets.messages + excluded.messages, "
                 "tool_calls = agent_metric_buckets.tool_calls + excluded.tool_calls",
                 (
                     agent_id,
                     team_id,
+                    source_path,
                     bucket_start,
                     int(message_buckets.get(bucket_start, 0)),
                     int(tool_call_buckets.get(bucket_start, 0)),
@@ -842,15 +851,19 @@ def _record_agent_metric_cursor_locked(
 def _reset_unaccountable_metrics_locked(
     connection: sqlite3.Connection, agent_id: str, *, source_path: str
 ) -> None:
-    """Clear aggregates no surviving checkpoint can account for.
+    """Clear what one source contributed once its checkpoint is gone.
 
-    Facts and the checkpoint covering them are written together, so an agent
-    holding counts with no checkpoint for the source it is reading lost that
-    checkpoint -- a dropped table after a shape change, a deleted row, a
-    restored database missing one file. The caller is resuming from the first
-    byte because of it, and an agent counts the transcript it is reading, so
-    those counts are what the replay is about to produce again: they are cleared
-    here, inside the transaction that replaces them.
+    Facts and the checkpoint covering them are written together, so counts
+    standing beside a missing checkpoint mean the checkpoint was lost -- a
+    dropped table after a shape change, a deleted row, a restored database
+    missing one file. The caller is resuming that source from its first byte
+    because of it, so the counts that source already produced are exactly what
+    the replay is about to produce again: they are cleared here, inside the
+    transaction that replaces them.
+
+    Only that source's counts go. Every other source the agent reads is still
+    covered by its own checkpoint, so nothing is going to replay it, and
+    clearing it would erase activity that never comes back.
     """
     checkpointed = connection.execute(
         "SELECT 1 FROM agent_metric_cursors WHERE agent_id = ? AND source_path = ?",
@@ -858,16 +871,13 @@ def _reset_unaccountable_metrics_locked(
     ).fetchone()
     if checkpointed is not None:
         return
-    counted = connection.execute(
-        "SELECT 1 FROM agent_metrics WHERE agent_id = ? "
-        "UNION ALL SELECT 1 FROM agent_metric_buckets WHERE agent_id = ?",
-        (agent_id, agent_id),
-    ).fetchone()
-    if counted is None:
-        return
-    connection.execute("DELETE FROM agent_metrics WHERE agent_id = ?", (agent_id,))
     connection.execute(
-        "DELETE FROM agent_metric_buckets WHERE agent_id = ?", (agent_id,)
+        "DELETE FROM agent_metrics WHERE agent_id = ? AND source_path = ?",
+        (agent_id, source_path),
+    )
+    connection.execute(
+        "DELETE FROM agent_metric_buckets WHERE agent_id = ? AND source_path = ?",
+        (agent_id, source_path),
     )
 
 
