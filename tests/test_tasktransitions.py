@@ -29,6 +29,7 @@ pytestmark = pytest.mark.skipif(
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RENEWAL_TICKS = 3
+RENEWAL_LEASE_SECONDS = 3600.0
 
 # What the deleted Serve mirror recorded for the lifecycle below: one row per
 # lifecycle call site, stamped with the actor of whichever process made the
@@ -162,12 +163,17 @@ def test_claim_renewal_moves_no_lifecycle_state(task_repo):
     task_id = identity.uuid_of(identity.resolve(handle))
     claimed = task_transitions([task_id])
 
-    for _tick in range(RENEWAL_TICKS):
-        claimstate.renew_claim_or_report(ACTOR_A)
+    version = opslog.task_version(task_id)
 
-    # Renewal rewrites the lease on every cadence tick and writes a fresh
-    # `modified` stamp with it, so the log grew; lifecycle state did not move.
-    assert opslog.task_version(task_id) > claimed[-1].id
+    # Each tick asks for a strictly longer lease, so the recorded deadline
+    # really moves every time. Renewal writes are otherwise invisible when a
+    # whole cadence lands inside one second: the plane records an operation
+    # only where a value changed, and a lease is stored to the second.
+    for tick in range(RENEWAL_TICKS):
+        claimstate.renew_claim(handle, lease_seconds=RENEWAL_LEASE_SECONDS + tick)
+
+    # The log grew by every one of those writes; lifecycle state did not move.
+    assert opslog.task_version(task_id) > version
     assert task_transitions([task_id]) == claimed
 
 
@@ -180,12 +186,15 @@ def test_one_command_writing_many_properties_is_one_transition(task_repo):
     ops.done(handle, validation=["todo complete"])
 
     advanced = task_transitions([task_id])[len(before) :]
-    written = _transaction_properties(task_id, after_id=before[-1].id)
+    # A transition is identified by its transaction's first operation, so
+    # reading from there covers that one transaction and nothing before it.
+    written = _transaction_properties(task_id, after_id=advanced[0].id - 1)
 
-    # One `task done` writes the phase and its index, releases the claim,
-    # clears the lease and stamps the modification, all at once. Four of those
-    # writes are lifecycle state, and together they are one advance.
-    assert set(written) > {"phase", "phase_i", "claim_by", "modified"}
+    # One `task done` moves the phase and its index, releases the claim, and
+    # clears the whole lease it was held under, all in that single transaction.
+    # Three of those writes are lifecycle state, and together they are one
+    # advance.
+    assert set(written) > {"phase", "phase_i", "claim_by"}
     assert [transition.kind for transition in advanced] == [
         TaskTransitionKind.PHASE_ADVANCE
     ]

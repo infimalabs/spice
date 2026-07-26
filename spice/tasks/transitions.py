@@ -284,10 +284,13 @@ def _closed(
 ) -> tuple[_Operation, ...]:
     """Close one grouped run, refusing a run that holds two commands' writes.
 
-    Taskwarrior stamps ``modified`` once per command, so a run carrying two of
-    them means two commands were read as one and every count derived from this
-    log would be quietly wrong. A run carrying none is ordinary: a command that
-    writes only an annotation or a deletion reason leaves the stamp alone.
+    A command stamps ``modified`` at most once, so a run carrying two of them
+    means two commands were read as one and every count derived from this log
+    would be quietly wrong. A run carrying none is ordinary and common: the
+    stamp has one-second resolution and the log records an operation only where
+    a value changed, so a command finishing inside the same second as the last
+    one writes no stamp at all. Contiguous ids under one uuid are what delimit
+    a transaction; this is the corroborating check, not the boundary.
     """
     stamps = sum(1 for item in operations if item.property == MODIFIED_PROPERTY)
     if stamps > 1:
@@ -412,8 +415,9 @@ def _written_value(transaction: Sequence[_Operation], name: str) -> str:
 def _transition_time(transaction: Sequence[_Operation]) -> float:
     """When the task plane recorded the transaction, in epoch seconds.
 
-    Every operation of one transaction is stamped from a single instant, so
-    the first stamp is the transaction's time. Taskwarrior's own ``modified``
+    Each operation carries its own stamp, taken as the command builds the
+    transaction, so one run's stamps rise across a few microseconds and the
+    first is where the transaction opened. Taskwarrior's own ``modified``
     epoch is the fallback for a log written without operation timestamps.
     """
     for operation in transaction:
