@@ -1262,7 +1262,9 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert "<dt>handle</dt><dd>UI-1k4Yh62d</dd>" in item["display_html"]
 
 
-def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
+def test_task_card_renders_description_before_acceptance_and_keeps_field_order(
+    monkeypatch,
+):
     actor = "a" * 32
     row = {
         "id": 77,
@@ -1292,11 +1294,20 @@ def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
     )
 
     card = cards[0]
-    # The card fronts title/project/acceptance, then surfaces the provenance and
-    # phase metadata as its own contiguous, ordered <dd> rows: the stored origin
-    # spelling verbatim, priority, status, current phase, the full flow pipeline
-    # (claimstate.phases_of -> "plan, todo, review"), and the joined tags.
-    metadata_rows = (
+    # The card reads from identity and context into its success criteria, then
+    # preserves the provenance and phase metadata as contiguous ordered rows:
+    # the stored origin spelling verbatim, priority, status, current phase, the
+    # full flow pipeline (claimstate.phases_of -> "plan, todo, review"), tags,
+    # and finally the stable handle.
+    ordered_rows = (
+        '<div class="task-directive-property">'
+        "<dt>title</dt><dd>Surface task origin</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>project</dt><dd>serve.taskcards</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>description</dt><dd>Origin and metadata reach the card.</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>acceptance</dt><dd>Origin renders on the card.</dd></div>"
         '<div class="task-directive-property">'
         "<dt>origin</dt><dd>ack:1kF7MMCS</dd></div>"
         '<div class="task-directive-property">'
@@ -1309,10 +1320,10 @@ def test_task_card_renders_origin_priority_flow_and_tags_in_order(monkeypatch):
         "<dt>flow</dt><dd>plan, todo, review</dd></div>"
         '<div class="task-directive-property">'
         "<dt>tags</dt><dd>cards, origin</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>handle</dt><dd>TASKCAR-1k4Yh62d</dd></div>"
     )
-    assert metadata_rows in card.display_html
-    assert "<dt>title</dt><dd>Surface task origin</dd>" in card.display_html
-    assert "<dt>handle</dt><dd>TASKCAR-1k4Yh62d</dd>" in card.display_html
+    assert ordered_rows in card.display_html
 
 
 def test_shared_task_card_index_is_lazy_for_unbound_lane_and_reuses_rows(

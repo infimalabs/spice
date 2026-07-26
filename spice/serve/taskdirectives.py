@@ -19,7 +19,7 @@ from spice.mail.ackgrammar import task_directive_fields, trim_blank_lines
 from spice.serve.markdown import render_message_html
 
 # Display order for the capture card; ordering only.
-_TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
+_TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "description", "acceptance")
 
 
 @dataclass(frozen=True, slots=True)
