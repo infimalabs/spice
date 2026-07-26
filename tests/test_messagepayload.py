@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.mail.ackarchive import summarize_nack_archival
+from spice.mail.ackgrammar import extract_task_batch_lines_from_text
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
@@ -590,6 +591,47 @@ _TASK_DIRECTIVE = (
     "TASK title=Follow up | project=session.transcript | acceptance=Tracked"
 )
 _APP_DIRECTIVE = '::git-commit{"sha":"abc"}'
+
+
+def test_a_nack_whose_only_body_is_a_directive_is_not_honored(tmp_path):
+    """A refusal that captured a task but gave no reason still needs one.
+
+    Archival strips control lines before it looks for a reason, so this body
+    reads as empty to the supervisor and the item stays pending. The display
+    keeps the directive whole so it can still become a card, and sharing only
+    the predicate was not enough to make the two agree: the same refusal read
+    as reasonless to the supervisor and refused on the wire, closing the
+    operator's submission while the supervisor was still asking for a reason.
+    Withholding the refusal does withhold this message's card, because an
+    unhonored segment is dropped whole. The task itself is not lost: capture
+    reads the raw message, so the directive still reaches the board, and the
+    card is a display gap rather than a dropped ask.
+    """
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = f"NACK {_NACK_KEY}:\n{_TASK_DIRECTIVE}"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    summary = summarize_nack_archival(None, text)
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert summary.reasonless == [_NACK_KEY]
+    assert payload["ack_keys"] == []
+    assert payload["nack_keys"] == []
+    assert payload["nack_count"] == 0
+    assert [segment["disposition"] for segment in payload["ack_segments"]] == []
+    assert payload["task_card_count"] == 0
+    assert extract_task_batch_lines_from_text(text) == [_TASK_DIRECTIVE]
 
 
 @pytest.mark.parametrize(

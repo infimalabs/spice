@@ -249,6 +249,18 @@ def extract_task_batch_lines_from_text(text: str) -> list[str]:
     return _task_batch_lines(text)
 
 
+def keyed_response_reason(content: str) -> str:
+    """The reason text a keyed response carries, with control lines removed.
+
+    A segment's content reaches this from two directions: archival hands over
+    text this module already cleaned, while a display hands over the body it
+    kept whole so task directives could still become cards. Cleaning is
+    idempotent, so running it here lets both arrive at the same reason and
+    keeps the decision from depending on which door the text came through.
+    """
+    return _clean_segment_content(content, drop_task_directives=True)
+
+
 def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
     """Roll segments up into a key -> cleaned-content map (latest ACK wins)."""
     mapping: dict[str, str] = {}

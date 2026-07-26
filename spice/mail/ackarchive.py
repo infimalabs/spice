@@ -22,6 +22,7 @@ from spice.mail.ackgrammar import (
     extract_ack_segments_from_text,
     extract_nack_segments_from_text,
     has_noop_ack_marker,
+    keyed_response_reason,
 )
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
@@ -274,8 +275,15 @@ def summarize_nack_archival(
 
 
 def nack_response_is_honored(content: str) -> bool:
-    """Whether a NACK segment carries the reason required to retire its keys."""
-    return bool(content.strip())
+    """Whether a NACK segment carries the reason required to retire its keys.
+
+    Sharing this predicate is not enough on its own: archival strips control
+    lines before it asks, and a display does not, so a refusal whose only body
+    was a TASK directive read as reasonless on one side and refused on the
+    other. Deriving the reason here makes the answer depend on the text rather
+    than on the caller.
+    """
+    return bool(keyed_response_reason(content))
 
 
 def _empty_ack_archival_summary() -> AckArchivalSummary:
