@@ -9,12 +9,8 @@ from typing import Any, Iterable
 
 from spice.sessions import records
 from spice.sessions.records import TurnRecord
-from spice.sessions.util import (
-    first_text,
-    format_float,
-    normalize_timestamp,
-    parse_iso_ts,
-)
+from spice.sessions.util import first_text, format_float
+from spice.transcript.timestamps import normalize_timestamp, parse_timestamp
 
 QUESTION_WORDS = ("what", "why", "how", "can", "is", "are", "should", "could", "would")
 DIRECTIVE_CUES = (
@@ -426,8 +422,8 @@ def short_turn_id(turn_id: str | None) -> str:
 
 
 def _phase_duration_seconds(phase: PhaseRecord) -> float | None:
-    start = parse_iso_ts(phase.start_ts)
-    end = parse_iso_ts(phase.end_ts)
+    start = parse_timestamp(phase.start_ts)
+    end = parse_timestamp(phase.end_ts)
     if start is None or end is None:
         return None
     return (end - start).total_seconds()
@@ -435,8 +431,8 @@ def _phase_duration_seconds(phase: PhaseRecord) -> float | None:
 
 def _gap_between_turns(previous: TurnRecord, current: TurnRecord) -> float:
     previous_end = previous.end_ts or previous.last_activity_ts or previous.start_ts
-    start = parse_iso_ts(previous_end)
-    end = parse_iso_ts(current.start_ts)
+    start = parse_timestamp(previous_end)
+    end = parse_timestamp(current.start_ts)
     if start is None or end is None:
         return 0.0
     return (end - start).total_seconds()

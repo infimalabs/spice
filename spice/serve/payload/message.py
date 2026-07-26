@@ -46,6 +46,7 @@ from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import claimstate
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
+from spice.transcript.timestamps import parse_timestamp
 
 
 TASK_CARD_SOURCE_KIND = "cli_task_created"
@@ -322,7 +323,7 @@ def _parse_task_timestamp(raw: str) -> datetime | None:
     value = raw.strip()
     if not value:
         return None
-    parsed = message_reader.parse_timestamp(value)
+    parsed = parse_timestamp(value)
     if parsed is not None:
         return parsed
     try:
@@ -356,7 +357,7 @@ def _message_inside_time_boundary(
     after: str | None,
     before: str | None,
 ) -> bool:
-    timestamp = message_reader.parse_timestamp(item.timestamp)
+    timestamp = parse_timestamp(item.timestamp)
     if timestamp is None:
         return True
     after_timestamp = _timestamp_from_message_key(after)
@@ -372,7 +373,7 @@ def _timestamp_from_message_key(key: str | None) -> datetime | None:
     if not key:
         return None
     timestamp, _sep, _suffix = key.partition("#")
-    return message_reader.parse_timestamp(timestamp)
+    return parse_timestamp(timestamp)
 
 
 def _key_has_transcript_offset(key: str | None) -> bool:
@@ -405,7 +406,7 @@ def _newest_messages(
 
 
 def _message_sort_key(item: message_reader.AssistantMessage) -> tuple[float, int, str]:
-    timestamp = message_reader.parse_timestamp(item.timestamp)
+    timestamp = parse_timestamp(item.timestamp)
     epoch = timestamp.timestamp() if timestamp is not None else 0.0
     return (epoch, item.index, item.key)
 

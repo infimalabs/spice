@@ -18,7 +18,7 @@ from spice.sessions.meter import (
     active_context_snapshot_from_object,
 )
 from spice.sessions.slices import turn_activity_ts
-from spice.sessions.util import parse_iso_ts
+from spice.transcript.timestamps import parse_timestamp
 from spice.tasks import claimstate, identity
 
 PARTIAL_MISSING_START = "missing_start"
@@ -556,7 +556,7 @@ def _active_context_snapshots(
 
 
 def _timestamp_in_window(ts: str | None, window: PhaseEffortWindow) -> bool:
-    parsed = parse_iso_ts(ts)
+    parsed = parse_timestamp(ts)
     if parsed is None:
         return False
     value = parsed.timestamp()

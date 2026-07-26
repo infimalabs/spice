@@ -7,6 +7,7 @@ read_reply_records instead of the task backend.
 
 from spice.serve import messages as message_reader
 from spice.serve.payload import message
+from spice.transcript.timestamps import parse_timestamp
 
 
 def _message(timestamp):
@@ -46,11 +47,10 @@ def test_reply_card_cursor_keeps_append_window_to_transcript_items(
     keys = [item.key for item in merged]
     assert "2026-06-10T12:00:01.000001Z#reply-card:0" not in keys  # cursor drops older
     assert "2026-06-10T12:00:02.000001Z#reply-card:1" in keys  # newer kept
-    boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.000001Z")
+    boundary = parse_timestamp("2026-06-10T12:00:01.000001Z")
     assert boundary is not None
     assert all(
-        (ts := message_reader.parse_timestamp(item.timestamp)) is not None
-        and ts > boundary
+        (ts := parse_timestamp(item.timestamp)) is not None and ts > boundary
         for item in merged
     )
 

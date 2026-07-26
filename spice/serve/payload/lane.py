@@ -18,6 +18,7 @@ from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_proje
 from spice.serve.team.history import ObservationAttributionMode
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import identity as task_identity
+from spice.transcript.timestamps import parse_timestamp
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 
@@ -321,7 +322,7 @@ def agent_uptime_seconds(
 ) -> int:
     if not status.running or not status.started_at:
         return 0
-    started = message_reader.parse_timestamp(status.started_at)
+    started = parse_timestamp(status.started_at)
     if started is None:
         return 0
     latest = _latest_message_timestamp(items) or datetime.now(UTC)
@@ -341,5 +342,5 @@ def _message_timestamps(
     return [
         parsed
         for item in items
-        if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
+        if (parsed := parse_timestamp(item.timestamp)) is not None
     ]
