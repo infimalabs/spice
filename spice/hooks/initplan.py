@@ -767,7 +767,7 @@ def _config_operation(
     target: str,
     generated_value: str,
 ) -> InitOperation:
-    previous_value = _git_config_file_get(scope_path, target)
+    previous_value = git_config_file_get(scope_path, target)
     effective = _git_config_get(repo_root, target)
     return InitOperation(
         kind=InitOperationKind.GIT_CONFIG,
@@ -833,7 +833,7 @@ def _ownership_digest(
     return hashlib.sha256(payload).hexdigest()
 
 
-def _git_config_file_get(path: Path, key: str) -> str | None:
+def git_config_file_get(path: Path, key: str) -> str | None:
     result = run_git_command(
         ["git", "config", "--file", str(path), "--get", key],
         capture_output=True,
