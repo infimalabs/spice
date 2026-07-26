@@ -19,6 +19,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# One recorded instant, stated as the log's own text and as the epoch seconds a
+# freshness reader compares against now. Both are written down rather than
+# derived from each other, so the conversion under test has nothing to agree
+# with but the answer.
+RECORDED_STAMP = "2026-07-26T19:51:45.291080Z"
+RECORDED_EPOCH = 1785095505.29108
+ZONELESS_STAMP = "2026-07-26T19:51:45.291080"
+CRAFTED_UUID = "11111111-1111-1111-1111-111111111111"
 
 
 @pytest.fixture(params=["task-backend", "task backend ?%"])
@@ -117,6 +125,98 @@ def test_connector_opens_the_one_resolved_database(tmp_path, monkeypatch):
 
     assert opslog.task_version(uuid) == 1
     assert resolved == [databases[0]]
+
+
+def test_freshness_holds_still_across_a_read_that_rewrites_the_store(task_repo):
+    """A Taskwarrior read writes the store, so the store cannot date the log.
+
+    The export changes nothing and still moves every timestamp the filesystem
+    keeps for the database, which is what the mtime assertion here pins down.
+    Freshness read from the log's own operations is unmoved by that and moves
+    for the modification, so it dates the authority rather than the last time
+    anyone ran a command against it.
+    """
+    handle = _claimed_task(priority="L")
+    store = opslog.operations_db_path()
+
+    claimed = opslog.latest_operation_epoch()
+    claimed_mtime = store.stat().st_mtime_ns
+    tw.export(["status.any:"])
+    read = opslog.latest_operation_epoch()
+    read_mtime = store.stat().st_mtime_ns
+    ops.modify(handle, acceptance=["sharpened criterion"])
+    modified = opslog.latest_operation_epoch()
+
+    assert read_mtime != claimed_mtime
+    assert read == claimed
+    assert modified > read
+
+
+def test_freshness_reads_past_the_separator_that_closes_a_transaction(
+    tmp_path, monkeypatch
+):
+    """TaskChampion's transaction separator carries no instant of its own."""
+    data_dir = _crafted_log(
+        tmp_path,
+        [
+            json.dumps(
+                {
+                    "Update": {
+                        "uuid": CRAFTED_UUID,
+                        "property": "status",
+                        "value": "pending",
+                        "timestamp": RECORDED_STAMP,
+                    }
+                }
+            ),
+            json.dumps("UndoPoint"),
+        ],
+    )
+    monkeypatch.setattr(config, "data_dir", lambda: data_dir)
+
+    assert opslog.latest_operation_epoch() == RECORDED_EPOCH
+
+
+def test_freshness_declines_a_stamp_that_names_no_zone(tmp_path, monkeypatch):
+    """A zoneless stamp read as local time would be wrong by whole hours."""
+    data_dir = _crafted_log(
+        tmp_path,
+        [
+            json.dumps(
+                {
+                    "Update": {
+                        "uuid": CRAFTED_UUID,
+                        "property": "status",
+                        "value": "pending",
+                        "timestamp": ZONELESS_STAMP,
+                    }
+                }
+            )
+        ],
+    )
+    monkeypatch.setattr(config, "data_dir", lambda: data_dir)
+
+    assert opslog.latest_operation_epoch() is None
+
+
+def _crafted_log(tmp_path: Path, operations: list[str]) -> Path:
+    """Write one operations log holding exactly the given operation payloads."""
+    data_dir = tmp_path / "crafted"
+    data_dir.mkdir()
+    con = sqlite3.connect(data_dir / opslog.OPERATIONS_DB_FILENAME)
+    try:
+        con.execute("CREATE TABLE operations (id INTEGER, uuid TEXT, data TEXT)")
+        con.executemany(
+            "INSERT INTO operations VALUES (?, ?, ?)",
+            [
+                (operation_id, CRAFTED_UUID, data)
+                for operation_id, data in enumerate(operations, start=1)
+            ],
+        )
+        con.commit()
+    finally:
+        con.close()
+    return data_dir
 
 
 def test_contract_mutations_track_modifications_exactly(task_repo):
