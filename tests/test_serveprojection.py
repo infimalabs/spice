@@ -5,11 +5,13 @@ from __future__ import annotations
 import importlib
 import re
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 import spice.serve.team.projection as projection_module
 from spice.errors import SpiceError
+from spice.serve.diagnostics import team_diagnostics_payload
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.projection import (
     AGENT_ACTIVITY,
@@ -27,6 +29,7 @@ AGENT_A = thread_actor_id("agent-a")
 SUCCESSOR = thread_actor_id("agent-a-next")
 RECORDED_TOOL_CALLS = 3
 ACTIVITY_TIMESTAMP = 1000.0
+REPEATED_READS = 5
 # The store's own bookkeeping rather than a replayable family: it records which
 # build of each family a reader is looking at.
 BOOKKEEPING_TABLES = frozenset({"projection_generations"})
@@ -56,8 +59,13 @@ def _resolve(dotted: str) -> object:
 
 
 def _reopen(projections: ServeProjectionStore) -> None:
-    """Force the next open to re-run the schema pass against the file on disk."""
-    ServeProjectionStore._initialized_paths.discard(projections.path)
+    """Force the next open to re-run the schema pass against the file on disk.
+
+    A file rewritten in place keeps its stat identity, so the store has no way
+    to notice on its own; a file that was deleted or replaced does not need
+    this.
+    """
+    ServeProjectionStore._initialized_files.pop(projections.path, None)
 
 
 def _published_state(projections: ServeProjectionStore) -> tuple[int, dict[str, int]]:
@@ -219,7 +227,6 @@ def test_discarding_the_projection_file_leaves_authority_byte_identical(tmp_path
         authority_before = tuple(connection.iterdump())
 
     projections.path.unlink()
-    _reopen(projections)
     with projections.connect() as connection:
         rebuilt = {
             str(row[0])
@@ -278,6 +285,60 @@ def test_a_corrupt_projection_file_is_rebuilt_rather_than_reported(tmp_path):
         FIRST_GENERATION,
         dict.fromkeys(AGENT_ACTIVITY.tables, 0),
     )
+
+
+def test_a_deleted_projection_file_is_rebuilt_for_the_next_read_and_write(tmp_path):
+    """Deleting a disposable store costs a replay, not a restart of the process."""
+    store = _seeded_store(tmp_path)
+    store.create_team(team_id="team-a", members=[AGENT_A])
+    projections = store.projections
+    with sqlite_connection(store.path) as connection:
+        authority_before = tuple(connection.iterdump())
+
+    projections.path.unlink()
+    rebuilt = team_diagnostics_payload(store=store)["projections"]
+    store.record_agent_metric_delta(
+        AGENT_A,
+        tool_calls=RECORDED_TOOL_CALLS,
+        message_timestamps=[ACTIVITY_TIMESTAMP],
+        tool_call_timestamps=[ACTIVITY_TIMESTAMP],
+    )
+
+    # The same live store that lost the file underneath it answers the next
+    # read from a rebuilt one and counts the next delta into it.
+    assert [row["family"] for row in rebuilt] == [AGENT_ACTIVITY.name]
+    assert rebuilt[0]["generation"] == FIRST_GENERATION
+    assert rebuilt[0]["rowCounts"] == dict.fromkeys(AGENT_ACTIVITY.tables, 0)
+    assert _published_state(projections)[1]["agent_metrics"] == 1
+    with sqlite_connection(store.path) as connection:
+        assert tuple(connection.iterdump()) == authority_before
+
+
+def test_an_unchanged_projection_file_is_synced_once_across_many_reads(
+    tmp_path, monkeypatch
+):
+    """Noticing a vanished file costs a stat, so an unchanged one stays cheap."""
+    store = _seeded_store(tmp_path)
+    projections = store.projections
+    synced: list[Path] = []
+    sync = ServeProjectionStore._open_and_sync_locked
+
+    def counting_sync(self: ServeProjectionStore) -> None:
+        synced.append(self.path)
+        sync(self)
+
+    monkeypatch.setattr(ServeProjectionStore, "_open_and_sync_locked", counting_sync)
+
+    for _ in range(REPEATED_READS):
+        with projections.connect() as connection:
+            connection.execute("SELECT COUNT(*) FROM agent_metrics").fetchone()
+    projections.path.unlink()
+    with projections.connect():
+        pass
+
+    # Every read of the file this store already synced went straight to SQLite;
+    # the one schema pass belongs to the file that went missing.
+    assert synced == [projections.path]
 
 
 def test_an_unknown_family_name_is_named_beside_the_known_ones(tmp_path):

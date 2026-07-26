@@ -38,10 +38,15 @@ def _initialize(path: Path) -> None:
         pass
 
 
+def _forget_projection_file(projections: ServeProjectionStore) -> None:
+    """Re-sync a file rewritten in place, which keeps its stat identity."""
+    ServeProjectionStore._initialized_files.pop(projections.path, None)
+
+
 def _open_projections(path: Path) -> ServeProjectionStore:
     """Open the projection database that belongs beside this authority file."""
     store = ServeTeamStore(path=path)
-    ServeProjectionStore._initialized_paths.discard(store.projections.path)
+    _forget_projection_file(store.projections)
     with store.projections.connect():
         pass
     return store.projections
@@ -292,7 +297,7 @@ def test_a_drifted_projection_rebuilds_in_its_own_file_leaving_authority_whole(
             "(agent_id, team_id, tool_calls, updated_at) "
             "VALUES ('agent-a', 'team-a', 3, 1.0)"
         )
-    ServeProjectionStore._initialized_paths.discard(projections.path)
+    _forget_projection_file(projections)
 
     with projections.connect() as connection:
         columns = tuple(
@@ -334,7 +339,7 @@ def test_projection_lifecycle_cannot_change_authority_or_its_version(tmp_path):
 
     projections.reset()
     projections.path.write_bytes(b"not a database at all")
-    ServeProjectionStore._initialized_paths.discard(projections.path)
+    _forget_projection_file(projections)
     with projections.connect() as connection:
         rebuilt_tables = {
             str(row[0])
@@ -343,7 +348,6 @@ def test_projection_lifecycle_cannot_change_authority_or_its_version(tmp_path):
             )
         }
     projections.path.unlink()
-    ServeProjectionStore._initialized_paths.discard(projections.path)
     with projections.connect():
         pass
 
