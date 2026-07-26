@@ -118,24 +118,24 @@ def configure_serve_parser(subparsers: Any) -> None:
     )
     teams.set_defaults(func=run_serve_team_diagnostics)
 
-    reset_projections = actions.add_parser(
-        "reset-projections",
+    rebuild_projections = actions.add_parser(
+        "rebuild-projections",
         help=(
             "Rebuild Serve projections from native facts and atomically publish "
             "the completed generation."
         ),
         recovery_examples=(
-            "spice serve reset-projections",
-            "spice serve reset-projections agentActivity",
+            "spice serve rebuild-projections",
+            "spice serve rebuild-projections agentActivity",
         ),
     )
-    reset_projections.add_argument(
+    rebuild_projections.add_argument(
         "families",
         nargs="*",
         metavar="FAMILY",
-        help="Family names to empty. Default: every registered family.",
+        help="Family names to rebuild. Default: every registered family.",
     )
-    reset_projections.set_defaults(func=run_serve_reset_projections)
+    rebuild_projections.set_defaults(func=run_serve_rebuild_projections)
 
     browser_artifact = actions.add_parser(
         "browser-artifact-path",
@@ -254,7 +254,7 @@ def run_serve_team_diagnostics(args: Any) -> int:
     return 0
 
 
-def run_serve_reset_projections(args: Any) -> int:
+def run_serve_rebuild_projections(args: Any) -> int:
     """Rebuild selected families and report the build each reader now sees.
 
     Population happens in an isolated projection file. Readers keep the prior
@@ -262,10 +262,10 @@ def run_serve_reset_projections(args: Any) -> int:
     publishes it, so interruption cannot expose a partial replay.
     """
     apply_serve_backends(args)
-    return _reset_projection_families(ServeTeamStore(), args.families)
+    return _rebuild_projection_families(ServeTeamStore(), args.families)
 
 
-def _reset_projection_families(store: ServeTeamStore, families: list[str]) -> int:
+def _rebuild_projection_families(store: ServeTeamStore, families: list[str]) -> int:
     requested = tuple(dict.fromkeys(families)) or tuple(
         family.name for family in PROJECTION_FAMILIES
     )

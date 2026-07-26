@@ -305,10 +305,10 @@ def test_serve_teams_parser_dispatches_json_subcommand(tmp_path):
     assert args.json_output is True
 
 
-def test_serve_reset_projections_rebuilds_and_reports_the_new_build(tmp_path, capsys):
+def test_serve_rebuild_projections_rebuilds_and_reports_the_new_build(tmp_path, capsys):
     backend = tmp_path / "task-backend"
     args = build_parser().parse_args(
-        ["serve", "--task-backend", str(backend), "reset-projections"]
+        ["serve", "--task-backend", str(backend), "rebuild-projections"]
     )
     set_state_backend(str(tmp_path / "managed-state"))
     task_config.set_backend(str(backend))

@@ -88,7 +88,7 @@ AGENT_ACTIVITY = ProjectionFamily(
         "source file is gone does not come back, and the rebuilt family says so "
         "by starting at the earliest bucket the surviving sources produce"
     ),
-    recovery_action="spice serve reset-projections agentActivity",
+    recovery_action="spice serve rebuild-projections agentActivity",
 )
 
 PROJECTION_FAMILIES: tuple[ProjectionFamily, ...] = (AGENT_ACTIVITY,)
@@ -100,9 +100,10 @@ PROJECTION_TABLES: tuple[str, ...] = tuple(
 )
 
 # `projection_generations` is the store's own bookkeeping rather than a family:
-# it records which build of each family a reader is looking at. A reset bumps
-# the generation in the same transaction that empties the tables, so a reader
-# never sees a new generation beside old rows.
+# it records which build of each family a reader is looking at. Every bump
+# shares one transaction with the rows it accounts for — the replacement a
+# rebuild publishes, or the discard drift forces — so a reader never sees a new
+# generation beside old rows.
 PROJECTION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projection_generations (
     family TEXT PRIMARY KEY,
