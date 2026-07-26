@@ -757,6 +757,87 @@ WIRE_OBJECTS = (
             "points": array(ref("MetricSeriesPoint")),
         },
     ),
+    # The three metrics answers the HTTP API serves, beside the window and the
+    # points they are drawn over. These are not the browser's metrics path --
+    # the browser asks the live bus for MetricSeriesFrame -- they answer any
+    # client that can reach the port, which is why the shape is declared here
+    # rather than left as whatever the dict literal happened to hold.
+    #
+    # Each carries `lens` as a literal, so the object a payload validates
+    # against is decided by a field the payload itself states, the same way the
+    # unions above narrow on a discriminant. `ok` is literal True because these
+    # builders have no failing return: a bad query raises SpiceError before the
+    # payload exists, so a False here would mean a path nobody wrote.
+    wire_object(
+        "MetricWindow",
+        {"start": NUMBER, "end": NUMBER},
+    ),
+    wire_object(
+        "TeamHistoricalMetricsPoint",
+        {"bucketStart": NUMBER, "messages": INTEGER},
+    ),
+    wire_object(
+        "TeamHistoricalMetricsResponse",
+        {
+            "ok": literal(True),
+            "lens": literal("team-historical"),
+            "teamId": STRING,
+            "agentIds": STRINGS,
+            "messages": INTEGER,
+            "cumulativeMessages": INTEGER,
+            "bucketSeconds": INTEGER,
+            "bucketCount": INTEGER,
+            "range": ref("MetricWindow"),
+            "sparkline": array(INTEGER),
+            "series": array(ref("TeamHistoricalMetricsPoint")),
+        },
+    ),
+    wire_object(
+        "TaskBurndownMetricsPoint",
+        {"bucketStart": NUMBER, "completed": INTEGER, "drained": INTEGER},
+    ),
+    wire_object(
+        "TaskBurndownMetricsResponse",
+        {
+            "ok": literal(True),
+            "lens": literal("task-burndown"),
+            "agentIds": STRINGS,
+            "teamIds": STRINGS,
+            "completed": INTEGER,
+            "drained": INTEGER,
+            "bucketSeconds": INTEGER,
+            "bucketCount": INTEGER,
+            "range": ref("MetricWindow"),
+            "series": array(ref("TaskBurndownMetricsPoint")),
+        },
+    ),
+    wire_object(
+        "TaskDistributionMetricsPoint",
+        {
+            "bucketStart": NUMBER,
+            "agentId": STRING,
+            "claimed": INTEGER,
+            "active": INTEGER,
+            "work": INTEGER,
+            "share": NUMBER,
+        },
+    ),
+    wire_object(
+        "TaskDistributionMetricsResponse",
+        {
+            "ok": literal(True),
+            "lens": literal("task-distribution"),
+            "agentIds": STRINGS,
+            "teamIds": STRINGS,
+            "claimed": INTEGER,
+            "active": INTEGER,
+            "work": INTEGER,
+            "bucketSeconds": INTEGER,
+            "bucketCount": INTEGER,
+            "range": ref("MetricWindow"),
+            "series": array(ref("TaskDistributionMetricsPoint")),
+        },
+    ),
     wire_object(
         "SubmissionStage",
         {"at": STRING, "source": STRING, "evidence": STRING},
