@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -20,16 +21,47 @@ from spice.serve.team.projection import (
 )
 from spice.serve.team.schema import (
     TEAM_AUTHORITY_MIGRATIONS,
-    TEAM_AUTHORITY_SCHEMA,
-    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
 )
 from spice.serve.team.store import ServeTeamStore
 
+# The shape each retained authority version describes, pinned. Databases in the
+# field are stamped with these numbers, so a number cannot come to mean a
+# different set of columns later: editing a shape in place changes a digest here
+# and fails. Adding a version adds its line and drops the one that falls out of
+# the supported range.
+AUTHORITY_SHAPE_DIGESTS = {
+    1: "2db781a8730ca90bf610f8c03add298fbbd2a02a925004612ca0d28a89af8eb8",
+    2: "5f0f10de12a33355365d89f984d589508a75ee6e78605f148fed306933209a24",
+}
+
+# The rehearsals below follow the current version rather than naming a fixed
+# one, so the release that adds the next authority version rehearses upgrading
+# from the shape it is leaving behind without anyone remembering to.
+PRIOR_AUTHORITY_VERSION = TEAM_AUTHORITY_SCHEMA_VERSION - 1
+
+
+def _digest_of_shape(shape: dict[str, Any]) -> str:
+    return hashlib.sha256(repr(sorted(shape.items())).encode("utf-8")).hexdigest()
+
+
+def _shape_digest(version: int) -> str:
+    return _digest_of_shape(team_store_module._authority_schema_shape(version))
+
 
 def _forget_initialized(path: Path) -> None:
     ServeTeamStore._initialized_paths.discard(path)
+
+
+def _build_authority_at(path: Path, version: int) -> None:
+    """Leave a database exactly as the writer that stamped `version` left it."""
+    with sqlite_connection(path) as connection:
+        team_store_module._execute_schema_script(
+            connection, TEAM_AUTHORITY_SCHEMAS[version]
+        )
+        connection.execute(f"PRAGMA user_version = {version}")
 
 
 def _initialize(path: Path) -> None:
@@ -114,31 +146,35 @@ def _seed_authority(path: Path) -> None:
                 16,
             ),
         )
+        identity = {
+            "actor_id": "agent-a",
+            "target_id": "main-c",
+            "thread_id": "thread-old",
+            "actual_driver": "codex",
+            "actual_model": "gpt-current",
+            "actual_effort": "high",
+            "actual_service_tier": "priority",
+            "desired_driver": "codex",
+            "desired_model": "gpt-next",
+            "desired_effort": "xhigh",
+            "transcript_owner": "codex",
+            "renewal_state": "started",
+            "renewal_ancestor_thread_id": "thread-old",
+            "renewal_successor_thread_id": "thread-next",
+            "renewal_revision": 16,
+            "updated_at": 10.7,
+        }
+        # Fill whichever identity columns this database's version carries, so
+        # one seeder serves a store at any version and the row that survives a
+        # migration is demonstrably the row that went in.
+        columns = [
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(agent_identities)")
+        ]
         connection.execute(
-            "INSERT INTO agent_identities "
-            "(actor_id, target_id, thread_id, actual_driver, actual_model, "
-            "actual_effort, desired_driver, desired_model, "
-            "desired_effort, transcript_owner, renewal_state, "
-            "renewal_ancestor_thread_id, renewal_successor_thread_id, "
-            "renewal_revision, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                "agent-a",
-                "main-c",
-                "thread-old",
-                "codex",
-                "gpt-current",
-                "high",
-                "codex",
-                "gpt-next",
-                "xhigh",
-                "codex",
-                "started",
-                "thread-old",
-                "thread-next",
-                16,
-                10.7,
-            ),
+            f"INSERT INTO agent_identities ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            tuple(identity[column] for column in columns),
         )
 
 
@@ -168,23 +204,21 @@ def test_failed_forward_migration_rolls_back_every_logical_change(
     _initialize(path)
     _seed_authority(path)
     before = _logical_state(path)
-    monkeypatch.setattr(team_store_module, "TEAM_AUTHORITY_SCHEMA_VERSION", 2)
+    next_version = TEAM_AUTHORITY_SCHEMA_VERSION + 1
+    monkeypatch.setattr(
+        team_store_module, "TEAM_AUTHORITY_SCHEMA_VERSION", next_version
+    )
     monkeypatch.setattr(
         team_store_module,
         "TEAM_AUTHORITY_MIGRATIONS",
         {
             **TEAM_AUTHORITY_MIGRATIONS,
-            2: (
+            next_version: (
                 "CREATE TABLE migration_probe (value TEXT NOT NULL);"
                 "INSERT INTO migration_probe VALUES ('must roll back');"
                 "THIS IS NOT SQL;"
             ),
         },
-    )
-    monkeypatch.setattr(
-        team_store_module,
-        "TEAM_AUTHORITY_SCHEMAS",
-        {**TEAM_AUTHORITY_SCHEMAS, 2: TEAM_AUTHORITY_SCHEMA},
     )
     _forget_initialized(path)
 
@@ -196,8 +230,8 @@ def test_failed_forward_migration_rolls_back_every_logical_change(
 
 def test_newer_writer_fails_before_mutating_database_or_journal_mode(tmp_path):
     path = tmp_path / "newer.sqlite3"
+    _build_authority_at(path, TEAM_AUTHORITY_SCHEMA_VERSION)
     with sqlite_connection(path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
         connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
     _seed_authority(path)
     before = _logical_state(path)
@@ -352,12 +386,127 @@ def test_unversioned_drifted_authority_fails_without_destructive_rebuild(tmp_pat
     assert _logical_state(path) == before
 
 
+def test_changing_an_authority_shape_without_advancing_the_version_fails_here():
+    versions = sorted(TEAM_AUTHORITY_SCHEMAS)
+
+    # The retained shapes are the current version and the one predecessor this
+    # writer converts, and each describes the shape pinned to it. Editing one in
+    # place moves a digest and lands here, which is the whole point: a version
+    # number stamped on a database in the field has to keep naming the columns
+    # that database has.
+    assert versions == [PRIOR_AUTHORITY_VERSION, TEAM_AUTHORITY_SCHEMA_VERSION]
+    assert {version: _shape_digest(version) for version in versions} == (
+        AUTHORITY_SHAPE_DIGESTS
+    )
+
+
+def test_no_two_authority_versions_describe_the_same_table_shape():
+    digests = [_shape_digest(version) for version in sorted(TEAM_AUTHORITY_SCHEMAS)]
+
+    # This is what lets the opener read a database's version off its columns
+    # when the stamp disagrees with them: matching a shape identifies exactly
+    # one version. Two versions sharing a shape would make that answer a guess,
+    # so pointing the predecessor entry back at the current DDL -- the aliasing
+    # that cost a fleet its authority store -- fails right here.
+    assert len(set(digests)) == len(digests)
+
+
+def test_the_forward_migration_carries_the_predecessor_onto_the_current_shape():
+    upgraded = sqlite3.connect(":memory:")
+    try:
+        team_store_module._execute_schema_script(
+            upgraded, TEAM_AUTHORITY_SCHEMAS[PRIOR_AUTHORITY_VERSION]
+        )
+        team_store_module._execute_schema_script(
+            upgraded, TEAM_AUTHORITY_MIGRATIONS[TEAM_AUTHORITY_SCHEMA_VERSION]
+        )
+        migrated = team_store_module._authority_table_shape(upgraded)
+    finally:
+        upgraded.close()
+
+    # Two roads reach the current version: a store being created runs its DDL,
+    # and a store at the predecessor runs the migration. Nothing else makes
+    # those agree, so without this an upgraded store and a new one could wear
+    # one version number over two different sets of columns.
+    assert _digest_of_shape(migrated) == _shape_digest(TEAM_AUTHORITY_SCHEMA_VERSION)
+
+
+def test_a_prior_shape_store_reaches_the_settled_shape_in_one_forward_step(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "prior-shape.sqlite3"
+    _build_authority_at(path, PRIOR_AUTHORITY_VERSION)
+    _seed_authority(path)
+    before = _authority_state(path)
+    applied: list[str] = []
+    run_script = team_store_module._execute_schema_script
+
+    def record_script(connection: sqlite3.Connection, script: str) -> None:
+        # Expected shapes are derived in memory, whose database_list carries no
+        # file. Only scripts run against the store on disk are steps it took.
+        if connection.execute("PRAGMA database_list").fetchone()[2]:
+            applied.append(script)
+        run_script(connection, script)
+
+    monkeypatch.setattr(team_store_module, "_execute_schema_script", record_script)
+
+    store = ServeTeamStore(path=path)
+    _forget_initialized(path)
+    identity = store.agent_identity_for_actor("agent-a")
+
+    # One migration, applied by the writer on open, is the entire recovery: no
+    # hand-edited authority database anywhere in it.
+    assert applied == [TEAM_AUTHORITY_MIGRATIONS[TEAM_AUTHORITY_SCHEMA_VERSION]]
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    # The identity read that every allocator answer goes through returns the
+    # seeded row, with the columns the settled shape kept still carrying what
+    # was written under the shape that had one more of them.
+    assert (identity.actor_id, identity.actual_model, identity.renewal_revision) == (
+        "agent-a",
+        "gpt-current",
+        16,
+    )
+    # Only the dropped column left. Every other authority row is untouched.
+    after = _authority_state(path)
+    assert {table: after[table] for table in after if table != "agent_identities"} == {
+        table: before[table] for table in before if table != "agent_identities"
+    }
+
+
+def test_a_store_stamped_behind_its_own_shape_is_carried_forward_by_the_writer(
+    tmp_path,
+):
+    path = tmp_path / "stamped-behind.sqlite3"
+    _build_authority_at(path, TEAM_AUTHORITY_SCHEMA_VERSION)
+    _seed_authority(path)
+    with sqlite_connection(path) as connection:
+        connection.execute(f"PRAGMA user_version = {PRIOR_AUTHORITY_VERSION}")
+    before = _authority_state(path)
+
+    store = ServeTeamStore(path=path)
+    _forget_initialized(path)
+    identity = store.agent_identity_for_actor("agent-a")
+
+    # A database whose stamp outran its columns is what the fleet was left
+    # holding, and reading the source version off the shape is what makes it
+    # openable again. Its rows are already at the settled shape, so carrying it
+    # forward is a stamp and nothing else.
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    assert identity.actor_id == "agent-a"
+    assert _authority_state(path) == before
+
+
 def test_current_version_with_partial_authority_fails_without_opening(tmp_path):
     path = tmp_path / "partial.sqlite3"
+    _build_authority_at(path, TEAM_AUTHORITY_SCHEMA_VERSION)
     with sqlite_connection(path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
         connection.execute("DROP TABLE renewals")
-        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
     before = _logical_state(path)
 
     with pytest.raises(SpiceError, match=r"durable table shape \(renewals\)"):

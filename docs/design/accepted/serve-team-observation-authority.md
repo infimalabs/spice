@@ -58,13 +58,33 @@ invalidation.
 
 ## Migration Contract
 
-The authority schema starts at explicit version `1`. Each future authority
-change must:
+The authority schema starts at explicit version `1`. Version `2` drops
+`agent_identities.actual_service_tier`, which no driver could populate.
+
+An authority version identifies exactly one table shape. A shape is written down
+once, as the complete DDL of the version that names it, and is never edited
+afterward: databases in the field are already stamped with that number. Editing
+one in place is what failed once already — the retained entry for version `1`
+was an alias for the writer's current schema, so an in-place edit silently
+redefined a version that stores were already stamped with, one version came to
+describe two shapes, and a shared authority database was edited by hand to get a
+fleet moving again.
+
+Three properties, each proven by test, are what keep that from recurring: every
+retained shape is pinned to a digest, so an in-place edit fails rather than
+rewriting the past; no two retained shapes describe the same tables, which is
+what lets the opener identify a database by its columns; and the forward
+migration carries the predecessor shape exactly onto the current one, so a store
+that was upgraded and a store that was created are the same database rather than
+two shapes wearing one version number.
+
+Each future authority change must:
 
 1. add the next consecutive integer version;
-2. retain a canonical shape contract for only the immediately preceding
-   supported source version;
-3. add exactly one forward migration from that source to the current version;
+2. retain the complete shape contract for only that version and the immediately
+   preceding supported source, leaving both exactly as they shipped;
+3. add exactly one forward migration from that source to the current version,
+   and pin the shape it produces rather than editing an existing pin;
 4. reject every older source without mutation and name the released Spice
    version that still owns its conversion;
 5. preserve all existing authority rows and revisions unless the new contract
@@ -79,26 +99,37 @@ writer supports.
 
 Opening a database follows one atomic sequence:
 
-1. Read the stored version and validate its durable table shape without
-   mutating the database.
+1. Read the durable table shape and resolve the source version from it, without
+   mutating the database. The stored stamp records which migrations a database
+   has been through, and the shape is what it has to show for them; where they
+   disagree the shape is what the next migration must operate on, so the shape
+   decides and exactly one version can match it. A database stamped behind its
+   own shape is therefore carried forward by being opened, rather than by
+   editing it.
 2. Reject a version newer than this writer before changing journal mode,
-   starting schema work, or writing any row.
+   starting schema work, or writing any row. A newer stamp is the one claim the
+   shape cannot settle: those rows are described by a shape this writer does not
+   hold, so nothing may be assumed about them.
 3. Acquire `BEGIN IMMEDIATE`, then reread and revalidate the source version so a
    concurrent migrator cannot make the preflight decision stale.
-4. Execute each complete migration statement inside that transaction. Python's
+4. Create a store that does not exist yet at the current shape directly, or
+   carry the one supported predecessor forward with the single migration, inside
+   that transaction. Execute each complete statement individually: Python's
    `executescript` is forbidden on this path because it commits an existing
    transaction before executing its script.
 5. Validate the destination authority shape, stamp the destination authority
    version, and commit. No projection DDL runs on this connection.
 6. Roll back the entire transaction on any exception.
 
-Fresh empty databases migrate from version `0`. A populated database that
-reports version `0`, a retired fingerprint, an unsupported version, or a
-partial/changed authority table shape fails without mutation. Tables outside
-the named authority set are outside its schema contract and are never queried,
-migrated, or dropped. There is no compatibility alias and no destructive
-recovery branch. Every caller must arrive on an explicitly supported integer
-version and exact authority shape.
+A fresh empty database is created at the current version rather than replayed
+into existence through history, so the shapes the writer retains stay a record
+of what it can open rather than the steps by which anything is built. A
+populated database reporting version `0` or a retired fingerprint predates
+versions entirely, and no migration claims to know what it is, so it fails
+without mutation — as does one whose authority tables match no supported shape. Tables outside the named
+authority set are outside its schema contract and are never queried, migrated,
+or dropped. There is no compatibility alias and no destructive recovery branch.
+Every caller must arrive on an exact supported authority shape.
 
 ## Writer-Version Rule
 
@@ -207,6 +238,18 @@ no retired row projection remains available to migrate them in place.
 
 Focused migration and terminal parity tests prove:
 
+- the retained shapes are exactly the current version and its immediate
+  predecessor, each describes the shape pinned to it, and no two of them
+  describe the same tables, so editing a shape in place — or pointing the
+  predecessor entry back at the current schema — fails rather than redefining a
+  version already stamped on databases in the field;
+- the one forward migration carries the predecessor shape exactly onto the
+  current shape, so an upgraded store and a created store are the same database;
+- a database at the prior version reaches the settled shape in exactly one
+  writer-applied forward step, with its authority rows and its allocator
+  identity reads intact afterward;
+- a database stamped behind its own shape is carried forward by being opened,
+  leaving every authority row byte-identical;
 - an injected multi-statement migration failure restores the complete logical
   dump and prior version;
 - a newer writer version leaves rows, schema, version, and journal mode

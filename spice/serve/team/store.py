@@ -88,8 +88,8 @@ from spice.serve.team.schema import (
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
     TASK_FILTER_SOURCES as TASK_FILTER_SOURCES,
     TEAM_AUTHORITY_MIGRATIONS,
-    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
@@ -164,15 +164,65 @@ def _authority_table_shape(
     return shape
 
 
+def _authority_migration(version: int) -> str:
+    try:
+        return TEAM_AUTHORITY_MIGRATIONS[version]
+    except KeyError as exc:
+        raise SpiceError(
+            f"missing team authority migration for version {version}"
+        ) from exc
+
+
+def _authority_schema(version: int) -> str:
+    try:
+        return TEAM_AUTHORITY_SCHEMAS[version]
+    except KeyError as exc:
+        raise SpiceError(
+            f"missing team authority schema for version {version}"
+        ) from exc
+
+
 def _authority_schema_shape(
-    schema: str,
+    version: int,
 ) -> dict[str, tuple[str, tuple[tuple[object, ...], ...]]]:
+    """Return the one table shape `version` describes.
+
+    The shape comes from that version's own frozen DDL, never from the writer's
+    current one. Reading it from the current DDL is what failed before: editing
+    the schema silently redefined a version that databases in the field were
+    already stamped with, so one version named two different sets of columns.
+    """
     expected = sqlite3.connect(":memory:")
     try:
-        _execute_schema_script(expected, schema)
+        _execute_schema_script(expected, _authority_schema(version))
         return _authority_table_shape(expected)
     finally:
         expected.close()
+
+
+def _authority_shape_mismatches(
+    connection: sqlite3.Connection, version: int
+) -> tuple[str, ...]:
+    expected = _authority_schema_shape(version)
+    actual = _authority_table_shape(connection)
+    return tuple(
+        table
+        for table in sorted(TEAM_AUTHORITY_TABLES)
+        if actual.get(table) != expected.get(table)
+    )
+
+
+def _authority_shape_error(connection: sqlite3.Connection, version: int) -> SpiceError:
+    names = ", ".join(_authority_shape_mismatches(connection, version))
+    return SpiceError(
+        f"team authority schema version {version} has incompatible "
+        f"durable table shape ({names}); refusing to rebuild or open it"
+    )
+
+
+def _require_authority_shape(connection: sqlite3.Connection, version: int) -> None:
+    if _authority_shape_mismatches(connection, version):
+        raise _authority_shape_error(connection, version)
 
 
 def team_database_path() -> Path:
@@ -262,19 +312,22 @@ class ServeTeamStore(
         try:
             source_version = self._authority_source_version_locked(connection)
             prepare_directive_history_database(self.directive_state_path)
-            migration_scripts = [
-                self._authority_migration(version)
-                for version in range(
-                    source_version + 1, TEAM_AUTHORITY_SCHEMA_VERSION + 1
-                )
-            ]
-            for script in migration_scripts:
-                _execute_schema_script(connection, script)
             if source_version == 0:
+                # A store that does not exist yet is created at the current
+                # shape rather than replayed into existence through history, so
+                # the shapes this writer retains stay a record of what it can
+                # open rather than the steps by which anything is built.
+                _execute_schema_script(
+                    connection, _authority_schema(TEAM_AUTHORITY_SCHEMA_VERSION)
+                )
                 self._write_store_generation_locked(connection)
-            self._validate_authority_schema_locked(
-                connection, TEAM_AUTHORITY_SCHEMA_VERSION
-            )
+            elif source_version != TEAM_AUTHORITY_SCHEMA_VERSION:
+                # The source resolver admits no version but the predecessor
+                # here, so this is the one forward step a writer ever runs.
+                _execute_schema_script(
+                    connection, _authority_migration(TEAM_AUTHORITY_SCHEMA_VERSION)
+                )
+            _require_authority_shape(connection, TEAM_AUTHORITY_SCHEMA_VERSION)
             connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
             connection.commit()
         except BaseException:
@@ -323,7 +376,38 @@ class ServeTeamStore(
         return str(row["value"]) if row is not None else ""
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
+        """Return the version whose shape this database actually carries.
+
+        The stamp says which migrations a database has been through, and the
+        shape is what it has to show for them. Where they disagree the shape is
+        what the next migration has to operate on, so the shape decides. A stamp
+        that outran its shape is exactly how a fleet lost its authority store:
+        every reader believed a version number that no longer named the columns
+        in front of it, and the recovery was to edit the database by hand.
+
+        Reading the source from the shape makes that recoverable instead: a
+        database whose columns match a shape this writer carries is migrated
+        forward from there, however it came to be stamped otherwise, and one
+        whose columns match none of them still fails untouched. Exactly one can
+        match, because no two of the retained shapes describe the same tables.
+
+        The stamp keeps the two jobs it can still do honestly. A stamp above
+        this writer means a newer writer has been here, and its rows are not
+        described by any shape this writer holds, so nothing may be assumed
+        about them. A stamp of zero on a populated database is from before
+        versions existed, and no migration claims to know what that is.
+
+        The shapes are bounded to the current version and the one predecessor
+        it converts, so a database older than that matches nothing and is
+        refused for the release that still owns its conversion.
+        """
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
+            raise SpiceError(
+                "team authority database was written by newer schema version "
+                f"{stored}; this writer supports through "
+                f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
+            )
         if stored == 0:
             tables = {
                 str(row[0])
@@ -338,50 +422,12 @@ class ServeTeamStore(
                 "unversioned populated team database has no supported migration; "
                 "refusing to rebuild or open durable team state"
             )
-        if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
-            raise SpiceError(
-                "team authority database was written by newer schema version "
-                f"{stored}; this writer supports through "
-                f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
-            )
-        if stored not in TEAM_AUTHORITY_SCHEMAS:
-            raise SpiceError(
-                f"unsupported team authority schema version {stored}; "
-                "refusing to mutate durable team state"
-            )
-        self._validate_authority_schema_locked(connection, stored)
-        return stored
-
-    def _authority_migration(self, version: int) -> str:
-        try:
-            return TEAM_AUTHORITY_MIGRATIONS[version]
-        except KeyError as exc:
-            raise SpiceError(
-                f"missing team authority migration for version {version}"
-            ) from exc
-
-    def _validate_authority_schema_locked(
-        self, connection: sqlite3.Connection, version: int
-    ) -> None:
-        try:
-            expected_schema = TEAM_AUTHORITY_SCHEMAS[version]
-        except KeyError as exc:
-            raise SpiceError(
-                f"missing team authority schema contract for version {version}"
-            ) from exc
-        expected = _authority_schema_shape(expected_schema)
-        actual = _authority_table_shape(connection)
-        mismatches = [
-            table
-            for table in sorted(TEAM_AUTHORITY_TABLES)
-            if actual.get(table) != expected.get(table)
-        ]
-        if mismatches:
-            names = ", ".join(mismatches)
-            raise SpiceError(
-                f"team authority schema version {version} has incompatible "
-                f"durable table shape ({names}); refusing to rebuild or open it"
-            )
+        for version in sorted(TEAM_AUTHORITY_SCHEMAS):
+            if not _authority_shape_mismatches(connection, version):
+                return version
+        # Report the drift against the version the database claims to be, which
+        # is the comparison an operator reading the message is already holding.
+        raise _authority_shape_error(connection, stored)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
