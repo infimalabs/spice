@@ -262,8 +262,15 @@ def _work_tree_send_result_payload(
     )
     agent_ensure = response_payload.get("agentEnsure")
     # The reconciler already settled which thread this send belongs to, renewal
-    # included. Reading it here keeps the reply a report of that decision.
-    send_agent_id = decision.thread_id if decision is not None else ""
+    # included. Reading it here keeps the reply a report of that decision. A
+    # decision that never arrives is a lane that did not start, not a send that
+    # did not land, so the publication is still attributed to the lane's own
+    # binding.
+    send_agent_id = (
+        decision.thread_id
+        if decision is not None
+        else identity.resolve_thread_id_for_target(state, target) or ""
+    )
     send_actor = ""
     if send_agent_id:
         send_actor = identity.team_actor_for_target(
