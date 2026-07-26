@@ -956,7 +956,7 @@ def test_projection_matches_pre_fold_review_followup_and_drained_edges(
     assert projection.drained_task_count(SEMANTIC_DASHED_ACTOR) == 3
 
 
-def test_failed_projection_matches_pre_fold_empty_task_views():
+def test_failed_projection_withholds_inventory_and_empties_task_views():
     review_actors = {THREAD_A, f"thread:{THREAD_A}"}
     failed = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
@@ -967,7 +967,10 @@ def test_failed_projection_matches_pre_fold_empty_task_views():
         )
     )
 
-    assert failed.task_filter_inventory["filters"] == []
+    # Every index answers empty, but the inventory is absent rather than empty:
+    # it reaches a browser that orders it by this revision, and an empty board
+    # stamped with the live one would refuse the recovery that follows it.
+    assert failed.task_filter_inventory is None
     assert failed.active_claim(SEMANTIC_DASHED_ACTOR) is None
     assert failed.task_card_rows(SEMANTIC_DASHED_ACTOR) == ()
     assert failed.completed_review_rows(review_actors) == ()

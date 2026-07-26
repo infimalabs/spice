@@ -14,6 +14,7 @@ from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
+from spice.serve.payload.chrome import LANE_CHROME_GENERATION_JOIN
 from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -505,9 +506,19 @@ def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
     assert pressure["items"][0]["reviewedTask"] == "review-before"
 
 
-def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure(
+def test_work_trees_payload_withholds_then_recovers_task_views_at_one_revision(
     tmp_path, monkeypatch
 ):
+    """A board nobody could read must not stamp the revision it never saw.
+
+    The browser orders this facet by the task revision it carries and refuses a
+    redelivery of an order it already holds, which
+    ``tests/fixtures/task_filter_inventory_reconcile.js`` pins. A failed
+    observation is deliberately not cached, so the very next pass rebuilds at
+    that same revision. Publishing the failure would therefore seat an empty
+    board as the newest truth about it and leave every recovery refused until a
+    task event moved the revision again.
+    """
     target = _Target(id="wt", repo_root=tmp_path)
     failed = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
@@ -549,14 +560,14 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
 
     degraded_tree = degraded["workTrees"][0]
     healthy_tree = healthy["workTrees"][0]
-    degraded_inventory = degraded_tree["chrome"]["taskBoard"]["value"][
-        "taskFilterInventory"
-    ]
     healthy_inventory = healthy_tree["chrome"]["taskBoard"]["value"][
         "taskFilterInventory"
     ]
-    assert degraded_inventory["revision"] == STABLE_GENERATION
-    assert degraded_inventory["filters"] == []
+    # Both passes read one revision, so publishing the failure would have seated
+    # an empty board as the newest truth about it and left the recovery behind it
+    # arriving as a redelivery the browser is right to drop. The degraded pass
+    # therefore names every facet it did observe and leaves this one unnamed.
+    assert set(degraded_tree["chrome"]) == set(healthy_tree["chrome"]) - {"taskBoard"}
     assert degraded_tree["statusLine"]["claimedTask"] == {}
     assert degraded_tree["statusLine"]["latestActivityKind"] == ""
     assert degraded_tree["laneInfo"]["reviewPressure"] == {
@@ -564,6 +575,11 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
         "openFollowupCount": 0,
         "items": [],
     }
+    # The order the failure would have carried, now spent on the board it names.
+    board_generation, _team_generation = healthy_tree["chrome"]["taskBoard"]["order"][
+        "epoch"
+    ].split(LANE_CHROME_GENERATION_JOIN)
+    assert board_generation == STABLE_GENERATION
     assert healthy_inventory["revision"] == STABLE_GENERATION
     assert [item["name"] for item in healthy_inventory["filters"]] == [
         "serve.recovered"
