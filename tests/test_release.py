@@ -66,7 +66,7 @@ def test_release_docs_show_lane_release_workflow():
         release_section.split("```sh", 1)[1].split("```", 1)[0].strip().splitlines()
     )
 
-    assert "{minor,patch,prepare,notes,range,publish,github}" in help_text
+    assert "{check,minor,patch,prepare,notes,range,publish,github}" in help_text
     assert "clean synchronized worktree" in normalized_help
     assert normalized_section.startswith(
         "Releases are cut from a clean synchronized worktree with this "
@@ -75,12 +75,21 @@ def test_release_docs_show_lane_release_workflow():
         "`origin/main`."
     )
     assert release_commands == [
+        "spice release check           # run the release gates only; bumps nothing",
         "spice release range           # preview latest-release-tag..HEAD before prepare",
         "spice release prepare minor   # bump, validate, commit, stop before publish",
         "spice release notes > /tmp/spice-release-notes.md",
         "spice release publish --notes-file /tmp/spice-release-notes.md",
         "spice release minor           # one-pass bump, validate, commit, publish",
     ]
+    # The docs must keep naming the trap: `prepare` reads like a rehearsal and
+    # is not one, and `check` is the only action that answers the question
+    # without changing the tree.
+    assert (
+        "It is the only mutation-free way to get that answer. `prepare` is not "
+        "the safe rehearsal its name suggests, because it bumps the version and "
+        "commits the bump before it stops." in normalized_section
+    )
     assert (
         "Before `prepare`, the bare `spice release range` command resolves the "
         "highest version tag merged into the current `HEAD` and previews "
@@ -280,6 +289,60 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
         "0.9.0",
         ("publish", "0.9.0", None, "head"),
     ]
+
+
+def test_check_and_publish_reach_the_gates_through_one_shared_body(
+    tmp_path, monkeypatch, capsys
+):
+    # Both entry points must call run_release_gates itself, not merely end up at
+    # the same leaf gates. That is what makes the check honest: an edit to what a
+    # release verifies changes what the check verifies in the same edit, because
+    # there is only one sequence to edit.
+    gate_calls = []
+
+    def reached_a_leaf_gate_directly(*args, **kwargs):
+        # Without this, re-inlining the sequence would run the real constitution
+        # gate -- `uv run pytest` over the whole suite -- from inside a worker,
+        # and the failure would arrive minutes later as a process deadline.
+        raise AssertionError(
+            "release modes must reach the gates through run_release_gates"
+        )
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(release, "clean_build_artifacts", reached_a_leaf_gate_directly)
+    monkeypatch.setattr(release, "run_constitution_gate", reached_a_leaf_gate_directly)
+    monkeypatch.setattr(release, "run_artifact_gate", reached_a_leaf_gate_directly)
+    monkeypatch.setattr(
+        release,
+        "run_release_gates",
+        lambda root, version: gate_calls.append((root, version)),
+    )
+    monkeypatch.setattr(release, "ensure_notes_file", lambda notes_file: None)
+    monkeypatch.setattr(
+        release, "release_commit_for_target", lambda version, target: "head"
+    )
+    monkeypatch.setattr(
+        release, "ensure_publish_release_commit_is_head", lambda commit: None
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_release",
+        lambda version, notes_file, *, release_commit=None: None,
+    )
+    parser = build_release_parser()
+
+    check_result = release._handle_release_from_root(
+        parser.parse_args(["check"]), tmp_path
+    )
+    publish_result = release._handle_release_from_root(
+        parser.parse_args(["publish"]), tmp_path
+    )
+
+    assert (check_result, publish_result) == (0, 0)
+    assert gate_calls == [(tmp_path, "0.9.0"), (tmp_path, "0.9.0")]
+    assert "release gates passed for 0.9.0" in capsys.readouterr().out
 
 
 def test_release_cleanup_removes_stale_build_and_distribution_trees(tmp_path):
@@ -698,6 +761,63 @@ def test_release_clean_worktree_guard_allows_any_branch_blocks_dirty(
     (repo / "g.txt").write_text("y\n", encoding="utf-8")
     with pytest.raises(SpiceError, match="dirty worktree"):
         release.ensure_clean_worktree(repo)
+
+
+def _release_repo_state(repo: Path) -> tuple[str, str, str]:
+    """The three things a release changes: version, commit graph, tag list."""
+
+    def read(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    return (
+        (repo / "pyproject.toml").read_text(encoding="utf-8"),
+        read("log", "--format=%H"),
+        read("tag", "--list"),
+    )
+
+
+def test_release_check_runs_the_gates_and_leaves_the_tree_where_it_found_it(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _git(repo, "config", "user.email", "r@example.test")
+    _git(repo, "config", "user.name", "Release Tester")
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "probe-package"\nversion = "1.2.3"\n', encoding="utf-8"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    _git(repo, "tag", "v1.2.3")
+    monkeypatch.chdir(repo)
+
+    # Only the two leaf gates are replaced, because they run the full pytest
+    # suite and a real `uv build`. Everything that could mutate -- bump_version,
+    # the git add/commit/tag/push calls, publish_release -- stays real and
+    # reachable, so a mutating call added to this branch would land on the repo
+    # below and the before/after comparison would see it.
+    ran: list[object] = []
+    monkeypatch.setattr(
+        release, "run_constitution_gate", lambda: ran.append("constitution")
+    )
+    monkeypatch.setattr(
+        release, "run_artifact_gate", lambda version: ran.append(("artifact", version))
+    )
+
+    before = _release_repo_state(repo)
+    args = build_release_parser().parse_args(["check"])
+
+    assert release.handle_release(args) == 0
+
+    # The gates ran for real, against the version already in the tree.
+    assert ran == ["constitution", ("artifact", "1.2.3")]
+    assert _release_repo_state(repo) == before
+    assert "nothing was bumped" in capsys.readouterr().out
 
 
 def test_release_preconditions_refuse_without_claim(tmp_path, monkeypatch):
