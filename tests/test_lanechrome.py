@@ -26,6 +26,8 @@ CHROME_FIXTURE_JS = Path(__file__).with_name("fixtures") / "lane_store_chrome.js
 # The revision a superseded generation climbs to while trying to reclaim the
 # facet, matching SWEEP_LAPSED_REVISION in the browser's own sweep.
 LAPSED_REVISION = 99
+MIN_UNCHANGED_CHROME_BYTE_REDUCTION = 300
+MIN_FLAT_SUPERSET_BYTE_OVERHEAD = 350
 
 IDENTITY = {
     "displayName": "spice-h",
@@ -61,6 +63,10 @@ FACET_VALUES = {
     "renewal": RENEWAL,
     "activity": ACTIVITY,
 }
+
+
+def _compact_payload_bytes(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, separators=(",", ":")).encode()
 
 
 def every_facet_observed() -> list[LaneChromeObservation]:
@@ -136,6 +142,63 @@ def test_an_unchanged_facet_is_left_out_while_a_moved_one_is_sent() -> None:
         },
     }
     assert second.orders["taskBoard"] == LaneChromeOrder("rev-8")
+
+
+def test_unchanged_chrome_crosses_only_the_target_and_saves_facet_bytes() -> None:
+    """Differential delivery does not rebuild or resend settled facet values."""
+    observations = [
+        LaneChromeObservation("taskBoard", LaneChromeOrder("8"), TASK_BOARD),
+        LaneChromeObservation(
+            "pendingInbox", LaneChromeOrder(revision=7), PENDING_INBOX
+        ),
+    ]
+    first = assemble_lane_chrome(TARGET, observations)
+    replay = assemble_lane_chrome(TARGET, observations, published=first.orders)
+
+    full_bytes = len(_compact_payload_bytes(first.payload))
+    replay_bytes = len(_compact_payload_bytes(replay.payload))
+
+    assert replay.changed == ()
+    assert replay.payload == {"targetId": TARGET}
+    assert replay_bytes == len(_compact_payload_bytes({"targetId": TARGET}))
+    assert full_bytes - replay_bytes >= MIN_UNCHANGED_CHROME_BYTE_REDUCTION
+
+
+def test_canonical_carrier_removes_the_flat_superset_wire_bytes() -> None:
+    projection = assemble_lane_chrome(
+        TARGET,
+        [
+            LaneChromeObservation(
+                "teamConfig", LaneChromeOrder(revision=5), TEAM_CONFIG
+            ),
+            LaneChromeObservation("taskBoard", LaneChromeOrder("8"), TASK_BOARD),
+            LaneChromeObservation(
+                "pendingInbox", LaneChromeOrder(revision=7), PENDING_INBOX
+            ),
+            LaneChromeObservation("renewal", LaneChromeOrder(revision=5), RENEWAL),
+        ],
+    )
+    canonical = {"chrome": projection.payload}
+    legacy_superset = {
+        **canonical,
+        "teamIdentity": TEAM_CONFIG["teamIdentity"],
+        "taskFilters": TASK_BOARD["taskFilters"],
+        "taskFilterEntries": TASK_BOARD["taskFilterEntries"],
+        "effectiveTaskFilters": TASK_BOARD["effectiveTaskFilters"],
+        "taskFilterInventory": TASK_BOARD["taskFilterInventory"],
+        "privateTaskCount": TASK_BOARD["privateTaskCount"],
+        "pendingInboxCount": PENDING_INBOX["count"],
+        "pendingInboxLabel": PENDING_INBOX["label"],
+        "pendingInboxKeys": PENDING_INBOX["keys"],
+        "lifetime": RENEWAL["lifetime"],
+        "renewalIntent": RENEWAL["renewalIntent"],
+    }
+
+    assert (
+        len(_compact_payload_bytes(legacy_superset))
+        - len(_compact_payload_bytes(canonical))
+        >= MIN_FLAT_SUPERSET_BYTE_OVERHEAD
+    )
 
 
 def test_one_task_board_reaches_every_lane_as_the_same_value() -> None:

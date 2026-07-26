@@ -246,10 +246,14 @@ function submitLatencySmokeLiveBusRequest(smoke, type, fields, timing) {
           ok: true,
           agentEnsure: { ok: true, threadId: smoke.lane.targetThreadId || "" },
           key: "submit-latency-smoke-key",
-          pendingInboxCount: 0,
-          pendingInboxKeys: [],
-          pendingInboxRevision: "submit-latency-smoke",
-          pendingInboxVersion: Date.now(),
+          chrome: {
+            targetId: smoke.lane.targetId,
+            pendingInbox: {
+              authority: "inbox",
+              order: { epoch: "", revision: Date.now() },
+              value: { count: 0, label: "0", keys: [] },
+            },
+          },
           requestText: payload.text || "",
           submission: submitLatencyAcceptedSubmission(
             "submit-latency-smoke-key",

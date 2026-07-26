@@ -376,16 +376,10 @@ WIRE_OBJECTS = (
             "bindingError": STRING,
             "rolloutStatus": STRING,
             "activityStatus": STRING,
-            "lastAssistantAt": STRING,
             "latestActivityKind": STRING,
             "latestMessagePreview": STRING,
             "latestActivityPreview": STRING,
             "preview": STRING,
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
             "agentProcessStatus": STRING,
             "agentVisualStatus": STRING,
             "claimedTask": _ref("ClaimedTask"),
@@ -429,11 +423,6 @@ WIRE_OBJECTS = (
             "deadletteredInboxKeys": STRINGS,
             "deadletteredInboxKey": STRING,
             "deadletterRequeueCommand": STRING,
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
         },
     ),
     _object(
@@ -464,42 +453,22 @@ WIRE_OBJECTS = (
         {
             "messages": _array(_ref("LaneMessage")),
             "ackContexts": _array(_ref("AckContext")),
-            "pendingInboxCount": INTEGER,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
-            "taskFilters": STRINGS,
-            "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "effectiveTaskFilters": STRINGS,
-            "laneFilterVersion": STRING,
-            "teamIdentity": _ref("TeamIdentity"),
-            "lifetime": STRING,
-            "renewalIntent": _ref("RenewalIntentPayload"),
-            "taskFilterInventory": _ref("TaskFilterInventory"),
             "laneInfo": _ref("LaneInfo"),
             "agentEnsure": _ref("AgentEnsurePayload"),
             "statusLine": _ref("StatusLine"),
             "error": STRING,
+            "chrome": _ref("LaneChromePayload"),
         },
         {
-            "pendingInboxLabel": STRING,
             "agentProcessStatus": STRING,
             "removedMessageKeys": STRINGS,
-            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
         "PendingLanePayload",
-        optional={
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
-            "chrome": _ref("LaneChromePayload"),
-        },
+        {"chrome": _ref("LaneChromePayload")},
     ),
     _object(
         "LaneErrorPayload",
@@ -526,12 +495,13 @@ WIRE_OBJECTS = (
     # counted within it can restart lower. Activity counts the transcript
     # instant it carries rather than spelling it out, because a stamp written
     # at one offset sorts ahead of a later stamp written at another. Both are
-    # microseconds because the reducer orders digit runs as doubles: a
-    # nanosecond count is already past the range a double holds exactly, where
-    # two distinct instants compare equal. payload.chrome.lane_chrome_generation
-    # admits only a count, so a hash identity cannot become an epoch -- it would
-    # arrive as an order the reducer cannot fault and then mis-order silently
-    # behind it.
+    # microseconds because both authorities use the same durable time vocabulary.
+    # The reducer never converts a digit run to a JavaScript number: it compares
+    # normalized digit length and then lexical value, exactly matching Python's
+    # unbounded integer order beyond Number.MAX_SAFE_INTEGER.
+    # payload.chrome.lane_chrome_generation admits only a count, so a hash
+    # identity cannot become an epoch -- it would arrive as an order the reducer
+    # cannot fault and then mis-order silently behind it.
     _object(
         "LaneChromeFacetOrder",
         {"epoch": STRING, "revision": INTEGER},
@@ -661,17 +631,9 @@ WIRE_OBJECTS = (
         optional={
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
-            "taskFilters": STRINGS,
-            "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "effectiveTaskFilters": STRINGS,
-            "laneFilterVersion": STRING,
-            "taskFilterInventory": _ref("TaskFilterInventory"),
             "laneInfo": _ref("LaneInfo"),
-            "privateTaskCount": INTEGER,
-            "teamIdentity": _ref("TeamIdentity"),
-            "lifetime": STRING,
-            "renewalIntent": _ref("RenewalIntentPayload"),
             "statusLine": _ref("StatusLine"),
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -681,30 +643,12 @@ WIRE_OBJECTS = (
             "repoRoot": STRING,
             "displayName": STRING,
             "branch": STRING,
-            "pendingCount": INTEGER,
-            "privateTaskCount": INTEGER,
             "agentProcessStatus": STRING,
-        },
-        {
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
-            "taskFilters": STRINGS,
-            "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "effectiveTaskFilters": STRINGS,
-            "laneFilterVersion": STRING,
-            "teamIdentity": _ref("TeamIdentity"),
-            "lifetime": STRING,
-            "renewalIntent": _ref("RenewalIntentPayload"),
-            "taskFilterInventory": _ref("TaskFilterInventory"),
             "laneInfo": _ref("LaneInfo"),
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
             "agentEnsure": _ref("AgentEnsurePayload"),
             "agentVisualStatus": STRING,
-            "lastAssistantAt": STRING,
             "statusLine": _ref("StatusLine"),
             "chrome": _ref("LaneChromePayload"),
         },
@@ -714,7 +658,6 @@ WIRE_OBJECTS = (
         {
             "workTrees": _array(_ref("WorkTreePayload")),
             "defaultTargetId": STRING,
-            "taskFilterInventory": _ref("TaskFilterInventory"),
         },
         {"observerErrors": STRINGS, "targetsDiscoveryErrors": STRINGS},
     ),
@@ -869,13 +812,7 @@ WIRE_OBJECTS = (
             "actor": STRING,
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
-            "teamIdentity": _ref("TeamIdentity"),
             "memberAgents": STRINGS,
-            "taskFilters": STRINGS,
-            "effectiveTaskFilters": STRINGS,
-            "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "laneFilterVersion": STRING,
-            "lifetime": STRING,
             "chrome": _ref("LaneChromePayload"),
         },
     ),
@@ -894,12 +831,6 @@ WIRE_OBJECTS = (
             "noSay": BOOLEAN,
             "attachments": _array(_ref("MessageAttachment")),
             "agentEnsure": _ref("AgentEnsurePayload"),
-            "pendingInboxCount": INTEGER,
-            "pendingInboxLabel": STRING,
-            "pendingInboxKeys": STRINGS,
-            "pendingInboxRevision": STRING,
-            "pendingInboxVersion": INTEGER,
-            "renewalIntent": _ref("RenewalIntentPayload"),
             "route": _ref("WorkTreeRoute"),
             "serverTiming": _ref("ServerTiming"),
             "submission": _ref("SubmissionLifecycle"),

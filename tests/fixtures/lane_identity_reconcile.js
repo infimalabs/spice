@@ -52,11 +52,6 @@ const lane = {
   agentName: "main",
   targetThreadId: "main-thread",
   activeThreadId: "main-thread",
-  teamId: "team-open",
-  teamRevision: 2,
-  configRevision: 2,
-  taskFilters: ["serve.ui"],
-  laneFilterVersion: "stale",
   pipEl: { dataset: {}, title: "" },
 };
 laneStore.registerLane(lane);
@@ -81,9 +76,6 @@ context.renderLanePayloadPresentation(lane, {
     target: {},
     thread: { state: "unbound" },
   },
-  taskFilters: [],
-  laneFilterVersion: "",
-  teamIdentity: { state: "none" },
   statusLine: { agentProcessStatus: "idle" },
 });
 
@@ -91,11 +83,6 @@ assert(lane.branchName === "main-2", "branch remains bound to main-2");
 assert(lane.agentName === "", "present target agent replaces stale main label");
 assert(lane.targetThreadId === "", "present target thread replaces stale thread");
 assert(lane.activeThreadId === "", "present target thread replaces active thread");
-assert(lane.teamId === "team-open", "stale none does not clear accepted team id");
-assert(lane.teamRevision === 2, "stale none does not clear accepted team revision");
-assert(lane.configRevision === 2, "stale none does not clear accepted config revision");
-assert(lane.taskFilters.join(",") === "serve.ui", "stale none keeps accepted filters");
-assert(lane.laneFilterVersion === "stale", "stale none keeps accepted filter version");
 assert(lane.pipEl.dataset.agentStatus === "idle", "idle status renders on lane");
 assert(lane.driverName === "codex", "unbound driver stays compact");
 assert(lane.driverModel === "gpt-5.5", "unbound model stays compact");
@@ -126,7 +113,6 @@ context.renderLanePayloadPresentation(lane, {
     target: {},
     thread: { state: "bound", threadId: "thread-b" },
   },
-  teamIdentity: { state: "none" },
   statusLine: { agentProcessStatus: "running" },
 });
 

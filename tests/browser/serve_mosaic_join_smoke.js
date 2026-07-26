@@ -15,16 +15,15 @@ const JOIN_OBSERVER_FLUSH_MS = 60;
 
 function joinMeasure(config) {
   const seed = (ids) => {
-    laneStore.replaceTargets(
-      ids.map((id) =>
+    applyTargetsPayload({
+      workTrees: ids.map((id) =>
         window.spicePayloads.targetPayload({
           id,
           threadId: id + "-th",
           teamId: "team-main",
-          pendingPrefix: "p-",
         }),
       ),
-    );
+    });
     applyTeamSnapshotPayload(
       window.spicePayloads.teamSnapshot({
         revision: 7,

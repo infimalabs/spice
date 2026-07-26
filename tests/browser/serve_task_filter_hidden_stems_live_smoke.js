@@ -74,8 +74,10 @@ async function seedHiddenStemTasks(repo, backendDir) {
 async function waitForProductionInventory(page) {
   await page.waitForFunction(
     (expected) => {
-      const inventory =
-        laneStore.targetsSnapshot()[0]?.taskFilterInventory || null;
+      const target = laneStore.targetsSnapshot()[0];
+      const inventory = target
+        ? laneChromeTaskBoard(target.id).taskFilterInventory || null
+        : null;
       if (!inventory) return false;
       const rows = new Map(
         (inventory.primaryStems || []).map((stem) => [stem.name, stem])
@@ -91,8 +93,10 @@ async function waitForProductionInventory(page) {
 
 async function readProductionState(page) {
   return page.evaluate((expectedNames) => {
-    const inventory =
-      laneStore.targetsSnapshot()[0]?.taskFilterInventory || {};
+    const target = laneStore.targetsSnapshot()[0];
+    const inventory = target
+      ? laneChromeTaskBoard(target.id).taskFilterInventory || {}
+      : {};
     const rows = new Map(
       (inventory.primaryStems || []).map((stem) => [stem.name, stem])
     );

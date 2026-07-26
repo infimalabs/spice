@@ -313,6 +313,7 @@ async function installInitialState(page) {
     const lane = resolveIsolatedLane("task-filter-pill-smoke");
     lane.lifetime = "Drain";
     lane.lastRenderedStatusLine = { agentProcessStatus: "running" };
+    window.__taskFilterPillInventory = structuredClone(inventory);
     applyTaskFilterInventory(inventory);
     renderFilterPills();
   }, initialInventory());
@@ -384,14 +385,14 @@ function assertInitialPills(pills) {
 
 async function resolveCliBlocker(page) {
   await page.evaluate(() => {
-    const lane = resolveIsolatedLane("task-filter-pill-smoke");
-    const inventory = structuredClone(lane.taskFilterInventory);
+    const inventory = structuredClone(window.__taskFilterPillInventory);
     inventory.revision = "30000000000000000000000000000";
     inventory.primaryStems = inventory.primaryStems.map((stem) =>
       stem.name === "cli"
         ? { ...stem, readyTaskCount: 1, blockedTaskCount: 0 }
         : stem,
     );
+    window.__taskFilterPillInventory = structuredClone(inventory);
     applyTaskFilterInventory(inventory);
     renderFilterPills();
   });
@@ -400,8 +401,7 @@ async function resolveCliBlocker(page) {
 
 async function renderReportedServeState(page) {
   await page.evaluate(() => {
-    const lane = resolveIsolatedLane("task-filter-pill-smoke");
-    const inventory = structuredClone(lane.taskFilterInventory);
+    const inventory = structuredClone(window.__taskFilterPillInventory);
     inventory.revision = "10000000000000000000000000000";
     inventory.primaryStems = inventory.primaryStems.map((stem) =>
       stem.name === "serve"
@@ -415,6 +415,7 @@ async function renderReportedServeState(page) {
           }
         : stem,
     );
+    window.__taskFilterPillInventory = structuredClone(inventory);
     applyTaskFilterInventory(inventory);
     renderFilterPills();
   });
@@ -425,6 +426,7 @@ async function restoreInitialState(page) {
   const inventory = initialInventory();
   inventory.revision = "20000000000000000000000000000";
   await page.evaluate((restoredInventory) => {
+    window.__taskFilterPillInventory = structuredClone(restoredInventory);
     applyTaskFilterInventory(restoredInventory);
     renderFilterPills();
   }, inventory);
@@ -505,10 +507,10 @@ function assertUncoveredPills(pills, coveredRamp, warnAccents, endpoints) {
 
 async function clearInventory(page) {
   return page.evaluate(() => {
-    const lane = resolveIsolatedLane("task-filter-pill-smoke");
-    const inventory = structuredClone(lane.taskFilterInventory);
+    const inventory = structuredClone(window.__taskFilterPillInventory);
     inventory.revision = "40000000000000000000000000000";
     inventory.primaryStems = [];
+    window.__taskFilterPillInventory = structuredClone(inventory);
     applyTaskFilterInventory(inventory);
     renderFilterPills();
     const strip = document.querySelector(".filter-strip");

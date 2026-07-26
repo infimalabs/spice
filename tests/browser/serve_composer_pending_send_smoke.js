@@ -31,6 +31,7 @@ async function run() {
           configureGroupedComposer,
           pendingSendSnapshot,
           pendingSendSubmission,
+          successfulPendingSendResult,
           resolveSuccessfulPendingSend,
           runCrossComposerFocusScenarios,
           runGroupedButtonSubmission,
@@ -92,17 +93,12 @@ async function runPendingSendScenarios(config) {
     const afterSecondSubmit = pendingSendSnapshot(lane, textarea, sends.length);
     const secondSendDispatched = waitForNextSend(sendDispatchEvents);
     sends[0].resolve({
-      result: {
-        ok: true,
-        key: "composer-pending-success",
-        requestText: config.successText,
-        pendingInboxCount: 1,
-        pendingInboxKeys: ["composer-pending-success"],
-        pendingInboxRevision: "composer-pending-success-revision",
-        pendingInboxVersion: 1,
-        submission: pendingSendSubmission("composer-pending-success"),
-        agentEnsure: { ok: true, threadId: lane.targetThreadId || "" },
-      },
+      result: successfulPendingSendResult(
+        lane,
+        "composer-pending-success",
+        config.successText,
+        1,
+      ),
     });
     await secondSendDispatched;
     const rapidQueued = {
@@ -502,18 +498,26 @@ function pendingSendSubmission(key) {
 
 function resolveSuccessfulPendingSend(send, lane, key, requestText, version) {
   send.resolve({
-    result: {
-      ok: true,
-      key,
-      requestText,
-      pendingInboxCount: 1,
-      pendingInboxKeys: [key],
-      pendingInboxRevision: key + "-revision",
-      pendingInboxVersion: version,
-      submission: pendingSendSubmission(key),
-      agentEnsure: { ok: true, threadId: lane.targetThreadId || "" },
-    },
+    result: successfulPendingSendResult(lane, key, requestText, version),
   });
+}
+
+function successfulPendingSendResult(lane, key, requestText, version) {
+  return {
+    ok: true,
+    key,
+    requestText,
+    chrome: {
+      targetId: lane.targetId,
+      pendingInbox: {
+        authority: "inbox",
+        order: { epoch: "", revision: version },
+        value: { count: 1, label: "1", keys: [key] },
+      },
+    },
+    submission: pendingSendSubmission(key),
+    agentEnsure: { ok: true, threadId: lane.targetThreadId || "" },
+  };
 }
 
 function waitForPendingSendCount(lane, expected) {

@@ -391,10 +391,8 @@ def test_an_accepted_send_reports_only_the_inbox_it_read(tmp_path, monkeypatch):
     # already holds for every other facet.
     assert set(chrome) == {"targetId", "pendingInbox"}
     assert chrome["pendingInbox"]["value"]["count"] == 1
-    assert (
-        chrome["pendingInbox"]["order"]["revision"] == (payload["pendingInboxVersion"])
-    )
-    assert payload["pendingInboxKeys"] == chrome["pendingInbox"]["value"]["keys"]
+    assert chrome["pendingInbox"]["order"]["revision"] > 0
+    assert chrome["pendingInbox"]["value"]["keys"] == [payload["key"]]
 
 
 def test_a_renewal_send_reports_the_lifetime_with_its_intent(tmp_path, monkeypatch):
@@ -419,14 +417,13 @@ def test_a_renewal_send_reports_the_lifetime_with_its_intent(tmp_path, monkeypat
     assert status == HTTPStatus.OK
     # The lifetime and the request are one team-store observation, so the facet
     # carries both at the revision that authority counted them at.
+    renewal = chrome["renewal"]["value"]["renewalIntent"]
     assert chrome["renewal"]["value"] == {
         "lifetime": DEFAULT_LIFETIME,
-        "renewalIntent": payload["renewalIntent"],
+        "renewalIntent": renewal,
     }
-    assert (
-        chrome["renewal"]["order"]["revision"] == (payload["renewalIntent"]["revision"])
-    )
-    assert chrome["renewal"]["value"]["renewalIntent"]["agentId"] == ACTOR_A
+    assert chrome["renewal"]["order"]["revision"] == renewal["revision"]
+    assert renewal["agentId"] == ACTOR_A
     assert chrome["renewal"]["order"]["revision"] > 0
 
 
@@ -482,22 +479,14 @@ def test_a_direct_route_reports_only_the_team_it_settled(tmp_path, monkeypatch):
     chrome = payload["route"]["chrome"]
     assert status == HTTPStatus.OK
     assert payload["route"]["actor"] == ACTOR_A
-    # A drain settles the team's filters and reads no inbox and no transcript,
-    # so it names the two facets that moved and stays silent on the rest.
-    assert set(chrome) == {"targetId", "teamConfig", "taskBoard"}
-    assert (
-        chrome["taskBoard"]["value"]["effectiveTaskFilters"]
-        == (payload["route"]["effectiveTaskFilters"])
-    )
-    assert (
-        chrome["teamConfig"]["value"]["teamIdentity"]
-        == (payload["route"]["teamIdentity"])
-    )
-    assert (
-        chrome["teamConfig"]["order"]["revision"]
-        == payload["route"]["teamIdentity"]["teamRevision"]
-    )
-    assert (
-        chrome["taskBoard"]["order"]["revision"]
-        == payload["route"]["teamIdentity"]["teamRevision"]
-    )
+    # A drain settles the team's filters and lifetime and reads no inbox or
+    # transcript, so all three team-owned projections move in one envelope.
+    assert set(chrome) == {"targetId", "teamConfig", "taskBoard", "renewal"}
+    team_identity = chrome["teamConfig"]["value"]["teamIdentity"]
+    assert chrome["taskBoard"]["value"]["effectiveTaskFilters"] == [
+        "serve",
+        "task.review",
+    ]
+    assert chrome["renewal"]["value"]["lifetime"] == "Drive"
+    assert chrome["teamConfig"]["order"]["revision"] == team_identity["teamRevision"]
+    assert chrome["taskBoard"]["order"]["revision"] == team_identity["teamRevision"]

@@ -48,14 +48,10 @@ function batchFreshMessage(id) {
   };
 }
 
-// Real lane payloads always carry the pending-inbox identity quad; the lane
-// chrome sync requires it.
-function batchStatusLine(id) {
+function batchChrome(id) {
   return {
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
+    targetId: id,
+    pendingInbox: window.spicePayloads.pendingInbox(1),
   };
 }
 
@@ -101,7 +97,8 @@ function batchInstallStubs(state, config) {
                 config.memberIds.indexOf(entry.targetId),
                 config.perMember,
               ),
-              statusLine: window.__batchStatusLine(entry.targetId),
+              statusLine: {},
+              chrome: window.__batchChrome(entry.targetId),
             },
         };
       }),
@@ -120,16 +117,15 @@ function batchInstallStubs(state, config) {
 
 // Phase A: initial fused mount -- one frame, one message-bearing host render.
 async function batchPhaseInitial(state, config) {
-  laneStore.replaceTargets(
-    config.memberIds.map((id) =>
+  applyTargetsPayload({
+    workTrees: config.memberIds.map((id) =>
       window.spicePayloads.targetPayload({
         id,
         threadId: id + "-th",
         teamId: "team-batch",
-        pendingPrefix: "p-",
       }),
     ),
-  );
+  });
   applyTeamSnapshotPayload(
     window.spicePayloads.teamSnapshot({
       revision: config.snapshotRevision,
@@ -341,10 +337,10 @@ async function batchPhaseCoalesce(state, config) {
         id: config.memberIds[0],
         threadId: config.memberIds[0] + "-th2",
         teamId: "team-batch",
-        pendingPrefix: "p-",
       }).targetIdentity,
       messages: [],
-      statusLine: window.__batchStatusLine(config.memberIds[0]),
+      statusLine: {},
+      chrome: window.__batchChrome(config.memberIds[0]),
     },
     "bus",
   );
@@ -378,7 +374,8 @@ async function batchPhaseFailedLane(state, config, hostTargetId) {
   };
   state.payloadOverrides[config.memberIds[1]] = {
     messages: [window.__batchFreshMessage(config.memberIds[1])],
-    statusLine: window.__batchStatusLine(config.memberIds[1]),
+    statusLine: {},
+    chrome: window.__batchChrome(config.memberIds[1]),
   };
   subscribeLaneToLiveBus(laneStore.laneForId(config.memberIds[0]));
   subscribeLaneToLiveBus(laneStore.laneForId(config.memberIds[1]));
@@ -472,7 +469,7 @@ async function batchMeasure(config) {
 const BATCH_PAGE_HELPERS = {
   __batchLaneMessages: batchLaneMessages,
   __batchFreshMessage: batchFreshMessage,
-  __batchStatusLine: batchStatusLine,
+  __batchChrome: batchChrome,
   __batchSettle: batchSettle,
   __batchSubscribeFrames: batchSubscribeFrames,
   __batchEntryIds: batchEntryIds,

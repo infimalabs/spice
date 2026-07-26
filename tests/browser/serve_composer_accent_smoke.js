@@ -23,16 +23,15 @@ function accentMeasureReorder(config) {
       accent: el.dataset.accentSlot,
   }));
   const ids = config.memberIds;
-  laneStore.replaceTargets(
-    ids.map((id) =>
+  applyTargetsPayload({
+    workTrees: ids.map((id) =>
       window.spicePayloads.targetPayload({
         id,
         threadId: id + "-th",
         teamId: "team-main",
-        pendingPrefix: "p-",
       }),
     ),
-  );
+  });
   applyTeamSnapshotPayload(
     window.spicePayloads.teamSnapshot({
       revision: 7,

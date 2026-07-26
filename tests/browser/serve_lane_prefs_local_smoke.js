@@ -14,15 +14,6 @@ const PREFS_HINT = { speechMode: "narrate", selectedView: "metrics" };
 const PREFS_CHANGED = { speechMode: "quiet", selectedView: "filters" };
 const PREFS_SETTLE_MS = 60;
 
-function prefsStatusLine(id) {
-  return {
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
-  };
-}
-
 function prefsSettle(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -44,7 +35,11 @@ function prefsInstallStubs(state) {
           watcherError: "",
           payload: {
             messages: [],
-            statusLine: window.__prefsStatusLine(entry.targetId),
+            statusLine: {},
+            chrome: {
+              targetId: entry.targetId,
+              pendingInbox: window.spicePayloads.pendingInbox(1),
+            },
           },
         };
       }),
@@ -78,16 +73,17 @@ function prefsStoredHint(targetId) {
 async function prefsMeasure(config) {
   const state = { frames: [] };
   window.__prefsInstallStubs(state);
-  laneStore.replaceTargets(
-    config.memberIds.map((id) =>
+  applyTargetsPayload({
+    workTrees: config.memberIds.map((id) =>
       window.spicePayloads.targetPayload({
         id,
         threadId: id + "-th",
         teamId: "team-" + id,
-        pendingPrefix: "p-",
+        teamRevision: config.configRevision,
+        configRevision: config.configRevision,
       }),
     ),
-  );
+  });
   localStorage.setItem(
     laneStorageKey,
     JSON.stringify([{ targetId: config.memberIds[0], ...config.hint }]),
@@ -103,7 +99,7 @@ async function prefsMeasure(config) {
     unhintedSelectedView: laneB.selectedView,
     pageDefaultSpeechMode: defaultSpeechMode,
     pageDefaultSelectedView: defaultLaneViewMode,
-    revisionBefore: laneB.configRevision,
+    revisionBefore: laneChromeConfigRevision(laneB),
   };
   setLaneSpeechMode(laneB, config.changed.speechMode);
   setLaneSelectedView(laneB, config.changed.selectedView);
@@ -113,7 +109,7 @@ async function prefsMeasure(config) {
     ...mounted,
     storedHintA: window.__prefsStoredHint(config.memberIds[0]),
     storedHintB: window.__prefsStoredHint(config.memberIds[1]),
-    revisionAfter: laneB.configRevision,
+    revisionAfter: laneChromeConfigRevision(laneB),
     speechAfterResnapshot: laneB.speechMode,
     viewAfterResnapshot: laneB.selectedView,
     teamCommandCount: state.frames.filter((frame) => {
@@ -123,7 +119,6 @@ async function prefsMeasure(config) {
 }
 
 const PREFS_PAGE_HELPERS = {
-  __prefsStatusLine: prefsStatusLine,
   __prefsSettle: prefsSettle,
   __prefsInstallStubs: prefsInstallStubs,
   __prefsApplySnapshot: prefsApplySnapshot,

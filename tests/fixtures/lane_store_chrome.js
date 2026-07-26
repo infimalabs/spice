@@ -251,6 +251,23 @@ assert(
     }),
   "a partial payload merges into one record and leaves every other facet alone",
 );
+const duplicatePending = apply(
+  chrome("target-f", { pendingInbox: facet("pendingInbox", pendingValue, 7) }),
+);
+assert(
+  JSON.stringify({
+    ...summary(duplicatePending),
+    stable: duplicatePending.record === pendingOnly.record,
+  }) ===
+    JSON.stringify({
+      targetId: "target-f",
+      disposition: "stale",
+      changed: [],
+      stale: ["pendingInbox"],
+      stable: true,
+    }),
+  "a duplicate pending-only event performs no mutation or record replacement",
+);
 
 // An explicit null is the authority saying the facet has no value now; the same
 // clear redelivered at a newer order is no longer a change.

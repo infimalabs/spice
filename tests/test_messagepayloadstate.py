@@ -434,14 +434,13 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         limit=5,
     )
 
-    assert payload["renewalIntent"]["agentId"] == "thread:agent-a"
-    assert payload["renewalIntent"]["requested"] is True
-    assert payload["renewalIntent"]["state"] == "requested"
-    assert payload["renewalIntent"]["teamSlot"] == 0
-    assert payload["renewalIntent"]["predecessorIdentity"]["threadId"] == "agent-a"
-    assert payload["renewalIntent"]["successorIdentity"]["desiredModel"] == (
-        "desired-model"
-    )
+    renewal = payload["chrome"]["renewal"]["value"]["renewalIntent"]
+    assert renewal["agentId"] == "thread:agent-a"
+    assert renewal["requested"] is True
+    assert renewal["state"] == "requested"
+    assert renewal["teamSlot"] == 0
+    assert renewal["predecessorIdentity"]["threadId"] == "agent-a"
+    assert renewal["successorIdentity"]["desiredModel"] == ("desired-model")
 
 
 def test_sent_steering_payload_includes_image_attachments(tmp_path):
@@ -564,22 +563,9 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "ackContexts",
         "targetIdentity",
         "serveAgentIdentity",
-        "taskFilters",
-        "taskFilterEntries",
-        "effectiveTaskFilters",
-        "laneFilterVersion",
-        "teamIdentity",
-        "lifetime",
-        "renewalIntent",
-        "taskFilterInventory",
         "laneInfo",
         "agentProcessStatus",
         "error",
-        "pendingInboxCount",
-        "pendingInboxLabel",
-        "pendingInboxKeys",
-        "pendingInboxRevision",
-        "pendingInboxVersion",
         "agentEnsure",
         "statusLine",
         "chrome",
@@ -589,21 +575,14 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     assert payload["targetIdentity"]["agent"] == {"state": "unconfigured"}
     assert payload["serveAgentIdentity"]["actorId"] == "target:wt"
     assert payload["serveAgentIdentity"]["renewal"]["revision"] == 0
-    assert payload["teamIdentity"] == {"state": "none"}
-    assert payload["pendingInboxCount"] == 1
-    assert payload["pendingInboxLabel"] == "1"
-    assert payload["pendingInboxKeys"] == [inbox_item_key(pending_name)]
-    assert payload["pendingInboxRevision"]
-    assert payload["pendingInboxVersion"] > 0
-    assert payload["statusLine"]["pendingInboxCount"] == 1
-    assert payload["statusLine"]["pendingInboxLabel"] == "1"
-    assert payload["statusLine"]["pendingInboxKeys"] == [inbox_item_key(pending_name)]
-    assert (
-        payload["statusLine"]["pendingInboxRevision"] == payload["pendingInboxRevision"]
-    )
-    assert (
-        payload["statusLine"]["pendingInboxVersion"] == payload["pendingInboxVersion"]
-    )
+    assert payload["chrome"]["teamConfig"]["value"]["teamIdentity"] == {"state": "none"}
+    pending = payload["chrome"]["pendingInbox"]
+    assert pending["value"] == {
+        "count": 1,
+        "label": "1",
+        "keys": [inbox_item_key(pending_name)],
+    }
+    assert pending["order"]["revision"] > 0
 
 
 def test_messages_payload_finds_ack_context_by_collision_suffixed_key(

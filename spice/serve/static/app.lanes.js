@@ -82,42 +82,8 @@ function applyTargetsPayload(payload) {
 }
 
 function targetInventoryRecord(target) {
-  const {
-    chrome,
-    taskFilters,
-    effectiveTaskFilters,
-    taskFilterEntries,
-    taskFilterInventory,
-    privateTaskCount,
-    teamIdentity,
-    lifetime,
-    renewalIntent,
-    pendingCount,
-    pendingInboxCount,
-    pendingInboxLabel,
-    pendingInboxKeys,
-    pendingInboxRevision,
-    pendingInboxVersion,
-    lastAssistantAt,
-    statusLine,
-    ...record
-  } = target || {};
-  return payloadHasField(target, "statusLine")
-    ? { ...record, statusLine: targetStatusPresentationRecord(statusLine) }
-    : record;
-}
-
-function targetStatusPresentationRecord(statusLine) {
-  const {
-    pendingInboxCount,
-    pendingInboxLabel,
-    pendingInboxKeys,
-    pendingInboxRevision,
-    pendingInboxVersion,
-    lastAssistantAt,
-    ...presentation
-  } = statusLine || {};
-  return presentation;
+  const { chrome, ...record } = target || {};
+  return record;
 }
 
 function syncObserverNotice(errors) {

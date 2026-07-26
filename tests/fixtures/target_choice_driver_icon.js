@@ -106,7 +106,11 @@ const context = {
       return null;
     },
     laneChrome() {
-      return null;
+      return {
+        pendingInbox: { count: 0, label: "0", keys: [] },
+        activity: { lastAssistantAt: "2020-01-01T00:00:00Z" },
+        lifecycle: { processStatus: "idle", visualStatus: "idle" },
+      };
     },
     subscribe() {},
   },
@@ -136,7 +140,7 @@ function target(overrides = {}) {
   const driver = { name: "codex", model: "gpt-5", effort: "high", ...(overrides.driver || {}) };
   return {
     id: overrides.id || "target-codex",
-    statusLine: { lastAssistantAt: "2020-01-01T00:00:00Z" },
+    statusLine: {},
     targetIdentity: {
       branch: "feature",
       agent: { state: "configured", name: "codex-hand" },

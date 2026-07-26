@@ -309,16 +309,10 @@
  * @property {string=} bindingError
  * @property {string=} rolloutStatus
  * @property {string=} activityStatus
- * @property {string=} lastAssistantAt
  * @property {string=} latestActivityKind
  * @property {string=} latestMessagePreview
  * @property {string=} latestActivityPreview
  * @property {string=} preview
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
  * @property {string=} agentProcessStatus
  * @property {string=} agentVisualStatus
  * @property {ClaimedTask=} claimedTask
@@ -360,11 +354,6 @@
  * @property {Array.<string>=} deadletteredInboxKeys
  * @property {string=} deadletteredInboxKey
  * @property {string=} deadletterRequeueCommand
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
  */
 
 /**
@@ -391,38 +380,20 @@
  * @typedef {Object} LanePayload
  * @property {Array.<LaneMessage>} messages
  * @property {Array.<AckContext>} ackContexts
- * @property {number} pendingInboxCount
- * @property {Array.<string>} pendingInboxKeys
- * @property {string} pendingInboxRevision
- * @property {number} pendingInboxVersion
  * @property {TargetIdentity} targetIdentity
  * @property {ServeAgentIdentity} serveAgentIdentity
- * @property {Array.<string>} taskFilters
- * @property {Array.<TaskFilterEntry>} taskFilterEntries
- * @property {Array.<string>} effectiveTaskFilters
- * @property {string} laneFilterVersion
- * @property {TeamIdentity} teamIdentity
- * @property {string} lifetime
- * @property {RenewalIntentPayload} renewalIntent
- * @property {TaskFilterInventory} taskFilterInventory
  * @property {LaneInfo} laneInfo
  * @property {AgentEnsurePayload} agentEnsure
  * @property {StatusLine} statusLine
  * @property {string} error
- * @property {string=} pendingInboxLabel
+ * @property {LaneChromePayload} chrome
  * @property {string=} agentProcessStatus
  * @property {Array.<string>=} removedMessageKeys
- * @property {LaneChromePayload=} chrome
  */
 
 /**
  * @typedef {Object} PendingLanePayload
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
- * @property {LaneChromePayload=} chrome
+ * @property {LaneChromePayload} chrome
  */
 
 /**
@@ -560,17 +531,9 @@
  * @typedef {Object} LaneChromeSourcePayload
  * @property {TargetIdentity=} targetIdentity
  * @property {ServeAgentIdentity=} serveAgentIdentity
- * @property {Array.<string>=} taskFilters
- * @property {Array.<TaskFilterEntry>=} taskFilterEntries
- * @property {Array.<string>=} effectiveTaskFilters
- * @property {string=} laneFilterVersion
- * @property {TaskFilterInventory=} taskFilterInventory
  * @property {LaneInfo=} laneInfo
- * @property {number=} privateTaskCount
- * @property {TeamIdentity=} teamIdentity
- * @property {string=} lifetime
- * @property {RenewalIntentPayload=} renewalIntent
  * @property {StatusLine=} statusLine
+ * @property {LaneChromePayload=} chrome
  */
 
 /**
@@ -579,37 +542,20 @@
  * @property {string} repoRoot
  * @property {string} displayName
  * @property {string} branch
- * @property {number} pendingCount
- * @property {number} privateTaskCount
  * @property {string} agentProcessStatus
- * @property {TargetIdentity=} targetIdentity
- * @property {ServeAgentIdentity=} serveAgentIdentity
- * @property {Array.<string>=} taskFilters
- * @property {Array.<TaskFilterEntry>=} taskFilterEntries
- * @property {Array.<string>=} effectiveTaskFilters
- * @property {string=} laneFilterVersion
- * @property {TeamIdentity=} teamIdentity
- * @property {string=} lifetime
- * @property {RenewalIntentPayload=} renewalIntent
- * @property {TaskFilterInventory=} taskFilterInventory
- * @property {LaneInfo=} laneInfo
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
- * @property {AgentEnsurePayload=} agentEnsure
- * @property {string=} agentVisualStatus
- * @property {string=} lastAssistantAt
- * @property {StatusLine=} statusLine
- * @property {LaneChromePayload=} chrome
+ * @property {TargetIdentity} targetIdentity
+ * @property {ServeAgentIdentity} serveAgentIdentity
+ * @property {LaneInfo} laneInfo
+ * @property {AgentEnsurePayload} agentEnsure
+ * @property {string} agentVisualStatus
+ * @property {StatusLine} statusLine
+ * @property {LaneChromePayload} chrome
  */
 
 /**
  * @typedef {Object} TargetsPayload
  * @property {Array.<WorkTreePayload>} workTrees
  * @property {string} defaultTargetId
- * @property {TaskFilterInventory} taskFilterInventory
  * @property {Array.<string>=} observerErrors
  * @property {Array.<string>=} targetsDiscoveryErrors
  */
@@ -775,13 +721,7 @@
  * @property {string} actor
  * @property {TargetIdentity} targetIdentity
  * @property {ServeAgentIdentity} serveAgentIdentity
- * @property {TeamIdentity} teamIdentity
  * @property {Array.<string>} memberAgents
- * @property {Array.<string>} taskFilters
- * @property {Array.<string>} effectiveTaskFilters
- * @property {Array.<TaskFilterEntry>} taskFilterEntries
- * @property {string} laneFilterVersion
- * @property {string} lifetime
  * @property {LaneChromePayload} chrome
  */
 
@@ -799,12 +739,6 @@
  * @property {boolean=} noSay
  * @property {Array.<MessageAttachment>=} attachments
  * @property {AgentEnsurePayload=} agentEnsure
- * @property {number=} pendingInboxCount
- * @property {string=} pendingInboxLabel
- * @property {Array.<string>=} pendingInboxKeys
- * @property {string=} pendingInboxRevision
- * @property {number=} pendingInboxVersion
- * @property {RenewalIntentPayload=} renewalIntent
  * @property {WorkTreeRoute=} route
  * @property {ServerTiming=} serverTiming
  * @property {SubmissionLifecycle=} submission

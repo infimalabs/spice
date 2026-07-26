@@ -98,6 +98,14 @@ function assert(condition, message) {
 function target(id) {
   return {
     id,
+    chrome: {
+      targetId: id,
+      teamConfig: {
+        authority: "team-store",
+        order: { epoch: "", revision: 1 },
+        value: { teamIdentity: { state: "none" } },
+      },
+    },
     targetIdentity: {
       targetId: id,
       worktreeName: id,
@@ -106,7 +114,6 @@ function target(id) {
       agent: { state: "unconfigured" },
       thread: { state: "unbound" },
     },
-    teamIdentity: { state: "none" },
     statusLine: { agentProcessStatus: "idle" },
   };
 }
@@ -133,7 +140,6 @@ context.liveBusRequest = async (type, request = {}) => {
     return {
       payload: {
         workTrees: [target("wt-a"), target("wt-b")],
-        taskFilterInventory: {},
       },
     };
   if (type === "teams.refresh")

@@ -171,16 +171,6 @@ def _write_response_item(
     )
 
 
-def _pending_identity(count: int = 0) -> dict[str, object]:
-    return {
-        "pendingInboxCount": count,
-        "pendingInboxLabel": str(count),
-        "pendingInboxKeys": [],
-        "pendingInboxRevision": f"test-revision-{count}",
-        "pendingInboxVersion": 100 + count,
-    }
-
-
 def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
@@ -232,15 +222,9 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
     line = lane.status_line_payload(_State(), target, items=items, error=None)
 
-    assert line["lastAssistantAt"] == latest
+    assert lane.lane_activity_at(items) == latest
     assert line["preview"] == "thinking"
     assert line["latestActivityPreview"] == "thinking"
     assert line["latestMessagePreview"] == ""
@@ -261,11 +245,6 @@ def test_status_line_derives_visual_status_from_structural_activity_kind(
             thread_id="thread",
         ),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
     cases = (
         [_message(timestamp, kind="final", preview="Confirmed fixed.")],
         [_message(timestamp, kind="assistant", preview="Working")],
@@ -281,15 +260,14 @@ def test_status_line_derives_visual_status_from_structural_activity_kind(
                 line["latestActivityKind"],
                 line["agentProcessStatus"],
                 line["agentVisualStatus"],
-                line["pendingInboxCount"],
             )
         )
 
     assert observed == [
-        ("final", "running", "idle", 0),
-        ("assistant", "running", "running", 0),
-        ("presence:function_call", "running", "running", 0),
-        ("", "running", "running", 0),
+        ("final", "running", "idle"),
+        ("assistant", "running", "running"),
+        ("presence:function_call", "running", "running"),
+        ("", "running", "running"),
     ]
 
 
@@ -304,11 +282,6 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
             process_status="running",
             thread_id="019f6edd-ab8c-7ab2-870a-f6b81dfc5b7f",
         ),
-    )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
     )
     projection = _task_board(
         [
@@ -374,12 +347,6 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(
         _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
@@ -434,12 +401,6 @@ def test_tool_output_preview_uses_matching_call_context(tmp_path, monkeypatch):
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(
         _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
@@ -518,12 +479,6 @@ def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monke
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
     items = message_reader.read_assistant_messages(transcript, limit=5)
     item_payloads = [item.to_payload() for item in items]
     line = lane.status_line_payload(
@@ -743,17 +698,11 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(_State(), target, items=items, error=None)
 
     assert items[0].kind == "presence:function_call"
-    assert line["lastAssistantAt"] == latest
+    assert lane.lane_activity_at(items) == latest
     assert line["activityStatus"] == "active"
     assert line["preview"] == "Bash: ls"
     assert line["latestActivityPreview"] == "Bash: ls"

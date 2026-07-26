@@ -73,7 +73,6 @@ class ObserverRegistry:
         payload = {
             "workTrees": targets,
             "defaultTargetId": targets[0]["id"] if targets else "",
-            "taskFilterInventory": {},
             "observerErrors": list(self.errors),
         }
         return validate_emitter_payload("observer.targets_payload", payload)
@@ -335,9 +334,8 @@ def observer_target_payload(session: ObserverSession) -> dict[str, Any]:
         "displayName": session.target.display_name,
         "branch": session.target.branch,
         **payload,
-        "pendingCount": 0,
-        "privateTaskCount": 0,
         "agentProcessStatus": "observer",
+        "agentVisualStatus": payload["statusLine"]["agentVisualStatus"],
     }
 
 
@@ -416,18 +414,12 @@ def _observer_lane_payload(session: ObserverSession) -> dict[str, Any]:
         "renewalIntent": {},
     }
     return {
-        **pending_identity,
         "targetIdentity": target_identity,
         "serveAgentIdentity": serve_identity,
-        **team_facts,
-        "laneFilterVersion": "",
-        "teamIdentity": team_identity,
-        "taskFilterInventory": {},
         "laneInfo": {"summaryRows": [], "members": []},
         "statusLine": {
             "agentVisualStatus": "idle",
             "preview": f"read-only {driver_name} transcript",
-            **pending_identity,
         },
         "agentEnsure": {},
         "chrome": lane_chrome_payload(

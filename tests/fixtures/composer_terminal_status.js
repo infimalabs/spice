@@ -17,7 +17,7 @@ const context = {
   Set,
   console,
   lanePendingDisplayCount(member) {
-    return member.pendingInboxCount || 0;
+    return member.pending || 0;
   },
 };
 
@@ -49,7 +49,7 @@ assert(
 );
 assert(
   context.laneComposePlaceholderStatus({
-    pendingInboxCount: 0,
+    pending: 0,
     submissionLifecycleByKey: new Map(),
     lastRenderedStatusLine: {
       ...terminalStatus,
@@ -69,7 +69,7 @@ const activeVisual = context.liveAgentVisualStatus(activeStatus);
 assert(activeVisual === "running", "active running status remains running");
 assert(
   context.laneComposePlaceholderStatus({
-    pendingInboxCount: 0,
+    pending: 0,
     submissionLifecycleByKey: new Map(),
     lastRenderedStatusLine: {
       ...activeStatus,

@@ -27,7 +27,6 @@ function ssTargetPayload(id, threadId, teamId, teamRevision) {
     threadId,
     teamId,
     teamRevision,
-    pendingPrefix: "p-",
   });
 }
 
@@ -82,12 +81,10 @@ function ssAckContexts(ackKey) {
   ];
 }
 
-function ssStatusLine(id) {
+function ssChrome(id) {
   return {
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "p-" + id,
-    pendingInboxVersion: 1,
+    targetId: id,
+    pendingInbox: window.spicePayloads.pendingInbox(1),
   };
 }
 
@@ -147,15 +144,18 @@ function ssBuildPayloads(config) {
   payloadByTargetId[config.fusedIds[0]] = {
     messages: window.__ssLaneMessages(config.fusedIds[0], 0, 2, config.perLane, config.ackKey),
     ackContexts: window.__ssAckContexts(config.ackKey),
-    statusLine: window.__ssStatusLine(config.fusedIds[0]),
+    statusLine: {},
+    chrome: window.__ssChrome(config.fusedIds[0]),
   };
   payloadByTargetId[config.fusedIds[1]] = {
     messages: window.__ssLaneMessages(config.fusedIds[1], 1, 2, config.perLane, null),
-    statusLine: window.__ssStatusLine(config.fusedIds[1]),
+    statusLine: {},
+    chrome: window.__ssChrome(config.fusedIds[1]),
   };
   payloadByTargetId[config.soloId] = {
     messages: window.__ssLaneMessages(config.soloId, 0, 1, config.perLane, null),
-    statusLine: window.__ssStatusLine(config.soloId),
+    statusLine: {},
+    chrome: window.__ssChrome(config.soloId),
   };
   return payloadByTargetId;
 }
@@ -175,11 +175,23 @@ async function ssMeasure(config) {
   window.__ssInstallStubs(state, config);
   state.payloadByTargetId = window.__ssBuildPayloads(config);
 
-  laneStore.replaceTargets([
-    window.__ssTarget(config.fusedIds[0], config.fusedIds[0] + "-th", "team-fused", 1),
-    window.__ssTarget(config.fusedIds[1], config.fusedIds[1] + "-th", "team-fused", 1),
-    window.__ssTarget(config.soloId, config.soloId + "-th", "team-solo", 1),
-  ]);
+  applyTargetsPayload({
+    workTrees: [
+      window.__ssTarget(
+        config.fusedIds[0],
+        config.fusedIds[0] + "-th",
+        "team-fused",
+        1,
+      ),
+      window.__ssTarget(
+        config.fusedIds[1],
+        config.fusedIds[1] + "-th",
+        "team-fused",
+        1,
+      ),
+      window.__ssTarget(config.soloId, config.soloId + "-th", "team-solo", 1),
+    ],
+  });
 
   applyTeamSnapshotPayload(
     window.spicePayloads.teamSnapshot({
@@ -240,7 +252,7 @@ const SS_PAGE_HELPERS = {
   __ssTeam: ssTeam,
   __ssLaneMessages: ssLaneMessages,
   __ssAckContexts: ssAckContexts,
-  __ssStatusLine: ssStatusLine,
+  __ssChrome: ssChrome,
   __ssSettle: ssSettle,
   __ssSubscribeFrames: ssSubscribeFrames,
   __ssFullReplayCount: ssFullReplayCount,

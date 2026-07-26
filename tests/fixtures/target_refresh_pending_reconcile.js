@@ -165,12 +165,14 @@ const refreshedTarget = {
       order: { epoch: "2", revision: 2 },
       value: {
         taskFilters: ["serve.ui"],
-        taskFilterEntries: [{ project: "serve.ui", sources: ["manual"] }],
+        taskFilterEntries: [{ project: "serve.ui", source: "manual" }],
         effectiveTaskFilters: ["serve"],
         taskFilterInventory: {
           revision: "2",
           catalog: { approvedStems: [] },
+          filters: [],
           primaryStems: [],
+          openTaskCount: 0,
         },
         privateTaskCount: 7,
       },
@@ -187,7 +189,7 @@ const refreshedTarget = {
     },
     activity: {
       authority: "transcript",
-      order: { epoch: "2026-07-26T05:00:00Z", revision: 0 },
+      order: { epoch: "1785042000000000", revision: 0 },
       value: { lastAssistantAt: "2026-07-26T05:00:00Z" },
     },
   },
@@ -212,18 +214,7 @@ assert(
   lifetimeCalls.length === 1 && lifetimeCalls[0].configRevision === 2,
   "renewal transition applies lifetime at canonical config revision",
 );
-assert(
-  !("taskFilters" in lane) &&
-    !("renewalIntent" in lane) &&
-    !("backendPendingInboxCount" in lane),
-  "lane retains no server chrome copies",
-);
-assert(
-  !("chrome" in storedTarget) &&
-    !("taskFilters" in storedTarget) &&
-    !("teamIdentity" in storedTarget),
-  "target inventory retains only descriptor and non-faceted identity state",
-);
+assert(!("chrome" in storedTarget), "inventory stores chrome only in its reducer");
 assert(lane.laneMetrics === currentMetrics, "on-demand metrics survive refresh");
 assert(lane.laneInfo === refreshedInfo, "non-faceted lane info updates");
 assert(

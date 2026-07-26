@@ -21,6 +21,7 @@ from spice.serve.payload.identity import (
 from spice.serve.payload.lane import (
     _lane_info_payload,
     _status_line_payload_from_status,
+    lane_activity_at,
     lane_chrome_payload,
 )
 from spice.serve.payload.wire import validate_emitter_payload
@@ -44,7 +45,6 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
             for target in targets
         ],
         "defaultTargetId": targets[0].id if targets else "",
-        "taskFilterInventory": inventory,
     }
     # A discovery failure must reach the client, which otherwise reads a short
     # workTrees list as proof those worktrees were removed and closes the lanes.
@@ -86,14 +86,13 @@ def _work_tree_payload(
     renewal_intent = _work_tree_renewal_intent(
         state, target, thread_id, predecessor_actor, renew_intent
     )
-    serve_identity, status_line = _work_tree_status_payloads(
+    serve_identity, status_line, last_assistant_at = _work_tree_status_payloads(
         state,
         target,
         thread_id=thread_id,
         binding_status=binding_status,
         binding_error=binding_error,
         status=status,
-        pending_identity=pending_identity,
         desired_config=desired_config,
         task_board=task_board,
     )
@@ -104,11 +103,8 @@ def _work_tree_payload(
         renewal_intent=renewal_intent,
         task_filter_inventory=inventory,
         pending_identity=pending_identity,
-        last_assistant_at=status_line["lastAssistantAt"],
+        last_assistant_at=last_assistant_at,
     )
-    board = chrome["taskBoard"]["value"]
-    pending = chrome["pendingInbox"]["value"]
-    renewal = chrome["renewal"]["value"]
     return {
         "id": target.id,
         "repoRoot": str(target.repo_root),
@@ -123,27 +119,15 @@ def _work_tree_payload(
             desired_config=desired_config,
         ),
         "serveAgentIdentity": serve_identity,
-        "taskFilters": board["taskFilters"],
-        "taskFilterEntries": board["taskFilterEntries"],
-        "effectiveTaskFilters": board["effectiveTaskFilters"],
-        "laneFilterVersion": "",
-        "teamIdentity": chrome["teamConfig"]["value"]["teamIdentity"],
-        "lifetime": renewal["lifetime"],
-        "renewalIntent": renewal["renewalIntent"],
-        "taskFilterInventory": board["taskFilterInventory"],
         "laneInfo": _lane_info_payload(
             target,
             serve_identity,
             agent_name=agent_name,
             task_board=task_board,
         ),
-        "pendingCount": pending["count"],
-        **pending_identity,
-        "privateTaskCount": board["privateTaskCount"],
         "agentProcessStatus": status.process_status,
         "agentVisualStatus": status_line["agentVisualStatus"],
         "agentEnsure": agent_ensure or {},
-        "lastAssistantAt": chrome["activity"]["value"]["lastAssistantAt"],
         "statusLine": status_line,
         "chrome": chrome,
     }
@@ -157,10 +141,9 @@ def _work_tree_status_payloads(
     binding_status: str,
     binding_error: str,
     status: Any,
-    pending_identity: dict[str, Any],
     desired_config: dict[str, str] | None = None,
     task_board: OpenTaskBoardProjection | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], str]:
     from spice.serve.payload.message import target_activity_items
 
     items, error, transcript = target_activity_items(
@@ -184,10 +167,9 @@ def _work_tree_status_payloads(
         binding_error=binding_error,
         items=items,
         error=error,
-        pending_identity=pending_identity,
         active_claims=task_board,
     )
-    return serve_identity, status_line
+    return serve_identity, status_line, lane_activity_at(items)
 
 
 def _work_tree_renewal_intent(

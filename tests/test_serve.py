@@ -317,10 +317,11 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert payload["ok"] is True
     assert payload["requestText"] == "inspect this image"
     assert payload["noSay"] is True
-    assert payload["pendingInboxCount"] == 1
-    assert payload["pendingInboxKeys"] == [inbox_item_key(items[0].name)]
-    assert payload["pendingInboxRevision"]
-    assert payload["pendingInboxVersion"] > 0
+    pending = payload["chrome"]["pendingInbox"]
+    assert pending["authority"] == "inbox"
+    assert pending["order"]["revision"] > 0
+    assert pending["value"]["count"] == 1
+    assert pending["value"]["keys"] == [inbox_item_key(items[0].name)]
     live_attachment = payload["attachments"][0]
     assert live_attachment["name"] == "paste.png"
     assert live_attachment["url"].startswith(
@@ -415,7 +416,9 @@ def test_work_tree_send_reuses_pending_key_for_exact_duplicate_text(
     assert first_status == HTTPStatus.OK
     assert second_status == HTTPStatus.OK
     assert first_payload["key"] == second_payload["key"]
-    assert second_payload["pendingInboxKeys"] == [first_payload["key"]]
+    assert second_payload["chrome"]["pendingInbox"]["value"]["keys"] == [
+        first_payload["key"]
+    ]
     assert [inbox_request_body(item.text) for item in items] == ["same steering"]
     assert pending_inbox_count(repo) == 1
 

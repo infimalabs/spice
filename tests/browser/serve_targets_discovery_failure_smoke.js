@@ -107,7 +107,7 @@ async function buildFusedBoard(page, args) {
     ({ targets, settledTeam, messagesByTargetId, readBoardStateText }) => {
       const readBoardState = eval("(" + readBoardStateText + ")");
       window.__readBoardState = readBoardState;
-      laneStore.replaceTargets(targets);
+      applyTargetsPayload({ workTrees: targets });
       applyTeamSnapshotPayload(
         window.spicePayloads.teamSnapshot({ revision: 1, teams: [settledTeam] }),
         { force: true },
@@ -134,7 +134,6 @@ async function applyFailedDiscovery(page, args) {
       applyTargetsPayload({
         workTrees: shrunkenWorkTrees,
         defaultTargetId: "alpha",
-        taskFilterInventory: {},
         targetsDiscoveryErrors: [discoveryError],
       });
       return window.__readBoardState("alpha");
@@ -151,7 +150,6 @@ async function applySuccessfulShrink(page, args) {
       applyTargetsPayload({
         workTrees: shrunkenWorkTrees,
         defaultTargetId: "alpha",
-        taskFilterInventory: {},
       });
       return window.__readBoardState("alpha");
     },

@@ -275,9 +275,13 @@ def _task_cards(payload: dict) -> list[dict]:
     return [item for item in payload["messages"] if item["kind"] == "task_card"]
 
 
+def _task_board(payload: dict) -> dict:
+    return payload["chrome"]["taskBoard"]["value"]
+
+
 def _task_derived_slice(payload: dict) -> tuple:
     return (
-        payload["taskFilterInventory"],
+        _task_board(payload)["taskFilterInventory"],
         payload["statusLine"]["claimedTask"],
         payload["laneInfo"]["reviewPressure"],
         _task_cards(payload),
@@ -581,8 +585,11 @@ def test_measured_board_moves_once_across_inventory_messages_and_metrics(
     assert len(normalized) == MEASURED_BOARD_ROW_COUNT
     assert len(set(normalized)) == MEASURED_BOARD_ROW_COUNT
     assert (
-        inventory_payload["taskFilterInventory"] == first_message["taskFilterInventory"]
+        _task_board(inventory_payload["workTrees"][0])["taskFilterInventory"]
+        == _task_board(first_message)["taskFilterInventory"]
     )
+    assert "taskFilterInventory" not in inventory_payload
+    assert "taskFilterInventory" not in first_message
     assert _task_derived_slice(repeated_message) == _task_derived_slice(first_message)
     assert metrics["drained"] == 2
 
@@ -1135,7 +1142,8 @@ def test_repeated_message_payloads_answer_every_task_read_from_one_export(
     repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert exports == [["status.any:"]]
-    assert payload["taskFilterInventory"]["openTaskCount"] == 2
+    assert _task_board(payload)["taskFilterInventory"]["openTaskCount"] == 2
+    assert "taskFilterInventory" not in payload
     assert [card["source_kind"] for card in _task_cards(payload)] == [
         "cli_task_created"
     ]
@@ -1226,9 +1234,9 @@ def test_task_mutation_advances_the_board_a_team_wake_reuses(tmp_path, monkeypat
     woken = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert (reads_before_mutation, reads_after_mutation, len(reads)) == (1, 2, 2)
-    assert empty["taskFilterInventory"]["openTaskCount"] == 0
+    assert _task_board(empty)["taskFilterInventory"]["openTaskCount"] == 0
     assert _task_derived_slice(repeated) == _task_derived_slice(empty)
-    assert mutated["taskFilterInventory"]["openTaskCount"] == 1
+    assert _task_board(mutated)["taskFilterInventory"]["openTaskCount"] == 1
     assert [card["display_text"] for card in _task_cards(mutated)] == [
         "Task capture: Cross a real mutation onto the board (serve.latency)"
     ]
