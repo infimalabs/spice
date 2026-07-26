@@ -646,6 +646,48 @@ def test_a_nack_whose_only_body_is_a_directive_is_not_honored(tmp_path):
     assert extract_task_batch_lines_from_text(text) == [_TASK_DIRECTIVE]
 
 
+_SUPPRESSED_DIRECTIVE_SHAPES = {
+    "fenced": "Use this form:\n```\n{directive}\n```\nNothing was captured.",
+    "indented": "Use this form:\n\n    {directive}\n\nNothing was captured.",
+    "quoted": "They wrote:\n> {directive}\nNothing was captured.",
+    "source-context": "spice/serve/taskdirectives.py:88: {directive}",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_SUPPRESSED_DIRECTIVE_SHAPES))
+def test_a_directive_the_supervisor_suppresses_renders_no_card(shape, tmp_path):
+    """Serve calls a line a directive exactly when the supervisor would.
+
+    Serve recognized directives with its own line walk, so a TASK line shown
+    inside a fence or an indented block — prose documenting the form rather
+    than asking for a task — rendered a card for a capture that would never
+    happen, and rewrote the line to a summary that destroyed the example it
+    was quoting. The quoted and source-context shapes already agreed by
+    accident, because their prefix survives into the strip; comparing every
+    shape against the supervisor's own reading makes the agreement principled
+    instead of coincidental.
+    """
+    text = _SUPPRESSED_DIRECTIVE_SHAPES[shape].format(directive=_TASK_DIRECTIVE)
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert extract_task_batch_lines_from_text(text) == []
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert _TASK_DIRECTIVE in payload["display_text"]
+
+
 @pytest.mark.parametrize(
     ("text", "expected", "expected_dispositions"),
     [

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
-from spice.mail.ackgrammar import split_keyed_response
+from spice.mail.ackgrammar import iter_control_lines, split_keyed_response
 from spice.transcript.events import (
     AssistantText,
     CommandExecution,
@@ -358,8 +358,12 @@ def _mask_directives(text: str) -> tuple[str, dict[str, _Directive]]:
         marker_prefix = f"\0{marker_prefix}"
     masked: list[str] = []
     directives: dict[str, _Directive] = {}
-    for line in text.splitlines():
-        directive_kind = _directive_kind(line)
+    # A directive that is only being shown -- fenced, quoted, indented, or in
+    # rendered source context -- must survive as prose. Masking it here would
+    # strip it to a marker, and every reader downstream would then see a bare
+    # directive with no way to tell it was an example.
+    for line, suppressed in iter_control_lines(text):
+        directive_kind = None if suppressed else _directive_kind(line)
         if directive_kind is None:
             masked.append(line)
             continue

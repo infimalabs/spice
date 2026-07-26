@@ -9,8 +9,10 @@ summaries used by the message builder.
 from __future__ import annotations
 
 import html
+from collections.abc import Iterator
 from typing import Any
 
+from spice.mail.ackgrammar import iter_control_lines
 from spice.serve.markdown import render_message_html
 
 _TASK_DIRECTIVE_TOKEN = "TASK"
@@ -57,8 +59,7 @@ def _render_message_html_with_task_directives(
             )
         directive_run = []
 
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        directive = _task_directive_from_line(line)
+    for line, directive in _iter_directive_lines(text):
         if directive is None:
             flush_directives()
             pending.append(line)
@@ -70,19 +71,29 @@ def _render_message_html_with_task_directives(
     return "".join(rendered)
 
 
+def _iter_directive_lines(text: str) -> Iterator[tuple[str, dict[str, Any] | None]]:
+    """Pair each line with its directive, or None when the line does not act.
+
+    Suppression comes from the mail grammar, so a directive that is merely
+    being shown -- fenced, quoted, indented, or carried in rendered source
+    context -- reads as prose here exactly as it does to the supervisor that
+    would otherwise capture it. Sharing the walk is what keeps a card from
+    appearing for a task nothing will create.
+    """
+    for line, suppressed in iter_control_lines(text):
+        yield line, None if suppressed else _task_directive_from_line(line)
+
+
 def _display_text_with_task_directives(text: str) -> str:
-    lines: list[str] = []
-    for line in text.splitlines():
-        directive = _task_directive_from_line(line)
-        if directive is None:
-            lines.append(line)
-        else:
-            lines.append(_task_directive_summary(directive))
+    lines = [
+        line if directive is None else _task_directive_summary(directive)
+        for line, directive in _iter_directive_lines(text)
+    ]
     return "\n".join(lines).strip()
 
 
 def _task_directive_count(text: str) -> int:
-    return sum(1 for line in text.splitlines() if _task_directive_from_line(line))
+    return sum(1 for _line, directive in _iter_directive_lines(text) if directive)
 
 
 def _task_directive_from_line(line: str) -> dict[str, Any] | None:
