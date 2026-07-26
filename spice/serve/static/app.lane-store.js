@@ -21,6 +21,8 @@ const LANE_CHROME_FACETS = Object.freeze(
   Object.keys(LANE_CHROME_FACET_AUTHORITIES),
 );
 
+const LANE_CHROME_EPOCH_RUNS = /\d+|\D+/g;
+
 class ServeLaneStore {
   #targets = [];
   #targetById = new Map();
@@ -589,8 +591,30 @@ function laneChromeFacetOrder(facet) {
 // while inside one epoch a lower revision is always a redelivery.
 function isNewerLaneChromeOrder(order, previous) {
   if (!previous) return true;
-  if (order.epoch !== previous.epoch) return order.epoch > previous.epoch;
+  if (order.epoch !== previous.epoch)
+    return compareLaneChromeEpoch(order.epoch, previous.epoch) > 0;
   return order.revision > previous.revision;
+}
+
+// Natural order over the epoch: digit runs compare as numbers so generation 10
+// supersedes generation 9, and the text around them compares as text so a
+// prefixed label still groups. Zero-padded fields -- an ISO instant, say --
+// order identically under both rules, so this only ever rescues the encodings
+// plain collation would invert.
+function compareLaneChromeEpoch(epoch, other) {
+  const runs = String(epoch).match(LANE_CHROME_EPOCH_RUNS) || [];
+  const otherRuns = String(other).match(LANE_CHROME_EPOCH_RUNS) || [];
+  for (let index = 0; index < Math.min(runs.length, otherRuns.length); index++) {
+    const run = runs[index];
+    const otherRun = otherRuns[index];
+    const numeric = /^\d/.test(run) && /^\d/.test(otherRun);
+    if (numeric && Number(run) !== Number(otherRun))
+      return Number(run) < Number(otherRun) ? -1 : 1;
+    if (!numeric && run !== otherRun) return run < otherRun ? -1 : 1;
+  }
+  if (runs.length !== otherRuns.length)
+    return runs.length < otherRuns.length ? -1 : 1;
+  return 0;
 }
 
 function sameLaneChromeValue(value, other) {
