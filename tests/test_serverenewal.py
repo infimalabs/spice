@@ -24,7 +24,6 @@ from spice.serve import agentapi, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
-from spice.serve.lifecycle import start_lifecycle_reconciler
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.workroutes import (
     work_tree_send_accepted_response_payload,
@@ -321,8 +320,6 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
-    # Active-mode Serve owns the reconciler every lane decision is submitted to.
-    start_lifecycle_reconciler(state)
     return state
 
 
