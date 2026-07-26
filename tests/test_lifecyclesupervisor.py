@@ -20,9 +20,9 @@ from spice.agent.driver import (
 from spice.errors import SpiceError
 from spice.tasks import claimstate
 from tests.test_lifecyclehelpers import (
-    FakeProcess as _FakeProcess,
-    FakeThread as _FakeThread,
-    status as _status,
+    FakeProcess,
+    FakeThread,
+    status,
 )
 
 SUPERVISOR_PID = 3333
@@ -42,8 +42,8 @@ def _git_worktree_tmp_path(request, tmp_path):
 def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     log_path = tmp_path / "supervisor.log"
     skill_path = (tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH).resolve()
-    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=5)
-    thread = _FakeThread()
+    process = FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=5)
+    thread = FakeThread()
     side_events: list[tuple[str, object]] = []
     spawned: list[dict[str, object]] = []
     thread_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -114,13 +114,13 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
 
 def test_run_agent_supervisor_records_launch_outcome_under_fakes(tmp_path, monkeypatch):
     log_path = tmp_path / "supervisor.log"
-    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=5)
+    process = FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=5)
     thread_id = "cccccccccccccccccccccccccccccccc"
     monkeypatch.setattr(lifecycle, "agent_environment", lambda repo_root: {"ENV": "1"})
     monkeypatch.setattr(
         lifecycle,
         "spawn_supervised_agent",
-        lambda command, *, cwd, log_path, env: (process, _FakeThread()),
+        lambda command, *, cwd, log_path, env: (process, FakeThread()),
     )
     monkeypatch.setattr(
         lifecycle,
@@ -324,7 +324,7 @@ def test_ensure_agent_automatic_refuses_while_explicit_start_is_granted(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
-    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: _status())
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: status())
     for index in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD):
         lifecycle.record_launch_outcome(tmp_path, _rapid_death(time.time() - index))
     journal = lifecycle.read_launch_outcomes(tmp_path)
@@ -348,7 +348,7 @@ def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
     renewals: list[tuple[Path, str, Path]] = []
     nudges: list[tuple[Path, str, Path]] = []
     stop = _StopAfterOneIteration()
-    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=None)
+    process = FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=None)
     # A renewal costs real wall clock on a loaded host. The beat is paced from
     # its own start, so that cost comes out of the idle budget rather than
     # being added on top of it.
@@ -597,7 +597,7 @@ def test_require_supervisor_started_accepts_thread_settled_log_path(
         "process_id_is_running",
         lambda pid: pid == SUPERVISED_AGENT_PID,
     )
-    process = _FakeProcess(pid=SUPERVISOR_PID, returncode=None)
+    process = FakeProcess(pid=SUPERVISOR_PID, returncode=None)
 
     lifecycle.require_supervisor_started(process, repo_root=tmp_path, log_path=log_path)
     assert process.wait_calls == 0
@@ -613,7 +613,7 @@ def test_require_started_process_distinguishes_codex_credit_failure(
         "or try again at 4:36 PM.\n",
         encoding="utf-8",
     )
-    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=1)
+    process = FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=1)
 
     monkeypatch.setattr(lifecycle, "STARTUP_GRACE_SECONDS", 0)
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CODEX_DRIVER)

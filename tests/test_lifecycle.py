@@ -39,8 +39,8 @@ from spice.paths import git_dir
 from spice.process import tool as processtool
 from spice.tasks import claimstate
 from tests.test_lifecyclehelpers import (
-    FakeProcess as _FakeProcess,
-    status as _status,
+    FakeProcess,
+    status,
 )
 
 DIRECT_AGENT_PID = 2222
@@ -208,7 +208,7 @@ def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monke
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(),
+        lambda *_args, **_kwargs: status(),
     )
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
@@ -261,7 +261,7 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(thread_id=status_thread[0]),
+        lambda *_args, **_kwargs: status(thread_id=status_thread[0]),
     )
 
     started = lifecycle.ensure_agent(
@@ -305,7 +305,7 @@ def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(),
+        lambda *_args, **_kwargs: status(),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
 
@@ -330,7 +330,7 @@ def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(),
+        lambda *_args, **_kwargs: status(),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     edit.set_scope_section(
@@ -349,7 +349,7 @@ def test_ensure_agent_applies_phase_model_for_claimed_task(tmp_path, monkeypatch
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(thread_id="claimed-thread"),
+        lambda *_args, **_kwargs: status(thread_id="claimed-thread"),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     monkeypatch.setattr(
@@ -376,7 +376,7 @@ def test_ensure_agent_falls_back_when_claimed_phase_is_unmapped(tmp_path, monkey
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(thread_id="claimed-thread"),
+        lambda *_args, **_kwargs: status(thread_id="claimed-thread"),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     monkeypatch.setattr(claimstate, "active_claim_phase", lambda actor: "todo")
@@ -396,7 +396,7 @@ def test_ensure_agent_skips_phase_lookup_without_a_thread_id(tmp_path, monkeypat
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
-        lambda *_args, **_kwargs: _status(),
+        lambda *_args, **_kwargs: status(),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
 
@@ -519,7 +519,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     tmp_path, monkeypatch
 ):
     log_path = tmp_path / "agent.log"
-    process = _FakeProcess(pid=DIRECT_AGENT_PID, returncode=None)
+    process = FakeProcess(pid=DIRECT_AGENT_PID, returncode=None)
     spawned: list[tuple[list[str], object, object]] = []
     reaped: list[int] = []
     events: list[str] = []
@@ -592,7 +592,7 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(
     tmp_path, monkeypatch, action
 ):
     log_path = tmp_path / "supervised.log"
-    process = _FakeProcess(pid=SUPERVISOR_PID, returncode=None)
+    process = FakeProcess(pid=SUPERVISOR_PID, returncode=None)
     spawned: list[dict[str, object]] = []
     required: list[tuple[int, object, object]] = []
     reaped: list[int] = []
@@ -652,7 +652,7 @@ def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatc
     log_path = tmp_path / "supervised.log"
     spawned: list[dict[str, object]] = []
 
-    class FakePopen(_FakeProcess):
+    class FakePopen(FakeProcess):
         def __init__(self, command, **kwargs) -> None:
             super().__init__(pid=SUPERVISOR_PID, returncode=None)
             spawned.append({"command": command, **kwargs})
@@ -697,7 +697,7 @@ def test_supervisor_command_carries_the_launch_claim_to_the_supervisor(
     # Built before Popen is faked: assembling the parser shells out to git.
     parser = build_parser()
 
-    class FakePopen(_FakeProcess):
+    class FakePopen(FakeProcess):
         def __init__(self, command, **_kwargs) -> None:
             super().__init__(pid=SUPERVISOR_PID, returncode=None)
             spawned.append(command)
