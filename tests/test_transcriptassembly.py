@@ -15,7 +15,6 @@ from spice.transcript.assembly import (
     AssembledMessageReducer,
     DirectiveKind,
     SpanKind,
-    strip_directive_lines,
 )
 from spice.transcript.events import (
     AssistantText,
@@ -203,15 +202,16 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "kinds", "expected"),
+    ("text", "directive_kind", "directive_text", "prose"),
     [
         (
             (
                 'shipped\n::git-commit{"sha":"abc"}\n'
                 '::Git-commit{"sha":"visible"}\ncontinuing'
             ),
-            {DirectiveKind.APP},
-            'shipped\n::Git-commit{"sha":"visible"}\ncontinuing',
+            DirectiveKind.APP,
+            '::git-commit{"sha":"abc"}',
+            ["shipped", '::Git-commit{"sha":"visible"}\ncontinuing'],
         ),
         (
             (
@@ -221,18 +221,33 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
                 "TASK title=Missing project\n"
                 "continuing"
             ),
-            {DirectiveKind.TASK},
-            "captured\nTASK title=Missing project\ncontinuing",
+            DirectiveKind.TASK,
+            "TASK title=Follow up | project=session.transcript | acceptance=Tracked",
+            ["captured", "TASK title=Missing project\ncontinuing"],
         ),
     ],
-    ids=["former-app-stripper", "former-task-stripper"],
+    ids=["app-directive", "task-directive"],
 )
-def test_shared_directive_stripper_matches_recorded_outputs(
+def test_a_line_the_grammar_rejects_stays_prose(
     text: str,
-    kinds: set[DirectiveKind],
-    expected: str,
+    directive_kind: DirectiveKind,
+    directive_text: str,
+    prose: list[str],
 ) -> None:
-    assert strip_directive_lines(text, kinds=kinds) == expected
+    """Near-miss directive lines are prose, not silently swallowed directives.
+
+    Each case pairs a well-formed directive with one the grammar rejects for a
+    single reason -- a capitalised app verb, a TASK line missing its required
+    project -- so a grammar that loosened into matching on the prefix alone
+    would take an operator's own words out of the message they wrote.
+    """
+    spans = _assemble([AssistantText(at=_at(1), text=text, final=False)])[0].spans
+
+    directives = [span for span in spans if span.kind is SpanKind.DIRECTIVE]
+    assert [(span.directive_kind, span.text) for span in directives] == [
+        (directive_kind, directive_text)
+    ]
+    assert [span.text for span in spans if span.kind is SpanKind.PROSE] == prose
 
 
 def _at(line: int) -> Provenance:

@@ -22,7 +22,7 @@ from typing import Any, BinaryIO, Literal
 
 from spice.agent.driver import AgentDriver
 from spice.transcript.decode import decode_parsed_line
-from spice.transcript.events import UNLOCATED_SOURCE, AssistantText, TranscriptEvent
+from spice.transcript.events import TranscriptEvent
 from spice.transcript.timestamps import normalize_timestamp
 
 REVERSE_WINDOW_BYTES = 8 * 1024 * 1024
@@ -33,11 +33,12 @@ __all__ = [
     "TranscriptCursor",
     "TranscriptEventRead",
     "TranscriptEventReader",
+    "TranscriptFileIdentity",
     "cursor_offset",
     "locked_cursor",
     "offset_after_line",
-    "record_assistant_text",
     "render_cursor",
+    "transcript_file_identity",
     "transcript_size",
 ]
 
@@ -49,9 +50,6 @@ class TranscriptLine:
     raw: str
     offset: int
     parsed: dict[str, Any] | None
-
-
-LineConsumer = Callable[[TranscriptLine], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +82,7 @@ class TranscriptEventRead:
     start_offset: int
     end_offset: int
     file_size: int
+    file_identity: TranscriptFileIdentity | None = None
     error: str | None = None
 
     def dispatch(self, *consumers: EventConsumer) -> None:
@@ -177,6 +176,7 @@ class TranscriptEventReader:
             start_offset=read.start_offset,
             end_offset=read.end_offset,
             file_size=read.file_size,
+            file_identity=read.file_identity,
             error=read.error,
         )
 
@@ -191,46 +191,7 @@ class TranscriptCursor:
     lock: RLock = field(default_factory=RLock, repr=False)
 
 
-def dispatch_records(
-    records: tuple[TranscriptLine, ...], *consumers: LineConsumer
-) -> None:
-    """Hand every parsed record to each consumer once, in source order."""
-    for record in records:
-        for consumer in consumers:
-            consumer(record)
-
-
 EventConsumer = Callable[[TranscriptEvent], None]
-
-
-def record_assistant_text(
-    record: TranscriptLine,
-    driver: AgentDriver,
-    *,
-    source: str = UNLOCATED_SOURCE,
-    source_actor: str | None = None,
-) -> tuple[AssistantText, ...]:
-    """The typed prose one already-read record carries, in source order.
-
-    The driver's line hint runs first, so the overwhelming majority of records --
-    tool calls and their results -- cost a substring search instead of a decode.
-    The hint is permissive by contract, so a record it admits still has to
-    survive the crossing. Skipping it changes nothing but the work: a record the
-    hint rejects carries no prose for the decoder to find either.
-
-    Consumers above the engine ask for facts, never for the line the hint reads.
-    """
-    if not driver.line_may_carry_assistant_text(record.raw):
-        return ()
-    events = decode_parsed_line(
-        record.parsed,
-        driver,
-        source=source,
-        line=record.offset,
-        offset=record.offset,
-        source_actor=source_actor,
-    )
-    return tuple(event for event in events if isinstance(event, AssistantText))
 
 
 @contextmanager
@@ -429,20 +390,6 @@ def _record_timestamp(record: TranscriptLine) -> str | None:
     if record.parsed is None:
         return None
     return normalize_timestamp(record.parsed.get("timestamp"))
-
-
-def read_line(path: Path, offset: int) -> TranscriptLine | None:
-    """Read and parse the line beginning at an exact cursor offset."""
-    try:
-        with _open_binary(path) as handle:
-            file_size = _handle_size(handle)
-            if offset < 0 or offset >= file_size:
-                return None
-            handle.seek(offset)
-            raw = handle.readline()
-            return _line_record(offset, raw) if raw else None
-    except OSError:
-        return None
 
 
 def offset_after_line(path: Path, offset: int) -> int:

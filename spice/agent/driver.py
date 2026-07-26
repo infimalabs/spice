@@ -73,10 +73,9 @@ class PostToolHookCapability:
 class AgentDriver:
     """One agent CLI's dialect, and the only place its shape is known.
 
-    Transcript hooks and the escape hatch. Four hooks carry dialect knowledge
+    Transcript hooks and the escape hatch. Three hooks carry dialect knowledge
     across the substrate seam: `transcript_line_events` decodes a raw line into
-    typed events, `line_may_carry_assistant_text` prefilters lines before that
-    parse, `context_snapshot_fields` reads per-turn token usage, and
+    typed events, `context_snapshot_fields` reads per-turn token usage, and
     `stream_failure_fields` types a terminal stdout failure. Everything above
     the seam consumes typed events and never inspects a dialect's raw shape.
 
@@ -284,17 +283,6 @@ class AgentDriver:
                     )
                 )
         return decoded
-
-    def line_may_carry_assistant_text(self, line: str) -> bool:
-        """Could this unparsed line carry assistant prose? Cheap and permissive.
-
-        A prefilter, not a decision: an overwhelming majority of transcript lines
-        are tool calls and results that a substring test rejects without a JSON
-        parse, and the substrate calls this before parsing on the paths that only
-        want prose. False negatives silently lose prose, so a dialect that cannot
-        answer cheaply should return True and let the decoder decide.
-        """
-        return '"message"' in line and '"role":"assistant"' in line
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> ContextUsageFields | None:
         """Decode this dialect's per-turn usage fields, or None otherwise."""
@@ -943,11 +931,6 @@ class ClaudeDriver(AgentDriver):
             source=source,
             line=line,
         )
-
-    def line_may_carry_assistant_text(self, line: str) -> bool:
-        # Claude wraps the message in a typed envelope, so the outer discriminant
-        # is the cheap one; the inner role repeats on lines this must not admit.
-        return '"message"' in line and '"type":"assistant"' in line
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> ContextUsageFields | None:
         if raw.get("type") != "assistant":

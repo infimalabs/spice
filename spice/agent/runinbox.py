@@ -11,6 +11,7 @@ from typing import Any, TextIO
 
 from spice.agent.paths import agent_state_dir
 from spice.agent.sidechannelnotify import consume_side_channel_notices
+from spice.mail.feedback import SUPERVISOR_FEEDBACK_HEADING
 from spice.paths import atomic_write_json, worktree_inbox_dir
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
@@ -178,7 +179,7 @@ class AgentSideChannelNoticeInjector:
         notices = consume_side_channel_notices(self.repo_root)
         if not notices:
             return
-        self.stderr.write("Supervisor Feedback\n")
+        self.stderr.write(f"{SUPERVISOR_FEEDBACK_HEADING}\n")
         for notice in notices:
             for line in notice.splitlines():
                 self.stderr.write(f"  {line}\n")
