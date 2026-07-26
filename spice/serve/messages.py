@@ -912,33 +912,25 @@ def _source_text(spans: Sequence[ClassifiedSpan]) -> str:
 
 
 def _text_groups(spans: Sequence[ClassifiedSpan]) -> list[_TextGroup]:
-    """Every prose and keyed-response run this locus carries, in source order."""
+    """Every prose and keyed-response run this locus carries, in source order.
+
+    A span names the run it belongs to, control lines included, so a directive
+    opening a refusal stays inside that refusal instead of being read as the
+    start of some other run.
+    """
     groups: list[_TextGroup] = []
     for span in spans:
-        marker = _span_marker(span, groups[-1] if groups else None)
-        if marker is None:
+        if span.kind not in _TEXT_SPAN_KINDS:
             continue
+        marker = (span.kind, span.keys)
         if not groups or groups[-1].marker != marker:
-            groups.append(_TextGroup(kind=marker[0], keys=marker[1]))
+            groups.append(_TextGroup(kind=span.kind, keys=span.keys))
         _absorb_span(groups[-1], span)
     return [group for group in groups if group.body or group.spoken]
 
 
-def _span_marker(
-    span: ClassifiedSpan, current: _TextGroup | None
-) -> tuple[SpanKind, tuple[str, ...]] | None:
-    """Which run a span belongs to: its own polarity, or the run it interrupts."""
-    if span.kind in _TEXT_SPAN_KINDS:
-        return (span.kind, span.keys)
-    if span.kind is not SpanKind.DIRECTIVE:
-        return None
-    if current is not None and current.keys == span.keys:
-        return current.marker
-    return (SpanKind.PROSE if not span.keys else SpanKind.ACK, span.keys)
-
-
 def _absorb_span(group: _TextGroup, span: ClassifiedSpan) -> None:
-    if span.kind is SpanKind.DIRECTIVE:
+    if span.directive_kind is not None:
         if span.directive_kind is DirectiveKind.TASK:
             group.lines.append(span.text)
         return

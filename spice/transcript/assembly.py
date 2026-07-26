@@ -72,7 +72,6 @@ class SpanKind(StrEnum):
     PROSE = "prose"
     ACK = "ack"
     NACK = "nack"
-    DIRECTIVE = "directive"
     TOOL = "tool"
     REASONING = "reasoning"
     IMAGE = "image"
@@ -89,7 +88,14 @@ class DirectiveKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ClassifiedSpan:
-    """One ordered semantic span backed by its original typed event."""
+    """One ordered semantic span backed by its original typed event.
+
+    `kind` always names the run the span sits in, so a control line carries the
+    polarity of the response that contains it rather than a kind of its own. A
+    consumer that must re-join a run therefore reads the polarity off any of its
+    spans instead of inferring one for the lines it cannot classify.
+    `directive_kind` is what marks a span as a control line and names its family.
+    """
 
     kind: SpanKind
     at: Provenance
@@ -298,7 +304,7 @@ def _segment_spans(
         flush_pending()
         spans.append(
             ClassifiedSpan(
-                kind=SpanKind.DIRECTIVE,
+                kind=kind,
                 at=event.at,
                 event=event,
                 text=directive.text,

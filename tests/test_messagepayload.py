@@ -550,6 +550,90 @@ def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path)
     assert "Cannot comply with that." in payload["ack_segments"][0]["html"]
 
 
+_ACK_KEY = "1k4YggTX"
+_NACK_KEY = "1k4Yggrm"
+_TASK_DIRECTIVE = (
+    "TASK title=Follow up | project=session.transcript | acceptance=Tracked"
+)
+_APP_DIRECTIVE = '::git-commit{"sha":"abc"}'
+
+
+@pytest.mark.parametrize(
+    ("text", "expected", "expected_dispositions"),
+    [
+        pytest.param(
+            f"NACK {_NACK_KEY}:\n{_TASK_DIRECTIVE}\ncannot comply with that.",
+            {
+                "ack_count": 0,
+                "ack_keys": [_NACK_KEY],
+                "nack_count": 1,
+                "nack_keys": [_NACK_KEY],
+                "task_card_count": 1,
+            },
+            ["refused"],
+            id="nack-opens-with-task-directive",
+        ),
+        pytest.param(
+            f"NACK {_NACK_KEY}:\n{_APP_DIRECTIVE}\ncannot comply with that.",
+            {
+                "ack_count": 0,
+                "ack_keys": [_NACK_KEY],
+                "nack_count": 1,
+                "nack_keys": [_NACK_KEY],
+                "task_card_count": 0,
+            },
+            ["refused"],
+            id="nack-opens-with-app-directive",
+        ),
+        pytest.param(
+            f"ACK {_ACK_KEY}:\n{_TASK_DIRECTIVE}\nshipped the doctor rollup.",
+            {
+                "ack_count": 1,
+                "ack_keys": [_ACK_KEY],
+                "nack_count": 0,
+                "nack_keys": [],
+                "task_card_count": 1,
+            },
+            ["acked"],
+            id="ack-opens-with-task-directive",
+        ),
+    ],
+)
+def test_keyed_response_opening_with_a_directive_keeps_its_polarity(
+    tmp_path,
+    text: str,
+    expected: dict[str, object],
+    expected_dispositions: list[str],
+):
+    """A control line belongs to the run it sits in and cannot retint it.
+
+    Here the directive is the first thing the run classifies. While the run's
+    polarity had to be inferred for a line that carried none, a refusal that
+    captured a task first was published as an acknowledgment: one extra acked
+    segment, and a key acked and refused at once vanished from `nack_keys`.
+    Each shape stays one segment, and the task card still counts.
+    """
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+    payload = item.to_payload()
+
+    assert {field: payload[field] for field in expected} == expected
+    assert [
+        seg["disposition"] for seg in payload["ack_segments"]
+    ] == expected_dispositions
+
+
 def test_inline_task_directive_counts_multiple_task_cards(tmp_path):
     latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

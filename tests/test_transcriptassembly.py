@@ -52,9 +52,9 @@ TIMESTAMP = "2026-07-26T02:20:00.000Z"
             2,
             [
                 SpanKind.PROSE,
-                SpanKind.DIRECTIVE,
+                SpanKind.PROSE,
                 SpanKind.ACK,
-                SpanKind.DIRECTIVE,
+                SpanKind.ACK,
                 SpanKind.NACK,
                 SpanKind.TOOL,
                 SpanKind.REASONING,
@@ -69,9 +69,9 @@ TIMESTAMP = "2026-07-26T02:20:00.000Z"
             4,
             [
                 SpanKind.PROSE,
-                SpanKind.DIRECTIVE,
+                SpanKind.PROSE,
                 SpanKind.ACK,
-                SpanKind.DIRECTIVE,
+                SpanKind.ACK,
                 SpanKind.NACK,
                 SpanKind.IMAGE,
                 SpanKind.FINAL_ANSWER,
@@ -105,14 +105,27 @@ def test_driver_fixtures_reduce_identically_live_and_file_backed(
     assert len(file_messages) == expected_message_count
     spans = [span for message in file_messages for span in message.spans]
     assert [span.kind for span in spans] == expected_kinds
-    assert [span.keys for span in spans if span.kind is SpanKind.ACK] == [(ACK_KEY,)]
-    assert [span.keys for span in spans if span.kind is SpanKind.NACK] == [(NACK_KEY,)]
-    assert [
-        span.directive_kind for span in spans if span.kind is SpanKind.DIRECTIVE
-    ] == [DirectiveKind.TASK, DirectiveKind.APP]
-    assert [span.text for span in spans if span.kind is SpanKind.PROSE] == [
-        "visible preamble"
+    assert [span.keys for span in spans if span.kind is SpanKind.ACK] == [
+        (ACK_KEY,),
+        (ACK_KEY,),
     ]
+    assert [span.keys for span in spans if span.kind is SpanKind.NACK] == [(NACK_KEY,)]
+    # A control line carries the kind and keys of the run it sits in, and only
+    # `directive_kind` marks it as one, so a consumer re-joining a run reads
+    # polarity off any span rather than inferring one for the lines it skips.
+    assert [
+        (span.kind, span.keys, span.directive_kind)
+        for span in spans
+        if span.directive_kind is not None
+    ] == [
+        (SpanKind.PROSE, (), DirectiveKind.TASK),
+        (SpanKind.ACK, (ACK_KEY,), DirectiveKind.APP),
+    ]
+    assert [
+        span.text
+        for span in spans
+        if span.kind is SpanKind.PROSE and span.directive_kind is None
+    ] == ["visible preamble"]
     assert all(message.at.offset is not None for message in file_messages)
     assert all(message.at.source_actor == SOURCE_ACTOR for message in file_messages)
 
@@ -243,11 +256,15 @@ def test_a_line_the_grammar_rejects_stays_prose(
     """
     spans = _assemble([AssistantText(at=_at(1), text=text, final=False)])[0].spans
 
-    directives = [span for span in spans if span.kind is SpanKind.DIRECTIVE]
+    directives = [span for span in spans if span.directive_kind is not None]
     assert [(span.directive_kind, span.text) for span in directives] == [
         (directive_kind, directive_text)
     ]
-    assert [span.text for span in spans if span.kind is SpanKind.PROSE] == prose
+    assert [
+        span.text
+        for span in spans
+        if span.kind is SpanKind.PROSE and span.directive_kind is None
+    ] == prose
 
 
 def _at(line: int) -> Provenance:
