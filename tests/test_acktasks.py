@@ -434,7 +434,10 @@ def test_supervised_decorated_ack_and_task_headers_land_together(
         (
             f"**ACK {INBOX_KEY}:** capturing both now.\n"
             "**TASK** title=Bold header | project=task.unit | acceptance=Exists\n"
-            "- TASK title=Bulleted header | project=task.unit | acceptance=Exists"
+            "- TASK title=Bulleted header | project=task.unit | acceptance=Exists\n"
+            "1. TASK title=Ordered header | project=task.unit | acceptance=Exists\n"
+            "- [ ] TASK title=Checkbox header | project=task.unit | acceptance=Exists\n"
+            "### TASK title=Heading header | project=task.unit | acceptance=Exists"
         ),
         log,
         watchdog.MaximReminderGate(),
@@ -444,16 +447,28 @@ def test_supervised_decorated_ack_and_task_headers_land_together(
     handle_of = {row["description"]: identity.render_handle(row) for row in rows}
     route = "route_filter=skipped:task.unit:no_team"
     assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
-    assert sorted(handle_of) == ["Bold header", "Bulleted header"]
+    assert sorted(handle_of) == [
+        "Bold header",
+        "Bulleted header",
+        "Checkbox header",
+        "Heading header",
+        "Ordered header",
+    ]
     # The published handles carry the message's own order, so a reversed or
     # dropped directive shows up here even though the export order is its own.
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == [
         _ack_feedback("ack.archived", INBOX_KEY),
         supervisor_feedback_line(
             "task.created",
-            handles=[handle_of["Bold header"], handle_of["Bulleted header"]],
-            projects=["task.unit", "task.unit"],
-            routes=[route, route],
+            handles=[
+                handle_of["Bold header"],
+                handle_of["Bulleted header"],
+                handle_of["Ordered header"],
+                handle_of["Checkbox header"],
+                handle_of["Heading header"],
+            ],
+            projects=["task.unit"] * 5,
+            routes=[route] * 5,
             **{"allowed-project-stems": _allowed_project_stems()},
         ),
         _task_backlog_note_feedback(),
