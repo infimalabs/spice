@@ -91,11 +91,14 @@ Retrying the recovery command stages another complete replacement.
 `spice serve reset-projections` performs the isolated rebuild despite its
 historical command name.
 
-`spice serve teams` reports the projection store path and, per family, all six
-registered answers beside the runtime state they explain: generation, status,
-servability, source freshness, retention floor, last successful rebuild, row
-counts, and failure detail. An operator reading a bad rebuild therefore sees
-where the family comes from and what refills it without opening this document.
+`spice serve teams` prints the projection store path and, per family, its
+generation, status, servability, source freshness, retention floor, last
+successful rebuild, row counts, failure detail, rebuild entry point, and exact
+recovery action. Its `--json` form carries those fields plus the update time and
+the four registered answers too long to render on one line — source, cursor,
+horizon, and beyond horizon — so a terminal keeps one line per family while the
+machine-readable payload answers all six. An operator reading a bad rebuild
+learns what refills the family and the exact command to run either way.
 
 ## No Migration Ladder
 
@@ -167,12 +170,14 @@ authority-configured floor.
 ## Validation
 
 Executable proofs in `tests/test_serveprojection.py`,
-`tests/test_serveprojectionparity.py`, and `tests/test_teamschema.py` establish
-that:
+`tests/test_serveprojectionparity.py`, `tests/test_servediagnostics.py`, and
+`tests/test_teamschema.py` establish that:
 
 - every registered family answers all six questions, every `spice.` symbol its
   registration names resolves, and its recovery action still parses to the
   command that rebuilds exactly that family;
+- a family left stale by a failed rebuild reports all six answers beside its
+  failure detail, so the diagnosis needs nothing from this document;
 - the schema builds exactly the registered family tables plus bookkeeping, so no
   table exists that nobody registered;
 - a successful isolated rebuild serves the prior generation until one atomic
