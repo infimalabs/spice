@@ -36,6 +36,7 @@ from typing import Literal
 # reader engine, which iterates files and knows both.
 UNLOCATED_SOURCE = "<unlocated>"
 ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
+TurnBoundaryKind = Literal["started", "completed"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -130,6 +131,18 @@ class ToolOutput:
 
 
 @dataclass(slots=True, frozen=True)
+class CommandExecution:
+    """A command execution reported directly by the transcript provider."""
+
+    at: Provenance
+    command: str
+    cwd: str | None
+    exit_code: int | None
+    status: str | None
+    turn_id: str | None
+
+
+@dataclass(slots=True, frozen=True)
 class Image:
     """An image block, carried as the resolved URL consumers render.
 
@@ -170,6 +183,15 @@ class UserMessage:
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
     ) = None
+
+
+@dataclass(slots=True, frozen=True)
+class TurnBoundary:
+    """A provider-reported start or completion boundary for one turn."""
+
+    at: Provenance
+    kind: TurnBoundaryKind
+    turn_id: str | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -241,8 +263,10 @@ TranscriptEvent = (
     | Reasoning
     | ToolCall
     | ToolOutput
+    | CommandExecution
     | Image
     | UserMessage
+    | TurnBoundary
     | Compaction
     | WebSearch
     | ContextUsage

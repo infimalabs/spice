@@ -12,7 +12,7 @@ from spice.sqliteconnection import sqlite_connection
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions import records
-from spice.sessions.util import first_text
+from spice.transcript.decode import first_text
 from spice.transcript.timestamps import normalize_timestamp
 from spice.errors import SpiceError
 from spice.tasks.identity import (
