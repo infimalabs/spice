@@ -54,6 +54,7 @@ from spice.transcript.reader import (
     read_forward,
     read_line,
     read_reverse_window,
+    record_assistant_text,
     render_cursor,
     transcript_file_identity,
     transcript_size,
@@ -754,7 +755,7 @@ def _build_message(
     if event.get("type") != "response_item":
         return None
     payload = event.get("payload") or {}
-    text = extract_assistant_text(record.raw, driver)
+    text = extract_assistant_text(record_assistant_text(record, driver))
     source_kind = "assistant_text"
     if text is None:
         text = assistant_image_markdown(
