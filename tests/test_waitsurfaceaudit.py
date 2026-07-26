@@ -24,6 +24,11 @@ BLOCKING_METHODS = {
     "sendall",
     "serve_forever",
     "wait",
+    # `Condition.wait_for` blocks exactly as `wait` does. Scanning only `wait`
+    # let a signal class that wraps its condition in a named helper carry the
+    # blocking call out of view: the audit went on naming the caller, which no
+    # longer waits, while the wait itself sat unclassified.
+    "wait_for",
 }
 LOCK_FACTORIES = {"Lock", "RLock", "threading.Lock", "threading.RLock"}
 DOC_ANCHOR_RE = re.compile(
@@ -56,6 +61,29 @@ def test_blocking_surface_audit_rows_name_classification_and_actionable_owner():
     actionable_rows = [row for row in rows if "actionable" in row.lower()]
     assert all(
         re.search(r"`[A-Z][A-Z0-9]*-1k[A-Za-z0-9]+`", row) for row in actionable_rows
+    )
+
+
+def test_blocking_surface_audit_anchors_name_calls_the_scan_still_finds():
+    """Every documented anchor still points at a call this tree makes.
+
+    The coverage test above only asks that each discovered call site be
+    documented, so drift the other way is silent: a row can go on naming a
+    call that was renamed, moved into a helper, or deleted outright and stay
+    green forever, because nothing discovers it to compare against. That is
+    how the audit came to carry four anchors for call sites the tree no
+    longer had. A surface the scan cannot see is still describable here --
+    the rows carry prose for those -- but an anchor is the machine-checked
+    form and has to name something real.
+    """
+    discovered = _production_blocking_call_sites()
+    documented = _documented_call_sites(AUDIT_PATH.read_text(encoding="utf-8"))
+    stale = sorted(documented - discovered)
+
+    assert discovered.issuperset(documented), (
+        "audit anchor(s) name a call this tree no longer makes; re-anchor each "
+        "to the surface that exists now, or drop it and leave the description "
+        f"as prose, in {AUDIT_PATH.relative_to(PROJECT_ROOT)}: {stale}"
     )
 
 
