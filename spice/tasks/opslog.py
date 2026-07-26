@@ -154,12 +154,14 @@ def latest_operation_epoch() -> float | None:
     timestamps, because id is the order the task plane committed in and the
     stamps are text whose fractional digits need not all be the same width.
     Operations carrying no stamp — the UndoPoint that separates transactions —
-    are skipped rather than ending the search, so an empty log and a log whose
-    tail is a separator both answer None.
+    are skipped rather than ending the search, so a log whose tail is a
+    separator still answers the transaction that separator closed. None is for
+    a log holding no stamped operation at all.
 
     None is also the answer for a stamp this cannot turn into an instant. A
-    zoneless one is refused rather than read as local time: a freshness a
-    reader compares against now is worth omitting instead of guessing by hours.
+    zoneless one is refused rather than read as local time, which would date
+    the authority differently on every machine that read it; a freshness a
+    reader compares against now is worth omitting instead of guessing.
     """
     with connect() as log:
         row = log.connection.execute(
