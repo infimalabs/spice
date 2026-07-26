@@ -858,7 +858,7 @@ def test_task_distribution_metrics_route_projects_per_agent_share(tmp_path):
     assert endpoint_payload["active"] == 4
 
 
-def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
+def test_message_image_route_accepts_zero_image_index(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
@@ -892,7 +892,7 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
     app._ServeHandler._send_message_image(
         handler,
         target,
-        {"offset": ["0"], "item": ["0"]},
+        {"offset": ["0"], "image": ["0"]},
     )
 
     assert handler.status == HTTPStatus.OK

@@ -46,6 +46,8 @@ from spice.transcript.events import (
     ContextUsage,
     ContextUsageFields,
     LineStamper,
+    Provenance,
+    StreamFailure,
     TokenUsage,
     TranscriptEvent,
 )
@@ -72,12 +74,12 @@ class PostToolHookCapability:
 class AgentDriver:
     """One agent CLI's dialect, and the only place its shape is known.
 
-    Transcript hooks and the escape hatch. Four hooks carry dialect knowledge
+    Transcript hooks and the escape hatch. Three hooks carry dialect knowledge
     across the substrate seam: `transcript_line_events` decodes a raw line into
     typed events, `line_may_carry_assistant_text` prefilters lines before that
-    parse, `context_snapshot_fields` reads per-turn token usage, and
-    `stream_failure_fields` types a terminal stdout failure. Everything above
-    the seam consumes typed events and never inspects a dialect's raw shape.
+    parse, and `context_snapshot_fields` reads per-turn token usage. Everything
+    above the seam consumes typed events and never inspects a dialect's raw
+    shape.
 
     A hook is the escape hatch for a genuinely dialect-local signal, and the bar
     is deliberately high: the fact must exist in one dialect's wire format and
@@ -305,19 +307,6 @@ class AgentDriver:
             )
             else ""
         )
-
-    def stream_failure_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Terminal failure fields carried by one stdout stream line, or None.
-
-        A driver whose CLI reports account-level rejections structurally (an
-        error-flagged result event, a rate-limit event with a reset horizon)
-        surfaces them here so launch classification does not depend on the
-        human-facing message text. `kind` names the failure family in the
-        `process_failure_kind` vocabulary; `reset_epoch` carries the source
-        retry horizon when the stream includes one.
-        """
-        del raw
-        return None
 
 
 PLAYWRIGHT_MCP_SERVER_NAME = defaults.string("agent", "playwright_mcp", "server_name")
@@ -922,12 +911,51 @@ class ClaudeDriver(AgentDriver):
     def transcript_line_events(
         self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
     ) -> list[TranscriptEvent]:
-        return self._with_context_usage(
+        events = self._with_context_usage(
             raw,
             claude_line_events(raw, source=source, line=line),
             source=source,
             line=line,
         )
+        failure = self._stream_failure_event(
+            raw, source=source, line=line, ordinal=len(events)
+        )
+        return [*events, failure] if failure is not None else events
+
+    def _stream_failure_event(
+        self, raw: dict[str, Any], *, source: str, line: int, ordinal: int
+    ) -> StreamFailure | None:
+        # A spend/usage-limit rejection does not fail startup: the CLI starts,
+        # emits a synthetic assistant message, and exits cleanly. The stream's
+        # structural signals — a rejected rate_limit_event (with the reset
+        # horizon) and an error-flagged result with HTTP 429 — are the
+        # reliable carriers; the text patterns back them up for result shapes
+        # without the structured fields.
+        timestamp = raw.get("timestamp")
+        at = Provenance(
+            source=source,
+            line=line,
+            ordinal=ordinal,
+            timestamp=timestamp if isinstance(timestamp, str) else None,
+        )
+        if raw.get("type") == "rate_limit_event":
+            info = raw.get("rate_limit_info")
+            if not isinstance(info, dict) or info.get("status") != "rejected":
+                return None
+            return StreamFailure(
+                at=at,
+                kind="out-of-credits",
+                reset_epoch=_as_int(info.get("resetsAt"), None),
+            )
+        if raw.get("type") != "result" or not raw.get("is_error"):
+            return None
+        if _as_int(raw.get("api_error_status"), None) == RATE_LIMIT_HTTP_STATUS:
+            return StreamFailure(at=at, kind="out-of-credits")
+        result_text = raw.get("result")
+        kind = self.process_failure_kind(
+            exit_code=0, output=result_text if isinstance(result_text, str) else ""
+        )
+        return StreamFailure(at=at, kind=kind) if kind else None
 
     def line_may_carry_assistant_text(self, line: str) -> bool:
         # Claude wraps the message in a typed envelope, so the outer discriminant
@@ -966,32 +994,6 @@ class ClaudeDriver(AgentDriver):
             # drifting up to a larger (1M) API context.
             model_context_window=self.default_context_window or None,
         )
-
-    def stream_failure_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        # A spend/usage-limit rejection does not fail startup: the CLI starts,
-        # emits a synthetic assistant message, and exits cleanly. The stream's
-        # structural signals — a rejected rate_limit_event (with the reset
-        # horizon) and an error-flagged result with HTTP 429 — are the
-        # reliable carriers; the text patterns back them up for result shapes
-        # without the structured fields.
-        if raw.get("type") == "rate_limit_event":
-            info = raw.get("rate_limit_info")
-            if isinstance(info, dict) and info.get("status") == "rejected":
-                fields: dict[str, Any] = {"kind": "out-of-credits"}
-                reset_epoch = _as_int(info.get("resetsAt"), None)
-                if reset_epoch is not None:
-                    fields["reset_epoch"] = reset_epoch
-                return fields
-            return None
-        if raw.get("type") != "result" or not raw.get("is_error"):
-            return None
-        if _as_int(raw.get("api_error_status"), None) == RATE_LIMIT_HTTP_STATUS:
-            return {"kind": "out-of-credits"}
-        result_text = raw.get("result")
-        kind = self.process_failure_kind(
-            exit_code=0, output=result_text if isinstance(result_text, str) else ""
-        )
-        return {"kind": kind} if kind else None
 
 
 def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:

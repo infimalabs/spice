@@ -18,6 +18,7 @@ from spice.transcript.events import (
     LineStamper,
     Provenance,
     Reasoning,
+    StreamFailure,
     TokenUsage,
     ToolCall,
     ToolOutput,
@@ -84,6 +85,7 @@ def _one_of_every_kind(at: Provenance) -> list[object]:
             cumulative=None,
             model_context_window=258_400,
         ),
+        StreamFailure(at=at, kind="out-of-credits", reset_epoch=1784280000),
         Unknown(at=at, reason="malformed json", raw_type=None),
     ]
 

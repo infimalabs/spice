@@ -256,6 +256,24 @@ class ContextUsage:
 
 
 @dataclass(slots=True, frozen=True)
+class StreamFailure:
+    """A terminal account-level rejection the agent CLI reported structurally.
+
+    A spend or usage limit does not fail a launch loudly: the CLI starts, says
+    so in prose, and exits cleanly. The structural signal on the stream — a
+    rejected rate-limit line, an error-flagged result — is what launch
+    classification reads, so it never has to match human-facing message text.
+    `kind` names the failure family in the driver's `process_failure_kind`
+    vocabulary, and `reset_epoch` carries the retry horizon when the source
+    named one.
+    """
+
+    at: Provenance
+    kind: str
+    reset_epoch: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class Unknown:
     """A line or block the decoder could not type, kept rather than dropped.
 
@@ -281,6 +299,7 @@ TranscriptEvent = (
     | Compaction
     | WebSearch
     | ContextUsage
+    | StreamFailure
     | Unknown
 )
 
