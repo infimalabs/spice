@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,15 @@ TASK_FILTERS = ("serve.ui", "task.review")
 # other canonical family in this table publishes.
 TASK_OPERATION_EPOCH = 1785095505.29108
 TEAM_ID = "team-main"
+
+
+def test_operator_projection_docs_use_the_registered_recovery_command():
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    command = AGENT_ACTIVITY.recovery_action.rsplit(" ", 1)[0]
+
+    assert f"Run `{command}`" in readme
+    assert "`spiceprojections.sqlite3`" in readme
+    assert "`spiceteams.sqlite3`" in readme
 
 
 def _record_identity(store: ServeTeamStore) -> None:

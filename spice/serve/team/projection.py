@@ -359,7 +359,8 @@ class ServeProjectionStore:
                 "(family, status, servable, last_successful_rebuild, freshness, "
                 "retention_floor, detail, recovery_action) "
                 "VALUES (?, ?, 1, NULL, NULL, NULL, '', ?) "
-                "ON CONFLICT(family) DO NOTHING",
+                "ON CONFLICT(family) DO UPDATE SET "
+                "recovery_action = excluded.recovery_action",
                 (
                     family.name,
                     PROJECTION_STATUS_READY,

@@ -147,6 +147,24 @@ def test_every_family_registers_a_replay_contract_that_resolves():
         assert recovery.families == [family.name]
 
 
+def test_schema_sync_refreshes_persisted_recovery_actions(tmp_path):
+    projections = _store(tmp_path).projections
+    projections.family_states()
+    with sqlite_connection(projections.path) as connection:
+        connection.execute(
+            "UPDATE projection_status SET recovery_action = ? WHERE family = ?",
+            (
+                "spice serve reset-projections agentActivity",
+                AGENT_ACTIVITY.name,
+            ),
+        )
+    _reopen(projections)
+
+    assert projections.family_states()[0].recovery_action == (
+        AGENT_ACTIVITY.recovery_action
+    )
+
+
 def test_the_schema_builds_exactly_the_registered_families():
     """A table nobody registered would be a fact with no way back."""
     probe = sqlite3.connect(":memory:")
