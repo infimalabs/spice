@@ -27,6 +27,8 @@ from spice.serve.observer import (
     OBSERVER_PRIMARY_PRECEDENCE,
     detect_observer_primary,
 )
+from spice.serve.team.projection import ServeProjectionStore
+from spice.serve.team.store import ServeTeamStore
 
 
 def configure_serve_parser(subparsers: Any) -> None:
@@ -110,6 +112,25 @@ def configure_serve_parser(subparsers: Any) -> None:
         help="Emit machine-readable diagnostics JSON.",
     )
     teams.set_defaults(func=run_serve_team_diagnostics)
+
+    reset_projections = actions.add_parser(
+        "reset-projections",
+        help=(
+            "Empty rebuildable Serve projections so the next pass replays them "
+            "from their native facts."
+        ),
+        recovery_examples=(
+            "spice serve reset-projections",
+            "spice serve reset-projections agentActivity",
+        ),
+    )
+    reset_projections.add_argument(
+        "families",
+        nargs="*",
+        metavar="FAMILY",
+        help="Family names to empty. Default: every registered family.",
+    )
+    reset_projections.set_defaults(func=run_serve_reset_projections)
 
     browser_artifact = actions.add_parser(
         "browser-artifact-path",
@@ -225,6 +246,35 @@ def run_serve_team_diagnostics(args: Any) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(render_team_diagnostics(payload))
+    return 0
+
+
+def run_serve_reset_projections(args: Any) -> int:
+    """Empty rebuildable families and report the build each reader now sees.
+
+    Nothing here is a fact of record, so emptying is the whole operation: the
+    next observation pass resumes each family from its first byte and refills
+    it. The printed rebuild entry point says what does the refilling.
+    """
+    apply_serve_backends(args)
+    return _reset_projection_families(ServeTeamStore().projections, args.families)
+
+
+def _reset_projection_families(
+    projections: ServeProjectionStore, families: list[str]
+) -> int:
+    emptied = {family.name for family in projections.reset(*families)}
+    for state in projections.family_states():
+        if state.family.name not in emptied:
+            continue
+        counts = " ".join(
+            f"{table}={count}" for table, count in sorted(state.row_counts.items())
+        )
+        print(
+            f"serve projections reset {state.family.name} "
+            f"generation={state.generation} {counts} "
+            f"rebuild={state.family.rebuild}"
+        )
     return 0
 
 

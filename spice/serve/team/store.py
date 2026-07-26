@@ -61,6 +61,11 @@ from spice.serve.team.metrics import (
     TaskStallState as TaskStallState,
     TeamMetricStoreMixin,
 )
+from spice.serve.team.projection import (
+    PROJECTION_DATABASE_FILENAME as PROJECTION_DATABASE_FILENAME,
+    ServeProjectionStore,
+    projection_database_path,
+)
 from spice.serve.team.models import (
     GlobalSettings,
     TeamAgentIdentity as TeamAgentIdentity,
@@ -79,8 +84,6 @@ from spice.serve.team.renewals import (
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
-    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
-    OBSERVATION_ATTRIBUTION_SAFE,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
@@ -90,9 +93,6 @@ from spice.serve.team.schema import (
     TEAM_AUTHORITY_SCHEMA_VERSION,
     TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
-    TEAM_PROJECTION_FAMILIES,
-    TEAM_PROJECTION_SCHEMA,
-    TEAM_PROJECTION_TABLES,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
@@ -132,52 +132,6 @@ def _execute_schema_script(connection: sqlite3.Connection, script: str) -> None:
     # transaction remains the sole atomic boundary.
     for statement in _schema_statements(script):
         connection.execute(statement)
-
-
-def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
-    return tuple(
-        str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')
-    )
-
-
-def _canonical_projection_columns() -> dict[str, tuple[str, ...]]:
-    """The columns each projection table has when built from the current DDL."""
-    probe = sqlite3.connect(":memory:")
-    try:
-        _execute_schema_script(probe, TEAM_PROJECTION_SCHEMA)
-        return {table: _table_columns(probe, table) for table in TEAM_PROJECTION_TABLES}
-    finally:
-        probe.close()
-
-
-def _projection_drop_families() -> tuple[frozenset[str], ...]:
-    """Every projection table grouped with the tables it must be replayed with."""
-    grouped = frozenset[str]().union(*TEAM_PROJECTION_FAMILIES)
-    return TEAM_PROJECTION_FAMILIES + tuple(
-        frozenset({table}) for table in sorted(TEAM_PROJECTION_TABLES - grouped)
-    )
-
-
-def _drop_drifted_projections_locked(connection: sqlite3.Connection) -> None:
-    """Discard projection tables whose shape no longer matches the current DDL.
-
-    A projection is derived state, so a shape change costs a replay rather than
-    a migration ladder: the drifted table is dropped and recreated empty by the
-    schema script that follows. A drifted table takes its whole family with it,
-    because half a replayed family reads as fact the surviving half contradicts.
-    Authority tables never reach here -- they carry versioned migrations and are
-    validated against their canonical shape.
-    """
-    drifted = {
-        table
-        for table, columns in _canonical_projection_columns().items()
-        if (live := _table_columns(connection, table)) and live != columns
-    }
-    for family in _projection_drop_families():
-        if drifted.isdisjoint(family):
-            continue
-        for table in sorted(family):
-            connection.execute(f'DROP TABLE IF EXISTS "{table}"')
 
 
 def _authority_table_shape(
@@ -234,6 +188,12 @@ def _default_directive_state_path(team_path: Path | None) -> Path:
     return ack_state_database_path(task_config.repo_root())
 
 
+def _default_projection_path(team_path: Path | None) -> Path:
+    if team_path is not None:
+        return Path(team_path).with_name(PROJECTION_DATABASE_FILENAME)
+    return projection_database_path()
+
+
 class ServeTeamStore(
     TeamIdentityStoreMixin,
     TeamRenewalStoreMixin,
@@ -244,8 +204,9 @@ class ServeTeamStore(
 ):
     # Schema is checked once per database path per process. Running even
     # idempotent DDL on every connect takes an exclusive lock and serializes
-    # readers. Authority changes are forward migrations; projection DDL may
-    # evolve independently without changing the authority version.
+    # readers. Authority changes are forward migrations, and this file holds
+    # nothing else: rebuildable projections carry their own database, version,
+    # and schema, so their DDL never opens this connection.
     _init_lock = Lock()
     _initialized_paths: set[Path] = set()
 
@@ -254,12 +215,22 @@ class ServeTeamStore(
         path: Path | None = None,
         *,
         directive_state_path: Path | None = None,
+        projection_path: Path | None = None,
     ) -> None:
         self.path = path or team_database_path()
         self.directive_state_path = (
             directive_state_path
             if directive_state_path is not None
             else _default_directive_state_path(path)
+        )
+        # A store of its own, opened on its own connection, rather than an
+        # `ATTACH` on this one: a projection that is missing, empty, drifted, or
+        # corrupt must not be able to fail an authority read, and an attached
+        # database shares the authority connection's fate.
+        self.projections = ServeProjectionStore(
+            projection_path
+            if projection_path is not None
+            else _default_projection_path(path)
         )
         self._task_event_wake_connection_ids: set[int] = set()
 
@@ -299,9 +270,6 @@ class ServeTeamStore(
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
             self._migrate_legacy_directive_projection_locked(connection)
-            _drop_drifted_projections_locked(connection)
-            _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
-            self._initialize_observation_attribution_state_locked(connection)
             self._validate_authority_schema_locked(
                 connection, TEAM_AUTHORITY_SCHEMA_VERSION
             )
@@ -362,29 +330,6 @@ class ServeTeamStore(
         )
         connection.execute("DROP TABLE directives")
         connection.execute("DROP TABLE directive_totals")
-
-    def _initialize_observation_attribution_state_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        existing = connection.execute(
-            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
-        ).fetchone()
-        if existing is not None:
-            return
-        observation_row = connection.execute(
-            "SELECT 1 FROM agent_metrics "
-            "UNION ALL SELECT 1 FROM agent_metric_buckets LIMIT 1"
-        ).fetchone()
-        status = (
-            OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
-            if observation_row is not None
-            else OBSERVATION_ATTRIBUTION_SAFE
-        )
-        connection.execute(
-            "INSERT INTO observation_attribution_state (singleton, status) "
-            "VALUES (1, ?)",
-            (status,),
-        )
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])

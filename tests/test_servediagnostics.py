@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from spice.cli.parser import build_parser
 from spice.serve.cli import run_serve_team_diagnostics
 from spice.serve.diagnostics import render_team_diagnostics, team_diagnostics_payload
+from spice.serve.team.projection import AGENT_ACTIVITY
 from spice.serve.team.store import (
     TEAM_DATABASE_FILENAME,
     ServeTeamStore,
@@ -226,3 +227,40 @@ def test_serve_teams_parser_dispatches_json_subcommand(tmp_path):
     assert args.func is run_serve_team_diagnostics
     assert args.task_backend == str(backend)
     assert args.json_output is True
+
+
+def test_serve_reset_projections_empties_the_family_and_reports_the_new_build(
+    tmp_path, capsys
+):
+    backend = tmp_path / "task-backend"
+    args = build_parser().parse_args(
+        ["serve", "--task-backend", str(backend), "reset-projections"]
+    )
+    task_config.set_backend(str(backend))
+    try:
+        ServeTeamStore().record_agent_metric_delta(
+            AGENT_A, tool_calls=1, message_timestamps=[1000.0]
+        )
+        before = _projection_row_counts()
+    finally:
+        task_config.set_backend(None)
+
+    try:
+        result = args.func(args)
+        text = capsys.readouterr().out
+        after = _projection_row_counts()
+    finally:
+        task_config.set_backend(None)
+
+    assert result == EXIT_OK
+    assert before["agent_metrics"] == 1
+    assert after == dict.fromkeys(before, 0)
+    assert "serve projections reset agentActivity generation=2" in text
+    assert AGENT_ACTIVITY.rebuild in text
+
+
+def _projection_row_counts() -> dict[str, int]:
+    states = ServeTeamStore().projections.family_states()
+    return {
+        table: count for state in states for table, count in state.row_counts.items()
+    }

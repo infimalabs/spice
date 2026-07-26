@@ -63,10 +63,6 @@ class _TeamRenewalStore(Protocol):
         aliases: Iterable[str] = (),
     ) -> list[str]: ...
 
-    def _inherit_agent_metric_cursors_locked(
-        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
-    ) -> None: ...
-
     def _team_slot_for_agent_locked(
         self, connection: sqlite3.Connection, team_id: str, agent_id: str
     ) -> int | None: ...
@@ -472,9 +468,6 @@ class TeamRenewalStoreMixin:
                     ancestor_thread_id = str(
                         event_payload.get("ancestor") or ancestor_thread_id
                     )
-            self._inherit_agent_metric_cursors_locked(
-                connection, predecessor_agent_id, successor_agent_id
-            )
             self._assign_locked(connection, team_id, successor_agent_id)
             connection.execute(
                 "DELETE FROM memberships WHERE agent_id = ?", (predecessor_agent_id,)

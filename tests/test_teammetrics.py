@@ -128,7 +128,7 @@ def _agent_metric_totals(
     store: ServeTeamStore, agents: tuple[str, ...]
 ) -> dict[str, tuple[int, int, int]]:
     totals = {agent_id: (0, 0, 0) for agent_id in agents}
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         tool_rows = connection.execute(
             "SELECT agent_id, COALESCE(SUM(tool_calls), 0) AS tool_calls "
             "FROM agent_metrics GROUP BY agent_id"
@@ -619,7 +619,7 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
     assert session.agent_ids == (successor,)
     assert (session.acked, session.sends, session.tool_calls) == (1, 1, 5)
     assert sum(session.sparkline) == 2
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         assert (
             connection.execute(
                 "SELECT COUNT(*) AS count FROM agent_metrics WHERE agent_id = ?",
@@ -874,7 +874,7 @@ def test_activity_metrics_are_tagged_with_team_at_capture(tmp_path):
         "agent-team", tool_calls=2, message_timestamps=[1000]
     )
 
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         metric_team = {
             str(row["agent_id"]): str(row["team_id"])
             for row in connection.execute("SELECT agent_id, team_id FROM agent_metrics")

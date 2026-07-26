@@ -55,21 +55,22 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path, task_p
 
     store.team_snapshot()  # runs the prune pass
 
-    with store.connect() as connection:
+    with store.projections.connect() as projection:
         bucket_starts = [
             int(row["bucket_start"])
-            for row in connection.execute(
+            for row in projection.execute(
                 "SELECT bucket_start FROM agent_metric_buckets WHERE agent_id = ?",
                 (AGENT_A,),
             )
         ]
+        tool_calls = projection.execute(
+            "SELECT tool_calls FROM agent_metrics WHERE agent_id = ?", (AGENT_A,)
+        ).fetchone()["tool_calls"]
+    with store.connect() as connection:
         task_ids = {
             transition.task_id
             for transition in team_task_transitions(connection, end_time=now)
         }
-        tool_calls = connection.execute(
-            "SELECT tool_calls FROM agent_metrics WHERE agent_id = ?", (AGENT_A,)
-        ).fetchone()["tool_calls"]
 
     floor = int(now) - METRIC_HISTORY_RETENTION_SECONDS
     # Old series rows are gone; the recent ones survive.
@@ -118,14 +119,15 @@ def test_prune_uses_team_configured_metric_retention_horizon(tmp_path, task_plan
 
     store.team_snapshot()
 
-    with store.connect() as connection:
+    with store.projections.connect() as projection:
         bucket_starts = [
             int(row["bucket_start"])
-            for row in connection.execute(
+            for row in projection.execute(
                 "SELECT bucket_start FROM agent_metric_buckets WHERE agent_id = ?",
                 (AGENT_A,),
             )
         ]
+    with store.connect() as connection:
         task_ids = {
             transition.task_id
             for transition in team_task_transitions(connection, end_time=now)

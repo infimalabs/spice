@@ -11,16 +11,19 @@ import pytest
 import spice.serve.team.store as team_store_module
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
+from spice.serve.team.projection import (
+    AGENT_ACTIVITY,
+    FIRST_GENERATION,
+    PROJECTION_TABLES,
+    ServeProjectionStore,
+)
 from spice.serve.team.schema import (
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
-    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
     TEAM_AUTHORITY_MIGRATIONS,
     TEAM_AUTHORITY_SCHEMA,
     TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
     TEAM_AUTHORITY_TABLES,
-    TEAM_PROJECTION_SCHEMA,
-    TEAM_PROJECTION_TABLES,
 )
 from spice.serve.team.store import ServeTeamStore
 
@@ -33,6 +36,15 @@ def _initialize(path: Path) -> None:
     _forget_initialized(path)
     with ServeTeamStore(path=path).connect():
         pass
+
+
+def _open_projections(path: Path) -> ServeProjectionStore:
+    """Open the projection database that belongs beside this authority file."""
+    store = ServeTeamStore(path=path)
+    ServeProjectionStore._initialized_paths.discard(store.projections.path)
+    with store.projections.connect():
+        pass
+    return store.projections
 
 
 def _seed_authority(path: Path) -> None:
@@ -161,7 +173,6 @@ def test_legacy_current_schema_upgrades_without_rewriting_authority(tmp_path):
     path = tmp_path / "legacy.sqlite3"
     with sqlite_connection(path) as connection:
         connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.executescript(TEAM_PROJECTION_SCHEMA)
         connection.execute(f"PRAGMA user_version = {LEGACY_TEAM_SCHEMA_FINGERPRINT}")
     _seed_authority(path)
     before = _authority_state(path)
@@ -181,7 +192,6 @@ def test_fresh_and_legacy_upgrade_converge_on_one_schema_and_version(tmp_path):
     _initialize(fresh_path)
     with sqlite_connection(legacy_path) as connection:
         connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.executescript(TEAM_PROJECTION_SCHEMA)
         connection.execute(f"PRAGMA user_version = {LEGACY_TEAM_SCHEMA_FINGERPRINT}")
 
     _initialize(legacy_path)
@@ -228,7 +238,6 @@ def test_newer_writer_fails_before_mutating_database_or_journal_mode(tmp_path):
     path = tmp_path / "newer.sqlite3"
     with sqlite_connection(path) as connection:
         connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.executescript(TEAM_PROJECTION_SCHEMA)
         connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
     _seed_authority(path)
     before = _logical_state(path)
@@ -259,12 +268,15 @@ def test_cached_store_rechecks_newer_writer_version_before_use(tmp_path):
     assert _logical_state(path) == before
 
 
-def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
+def test_a_drifted_projection_rebuilds_in_its_own_file_leaving_authority_whole(
+    tmp_path,
+):
     path = tmp_path / "drifted-projection.sqlite3"
     _initialize(path)
     _seed_authority(path)
     before = _authority_state(path)
-    with sqlite_connection(path) as connection:
+    projections = _open_projections(path)
+    with sqlite_connection(projections.path) as connection:
         connection.execute('DROP TABLE "agent_metric_cursors"')
         connection.execute(
             "CREATE TABLE agent_metric_cursors ("
@@ -277,34 +289,23 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
         )
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, team_id, tool_calls, updated_at) VALUES ('agent-a', 'team-a', 3, 1.0)"
+            "(agent_id, team_id, tool_calls, updated_at) "
+            "VALUES ('agent-a', 'team-a', 3, 1.0)"
         )
-        connection.execute(
-            "UPDATE observation_attribution_state SET status = ? WHERE singleton = 1",
-            (OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,),
-        )
+    ServeProjectionStore._initialized_paths.discard(projections.path)
 
-    _initialize(path)
-
-    with sqlite_connection(path) as connection:
+    with projections.connect() as connection:
         columns = tuple(
             str(row[1])
             for row in connection.execute('PRAGMA table_info("agent_metric_cursors")')
         )
-        cursor_rows = connection.execute(
-            "SELECT count(*) FROM agent_metric_cursors"
-        ).fetchone()[0]
-        counted_rows = connection.execute(
-            "SELECT count(*) FROM agent_metrics WHERE agent_id = 'agent-a'"
-        ).fetchone()[0]
-        kept_attribution_status = connection.execute(
-            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
-        ).fetchone()[0]
+    rebuilt = {state.family.name: state for state in projections.family_states()}
 
     # A projection whose shape drifted is discarded and rebuilt from the current
     # DDL, and it takes its family with it: counts left standing beside a reset
-    # checkpoint would be counted again by the replay that follows. Projections
-    # outside that family keep their rows, and authority is untouched either way.
+    # checkpoint would be counted again by the replay that follows. The discard
+    # publishes a new generation, so an operator sees a rebuild rather than
+    # inferring one from empty tables.
     assert columns == (
         "agent_id",
         "source_path",
@@ -313,46 +314,48 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
         "source_inode",
         "updated_at",
     )
-    assert cursor_rows == 0
-    assert counted_rows == 0
-    assert kept_attribution_status == OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
+    assert rebuilt["agentActivity"].row_counts == dict.fromkeys(
+        AGENT_ACTIVITY.tables, 0
+    )
+    assert rebuilt["agentActivity"].generation == FIRST_GENERATION + 1
+    # The drift never reached the authority file, which was open and seeded the
+    # whole time.
     assert _authority_state(path) == before
 
 
-def test_projection_schema_reset_cannot_change_authority_or_its_version(tmp_path):
+def test_projection_lifecycle_cannot_change_authority_or_its_version(tmp_path):
     path = tmp_path / "projection-reset.sqlite3"
     _initialize(path)
     _seed_authority(path)
     before = _authority_state(path)
     with sqlite_connection(path) as connection:
         version_before = connection.execute("PRAGMA user_version").fetchone()[0]
-        for table in TEAM_PROJECTION_TABLES:
-            connection.execute(f'DROP TABLE "{table}"')
-        connection.execute(
-            "CREATE TABLE projection_experiment "
-            "(projection_key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-        )
-        connection.execute(
-            "INSERT INTO projection_experiment VALUES ('kept', 'outside authority')"
-        )
+    projections = _open_projections(path)
 
-    _initialize(path)
-
-    assert _authority_state(path) == before
-    with sqlite_connection(path) as connection:
-        version_after = connection.execute("PRAGMA user_version").fetchone()[0]
-        recreated = {
+    projections.reset()
+    projections.path.write_bytes(b"not a database at all")
+    ServeProjectionStore._initialized_paths.discard(projections.path)
+    with projections.connect() as connection:
+        rebuilt_tables = {
             str(row[0])
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        experiment = connection.execute(
-            "SELECT projection_key, value FROM projection_experiment"
-        ).fetchone()
+    projections.path.unlink()
+    ServeProjectionStore._initialized_paths.discard(projections.path)
+    with projections.connect():
+        pass
+
+    # Emptying it, corrupting it, and deleting it outright are all recoverable
+    # in one file: each one costs a replay and the store rebuilds itself.
+    assert set(PROJECTION_TABLES) <= rebuilt_tables
+    assert projections.path.exists()
+    # None of it reached authority, whose rows and version are byte-identical.
+    assert _authority_state(path) == before
+    with sqlite_connection(path) as connection:
+        version_after = connection.execute("PRAGMA user_version").fetchone()[0]
     assert version_after == version_before == TEAM_AUTHORITY_SCHEMA_VERSION
-    assert TEAM_PROJECTION_TABLES <= recreated
-    assert tuple(experiment) == ("kept", "outside authority")
 
 
 def test_unversioned_drifted_authority_fails_without_destructive_rebuild(tmp_path):
