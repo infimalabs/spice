@@ -61,18 +61,6 @@ class OpenTaskBoardProjection:
     _open_followups_by_reviewed: Mapping[str, int]
     _drained_counts_by_actor: Mapping[str, int]
     _row_positions: Mapping[int, int]
-    _query_lock: threading.Lock = field(
-        default_factory=threading.Lock,
-        compare=False,
-        repr=False,
-    )
-    _completed_review_queries: dict[frozenset[str], tuple[Mapping[str, Any], ...]] = (
-        field(
-            default_factory=dict,
-            compare=False,
-            repr=False,
-        )
-    )
 
     def active_claim(self, actor: str) -> Mapping[str, Any] | None:
         """Return the canonical actor's latest active claim, if any."""
@@ -93,25 +81,19 @@ class OpenTaskBoardProjection:
         keys = frozenset(str(value) for value in actors if value)
         if not keys:
             return ()
-        with self._query_lock:
-            cached = self._completed_review_queries.get(keys)
-            if cached is not None:
-                return cached
-            rows = [
-                row
-                for actor in keys
-                for row in self._completed_reviews_by_author.get(actor, ())
-            ]
-            rows.sort(
-                key=lambda row: (
-                    _review_pressure_sort_key(row),
-                    -self._row_positions[id(row)],
-                ),
-                reverse=True,
-            )
-            result = tuple(rows)
-            self._completed_review_queries[keys] = result
-            return result
+        rows = [
+            row
+            for actor in keys
+            for row in self._completed_reviews_by_author.get(actor, ())
+        ]
+        rows.sort(
+            key=lambda row: (
+                _review_pressure_sort_key(row),
+                -self._row_positions[id(row)],
+            ),
+            reverse=True,
+        )
+        return tuple(rows)
 
     def open_review_followup_count(self, reviewed_uuid: str) -> int:
         """Return the number of open rows depending on one reviewed UUID."""
