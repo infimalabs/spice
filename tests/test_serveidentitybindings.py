@@ -14,6 +14,7 @@ from spice.agent.paths import (
 from spice.serve.app import ServeState
 from spice.serve.payload.identity import (
     record_serve_agent_identity,
+    serve_agent_identity_payload,
     target_bound_actor,
 )
 from spice.serve.team.store import ServeTeamStore
@@ -90,15 +91,37 @@ def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
         for target, thread in zip((target_a, target_c), resolved_threads)
     ] == [f"target:{target_a.id}", f"thread:{THREAD_ID}"]
 
-    identities = [
-        record_serve_agent_identity(store, target) for target in (target_a, target_c)
+    projected_identities = [
+        [
+            serve_agent_identity_payload(target, store=store)
+            for target in (target_a, target_c)
+        ]
+        for _ in range(2)
     ]
-    assert [item["actorId"] for item in identities] == [
+    expected_actor_ids = [
         f"target:{target_a.id}",
         f"thread:{THREAD_ID}",
     ]
     assert [
-        store.agent_identity_for_actor(item["actorId"]).target_id for item in identities
+        [item["actorId"] for item in projection] for projection in projected_identities
+    ] == [expected_actor_ids, expected_actor_ids]
+    with store.connect() as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM agent_identities").fetchone()[0]
+            == 0
+        )
+        assert connection.execute("SELECT COUNT(*) FROM memberships").fetchone()[0] == 0
+
+    recorded_identities = [
+        record_serve_agent_identity(store, target) for target in (target_a, target_c)
+    ]
+    assert [item["actorId"] for item in recorded_identities] == expected_actor_ids
+    stored_identities = [
+        store.agent_identity_for_actor(actor_id) for actor_id in expected_actor_ids
+    ]
+    assert all(identity is not None for identity in stored_identities)
+    assert [
+        identity.target_id for identity in stored_identities if identity is not None
     ] == [target_a.id, target_c.id]
 
 
