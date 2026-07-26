@@ -23,6 +23,11 @@ function fixtureCardsOverlap(a, b) {
 const TRACKS = 12;
 const LEGAL_BASE_SPANS = [2, 3, 4, 6, 12];
 const TALL_ROW_COUNT_THRESHOLD = 4;
+const DEFAULT_TRACK_COUNT = 12;
+// Counts that are not a usable lattice. 0.5 and 0.9 are the interesting ones:
+// they are finite and above zero, so they used to pass the track-count guard
+// and then floor to zero tracks.
+const DEGENERATE_TRACK_COUNTS = [0.5, 0.9, 0, -3, NaN, Infinity, undefined, null];
 
 // mulberry32: deterministic seeded PRNG so "randomized" sequences replay
 // identically across runs and across the byte-identical replay check below.
@@ -180,6 +185,36 @@ for (const seed of [1, 2, 3, 4, 5, 42, 1337]) {
   );
   assert(deepEqual(before, before_copy), "mosaicCommit mutated its input");
   assert(deepEqual(after, [3, 3, 0, 0]), "mosaicCommit advanced tracks wrong");
+}
+
+// The anchor search is total: every track count normalizes to a real lattice,
+// so there is always a legal placement to return. A sub-unit count used to
+// floor to zero tracks, which left the search with no candidate track and
+// handed back null -- and both callers read the anchor's fields directly.
+{
+  for (const trackCount of DEGENERATE_TRACK_COUNTS) {
+    const label = String(trackCount);
+    const tracks = context.mosaicTrackCount(trackCount);
+    assert(
+      tracks === DEFAULT_TRACK_COUNT,
+      "unusable track count must fall back to the default: " + label,
+    );
+    const rowFloor = context.mosaicDeriveRowFloor([], trackCount);
+    assert(
+      rowFloor.length === DEFAULT_TRACK_COUNT,
+      "rowFloor must span the normalized lattice: " + label,
+    );
+    const anchor = context.mosaicAnchorFor(1, rowFloor, trackCount);
+    assert(
+      Boolean(anchor) && anchor.t === 0 && anchor.span === 1,
+      "anchor must exist at track 0 for track count " + label,
+    );
+    const decision = context.mosaicDecide([{ span: 2, n: 1 }], rowFloor, trackCount);
+    assert(
+      decision.t === 0 && decision.span === 2 && decision.n === 1,
+      "decision must exist for track count " + label,
+    );
+  }
 }
 
 console.log("mosaic engine: all assertions passed");

@@ -8,8 +8,12 @@
 // and stays out of this module; candidates arrive pre-measured as
 // { span, n } pairs.
 
+// Every other function in the lattice treats this as "at least one track", so
+// the guard has to be >= 1 rather than > 0: a fractional count like 0.5 passes
+// `> 0` and then floors to zero, which yields an empty rowFloor, a placement
+// range of nothing, and an anchor search with no candidates at all.
 function mosaicTrackCount(trackCount) {
-  return Number.isFinite(trackCount) && trackCount > 0
+  return Number.isFinite(trackCount) && trackCount >= 1
     ? Math.floor(trackCount)
     : 12;
 }
@@ -49,19 +53,34 @@ function mosaicKeyLess(left, right) {
 function mosaicAnchorFor(span, rowFloor, trackCount) {
   const tracks = mosaicTrackCount(trackCount);
   const clampedSpan = mosaicClampSpan(span, tracks);
-  let best = null;
-  for (let t = 0; t <= tracks - clampedSpan; t += 1) {
-    let b = 0;
-    for (let i = t; i < t + clampedSpan; i += 1) {
-      if (rowFloor[i] > b) b = rowFloor[i];
-    }
-    let waste = 0;
-    for (let i = t; i < t + clampedSpan; i += 1) waste += b - rowFloor[i];
-    const key = [b, waste, t];
-    if (best === null || mosaicKeyLess(key, [best.b, best.waste, best.t]))
-      best = { b, waste, t, span: clampedSpan };
+  // tracks >= 1 and clampedSpan is clamped into [1, tracks], so track 0 is
+  // always a legal placement. The search is seeded with it rather than with
+  // null: this function is total, and saying so is what lets its callers read
+  // the anchor without asking whether there was one.
+  let best = mosaicAnchorAt(0, clampedSpan, rowFloor);
+  for (let t = 1; t <= tracks - clampedSpan; t += 1) {
+    const candidate = mosaicAnchorAt(t, clampedSpan, rowFloor);
+    if (
+      mosaicKeyLess(
+        [candidate.b, candidate.waste, candidate.t],
+        [best.b, best.waste, best.t],
+      )
+    )
+      best = candidate;
   }
   return best;
+}
+
+// The frontier a span would sit on at one track: the highest floor it covers,
+// and the dead space left under it.
+function mosaicAnchorAt(t, clampedSpan, rowFloor) {
+  let b = 0;
+  for (let i = t; i < t + clampedSpan; i += 1) {
+    if (rowFloor[i] > b) b = rowFloor[i];
+  }
+  let waste = 0;
+  for (let i = t; i < t + clampedSpan; i += 1) waste += b - rowFloor[i];
+  return { b, waste, t, span: clampedSpan };
 }
 
 // Choose across candidate spans by the lexicographic minimum of
@@ -73,14 +92,25 @@ function mosaicDecide(candidates, rowFloor, trackCount) {
   if (!candidates || !candidates.length)
     throw new Error("mosaicDecide requires at least one candidate");
   const tracks = mosaicTrackCount(trackCount);
-  let best = null;
-  for (const candidate of candidates) {
-    const anchor = mosaicAnchorFor(candidate.span, rowFloor, tracks);
-    const key = [anchor.b, anchor.waste, -anchor.span, anchor.t];
-    if (best === null || mosaicKeyLess(key, best.key))
-      best = { span: anchor.span, n: candidate.n, b: anchor.b, t: anchor.t, key };
+  // At least one candidate is guaranteed above, so the first one seeds the
+  // search and the winner is never absent.
+  let best = mosaicDecision(candidates[0], rowFloor, tracks);
+  for (let index = 1; index < candidates.length; index += 1) {
+    const decision = mosaicDecision(candidates[index], rowFloor, tracks);
+    if (mosaicKeyLess(decision.key, best.key)) best = decision;
   }
   return { span: best.span, n: best.n, b: best.b, t: best.t };
+}
+
+function mosaicDecision(candidate, rowFloor, tracks) {
+  const anchor = mosaicAnchorFor(candidate.span, rowFloor, tracks);
+  return {
+    span: anchor.span,
+    n: candidate.n,
+    b: anchor.b,
+    t: anchor.t,
+    key: [anchor.b, anchor.waste, -anchor.span, anchor.t],
+  };
 }
 
 // Advance the tracks a placed card covers. Returns a new rowFloor —
