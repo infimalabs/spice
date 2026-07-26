@@ -18,10 +18,15 @@ The corpus is three cases per dialect. `transcript/parity_{claude,codex}.jsonl`
 each carry one prompt boundary, one assistant line holding prose plus a task
 directive plus an ACK plus an app directive plus a NACK plus an image (and, for
 Claude, a tool call and reasoning too), a tool exchange, a reasoning-only turn,
-a compaction, a final answer, and a truncated tail. The same file replayed from
-a mid-transcript cursor is the boundary case. `session/supervised_*.jsonl`, the
-recorded supervised lanes, supply turn boundaries and repeated compactions at
-volume.
+a compaction, a final answer, one corrupt record, and one unterminated record a
+live writer is still flushing. The same file replayed from a mid-transcript
+cursor is the boundary case. `session/supervised_*.jsonl`, the recorded
+supervised lanes, supply turn boundaries and repeated compactions at volume.
+
+The two tails are different shapes and the reader treats them differently: a
+corrupt but complete record decodes to `Unknown`, while the mid-flush record is
+held back by the cursor-owned forward path until its writer finishes. Every
+access path is therefore compared over the same completed span.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ from spice.transcript.assembly import (
 from spice.transcript.events import Provenance, TranscriptEvent, Unknown
 from spice.transcript.reader import (
     TranscriptCursor,
+    TranscriptEventRead,
     TranscriptEventReader,
     transcript_size,
 )
@@ -111,6 +117,7 @@ class CorpusShape(StrEnum):
     IMAGE = "image"
     REASONING_ONLY_TURN = "reasoning-only-turn"
     MALFORMED_TAIL = "malformed-tail"
+    PARTIAL_TAIL = "partial-tail"
     CURSOR_BOUNDARY = "cursor-boundary"
 
 
@@ -244,9 +251,19 @@ def record_offsets(case: CorpusCase) -> tuple[int, ...]:
 
 def typed_events(case: CorpusCase) -> tuple[TranscriptEvent, ...]:
     """Every typed fact the case carries, read forward from its own cursor."""
+    return forward_read(case).events
+
+
+def forward_read(case: CorpusCase) -> TranscriptEventRead:
+    """One cursor-owned forward pass, kept whole for its completed end offset.
+
+    A live transcript can be mid-flush, and the forward path holds that
+    unterminated last line back; the read reports where the completed transcript
+    ends, which is the span every other access path has to be asked for.
+    """
     reader = TranscriptEventReader(case.path, case.driver, case.source_actor)
     cursor = TranscriptCursor(offset=case.cursor_offset)
-    return reader.read("forward", cursor=cursor).events
+    return reader.read("forward", cursor=cursor)
 
 
 def assembled_messages(case: CorpusCase) -> tuple[AssembledMessage, ...]:
@@ -296,12 +313,24 @@ def assert_parity(
     corpus: Sequence[CorpusCase] | None = None,
     labels: tuple[str, str] = DEFAULT_LABELS,
 ) -> None:
-    """Replay every case through both interpreters and demand identical output."""
-    for case in parity_corpus() if corpus is None else corpus:
-        divergence = first_divergence(
-            case, tuple(left(case)), tuple(right(case)), labels=labels
-        )
+    """Replay every case through both interpreters and demand identical output.
+
+    Agreement only means something if something was actually compared, so a
+    corpus that selected nothing and a pair that produced nothing are failures
+    here rather than the quietest possible green.
+    """
+    cases = tuple(parity_corpus() if corpus is None else corpus)
+    assert cases, "parity corpus selected no cases, so nothing was replayed"
+    compared = 0
+    for case in cases:
+        left_outputs = tuple(left(case))
+        right_outputs = tuple(right(case))
+        divergence = first_divergence(case, left_outputs, right_outputs, labels=labels)
         assert divergence is None, divergence.report()
+        compared += max(len(left_outputs), len(right_outputs))
+    assert compared, (
+        f"both interpreters produced no output across {len(cases)} corpus case(s)"
+    )
 
 
 def observed_shapes(case: CorpusCase) -> frozenset[CorpusShape]:
@@ -325,11 +354,20 @@ def observed_shapes(case: CorpusCase) -> frozenset[CorpusShape]:
             CorpusShape.REASONING_ONLY_TURN,
             any(_is_reasoning_only(message) for message in messages),
         ),
-        (CorpusShape.MALFORMED_TAIL, bool(events) and isinstance(events[-1], Unknown)),
+        (
+            CorpusShape.MALFORMED_TAIL,
+            any(isinstance(event, Unknown) for event in events),
+        ),
+        (CorpusShape.PARTIAL_TAIL, _holds_back_a_partial_line(case)),
         (CorpusShape.CURSOR_BOUNDARY, _resumes_mid_transcript(case, events)),
     )
     observed.update(shape for shape, present in carried if present)
     return frozenset(observed)
+
+
+def _holds_back_a_partial_line(case: CorpusCase) -> bool:
+    """True when the case ends mid-flush, so the forward pass stops short."""
+    return forward_read(case).end_offset < (transcript_size(case.path) or 0)
 
 
 def _is_reasoning_only(message: AssembledMessage) -> bool:
@@ -361,10 +399,9 @@ def split_pass_events(case: CorpusCase) -> tuple[ParityOutput, ...]:
         if offsets
         else case.cursor_offset
     )
+    complete = forward_read(case).end_offset
     head = reader.read("bounded", start_offset=case.cursor_offset, end_offset=split)
-    tail = reader.read(
-        "bounded", start_offset=split, end_offset=transcript_size(case.path) or 0
-    )
+    tail = reader.read("bounded", start_offset=split, end_offset=complete)
     return tuple(
         ParityOutput(value=event, at=event.at) for event in (*head.events, *tail.events)
     )
@@ -419,6 +456,22 @@ def test_a_missing_trailing_output_diverges_where_the_sequence_ends() -> None:
     assert f"output index {len(complete) - 1} " in report
     assert repr(complete[-1].value) in report
     assert repr(NO_OUTPUT) in report
+
+
+def test_a_corpus_that_selected_nothing_fails_instead_of_passing_quietly() -> None:
+    with pytest.raises(AssertionError) as failure:
+        assert_parity(whole_pass_events, split_pass_events, corpus=())
+
+    assert "nothing was replayed" in str(failure.value)
+
+
+def test_two_interpreters_that_produce_nothing_fail_instead_of_agreeing() -> None:
+    case = _case("shapes", CLAUDE_DRIVER)
+
+    with pytest.raises(AssertionError) as failure:
+        assert_parity(_no_outputs, _no_outputs, corpus=(case,))
+
+    assert "produced no output" in str(failure.value)
 
 
 @DRIVERS
@@ -509,6 +562,11 @@ def _case(name: str, driver: AgentDriver) -> CorpusCase:
 
 def _spans(case: CorpusCase) -> list[ClassifiedSpan]:
     return [span for message in assembled_messages(case) for span in message.spans]
+
+
+def _no_outputs(case: CorpusCase) -> tuple[ParityOutput, ...]:
+    """An interpreter that reads nothing at all, which is never parity."""
+    return ()
 
 
 def _altered_outputs(case: CorpusCase) -> tuple[ParityOutput, ...]:
