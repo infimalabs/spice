@@ -65,6 +65,8 @@ def ensure_sqlite_schema_once(
     *,
     busy_timeout_ms: int,
     initialize: Callable[[sqlite3.Connection], None],
+    validate: Callable[[sqlite3.Connection], None] | None = None,
+    wal_after_initialize: bool = False,
 ) -> None:
     """Run a database's DDL at most once per path per process.
 
@@ -79,22 +81,45 @@ def ensure_sqlite_schema_once(
     initializer that raises leaves the next caller to try again rather than
     marking a database that was never built.
 
-    WAL opens here, before the DDL. A store that must decide something about
-    the database before its journal mode changes -- as the serve team store
-    decides compatibility, so that a database written by a newer writer is
-    refused without even that mutation -- needs the reverse order and keeps its
-    own owner instead.
+    WAL normally opens here, before the DDL. A versioned store can instead set
+    ``wal_after_initialize`` so its initializer rejects an incompatible file
+    before journal mode mutates it. Such a store can also supply ``validate``:
+    cached paths then get a read-only compatibility check, catching a file
+    replaced or advanced by another writer without repeating the DDL.
     """
     if path in _INITIALIZED_PATHS:
+        if validate is not None:
+            _validate_initialized_schema(
+                path, busy_timeout_ms=busy_timeout_ms, validate=validate
+            )
         return
     with _SCHEMA_INIT_LOCK:
         if path in _INITIALIZED_PATHS:
+            if validate is not None:
+                _validate_initialized_schema(
+                    path, busy_timeout_ms=busy_timeout_ms, validate=validate
+                )
             return
         with sqlite_connection(
             path,
             busy_timeout_ms=busy_timeout_ms,
-            wal=True,
+            wal=not wal_after_initialize,
             ensure_parent=True,
         ) as connection:
             initialize(connection)
+            if wal_after_initialize:
+                connection.execute("PRAGMA journal_mode = WAL")
         _INITIALIZED_PATHS.add(path)
+
+
+def _validate_initialized_schema(
+    path: Path,
+    *,
+    busy_timeout_ms: int,
+    validate: Callable[[sqlite3.Connection], None],
+) -> None:
+    with sqlite_connection(
+        path,
+        busy_timeout_ms=busy_timeout_ms,
+    ) as connection:
+        validate(connection)

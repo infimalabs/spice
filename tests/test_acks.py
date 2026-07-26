@@ -417,14 +417,17 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
             CREATE TABLE acked_inbox_items (
               key TEXT PRIMARY KEY,
               inbox_name TEXT NOT NULL,
+              text TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
               archived_at REAL NOT NULL
             )
             """
         )
         connection.execute(
             """
-            INSERT INTO acked_inbox_items (key, inbox_name, archived_at)
-            VALUES (?, ?, ?)
+            INSERT INTO acked_inbox_items
+              (key, inbox_name, text, attachments_json, archived_at)
+            VALUES (?, ?, '', '[]', ?)
             """,
             (KEY_A, f"{KEY_A}.txt", 100.0),
         )
@@ -731,7 +734,7 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     database_path = ack_state_database_path(tmp_path)
     holder = sqlite3.connect(database_path)
     holder.execute("BEGIN IMMEDIATE")
-    insert_started = Event()
+    write_started = Event()
     finished = Event()
     real_connection = ackstate.sqlite_connection
     configured_timeouts: list[int | None] = []
@@ -743,10 +746,8 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
         with real_connection(*args, **kwargs) as connection:
             connection.set_trace_callback(
                 lambda statement: (
-                    insert_started.set()
-                    if statement.lstrip()
-                    .upper()
-                    .startswith("INSERT INTO ACKED_INBOX_ITEMS")
+                    write_started.set()
+                    if statement.lstrip().upper().startswith("BEGIN IMMEDIATE")
                     else None
                 )
             )
@@ -764,7 +765,7 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     worker = Thread(target=archive_header)
     worker.start()
     try:
-        assert insert_started.wait(timeout=2.0) is True
+        assert write_started.wait(timeout=2.0) is True
         assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
     finally:
         holder.commit()
