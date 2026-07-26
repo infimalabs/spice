@@ -18,6 +18,7 @@ const messageOccupantAccentPalette = [
   "var(--team-teal-accent)",
   "var(--team-plum-accent)",
 ];
+/** @type {number | null} */
 let globalTransientStatusTimer = null;
 let globalTransientStatusText = "";
 let globalTransientStatusIsError = false;
