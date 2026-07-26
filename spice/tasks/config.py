@@ -423,10 +423,28 @@ def _bootstrap_lock(root: Path | None = None):
         yield
 
 
+def task_event_generation() -> str:
+    """Mint the token every task-backend event is ordered by.
+
+    Microseconds, not nanoseconds: a reader that orders these as numbers needs
+    them to stay exact, and a nanosecond count is already past the range a
+    double holds exactly, where two distinct instants compare equal.
+    """
+    return str(time.time_ns() // 1000)
+
+
 def ensure_task_event_file(root: Path | None = None) -> Path:
     path = task_event_path(root)
     if not path.exists():
-        atomic_write_text(path, "0 bootstrap\n", write_if_changed=True)
+        # A new store bootstraps at the instant it was created rather than at
+        # zero. A store is only ever created after every store it replaces, so
+        # starting from now is what keeps this revision rising across a store
+        # that was deleted and remade -- a zero here reads as older than the
+        # generation it replaced, and readers that keep the highest revision
+        # they have seen would refuse this backend forever.
+        atomic_write_text(
+            path, f"{task_event_generation()} bootstrap\n", write_if_changed=True
+        )
     return path
 
 
@@ -451,7 +469,7 @@ def mark_task_backend_changed(
         timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
         action="publish task backend event",
     ):
-        event_revision = str(time.time_ns())
+        event_revision = task_event_generation()
         task_revision = (
             task_event_revision(selected_root)
             if normalized_reason == "team"

@@ -28,7 +28,16 @@ from tests.test_servehelpers import (
     _target,
 )
 
-CROSSING_REVISION = "crossing"
+# A board revision is the generation its authority minted, so these fixtures
+# carry counts rather than labels: the chrome producer publishes an epoch only
+# where it could have counted forward from it.
+CROSSING_REVISION = "1785044000000100"
+MEASURED_GENERATION = "1785044000000200"
+SEMANTIC_EDGE_GENERATION = "1785044000000300"
+SEMANTIC_ERROR_GENERATION = "1785044000000400"
+OPEN_STATE_GENERATION = "1785044000000500"
+ACTIVE_CLAIM_GENERATION = "1785044000000600"
+SHARED_INDEX_GENERATION = "1785044000000700"
 # One board every lane read in a message payload answers: an origin-owned card
 # row, the lane's active claim, a completed review carrying a finding, and a
 # second completed row the lane drained. Rendering all four from one export is
@@ -526,7 +535,7 @@ def test_measured_board_moves_once_across_inventory_messages_and_metrics(
 
     backend = tmp_path / "task-backend"
     monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
-    _stub_backend(monkeypatch, lambda root: "measured-stable")
+    _stub_backend(monkeypatch, lambda root: MEASURED_GENERATION)
     source_rows = _measured_board_rows()
     export_started = threading.Event()
     release_export = threading.Event()
@@ -756,7 +765,7 @@ def test_new_revision_replaces_prior_backend_observation(monkeypatch, tmp_path):
 def test_open_projection_preserves_filter_state_parity():
     observation = taskboard.TaskBoardObservation(
         backend_identity="test",
-        revision="open-states",
+        revision=OPEN_STATE_GENERATION,
         rows=(
             {"uuid": "ready", "project": "serve.latency"},
             {
@@ -820,7 +829,7 @@ def semantic_edge_projection(
 ) -> taskboard.OpenTaskBoardProjection:
     observation = taskboard.TaskBoardObservation(
         backend_identity="differential",
-        revision="semantic-edges",
+        revision=SEMANTIC_EDGE_GENERATION,
         rows=SEMANTIC_EDGE_ROWS,
     )
     projection = taskboard.open_task_board_projection(observation)
@@ -945,7 +954,7 @@ def test_failed_projection_matches_pre_fold_empty_task_views():
     failed = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
             backend_identity="differential",
-            revision="semantic-error",
+            revision=SEMANTIC_ERROR_GENERATION,
             rows=(),
             error="backend unavailable",
         )
@@ -989,7 +998,7 @@ def test_open_projection_indexes_latest_claim_without_copying_rows(monkeypatch):
     )
     observation = taskboard.TaskBoardObservation(
         backend_identity="test",
-        revision="claims",
+        revision=ACTIVE_CLAIM_GENERATION,
         rows=rows,
     )
 
@@ -1079,7 +1088,7 @@ def test_projection_reuses_card_review_followup_and_drained_indexes(monkeypatch)
     )
     observation = taskboard.TaskBoardObservation(
         backend_identity="test",
-        revision="shared-indexes",
+        revision=SHARED_INDEX_GENERATION,
         rows=rows,
     )
     projection = taskboard.open_task_board_projection(observation)

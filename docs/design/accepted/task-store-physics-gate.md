@@ -137,6 +137,12 @@ owner-and-deadline compare-and-swap guard, and phase plus claim release are one
 row mutation. The witness is recovery/notification state and `task_events` is
 an observation fact series.
 
+The `task_events` fact series has since been deleted: Serve derives every
+lifecycle movement by folding the TaskChampion operations log this probe
+already measured, so the write side no longer makes a secondary Serve write and
+one of the four representations above is gone. The measurement stands as taken;
+the pending remeasure is where these counts are re-derived.
+
 ## Stop/Go Balance
 
 ### What still argues for an owned store

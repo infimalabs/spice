@@ -21,13 +21,16 @@ The durable authority table set is:
 - `agent_identities`: observed and desired agent, thread, driver, model, and
   renewal identity.
 
-The currently co-resident `agent_metrics`, `agent_metric_buckets`,
-`agent_metric_cursors`, and `task_events` tables are not members of the
-authority schema. Their present storage location is transitional. Changing or
-recreating one of those projection tables does not change the authority schema
-version. Directive facts have completed that transition: their canonical rows
-now live in repository-owned `spiceacks.sqlite3`, and the former `directives`
-and `directive_totals` tables are removed after checked migration.
+The currently co-resident `agent_metrics`, `agent_metric_buckets`, and
+`agent_metric_cursors` tables are not members of the authority schema. Their
+present storage location is transitional. Changing or recreating one of those
+projection tables does not change the authority schema version. Directive facts
+have completed that transition: their canonical rows now live in
+repository-owned `spiceacks.sqlite3`, and the former `directives` and
+`directive_totals` tables are removed after checked migration. Task lifecycle
+facts completed it too, in the other direction: the former `task_events` mirror
+is removed and Serve derives every claim, phase advance, review, completion,
+and drain from the task plane's own mutation history.
 
 ## Context
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any, Iterable, Mapping, Protocol
 
 from spice.agent.driver import driver_for_transcript
 from spice.serve.team.ids import thread_id_for_actor
+from spice.serve.team.lifecycle import TeamTaskTransition, team_task_transitions
 from spice.serve.team.store import ServeTeamStore
 from spice.sessions import records
 from spice.sessions.meter import (
@@ -18,6 +20,7 @@ from spice.sessions.meter import (
 )
 from spice.sessions.slices import turn_activity_ts
 from spice.tasks import claimstate, identity
+from spice.tasks.transitions import TaskTransitionKind
 from spice.transcript.events import ContextUsage, TranscriptEvent
 from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import parse_timestamp
@@ -166,16 +169,6 @@ class _TaskShape:
 
 
 @dataclass(frozen=True, slots=True)
-class _TaskLifecycleEvent:
-    rowid: int
-    ts: float
-    kind: str
-    task_id: str
-    agent_id: str
-    team_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class _AgentEffortTags:
     actor_id: str
     thread_id: str
@@ -188,7 +181,7 @@ class _AgentEffortTags:
 class _OpenWindow:
     shape: _TaskShape
     phase_index: int
-    event: _TaskLifecycleEvent
+    event: TeamTaskTransition
 
 
 @dataclass(slots=True)
@@ -264,8 +257,9 @@ def phase_effort_windows_for_tasks(
     """Return deterministic per-task phase windows from stored lifecycle facts.
 
     ``task_rows`` supplies the durable Taskwarrior task shape: uuid, handle,
-    title, and phase flow. Lifecycle timing and actor/team attribution come
-    from ``ServeTeamStore.task_events``.
+    title, and phase flow. Lifecycle timing and actor attribution come from
+    the task plane's own history; the team credited to each movement comes
+    from the team an actor belonged to at that instant.
     """
 
     shapes = _task_shapes(task_rows)
@@ -409,26 +403,16 @@ def _task_shapes(task_rows: Iterable[Mapping[str, Any]]) -> dict[str, _TaskShape
 
 def _task_lifecycle_events_locked(
     connection: sqlite3.Connection, task_ids: tuple[str, ...]
-) -> tuple[_TaskLifecycleEvent, ...]:
+) -> tuple[TeamTaskTransition, ...]:
+    """Every lifecycle movement the task plane recorded for the named tasks.
+
+    The read covers each task's whole history rather than a retention window,
+    so a phase window opened long before the report still closes against the
+    movement that actually ended it.
+    """
     if not task_ids:
         return ()
-    rows = connection.execute(
-        "SELECT rowid, ts, kind, task_id, agent_id, team_id FROM task_events "
-        f"WHERE task_id IN ({_placeholders(task_ids)}) "
-        "ORDER BY task_id, ts, rowid",
-        task_ids,
-    ).fetchall()
-    return tuple(
-        _TaskLifecycleEvent(
-            rowid=int(row["rowid"]),
-            ts=float(row["ts"] or 0.0),
-            kind=str(row["kind"] or ""),
-            task_id=str(row["task_id"] or ""),
-            agent_id=str(row["agent_id"] or ""),
-            team_id=str(row["team_id"] or ""),
-        )
-        for row in rows
-    )
+    return team_task_transitions(connection, task_ids=task_ids, end_time=time.time())
 
 
 def _agent_effort_tags_locked(
@@ -459,7 +443,9 @@ def _agent_effort_tags_locked(
             agent_id,
             _AgentEffortTags(
                 actor_id=agent_id,
-                thread_id=thread_id_for_actor(agent_id),
+                # A movement on a task nobody holds carries no actor, so there
+                # is no thread to derive one from: it is billed to no one.
+                thread_id=thread_id_for_actor(agent_id) if agent_id else "",
                 driver="",
                 model="",
                 effort="",
@@ -580,7 +566,7 @@ def _timestamp_in_window(ts: str | None, window: PhaseEffortWindow) -> bool:
 
 def _windows_for_task(
     shape: _TaskShape,
-    events: list[_TaskLifecycleEvent],
+    events: list[TeamTaskTransition],
     tags: dict[str, _AgentEffortTags],
 ) -> list[PhaseEffortWindow]:
     windows: list[PhaseEffortWindow] = []
@@ -588,7 +574,7 @@ def _windows_for_task(
     phase_index = 0
     closed_phase_indexes: set[int] = set()
     for event in events:
-        if event.kind == "claim":
+        if event.kind is TaskTransitionKind.CLAIM:
             if open_window is not None:
                 windows.append(
                     _close_window(
@@ -601,7 +587,7 @@ def _windows_for_task(
             open_window = _OpenWindow(shape, phase_index, event)
             closed_phase_indexes.discard(phase_index)
             continue
-        if event.kind == "phaseAdvance":
+        if event.kind is TaskTransitionKind.PHASE_ADVANCE:
             if open_window is not None:
                 windows.append(_close_window(open_window, event.ts, tags))
                 open_window = None
@@ -610,7 +596,7 @@ def _windows_for_task(
             closed_phase_indexes.add(phase_index)
             phase_index += 1
             continue
-        if event.kind == "review":
+        if event.kind is TaskTransitionKind.REVIEW:
             if open_window is not None:
                 windows.append(_close_window(open_window, event.ts, tags))
                 open_window = None
@@ -618,7 +604,7 @@ def _windows_for_task(
                 windows.append(_missing_start_window(shape, phase_index, event, tags))
             closed_phase_indexes.add(phase_index)
             continue
-        if event.kind == "complete":
+        if event.kind is TaskTransitionKind.COMPLETE:
             if open_window is not None:
                 windows.append(_close_window(open_window, event.ts, tags))
                 open_window = None
@@ -659,7 +645,7 @@ def _close_window(
 def _missing_start_window(
     shape: _TaskShape,
     phase_index: int,
-    event: _TaskLifecycleEvent,
+    event: TeamTaskTransition,
     tags: dict[str, _AgentEffortTags],
 ) -> PhaseEffortWindow:
     return _window(
@@ -676,7 +662,7 @@ def _missing_start_window(
 def _window(
     shape: _TaskShape,
     phase_index: int,
-    event: _TaskLifecycleEvent,
+    event: TeamTaskTransition,
     tags: dict[str, _AgentEffortTags],
     *,
     started_at: float | None,

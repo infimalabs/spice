@@ -133,11 +133,16 @@ team-historical lenses derive alternate cuts from the same facts.
 **D12 — Task-flow is its own fact source.** Burndown, distribution, and stuck
 signals derive from a task-lifecycle fact series, not from message-activity
 counters. Message and tool-call activity can explain agent effort; task-flow
-facts explain work movement. The source is the persisted `task_events` fact
-table (`claim`, `phaseAdvance`, `review`, `complete`, `drain`), not a read-time
-projection over Taskwarrior state; Taskwarrior keeps current state plus a small
-timestamp set, not the full reassignment, phase-advance, review, and stall
-history that stable task-flow range queries need.
+facts explain work movement. The source is the task plane's own append-only
+mutation history, folded at read time into semantic transitions (`claim`,
+`phaseAdvance`, `review`, `complete`, `drain`). The `task_events` mirror this
+decision originally specified is removed: it was justified by the premise that
+the task plane keeps only current state plus a small timestamp set, and that
+premise was wrong. TaskChampion records every task mutation as a per-property
+operation in an append-only log, which carries the full reassignment,
+phase-advance, review, and drain history stable range queries need. Folding
+that log is also what makes a retried or multi-property write one transition:
+a movement exists where lifecycle state moved, not where a command ran.
 
 **D13 — Renewal boundaries are events.** A lineage's session windows come from
 append-only started-renewal events for the successor actor. PER-SESSION
@@ -145,10 +150,13 @@ projections compute their windows from those events; no mutable session counter
 exists.
 
 **D14 — Retention follows fact ownership.** Serve's observation retention
-horizon is config-driven (default 30d) for its transitional activity and task
-series. It never prunes canonical steering/ACK history. Each native fact owner
-defines its own retention contract, and every retained materialized total must
-remain derivable from the native facts that survive that contract.
+horizon is config-driven (default 30d) for the transitional activity series it
+materializes. It never prunes canonical steering/ACK history, and it no longer
+prunes task lifecycle facts: those are the task plane's, kept for as long as it
+keeps them, so a task-flow range query outside Serve's horizon still answers.
+Each native fact owner defines its own retention contract, and every retained
+materialized total must remain derivable from the native facts that survive
+that contract.
 
 ## The invariant
 

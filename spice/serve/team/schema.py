@@ -128,7 +128,6 @@ TEAM_PROJECTION_TABLES = frozenset(
         "agent_metrics",
         "agent_metric_buckets",
         "agent_metric_cursors",
-        "task_events",
         "observation_attribution_state",
     }
 )
@@ -178,25 +177,12 @@ CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     updated_at REAL NOT NULL,
     PRIMARY KEY (agent_id, source_path)
 );
-CREATE TABLE IF NOT EXISTS task_events (
-    ts REAL NOT NULL,
-    kind TEXT NOT NULL CHECK (
-        kind IN ('claim', 'phaseAdvance', 'review', 'complete', 'drain')
-    ),
-    task_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    team_id TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS observation_attribution_state (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     status TEXT NOT NULL CHECK (status IN ('immutable', 'rebuildRequired'))
 );
 CREATE INDEX IF NOT EXISTS agent_metric_buckets_by_start
     ON agent_metric_buckets (bucket_start);
-CREATE INDEX IF NOT EXISTS task_events_by_ts
-    ON task_events (ts);
-CREATE INDEX IF NOT EXISTS task_events_by_agent_team_ts
-    ON task_events (agent_id, team_id, ts);
 """
 
 # Authority migrations are append-only and keyed by their destination version.
