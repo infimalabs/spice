@@ -570,17 +570,6 @@ function persistLaneHints() {
   storage.setItem(laneStorageKey, JSON.stringify(hints));
 }
 
-// Parsing a subtree out of an innerHTML string and querying it back returns a
-// node the checker only knows as possibly null, so the text assignment that
-// always follows cannot be checked -- a renamed class would survive typecheck
-// and fail in the browser. Building the span hands back a node that is present
-// by construction, which is the same reason the lane mode rail is built.
-function laneSpanWithClass(className) {
-  const span = document.createElement("span");
-  span.className = className;
-  return span;
-}
-
 function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   const button = document.createElement("button");
   button.type = "button";
@@ -589,12 +578,12 @@ function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   button.dataset.targetChoiceId = target.id;
   button.dataset.targetChoiceActionLabel = actionLabel;
   if (role) button.setAttribute("role", role);
-  const signal = laneSpanWithClass("target-choice-signal");
+  const signal = serveSpanWithClass("target-choice-signal");
   signal.setAttribute("aria-hidden", "true");
-  const copy = laneSpanWithClass("target-choice-copy");
-  const nameSpan = laneSpanWithClass("target-choice-name");
+  const copy = serveSpanWithClass("target-choice-copy");
+  const nameSpan = serveSpanWithClass("target-choice-name");
   nameSpan.textContent = name;
-  copy.append(nameSpan, laneSpanWithClass("target-choice-meta"));
+  copy.append(nameSpan, serveSpanWithClass("target-choice-meta"));
   button.append(signal, copy);
   updateTargetChoiceButtonPresentation(button, target, actionLabel);
   button.addEventListener("click", onClick);
@@ -915,9 +904,9 @@ function renderFilterPills() {
     pill.dataset.blockedTaskCount = String(model.blockedTaskCount);
     pill.dataset.deferredTaskCount = String(model.deferredTaskCount);
     pill.dataset.unavailableTaskCount = String(model.unavailableTaskCount);
-    const pillLabel = laneSpanWithClass("filter-pill-label");
+    const pillLabel = serveSpanWithClass("filter-pill-label");
     pillLabel.textContent = model.label;
-    const pillCount = laneSpanWithClass("filter-pill-count");
+    const pillCount = serveSpanWithClass("filter-pill-count");
     pillCount.textContent = taskFilterStemPillCountText(model);
     pill.append(pillLabel, pillCount);
     nodes.push(pill);

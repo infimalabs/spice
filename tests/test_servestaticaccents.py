@@ -90,10 +90,10 @@ def test_static_agent_names_use_accent_colors_without_bold_weight():
     # The accent rides a class, so the name has to stay its own classed span
     # inside the copy wrapper rather than a bare <strong>. The button is built
     # node by node, so the structure is asserted through the builder calls.
-    assert 'const copy = laneSpanWithClass("target-choice-copy");' in app_lanes
-    assert 'const nameSpan = laneSpanWithClass("target-choice-name");' in app_lanes
+    assert 'const copy = serveSpanWithClass("target-choice-copy");' in app_lanes
+    assert 'const nameSpan = serveSpanWithClass("target-choice-name");' in app_lanes
     assert (
-        'copy.append(nameSpan, laneSpanWithClass("target-choice-meta"));' in app_lanes
+        'copy.append(nameSpan, serveSpanWithClass("target-choice-meta"));' in app_lanes
     )
     assert "function syncTargetChoiceNameAccent(button, target)" in app_lanes
     assert (

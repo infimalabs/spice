@@ -74,6 +74,7 @@ const laneTemplate =
   '  <div class="history-sentinel" data-history-sentinel aria-hidden="true"></div>' +
   "</div>";
 
+/** @type {((event: PointerEvent) => void) | null} */
 let composerBandMenuDismissHandler = null;
 
 function laneDriverIdentityFields(emptyTeam, targetIdentity, serveAgentIdentity) {

@@ -26,6 +26,17 @@ let globalTransientStatusTimestamp = "";
 let globalActivityStatusText = "";
 
 /** Apply the one server-owned chrome envelope carried by an ingress payload. */
+// Parsing a subtree out of an innerHTML string and querying a child back returns
+// a node the checker only knows as possibly null, so the text assignment that
+// always follows cannot be checked -- rename one of those classes and nothing
+// fails until the browser runs. Building the span hands back a node present by
+// construction, which turns that rename into a reference error instead.
+function serveSpanWithClass(className) {
+  const span = document.createElement("span");
+  span.className = className;
+  return span;
+}
+
 function applyLaneChromePayload(payload) {
   const chrome = (payload || {}).chrome;
   return chrome ? laneStore.applyLaneChrome(chrome) : null;
