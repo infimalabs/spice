@@ -16,7 +16,6 @@ from spice.agent import launchhistory
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.serve import messages as message_reader
 from spice.serve.messages import AssistantMessage, RolloutCursor
-from spice.transcript.reader import render_cursor
 from tests.test_transcriptparity import (
     CorpusCase,
     ParityOutput,
@@ -119,23 +118,8 @@ def assembled_ack_presentations(case: CorpusCase) -> tuple[ParityOutput, ...]:
     """The same presentation projected directly from reducer output."""
     outputs: list[ParityOutput] = []
     for assembled in assembled_messages(case):
-        source = next(
-            (event for event in assembled.assistant_text_events if event.text),
-            None,
-        )
-        if source is None:
-            continue
-        offset = source.at.offset or 0
-        message = message_reader._assistant_message(
-            render_cursor(source.at.timestamp or "", offset),
-            offset,
-            source.at.timestamp or "",
-            source.text,
-            kind="final" if source.final else "assistant",
-            classified=assembled,
-            source_event=source,
-        )
-        if message.ack_keys:
+        message = message_reader._build_message(assembled)
+        if message is not None and message.ack_keys:
             outputs.append(
                 ParityOutput(
                     value=_ack_presentation(message),
@@ -212,6 +196,27 @@ def test_mail_and_launch_match_reducer_spans_on_recorded_and_one_live_transcript
             "kind": "out-of-credits",
             "reset_epoch": LIVE_RESET_EPOCH,
         }
+    ]
+
+
+def test_bodyless_keyed_reply_keeps_both_response_dispositions() -> None:
+    message = message_reader.reply_card_message(
+        "bodyless",
+        1,
+        "2026-07-26T06:01:00.000Z",
+        f"ACK {LIVE_ACK_KEY}:\nNACK {LIVE_NACK_KEY}:",
+    )
+
+    assert message.ack_keys == [LIVE_ACK_KEY, LIVE_NACK_KEY]
+    assert message.nack_keys == [LIVE_NACK_KEY]
+    assert message.ack_count == 1
+    assert message.nack_count == 1
+    assert message.ack_utterances == []
+    assert [
+        (segment["keys"], segment["disposition"]) for segment in message.ack_segments
+    ] == [
+        ([LIVE_ACK_KEY], "acked"),
+        ([LIVE_NACK_KEY], "refused"),
     ]
 
 

@@ -1,19 +1,20 @@
 """Presentation models and renderers for transcript-backed assistant messages.
 
-Transcript access, paging, and record projection live in :mod:`spice.serve.messages`.
-This module owns the envelopes produced at that boundary: ACK/NACK rendering,
-task and reply cards, supervisor feedback, and compact activity previews.
+Transcript access, paging, and assembled-locus projection live in
+:mod:`spice.serve.messages`. This module owns the envelopes emitted at that
+boundary: ACK/NACK rendering, task and reply cards, supervisor feedback, and
+compact activity previews.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
-from spice.mail.feedback import SupervisorFeedback, parse_supervisor_feedback_line
+from spice.mail.feedback import supervisor_feedback_notices
 from spice.serve.markdown import render_message_html
 from spice.serve.taskdirectives import (
     _display_text_with_task_directives,
@@ -23,30 +24,29 @@ from spice.serve.taskdirectives import (
     _task_directive_summary,
 )
 from spice.transcript.assembly import (
-    AssembledMessage,
     AssembledMessageReducer,
+    ClassifiedSpan,
     DirectiveKind,
     SpanKind,
+    span_disposition,
 )
-from spice.transcript.events import AssistantText, Provenance
+from spice.transcript.events import (
+    UNLOCATED_SOURCE,
+    AssistantText,
+    Provenance,
+    ToolCall,
+    WebSearch,
+)
 
 IMAGE_REFERENCE_RE = re.compile(r"!\[[^\]]*\]\((?:<[^>]*>|[^)]*)\)")
 
 _PREVIEW_MAX_CHARS = 120
-_PRESENCE_PAYLOAD_TYPES = frozenset(
-    {
-        "function_call",
-        "function_call_output",
-        "custom_tool_call",
-        "custom_tool_call_output",
-        "reasoning",
-        "web_search_call",
-    }
-)
-_SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
-    {"function_call_output", "custom_tool_call_output"}
-)
-_SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
+_TEXT_SPAN_KINDS = frozenset({SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK})
+_TOOL_CALL_TYPES = frozenset({"function_call", "custom_tool_call"})
+_TOOL_OUTPUT_TYPES = frozenset({"function_call_output", "custom_tool_call_output"})
+_UPDATE_PLAN_TOOL = "update_plan"
+_REASONING_KIND = "reasoning"
+_WEB_SEARCH_KIND = "web_search_call"
 _ACK_ALREADY_ACKED_KIND = "ack.already-acked"
 _ACK_ARCHIVED_KIND = "ack.archived"
 _ACK_ERROR_KIND = "ack.error"
@@ -117,24 +117,108 @@ class AssistantMessage:
         }
 
 
-def _payload_output_text(payload: dict[str, Any]) -> str:
-    output = payload.get("output")
-    if isinstance(output, str):
-        return output
-    if isinstance(output, list):
-        parts: list[str] = []
-        for item in output:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "\n".join(parts)
-    return ""
+@dataclass(slots=True)
+class _TextGroup:
+    """One prose or keyed-response run rebuilt from a locus' spans.
+
+    The reducer splits a run wherever a control line interrupts it; a display
+    wants the pieces whole again, so a group re-accumulates them and keeps the
+    two readings apart: task directives stay in `body` to become cards, and
+    every control line is gone from the `spoken` text a browser reads aloud.
+    """
+
+    kind: SpanKind
+    keys: tuple[str, ...]
+    event_identity: int = 0
+    response_index: int | None = None
+    lines: list[str] = field(default_factory=list)
+    spoken_lines: list[str] = field(default_factory=list)
+
+    @property
+    def marker(self) -> tuple[int, int | None, SpanKind, tuple[str, ...]]:
+        return (self.event_identity, self.response_index, self.kind, self.keys)
+
+    @property
+    def body(self) -> str:
+        return "\n".join(self.lines).strip()
+
+    @property
+    def spoken(self) -> str:
+        return "\n".join(self.spoken_lines).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class _PresenceFacts:
+    """The one activity a wordless locus reports, in wire-kind terms."""
+
+    kind: str
+    call_id: str = ""
+    output_text: str = ""
+    call: ToolCall | None = None
+    search: WebSearch | None = None
+    reasoning: str = ""
+
+
+def _text_groups(spans: Sequence[ClassifiedSpan]) -> list[_TextGroup]:
+    """Every prose and keyed-response run this locus carries, in source order."""
+    groups: list[_TextGroup] = []
+    for span in spans:
+        marker = _span_marker(span)
+        if marker is None:
+            continue
+        if not groups or groups[-1].marker != marker:
+            groups.append(
+                _TextGroup(
+                    event_identity=marker[0],
+                    response_index=marker[1],
+                    kind=marker[2],
+                    keys=marker[3],
+                )
+            )
+        _absorb_span(groups[-1], span)
+    return [
+        group
+        for group in groups
+        if group.body or group.spoken or group.response_index is not None
+    ]
+
+
+def _span_marker(
+    span: ClassifiedSpan,
+) -> tuple[int, int | None, SpanKind, tuple[str, ...]] | None:
+    """The source event and response run a classified span already belongs to."""
+    if span.kind in _TEXT_SPAN_KINDS:
+        kind = span.response_kind or span.kind
+        return (id(span.event), span.response_index, kind, span.keys)
+    if span.kind is not SpanKind.DIRECTIVE:
+        return None
+    if span.response_index is None:
+        return (id(span.event), None, SpanKind.PROSE, ())
+    response_kind = span.response_kind
+    if response_kind is None or response_kind not in {SpanKind.ACK, SpanKind.NACK}:
+        raise ValueError(
+            f"response {span.response_index} directive has no ACK/NACK classification"
+        )
+    return (
+        id(span.event),
+        span.response_index,
+        response_kind,
+        span.keys,
+    )
+
+
+def _absorb_span(group: _TextGroup, span: ClassifiedSpan) -> None:
+    if span.kind is SpanKind.DIRECTIVE:
+        if span.directive_kind is DirectiveKind.TASK:
+            group.lines.append(span.text)
+        return
+    group.lines.append(span.text)
+    group.spoken_lines.append(span.text)
 
 
 def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for feedback in _supervisor_feedback_notices(output):
+    for feedback in supervisor_feedback_notices(output):
         if feedback.kind == _TASK_CREATED_KIND:
             handles = _feedback_string_list(feedback.fields.get("handles"))
             if handles:
@@ -215,39 +299,11 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
     return items
 
 
-def _supervisor_feedback_preview(payload: dict[str, Any]) -> str:
-    if payload.get("type") not in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES:
-        return ""
-    items = _supervisor_feedback_items(_payload_output_text(payload))
+def _supervisor_feedback_preview(output: str) -> str:
+    items = _supervisor_feedback_items(output)
     return _preview_from_text(
         "\n".join(f"{item['label']}: {item['detail']}" for item in items)
     )
-
-
-def _supervisor_feedback_notices(output: str) -> list[SupervisorFeedback]:
-    notices: list[SupervisorFeedback] = []
-    lines = output.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    index = 0
-    while index < len(lines):
-        if lines[index].strip() != _SUPERVISOR_FEEDBACK_HEADING:
-            index += 1
-            continue
-        index += 1
-        while index < len(lines):
-            line = lines[index]
-            stripped = line.strip()
-            if stripped == _SUPERVISOR_FEEDBACK_HEADING:
-                break
-            if not stripped:
-                index += 1
-                break
-            if line == stripped:
-                break
-            feedback = parse_supervisor_feedback_line(stripped)
-            if feedback is not None:
-                notices.append(feedback)
-            index += 1
-    return notices
 
 
 def _feedback_string_list(value: object) -> list[str]:
@@ -300,7 +356,7 @@ def reply_card_message(
     """Synthesize the lane card for one `spice agent reply` submission.
 
     The reply text is the same ACK/NACK grammar a prose reply would carry, so
-    it runs through the ordinary assistant-message builder and renders exactly
+    it goes through the same reducer a transcript line does and renders exactly
     like a prose ACK -- acknowledgment quote plus ACK chip -- with no prose.
     """
     return _assistant_message(
@@ -308,19 +364,40 @@ def reply_card_message(
         index,
         timestamp,
         text,
+        groups=_text_groups(_submitted_spans(text, index, timestamp)),
         kind="reply",
         source_kind=source_kind,
         worktree_id=worktree_id,
     )
 
 
-def _plan_items(payload: dict[str, Any]) -> list[dict[str, str]] | None:
-    if payload.get("type") not in ("function_call", "custom_tool_call"):
-        return None
-    if payload.get("name") != "update_plan":
+def _submitted_spans(
+    text: str, index: int, timestamp: str
+) -> tuple[ClassifiedSpan, ...]:
+    """Classify text an operator submitted, which has no transcript line yet."""
+    reducer = AssembledMessageReducer()
+    reducer.push(
+        AssistantText(
+            at=Provenance(
+                source=UNLOCATED_SOURCE,
+                line=index,
+                ordinal=0,
+                timestamp=timestamp,
+                offset=index,
+            ),
+            text=text,
+            final=False,
+        )
+    )
+    assembled = reducer.finish()
+    return assembled[0].spans if assembled else ()
+
+
+def _plan_items(call: ToolCall) -> list[dict[str, str]] | None:
+    if call.name != _UPDATE_PLAN_TOOL:
         return None
     try:
-        arguments = json.loads(payload.get("arguments") or "{}")
+        arguments = json.loads(call.arguments or "{}")
     except json.JSONDecodeError:
         return None
     raw_plan = arguments.get("plan") if isinstance(arguments, dict) else None
@@ -366,125 +443,22 @@ def _normalize_terminal_colon_for_display(
     return _replace_terminal_colon(preamble), segment_bodies
 
 
-@dataclass
-class _ClassifiedResponse:
-    keys: tuple[str, ...]
-    disposition: str
-    visible_parts: list[str] = field(default_factory=list)
-    spoken_parts: list[str] = field(default_factory=list)
-
-    @property
-    def visible_text(self) -> str:
-        return "\n".join(self.visible_parts).strip()
-
-    @property
-    def spoken_text(self) -> str:
-        return "\n".join(self.spoken_parts).strip()
-
-
-def _classified_text_parts(
-    message: AssembledMessage,
-    source_event: AssistantText,
-) -> tuple[str, list[_ClassifiedResponse]]:
-    preamble_parts: list[str] = []
-    responses: dict[int, _ClassifiedResponse] = {}
-    for span in message.spans:
-        if span.event is not source_event or span.kind is SpanKind.FINAL_ANSWER:
-            continue
-        visible = (
-            span.text
-            if span.kind is not SpanKind.DIRECTIVE
-            or span.directive_kind is DirectiveKind.TASK
-            else ""
-        )
-        if span.response_index is None:
-            if span.kind not in {SpanKind.PROSE, SpanKind.DIRECTIVE}:
-                raise ValueError(
-                    f"unkeyed assistant span has response kind {span.kind}"
-                )
-            if visible:
-                preamble_parts.append(visible)
-            continue
-        response_kind = span.response_kind
-        if response_kind not in {SpanKind.ACK, SpanKind.NACK}:
-            raise ValueError(
-                f"response {span.response_index} has no ACK/NACK classification"
-            )
-        disposition = (
-            ACK_DISPOSITION_REFUSED
-            if response_kind is SpanKind.NACK
-            else ACK_DISPOSITION_ACKED
-        )
-        response = responses.get(span.response_index)
-        if response is None:
-            response = _ClassifiedResponse(
-                keys=span.keys,
-                disposition=disposition,
-            )
-            responses[span.response_index] = response
-        elif response.keys != span.keys or response.disposition != disposition:
-            raise ValueError(
-                f"inconsistent classification for response {span.response_index}"
-            )
-        if visible:
-            response.visible_parts.append(visible)
-        if span.kind in {SpanKind.ACK, SpanKind.NACK} and span.text:
-            response.spoken_parts.append(span.text)
-    return "\n".join(preamble_parts).strip(), list(responses.values())
-
-
-def _classify_assistant_text(
-    text: str,
-    *,
-    offset: int,
-    timestamp: str,
-    final: bool,
-) -> tuple[AssembledMessage, AssistantText]:
-    source_event = AssistantText(
-        at=Provenance(
-            source="<serve-message>",
-            line=offset,
-            ordinal=0,
-            timestamp=timestamp or None,
-            offset=offset,
-        ),
-        text=text,
-        final=final,
-    )
-    reducer = AssembledMessageReducer()
-    reducer.push(source_event)
-    messages = reducer.finish()
-    if len(messages) != 1:
-        raise ValueError(f"assistant text assembled into {len(messages)} messages")
-    return messages[0], source_event
-
-
 def _assistant_message(
     key: str,
     offset: int,
     timestamp: str,
     text: str,
     *,
+    groups: Sequence[_TextGroup],
     kind: str,
     source_kind: str = "assistant_text",
     worktree_id: str | None = None,
-    classified: AssembledMessage | None = None,
-    source_event: AssistantText | None = None,
 ) -> AssistantMessage:
-    if classified is None or source_event is None:
-        classified, source_event = _classify_assistant_text(
-            text,
-            offset=offset,
-            timestamp=timestamp,
-            final=kind == "final",
-        )
-    if (
-        source_event.text != text
-        or source_event not in classified.assistant_text_events
-    ):
-        raise ValueError("assistant text does not match its classified source event")
-    preamble, responses = _classified_text_parts(classified, source_event)
-    segment_bodies = [response.visible_text for response in responses]
+    preamble = "\n\n".join(
+        group.body for group in groups if group.kind is SpanKind.PROSE and group.body
+    )
+    segments = [group for group in groups if group.kind is not SpanKind.PROSE]
+    segment_bodies = [group.body for group in segments]
     preamble, segment_bodies = _normalize_terminal_colon_for_display(
         text, preamble, segment_bodies
     )
@@ -504,8 +478,8 @@ def _assistant_message(
         [_display_text_with_task_directives(preamble)] if preamble else []
     )
     task_card_count = _task_directive_count(preamble)
-    for response, segment_body in zip(responses, segment_bodies, strict=True):
-        refused = response.disposition == ACK_DISPOSITION_REFUSED
+    for segment, segment_body in zip(segments, segment_bodies, strict=True):
+        refused = segment.kind is SpanKind.NACK
         # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(segment_body)
@@ -513,21 +487,20 @@ def _assistant_message(
         display_body = _display_text_with_task_directives(body)
         ack_segments.append(
             {
-                "keys": list(response.keys),
+                "keys": list(segment.keys),
                 "html": _render_message_html_with_task_directives(
                     body, worktree_id=worktree_id
                 ),
-                "disposition": response.disposition,
+                "disposition": span_disposition(segment.kind),
             }
         )
-        for keyed in response.keys:
+        for keyed in segment.keys:
             if keyed not in seen_keys:
                 seen_keys.add(keyed)
                 ack_keys.append(keyed)
             (refused_keys if refused else acked_keys).add(keyed)
-        spoken = response.spoken_text
-        if spoken:
-            ack_utterances.append(spoken)
+        if segment.spoken:
+            ack_utterances.append(segment.spoken)
         if body:
             display_sources.append(body)
         if display_body:
@@ -539,7 +512,7 @@ def _assistant_message(
     image_only = _image_only_markdown(display_text)
     preamble_html = (
         _render_message_html_with_task_directives(preamble, worktree_id=worktree_id)
-        if preamble and responses
+        if preamble and segments
         else ""
     )
     display_source = "\n".join(display_sources)
@@ -626,55 +599,40 @@ def _preview_from_text(text: str) -> str:
 
 
 def _preview_for_presence(
-    payload: dict[str, Any],
-    payload_type: str,
+    presence: _PresenceFacts,
     *,
     call_previews: dict[str, str] | None = None,
 ) -> str:
-    supervisor_feedback = _supervisor_feedback_preview(payload)
+    supervisor_feedback = _supervisor_feedback_preview(presence.output_text)
     if supervisor_feedback:
         return supervisor_feedback
-    if payload_type == "reasoning":
-        return _preview_from_text(_reasoning_summary_text(payload)) or "thinking"
-    if payload_type in {"function_call", "custom_tool_call"}:
-        return _preview_for_call(payload) or "tool call"
-    if payload_type in {"function_call_output", "custom_tool_call_output"}:
-        return _preview_for_tool_output(payload, call_previews=call_previews)
-    if payload_type == "web_search_call":
-        return _preview_for_web_search(payload) or "web search"
-    return payload_type.replace("_", " ")
+    if presence.call is not None:
+        return _preview_for_call(presence.call) or "tool call"
+    if presence.search is not None:
+        return _preview_for_web_search(presence.search) or "web search"
+    if presence.kind == _REASONING_KIND:
+        return _preview_from_text(presence.reasoning) or "thinking"
+    if presence.kind in _TOOL_OUTPUT_TYPES:
+        return _preview_for_tool_output(presence, call_previews=call_previews)
+    return presence.kind.replace("_", " ")
 
 
 def _remember_call_preview(
-    payload: dict[str, Any],
-    payload_type: str,
+    presence: _PresenceFacts,
     preview: str,
     call_previews: dict[str, str] | None,
 ) -> None:
-    if call_previews is None:
+    if call_previews is None or presence.call is None:
         return
-    if payload_type not in {"function_call", "custom_tool_call"}:
-        return
-    call_id = _payload_call_id(payload)
-    if call_id and preview:
-        call_previews[call_id] = preview
-
-
-def _payload_call_id(payload: dict[str, Any]) -> str:
-    for key in ("call_id", "id"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
+    if presence.call_id and preview:
+        call_previews[presence.call_id] = preview
 
 
 def _preview_for_tool_output(
-    payload: dict[str, Any], *, call_previews: dict[str, str] | None
+    presence: _PresenceFacts, *, call_previews: dict[str, str] | None
 ) -> str:
-    output_preview = _preview_from_text(_payload_output_text(payload))
-    call_preview = (
-        call_previews.get(_payload_call_id(payload), "") if call_previews else ""
-    )
+    output_preview = _preview_from_text(presence.output_text)
+    call_preview = call_previews.get(presence.call_id, "") if call_previews else ""
     return _render_tool_output_preview(
         call_preview=call_preview,
         output_preview=output_preview,
@@ -691,33 +649,19 @@ def _render_tool_output_preview(*, call_preview: str, output_preview: str) -> st
     return "tool output"
 
 
-def _reasoning_summary_text(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary")
-    if not isinstance(summary, list):
-        return ""
-    for item in summary:
-        if isinstance(item, dict):
-            text = item.get("text") or item.get("summary") or ""
-            if isinstance(text, str) and text.strip():
-                return text
-        elif isinstance(item, str) and item.strip():
-            return item
-    return ""
-
-
 _PREVIEW_ARG_KEYS = ("cmd", "path", "query", "url", "input", "prompt", "text")
 
 
-def _preview_for_call(payload: dict[str, Any]) -> str:
-    name = str(payload.get("name") or "").strip().replace("_", " ")
-    args_preview = _preview_args(payload.get("arguments"))
+def _preview_for_call(call: ToolCall) -> str:
+    name = call.name.strip().replace("_", " ")
+    args_preview = _preview_args(call.arguments)
     if name and args_preview:
         return _preview_from_text(f"{name}: {args_preview}")
     return _preview_from_text(name or args_preview)
 
 
-def _preview_args(raw: Any) -> str:
-    if not isinstance(raw, str) or not raw:
+def _preview_args(raw: str) -> str:
+    if not raw:
         return ""
     try:
         data = json.loads(raw)
@@ -740,13 +684,8 @@ def _preview_args(raw: Any) -> str:
     return data if isinstance(data, str) else ""
 
 
-def _preview_for_web_search(payload: dict[str, Any]) -> str:
-    action = payload.get("action")
-    if isinstance(action, dict):
-        query = action.get("query")
-        if isinstance(query, str) and query.strip():
-            return f"search: {query}"
-    query = payload.get("query")
-    if isinstance(query, str) and query.strip():
+def _preview_for_web_search(search: WebSearch) -> str:
+    query = search.query or ""
+    if query.strip():
         return f"search: {query}"
     return ""

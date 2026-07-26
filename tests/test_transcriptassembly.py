@@ -203,6 +203,55 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "directive_kind", "directive_text", "prose"),
+    [
+        (
+            (
+                'shipped\n::git-commit{"sha":"abc"}\n'
+                '::Git-commit{"sha":"visible"}\ncontinuing'
+            ),
+            DirectiveKind.APP,
+            '::git-commit{"sha":"abc"}',
+            ["shipped", '::Git-commit{"sha":"visible"}\ncontinuing'],
+        ),
+        (
+            (
+                "captured\n"
+                "TASK title=Follow up | project=session.transcript "
+                "| acceptance=Tracked\n"
+                "TASK title=Missing project\n"
+                "continuing"
+            ),
+            DirectiveKind.TASK,
+            "TASK title=Follow up | project=session.transcript | acceptance=Tracked",
+            ["captured", "TASK title=Missing project\ncontinuing"],
+        ),
+    ],
+    ids=["app-directive", "task-directive"],
+)
+def test_a_line_the_grammar_rejects_stays_prose(
+    text: str,
+    directive_kind: DirectiveKind,
+    directive_text: str,
+    prose: list[str],
+) -> None:
+    """Near-miss directive lines are prose, not silently swallowed directives.
+
+    Each case pairs a well-formed directive with one the grammar rejects for a
+    single reason -- a capitalised app verb, a TASK line missing its required
+    project -- so a grammar that loosened into matching on the prefix alone
+    would take an operator's own words out of the message they wrote.
+    """
+    spans = _assemble([AssistantText(at=_at(1), text=text, final=False)])[0].spans
+
+    directives = [span for span in spans if span.kind is SpanKind.DIRECTIVE]
+    assert [(span.directive_kind, span.text) for span in directives] == [
+        (directive_kind, directive_text)
+    ]
+    assert [span.text for span in spans if span.kind is SpanKind.PROSE] == prose
+
+
+@pytest.mark.parametrize(
     ("header", "expected_kind"),
     (
         (f"ACK {ACK_KEY}:", SpanKind.ACK),
@@ -223,7 +272,6 @@ def test_bodyless_keyed_response_keeps_its_reducer_classification(
     assert span.text == ""
     assert span.response_index == 0
     assert span.response_kind is expected_kind
-    assert message.assistant_text_events == (event,)
 
 
 def _at(line: int) -> Provenance:

@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
+from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
 from spice.mail.ackgrammar import split_keyed_response
 from spice.transcript.events import (
     AssistantText,
@@ -42,6 +42,7 @@ __all__ = [
     "ClassifiedSpan",
     "DirectiveKind",
     "SpanKind",
+    "span_disposition",
 ]
 
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
@@ -87,9 +88,6 @@ class DirectiveKind(StrEnum):
     APP = "app"
 
 
-_ALL_DIRECTIVE_KINDS = frozenset(DirectiveKind)
-
-
 @dataclass(frozen=True, slots=True)
 class ClassifiedSpan:
     """One ordered semantic span backed by its original typed event."""
@@ -110,19 +108,6 @@ class AssembledMessage:
 
     at: Provenance
     spans: tuple[ClassifiedSpan, ...]
-
-    @property
-    def assistant_text_events(self) -> tuple[AssistantText, ...]:
-        """Each assistant text fact backing these spans, once and in order."""
-        events: list[AssistantText] = []
-        seen: set[int] = set()
-        for span in self.spans:
-            event = span.event
-            if not isinstance(event, AssistantText) or id(event) in seen:
-                continue
-            seen.add(id(event))
-            events.append(event)
-        return tuple(events)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +173,20 @@ class AssembledMessageReducer:
         return (message,)
 
 
+def span_disposition(kind: SpanKind) -> str:
+    """The ACK-state disposition a keyed span's polarity already decided.
+
+    Classification happens once, here, when the span is built; consumers that
+    put the polarity on a wire ask for its name rather than re-reading the
+    header or comparing kinds themselves.
+    """
+    if kind is SpanKind.ACK:
+        return ACK_DISPOSITION_ACKED
+    if kind is SpanKind.NACK:
+        return ACK_DISPOSITION_REFUSED
+    raise ValueError(f"span kind {kind} has no ACK disposition")
+
+
 def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
     if isinstance(event, AssistantText):
         return _assistant_text_spans(event)
@@ -250,7 +249,7 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
 
 
 def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
-    masked, directives = _mask_directives(event.text, _ALL_DIRECTIVE_KINDS)
+    masked, directives = _mask_directives(event.text)
     preamble, responses = split_keyed_response(
         masked,
         drop_task_directives=False,
@@ -343,10 +342,7 @@ def _segment_spans(
     return tuple(spans)
 
 
-def _mask_directives(
-    text: str,
-    kinds: frozenset[DirectiveKind],
-) -> tuple[str, dict[str, _Directive]]:
+def _mask_directives(text: str) -> tuple[str, dict[str, _Directive]]:
     marker_prefix = "\0spice-directive:"
     while marker_prefix in text:
         marker_prefix = f"\0{marker_prefix}"
@@ -354,7 +350,7 @@ def _mask_directives(
     directives: dict[str, _Directive] = {}
     for line in text.splitlines():
         directive_kind = _directive_kind(line)
-        if directive_kind is None or directive_kind not in kinds:
+        if directive_kind is None:
             masked.append(line)
             continue
         marker = f"{marker_prefix}{len(directives)}\0"

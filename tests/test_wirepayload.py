@@ -18,7 +18,7 @@ from spice.serve import (
     submissions,
     workroutes,
 )
-from spice.serve.payload import message, metric, wire
+from spice.serve.payload import chrome, message, metric, wire
 from spice.serve.worktree import inventory
 from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
 
@@ -28,6 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def test_browser_payload_emitters_match_the_exact_schema_registry():
     modules = (
         agentapi,
+        chrome,
         httpapi,
         observer,
         message,
@@ -272,8 +273,11 @@ def test_lane_chrome_contract_rejects_authority_expansion_fields():
             )
 
 
-def test_lane_chrome_contract_is_not_yet_an_emitter_migration():
-    assert "LaneChromePayload" not in wire.BROWSER_PAYLOAD_EMITTER_SCHEMAS.values()
+def test_lane_chrome_is_the_assembler_emitted_contract():
+    emitter = wire.BROWSER_PAYLOAD_EMITTER_SCHEMAS[
+        "payload.chrome.assemble_lane_chrome"
+    ]
+    assert emitter == "LaneChromePayload"
 
     rendered = wire.render_app_types_js()
     assert " * @typedef {Object} LaneChromePayload" in rendered

@@ -10,10 +10,11 @@ scanned backwards in chunks so a season-long transcript stays cheap to page.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TypeVar
 
 from spice.agent.driver import (
     AgentDriver,
@@ -22,20 +23,17 @@ from spice.agent.driver import (
     driver_for_transcript,
 )
 from spice.agent.identity import canonical_thread_id
-from spice.serve.images import (
-    assistant_image_markdown,
-    tool_output_image_markdown,
-    view_image_markdown,
-)
+from spice.serve.images import image_markdown, view_image_markdown
 from spice.serve.messagepresentation import (
-    _PRESENCE_PAYLOAD_TYPES,
-    _SUPERVISOR_FEEDBACK_OUTPUT_TYPES,
+    _REASONING_KIND,
     _SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES,
+    _TOOL_CALL_TYPES,
+    _TOOL_OUTPUT_TYPES,
+    _WEB_SEARCH_KIND,
     AssistantMessage,
     _assistant_message,
-    _payload_call_id,
-    _payload_output_text,
     _plan_items,
+    _PresenceFacts,
     _presence_message,
     _preview_for_presence,
     _preview_from_text,
@@ -44,26 +42,34 @@ from spice.serve.messagepresentation import (
     _simple_message,
     _supervisor_feedback_items as _supervisor_feedback_items,
     _supervisor_feedback_preview,
+    _TextGroup,
+    _text_groups,
     reply_card_message as reply_card_message,
     task_card_message as task_card_message,
 )
 from spice.transcript.assembly import (
     AssembledMessage,
     AssembledMessageReducer,
+    ClassifiedSpan,
+    SpanKind,
+)
+from spice.transcript.events import (
+    AssistantText,
+    Compaction,
+    Image,
+    Reasoning,
+    ToolCall,
+    ToolOutput,
+    TranscriptEvent,
+    WebSearch,
 )
 from spice.transcript.reader import (
     REVERSE_WINDOW_BYTES,
     TranscriptCursor,
-    TranscriptLine,
+    TranscriptEventReader,
     cursor_offset,
-    dispatch_records,
     locked_cursor,
     offset_after_line,
-    read_bounded,
-    read_forward,
-    read_line,
-    read_reverse_window,
-    record_assistant_text,
     render_cursor,
     transcript_file_identity,
     transcript_size,
@@ -74,6 +80,8 @@ ACTIVE_ASSISTANT_SECONDS = 60
 ACTIVEISH_ASSISTANT_SECONDS = 5 * 60
 DEFAULT_MESSAGE_LIMIT = 200
 MAX_MESSAGE_LIMIT = 400
+
+_EventT = TypeVar("_EventT", bound=TranscriptEvent)
 
 
 @dataclass
@@ -103,31 +111,23 @@ class AssistantMessageRead:
 
 @dataclass
 class _ToolPreviewIndex:
-    """Call/output preview facts collected during one record projection pass."""
+    """Call/output preview facts collected during one event projection pass."""
 
     calls: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
     outputs: dict[int, tuple[str, str]] = field(default_factory=dict)
 
-    def observe(
-        self,
-        *,
-        offset: int,
-        payload: dict[str, Any],
-        payload_type: str,
-        preview: str,
-    ) -> None:
-        call_id = _payload_call_id(payload)
-        if payload_type in {"function_call", "custom_tool_call"}:
-            if call_id and preview:
-                self.calls.setdefault(call_id, []).append((offset, preview))
+    def observe(self, presence: _PresenceFacts, *, offset: int, preview: str) -> None:
+        if presence.kind in _TOOL_CALL_TYPES:
+            if presence.call_id and preview:
+                self.calls.setdefault(presence.call_id, []).append((offset, preview))
             return
-        if payload_type not in {"function_call_output", "custom_tool_call_output"}:
+        if presence.kind not in _TOOL_OUTPUT_TYPES:
             return
-        if _supervisor_feedback_preview(payload):
+        if _supervisor_feedback_preview(presence.output_text):
             return
         self.outputs[offset] = (
-            call_id,
-            _preview_from_text(_payload_output_text(payload)),
+            presence.call_id,
+            _preview_from_text(presence.output_text),
         )
 
     def resolve(self, messages: list[AssistantMessage]) -> list[AssistantMessage]:
@@ -373,7 +373,7 @@ def _read_appended_window(
     if file_size == cursor.window_size:
         cursor.offset = file_size
         return []
-    read = read_forward(transcript_path, cursor=cursor)
+    read = _reader(transcript_path, driver).read("forward", cursor=cursor)
     if read.error is not None:
         return []
     if read.file_identity != file_identity:
@@ -385,11 +385,7 @@ def _read_appended_window(
             worktree_id=worktree_id,
             driver=driver,
         )
-    appended = _messages_from_records(
-        read.records,
-        driver=driver,
-        worktree_id=worktree_id,
-    )
+    appended = _messages_from_events(read.events, worktree_id=worktree_id)
     end_offset = read.end_offset
     previous = list(reversed(cursor.window))
     previous_tail = previous[-1:] if previous else []
@@ -419,16 +415,12 @@ def _read_chronological_from_offset(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> tuple[list[AssistantMessage], int]:
-    read = read_forward(
-        transcript_path,
+    read = _reader(transcript_path, driver).read(
+        "forward",
         cursor=TranscriptCursor(offset=start_offset),
     )
     return (
-        _messages_from_records(
-            read.records,
-            driver=driver,
-            worktree_id=worktree_id,
-        ),
+        _messages_from_events(read.events, worktree_id=worktree_id),
         read.end_offset,
     )
 
@@ -456,33 +448,32 @@ def _read_window(
         and cursor.file_identity == file_identity
     ):
         return list(cursor.window)
-    read = read_reverse_window(
-        transcript_path,
+    reader = _reader(transcript_path, driver)
+    read = reader.read(
+        "reverse",
         end_offset=end_offset,
         max_bytes=REVERSE_WINDOW_BYTES,
     )
     preview_index = _ToolPreviewIndex()
-    scanned = _messages_from_records(
-        read.records,
-        driver=driver,
+    scanned = _messages_from_events(
+        read.events,
         worktree_id=worktree_id,
         preview_index=preview_index,
     )
     visible_count = sum(not message.kind.startswith("presence:") for message in scanned)
     scan_start = read.access_start_offset
     while visible_count < limit and scan_start > 0:
-        older = read_bounded(
-            transcript_path,
+        older = reader.read(
+            "bounded",
             start_offset=max(0, scan_start - REVERSE_WINDOW_BYTES),
             end_offset=scan_start,
             align_partial_start=True,
         )
         if older.access_start_offset >= scan_start:
             break
-        if older.records:
-            projected = _messages_from_records(
-                older.records,
-                driver=driver,
+        if older.events:
+            projected = _messages_from_events(
+                older.events,
                 worktree_id=worktree_id,
                 preview_index=preview_index,
             )
@@ -516,20 +507,24 @@ def _read_window(
     return result
 
 
-def _messages_from_records(
-    records: tuple[TranscriptLine, ...],
+def _reader(transcript_path: Path, driver: AgentDriver) -> TranscriptEventReader:
+    return TranscriptEventReader(transcript_path, driver, source_actor=None)
+
+
+def _messages_from_events(
+    events: Sequence[TranscriptEvent],
     *,
-    driver: AgentDriver,
     worktree_id: str | None,
     preview_index: _ToolPreviewIndex | None = None,
 ) -> list[AssistantMessage]:
+    """Project one access pass of typed facts into envelopes, in source order."""
     messages: list[AssistantMessage] = []
     call_previews: dict[str, str] = {}
+    reducer = AssembledMessageReducer()
 
-    def consume(record: TranscriptLine) -> None:
+    def consume(assembled: AssembledMessage) -> None:
         message = _build_message(
-            record,
-            driver=driver,
+            assembled,
             worktree_id=worktree_id,
             call_previews=call_previews,
             preview_index=preview_index,
@@ -537,7 +532,11 @@ def _messages_from_records(
         if message is not None:
             messages.append(message)
 
-    dispatch_records(records, consume)
+    for event in events:
+        for assembled in reducer.push(event):
+            consume(assembled)
+    for assembled in reducer.finish():
+        consume(assembled)
     return messages
 
 
@@ -574,18 +573,13 @@ def _line_has_tool_output_image(
     transcript_path: Path, offset: int, *, driver: AgentDriver
 ) -> bool:
     """The paging boundary line pairs with a trailing `view_image` call."""
-    record = read_line(transcript_path, offset)
-    loaded = record.parsed if record is not None else None
-    if loaded is None:
-        return False
-    event = driver.normalize_transcript_line(loaded)
-    if event is None or event.get("type") != "response_item":
-        return False
-    payload = event.get("payload")
-    if not isinstance(payload, dict):
-        return False
-    markdown = tool_output_image_markdown(payload, worktree_id=None, source_offset=None)
-    return markdown is not None
+    read = _reader(transcript_path, driver).read(
+        "bounded", start_offset=offset, end_offset=offset + 1
+    )
+    return any(
+        isinstance(event, Image) and _is_tool_output_image(event)
+        for event in read.events
+    )
 
 
 def _trim_chronological(
@@ -635,7 +629,7 @@ def _kept_presence_messages(messages: list[AssistantMessage]) -> list[AssistantM
 def _is_supervisor_feedback_presence(message: AssistantMessage) -> bool:
     return (
         message.kind.startswith("presence:")
-        and message.source_kind in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES
+        and message.source_kind in _TOOL_OUTPUT_TYPES
         and message.preview.startswith(_SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES)
     )
 
@@ -654,113 +648,205 @@ def activity_status(messages: list[AssistantMessage]) -> str:
     return "inactive"
 
 
-def _classified_record_text(
-    record: TranscriptLine,
-    driver: AgentDriver,
-) -> AssembledMessage | None:
-    reducer = AssembledMessageReducer()
-    messages: list[AssembledMessage] = []
-    for event in record_assistant_text(record, driver):
-        messages.extend(reducer.push(event))
-    messages.extend(reducer.finish())
-    if not messages:
-        return None
-    if len(messages) != 1:
-        raise ValueError(
-            f"one transcript record assembled into {len(messages)} text messages"
-        )
-    return messages[0]
-
-
 def _build_message(
-    record: TranscriptLine,
+    message: AssembledMessage,
     *,
-    driver: AgentDriver,
     worktree_id: str | None = None,
     call_previews: dict[str, str] | None = None,
     preview_index: _ToolPreviewIndex | None = None,
 ) -> AssistantMessage | None:
-    loaded = record.parsed
-    if loaded is None:
-        return None
-    event = driver.normalize_transcript_line(loaded)
-    if event is None:
-        return None
-    offset = record.offset
-    timestamp = str(event.get("timestamp") or "")
+    """Project one assembled locus into the single envelope it can carry."""
+    spans = message.spans
+    at = message.at
+    offset = at.offset if at.offset is not None else at.line
+    timestamp = str(at.timestamp or "")
     key = render_cursor(timestamp, offset)
-    if event.get("type") == "compacted":
+    compaction = _first_event(spans, Compaction)
+    if compaction is not None:
+        if not compaction.boundary:
+            return None
         return _simple_message(
             key, offset, timestamp, kind="compaction", text="Context compacted"
         )
-    if event.get("type") != "response_item":
-        return None
-    payload = event.get("payload") or {}
-    classified = _classified_record_text(record, driver)
-    source_event = (
-        next(
-            (event for event in classified.assistant_text_events if event.text),
-            None,
-        )
-        if classified is not None
-        else None
+    visible = _visible_message(spans, key, offset, timestamp, worktree_id=worktree_id)
+    if visible is not None:
+        return visible
+    return _presence_envelope(
+        spans,
+        key,
+        offset,
+        timestamp,
+        call_previews=call_previews,
+        preview_index=preview_index,
     )
-    text = source_event.text if source_event is not None else None
-    source_kind = "assistant_text"
-    if text is None:
-        text = assistant_image_markdown(
-            payload, worktree_id=worktree_id, source_offset=offset
-        )
-        source_kind = "assistant_image"
-    if text is None:
-        text = tool_output_image_markdown(
-            payload, worktree_id=worktree_id, source_offset=offset
-        )
-        source_kind = "tool_output_image"
-    if text is None:
-        text = view_image_markdown(payload)
-        source_kind = "view_image_call"
-    if text is not None:
-        kind = "final" if payload.get("phase") == "final_answer" else "assistant"
+
+
+def _visible_message(
+    spans: Sequence[ClassifiedSpan],
+    key: str,
+    offset: int,
+    timestamp: str,
+    *,
+    worktree_id: str | None,
+) -> AssistantMessage | None:
+    """The prose, picture, or picture request this locus shows the operator."""
+    groups = _text_groups(spans)
+    if groups:
         return _assistant_message(
             key,
             offset,
             timestamp,
-            text,
-            kind=kind,
-            source_kind=source_kind,
+            _source_text(spans),
+            groups=groups,
+            kind="final" if _has_final_answer(spans) else "assistant",
+            source_kind="assistant_text",
             worktree_id=worktree_id,
-            classified=classified if source_event is not None else None,
-            source_event=source_event,
         )
-    plan_items = _plan_items(payload)
-    if plan_items is not None:
-        return _presence_message(
-            key,
-            offset,
-            timestamp,
-            kind="update_plan",
-            preview="to-do list update",
-            plan_items=plan_items,
-        )
-    payload_type = payload.get("type")
-    if isinstance(payload_type, str) and payload_type in _PRESENCE_PAYLOAD_TYPES:
-        preview = _preview_for_presence(
-            payload, payload_type, call_previews=call_previews
-        )
-        _remember_call_preview(payload, payload_type, preview, call_previews)
-        if preview_index is not None:
-            preview_index.observe(
-                offset=offset,
-                payload=payload,
-                payload_type=payload_type,
-                preview=preview,
+    images = [span.event for span in spans if isinstance(span.event, Image)]
+    source_kind = _image_source_kind(images)
+    if source_kind is not None:
+        markdown = image_markdown(images, worktree_id=worktree_id, source_offset=offset)
+        if markdown is not None:
+            return _markdown_message(
+                key, offset, timestamp, markdown, source_kind, worktree_id
             )
-        return _presence_message(
-            key,
-            offset,
-            timestamp,
-            kind=payload_type,
-            preview=preview,
+    call = _first_event(spans, ToolCall)
+    view_markdown = None if call is None else view_image_markdown(call)
+    if view_markdown is not None:
+        return _markdown_message(
+            key, offset, timestamp, view_markdown, "view_image_call", worktree_id
         )
     return None
+
+
+def _presence_envelope(
+    spans: Sequence[ClassifiedSpan],
+    key: str,
+    offset: int,
+    timestamp: str,
+    *,
+    call_previews: dict[str, str] | None,
+    preview_index: _ToolPreviewIndex | None,
+) -> AssistantMessage | None:
+    """The activity record a locus with nothing visible still contributes."""
+    presence = _presence_facts(spans)
+    if presence is None:
+        return None
+    if presence.call is not None:
+        plan_items = _plan_items(presence.call)
+        if plan_items is not None:
+            return _presence_message(
+                key,
+                offset,
+                timestamp,
+                kind="update_plan",
+                preview="to-do list update",
+                plan_items=plan_items,
+            )
+    preview = _preview_for_presence(presence, call_previews=call_previews)
+    _remember_call_preview(presence, preview, call_previews)
+    if preview_index is not None:
+        preview_index.observe(presence, offset=offset, preview=preview)
+    return _presence_message(
+        key, offset, timestamp, kind=presence.kind, preview=preview
+    )
+
+
+def _markdown_message(
+    key: str,
+    offset: int,
+    timestamp: str,
+    markdown: str,
+    source_kind: str,
+    worktree_id: str | None,
+) -> AssistantMessage:
+    """One picture rendered as the whole of an otherwise wordless message."""
+    group = _TextGroup(kind=SpanKind.PROSE, keys=())
+    group.lines.append(markdown)
+    group.spoken_lines.append(markdown)
+    return _assistant_message(
+        key,
+        offset,
+        timestamp,
+        markdown,
+        groups=[group],
+        kind="assistant",
+        source_kind=source_kind,
+        worktree_id=worktree_id,
+    )
+
+
+def _first_event(
+    spans: Sequence[ClassifiedSpan], wanted: type[_EventT]
+) -> _EventT | None:
+    return next(
+        (span.event for span in spans if isinstance(span.event, wanted)),
+        None,
+    )
+
+
+def _has_final_answer(spans: Sequence[ClassifiedSpan]) -> bool:
+    return any(span.kind is SpanKind.FINAL_ANSWER for span in spans)
+
+
+def _source_text(spans: Sequence[ClassifiedSpan]) -> str:
+    """The prose exactly as written, with each block of a line kept apart."""
+    texts: list[str] = []
+    previous: AssistantText | None = None
+    for span in spans:
+        event = span.event
+        if isinstance(event, AssistantText) and event is not previous:
+            previous = event
+            if event.text.strip():
+                texts.append(event.text)
+    return "\n\n".join(texts).strip()
+
+
+def _is_tool_output_image(image: Image) -> bool:
+    return image.tool_output_type == "function_call_output"
+
+
+def _image_source_kind(images: Sequence[Image]) -> str | None:
+    """Where a locus' pictures came from, or None when it shows none."""
+    if not images:
+        return None
+    if any(_is_tool_output_image(image) for image in images):
+        return "tool_output_image"
+    if all(image.role in (None, "assistant") for image in images):
+        return "assistant_image"
+    return None
+
+
+def _presence_facts(spans: Sequence[ClassifiedSpan]) -> _PresenceFacts | None:
+    """The single activity a locus reports, tool results before requests."""
+    outputs = [span.event for span in spans if isinstance(span.event, ToolOutput)]
+    if outputs:
+        return _PresenceFacts(
+            kind=outputs[0].tool_output_type,
+            call_id=_event_call_id(outputs[0]),
+            output_text="\n".join(output.content for output in outputs),
+        )
+    call = _first_event(spans, ToolCall)
+    if call is not None:
+        return _PresenceFacts(
+            kind="custom_tool_call" if call.custom else "function_call",
+            call_id=_event_call_id(call),
+            call=call,
+        )
+    search = _first_event(spans, WebSearch)
+    if search is not None:
+        return _PresenceFacts(kind=_WEB_SEARCH_KIND, search=search)
+    reasonings = [span.event for span in spans if isinstance(span.event, Reasoning)]
+    if reasonings:
+        summary = next(
+            (event.summary for event in reasonings if event.summary.strip()), ""
+        )
+        return _PresenceFacts(kind=_REASONING_KIND, reasoning=summary)
+    return None
+
+
+def _event_call_id(event: ToolCall | ToolOutput) -> str:
+    for value in (event.call_id, event.item_id):
+        if value and value.strip():
+            return value.strip()
+    return ""
