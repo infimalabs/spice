@@ -532,9 +532,8 @@ WIRE_OBJECTS = (
     # microseconds so that a reader meeting more than one meets one kind of
     # token rather than one encoding per authority.
     # payload.chrome.lane_chrome_generation admits only a count, so a hash
-    # identity cannot become an epoch -- it would
-    # arrive as an order the reducer cannot fault and then mis-order silently
-    # behind it.
+    # identity cannot become an epoch -- it would arrive as an order the
+    # reducer cannot fault and then mis-order silently behind it.
     _object(
         "LaneChromeFacetOrder",
         {"epoch": STRING, "revision": INTEGER},

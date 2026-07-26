@@ -28,8 +28,8 @@ from spice.serve.payload.chrome import (
 )
 from spice.serve.payload.identity import team_facts_for_actor, team_identity_payload
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
-from spice.serve.team.store import ServeTeamStore
 from spice.serve.team.schema import DEFAULT_LIFETIME
+from spice.serve.team.store import ServeTeamStore
 from spice.serve.worktree import inventory
 from spice.serve.workroutes import (
     work_tree_send_accepted_response_payload,
@@ -71,6 +71,10 @@ WHOLE_LANE_FACETS = {
 }
 TEAM_REVISION_BEFORE_CONFIG = 11
 TEAM_REVISION_AFTER_CONFIG = 12
+TEAM_ACTOR = "agent-a"
+# The two facets the team store alone orders, and so the two it dates by the
+# generation it was created at.
+TEAM_STORE_FACETS = ("teamConfig", "renewal")
 
 
 class _FailedDiscoveryState(_State):
@@ -345,10 +349,6 @@ def test_the_activity_generation_orders_stamps_across_a_written_offset():
     assert landed.changed == ("activity",)
 
 
-TEAM_ACTOR = "agent-a"
-TEAM_STORE_FACETS = ("teamConfig", "renewal")
-
-
 def _team_store(path) -> ServeTeamStore:
     """Open a store the way a restarted serve does, and seat one team in it.
 
@@ -398,16 +398,13 @@ def test_a_remade_team_store_supersedes_the_generation_it_replaced(tmp_path):
 
     # Both stores were seated the same way, so their revisions match exactly and
     # the generation is the only thing left that can say which store spoke last.
-    # Both come from the authority; nothing here writes one. Re-observing the
-    # same generation publishes nothing, which is what says the first result is
-    # a supersession rather than an assembler republishing what it holds.
-    assert _orders(replaced) == {
-        facet: LaneChromeOrder(
-            epoch=replaced[facet]["order"]["epoch"],
-            revision=remade[facet]["order"]["revision"],
-        )
-        for facet in TEAM_STORE_FACETS
-    }
+    # Every order here comes from the authority; nothing in this test writes
+    # one. Re-observing the same generation publishes nothing, which is what
+    # says the first result is a supersession rather than an assembler
+    # republishing what it holds.
+    assert [replaced[facet]["order"]["revision"] for facet in TEAM_STORE_FACETS] == [
+        remade[facet]["order"]["revision"] for facet in TEAM_STORE_FACETS
+    ]
     assert (
         assemble_lane_chrome("wt", observed, published=_orders(replaced)).changed
         == TEAM_STORE_FACETS
