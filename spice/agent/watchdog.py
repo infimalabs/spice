@@ -66,6 +66,7 @@ from spice.transcript.decode import decode_parsed_line
 from spice.transcript.events import (
     AssistantText,
     Compaction,
+    Image,
     LineStamper,
     ToolCall,
     TranscriptEvent,
@@ -610,7 +611,6 @@ def make_stdout_scanner(
         driver,
         on_message,
         on_compaction=on_compaction,
-        on_text_starvation=on_text_starvation,
         on_activity=on_activity,
     )
 
@@ -628,6 +628,9 @@ TEXT_STARVATION_THRESHOLD = 12
 TEXT_SPAN_KINDS = frozenset(
     {SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK, SpanKind.DIRECTIVE}
 )
+
+# The facts that mean the agent is producing rather than being produced for.
+ACTIVITY_EVENTS = (AssistantText, Image, ToolCall)
 
 # The synthetic source both stdout dialects stamp their facts with. Nothing
 # reads it back: stdout is a stream, not a file anyone can seek into again.
@@ -679,7 +682,11 @@ class SupervisedProseFold:
 
     def _consume(self, message: AssembledMessage) -> None:
         events = [span.event for span in message.spans]
-        if any(isinstance(event, (AssistantText, ToolCall)) for event in events):
+        # Activity is anything the assistant itself materialized. An image is
+        # produced output like prose is, so a lane whose first turn is one has
+        # started; only facts the harness attributed to it -- reasoning
+        # summaries, tool output coming back -- leave the deadline waiting.
+        if any(isinstance(event, ACTIVITY_EVENTS) for event in events):
             self._on_activity()
         text = self._visible_text(message)
         if text:
@@ -742,7 +749,6 @@ class JsonStdoutScanner:
         on_activity: Callable[[], None] | None = None,
         on_compaction_active: Callable[[bool], None] | None = None,
     ) -> None:
-        self.on_message = on_message
         self._driver = driver
         self._on_compaction = on_compaction or (lambda: None)
         self._on_compaction_active = on_compaction_active or (lambda _active: None)
@@ -796,16 +802,16 @@ class AgentStdoutMessageScanner:
         on_message: Callable[[str], None],
         *,
         on_compaction: Callable[[], None] | None = None,
-        on_text_starvation: Callable[[int], None] | None = None,
         on_activity: Callable[[], None] | None = None,
     ) -> None:
         self._driver = driver
-        self.on_message = on_message
         self._on_compaction = on_compaction or (lambda: None)
         self._on_activity = on_activity or (lambda: None)
+        # A marker block is prose by construction, so this dialect can neither
+        # starve nor discover activity the markers have not already reported.
         self._fold = SupervisedProseFold(
             on_message,
-            on_text_starvation=on_text_starvation or (lambda _count: None),
+            on_text_starvation=lambda _count: None,
             on_activity=lambda: None,
         )
         self._capturing = False
