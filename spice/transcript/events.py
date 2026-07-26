@@ -148,6 +148,9 @@ class Image:
 
     Base64 blocks arrive as a `data:` URL, so the media type and payload stay
     recoverable from the single field without a second encoding step.
+    `payload_index` is its position in the selected message/tool-output content
+    list; adapters leave it unset when their payload-selection contract hides
+    that image from consumers.
     """
 
     at: Provenance
@@ -158,6 +161,7 @@ class Image:
     item_id: str | None = None
     call_id: str | None = None
     tool_output_type: ToolOutputType | None = None
+    payload_index: int | None = None
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
@@ -256,16 +260,12 @@ class ContextUsage:
 
 
 @dataclass(slots=True, frozen=True)
-class StreamFailure:
-    """A terminal account-level rejection the agent CLI reported structurally.
+class FailureSignal:
+    """A structural process failure carried by the transcript stream.
 
-    A spend or usage limit does not fail a launch loudly: the CLI starts, says
-    so in prose, and exits cleanly. The structural signal on the stream — a
-    rejected rate-limit line, an error-flagged result — is what launch
-    classification reads, so it never has to match human-facing message text.
-    `kind` names the failure family in the driver's `process_failure_kind`
-    vocabulary, and `reset_epoch` carries the retry horizon when the source
-    named one.
+    This is the plane-neutral result of a driver interpreting its own failure
+    envelope. Consumers see only the stable failure family and optional retry
+    horizon; provider JSON stays behind the driver adapter.
     """
 
     at: Provenance
@@ -299,7 +299,7 @@ TranscriptEvent = (
     | Compaction
     | WebSearch
     | ContextUsage
-    | StreamFailure
+    | FailureSignal
     | Unknown
 )
 

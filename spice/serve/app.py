@@ -770,9 +770,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self, target: WorktreeTarget, query: dict[str, list[str]]
     ) -> None:
         offset = _query_int(query, "offset", -1, minimum=0)
-        image_index = _query_int(query, "image", -1, minimum=0)
-        if offset < 0 or image_index < 0:
-            self.send_error(HTTPStatus.BAD_REQUEST, "offset and image are required")
+        item = _query_int(query, "item", -1, minimum=0)
+        if offset < 0 or item < 0:
+            self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
         if self.state.observer is not None:
             transcript = self.state.observer.session_for_target(target).transcript
@@ -789,7 +789,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         result = rollout_image_from_offset(
             transcript.path,
             offset=offset,
-            image_index=image_index,
+            item_index=item,
             driver=transcript.owner_driver,
         )
         if result is None:

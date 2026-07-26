@@ -14,13 +14,10 @@ from spice.serve.images import (
 )
 from spice.serve.markdown import render_message_html
 from spice.serve.messages import read_assistant_messages
+from spice.transcript.reader import TranscriptEventReader
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepixels"
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")
-SECOND_PNG_BYTES = b"\x89PNG\r\n\x1a\notherpixels"
-SECOND_PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(
-    SECOND_PNG_BYTES
-).decode("ascii")
 
 
 def _tool_output_payload() -> dict:
@@ -43,8 +40,8 @@ def test_tool_output_embedded_image_routes_through_api():
     markdown = tool_output_image_markdown(
         _tool_output_payload(), worktree_id="wt", source_offset=17
     )
-    assert markdown == (
-        "![input_image](/api/work/trees/wt/messages/image?offset=17&image=0)"
+    assert (
+        markdown == "![input_image](/api/work/trees/wt/messages/image?offset=17&item=0)"
     )
 
 
@@ -56,20 +53,102 @@ def test_assistant_message_image_content_becomes_markdown():
     }
     markdown = assistant_image_markdown(payload, worktree_id="wt", source_offset=3)
     assert (
-        markdown == "![input_image](/api/work/trees/wt/messages/image?offset=3&image=0)"
+        markdown == "![input_image](/api/work/trees/wt/messages/image?offset=3&item=0)"
     )
 
 
-def test_rollout_image_decodes_from_line_offset(tmp_path):
+def test_rollout_image_decodes_from_typed_bounded_line_offset(tmp_path, monkeypatch):
     first = json.dumps({"type": "response_item", "payload": {"type": "reasoning"}})
     second = json.dumps({"type": "response_item", "payload": _tool_output_payload()})
     rollout = tmp_path / "rollout.jsonl"
     rollout.write_text(f"{first}\n{second}\n", encoding="utf-8")
     offset = len(first.encode("utf-8")) + 1
+    reads: list[tuple[str, int, int | None]] = []
+    read_events = TranscriptEventReader.read
+
+    def track_read(self, mode, **kwargs):
+        reads.append((mode, kwargs.get("start_offset", 0), kwargs.get("end_offset")))
+        return read_events(self, mode, **kwargs)
+
+    monkeypatch.setattr(TranscriptEventReader, "read", track_read)
     result = rollout_image_from_offset(
-        rollout, offset=offset, image_index=0, driver=CODEX_DRIVER
+        rollout, offset=offset, item_index=0, driver=CODEX_DRIVER
     )
     assert result == (PNG_BYTES, "image/png")
+    assert reads == [("bounded", offset, offset + 1)]
+
+
+def test_rollout_image_keeps_mixed_content_payload_index(tmp_path):
+    line = json.dumps(
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "look"},
+                    {"type": "input_image", "image_url": PNG_DATA_URL},
+                ],
+            },
+        }
+    )
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(f"{line}\n", encoding="utf-8")
+
+    assert rollout_image_from_offset(
+        rollout,
+        offset=0,
+        item_index=1,
+        driver=CODEX_DRIVER,
+    ) == (PNG_BYTES, "image/png")
+    assert (
+        rollout_image_from_offset(
+            rollout,
+            offset=0,
+            item_index=0,
+            driver=CODEX_DRIVER,
+        )
+        is None
+    )
+
+
+def test_rollout_image_rejects_unselected_payload_families(tmp_path):
+    user = json.dumps(
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_image", "image_url": PNG_DATA_URL}],
+            },
+        }
+    )
+    custom_output = json.dumps(
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call_output",
+                "output": [{"type": "input_image", "image_url": PNG_DATA_URL}],
+            },
+        }
+    )
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(f"{user}\n{custom_output}\n", encoding="utf-8")
+    custom_offset = len(user.encode()) + 1
+
+    assert (
+        rollout_image_from_offset(rollout, offset=0, item_index=0, driver=CODEX_DRIVER)
+        is None
+    )
+    assert (
+        rollout_image_from_offset(
+            rollout,
+            offset=custom_offset,
+            item_index=0,
+            driver=CODEX_DRIVER,
+        )
+        is None
+    )
 
 
 def test_claude_image_decodes_from_transcript_owner(tmp_path, monkeypatch):
@@ -107,42 +186,61 @@ def test_claude_image_decodes_from_transcript_owner(tmp_path, monkeypatch):
     transcript.write_text(f"{line}\n", encoding="utf-8")
 
     assert rollout_image_from_offset(
-        transcript, offset=0, image_index=0, driver=CLAUDE_DRIVER
+        transcript, offset=0, item_index=0, driver=CLAUDE_DRIVER
     ) == (
         PNG_BYTES,
         "image/png",
     )
 
 
-def test_pictures_after_prose_are_addressed_by_position_among_pictures(tmp_path):
-    payload = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {"type": "output_text", "text": "two shots"},
-            {"type": "input_image", "image_url": PNG_DATA_URL},
-            {"type": "input_image", "image_url": SECOND_PNG_DATA_URL},
-        ],
+def test_claude_assistant_image_keeps_historical_payload_selection(tmp_path):
+    selected = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(PNG_BYTES).decode("ascii"),
+                    },
+                }
+            ],
+        },
     }
-    rollout = tmp_path / "rollout.jsonl"
-    rollout.write_text(
-        json.dumps({"type": "response_item", "payload": payload}) + "\n",
-        encoding="utf-8",
-    )
+    hidden = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "the canonical payload keeps this"},
+                selected["message"]["content"][0],
+            ],
+        },
+    }
+    selected_line = json.dumps(selected)
+    hidden_line = json.dumps(hidden)
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text(f"{selected_line}\n{hidden_line}\n", encoding="utf-8")
+    hidden_offset = len(selected_line.encode()) + 1
 
-    markdown = assistant_image_markdown(payload, worktree_id="wt", source_offset=0)
-    decoded = [
+    assert rollout_image_from_offset(
+        transcript,
+        offset=0,
+        item_index=0,
+        driver=CLAUDE_DRIVER,
+    ) == (PNG_BYTES, "image/png")
+    assert (
         rollout_image_from_offset(
-            rollout, offset=0, image_index=index, driver=CODEX_DRIVER
+            transcript,
+            offset=hidden_offset,
+            item_index=0,
+            driver=CLAUDE_DRIVER,
         )
-        for index in (0, 1)
-    ]
-
-    assert markdown == (
-        "![input_image](/api/work/trees/wt/messages/image?offset=0&image=0)\n\n"
-        "![input_image](/api/work/trees/wt/messages/image?offset=0&image=1)"
+        is None
     )
-    assert decoded == [(PNG_BYTES, "image/png"), (SECOND_PNG_BYTES, "image/png")]
 
 
 def test_markdown_reference_percent_encodes_delimiters():
@@ -168,11 +266,11 @@ def test_render_html_inlines_worktree_image():
 
 
 def test_render_html_inlines_api_image_directly():
-    url = "/api/work/trees/wt/messages/image?offset=17&image=0"
+    url = "/api/work/trees/wt/messages/image?offset=17&item=0"
     html = render_message_html(f"![tool]({url})")
     assert '<a class="message-image" ' in html
-    assert 'href="/api/work/trees/wt/messages/image?offset=17&amp;image=0"' in html
-    assert '<img src="/api/work/trees/wt/messages/image?offset=17&amp;image=0"' in html
+    assert 'href="/api/work/trees/wt/messages/image?offset=17&amp;item=0"' in html
+    assert '<img src="/api/work/trees/wt/messages/image?offset=17&amp;item=0"' in html
     assert 'alt="tool"' in html
     assert 'target="_blank" rel="noopener"' in html
 

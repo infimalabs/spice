@@ -22,6 +22,7 @@ from spice.transcript.events import (
     CommandExecution,
     Compaction,
     ContextUsage,
+    FailureSignal,
     Image,
     Provenance,
     Reasoning,
@@ -176,7 +177,12 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
             cumulative=None,
             model_context_window=100,
         ),
-        Unknown(at=_at(12), reason="future", raw_type="future"),
+        FailureSignal(
+            at=_at(12),
+            kind="out-of-credits",
+            reset_epoch=1_784_280_000,
+        ),
+        Unknown(at=_at(13), reason="future", raw_type="future"),
     ]
 
     messages = _assemble(events)

@@ -192,7 +192,7 @@ def _codex_message_events(
     phase = _optional_str(payload.get("phase"))
     turn_id, metadata_key = _turn_metadata(payload)
     events: list[TranscriptEvent] = []
-    for block in content:
+    for payload_index, block in enumerate(content):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex message block", None))
             continue
@@ -233,16 +233,17 @@ def _codex_message_events(
                     )
                 )
             continue
-        image_url = _codex_image_url(block)
-        if image_url is not None:
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
                     url=image_url,
-                    content_type=block_type if isinstance(block_type, str) else "image",
+                    content_type=block_type,
                     detail=_optional_str(block.get("detail")),
                     role=role,
                     item_id=item_id,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -330,7 +331,7 @@ def _codex_tool_output_events(
             )
         ]
     events: list[TranscriptEvent] = []
-    for block in output:
+    for payload_index, block in enumerate(output):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex output block", None))
             continue
@@ -352,17 +353,18 @@ def _codex_tool_output_events(
                 )
             )
             continue
-        image_url = _codex_image_url(block)
-        if image_url is not None:
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
                     url=image_url,
-                    content_type=block_type if isinstance(block_type, str) else "image",
+                    content_type=block_type,
                     detail=_optional_str(block.get("detail")),
                     item_id=item_id,
                     call_id=call_id,
                     tool_output_type=output_type,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -633,27 +635,17 @@ def _event_phase(event: TranscriptEvent) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _codex_image_url(block: dict[str, Any]) -> str | None:
-    """The picture one content block points at, in every shape Codex writes.
-
-    A block carries `image_url` (or plain `url`) either as the bare string the
-    rollout writer emits or as the `{"url": ...}` object the OpenAI content-part
-    shape nests it in. Both are real in transcripts, so the URL — not the
-    declared block type — is the discriminant here, exactly as text is for
-    prose: requiring one spelling filed real pictures as `Unknown` and the
-    typed image never reached a consumer.
-    """
-    raw = block.get("image_url") or block.get("url")
-    url = raw.get("url") if isinstance(raw, dict) else raw
-    return url if isinstance(url, str) and url else None
-
-
 def _unknown(stamper: LineStamper, reason: str, raw_type: str | None) -> Unknown:
     return Unknown(at=stamper.stamp(), reason=reason, raw_type=raw_type)
 
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _codex_image_url(value: Any) -> str | None:
+    raw = value.get("url") if isinstance(value, dict) else value
+    return raw if isinstance(raw, str) and raw else None
 
 
 def _command_value(value: Any) -> str:

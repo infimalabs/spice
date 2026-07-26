@@ -37,14 +37,8 @@ from spice.agent.driver import (
     select_driver,
 )
 from spice.agent.paths import agent_worktree_state_dir
-from spice.transcript.events import UNLOCATED_SOURCE, Provenance, StreamFailure
 
 SPEND_LIMIT_RESET_EPOCH = 1784280000
-# A stream failure line carries no other block, so its failure is the line's
-# first and only typed fact.
-FAILURE_PROVENANCE = Provenance(
-    source=UNLOCATED_SOURCE, line=0, ordinal=0, timestamp=None
-)
 
 
 @pytest.fixture(autouse=True)
@@ -326,8 +320,8 @@ def test_claude_driver_classifies_live_spend_limit_wording():
     )
 
 
-def test_claude_rejected_rate_limit_line_decodes_to_a_stream_failure():
-    rejected = CLAUDE_DRIVER.transcript_line_events(
+def test_claude_stream_failure_fields_read_rejected_rate_limit_event():
+    fields = CLAUDE_DRIVER.stream_failure_fields(
         {
             "type": "rate_limit_event",
             "rate_limit_info": {
@@ -337,7 +331,7 @@ def test_claude_rejected_rate_limit_line_decodes_to_a_stream_failure():
             },
         }
     )
-    allowed = CLAUDE_DRIVER.transcript_line_events(
+    allowed = CLAUDE_DRIVER.stream_failure_fields(
         {
             "type": "rate_limit_event",
             "rate_limit_info": {
@@ -347,18 +341,15 @@ def test_claude_rejected_rate_limit_line_decodes_to_a_stream_failure():
         }
     )
 
-    assert rejected == [
-        StreamFailure(
-            at=FAILURE_PROVENANCE,
-            kind="out-of-credits",
-            reset_epoch=SPEND_LIMIT_RESET_EPOCH,
-        )
-    ]
-    assert allowed == []
+    assert fields == {
+        "kind": "out-of-credits",
+        "reset_epoch": SPEND_LIMIT_RESET_EPOCH,
+    }
+    assert allowed is None
 
 
-def test_claude_error_flagged_result_line_decodes_to_a_stream_failure():
-    structural = CLAUDE_DRIVER.transcript_line_events(
+def test_claude_stream_failure_fields_read_429_result_line():
+    fields = CLAUDE_DRIVER.stream_failure_fields(
         {
             "type": "result",
             "subtype": "success",
@@ -370,20 +361,20 @@ def test_claude_error_flagged_result_line_decodes_to_a_stream_failure():
             ),
         }
     )
-    text_only = CLAUDE_DRIVER.transcript_line_events(
+    text_only = CLAUDE_DRIVER.stream_failure_fields(
         {
             "type": "result",
             "is_error": True,
             "result": "Claude AI usage limit reached",
         }
     )
-    clean = CLAUDE_DRIVER.transcript_line_events(
+    clean = CLAUDE_DRIVER.stream_failure_fields(
         {"type": "result", "subtype": "success", "is_error": False, "result": "done"}
     )
 
-    assert structural == [StreamFailure(at=FAILURE_PROVENANCE, kind="out-of-credits")]
-    assert text_only == [StreamFailure(at=FAILURE_PROVENANCE, kind="out-of-credits")]
-    assert clean == []
+    assert fields == {"kind": "out-of-credits"}
+    assert text_only == {"kind": "out-of-credits"}
+    assert clean is None
 
 
 def test_claude_skill_prompt_matches_codex_link_form():

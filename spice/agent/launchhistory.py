@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,8 +16,14 @@ from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
-from spice.transcript.events import AssistantText, StreamFailure, ToolCall
-from spice.transcript.reader import TranscriptEventReader
+from spice.transcript.events import (
+    AssistantText,
+    FailureSignal,
+    Image,
+    ToolCall,
+    TranscriptEvent,
+)
+from spice.transcript.reader import TranscriptEventReader, transcript_size
 from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
@@ -174,31 +181,50 @@ def supervised_launch_outcome(
 def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
     """Activity counts and structural failure fields from one launch log.
 
-    A launch log is the agent CLI's own stream-json stdout, one JSON event per
-    line, so it reads through the shared transcript reader like any other
-    typed source: assistant prose and tool calls are the liveness counters, and
-    a `StreamFailure` is the terminal classification the account itself
-    reported. Marker-format stdout lines carry no typed fact and so count for
-    nothing, leaving the text-pattern fallback to the caller. An unreadable log
-    yields the same empty counts a silent one does.
+    The bounded typed read includes a terminal unterminated record from a
+    process that exited mid-flush. Marker-format stdout decodes only to unknown
+    facts and contributes nothing, leaving text-pattern fallback to the caller.
     """
-    read = TranscriptEventReader(
-        path=log_path,
-        driver=driver_for(repo_root),
-        source_actor=None,
-    ).read("forward")
+    driver = driver_for(repo_root)
+    end_offset = transcript_size(log_path)
+    if end_offset is None:
+        return {"assistant_messages": 0, "tool_calls": 0}
+    events = (
+        TranscriptEventReader(log_path, driver)
+        .read(
+            "bounded",
+            start_offset=0,
+            end_offset=end_offset,
+        )
+        .events
+    )
+    return _launch_log_projection(events)
+
+
+def _launch_log_projection(events: Iterable[TranscriptEvent]) -> dict[str, Any]:
+    assistant_loci: set[int] = set()
+    tool_loci: set[int] = set()
     failure: dict[str, Any] = {}
-    for event in read.events:
-        if not isinstance(event, StreamFailure):
-            continue
-        failure["kind"] = event.kind
-        if event.reset_epoch is not None:
-            failure["reset_epoch"] = event.reset_epoch
+    for event in events:
+        locus = event.at.line
+        if isinstance(event, AssistantText) or (
+            isinstance(event, Image)
+            and event.role == "assistant"
+            and event.payload_index is not None
+        ):
+            assistant_loci.add(locus)
+        elif isinstance(event, ToolCall):
+            tool_loci.add(locus)
+        if isinstance(event, FailureSignal):
+            failure["kind"] = event.kind
+            if event.reset_epoch is not None:
+                failure["reset_epoch"] = event.reset_epoch
     return {
-        "assistant_messages": sum(
-            1 for event in read.events if isinstance(event, AssistantText)
-        ),
-        "tool_calls": sum(1 for event in read.events if isinstance(event, ToolCall)),
+        "assistant_messages": len(assistant_loci),
+        # Claude's canonical response-item selection historically chose prose
+        # over a tool call carried by the same source line. Keep that launch
+        # outcome contract while the typed reader preserves both facts.
+        "tool_calls": len(tool_loci - assistant_loci),
         **failure,
     }
 

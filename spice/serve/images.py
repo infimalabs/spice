@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from spice.agent.driver import AgentDriver
 from spice.transcript.events import Image
-from spice.transcript.reader import TranscriptEventReader, offset_after_line
+from spice.transcript.reader import TranscriptEventReader
 
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
@@ -69,29 +69,33 @@ def view_image_markdown(payload: dict[str, Any]) -> str | None:
 
 
 def rollout_image_from_offset(
-    rollout_path: Path, *, offset: int, image_index: int, driver: AgentDriver
+    rollout_path: Path, *, offset: int, item_index: int, driver: AgentDriver
 ) -> tuple[bytes, str] | None:
-    """Decode the embedded image at (line offset, picture position) in a rollout.
-
-    The position counts pictures on that one line rather than content items,
-    because that is the one ordinal both dialects agree on: a Codex message
-    keeps its images inline among prose, while a Claude tool result folds them
-    into a list of their own. A line the reader cannot type, or one carrying
-    fewer pictures than asked for, is simply absent rather than an error.
-    """
-    if offset < 0 or image_index < 0:
+    """Decode the selected image at one typed transcript payload locus."""
+    if offset < 0 or item_index < 0:
         return None
-    read = TranscriptEventReader(
-        path=rollout_path, driver=driver, source_actor=None
-    ).read(
+    read = TranscriptEventReader(rollout_path, driver).read(
         "bounded",
         start_offset=offset,
-        end_offset=offset_after_line(rollout_path, offset),
+        # A one-byte range is enough to select the record that starts here;
+        # the reader owns consuming and decoding the complete line.
+        end_offset=offset + 1,
     )
-    images = [event for event in read.events if isinstance(event, Image)]
-    if image_index >= len(images):
-        return None
-    return _decode_data_image(images[image_index].url)
+    image = next(
+        (
+            event
+            for event in read.events
+            if isinstance(event, Image)
+            and event.at.offset == offset
+            and event.payload_index == item_index
+            and (
+                event.role == "assistant"
+                or event.tool_output_type == "function_call_output"
+            )
+        ),
+        None,
+    )
+    return _decode_data_image(image.url) if image is not None else None
 
 
 def markdown_image_reference(alt: str, target: str) -> str:
@@ -118,13 +122,11 @@ def worktree_file_image_url(
     return url
 
 
-def embedded_image_url(
-    worktree_id: str, *, source_offset: int, image_index: int
-) -> str:
+def embedded_image_url(worktree_id: str, *, source_offset: int, item_index: int) -> str:
     encoded = quote(worktree_id, safe="")
     return (
         f"/api/work/trees/{encoded}/messages/image"
-        f"?offset={source_offset}&image={image_index}"
+        f"?offset={source_offset}&item={item_index}"
     )
 
 
@@ -132,7 +134,7 @@ def _image_items_markdown(
     items: list[Any], *, worktree_id: str | None, source_offset: int | None
 ) -> str | None:
     parts: list[str] = []
-    for item in items:
+    for item_index, item in enumerate(items):
         url = _item_image_url(item)
         if not url:
             continue
@@ -145,10 +147,8 @@ def _image_items_markdown(
             and source_offset is not None
             and DATA_IMAGE_RE.match(url) is not None
         ):
-            # Pictures emitted so far is this picture's position on the line,
-            # which is what the typed decoder counts back to find it again.
             target = embedded_image_url(
-                worktree_id, source_offset=source_offset, image_index=len(parts)
+                worktree_id, source_offset=source_offset, item_index=item_index
             )
         parts.append(markdown_image_reference(alt, target))
     return "\n\n".join(parts) if parts else None
