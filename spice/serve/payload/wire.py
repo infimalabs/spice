@@ -1029,8 +1029,13 @@ WIRE_OBJECTS = (
         },
     ),
     _object(
+        # Every field is built unconditionally in `spice/serve/web.py`: the name
+        # and lifetime off a frozen ServeBranding whose fields are plain `str`,
+        # the version off `runtime_version()`. Declaring them optional described
+        # an absence the server has no way to send, and the browser paid for it
+        # by reading `string | undefined` where only a string ever arrives.
         "ServeBranding",
-        optional={"name": STRING, "defaultLifetime": STRING, "version": STRING},
+        required={"name": STRING, "defaultLifetime": STRING, "version": STRING},
     ),
     _object(
         "ServeInitialGlobalSettings",
