@@ -26,7 +26,9 @@ from spice.serve.payload.chrome import (
     LaneChromeOrder,
     assemble_lane_chrome,
 )
+from spice.serve.payload.identity import team_facts_for_actor, team_identity_payload
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
+from spice.serve.team.store import ServeTeamStore
 from spice.serve.team.schema import DEFAULT_LIFETIME
 from spice.serve.worktree import inventory
 from spice.serve.workroutes import (
@@ -285,6 +287,79 @@ def test_the_activity_generation_orders_stamps_across_a_written_offset():
     assert earlier["value"]["lastAssistantAt"] > later["value"]["lastAssistantAt"]
     assert int(later["order"]["epoch"]) > int(earlier["order"]["epoch"])
     assert landed.changed == ("activity",)
+
+
+TEAM_ACTOR = "agent-a"
+TEAM_STORE_FACETS = ("teamConfig", "renewal")
+
+
+def _team_store(path) -> ServeTeamStore:
+    """Open a store the way a restarted serve does, and seat one team in it.
+
+    The schema memo is process-wide, so discarding this path is what stands in
+    for the restart that actually separates a replaced store from the one that
+    remade it.
+    """
+    ServeTeamStore._initialized_paths.discard(path)
+    store = ServeTeamStore(path=path)
+    store.create_team(members=[TEAM_ACTOR])
+    return store
+
+
+def _real_team_chrome(store: ServeTeamStore) -> dict:
+    """Build team chrome the way a lane pass does, off the live team store."""
+    facts = team_facts_for_actor(store, TEAM_ACTOR)
+    return lane.lane_chrome_payload(
+        target_id="wt",
+        team_identity=team_identity_payload(facts),
+        team_facts=facts,
+        renewal_intent=facts["renewalIntent"],
+    )
+
+
+def _orders(chrome: dict) -> dict:
+    return {
+        facet: LaneChromeOrder(
+            epoch=chrome[facet]["order"]["epoch"],
+            revision=chrome[facet]["order"]["revision"],
+        )
+        for facet in TEAM_STORE_FACETS
+    }
+
+
+def test_a_remade_team_store_supersedes_the_generation_it_replaced(tmp_path):
+    path = tmp_path / "teams.sqlite3"
+
+    replaced = _real_team_chrome(_team_store(path))
+    path.unlink()
+    remade = _real_team_chrome(_team_store(path))
+
+    remade_orders = _orders(remade)
+    observed = [
+        LaneChromeObservation(facet, remade_orders[facet], remade[facet]["value"])
+        for facet in TEAM_STORE_FACETS
+    ]
+
+    # Both stores were seated the same way, so their revisions match exactly and
+    # the generation is the only thing left that can say which store spoke last.
+    # Both come from the authority; nothing here writes one. Re-observing the
+    # same generation publishes nothing, which is what says the first result is
+    # a supersession rather than an assembler republishing what it holds.
+    assert _orders(replaced) == {
+        facet: LaneChromeOrder(
+            epoch=replaced[facet]["order"]["epoch"],
+            revision=remade[facet]["order"]["revision"],
+        )
+        for facet in TEAM_STORE_FACETS
+    }
+    assert int(remade["teamConfig"]["order"]["epoch"]) > int(
+        replaced["teamConfig"]["order"]["epoch"]
+    )
+    assert (
+        assemble_lane_chrome("wt", observed, published=_orders(replaced)).changed
+        == TEAM_STORE_FACETS
+    )
+    assert assemble_lane_chrome("wt", observed, published=remade_orders).changed == ()
 
 
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):

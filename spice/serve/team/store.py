@@ -109,6 +109,8 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
 PRUNE_EVENT_TEAM_ID = "__system__"
 GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
+GLOBAL_STORE_GENERATION_KEY = "store_generation"
+_NANOSECONDS_PER_MICROSECOND = 1000
 
 
 def _schema_statements(script: str) -> tuple[str, ...]:
@@ -302,6 +304,7 @@ class ServeTeamStore(
             _drop_drifted_projections_locked(connection)
             _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
             self._initialize_observation_attribution_state_locked(connection)
+            self._initialize_store_generation_locked(connection)
             self._validate_authority_schema_locked(
                 connection, TEAM_AUTHORITY_SCHEMA_VERSION
             )
@@ -362,6 +365,48 @@ class ServeTeamStore(
         )
         connection.execute("DROP TABLE directives")
         connection.execute("DROP TABLE directive_totals")
+
+    def _initialize_store_generation_locked(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Date this store the instant it is created, once and never again.
+
+        Every counter this store keeps -- a team's config revision, an agent's
+        renewal revision -- restarts from zero in a store that was deleted and
+        remade, so a reader keeping the highest revision it has seen would
+        refuse the rebuilt store until it counted back past where the replaced
+        one stopped. The generation is what carries a reader across that: a
+        store is only ever created after every store it replaces, so this
+        instant rises exactly where those revisions restart.
+
+        It is written in microseconds because the readers that order it compare
+        digit runs as doubles, and a nanosecond count is already past the range
+        a double holds exactly, where two distinct instants compare equal.
+        """
+        existing = connection.execute(
+            "SELECT value FROM global_settings WHERE key = ?",
+            (GLOBAL_STORE_GENERATION_KEY,),
+        ).fetchone()
+        if existing is not None:
+            return
+        connection.execute(
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, 0)",
+            (
+                GLOBAL_STORE_GENERATION_KEY,
+                str(time.time_ns() // _NANOSECONDS_PER_MICROSECOND),
+                time.time(),
+            ),
+        )
+
+    def store_generation(self) -> str:
+        """Return the instant this store was created, as its readers order it."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM global_settings WHERE key = ?",
+                (GLOBAL_STORE_GENERATION_KEY,),
+            ).fetchone()
+        return str(row["value"]) if row is not None else ""
 
     def _initialize_observation_attribution_state_locked(
         self, connection: sqlite3.Connection

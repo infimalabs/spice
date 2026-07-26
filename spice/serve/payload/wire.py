@@ -528,7 +528,10 @@ WIRE_OBJECTS = (
     # at one offset sorts ahead of a later stamp written at another. Both are
     # microseconds because the reducer orders digit runs as doubles: a
     # nanosecond count is already past the range a double holds exactly, where
-    # two distinct instants compare equal. payload.chrome.lane_chrome_generation
+    # two distinct instants compare equal. teamConfig and renewal share one
+    # generation, stamped into the team store's global settings when it is
+    # created, because both count inside that store and both restart together
+    # when it is remade. payload.chrome.lane_chrome_generation
     # admits only a count, so a hash identity cannot become an epoch -- it would
     # arrive as an order the reducer cannot fault and then mis-order silently
     # behind it.

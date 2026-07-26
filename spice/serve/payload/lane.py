@@ -162,11 +162,20 @@ def lane_chrome_payload(
     so neither can order two observations of itself.
     """
     observations: list[LaneChromeObservation] = []
+    # Both team-store facets count in the same store, so both are dated by the
+    # one generation it was created at: their revisions restart together when
+    # that store is remade, and nothing counted inside it can say so.
+    team_generation = lane_chrome_generation(
+        (team_facts or {}).get("storeGeneration", "")
+    )
     if team_identity is not None:
         observations.append(
             LaneChromeObservation(
                 "teamConfig",
-                LaneChromeOrder(revision=int(team_identity.get("configRevision", 0))),
+                LaneChromeOrder(
+                    epoch=team_generation,
+                    revision=int(team_identity.get("configRevision", 0)),
+                ),
                 {"teamIdentity": dict(team_identity)},
             )
         )
@@ -207,7 +216,10 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "renewal",
-                LaneChromeOrder(revision=int(renewal_intent.get("revision", 0))),
+                LaneChromeOrder(
+                    epoch=team_generation,
+                    revision=int(renewal_intent.get("revision", 0)),
+                ),
                 {
                     "lifetime": team_facts.get("lifetime", ""),
                     "renewalIntent": dict(renewal_intent),
