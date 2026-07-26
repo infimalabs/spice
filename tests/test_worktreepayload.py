@@ -20,6 +20,16 @@ IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 FIVE_MINUTES_SECONDS = 300
 
+# A board revision is the generation its authority minted, so these fixtures
+# carry counts rather than labels: the chrome producer publishes an epoch only
+# where it could have counted forward from it.
+BEFORE_GENERATION = "1785044000000010"
+AFTER_GENERATION = "1785044000000011"
+STABLE_GENERATION = "1785044000000020"
+REVIEWS_GENERATION = "1785044000000030"
+ACTIVE_CLAIM_GENERATION = "1785044000000040"
+TASK_CARDS_GENERATION = "1785044000000050"
+
 
 class _EmptyOpenTaskBoard:
     task_filter_inventory: dict[str, object] = {}
@@ -440,8 +450,8 @@ def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
     tmp_path, monkeypatch
 ):
     target = _Target(id="wt", repo_root=tmp_path)
-    before = _task_facet_board("revision-before", "before")
-    after = _task_facet_board("revision-after", "after")
+    before = _task_facet_board(BEFORE_GENERATION, "before")
+    after = _task_facet_board(AFTER_GENERATION, "after")
     selected: list[str] = []
     fallback_calls: list[str] = []
 
@@ -478,9 +488,9 @@ def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
     work_tree = payload["workTrees"][0]
     task_filter = payload["taskFilterInventory"]
     pressure = work_tree["laneInfo"]["reviewPressure"]
-    assert selected == ["revision-before"]
+    assert selected == [BEFORE_GENERATION]
     assert fallback_calls == []
-    assert task_filter["revision"] == "revision-before"
+    assert task_filter["revision"] == BEFORE_GENERATION
     assert [item["name"] for item in task_filter["filters"]] == ["serve.before"]
     assert work_tree["taskFilterInventory"] == task_filter
     assert work_tree["statusLine"]["claimedTask"] == {
@@ -504,12 +514,12 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
     failed = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
             backend_identity="test",
-            revision="stable-revision",
+            revision=STABLE_GENERATION,
             rows=(),
             error="backend unavailable",
         )
     )
-    recovered = _task_facet_board("stable-revision", "recovered")
+    recovered = _task_facet_board(STABLE_GENERATION, "recovered")
     observations = iter((failed, recovered))
     monkeypatch.setattr(
         inventory,
@@ -541,7 +551,7 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
 
     degraded_tree = degraded["workTrees"][0]
     healthy_tree = healthy["workTrees"][0]
-    assert degraded["taskFilterInventory"]["revision"] == "stable-revision"
+    assert degraded["taskFilterInventory"]["revision"] == STABLE_GENERATION
     assert degraded["taskFilterInventory"]["filters"] == []
     assert degraded_tree["statusLine"]["claimedTask"] == {}
     assert degraded_tree["statusLine"]["latestActivityKind"] == ""
@@ -550,7 +560,7 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
         "openFollowupCount": 0,
         "items": [],
     }
-    assert healthy["taskFilterInventory"]["revision"] == "stable-revision"
+    assert healthy["taskFilterInventory"]["revision"] == STABLE_GENERATION
     assert [item["name"] for item in healthy["taskFilterInventory"]["filters"]] == [
         "serve.recovered"
     ]
@@ -597,7 +607,7 @@ def test_work_trees_payload_indexes_shared_review_rows_per_lane(tmp_path, monkey
     task_board = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
             backend_identity="test",
-            revision="reviews",
+            revision=REVIEWS_GENERATION,
             rows=tuple(completed),
         )
     )
@@ -682,7 +692,7 @@ def test_work_trees_payload_projects_active_claims_without_an_export(
     ]
     observation = taskboard.TaskBoardObservation(
         backend_identity="test",
-        revision="active",
+        revision=ACTIVE_CLAIM_GENERATION,
         rows=tuple(active),
     )
     task_board = taskboard.open_task_board_projection(observation)
@@ -765,7 +775,7 @@ def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
     task_board = taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
             backend_identity="test",
-            revision="task-cards",
+            revision=TASK_CARDS_GENERATION,
             rows=tuple(task_rows),
         )
     )

@@ -9,15 +9,23 @@ submission results -- stay in the envelopes that own them.
 
 from __future__ import annotations
 
+import hashlib
 from http import HTTPStatus
+import shutil
 from types import SimpleNamespace
 
 import pytest
 
 from spice.agent.driver import CODEX_DRIVER
-from spice.serve import agentapi, lifecycle as serve_lifecycle, observer
+from spice.errors import SpiceError
+from spice.serve import agentapi, lifecycle as serve_lifecycle, observer, taskboard
 from spice.serve.lifecycle import LifecycleDecision
-from spice.serve.payload import message
+from spice.serve.payload import lane, message
+from spice.serve.payload.chrome import (
+    LaneChromeObservation,
+    LaneChromeOrder,
+    assemble_lane_chrome,
+)
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 from spice.serve.team.schema import DEFAULT_LIFETIME
 from spice.serve.worktree import inventory
@@ -26,6 +34,7 @@ from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
+from spice.tasks import config as task_config
 from tests.test_servehelpers import (
     ACTOR_A,
     THREAD_A,
@@ -36,6 +45,8 @@ from tests.test_servehelpers import (
     _target,
 )
 from tests.test_worktreepayload import (
+    AFTER_GENERATION,
+    BEFORE_GENERATION,
     _EmptyOpenTaskBoard,
     _InventoryState,
     _State,
@@ -149,8 +160,8 @@ def test_a_task_filter_change_advances_the_board_facet_epoch(tmp_path, monkeypat
     target = _Target(id="wt", repo_root=tmp_path)
     _stub_running_inventory_dependencies(monkeypatch, target=target)
     boards = [
-        _task_facet_board("revision-1", "one"),
-        _task_facet_board("revision-2", "two"),
+        _task_facet_board(BEFORE_GENERATION, "one"),
+        _task_facet_board(AFTER_GENERATION, "two"),
     ]
     monkeypatch.setattr(inventory, "open_task_board_projection", boards.pop)
 
@@ -161,11 +172,73 @@ def test_a_task_filter_change_advances_the_board_facet_epoch(tmp_path, monkeypat
     after = second["workTrees"][0]["chrome"]["taskBoard"]
     # The board's own revision is what orders this facet, so a filter change is
     # a new epoch rather than a lane-wide counter someone had to advance.
-    assert before["order"]["epoch"] == "revision-1"
-    assert after["order"]["epoch"] == "revision-2"
+    assert before["order"]["epoch"] == BEFORE_GENERATION
+    assert after["order"]["epoch"] == AFTER_GENERATION
     assert [
         item["name"] for item in after["value"]["taskFilterInventory"]["filters"]
     ] == ["serve.two"]
+
+
+def _real_board_chrome(target_id: str) -> dict:
+    """Build board chrome the way a lane pass does, off the live projection."""
+    return lane.lane_chrome_payload(
+        target_id=target_id,
+        team_facts={},
+        task_filter_inventory=(
+            taskboard.open_task_board_projection().task_filter_inventory
+        ),
+    )
+
+
+def test_a_remade_task_store_supersedes_the_generation_it_replaced(
+    tmp_path, monkeypatch
+):
+    backend = tmp_path / "task-backend"
+    monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
+    monkeypatch.setattr(taskboard.tw, "export", lambda *_args, **_kwargs: [])
+    task_config.mark_task_backend_changed("task")
+
+    before = _real_board_chrome("wt")["taskBoard"]
+    shutil.rmtree(backend)
+    after = _real_board_chrome("wt")["taskBoard"]
+
+    remade = LaneChromeObservation(
+        "taskBoard", LaneChromeOrder(epoch=after["order"]["epoch"]), after["value"]
+    )
+    replaced = {"taskBoard": LaneChromeOrder(epoch=before["order"]["epoch"])}
+
+    # A store deleted and remade counts its revisions from the start again, so
+    # the generation is the only thing that can carry the lane across it. Both
+    # epochs come from the authority itself; nothing here writes one, which is
+    # what makes the comparison worth anything. Re-observing the same
+    # generation publishes nothing, which is what says the first result is a
+    # supersession rather than an assembler that republishes whatever it holds.
+    assert before["order"]["epoch"].isdigit()
+    assert after["order"]["epoch"].isdigit()
+    assert assemble_lane_chrome("wt", [remade], published=replaced).changed == (
+        "taskBoard",
+    )
+    assert (
+        assemble_lane_chrome(
+            "wt", [remade], published={"taskBoard": remade.order}
+        ).changed
+        == ()
+    )
+
+
+def test_a_hash_identity_never_reaches_the_board_facet_as_an_epoch():
+    # The inbox keeps a digest beside its version in one payload, so a digest is
+    # exactly what a future producer reaches for by mistake. It orders at
+    # random, and the browser would apply it as a well-formed order and then
+    # refuse every later generation that happened to hash lower.
+    digest = hashlib.blake2s(b"lane-chrome", digest_size=16).hexdigest()
+
+    with pytest.raises(SpiceError, match="must be a decimal count"):
+        lane.lane_chrome_payload(
+            target_id="wt",
+            team_facts={},
+            task_filter_inventory={"revision": digest},
+        )
 
 
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):

@@ -31,12 +31,17 @@ IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 FIVE_MINUTES_SECONDS = 300
 
+# A board revision is the generation its authority minted, so this fixture
+# carries a count rather than a label: the chrome producer publishes an epoch
+# only where it could have counted forward from it.
+FIXTURE_GENERATION = "1785044000000001"
+
 
 def _task_board(rows):
     return taskboard.open_task_board_projection(
         taskboard.TaskBoardObservation(
             backend_identity="test",
-            revision="fixture",
+            revision=FIXTURE_GENERATION,
             rows=tuple(rows),
         )
     )
