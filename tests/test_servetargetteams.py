@@ -223,6 +223,90 @@ def test_lifecycle_wake_rewrites_placeholder_membership_and_renewal_atomically(
     ]
 
 
+def test_automatic_first_start_converges_identity_and_membership_once(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[f"target:{target.id}"])
+    _record_target_identity(state, target)
+    _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
+    status = SimpleNamespace(
+        running=False,
+        thread_id="",
+        process_status="idle",
+        started_at="",
+    )
+    for module in (agentapi, identity, lane, message, inventory, workroutes):
+        monkeypatch.setattr(module, "agent_status", lambda _repo: status)
+    ensure_calls: list[str] = []
+
+    def ensure_pending(_target, **_kwargs):
+        ensure_calls.append(target.id)
+        status.thread_id = THREAD_A
+        return {"ok": True, "trigger": "pending-inbox", "threadId": THREAD_A}
+
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        ensure_pending,
+    )
+    writes: list[str] = []
+    assign_agent = state.team_store.assign_agent
+    record_identity = state.team_store.record_agent_identity
+
+    def counted_assign(*args, **kwargs):
+        writes.append("membership")
+        return assign_agent(*args, **kwargs)
+
+    def counted_record(**kwargs):
+        writes.append("identity")
+        return record_identity(**kwargs)
+
+    monkeypatch.setattr(state.team_store, "assign_agent", counted_assign)
+    monkeypatch.setattr(state.team_store, "record_agent_identity", counted_record)
+
+    first = lifecycle.submit_inbox_wake(state, target, "first-start").result()
+    second = lifecycle.submit_inbox_wake(state, target, "second-observation").result()
+
+    assert first.decision is not None
+    assert second.decision is not None
+    assert first.decision.thread_id == THREAD_A
+    assert second.decision.thread_id == THREAD_A
+    assert ensure_calls == [target.id, target.id]
+    assert writes == ["membership", "identity"]
+    assert [
+        member.agent_id
+        for member in state.team_store.team_state(created.team_id).members
+    ] == [ACTOR_A]
+    recorded = state.team_store.agent_identity_for_actor(ACTOR_A)
+    assert recorded is not None
+    assert recorded.target_id == target.id
+    assert recorded.thread_id == THREAD_A
+
+    def reject(*_args, **_kwargs):
+        raise AssertionError("payload projection attempted a durable write")
+
+    monkeypatch.setattr(state.team_store, "assign_agent", reject)
+    monkeypatch.setattr(state.team_store, "record_agent_identity", reject)
+    inventory_payload = inventory.work_trees_payload(state)["workTrees"][0]
+    message_payload = message.messages_payload_for_worktree(state, target, limit=5)
+    history_payload = message.messages_payload_for_worktree(
+        state,
+        target,
+        limit=5,
+        before="2026-01-01T00:00:00.000000Z#0",
+        expected_thread_id=THREAD_A,
+    )
+
+    assert inventory_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
+    assert message_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
+    assert history_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
+    assert inventory_payload["teamIdentity"]["teamId"] == created.team_id
+    assert message_payload["teamIdentity"]["teamId"] == created.team_id
+
+
 def test_inventory_message_and_history_builders_are_pure_lifecycle_projections(
     tmp_path, monkeypatch
 ):
