@@ -20,7 +20,6 @@ from tests.test_directivefacthelpers import (
 from spice.serve.team.schema import (
     TEAM_AUTHORITY_SCHEMA,
     TEAM_AUTHORITY_SCHEMA_VERSION,
-    TEAM_PROJECTION_SCHEMA,
 )
 
 DIRECTIVE_SENT_AT = 100.0
@@ -332,9 +331,7 @@ def _seed_legacy_team_directives(
     totals,
 ) -> None:
     with sqlite_connection(path, ensure_parent=True) as connection:
-        connection.executescript(
-            TEAM_AUTHORITY_SCHEMA + TEAM_PROJECTION_SCHEMA + LEGACY_DIRECTIVE_SCHEMA
-        )
+        connection.executescript(TEAM_AUTHORITY_SCHEMA + LEGACY_DIRECTIVE_SCHEMA)
         connection.executemany(
             "INSERT INTO directives "
             "(directive_key, agent_id, team_id, sent_at, acked, acked_at) "
