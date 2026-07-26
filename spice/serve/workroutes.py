@@ -308,9 +308,13 @@ def _work_tree_send_result_payload(
         renewal_facts = identity.team_facts_for_actor(
             state.team_store, renewal_agent_id
         )
-        response_payload["renewalIntent"] = identity.renewal_intent_for_actor(
-            state.team_store, renewal_agent_id
-        )
+        # That pass already resolved this actor's renewal state, so the flat
+        # field reads the same answer rather than asking the store a second
+        # time and reporting two instants of one lane in one reply. Only a
+        # teamless actor, whose facts come back empty, needs its own read.
+        response_payload["renewalIntent"] = renewal_facts.get(
+            "renewalIntent"
+        ) or identity.renewal_intent_for_actor(state.team_store, renewal_agent_id)
     response_payload["chrome"] = lane_chrome_payload(
         target_id=target.id,
         pending_identity=pending_identity,
