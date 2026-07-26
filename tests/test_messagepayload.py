@@ -717,6 +717,83 @@ def test_a_directive_sharing_an_ack_header_line_stays_acknowledgment_prose(tmp_p
     assert _TASK_DIRECTIVE in payload["display_text"]
 
 
+_REPEATED_DIRECTIVE_SHAPES = {
+    "ack-header-then-live-body": (
+        f"ACK {_ACK_KEY}: - {_TASK_DIRECTIVE}\n{_TASK_DIRECTIVE}"
+    ),
+    "ack-header-then-live-marker-body": (
+        f"ACK {_ACK_KEY}: - {_TASK_DIRECTIVE}\n- {_TASK_DIRECTIVE}"
+    ),
+    "nack-header-then-live-body": (
+        f"NACK {_NACK_KEY}: - {_TASK_DIRECTIVE}\n{_TASK_DIRECTIVE}"
+    ),
+    "nack-header-then-live-marker-body": (
+        f"NACK {_NACK_KEY}: - {_TASK_DIRECTIVE}\n- {_TASK_DIRECTIVE}"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_REPEATED_DIRECTIVE_SHAPES))
+def test_a_repeated_directive_is_admitted_only_where_it_acts(shape, tmp_path):
+    """The same directive text twice must not admit the occurrence that asks
+    for nothing.
+
+    A card was admitted by directive text, so two identical directives were
+    indistinguishable and the occurrence sharing an ACK header borrowed the
+    admission the standalone one earned: the supervisor created one task and
+    the display showed two cards, rewriting the acknowledgment into a second
+    capture summary. Position is what separates them, because the header is
+    stripped before this layer sees the line and what remains is character
+    for character the genuine directive.
+    """
+    text = _REPEATED_DIRECTIVE_SHAPES[shape]
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert f"- {_TASK_DIRECTIVE}" in payload["display_text"]
+
+
+def test_a_shown_directive_keeps_its_card_on_the_one_that_acts(tmp_path):
+    """An identical directive shown and issued must card the issued one.
+
+    Admitting by text could only count the pair, never place the card, so a
+    fenced example and the live directive below it were interchangeable. The
+    card belongs to the line the supervisor read, and the fence has to come
+    through intact around the line it was only displaying.
+    """
+    text = f"```\n{_TASK_DIRECTIVE}\n```\n{_TASK_DIRECTIVE}"
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert f"```\n{_TASK_DIRECTIVE}\n```" in payload["display_text"]
+
+
 _MARKER_PREFIXED_DIRECTIVES = {
     "bullet-hyphen": f"- {_TASK_DIRECTIVE}",
     "bullet-asterisk": f"* {_TASK_DIRECTIVE}",
