@@ -62,11 +62,20 @@ The authority schema starts at explicit version `1`. Each future authority
 change must:
 
 1. add the next consecutive integer version;
-2. retain a canonical shape contract for every supported source version;
-3. add a forward migration keyed by its destination version;
-4. preserve all existing authority rows and revisions unless the new contract
+2. retain a canonical shape contract for only the immediately preceding
+   supported source version;
+3. add exactly one forward migration from that source to the current version;
+4. reject every older source without mutation and name the released Spice
+   version that still owns its conversion;
+5. preserve all existing authority rows and revisions unless the new contract
    explicitly transforms one transactionally; and
-5. prove both successful convergence and rollback from an injected failure.
+6. prove both successful convergence and rollback from an injected failure.
+
+Migration support advances one release at a time; it never accumulates. There
+is no retirement clock or version-by-version schedule in the writer. An
+operator holding an older authority database backs it up, runs the named
+intermediate release once, and then advances from the one source the current
+writer supports.
 
 Opening a database follows one atomic sequence:
 
@@ -172,6 +181,11 @@ reads, drops, or rewrites retired mixed-store tables; if inert physical vestiges
 exist beside authority, they remain outside the named schema contract and every
 query path. An operator needing their former facts must use the release that
 owns that migration.
+
+The ACK authority follows the same one-step rule. This writer converts only the
+semantic v0.27 table shape. It recognizes v0.8 through v0.16 shapes solely to
+refuse them before a transaction and direct the operator through Spice v0.27.0;
+no retired row projection remains available to migrate them in place.
 
 ## Constraints
 
