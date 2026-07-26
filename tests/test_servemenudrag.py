@@ -125,9 +125,8 @@ def test_static_lane_team_drag_uses_menu_style_pointer_tracking():
     assert "startY: event.clientY," in pointer_body
     assert "pointerCleanup: null," in pointer_body
     assert "pointerCaptureFailed: false," in pointer_body
-    assert "laneDragState.pointerCleanup = wireLaneDragPointerDocumentEvents();" in (
-        pointer_body
-    )
+    assert "laneDragState = state;" in pointer_body
+    assert "state.pointerCleanup = wireLaneDragPointerDocumentEvents();" in pointer_body
     assert "handle.setPointerCapture(event.pointerId);" in pointer_body
     assert "function updateLaneDragFromEvent(event)" in app_groups
     assert (
