@@ -43,13 +43,21 @@ def lane_chrome_generation(value: object) -> str:
     had, so the producer declines to mint anything but a count.
 
     An empty value is an authority saying it has no generation to report, which
-    orders below every minted one.
+    orders below every minted one. The count is canonical too: padding one
+    spelling with zeroes would make two unequal tokens compare at the same
+    natural-order position, so neither could supersede the other.
     """
     text = str(value or "")
     if not text:
         return ""
-    if not (text.isascii() and text.isdigit()):
-        raise SpiceError(f"lane chrome generation must be a decimal count: {text!r}")
+    canonical = (
+        text.isascii() and text.isdigit() and (text == "0" or not text.startswith("0"))
+    )
+    if not canonical:
+        raise SpiceError(
+            "lane chrome generation must be a decimal count in canonical form: "
+            f"{text!r}"
+        )
     return text
 
 

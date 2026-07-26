@@ -12,25 +12,22 @@ import html
 from collections.abc import Iterator
 from typing import Any
 
-from spice.mail.ackgrammar import iter_control_lines
+from spice.mail.ackgrammar import (
+    extract_task_batch_lines_from_text,
+    iter_control_lines,
+    task_directive_fields,
+    task_directive_line,
+)
 from spice.serve.markdown import render_message_html
 
-_TASK_DIRECTIVE_TOKEN = "TASK"
-_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-# Display order for the capture card; ordering only.
+# Display order for the capture card; ordering only. Whether a line is a
+# directive at all is not decided here -- spice.mail.ackgrammar owns that, so
+# this display and the supervisor cannot disagree about which lines act.
 _TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
-# A line is a directive exactly when the supervisor would convert it into a
-# task. Inline supervised creation requires title and project and treats
-# acceptance as optional -- an acceptance-less directive lands in the plan phase
-# but is still created -- so recognition must not demand acceptance, or a
-# converted plan-phase task renders raw here while its capture card shows
-# elsewhere. Mirrors the require_project title+project rule in
-# spice.tasks.create._batch_field_errors.
-_TASK_DIRECTIVE_REQUIRED_FIELDS = ("title", "project")
 
 
 def _render_message_html_with_task_directives(
-    text: str, *, worktree_id: str | None = None
+    text: str, captured: frozenset[str], *, worktree_id: str | None = None
 ) -> str:
     if not text or not text.strip():
         return ""
@@ -59,7 +56,7 @@ def _render_message_html_with_task_directives(
             )
         directive_run = []
 
-    for line, directive in _iter_directive_lines(text):
+    for line, directive in _iter_directive_lines(text, captured):
         if directive is None:
             flush_directives()
             pending.append(line)
@@ -71,63 +68,56 @@ def _render_message_html_with_task_directives(
     return "".join(rendered)
 
 
-def _iter_directive_lines(text: str) -> Iterator[tuple[str, dict[str, Any] | None]]:
+def captured_directive_lines(text: str) -> frozenset[str]:
+    """Return the directives the supervisor reads out of a whole message.
+
+    Resolved before the message is split, because splitting is what destroys
+    the context recognition depends on: a segment body begins where its
+    ACK/NACK header was cut away, so a marker that sat mid-header is left
+    opening the line. Reading the undivided message once answers that, and
+    the display consults the answer while rendering the pieces.
+    """
+    return frozenset(extract_task_batch_lines_from_text(text))
+
+
+def _iter_directive_lines(
+    text: str, captured: frozenset[str]
+) -> Iterator[tuple[str, dict[str, Any] | None]]:
     """Pair each line with its directive, or None when the line does not act.
 
-    Suppression comes from the mail grammar, so a directive that is merely
-    being shown -- fenced, quoted, indented, or carried in rendered source
-    context -- reads as prose here exactly as it does to the supervisor that
-    would otherwise capture it. Sharing the walk is what keeps a card from
-    appearing for a task nothing will create.
+    Two authorities must agree before a card appears, because this text is a
+    piece the reducer cut. The local walk drops a directive that is merely
+    being shown -- fenced, quoted, indented, or in rendered source context.
+    `captured` drops one this piece no longer has the context to judge: a
+    segment body opens where its header was cut away, so a marker that sat
+    mid-header is left looking like it opens the line.
     """
     for line, suppressed in iter_control_lines(text):
-        yield line, None if suppressed else _task_directive_from_line(line)
+        directive = None if suppressed else _task_directive_from_line(line, captured)
+        yield line, directive
 
 
-def _display_text_with_task_directives(text: str) -> str:
+def _display_text_with_task_directives(text: str, captured: frozenset[str]) -> str:
     lines = [
         line if directive is None else _task_directive_summary(directive)
-        for line, directive in _iter_directive_lines(text)
+        for line, directive in _iter_directive_lines(text, captured)
     ]
     return "\n".join(lines).strip()
 
 
-def _task_directive_count(text: str) -> int:
-    return sum(1 for _line, directive in _iter_directive_lines(text) if directive)
+def _task_directive_count(text: str, captured: frozenset[str]) -> int:
+    return sum(
+        1 for _line, directive in _iter_directive_lines(text, captured) if directive
+    )
 
 
-def _task_directive_from_line(line: str) -> dict[str, Any] | None:
-    stripped = line.strip()
-    token_end = len(_TASK_DIRECTIVE_TOKEN)
-    if not stripped.startswith(_TASK_DIRECTIVE_TOKEN):
+def _task_directive_from_line(
+    line: str, captured: frozenset[str]
+) -> dict[str, Any] | None:
+    fields = task_directive_fields(line)
+    if fields is None or task_directive_line(line) not in captured:
         return None
-    if len(stripped) > token_end and stripped[token_end] not in (
-        _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        return None
-    payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
-    fields = _task_directive_fields(payload)
-    if not _task_directive_has_required_fields(fields):
-        return None
-    return {"payload": payload, "fields": fields}
-
-
-def _task_directive_fields(payload: str) -> list[tuple[str, str]]:
-    fields: list[tuple[str, str]] = []
-    for part in payload.split("|"):
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        key = " ".join(key.strip().split())
-        value = " ".join(value.strip().split())
-        if key and value:
-            fields.append((key, value))
-    return fields
-
-
-def _task_directive_has_required_fields(fields: list[tuple[str, str]]) -> bool:
-    keys = {key for key, _value in fields}
-    return all(key in keys for key in _TASK_DIRECTIVE_REQUIRED_FIELDS)
+    return {"fields": fields}
 
 
 def _task_directive_summary(directive: dict[str, Any]) -> str:

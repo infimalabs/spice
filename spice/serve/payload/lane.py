@@ -292,13 +292,15 @@ def _transcript_generation(last_assistant_at: str) -> str:
     it settles that, and the count is the same one every other generation here
     is, so the producer publishes one kind of token rather than one per facet.
 
-    Text no instant can be read out of is no generation at all. A transcript's
-    malformed line must not end the pass -- spice.transcript.timestamps holds
-    that rule for every reader -- and an identity that was never a date must
-    not become an epoch, so both arrive here as nothing to report.
+    Text no instant can be read out of is no generation at all, and neither is
+    an instant before the counter's Unix epoch. A transcript's malformed line
+    or zero-value stamp must not end the pass --
+    spice.transcript.timestamps holds that rule for every reader -- and an
+    identity that was never a date must not become an epoch, so all arrive here
+    as nothing to report.
     """
     instant = parse_timestamp(last_assistant_at)
-    if instant is None:
+    if instant is None or instant < _EPOCH_START:
         return ""
     return str((instant - _EPOCH_START) // _ONE_MICROSECOND)
 

@@ -34,23 +34,33 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     targets = state.worktree_targets()
     task_board = open_task_board_projection()
     inventory = task_board.task_filter_inventory
-    payload: dict[str, Any] = {
-        "workTrees": [
-            _work_tree_payload(
-                state,
-                target,
-                inventory,
-                task_board,
+    work_trees: list[dict[str, Any]] = []
+    projection_errors: list[str] = []
+    for target in targets:
+        try:
+            work_trees.append(
+                _work_tree_payload(
+                    state,
+                    target,
+                    inventory,
+                    task_board,
+                )
             )
-            for target in targets
-        ],
-        "defaultTargetId": targets[0].id if targets else "",
+        except Exception as exc:
+            # Inventory is the boundary between independent lanes. Surface a
+            # target that could not be projected without discarding every
+            # sibling the pass did project; targetsDiscoveryErrors tells the
+            # client this is not a complete topology reconciliation.
+            projection_errors.append(f"could not project worktree {target.id}: {exc}")
+    payload: dict[str, Any] = {
+        "workTrees": work_trees,
+        "defaultTargetId": work_trees[0]["id"] if work_trees else "",
     }
     # A discovery failure must reach the client, which otherwise reads a short
     # workTrees list as proof those worktrees were removed and closes the lanes.
     # This is its own field rather than observerErrors: observer mode carries
     # unrelated errors there, and the client keys lane closure off this one.
-    errors = state.targets_discovery_errors()
+    errors = [*state.targets_discovery_errors(), *projection_errors]
     if errors:
         payload["targetsDiscoveryErrors"] = errors
     return validate_emitter_payload("worktree.inventory.work_trees_payload", payload)

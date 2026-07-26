@@ -646,6 +646,147 @@ def test_a_nack_whose_only_body_is_a_directive_is_not_honored(tmp_path):
     assert extract_task_batch_lines_from_text(text) == [_TASK_DIRECTIVE]
 
 
+_DIRECTIVE_POSITIONS = {
+    "only-line": f"- {_TASK_DIRECTIVE}",
+    "first-line": f"- {_TASK_DIRECTIVE}\nContinuing.",
+    "mid-segment": f"Queued.\n- {_TASK_DIRECTIVE}\nContinuing.",
+    "last-line": f"Queued.\n- {_TASK_DIRECTIVE}",
+    "ack-body-first-line": f"ACK {_ACK_KEY}:\n- {_TASK_DIRECTIVE}\nDone.",
+    "ack-header-line": f"ACK {_ACK_KEY}: - {_TASK_DIRECTIVE}\nDone.",
+    "nack-body": f"NACK {_NACK_KEY}: cannot comply.\n- {_TASK_DIRECTIVE}",
+}
+
+
+@pytest.mark.parametrize("position", sorted(_DIRECTIVE_POSITIONS))
+def test_a_directive_reads_the_same_wherever_it_sits_in_a_message(position, tmp_path):
+    """Where a directive sits must not change whether it asks for a task.
+
+    Serve reads segment text the reducer already transformed, so the
+    line-leading context recognition depends on can be gone before the
+    decision is made: a segment body opens after a stripped ACK header, which
+    made a hyphen mid-header look line-leading and invented a card. Every
+    position is measured against the supervisor's reading of the raw message,
+    which is the only text that still carries that context.
+    """
+    text = _DIRECTIVE_POSITIONS[position]
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+
+
+def test_a_directive_sharing_an_ack_header_line_stays_acknowledgment_prose(tmp_path):
+    """A token mid-header asks for nothing, so the acknowledgment must survive.
+
+    The supervisor reads no directive here, because the hyphen follows the ACK
+    header rather than opening the line. Serve saw the body with the header
+    already stripped and rewrote the whole acknowledgment to a capture
+    summary, showing a card for a task that was never created and destroying
+    what the agent actually said.
+    """
+    text = _DIRECTIVE_POSITIONS["ack-header-line"]
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert extract_task_batch_lines_from_text(text) == []
+    assert payload["task_card_count"] == 0
+    assert _TASK_DIRECTIVE in payload["display_text"]
+
+
+_MARKER_PREFIXED_DIRECTIVES = {
+    "bullet-hyphen": f"- {_TASK_DIRECTIVE}",
+    "bullet-asterisk": f"* {_TASK_DIRECTIVE}",
+    "numbered-item": f"1. {_TASK_DIRECTIVE}",
+    "heading": f"## {_TASK_DIRECTIVE}",
+    "emphasized-token": _TASK_DIRECTIVE.replace("TASK", "**TASK**", 1),
+    "emphasized-line": f"**{_TASK_DIRECTIVE}**",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_MARKER_PREFIXED_DIRECTIVES))
+def test_a_directive_behind_a_markdown_marker_still_renders_its_card(shape, tmp_path):
+    """A captured task must be visible however the writer decorated its line.
+
+    The supervisor accepts the list, heading, and emphasis decoration a writer
+    naturally puts in front of a directive, but serve required the line to
+    begin with the bare token. A bulleted TASK line therefore created a task
+    and showed nothing for it — worse than a spurious card, because the board
+    moved with no visible confirmation. Prose that merely mentions the token
+    stays prose on both sides.
+    """
+    text = f"Queued the follow-up.\n{_MARKER_PREFIXED_DIRECTIVES[shape]}\nContinuing."
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert len(extract_task_batch_lines_from_text(text)) == 1
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert "Task capture: Follow up (session.transcript)" in payload["display_text"]
+
+
+def test_prose_that_mentions_the_task_token_stays_prose(tmp_path):
+    """Recognition is line-leading, so a mid-sentence token asks for nothing.
+
+    This is the boundary the marker rule has to hold: widening recognition to
+    reach a bulleted directive must not widen it to reach a sentence that
+    happens to name the token and its fields.
+    """
+    text = f"Note. {_TASK_DIRECTIVE}"
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert extract_task_batch_lines_from_text(text) == []
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert payload["display_text"] == text
+
+
 _SUPPRESSED_DIRECTIVE_SHAPES = {
     "fenced": "Use this form:\n```\n{directive}\n```\nNothing was captured.",
     "indented": "Use this form:\n\n    {directive}\n\nNothing was captured.",

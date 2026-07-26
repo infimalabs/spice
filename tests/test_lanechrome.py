@@ -6,6 +6,7 @@ import ast
 import importlib.util
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from spice.serve.payload.chrome import (
     LaneChromeObservation,
     LaneChromeOrder,
     assemble_lane_chrome,
+    lane_chrome_generation,
 )
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 
@@ -23,6 +25,9 @@ OTHER_TARGET = "target-b"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LANE_STORE_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.lane-store.js"
 CHROME_FIXTURE_JS = Path(__file__).with_name("fixtures") / "lane_store_chrome.js"
+CHROME_COMPARATOR_FIXTURE_JS = (
+    Path(__file__).with_name("fixtures") / "lane_chrome_comparator.js"
+)
 # The revision a superseded generation climbs to while trying to reclaim the
 # facet, matching SWEEP_LAPSED_REVISION in the browser's own sweep.
 LAPSED_REVISION = 99
@@ -309,6 +314,15 @@ def test_a_later_epoch_supersedes_under_natural_order() -> None:
     }
 
 
+def test_a_generation_is_a_canonical_decimal_count() -> None:
+    assert lane_chrome_generation("0") == "0"
+    assert lane_chrome_generation("7") == "7"
+
+    for padded in ("00", "007"):
+        with pytest.raises(SpiceError, match="decimal count in canonical form"):
+            lane_chrome_generation(padded)
+
+
 def test_the_server_names_the_authorities_the_browser_checks_for() -> None:
     """A drifted name would make the browser throw on every facet sent.
 
@@ -339,6 +353,73 @@ def test_the_server_advances_generations_the_way_the_browser_does() -> None:
         }
         for encoding, epochs in encodings
     }
+
+
+def test_python_and_browser_epoch_comparators_agree_on_reachable_orders() -> None:
+    """Differential the implementations on epochs one to three stores can mint.
+
+    Padded counts remain in the inputs because the comparator must stay mirrored
+    even though the producer refuses to publish them. The long count also proves
+    the browser's string comparison does not lose precision through Number.
+    """
+    counts = ("", "0", "1", "7", "10", "007", "00", "18446744073709551616")
+    triple_counts = ("", "0", "007", "18446744073709551616")
+    epochs = [
+        *counts,
+        *(f"{first}-{second}" for first in counts for second in counts),
+        *(
+            f"{first}-{second}-{third}"
+            for first in triple_counts
+            for second in triple_counts
+            for third in triple_counts
+        ),
+    ]
+    cases = [
+        [epoch, previous, index % 4, previous_index % 3]
+        for index, epoch in enumerate(epochs)
+        for previous_index, previous in enumerate(epochs)
+    ]
+    result = subprocess.run(
+        ["node", str(CHROME_COMPARATOR_FIXTURE_JS), str(LANE_STORE_JS)],
+        input=json.dumps(cases),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    browser = json.loads(result.stdout)
+    python = [
+        [
+            server_epoch_comparison(epoch, previous),
+            server_order_is_newer(epoch, revision, previous, previous_revision),
+        ]
+        for epoch, previous, revision, previous_revision in cases
+    ]
+    assert browser == python
+
+
+def server_epoch_comparison(epoch: str, previous: str) -> int:
+    """Read the server comparator through its public projection decision."""
+    if server_order_is_newer(epoch, 0, previous, 0):
+        return 1
+    if server_order_is_newer(previous, 0, epoch, 0):
+        return -1
+    return 0
+
+
+def server_order_is_newer(
+    epoch: str, revision: int, previous: str, previous_revision: int
+) -> bool:
+    observed = LaneChromeObservation(
+        "activity", LaneChromeOrder(epoch, revision), ACTIVITY
+    )
+    projection = assemble_lane_chrome(
+        TARGET,
+        [observed],
+        published={"activity": LaneChromeOrder(previous, previous_revision)},
+    )
+    return projection.changed == ("activity",)
 
 
 def sweep_generations(encoding: str, epochs: list[str]) -> dict[str, object]:
