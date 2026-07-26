@@ -7,8 +7,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+from spice import paths as spice_paths
 from spice.errors import SpiceError
-from spice.paths import repo_root_from_cwd, require_repo_root
+from spice.paths import require_repo_root
+
+
+def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
+    """Resolve through the live paths module so test/config overrides cannot leak."""
+    return (
+        spice_paths.repo_root_from_cwd()
+        if cwd is None
+        else spice_paths.repo_root_from_cwd(cwd)
+    )
 
 
 def configure_dev_parser(subparsers: Any) -> None:

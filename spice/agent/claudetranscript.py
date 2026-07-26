@@ -17,6 +17,7 @@ consumers read typed events directly.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from spice.transcript.events import (
@@ -83,7 +84,7 @@ def _claude_assistant_events(
         event = _claude_assistant_block_event(stamper, block, final=final)
         if event is not None:
             events.append(event)
-    return events
+    return _select_assistant_image_payload(events)
 
 
 def _claude_assistant_block_event(
@@ -110,7 +111,11 @@ def _claude_assistant_block_event(
         )
     if block_type == "image":
         url = _claude_image_url(block)
-        return None if url is None else Image(at=stamper.stamp(), url=url)
+        return (
+            None
+            if url is None
+            else Image(at=stamper.stamp(), url=url, role="assistant")
+        )
     return Unknown(
         at=stamper.stamp(),
         reason="unrecognized assistant block",
@@ -134,6 +139,7 @@ def _claude_user_events(
                 prompt_id=prompt_id
                 if isinstance(prompt_id, str) and prompt_id
                 else None,
+                transcript_kind="user",
             )
         ]
     if isinstance(content, list):
@@ -146,16 +152,18 @@ def _claude_user_events(
 def _claude_tool_result_events(
     stamper: LineStamper, block: dict[str, Any]
 ) -> list[TranscriptEvent]:
+    call_id = str(block.get("tool_use_id") or "")
     body = block.get("content")
     events: list[TranscriptEvent] = [
         ToolOutput(
             at=stamper.stamp(),
-            call_id=str(block.get("tool_use_id") or ""),
+            call_id=call_id,
             content=body if isinstance(body, str) else "",
             failed=bool(block.get("is_error")),
             tool_output_type="function_call_output",
         )
     ]
+    payload_index = 0
     for item in body if isinstance(body, list) else []:
         if isinstance(item, dict) and item.get("type") == "image":
             url = _claude_image_url(item)
@@ -164,9 +172,27 @@ def _claude_tool_result_events(
                     Image(
                         at=stamper.stamp(),
                         url=url,
+                        call_id=call_id,
                         tool_output_type="function_call_output",
+                        payload_index=payload_index,
                     )
                 )
+                payload_index += 1
+    return events
+
+
+def _select_assistant_image_payload(
+    events: list[TranscriptEvent],
+) -> list[TranscriptEvent]:
+    """Mark the image retained by Claude's historical response-item selection."""
+    if any(isinstance(event, AssistantText) and event.text.strip() for event in events):
+        return events
+    for index, event in enumerate(events):
+        if isinstance(event, ToolCall):
+            return events
+        if isinstance(event, Image):
+            events[index] = replace(event, payload_index=0)
+            return events
     return events
 
 

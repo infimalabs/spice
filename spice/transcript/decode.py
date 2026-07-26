@@ -28,16 +28,6 @@ from spice.transcript.events import (
 )
 
 
-def first_text(content: Any) -> str | None:
-    """Return the first text block from legacy transcript message content."""
-    if not isinstance(content, list):
-        return None
-    for item in content:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            return item["text"]
-    return None
-
-
 def decode_parsed_line(
     obj: dict[str, Any] | None,
     driver: AgentDriver,

@@ -278,6 +278,10 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
             "INSERT INTO agent_metrics "
             "(agent_id, team_id, tool_calls, updated_at) VALUES ('agent-a', 'team-a', 3, 1.0)"
         )
+        connection.execute(
+            "INSERT INTO task_events (ts, kind, task_id, agent_id, team_id) "
+            "VALUES (1.0, 'claim', 'TASK-1', 'agent-a', 'team-a')"
+        )
 
     _initialize(path)
 
@@ -289,13 +293,17 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
         cursor_rows = connection.execute(
             "SELECT count(*) FROM agent_metric_cursors"
         ).fetchone()[0]
-        kept_tool_calls = connection.execute(
-            "SELECT tool_calls FROM agent_metrics WHERE agent_id = 'agent-a'"
+        counted_rows = connection.execute(
+            "SELECT count(*) FROM agent_metrics WHERE agent_id = 'agent-a'"
+        ).fetchone()[0]
+        kept_task_events = connection.execute(
+            "SELECT count(*) FROM task_events"
         ).fetchone()[0]
 
     # A projection whose shape drifted is discarded and rebuilt from the current
-    # DDL; the projections that still match keep their rows, and authority is
-    # untouched either way.
+    # DDL, and it takes its family with it: counts left standing beside a reset
+    # checkpoint would be counted again by the replay that follows. Projections
+    # outside that family keep their rows, and authority is untouched either way.
     assert columns == (
         "agent_id",
         "source_path",
@@ -305,7 +313,8 @@ def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
         "updated_at",
     )
     assert cursor_rows == 0
-    assert kept_tool_calls == 3
+    assert counted_rows == 0
+    assert kept_task_events == 1
     assert _authority_state(path) == before
 
 

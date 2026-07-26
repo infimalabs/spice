@@ -11,10 +11,15 @@ Resumption is a checkpoint, not an offset: the reader compares the source's
 filesystem identity against the stored one, so a transcript replaced under the
 same path restarts from its first byte instead of resuming into the middle of a
 different file.
+
+The counted facts and the checkpoint they were read to are one write. A pass
+that dies before its commit leaves neither, so the next pass reads the same
+bytes once rather than counting them twice or stepping over them unread.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from spice.agent.driver import driver_for_transcript
@@ -76,12 +81,9 @@ def record_transcript_metrics_for_agent(
         ),
         tool_call_timestamps=_event_times(read.events, TOOL_CALL_EVENTS),
         message_timestamps=_event_times(read.events, ACTIVITY_EVENTS),
-    )
-    store.record_agent_metric_cursor(
-        agent_id,
-        source_path=source_path,
-        offset=cursor.offset,
-        file_identity=cursor.file_identity,
+        checkpoint=replace(
+            checkpoint, offset=cursor.offset, file_identity=cursor.file_identity
+        ),
     )
 
 

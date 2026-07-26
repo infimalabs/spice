@@ -55,9 +55,7 @@ def test_available_work_expansion_is_scoped_to_drain_lifetime(
         lambda *_args, **_kwargs: {"ok": True, "trigger": "available-work"},
     )
 
-    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
-        target, thread_id=THREAD_A
-    )
+    result = _run_automatic_decision(state, target, "lifetime-scope")
 
     assert result.agent_ensure == expected_ensure
 
@@ -85,9 +83,7 @@ def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
         capture_available_work,
     )
 
-    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
-        target, thread_id=THREAD_A
-    )
+    result = _run_automatic_decision(state, target, "drain-backlog")
 
     assert result.agent_ensure == {"ok": True, "trigger": "available-work"}
     retry_due = observed[0]["retry_due"]
@@ -122,9 +118,7 @@ def test_operator_wake_bypasses_steer_available_work_gate(tmp_path, monkeypatch)
         lambda *_args, **_kwargs: operator_wake,
     )
 
-    result = lifecycle.lifecycle_decision_authority(state).evaluate_target(
-        target, thread_id=THREAD_A
-    )
+    result = _run_automatic_decision(state, target, "operator-wake")
 
     assert result.agent_ensure == operator_wake
 
@@ -362,7 +356,7 @@ def test_inventory_message_and_history_builders_are_pure_lifecycle_projections(
     monkeypatch.setattr(agentapi, "deadletter_inbox_item", reject("inbox deadletter"))
     monkeypatch.setattr(
         lifecycle.LifecycleDecisionAuthority,
-        "evaluate_target",
+        "_evaluate_target_locked",
         reject("lifecycle evaluation"),
     )
     monkeypatch.setattr(claimstate, "do_claim", reject("task claim"))
@@ -584,6 +578,20 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
     # Active-mode Serve owns the reconciler every lane decision is submitted to.
     start_lifecycle_reconciler(state)
     return state
+
+
+def _run_automatic_decision(
+    state: ServeState,
+    target: WorktreeTarget,
+    source_identity: str,
+):
+    outcome = lifecycle.submit_inbox_wake(
+        state,
+        target,
+        source_identity,
+    ).result(timeout=1.0)
+    assert outcome.decision is not None
+    return outcome.decision
 
 
 def _record_target_identity(state: ServeState, target: WorktreeTarget) -> None:

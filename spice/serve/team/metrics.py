@@ -66,6 +66,7 @@ class AgentMetricCheckpoint:
     replacement.
     """
 
+    source_path: str
     offset: int
     file_identity: TranscriptFileIdentity | None
 
@@ -126,6 +127,7 @@ class _TeamMetricStore(Protocol):
         agent_id: str,
         *,
         team_id: str,
+        source_path: str,
         tool_calls: int,
         message_buckets: Counter[int],
         tool_call_buckets: Counter[int],
@@ -180,7 +182,15 @@ class TeamMetricStoreMixin:
         tool_calls: int = 0,
         message_timestamps: Iterable[float] = (),
         tool_call_timestamps: Iterable[float] = (),
+        checkpoint: AgentMetricCheckpoint | None = None,
     ) -> None:
+        """Count one batch of lane activity, with the checkpoint that produced it.
+
+        Facts read out of a transcript arrive with the resume point they were
+        read up to, and the two commit together: a checkpoint that landed
+        without its facts skips activity forever, and facts that landed without
+        their checkpoint are counted again on the next pass.
+        """
         agent_id = _normalized_id(agent_id, "agent_id")
         tool_calls = _nonnegative_int(tool_calls)
         now = time.time()
@@ -197,21 +207,36 @@ class TeamMetricStoreMixin:
             tool_call_buckets[metric_bucket_start(now)] += (
                 tool_calls - recorded_tool_calls
             )
-        if tool_calls == 0 and not message_buckets:
+        counted = tool_calls > 0 or bool(message_buckets)
+        if not counted and checkpoint is None:
             return
         # Tag the activity with the team the agent is on at capture time, or the
         # agent itself when it is in no team / a private solo team.
         team_id = self.current_team_for_agent(agent_id) or agent_id
+        # Counts are attributed to the source that produced them, so a replay of
+        # one source reverses only its own contribution. Activity counted
+        # outside a transcript pass has no source to replay from.
+        source_path = "" if checkpoint is None else checkpoint.source_path
         with self.connect() as connection:
-            self._record_agent_metric_delta_locked(
-                connection,
-                agent_id,
-                team_id=team_id,
-                tool_calls=tool_calls,
-                message_buckets=message_buckets,
-                tool_call_buckets=tool_call_buckets,
-                now=now,
-            )
+            if checkpoint is not None:
+                _reset_unaccountable_metrics_locked(
+                    connection, agent_id, source_path=source_path
+                )
+            if counted:
+                self._record_agent_metric_delta_locked(
+                    connection,
+                    agent_id,
+                    team_id=team_id,
+                    source_path=source_path,
+                    tool_calls=tool_calls,
+                    message_buckets=message_buckets,
+                    tool_call_buckets=tool_call_buckets,
+                    now=now,
+                )
+            if checkpoint is not None:
+                _record_agent_metric_cursor_locked(
+                    connection, agent_id, checkpoint=checkpoint, now=now
+                )
 
     def agent_metric_checkpoint(
         self: _TeamMetricStore, agent_id: str, source_path: str
@@ -224,8 +249,11 @@ class TeamMetricStoreMixin:
                 (agent_id, source_path),
             ).fetchone()
         if row is None:
-            return AgentMetricCheckpoint(offset=0, file_identity=None)
+            return AgentMetricCheckpoint(
+                source_path=source_path, offset=0, file_identity=None
+            )
         return AgentMetricCheckpoint(
+            source_path=source_path,
             offset=max(0, int(row["offset"] or 0)),
             file_identity=_file_identity(row["source_device"], row["source_inode"]),
         )
@@ -233,35 +261,6 @@ class TeamMetricStoreMixin:
     def metric_history_retention_seconds(self: _TeamMetricStore) -> int:
         with self.connect() as connection:
             return _metric_history_retention_seconds_locked(connection)
-
-    def record_agent_metric_cursor(
-        self: _TeamMetricStore,
-        agent_id: str,
-        *,
-        source_path: str,
-        offset: int,
-        file_identity: TranscriptFileIdentity | None,
-    ) -> None:
-        agent_id = _normalized_id(agent_id, "agent_id")
-        with self.connect() as connection:
-            connection.execute(
-                "INSERT INTO agent_metric_cursors "
-                "(agent_id, source_path, offset, source_device, source_inode, "
-                "updated_at) VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
-                "offset = excluded.offset, "
-                "source_device = excluded.source_device, "
-                "source_inode = excluded.source_inode, "
-                "updated_at = excluded.updated_at",
-                (
-                    agent_id,
-                    source_path,
-                    max(0, int(offset)),
-                    None if file_identity is None else file_identity.device,
-                    None if file_identity is None else file_identity.inode,
-                    time.time(),
-                ),
-            )
 
     def record_task_lifecycle_event(
         self: _TeamMetricStore,
@@ -743,6 +742,7 @@ class TeamMetricStoreMixin:
         agent_id: str,
         *,
         team_id: str,
+        source_path: str,
         tool_calls: int,
         message_buckets: Counter[int],
         tool_call_buckets: Counter[int],
@@ -750,25 +750,27 @@ class TeamMetricStoreMixin:
     ) -> None:
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, team_id, tool_calls, updated_at) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
+            "(agent_id, team_id, source_path, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(agent_id, team_id, source_path) DO UPDATE SET "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = excluded.updated_at",
-            (agent_id, team_id, tool_calls, now),
+            (agent_id, team_id, source_path, tool_calls, now),
         )
         bucket_starts = sorted(set(message_buckets) | set(tool_call_buckets))
         for bucket_start in bucket_starts:
             connection.execute(
                 "INSERT INTO agent_metric_buckets "
-                "(agent_id, team_id, bucket_start, messages, tool_calls) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
+                "(agent_id, team_id, source_path, bucket_start, messages, tool_calls) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(agent_id, team_id, source_path, bucket_start) "
+                "DO UPDATE SET "
                 "messages = agent_metric_buckets.messages + excluded.messages, "
                 "tool_calls = agent_metric_buckets.tool_calls + excluded.tool_calls",
                 (
                     agent_id,
                     team_id,
+                    source_path,
                     bucket_start,
                     int(message_buckets.get(bucket_start, 0)),
                     int(tool_call_buckets.get(bucket_start, 0)),
@@ -816,6 +818,67 @@ class TeamMetricStoreMixin:
             bucket_seconds=bucket_seconds,
             now=now,
         )
+
+
+def _record_agent_metric_cursor_locked(
+    connection: sqlite3.Connection,
+    agent_id: str,
+    *,
+    checkpoint: AgentMetricCheckpoint,
+    now: float,
+) -> None:
+    identity = checkpoint.file_identity
+    connection.execute(
+        "INSERT INTO agent_metric_cursors "
+        "(agent_id, source_path, offset, source_device, source_inode, "
+        "updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
+        "offset = excluded.offset, "
+        "source_device = excluded.source_device, "
+        "source_inode = excluded.source_inode, "
+        "updated_at = excluded.updated_at",
+        (
+            agent_id,
+            checkpoint.source_path,
+            max(0, int(checkpoint.offset)),
+            None if identity is None else identity.device,
+            None if identity is None else identity.inode,
+            now,
+        ),
+    )
+
+
+def _reset_unaccountable_metrics_locked(
+    connection: sqlite3.Connection, agent_id: str, *, source_path: str
+) -> None:
+    """Clear what one source contributed once its checkpoint is gone.
+
+    Facts and the checkpoint covering them are written together, so counts
+    standing beside a missing checkpoint mean the checkpoint was lost -- a
+    dropped table after a shape change, a deleted row, a restored database
+    missing one file. The caller is resuming that source from its first byte
+    because of it, so the counts that source already produced are exactly what
+    the replay is about to produce again: they are cleared here, inside the
+    transaction that replaces them.
+
+    Only that source's counts go. Every other source the agent reads is still
+    covered by its own checkpoint, so nothing is going to replay it, and
+    clearing it would erase activity that never comes back.
+    """
+    checkpointed = connection.execute(
+        "SELECT 1 FROM agent_metric_cursors WHERE agent_id = ? AND source_path = ?",
+        (agent_id, source_path),
+    ).fetchone()
+    if checkpointed is not None:
+        return
+    connection.execute(
+        "DELETE FROM agent_metrics WHERE agent_id = ? AND source_path = ?",
+        (agent_id, source_path),
+    )
+    connection.execute(
+        "DELETE FROM agent_metric_buckets WHERE agent_id = ? AND source_path = ?",
+        (agent_id, source_path),
+    )
 
 
 def _file_identity(

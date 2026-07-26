@@ -90,6 +90,7 @@ def _codex_event_message_events(
     stamper: LineStamper, payload: dict[str, Any]
 ) -> list[TranscriptEvent]:
     payload_type = payload.get("type")
+    turn_id = _optional_str(payload.get("turn_id"))
     if payload_type == "token_count":
         # AgentDriver attaches the dialect-decoded ContextUsage fact.
         return []
@@ -98,7 +99,7 @@ def _codex_event_message_events(
             TurnBoundary(
                 at=stamper.stamp(),
                 kind="started",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
             )
         ]
     if payload_type == "task_complete":
@@ -106,22 +107,18 @@ def _codex_event_message_events(
             TurnBoundary(
                 at=stamper.stamp(),
                 kind="completed",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
+                last_assistant_message=_optional_str(payload.get("last_agent_message")),
             )
         ]
-    if payload_type == "user_message":
-        message = payload.get("message")
-        if isinstance(message, str):
-            return [
-                UserMessage(
-                    at=stamper.stamp(),
-                    text=message,
-                    prompt_id=None,
-                    phase="prompt",
-                    turn_id=_optional_str(payload.get("turn_id")),
-                )
-            ]
-        return []
+    if payload_type == "error":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="error",
+                turn_id=turn_id,
+            )
+        ]
     if payload_type == "exec_command_end":
         return [
             CommandExecution(
@@ -130,9 +127,22 @@ def _codex_event_message_events(
                 cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
                 exit_code=_command_int(payload.get("exit_code")),
                 status=_optional_str(payload.get("status")) or "completed",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
             )
         ]
+    if payload_type == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str) and message:
+            return [
+                UserMessage(
+                    at=stamper.stamp(),
+                    text=message,
+                    prompt_id=None,
+                    phase="prompt",
+                    turn_id=turn_id,
+                    transcript_kind="event_msg",
+                )
+            ]
     return []
 
 
@@ -182,7 +192,7 @@ def _codex_message_events(
     phase = _optional_str(payload.get("phase"))
     turn_id, metadata_key = _turn_metadata(payload)
     events: list[TranscriptEvent] = []
-    for block in content:
+    for payload_index, block in enumerate(content):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex message block", None))
             continue
@@ -223,8 +233,8 @@ def _codex_message_events(
                     )
                 )
             continue
-        image_url = block.get("image_url")
-        if isinstance(block_type, str) and isinstance(image_url, str):
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
@@ -233,6 +243,7 @@ def _codex_message_events(
                     detail=_optional_str(block.get("detail")),
                     role=role,
                     item_id=item_id,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -320,7 +331,7 @@ def _codex_tool_output_events(
             )
         ]
     events: list[TranscriptEvent] = []
-    for block in output:
+    for payload_index, block in enumerate(output):
         if not isinstance(block, dict):
             events.append(_unknown(stamper, "malformed Codex output block", None))
             continue
@@ -342,8 +353,8 @@ def _codex_tool_output_events(
                 )
             )
             continue
-        image_url = block.get("image_url")
-        if isinstance(block_type, str) and isinstance(image_url, str):
+        image_url = _codex_image_url(block.get("image_url"))
+        if isinstance(block_type, str) and image_url is not None:
             events.append(
                 Image(
                     at=stamper.stamp(),
@@ -353,6 +364,7 @@ def _codex_tool_output_events(
                     item_id=item_id,
                     call_id=call_id,
                     tool_output_type=output_type,
+                    payload_index=payload_index,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -629,6 +641,11 @@ def _unknown(stamper: LineStamper, reason: str, raw_type: str | None) -> Unknown
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _codex_image_url(value: Any) -> str | None:
+    raw = value.get("url") if isinstance(value, dict) else value
+    return raw if isinstance(raw, str) and raw else None
 
 
 def _command_value(value: Any) -> str:

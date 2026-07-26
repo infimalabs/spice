@@ -89,7 +89,10 @@ def _collect_messages_from_file(path: Path) -> list[MessageRecord]:
         if not ts:
             continue
         if isinstance(event, TurnBoundary):
-            current_turn_id = event.turn_id if event.kind == "started" else None
+            if event.kind == "started":
+                current_turn_id = event.turn_id
+            elif event.kind == "completed":
+                current_turn_id = None
             continue
         if isinstance(event, UserMessage) and event.role == "user":
             record = _typed_message(

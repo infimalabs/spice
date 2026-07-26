@@ -36,7 +36,7 @@ from typing import Literal
 # reader engine, which iterates files and knows both.
 UNLOCATED_SOURCE = "<unlocated>"
 ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
-TurnBoundaryKind = Literal["started", "completed"]
+TurnBoundaryKind = Literal["started", "completed", "error"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -148,6 +148,9 @@ class Image:
 
     Base64 blocks arrive as a `data:` URL, so the media type and payload stay
     recoverable from the single field without a second encoding step.
+    `payload_index` is its position in the selected message/tool-output content
+    list; adapters leave it unset when their payload-selection contract hides
+    that image from consumers.
     """
 
     at: Provenance
@@ -158,6 +161,7 @@ class Image:
     item_id: str | None = None
     call_id: str | None = None
     tool_output_type: ToolOutputType | None = None
+    payload_index: int | None = None
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
@@ -183,15 +187,17 @@ class UserMessage:
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
     ) = None
+    transcript_kind: Literal["response_item", "event_msg", "user"] = "response_item"
 
 
 @dataclass(slots=True, frozen=True)
 class TurnBoundary:
-    """A provider-reported start or completion boundary for one turn."""
+    """A provider-reported turn start, completion, or in-turn error."""
 
     at: Provenance
     kind: TurnBoundaryKind
     turn_id: str | None
+    last_assistant_message: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -254,6 +260,20 @@ class ContextUsage:
 
 
 @dataclass(slots=True, frozen=True)
+class FailureSignal:
+    """A structural process failure carried by the transcript stream.
+
+    This is the plane-neutral result of a driver interpreting its own failure
+    envelope. Consumers see only the stable failure family and optional retry
+    horizon; provider JSON stays behind the driver adapter.
+    """
+
+    at: Provenance
+    kind: str
+    reset_epoch: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class Unknown:
     """A line or block the decoder could not type, kept rather than dropped.
 
@@ -279,6 +299,7 @@ TranscriptEvent = (
     | Compaction
     | WebSearch
     | ContextUsage
+    | FailureSignal
     | Unknown
 )
 

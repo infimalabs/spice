@@ -1208,28 +1208,17 @@ class _ExplicitSendRace:
         self.target = target
         self.published = threading.Event()
         self.release_direct_send = threading.Event()
-        self.background_at_launch_lock = threading.Event()
+        self.background_submitted = threading.Event()
         self.background_finished = threading.Event()
         self.agent_started = threading.Event()
         self.attempts: list[bool] = []
         self.attempt_pending_counts: list[int] = []
         self.direct_result: dict[str, object] = {}
 
-    def install(self, monkeypatch) -> None:
+    def install(self, monkeypatch, state) -> None:
         real_submit = workroutes.submit_steering_message
-        real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
+        real_submit_wake = state.submit_lifecycle_wake
         race = self
-
-        class ObservedPendingInboxLaunchLock:
-            def __enter__(self):
-                if threading.current_thread().name.startswith(
-                    serve_lifecycle.LIFECYCLE_RECONCILER_THREAD_PREFIX
-                ):
-                    race.background_at_launch_lock.set()
-                return real_launch_lock.__enter__()
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                return real_launch_lock.__exit__(exc_type, exc_value, traceback)
 
         def pause_after_publication(**kwargs):
             sent = real_submit(**kwargs)
@@ -1237,19 +1226,24 @@ class _ExplicitSendRace:
             race.release_direct_send.wait(timeout=EXPLICIT_SEND_RELEASE_SECONDS)
             return sent
 
+        def observe_background_submission(wake):
+            future = real_submit_wake(wake)
+            race.background_submitted.set()
+            return future
+
         def status_after_explicit_start(*_args, **_kwargs):
             return SimpleNamespace(running=race.agent_started.is_set())
 
         monkeypatch.setattr(
             workroutes, "submit_steering_message", pause_after_publication
         )
+        monkeypatch.setattr(
+            state,
+            "submit_lifecycle_wake",
+            observe_background_submission,
+        )
         monkeypatch.setattr(agentapi, "agent_status", status_after_explicit_start)
         monkeypatch.setattr(agentapi, "agent_ensure_response_payload", self.ensure)
-        monkeypatch.setattr(
-            agentapi,
-            "_PENDING_INBOX_LAUNCH_LOCK",
-            ObservedPendingInboxLaunchLock(),
-        )
 
     def ensure(self, ensured_target, **kwargs):
         """Refuse every automatic restart and honor the one explicit grant."""
@@ -1280,7 +1274,7 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     state = _serve_state(tmp_path, target)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     race = _ExplicitSendRace(repo, target)
-    race.install(monkeypatch)
+    race.install(monkeypatch, state)
     reconciler = state.lifecycle_reconciler
     assert reconciler is not None
 
@@ -1311,14 +1305,12 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         daemon=True,
     )
     background_thread.start()
-    # The watcher's decision is at the real launch boundary, blocked behind the
-    # route's pre-publication acquisition, and its own evaluation has not
-    # finished. Releasing the route publishes and reserves this send's grant as
-    # one step, so the decision that wins the guard next reads a reservation only
-    # the send's own intent may spend.
-    assert (
-        race.background_at_launch_lock.wait(timeout=EXPLICIT_SEND_STEP_SECONDS) is True
-    )
+    # The watcher has handed its real Future to the reconciler but its
+    # same-target decision is blocked behind the route's publication boundary.
+    # Releasing the route reserves this send's grant as the same target-scoped
+    # step, so the queued automatic decision observes a reservation only the
+    # send's own intent may spend.
+    assert race.background_submitted.wait(timeout=EXPLICIT_SEND_STEP_SECONDS) is True
     assert race.background_finished.is_set() is False
     race.release_direct_send.set()
     direct_thread.join(timeout=EXPLICIT_SEND_STEP_SECONDS)
@@ -1333,7 +1325,7 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     assert race.attempts == [False]
     assert race.attempt_pending_counts == [1]
     assert race.agent_started.is_set() is True
-    assert race.background_at_launch_lock.is_set() is True
+    assert race.background_submitted.is_set() is True
     assert race.background_finished.is_set() is True
     reconciler.cancel()
     assert reconciler.join(timeout=RECONCILER_JOIN_SECONDS) is True

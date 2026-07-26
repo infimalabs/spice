@@ -43,7 +43,6 @@ ROUND_TRIP_OFFSET_SECONDS = 3600
 TW_TOUCHPOINTS: dict[str, frozenset[str]] = {
     "spice/agent/watchdog.py": frozenset({"canonical_actor"}),
     "spice/agent/wrap.py": frozenset({"export"}),
-    "spice/serve/payload/metric.py": frozenset({"export"}),
     "spice/serve/taskboard.py": frozenset({"canonical_actor", "export"}),
     "spice/sessions/briefingtaskplane.py": frozenset({"current_actor", "now_iso"}),
     "spice/studies/taskgen.py": frozenset({"export"}),

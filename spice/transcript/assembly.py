@@ -23,6 +23,7 @@ from spice.transcript.events import (
     CommandExecution,
     Compaction,
     ContextUsage,
+    FailureSignal,
     Image,
     Provenance,
     Reasoning,
@@ -60,6 +61,7 @@ _EVENT_TYPES = (
     Compaction,
     WebSearch,
     ContextUsage,
+    FailureSignal,
     Unknown,
 )
 
@@ -218,7 +220,14 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
         )
     if isinstance(
         event,
-        (CommandExecution, UserMessage, TurnBoundary, ContextUsage, Unknown),
+        (
+            CommandExecution,
+            UserMessage,
+            TurnBoundary,
+            ContextUsage,
+            FailureSignal,
+            Unknown,
+        ),
     ):
         return ()
     raise TypeError(f"unsupported transcript event: {type(event).__name__}")

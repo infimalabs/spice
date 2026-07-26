@@ -7,6 +7,11 @@ from typing import Any
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
 from spice.serve.lifecycle import project_lifecycle
+from spice.serve.payload.chrome import (
+    LaneChromeObservation,
+    LaneChromeOrder,
+    assemble_lane_chrome,
+)
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
@@ -72,7 +77,6 @@ def _work_tree_payload(
     renew_intent = lifecycle.renewal_intent
     agent_ensure = lifecycle.agent_ensure
     pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
@@ -97,6 +101,18 @@ def _work_tree_payload(
         desired_config=desired_config,
         task_board=task_board,
     )
+    chrome = _work_tree_chrome(
+        target_id=target.id,
+        team_identity=team_identity,
+        team_facts=team_facts,
+        renewal_intent=renewal_intent,
+        inventory=inventory,
+        pending_identity=pending_identity,
+        status_line=status_line,
+    )
+    board = chrome["taskBoard"]["value"]
+    pending = chrome["pendingInbox"]["value"]
+    renewal = chrome["renewal"]["value"]
     return {
         "id": target.id,
         "repoRoot": str(target.repo_root),
@@ -111,30 +127,95 @@ def _work_tree_payload(
             desired_config=desired_config,
         ),
         "serveAgentIdentity": serve_identity,
-        "taskFilters": team_facts.get("taskFilters", []),
-        "taskFilterEntries": team_facts.get("taskFilterEntries", []),
-        "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
+        "taskFilters": board["taskFilters"],
+        "taskFilterEntries": board["taskFilterEntries"],
+        "effectiveTaskFilters": board["effectiveTaskFilters"],
         "laneFilterVersion": "",
-        "teamIdentity": team_identity,
-        "lifetime": team_facts.get("lifetime", ""),
-        "renewalIntent": renewal_intent,
-        "taskFilterInventory": inventory,
+        "teamIdentity": chrome["teamConfig"]["value"]["teamIdentity"],
+        "lifetime": renewal["lifetime"],
+        "renewalIntent": renewal["renewalIntent"],
+        "taskFilterInventory": board["taskFilterInventory"],
         "laneInfo": _lane_info_payload(
             target,
             serve_identity,
             agent_name=agent_name,
             task_board=task_board,
         ),
-        "pendingCount": pending,
-        "pendingLabel": str(pending),
+        "pendingCount": pending["count"],
+        "pendingLabel": pending["label"],
         **pending_identity,
-        "privateTaskCount": 0,
+        "privateTaskCount": board["privateTaskCount"],
         "agentProcessStatus": status.process_status,
         "agentVisualStatus": status_line["agentVisualStatus"],
         "agentEnsure": agent_ensure or {},
-        "lastAssistantAt": status_line["lastAssistantAt"],
+        "lastAssistantAt": chrome["activity"]["value"]["lastAssistantAt"],
         "statusLine": status_line,
     }
+
+
+def _work_tree_chrome(
+    *,
+    target_id: str,
+    team_identity: dict[str, Any],
+    team_facts: dict[str, Any],
+    renewal_intent: dict[str, Any],
+    inventory: dict[str, Any],
+    pending_identity: dict[str, Any],
+    status_line: dict[str, Any],
+) -> dict[str, Any]:
+    """Project this pass's chrome facets, each ordered by its own authority.
+
+    Only facets this pass observes whole and can order from the producing
+    authority's own counter are published: an inventory pass reads no counter
+    behind the identity or lifecycle facets, and a producer that cannot say
+    which of two observations is newer must not publish either. The flat fields
+    above read back out of these values, so the projection is the one place
+    they are decided.
+    """
+    observations = (
+        LaneChromeObservation(
+            "teamConfig",
+            LaneChromeOrder(revision=int(team_identity.get("configRevision", 0))),
+            {"teamIdentity": team_identity},
+        ),
+        LaneChromeObservation(
+            "pendingInbox",
+            LaneChromeOrder(revision=int(pending_identity["pendingInboxVersion"])),
+            {
+                "count": int(pending_identity["pendingInboxCount"]),
+                "label": str(pending_identity["pendingInboxLabel"]),
+                "keys": pending_identity["pendingInboxKeys"],
+            },
+        ),
+        LaneChromeObservation(
+            "taskBoard",
+            LaneChromeOrder(epoch=str(inventory.get("revision", ""))),
+            {
+                "taskFilters": team_facts.get("taskFilters", []),
+                "taskFilterEntries": team_facts.get("taskFilterEntries", []),
+                "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
+                "taskFilterInventory": inventory,
+                "privateTaskCount": 0,
+            },
+        ),
+        LaneChromeObservation(
+            "renewal",
+            LaneChromeOrder(revision=int(renewal_intent.get("revision", 0))),
+            {
+                "lifetime": team_facts.get("lifetime", ""),
+                "renewalIntent": renewal_intent,
+            },
+        ),
+        # The transcript's own last assistant instant is what advances here:
+        # zero-padded, so it orders naturally, and it moves exactly when the
+        # activity the facet describes does.
+        LaneChromeObservation(
+            "activity",
+            LaneChromeOrder(epoch=str(status_line["lastAssistantAt"])),
+            {"lastAssistantAt": status_line["lastAssistantAt"]},
+        ),
+    )
+    return assemble_lane_chrome(target_id, observations).payload
 
 
 def _work_tree_status_payloads(
