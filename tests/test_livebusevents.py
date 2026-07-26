@@ -695,6 +695,7 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
+    created = state.team_store.create_team(members=[f"target:{target.id}"])
     # Active-mode Serve owns the reconciler every lane decision is submitted to.
     start_lifecycle_reconciler(state)
     _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
@@ -772,6 +773,22 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
             "state": "bound",
             "threadId": THREAD_ID,
         }
+        actor = f"thread:{THREAD_ID}"
+        assert [
+            member.agent_id
+            for member in state.team_store.team_state(created.team_id).members
+        ] == [actor]
+        recorded = state.team_store.agent_identity_for_actor(actor)
+        assert recorded is not None
+        assert recorded.thread_id == THREAD_ID
+
+        def reject(*_args, **_kwargs):
+            raise AssertionError("send follow-up projection attempted a durable write")
+
+        monkeypatch.setattr(state.team_store, "assign_agent", reject)
+        monkeypatch.setattr(state.team_store, "record_agent_identity", reject)
+        monkeypatch.setattr(state.team_store, "record_pending_renewal", reject)
+        monkeypatch.setattr(state.team_store, "record_started_renewal", reject)
         repeated = message.send_followup_messages_payload(state, target, limit=5)
         assert repeated["agentEnsure"] == followup["payload"]["agentEnsure"]
         assert len(ensure_calls) == 1

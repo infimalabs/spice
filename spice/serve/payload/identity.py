@@ -292,23 +292,28 @@ def record_serve_agent_identity(
     actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
     actual_launch = identity["launch"]["actual"]
     renewal = identity["renewal"]
-    store.record_agent_identity(
-        actor_id=actor,
-        target_id=identity["target"]["id"],
-        thread_id=bound_thread,
-        actual_driver=identity["driver"]["actual"],
-        actual_model=actual_launch["model"],
-        actual_effort=actual_launch["effort"],
-        actual_service_tier=actual_launch["serviceTier"],
-        desired_driver=identity["driver"]["desired"],
-        desired_model=identity["launch"]["desired"]["model"],
-        desired_effort=identity["launch"]["desired"]["effort"],
-        transcript_owner=identity["driver"]["transcriptOwner"],
-        renewal_state=str(renewal.get("state") or ""),
-        renewal_ancestor_thread_id=str(renewal.get("ancestorThreadId") or ""),
-        renewal_successor_thread_id=str(renewal.get("successorThreadId") or ""),
-        renewal_revision=int(renewal.get("revision") or 0),
-    )
+    record = {
+        "actor_id": actor,
+        "target_id": identity["target"]["id"],
+        "thread_id": bound_thread,
+        "actual_driver": identity["driver"]["actual"],
+        "actual_model": actual_launch["model"],
+        "actual_effort": actual_launch["effort"],
+        "actual_service_tier": actual_launch["serviceTier"],
+        "desired_driver": identity["driver"]["desired"],
+        "desired_model": identity["launch"]["desired"]["model"],
+        "desired_effort": identity["launch"]["desired"]["effort"],
+        "transcript_owner": identity["driver"]["transcriptOwner"],
+        "renewal_state": str(renewal.get("state") or ""),
+        "renewal_ancestor_thread_id": str(renewal.get("ancestorThreadId") or ""),
+        "renewal_successor_thread_id": str(renewal.get("successorThreadId") or ""),
+        "renewal_revision": int(renewal.get("revision") or 0),
+    }
+    existing = store.agent_identity_for_actor(actor)
+    if existing is None or any(
+        getattr(existing, field) != value for field, value in record.items()
+    ):
+        store.record_agent_identity(**record)
     return identity
 
 

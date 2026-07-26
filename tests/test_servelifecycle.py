@@ -26,6 +26,49 @@ from spice.serve.lifecycle import (
 )
 
 RECONCILER_RETRY_AFTER_SECONDS = 17.5
+PENDING_ENSURE_RESULT = {
+    "ok": True,
+    "trigger": "pending-inbox",
+    "threadId": "successor",
+}
+AVAILABLE_WORK_RESULT = {
+    "ok": True,
+    "action": "skipped",
+    "trigger": "available-work",
+    "reason": "claim-lost",
+    "taskHandle": "LIFECYC-example",
+    "retryAfterSeconds": RECONCILER_RETRY_AFTER_SECONDS,
+}
+
+
+def _patch_automatic_identity_projection(monkeypatch, record_identity) -> None:
+    monkeypatch.setattr(
+        lifecycle,
+        "target_bound_actor",
+        lambda _target, thread_id: f"thread:{thread_id}",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "projected_team_actor_for_target",
+        lambda _store, _target, thread_id: f"thread:{thread_id}",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_serve_agent_identity",
+        record_identity,
+    )
+
+
+def _automatic_authority_state(store):
+    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: [target],
+    )
+    return target, state
 
 
 def _outcome(
@@ -231,6 +274,10 @@ def _grant_release_lane(monkeypatch, *, ensure_calls: list[dict[str, object]]):
     monkeypatch.setattr(
         lifecycle, "team_actor_for_target", lambda *_args: "thread:predecessor"
     )
+    _patch_automatic_identity_projection(
+        monkeypatch,
+        lambda *_args, **_kwargs: {},
+    )
     monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
     monkeypatch.setattr(lifecycle, "team_facts_for_target", lambda *_args: {})
     monkeypatch.setattr(
@@ -354,28 +401,78 @@ def test_duplicate_automatic_wakes_coalesce_but_explicit_intents_remain_distinct
     assert calls == ["task:revision-7", "intent-1", "intent-2"]
 
 
+def _run_automatic_wake(state, wake: AutomaticLifecycleWake) -> LifecycleOutcome:
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    try:
+        return reconciler.submit_automatic(wake).result(timeout=1.0)
+    finally:
+        reconciler.cancel()
+        assert reconciler.join(timeout=1.0) is True
+
+
+def _assert_pending_first_trace(
+    calls, pending_calls, pending_result, retry_due
+) -> None:
+    assert pending_calls == [
+        {
+            "retry_due": retry_due,
+            "fast_mode": True,
+            "force_new": True,
+        }
+    ]
+    assert calls == [
+        "resolve-thread",
+        ("team-actor", "predecessor"),
+        ("renewal", "thread:predecessor"),
+        "renewal-identity",
+        "fast-mode",
+        ("pending", pending_calls[0]),
+        ("team-facts", "predecessor"),
+        (
+            "record-renewal",
+            {
+                "predecessor_agent_id": "thread:predecessor",
+                "agent_ensure": pending_result,
+            },
+        ),
+        "renewal-identity",
+    ]
+
+
+def _assert_drain_trace(calls, available_result, retry_due) -> None:
+    ensure_kwargs = {
+        "retry_due": retry_due,
+        "fast_mode": True,
+        "force_new": False,
+    }
+    assert calls == [
+        ("actor", "bound-thread"),
+        ("pending", ensure_kwargs),
+        ("team", "bound-thread"),
+        ("available", {"thread_id": "bound-thread", **ensure_kwargs}),
+        (
+            "record",
+            {
+                "predecessor_agent_id": "thread:bound-thread",
+                "agent_ensure": available_result,
+            },
+        ),
+        ("identity", "bound-thread"),
+    ]
+
+
 def test_automatic_authority_evaluates_pending_before_drain_work(
     monkeypatch,
 ) -> None:
     calls: list[object] = []
     pending_calls: list[dict[str, object]] = []
-    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
     store = SimpleNamespace(
         agent_renewal_active=lambda actor: calls.append(("renewal", actor)) or True,
         global_fast_mode_enabled=lambda: calls.append("fast-mode") or True,
     )
-    state = SimpleNamespace(
-        observer_mode=False,
-        lifecycle_reconciler=None,
-        lifecycle_decision_authority=None,
-        team_store=store,
-        worktree_targets=lambda: [target],
-    )
-    pending_result = {
-        "ok": True,
-        "trigger": "pending-inbox",
-        "threadId": "successor",
-    }
+    _target, state = _automatic_authority_state(store)
+    pending_result = PENDING_ENSURE_RESULT
 
     monkeypatch.setattr(
         lifecycle,
@@ -389,9 +486,8 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
             calls.append(("team-actor", thread_id)) or "thread:predecessor"
         ),
     )
-    monkeypatch.setattr(
-        lifecycle,
-        "record_serve_agent_identity",
+    _patch_automatic_identity_projection(
+        monkeypatch,
         lambda *_args, **_kwargs: calls.append("renewal-identity") or {},
     )
 
@@ -421,19 +517,14 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
         ),
     )
 
-    reconciler = start_lifecycle_reconciler(state)
-    assert reconciler is not None
-    try:
-        outcome = reconciler.submit_automatic(
-            AutomaticLifecycleWake(
-                "lane-a",
-                LifecycleWakeSource.INBOX,
-                "inbox-revision-4",
-            )
-        ).result(timeout=1.0)
-    finally:
-        reconciler.cancel()
-        assert reconciler.join(timeout=1.0) is True
+    outcome = _run_automatic_wake(
+        state,
+        AutomaticLifecycleWake(
+            "lane-a",
+            LifecycleWakeSource.INBOX,
+            "inbox-revision-4",
+        ),
+    )
 
     authority = state.lifecycle_decision_authority
     assert authority is not None
@@ -442,60 +533,17 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
     assert callable(retry_due)
     assert outcome.detail == "pending-inbox"
     assert "available-work" not in calls
-    assert pending_calls == [
-        {
-            "retry_due": retry_due,
-            "fast_mode": True,
-            "force_new": True,
-        }
-    ]
-    assert calls == [
-        "resolve-thread",
-        ("team-actor", "predecessor"),
-        ("renewal", "thread:predecessor"),
-        "renewal-identity",
-        "fast-mode",
-        (
-            "pending",
-            {
-                "retry_due": retry_due,
-                "fast_mode": True,
-                "force_new": True,
-            },
-        ),
-        ("team-facts", "predecessor"),
-        (
-            "record-renewal",
-            {
-                "predecessor_agent_id": "thread:predecessor",
-                "agent_ensure": pending_result,
-            },
-        ),
-    ]
+    _assert_pending_first_trace(calls, pending_calls, pending_result, retry_due)
 
 
 def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
-    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
     store = SimpleNamespace(
         agent_renewal_active=lambda _actor: False,
         global_fast_mode_enabled=lambda: True,
     )
-    state = SimpleNamespace(
-        observer_mode=False,
-        lifecycle_reconciler=None,
-        lifecycle_decision_authority=None,
-        team_store=store,
-        worktree_targets=lambda: [target],
-    )
+    _target, state = _automatic_authority_state(store)
     calls: list[tuple[str, object]] = []
-    available_result = {
-        "ok": True,
-        "action": "skipped",
-        "trigger": "available-work",
-        "reason": "claim-lost",
-        "taskHandle": "LIFECYC-example",
-        "retryAfterSeconds": RECONCILER_RETRY_AFTER_SECONDS,
-    }
+    available_result = AVAILABLE_WORK_RESULT
     monkeypatch.setattr(
         lifecycle,
         "resolve_thread_id_for_target",
@@ -535,20 +583,21 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
         "record_started_renewal_from_ensure",
         lambda _store, **kwargs: calls.append(("record", kwargs)) or "",
     )
+    _patch_automatic_identity_projection(
+        monkeypatch,
+        lambda _store, _target, thread_id, **_kwargs: (
+            calls.append(("identity", thread_id)) or {}
+        ),
+    )
 
-    reconciler = start_lifecycle_reconciler(state)
-    assert reconciler is not None
-    try:
-        outcome = reconciler.submit_automatic(
-            AutomaticLifecycleWake(
-                "lane-a",
-                LifecycleWakeSource.TASK,
-                "task-revision-9",
-            )
-        ).result(timeout=1.0)
-    finally:
-        reconciler.cancel()
-        assert reconciler.join(timeout=1.0) is True
+    outcome = _run_automatic_wake(
+        state,
+        AutomaticLifecycleWake(
+            "lane-a",
+            LifecycleWakeSource.TASK,
+            "task-revision-9",
+        ),
+    )
 
     authority = state.lifecycle_decision_authority
     assert authority is not None
@@ -556,32 +605,9 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
     assert isinstance(pending_kwargs, dict)
     retry_due = pending_kwargs["retry_due"]
     assert callable(retry_due)
-    ensure_kwargs = {
-        "retry_due": retry_due,
-        "fast_mode": True,
-        "force_new": False,
-    }
     assert outcome.detail == "available-work:skipped:claim-lost"
     assert outcome.retry_after_seconds == RECONCILER_RETRY_AFTER_SECONDS
-    assert calls == [
-        ("actor", "bound-thread"),
-        ("pending", ensure_kwargs),
-        ("team", "bound-thread"),
-        (
-            "available",
-            {
-                "thread_id": "bound-thread",
-                **ensure_kwargs,
-            },
-        ),
-        (
-            "record",
-            {
-                "predecessor_agent_id": "thread:bound-thread",
-                "agent_ensure": available_result,
-            },
-        ),
-    ]
+    _assert_drain_trace(calls, available_result, retry_due)
     available_kwargs = calls[3][1]
     assert isinstance(available_kwargs, dict)
     assert available_kwargs["retry_due"] is retry_due
@@ -618,9 +644,8 @@ def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(
         "team_actor_for_target",
         lambda _store, _target, _thread: "thread:predecessor",
     )
-    monkeypatch.setattr(
-        lifecycle,
-        "record_serve_agent_identity",
+    _patch_automatic_identity_projection(
+        monkeypatch,
         lambda *_args, **_kwargs: writes.append("renewal-identity") or {},
     )
 
@@ -675,6 +700,7 @@ def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(
         "renewal-identity",
         "launch-or-deadletter",
         "renewal-start",
+        "renewal-identity",
     ]
 
 
