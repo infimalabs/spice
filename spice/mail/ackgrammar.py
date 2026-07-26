@@ -583,11 +583,25 @@ def trim_blank_lines(text: str) -> str:
     or the ones downstream will read a displayed directive as a real one.
     """
     lines = text.split("\n")
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return "\n".join(lines).rstrip()
+    start, stop = blank_edge_span(lines)
+    return "\n".join(lines[start:stop]).rstrip()
+
+
+def blank_edge_span(lines: Sequence[str]) -> tuple[int, int]:
+    """The half-open range of `lines` that survives dropping blank ends.
+
+    Which ends a segment loses is decided once, here, so a reader holding
+    lines paired with facts of its own -- which of them the supervisor read
+    as a directive, say -- drops exactly the ends the text form drops instead
+    of keeping its own copy of the rule and drifting out of step with it.
+    """
+    start = 0
+    stop = len(lines)
+    while start < stop and not lines[start].strip():
+        start += 1
+    while stop > start and not lines[stop - 1].strip():
+        stop -= 1
+    return start, stop
 
 
 def _is_app_directive_line(line: str) -> bool:

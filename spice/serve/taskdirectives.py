@@ -1,35 +1,56 @@
 """Rendering for inline TASK directives embedded in assistant message text.
 
 The serve transcript renders `TASK title=... | project=... | ...` capture
-lines as styled task-capture cards rather than raw text. These helpers detect
-the directive lines, extract their fields, and render the HTML and plain-text
-summaries used by the message builder.
+lines as styled task-capture cards rather than raw text. Which lines those
+are is not decided here: the transcript reducer decides it on the undivided
+raw message and marks them, and these helpers read the marks, extract the
+fields, and render the HTML and plain-text summaries the message builder
+shows.
 """
 
 from __future__ import annotations
 
 import html
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
-from spice.mail.ackgrammar import (
-    extract_task_batch_lines_from_text,
-    iter_control_lines,
-    task_directive_fields,
-    task_directive_line,
-)
+from spice.mail.ackgrammar import task_directive_fields
 from spice.serve.markdown import render_message_html
 
-# Display order for the capture card; ordering only. Whether a line is a
-# directive at all is not decided here -- spice.mail.ackgrammar owns that, so
-# this display and the supervisor cannot disagree about which lines act.
+# Display order for the capture card; ordering only.
 _TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
 
 
+@dataclass(frozen=True, slots=True)
+class MarkedText:
+    """Text carrying which of its lines the reducer read as task directives.
+
+    Position is what admits a capture card, because content cannot tell two
+    occurrences apart. The ACK header is stripped before a segment reaches
+    this display, so a directive that merely shared that header arrives
+    character for character identical to a real one; only where it sits
+    separates them. The reducer decided that on the undivided raw message,
+    suppression included, and the marks carry the decision here so the
+    display and the supervisor cannot disagree about which lines act.
+    """
+
+    text: str
+    directive_lines: frozenset[int]
+
+    @property
+    def line_count(self) -> int:
+        return self.text.count("\n") + 1 if self.text else 0
+
+    def rewritten(self, text: str) -> MarkedText:
+        """Carry these marks onto a rewrite that changed no line's position."""
+        return MarkedText(text=text, directive_lines=self.directive_lines)
+
+
 def _render_message_html_with_task_directives(
-    text: str, captured: frozenset[str], *, worktree_id: str | None = None
+    marked: MarkedText, *, worktree_id: str | None = None
 ) -> str:
-    if not text or not text.strip():
+    if not marked.text or not marked.text.strip():
         return ""
     rendered: list[str] = []
     pending: list[str] = []
@@ -56,7 +77,7 @@ def _render_message_html_with_task_directives(
             )
         directive_run = []
 
-    for line, directive in _iter_directive_lines(text, captured):
+    for line, directive in _iter_directive_lines(marked):
         if directive is None:
             flush_directives()
             pending.append(line)
@@ -68,61 +89,27 @@ def _render_message_html_with_task_directives(
     return "".join(rendered)
 
 
-def captured_directive_lines(text: str) -> frozenset[str]:
-    """Return the directives the supervisor reads out of a whole message.
-
-    Resolved before the message is split, because splitting is what destroys
-    the context recognition depends on: a segment body begins where its
-    ACK/NACK header was cut away, so a marker that sat mid-header is left
-    opening the line. Reading the undivided message once answers that, and
-    the display consults the answer while rendering the pieces.
-
-    The answer is keyed by directive content rather than by position, so two
-    textually identical directives in one message cannot be told apart: a
-    phantom occurrence borrows the admission a real one earned. Telling them
-    apart needs the line positions the split discards.
-    """
-    return frozenset(extract_task_batch_lines_from_text(text))
-
-
 def _iter_directive_lines(
-    text: str, captured: frozenset[str]
+    marked: MarkedText,
 ) -> Iterator[tuple[str, dict[str, Any] | None]]:
-    """Pair each line with its directive, or None when the line does not act.
-
-    Two authorities must agree before a card appears, because this text is a
-    piece the reducer cut. The local walk drops a directive that is merely
-    being shown -- fenced, quoted, indented, or in rendered source context.
-    `captured` drops one this piece no longer has the context to judge: a
-    segment body opens where its header was cut away, so a marker that sat
-    mid-header is left looking like it opens the line.
-    """
-    for line, suppressed in iter_control_lines(text):
-        directive = None if suppressed else _task_directive_from_line(line, captured)
-        yield line, directive
+    """Pair each line with its directive, or None when the line does not act."""
+    for index, line in enumerate(marked.text.split("\n")):
+        fields = (
+            task_directive_fields(line) if index in marked.directive_lines else None
+        )
+        yield line, None if fields is None else {"fields": fields}
 
 
-def _display_text_with_task_directives(text: str, captured: frozenset[str]) -> str:
+def _display_text_with_task_directives(marked: MarkedText) -> str:
     lines = [
         line if directive is None else _task_directive_summary(directive)
-        for line, directive in _iter_directive_lines(text, captured)
+        for line, directive in _iter_directive_lines(marked)
     ]
     return "\n".join(lines).strip()
 
 
-def _task_directive_count(text: str, captured: frozenset[str]) -> int:
-    return sum(
-        1 for _line, directive in _iter_directive_lines(text, captured) if directive
-    )
-
-
-def _task_directive_from_line(
-    line: str, captured: frozenset[str]
-) -> dict[str, Any] | None:
-    fields = task_directive_fields(line)
-    if fields is None or task_directive_line(line) not in captured:
-        return None
-    return {"fields": fields}
+def _task_directive_count(marked: MarkedText) -> int:
+    return sum(1 for _line, directive in _iter_directive_lines(marked) if directive)
 
 
 def _task_directive_summary(directive: dict[str, Any]) -> str:

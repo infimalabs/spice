@@ -14,17 +14,17 @@ from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from spice.mail.ackarchive import nack_response_is_honored
-from spice.mail.ackgrammar import trim_blank_lines
+from spice.mail.ackgrammar import blank_edge_span
 from spice.mail.feedback import supervisor_feedback_notices
 from spice.serve.images import image_markdown, view_image_markdown
 from spice.serve.markdown import render_message_html
 from spice.serve.taskdirectives import (
+    MarkedText,
     _display_text_with_task_directives,
     _render_message_html_with_task_directives,
     _task_directive_count,
     _task_directive_html,
     _task_directive_summary,
-    captured_directive_lines,
 )
 from spice.transcript.assembly import (
     AssembledMessage,
@@ -159,7 +159,7 @@ class _TextGroup:
     keys: tuple[str, ...]
     event_identity: int = 0
     response_index: int | None = None
-    lines: list[str] = field(default_factory=list)
+    chunks: list[tuple[str, bool]] = field(default_factory=list)
     spoken_lines: list[str] = field(default_factory=list)
 
     @property
@@ -167,8 +167,33 @@ class _TextGroup:
         return (self.event_identity, self.response_index, self.kind, self.keys)
 
     @property
+    def marked(self) -> MarkedText:
+        """This run's body with the directive lines the reducer marked.
+
+        A prose chunk carries however many lines it accumulated and a
+        directive chunk is exactly one, so numbering the lines here is what
+        turns the reducer's per-span decision into a position the display can
+        use. The blank ends go the way the text form drops them, which no
+        directive line is ever caught by.
+        """
+        flagged: list[tuple[str, bool]] = []
+        for chunk, directive in self.chunks:
+            if directive:
+                flagged.append((chunk, True))
+                continue
+            flagged.extend((line, False) for line in chunk.split("\n"))
+        start, stop = blank_edge_span([line for line, _ in flagged])
+        flagged = flagged[start:stop]
+        return MarkedText(
+            text="\n".join(line for line, _ in flagged).rstrip(),
+            directive_lines=frozenset(
+                index for index, (_, directive) in enumerate(flagged) if directive
+            ),
+        )
+
+    @property
     def body(self) -> str:
-        return trim_blank_lines("\n".join(self.lines))
+        return self.marked.text
 
     @property
     def spoken(self) -> str:
@@ -343,10 +368,24 @@ def _text_groups(spans: Sequence[ClassifiedSpan]) -> list[_TextGroup]:
 def _absorb_span(group: _TextGroup, span: ClassifiedSpan) -> None:
     if span.directive_kind is not None:
         if span.directive_kind is DirectiveKind.TASK:
-            group.lines.append(span.text)
+            group.chunks.append((span.text, True))
         return
-    group.lines.append(span.text)
+    group.chunks.append((span.text, False))
     group.spoken_lines.append(span.text)
+
+
+def _join_marked(parts: Sequence[MarkedText], separator: str) -> MarkedText:
+    """One text from several, with every part's marks moved onto its new lines."""
+    texts: list[str] = []
+    directive_lines: set[int] = set()
+    offset = 0
+    for part in parts:
+        directive_lines.update(offset + index for index in part.directive_lines)
+        texts.append(part.text)
+        offset += part.line_count + separator.count("\n") - 1
+    return MarkedText(
+        text=separator.join(texts), directive_lines=frozenset(directive_lines)
+    )
 
 
 def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
@@ -563,23 +602,23 @@ def _replace_terminal_colon(text: str) -> str:
 
 
 def _normalize_terminal_colon_for_display(
-    message: str, preamble: str, segment_bodies: list[str]
-) -> tuple[str, list[str]]:
+    message: str, preamble: MarkedText, segment_bodies: list[MarkedText]
+) -> tuple[MarkedText, list[MarkedText]]:
     if not message.rstrip().endswith(":"):
         return preamble, segment_bodies
     for body_index in range(len(segment_bodies) - 1, -1, -1):
-        if segment_bodies[body_index]:
-            segment_bodies[body_index] = _replace_terminal_colon(
-                segment_bodies[body_index]
+        body = segment_bodies[body_index]
+        if body.text:
+            segment_bodies[body_index] = body.rewritten(
+                _replace_terminal_colon(body.text)
             )
             return preamble, segment_bodies
-    return _replace_terminal_colon(preamble), segment_bodies
+    return preamble.rewritten(_replace_terminal_colon(preamble.text)), segment_bodies
 
 
 def _ack_segment(
     segment: _TextGroup,
-    body: str,
-    captured: frozenset[str],
+    body: MarkedText,
     *,
     withheld: bool,
     worktree_id: str | None,
@@ -593,7 +632,7 @@ def _ack_segment(
     return {
         "keys": [] if withheld else list(segment.keys),
         "html": _render_message_html_with_task_directives(
-            body, captured, worktree_id=worktree_id
+            body, worktree_id=worktree_id
         ),
         "disposition": SEGMENT_DISPOSITION_WITHHELD
         if withheld
@@ -612,14 +651,16 @@ def _assistant_message(
     source_kind: str = "assistant_text",
     worktree_id: str | None = None,
 ) -> AssistantMessage:
-    # Read the message whole before splitting it: a segment body opens where
-    # its header was cut away, and that is context recognition cannot recover.
-    captured = captured_directive_lines(text)
-    preamble = "\n\n".join(
-        group.body for group in groups if group.kind is SpanKind.PROSE and group.body
+    preamble = _join_marked(
+        [
+            group.marked
+            for group in groups
+            if group.kind is SpanKind.PROSE and group.body
+        ],
+        "\n\n",
     )
     segments = [group for group in groups if group.kind is not SpanKind.PROSE]
-    segment_bodies = [group.body for group in segments]
+    segment_bodies = [group.marked for group in segments]
     preamble, segment_bodies = _normalize_terminal_colon_for_display(
         text, preamble, segment_bodies
     )
@@ -634,11 +675,11 @@ def _assistant_message(
     acked_keys: set[str] = set()
     refused_keys: set[str] = set()
     ack_utterances: list[str] = []
-    display_sources: list[str] = [preamble] if preamble else []
+    display_sources: list[MarkedText] = [preamble] if preamble.text else []
     display_parts: list[str] = (
-        [_display_text_with_task_directives(preamble, captured)] if preamble else []
+        [_display_text_with_task_directives(preamble)] if preamble.text else []
     )
-    task_card_count = _task_directive_count(preamble, captured)
+    task_card_count = _task_directive_count(preamble)
     for segment, segment_body in zip(segments, segment_bodies, strict=True):
         refused = segment.kind is SpanKind.NACK
         # The archival authority leaves a reasonless NACK pending. It must not
@@ -647,17 +688,15 @@ def _assistant_message(
         withheld = refused and not nack_response_is_honored(segment.body)
         # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
-        body = _capitalize_first(segment_body)
+        body = segment_body.rewritten(_capitalize_first(segment_body.text))
         # Withholding the refusal must not withhold what it captured, but a
         # refusal that said nothing at all captured nothing to show.
-        if withheld and not body:
+        if withheld and not body.text:
             continue
-        task_card_count += _task_directive_count(body, captured)
-        display_body = _display_text_with_task_directives(body, captured)
+        task_card_count += _task_directive_count(body)
+        display_body = _display_text_with_task_directives(body)
         ack_segments.append(
-            _ack_segment(
-                segment, body, captured, withheld=withheld, worktree_id=worktree_id
-            )
+            _ack_segment(segment, body, withheld=withheld, worktree_id=worktree_id)
         )
         if not withheld:
             for keyed in segment.keys:
@@ -667,7 +706,7 @@ def _assistant_message(
                 (refused_keys if refused else acked_keys).add(keyed)
             if segment.spoken:
                 ack_utterances.append(segment.spoken)
-        if body:
+        if body.text:
             display_sources.append(body)
         if display_body:
             display_parts.append(display_body)
@@ -677,13 +716,11 @@ def _assistant_message(
     display_text = "\n".join(display_parts)
     image_only = _image_only_markdown(display_text)
     preamble_html = (
-        _render_message_html_with_task_directives(
-            preamble, captured, worktree_id=worktree_id
-        )
-        if preamble and segments
+        _render_message_html_with_task_directives(preamble, worktree_id=worktree_id)
+        if preamble.text and segments
         else ""
     )
-    display_source = "\n".join(display_sources)
+    display_source = _join_marked(display_sources, "\n")
     return AssistantMessage(
         key=key,
         index=offset,
@@ -691,7 +728,7 @@ def _assistant_message(
         text=text,
         display_text=display_text,
         display_html=_render_message_html_with_task_directives(
-            display_source, captured, worktree_id=worktree_id
+            display_source, worktree_id=worktree_id
         ),
         ack_count=len(acked_keys),
         ack_keys=ack_keys,
@@ -973,7 +1010,7 @@ def _markdown_message(
 ) -> AssistantMessage:
     """One picture rendered as the whole of an otherwise wordless message."""
     group = _TextGroup(kind=SpanKind.PROSE, keys=())
-    group.lines.append(markdown)
+    group.chunks.append((markdown, False))
     group.spoken_lines.append(markdown)
     return _assistant_message(
         key,
