@@ -740,6 +740,23 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
   }
 }
 
+// One lane submit measured end to end. It is created at the send and grown as
+// the request crosses the live bus, so everything past `marks` is present only
+// once the phase that sets it has run -- which is why those fields are optional
+// rather than the whole probe being one loose object.
+/**
+ * @typedef {{
+ *   targetId: string,
+ *   textLength: number,
+ *   marks: Record<string, number>,
+ *   requestId?: string,
+ *   serverTiming?: Record<string, any>,
+ *   completed?: boolean,
+ *   status?: string,
+ *   durations?: Record<string, number>,
+ * }} LaneSubmitLatencyProbe
+ */
+
 function startLaneSubmitLatencyProbe(lane, payload) {
   const text = String((payload || {}).text || "");
   return {
