@@ -96,9 +96,11 @@ class ClassifiedSpan:
     consumer that must re-join a run therefore reads the polarity off any of its
     spans instead of inferring one for the lines it cannot classify.
     `directive_kind` is what marks a span as a control line and names its family.
-    `response_index` is which keyed response of the message the span came from,
-    unset for preamble prose, and it is what keeps two responses that agree on
-    both polarity and keys from re-joining into one run.
+    `response_index` is which keyed response of its own source event the span
+    came from, unset for preamble prose, and it is what keeps two responses
+    that agree on both polarity and keys from re-joining into one run. It
+    counts from zero per event, so a consumer spanning events pairs it with the
+    event identity.
     """
 
     kind: SpanKind
