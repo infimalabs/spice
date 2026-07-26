@@ -273,7 +273,9 @@ def _span_keys(message: AssembledMessage, kind: SpanKind) -> tuple[str, ...]:
 
     A control line takes the kind and keys of the run it sits in, so counting
     every span's keys would report a header once more for each directive its
-    run happens to contain. Only the prose the header introduced carries it.
+    run happens to contain. The prose is safe to count per span: the grammar
+    ends a keyed response at its own line, so a run is one prose span and
+    whatever control lines trail it, never prose resumed on the far side of one.
     """
     return tuple(
         key
