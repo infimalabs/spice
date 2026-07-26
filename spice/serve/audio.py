@@ -220,10 +220,7 @@ def _render_macos_say_audio(
         os.close(handle)
         result = run_bounded_process_group(
             [
-                *values.say_command_args(
-                    repo_root,
-                    rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
-                ),
+                *values.say_command_args(repo_root, rate_multiplier=rate_multiplier),
                 "-o",
                 str(audio_path),
                 "--file-format=m4af",

@@ -17,6 +17,7 @@ import pytest
 from spice.config import edit, layers, values
 from spice.cli.parser import build_parser
 from spice.configcli import handle_config
+from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.serve import audio
 
@@ -26,6 +27,10 @@ LONG_MESSAGE_FLOOR_SECONDS = 60.0
 SLOW_RATE_MULTIPLIER = 0.5
 FAST_RATE_MULTIPLIER = 2.0
 CONFIGURED_WORDS_PER_MINUTE = 200
+# Rates a request can carry that the UI control itself would never produce.
+IN_RANGE_REQUEST_RATE = 1.5
+ABOVE_RANGE_REQUEST_RATE = 1000
+BELOW_RANGE_REQUEST_RATE = -5
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,78 @@ def test_external_speech_command_without_a_slot_keeps_its_own_engine_rate(
         audio.render_speech_audio("hello", repo_root=tmp_path, rate_multiplier=rate)
 
     assert seen == [["tts-engine", "--wav"], ["tts-engine", "--wav"]]
+
+
+def test_both_speech_backends_resolve_one_multiplier_to_one_rate(tmp_path, monkeypatch):
+    # A listener picking a rate hears the same proportion whichever engine
+    # renders it. Read off the argv each production path actually builds, so the
+    # two are compared as they ship rather than through the helper they share.
+    seen: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        seen.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
+
+    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+
+    def rendered_rates(section: dict[str, object], read: Callable[[list[str]], str]):
+        edit.set_scope_section(
+            tmp_path, layers.WORKTREE_SOURCE, values.SAY_KEY, section
+        )
+        seen.clear()
+        for rate in rates:
+            audio.render_speech_audio("hi", repo_root=tmp_path, rate_multiplier=rate)
+        return [read(argv) for argv in seen]
+
+    # The last rate is past what the UI control can ask for: the clamp lives at
+    # the boundary the request enters, so a caller below it gets one arithmetic
+    # from both backends instead of one clamping and the other running away.
+    rates = (
+        SLOW_RATE_MULTIPLIER,
+        audio.DEFAULT_SAY_RATE_MULTIPLIER,
+        IN_RANGE_REQUEST_RATE,
+        FAST_RATE_MULTIPLIER,
+        float(ABOVE_RANGE_REQUEST_RATE),
+    )
+    external = rendered_rates(
+        {
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine -s {words_per_minute}",
+            values.SAY_CONTENT_TYPE_KEY: "audio/wav",
+            values.SAY_WORDS_PER_MINUTE_KEY: CONFIGURED_WORDS_PER_MINUTE,
+        },
+        lambda argv: argv[-1],
+    )
+    macos = rendered_rates(
+        {
+            values.SAY_BACKEND_KEY: "say",
+            values.SAY_WORDS_PER_MINUTE_KEY: CONFIGURED_WORDS_PER_MINUTE,
+        },
+        lambda argv: argv[argv.index("-r") + 1],
+    )
+    assert external == macos == ["100", "200", "300", "400", "200000"]
+
+
+def test_request_rate_is_coerced_once_where_it_enters():
+    # The one coercion between a request's `rate` field and the engine: the
+    # backends below it trust the proportion it returns, so the shapes a request
+    # can actually carry are pinned here.
+    normalize = audio.normalize_say_rate_multiplier
+    assert normalize(None) == audio.DEFAULT_SAY_RATE_MULTIPLIER
+    assert normalize("nonsense") == audio.DEFAULT_SAY_RATE_MULTIPLIER
+    assert normalize(float("nan")) == audio.DEFAULT_SAY_RATE_MULTIPLIER
+    assert normalize(str(IN_RANGE_REQUEST_RATE)) == IN_RANGE_REQUEST_RATE
+    assert normalize(ABOVE_RANGE_REQUEST_RATE) == audio.MAX_SAY_RATE_MULTIPLIER
+    assert normalize(BELOW_RANGE_REQUEST_RATE) == audio.MIN_SAY_RATE_MULTIPLIER
+
+
+def test_speech_rate_arithmetic_rejects_a_multiplier_that_is_not_a_proportion():
+    # Below the coercion seam a multiplier that is not a proportion is a broken
+    # caller. It fails where it happens rather than reaching an engine as some
+    # plausible-looking word count that nobody asked for.
+    for broken in (float("nan"), float("inf"), 0.0, float(BELOW_RANGE_REQUEST_RATE)):
+        with pytest.raises(SpiceError, match="positive finite number"):
+            values.scale_say_words_per_minute(CONFIGURED_WORDS_PER_MINUTE, broken)
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
