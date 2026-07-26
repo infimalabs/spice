@@ -270,6 +270,13 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
         members=[f"target:{target.id}"],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
+    # The send's own launch is the subject here, so the explicit decision runs for
+    # real against the ensure stub below; the fixture only holds automatic wakes.
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        agentapi.ensure_agent_for_pending_inbox,
+    )
 
     def fake_ensure(ensured_target, **kwargs):
         return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK

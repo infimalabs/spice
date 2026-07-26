@@ -1176,6 +1176,7 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     agent_started = threading.Event()
     direct_result: dict[str, object] = {}
     attempts: list[bool] = []
+    attempt_pending_counts: list[int] = []
     real_submit = workroutes.submit_steering_message
     real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
 
@@ -1201,6 +1202,7 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         assert ensured_target == target
         automatic = bool(kwargs["automatic"])
         attempts.append(automatic)
+        attempt_pending_counts.append(pending_inbox_count(repo))
         if automatic:
             return {
                 "ok": False,
@@ -1245,8 +1247,9 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     )
     background_thread.start()
     # The watcher is now at the real launch boundary, blocked behind the UI
-    # route's pre-publication acquisition. Releasing the paused route must let
-    # its reentrant automatic=False decision run before the watcher proceeds.
+    # route's pre-publication acquisition. Releasing the paused route publishes
+    # and reserves this send's grant as one step, so whichever thread reaches the
+    # boundary next reads a reservation that only the send's own decision spends.
     assert background_at_launch_lock.wait(timeout=5.0) is True
     release_direct_send.set()
     direct_thread.join(timeout=5.0)
@@ -1255,7 +1258,11 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     response, status = direct_result["response"]
     assert status == HTTPStatus.OK
     assert response["agentEnsure"]["action"] == "start"
-    assert attempts[0] is False
+    # Exactly one launch decision, it is the send's own, and it ran against an
+    # inbox that already holds the item -- publication precedes the attempt that
+    # the item justifies, never the other way around.
+    assert attempts == [False]
+    assert attempt_pending_counts == [1]
     assert agent_started.is_set() is True
     assert background_finished.is_set() is True
     assert [inbox_item_key(item.name) for item in collect_inbox_items(repo)] == [

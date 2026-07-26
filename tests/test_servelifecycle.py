@@ -49,10 +49,14 @@ def test_compact_inputs_carry_identity_without_lane_snapshots() -> None:
         "source",
         "source_identity",
     ]
+    # The grant parameters are the request, not a lane snapshot: how this one
+    # launch attempt should be spent, decided before the handler reads any state.
     assert [field.name for field in fields(ExplicitLifecycleIntent)] == [
         "target_id",
         "intent_id",
         "kind",
+        "fast_mode",
+        "force_new",
     ]
 
 

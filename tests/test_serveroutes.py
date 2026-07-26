@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
@@ -65,6 +66,11 @@ from tests.test_servehelpers import (
     _transcript_resolution,
 )
 
+# A blocked ensure only has to outlive the assertions made while it is parked;
+# the release bound is the failure escape hatch for a test that stops early.
+BLOCKED_ENSURE_ENTRY_SECONDS = 5.0
+BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
+
 
 def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
@@ -94,7 +100,7 @@ def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkey
     assert empty_payload == {"ok": False, "error": "Message text is required."}
 
 
-def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
+def test_work_tree_send_accepted_response_schedules_ensure_without_waiting(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -102,52 +108,73 @@ def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
     state = _serve_state(tmp_path, target)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     ensure_calls: list[dict[str, object]] = []
+    ensure_entered = threading.Event()
+    release_ensure = threading.Event()
 
     def fake_ensure(ensured_target, **kwargs):
         ensure_calls.append({"target": ensured_target, **kwargs})
-        raise AssertionError("accepted send must not ensure synchronously")
+        ensure_entered.set()
+        release_ensure.wait(timeout=BLOCKED_ENSURE_RELEASE_SECONDS)
+        return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload, status = work_tree_send_accepted_response_payload(
-        state,
-        target,
-        {
-            "text": "> > quoted context\n> > with newline\n\nwake this lane",
-            "attachments": [
-                {
-                    "name": "paste.png",
-                    "contentType": "image/png",
-                    "dataUrl": IMAGE_DATA_URL,
-                }
-            ],
-        },
-    )
+    try:
+        payload, status = work_tree_send_accepted_response_payload(
+            state,
+            target,
+            {
+                "text": "> > quoted context\n> > with newline\n\nwake this lane",
+                "attachments": [
+                    {
+                        "name": "paste.png",
+                        "contentType": "image/png",
+                        "dataUrl": IMAGE_DATA_URL,
+                    }
+                ],
+            },
+        )
 
-    items = collect_inbox_items(repo)
-    assert status == HTTPStatus.OK
-    assert payload["ok"] is True
-    assert (
-        payload["requestText"]
-        == "> > quoted context\n> > with newline\n\nwake this lane"
-    )
-    assert payload["requestHtml"] == (
-        "<blockquote><blockquote><p>quoted context<br>with newline</p>"
-        "</blockquote></blockquote><p>wake this lane</p>"
-    )
-    assert payload["attachments"][0]["name"] == "paste.png"
-    assert payload["attachments"][0]["contentType"] == "image/png"
-    assert payload["agentEnsure"] == {}
-    assert payload["pendingInboxCount"] == 1
-    assert payload["pendingInboxLabel"] == "1"
-    assert payload["pendingInboxKeys"] == [payload["key"]]
-    assert payload["pendingInboxRevision"]
-    assert payload["pendingInboxVersion"] > 0
-    assert inbox_event_path(repo).read_text(encoding="utf-8").endswith(" inbox\n")
-    assert inbox_request_body(items[0].text) == (
-        "> > quoted context\n> > with newline\n\nwake this lane"
-    )
-    assert ensure_calls == []
+        items = collect_inbox_items(repo)
+        assert status == HTTPStatus.OK
+        assert payload["ok"] is True
+        assert (
+            payload["requestText"]
+            == "> > quoted context\n> > with newline\n\nwake this lane"
+        )
+        assert payload["requestHtml"] == (
+            "<blockquote><blockquote><p>quoted context<br>with newline</p>"
+            "</blockquote></blockquote><p>wake this lane</p>"
+        )
+        assert payload["attachments"][0]["name"] == "paste.png"
+        assert payload["attachments"][0]["contentType"] == "image/png"
+        # The reply is complete while the launch it scheduled is still parked
+        # inside the ensure below: this route reports the publication, never the
+        # lane start.
+        assert payload["agentEnsure"] == {}
+        assert payload["pendingInboxCount"] == 1
+        assert payload["pendingInboxLabel"] == "1"
+        assert payload["pendingInboxKeys"] == [payload["key"]]
+        assert payload["pendingInboxRevision"]
+        assert payload["pendingInboxVersion"] > 0
+        assert inbox_event_path(repo).read_text(encoding="utf-8").endswith(" inbox\n")
+        assert inbox_request_body(items[0].text) == (
+            "> > quoted context\n> > with newline\n\nwake this lane"
+        )
+        assert ensure_entered.wait(timeout=BLOCKED_ENSURE_ENTRY_SECONDS) is True
+        # One decision, and an automatic one: this route reserves no explicit
+        # restart grant, which is what still separates it from the synchronous
+        # send.
+        assert ensure_calls == [
+            {
+                "target": target,
+                "fast_mode": False,
+                "force_new": False,
+                "automatic": True,
+            }
+        ]
+    finally:
+        release_ensure.set()
 
 
 def test_running_requested_renewal_sends_handoff_and_marks_pending(

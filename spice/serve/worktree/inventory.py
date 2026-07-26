@@ -7,7 +7,7 @@ from typing import Any
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
 from spice.serve.lifecycle import (
-    AutomaticLifecycleDecision,
+    LifecycleDecision,
     evaluate_automatic_lifecycle,
 )
 from spice.serve.payload.identity import (
@@ -138,7 +138,7 @@ def _work_tree_payload(
 
 def ensure_work_tree_agent(
     state: Any, target: WorktreeTarget, thread_id: str
-) -> AutomaticLifecycleDecision:
+) -> LifecycleDecision:
     """Public server-owned entry point for the inventory launch decision."""
     return evaluate_automatic_lifecycle(
         state,

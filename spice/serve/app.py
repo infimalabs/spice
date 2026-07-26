@@ -994,7 +994,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     lane_signature_for_target(state, target, thread_id, transcript_path)
                 ),
                 send_followup_payload=lambda target, payload: (
-                    message.messages_payload_for_worktree(
+                    message.send_followup_messages_payload(
                         state,
                         target,
                         limit=DEFAULT_MESSAGE_LIMIT,
