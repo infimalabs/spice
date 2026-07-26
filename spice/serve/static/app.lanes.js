@@ -60,11 +60,16 @@ function applyTargetsPayload(payload) {
     setGlobalTransientError(discoveryErrors[0]);
     return;
   }
-  laneStore.replaceTargets(payload.workTrees || []);
+  const workTrees = payload.workTrees || [];
+  laneStore.replaceTargets(workTrees.map(targetInventoryRecord));
   targetsLoaded = true;
   syncObserverNotice(payload.observerErrors || []);
   clearGlobalActivityStatus("loading teams");
-  applyTaskFilterInventory(payload.taskFilterInventory || {});
+  for (const target of workTrees) {
+    const lane = laneStore.laneForId(target.id);
+    applyLaneChromePayload(target);
+    if (lane) renderLanePayloadPresentation(lane, target);
+  }
   for (const lane of laneStore.lanesSnapshot()) {
     if (!laneStore.targetForId(lane.targetId) && !lane.emptyTeam)
       closeLaneCore(lane);
@@ -72,9 +77,47 @@ function applyTargetsPayload(payload) {
   renderFilterPills();
   for (const lane of laneStore.lanesSnapshot()) {
     if (lane.emptyTeam) syncEmptyTeamLane(lane);
-    else renderLaneChrome(lane, laneStore.targetForId(lane.targetId));
   }
   if (spiceMenuEl) renderSpiceMenu();
+}
+
+function targetInventoryRecord(target) {
+  const {
+    chrome,
+    taskFilters,
+    effectiveTaskFilters,
+    taskFilterEntries,
+    taskFilterInventory,
+    privateTaskCount,
+    teamIdentity,
+    lifetime,
+    renewalIntent,
+    pendingCount,
+    pendingInboxCount,
+    pendingInboxLabel,
+    pendingInboxKeys,
+    pendingInboxRevision,
+    pendingInboxVersion,
+    lastAssistantAt,
+    statusLine,
+    ...record
+  } = target || {};
+  return payloadHasField(target, "statusLine")
+    ? { ...record, statusLine: targetStatusPresentationRecord(statusLine) }
+    : record;
+}
+
+function targetStatusPresentationRecord(statusLine) {
+  const {
+    pendingInboxCount,
+    pendingInboxLabel,
+    pendingInboxKeys,
+    pendingInboxRevision,
+    pendingInboxVersion,
+    lastAssistantAt,
+    ...presentation
+  } = statusLine || {};
+  return presentation;
 }
 
 function syncObserverNotice(errors) {
@@ -102,20 +145,8 @@ function applyTaskFilterInventory(inventory) {
   if (!taskFilterInventoryIsFresh(acceptedInventory)) return false;
   taskFilterInventoryRevision = taskFilterInventoryRevisionValue(acceptedInventory);
   taskFilterStemPills = taskFilterStemPillsFromInventory(acceptedInventory);
-  syncTaskFilterInventoryState(acceptedInventory);
   renderTaskFilterInventoryPanes();
   return true;
-}
-
-function syncTaskFilterInventoryState(inventory) {
-  laneStore.replaceTargets(
-    laneStore.targetsSnapshot().map((target) => ({
-      ...target,
-      taskFilterInventory: inventory,
-    })),
-  );
-  for (const lane of laneStore.lanesSnapshot())
-    lane.taskFilterInventory = inventory;
 }
 
 function renderTaskFilterInventoryPanes() {
@@ -136,7 +167,7 @@ function taskFilterInventoryIsFresh(inventory) {
   return compareNonnegativeIntegerStrings(
     incomingRevision,
     taskFilterInventoryRevision,
-  ) >= 0;
+  ) > 0;
 }
 
 function taskFilterInventoryRevisionValue(inventory) {
@@ -282,7 +313,6 @@ function materializeTeamSnapshotTransition(transition) {
         change.targetId,
         change.team,
         hints.get(change.targetId),
-        change.member,
       );
   }
   for (const lane of transition.removes) closeLaneCore(lane);
@@ -341,7 +371,7 @@ function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
     if (lane.emptyTeam || claimed.has(lane.targetId)) continue;
     const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
-    if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
+    if (String(lane.teamId || laneChromeTeamId(target.id)) !== teamId)
       continue;
     const laneActorId = laneTeamAgentId(lane);
     if (!laneActorId || actorIds.has(laneActorId)) continue;
@@ -377,7 +407,7 @@ function unresolvedTeamLaneTargetIds(team) {
     if (lane.emptyTeam) continue;
     const target = laneStore.targetForId(lane.targetId);
     if (!target) continue;
-    if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
+    if (String(lane.teamId || laneChromeTeamId(target.id)) !== teamId)
       continue;
     const laneActorId = laneTeamAgentId(lane);
     if (laneActorId && actorIds.has(laneActorId)) continue;
@@ -395,32 +425,19 @@ function teamMemberActorIds(team) {
   return actorIds;
 }
 
-function ensureTeamMemberLane(targetId, team, hint = null, member = null) {
+function ensureTeamMemberLane(targetId, team, hint = null) {
   if (!laneStore.hasLane(targetId)) addLane(targetId, hint, { persist: false });
   const lane = laneStore.laneForId(targetId);
   if (!lane) return;
-  const previousConfigRevision = lane.configRevision || 0;
+  const previousConfigRevision = laneChromeConfigRevision(lane);
   const config = team.config || {};
   const splitBack = team.splitBack || {};
   lane.teamId = String(team.teamId || "");
-  lane.teamRevision = Math.max(0, Number(team.revision || 0));
   lane.teamSplitBackAvailable = Boolean(splitBack.available);
   lane.teamSplitBackMemberCount = Math.max(
     0,
     Number(splitBack.memberCount || 0),
   );
-  lane.configRevision = Math.max(0, Number(config.revision || 0));
-  if (member && member.renewalIntent) lane.renewalIntent = member.renewalIntent;
-  if (Array.isArray(config.taskFilters))
-    lane.taskFilters = uniqueStringList(config.taskFilters);
-  if (Array.isArray(config.effectiveTaskFilters))
-    lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
-  if (Array.isArray(config.taskFilterEntries))
-    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
-  if (config.lifetime)
-    applyServerLaneLifetime(lane, config.lifetime, {
-      configRevision: config.revision,
-    });
   syncLaneEffectiveControls(lane);
   // The server no longer wakes lanes on a team config change (it would reflow
   // every team). Instead, a lane whose OWN team config revision advanced
@@ -429,7 +446,7 @@ function ensureTeamMemberLane(targetId, team, hint = null, member = null) {
   if (
     lane.liveBusSubscribed &&
     previousConfigRevision > 0 &&
-    lane.configRevision > previousConfigRevision
+    Math.max(0, Number(config.revision) || 0) > previousConfigRevision
   )
     subscribeLaneToLiveBus(lane);
 }
@@ -706,12 +723,11 @@ function targetChoiceLastAssistantAt(target) {
 }
 
 function targetChoiceStatusLine(target) {
-  const statusLine = target.statusLine || {};
+  const statusLine = laneChromeStatusLine(target.id, target.statusLine || {});
   const laneStatusLine = targetChoiceLaneStatusLine(target);
   const merged = { ...statusLine, ...laneStatusLine };
   merged.lastAssistantAt =
     laneStatusLine.lastAssistantAt ||
-    target.lastAssistantAt ||
     statusLine.lastAssistantAt ||
     "";
   merged.latestActivityKind = payloadHasField(
@@ -747,13 +763,10 @@ function targetChoiceLaneStatusLine(target) {
 }
 
 function targetChoicePendingCount(target) {
-  const statusLine = target.statusLine || {};
   const laneStatusLine = targetChoiceLaneStatusLine(target);
   for (const value of [
+    laneChromePendingInbox(target.id).count,
     laneStatusLine.pendingInboxCount,
-    target.pendingCount,
-    target.pendingInboxCount,
-    statusLine.pendingInboxCount,
   ]) {
     const count = normalizedTargetChoiceCount(value);
     if (count !== null) return count;

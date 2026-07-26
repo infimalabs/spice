@@ -1,7 +1,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
 const context = {
   console,
   uniqueStringList(values) {
@@ -13,21 +14,32 @@ const context = {
   relativeAgeSeconds() {
     return null;
   },
+  laneIsFusedHost() {
+    return false;
+  },
+  laneGroupMemberLanes(lane) {
+    return [lane];
+  },
+  syncComposerShards() {},
+  syncComposerPlaceholders() {},
+  syncFusedLaneLights() {},
+  syncFusedLaneStatusLine() {},
+  syncLaneTeamMenuButton() {},
+  renderLaneInfoPane() {},
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 
 context.setLaneStatus = (lane, statusLine) => {
   lane.renderedStatusLine = statusLine;
 };
-context.syncLaneBackendPending = () => {};
-context.renderLaneViewShell = () => {};
-context.renderFilterPills = () => {};
-context.syncFusedLaneChrome = () => {};
-context.syncComposerPlaceholders = () => {};
 context.updateLiveTargetChoiceMetadata = () => {};
 
 function assert(condition, message) {
@@ -35,6 +47,7 @@ function assert(condition, message) {
 }
 
 const lane = {
+  targetId: "main-2",
   branchName: "main-2",
   agentName: "main",
   targetThreadId: "main-thread",
@@ -46,8 +59,9 @@ const lane = {
   laneFilterVersion: "stale",
   pipEl: { dataset: {}, title: "" },
 };
+laneStore.registerLane(lane);
 
-context.renderLaneChrome(lane, {
+context.renderLanePayloadPresentation(lane, {
   targetIdentity: {
     targetId: "main-2",
     worktreeName: "main-2",
@@ -88,7 +102,7 @@ assert(lane.driverModel === "gpt-5.5", "unbound model stays compact");
 assert(lane.driverEffort === "xhigh", "unbound effort stays compact");
 assert(lane.driverIconName === "codex", "unbound driver icon uses desired driver");
 
-context.renderLaneChrome(lane, {
+context.renderLanePayloadPresentation(lane, {
   targetIdentity: {
     targetId: "main-2",
     worktreeName: "main-2",
@@ -138,7 +152,7 @@ function assertThrows(fn, expectedMessage) {
 
 assertThrows(
   () =>
-    context.renderLaneChrome({ ...lane }, {
+    context.renderLanePayloadPresentation({ ...lane }, {
       targetIdentity: {
         targetId: "main-2",
         worktreeName: "main-2",
@@ -152,24 +166,19 @@ assertThrows(
   "thread id must be non-empty",
 );
 
-assertThrows(
-  () =>
-    context.renderLaneChrome({ ...lane }, {
-      targetIdentity: {
-        targetId: "main-2",
-        worktreeName: "main-2",
-        branch: "main-2",
-        driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
-        agent: { state: "unconfigured" },
-        thread: { state: "unbound" },
-      },
+laneStore.applyLaneChrome({
+  targetId: lane.targetId,
+  teamConfig: {
+    authority: "team-store",
+    order: { epoch: "", revision: 1 },
+    value: {
       teamIdentity: {
         state: "member",
         teamId: "",
         teamRevision: 1,
         configRevision: 1,
       },
-      statusLine: {},
-    }),
-  "team id must be non-empty",
-);
+    },
+  },
+});
+assertThrows(() => context.laneChromeTeamId(lane), "team id must be non-empty");

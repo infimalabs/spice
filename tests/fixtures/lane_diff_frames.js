@@ -59,10 +59,6 @@ function lane() {
     occupants: new Map(),
     targetThreadId: "thread-a",
     activeThreadId: "thread-a",
-    backendPendingInboxCount: 0,
-    backendPendingInboxKeys: new Set(),
-    backendPendingInboxRevision: "",
-    backendPendingInboxVersion: 0,
     optimisticPendingInboxCount: 0,
     optimisticSubmittedInboxKeys: new Set(),
     optimisticPendingInboxFloor: 0,
@@ -84,10 +80,10 @@ function lane() {
 
 const laneStore = vm.runInContext("laneStore", context);
 context.laneGroupHost = (item) => item;
-context.renderLaneChrome = (item, payload) => {
+context.renderLanePayloadPresentation = (item, payload) => {
   item.renderedChromePayload = payload;
 };
-context.renderLaneViewShell = (item) => {
+context.renderLaneViewBadge = (item) => {
   item.viewShellRenders += 1;
 };
 context.syncComposerPlaceholders = (item) => {
@@ -105,6 +101,17 @@ context.primeSpeechBoundary = (item) => {
 context.subscribeLaneToLiveBus = () => {};
 context.refreshServerTopology = () => Promise.resolve();
 
+function pendingChrome(targetId, version, count, keys) {
+  return {
+    targetId,
+    pendingInbox: {
+      authority: "inbox",
+      order: { epoch: "", revision: version },
+      value: { count, label: String(count), keys },
+    },
+  };
+}
+
 async function main() {
   const subject = lane();
   laneStore.registerLane(subject);
@@ -113,11 +120,8 @@ async function main() {
     messages: [initial],
     statusLine: {
       preview: "initial",
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "rev-1",
-      pendingInboxVersion: 1,
     },
+    chrome: pendingChrome(subject.targetId, 1, 0, []),
   };
 
   await context.handleLiveBusMessage(
@@ -133,21 +137,28 @@ async function main() {
   );
   assert(subject.knownMessages[0].key === initial.key, "full payload seeded stream");
   assert(subject.messageRenders === 1, "full payload rendered messages");
+  subject.viewShellRenders = 0;
+  subject.placeholderSyncs = 0;
 
   await context.handleLiveBusMessage(
     JSON.stringify({
       type: "lane.pending",
       targetId: subject.targetId,
       payload: {
-        pendingInboxCount: 2,
-        pendingInboxKeys: ["inbox-a", "inbox-b"],
-        pendingInboxRevision: "rev-2",
-        pendingInboxVersion: 2,
+        chrome: pendingChrome(
+          subject.targetId,
+          2,
+          2,
+          ["inbox-a", "inbox-b"],
+        ),
       },
     }),
   );
   const pendingMergedPayload = subject.latestPayload;
-  assert(subject.backendPendingInboxCount === 2, "pending frame updates backend count");
+  assert(
+    laneStore.laneChrome(subject.targetId).pendingInbox.count === 2,
+    "pending frame updates canonical count",
+  );
   assert(
     subject.latestPayload.statusLine.pendingInboxCount === 2,
     "pending frame updates cached status line",
@@ -160,14 +171,14 @@ async function main() {
       type: "lane.pending",
       targetId: subject.targetId,
       payload: {
-        pendingInboxCount: 0,
-        pendingInboxKeys: [],
-        pendingInboxRevision: "rev-stale",
-        pendingInboxVersion: 1,
+        chrome: pendingChrome(subject.targetId, 1, 0, []),
       },
     }),
   );
-  assert(subject.backendPendingInboxCount === 2, "stale pending frame is ignored");
+  assert(
+    laneStore.laneChrome(subject.targetId).pendingInbox.count === 2,
+    "stale pending frame is ignored",
+  );
   assert(subject.viewShellRenders === 1, "stale pending frame does not rerender");
 
   const appended = message("2026-06-22T03:01:00.000000Z#2", "appended");

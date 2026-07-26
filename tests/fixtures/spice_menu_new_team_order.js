@@ -17,19 +17,19 @@ const context = {
   targetChoiceName(target) {
     return String(target.branch || "");
   },
-  teamIdentityTeamId(identity) {
-    return String((identity || {}).teamId || "");
-  },
 };
 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
   filename: "app.lane-store.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
+context.laneChromeTeamId = (targetId) =>
+  ((laneStore.laneChrome(targetId) || {}).teamConfig || {}).teamIdentity?.teamId ||
+  "";
 vm.runInContext(fs.readFileSync(menuPath, "utf8"), context, {
   filename: "app.menu.js",
 });
-const laneStore = vm.runInContext("laneStore", context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -49,13 +49,39 @@ function target(id, branch, teamId = "", activityRank = 0) {
     id,
     branch,
     activityRank,
+    fixtureTeamId: teamId,
     targetIdentity: { branch },
-    teamIdentity: { teamId },
   };
 }
 
 function setTargets(items) {
   laneStore.replaceTargets(items);
+  for (const item of items) {
+    laneStore.applyLaneChrome({
+      targetId: item.id,
+      teamConfig: {
+        authority: "team-store",
+        order: {
+          epoch: "",
+          revision:
+            (((laneStore.laneChrome(item.id) || {}).teamConfig || {})
+              .teamIdentity?.configRevision || 0) + 1,
+        },
+        value: {
+          teamIdentity: item.fixtureTeamId
+            ? {
+                state: "member",
+                teamId: item.fixtureTeamId,
+                teamRevision: 1,
+                configRevision:
+                  (((laneStore.laneChrome(item.id) || {}).teamConfig || {})
+                    .teamIdentity?.configRevision || 0) + 1,
+              }
+            : { state: "none" },
+        },
+      },
+    });
+  }
 }
 
 function orderedMenuTeamIds() {
@@ -85,8 +111,8 @@ assertOrder(
   "placement hint leaves server-authored source topology untouched",
 );
 assert(
-  laneStore.targetForId("created").teamIdentity.teamId === "team-old",
-  "placement hint does not author a target team identity",
+  laneStore.laneChrome("created").teamConfig.teamIdentity.teamId === "team-old",
+  "placement hint does not author canonical team identity",
 );
 
 setTargets([

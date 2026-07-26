@@ -105,6 +105,9 @@ const context = {
     laneForId() {
       return null;
     },
+    laneChrome() {
+      return null;
+    },
     subscribe() {},
   },
   document: {

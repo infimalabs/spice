@@ -159,42 +159,29 @@ function populateLaneModeRail(rail) {
 }
 
 function laneControlState(target, hint) {
-  const lifetime = target.lifetime || defaultAgentLifetime;
+  const renewal = laneChromeRenewal(target.id);
+  const lifetime = renewal.lifetime || defaultAgentLifetime;
   return {
     speechMode: hint ? hint.speechMode : defaultSpeechMode,
     lifetime,
-    serverLifetime: lifetime,
     selectedView: hint ? hint.selectedView : defaultLaneViewMode,
-    taskFilters: uniqueStringList(target.taskFilters || []),
-    effectiveTaskFilters: uniqueStringList(target.effectiveTaskFilters || []),
-    taskFilterEntries: normalizedTaskFilterEntries(target.taskFilterEntries),
-    laneFilterVersion: target.laneFilterVersion || "",
-    taskFilterInventory: target.taskFilterInventory || null,
     laneMetrics: {},
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
-    renewalIntent: target.renewalIntent || {},
-    privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
   };
 }
 
 function laneTeamState(emptyTeam, teamIdentity, options) {
   return {
     teamId: emptyTeam ? "" : teamIdentityTeamId(teamIdentity),
-    teamRevision: emptyTeam ? 0 : teamIdentityRevision(teamIdentity),
     emptyTeamCanClose: emptyTeam && Boolean(options.canClose),
     teamSplitBackAvailable: false,
     teamSplitBackMemberCount: 0,
-    configRevision: emptyTeam ? 0 : teamIdentityConfigRevision(teamIdentity),
+    ...(emptyTeam ? { teamRevision: 0, configRevision: 0 } : {}),
   };
 }
 
 function laneBackendState() {
   return {
-    backendPendingInboxCount: 0,
-    backendPendingInboxKeys: new Set(),
-    backendPendingInboxRevision: "",
-    backendPendingInboxVersion: 0,
-    backendPendingInboxKeysAuthoritative: false,
     optimisticPendingInboxCount: 0,
     optimisticSubmittedInboxKeys: new Set(),
     optimisticPendingInboxFloor: 0,
@@ -258,7 +245,9 @@ function createLaneState(targetId, hint = null, options = {}) {
   if (!target) throw new Error("lane target payload is required: " + targetId);
   const targetIdentity = target.targetIdentity || {};
   const serveAgentIdentity = target.serveAgentIdentity || {};
-  const teamIdentity = target.teamIdentity || { state: "none" };
+  const teamIdentity = emptyTeam
+    ? { state: "none" }
+    : laneChromeTeamIdentity(targetId);
   const element = createLaneShellElement(targetId, emptyTeam);
   const lane = {
     targetId,
@@ -291,7 +280,8 @@ function createLaneState(targetId, hint = null, options = {}) {
   else {
     syncComposerShards(lane, [lane]);
     syncLaneEffectiveControls(lane);
-    renderLaneChrome(lane, target);
+    renderLanePayloadPresentation(lane, target);
+    renderLaneViewShell(lane);
   }
   return lane;
 }
@@ -347,11 +337,15 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
       configRevision: config.revision,
     });
   if (Array.isArray(config.taskFilters))
-    lane.taskFilters = uniqueStringList(config.taskFilters);
+    lane.emptyTeamTaskFilters = uniqueStringList(config.taskFilters);
   if (Array.isArray(config.effectiveTaskFilters))
-    lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
+    lane.emptyTeamEffectiveTaskFilters = uniqueStringList(
+      config.effectiveTaskFilters,
+    );
   if (Array.isArray(config.taskFilterEntries))
-    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
+    lane.emptyTeamTaskFilterEntries = normalizedTaskFilterEntries(
+      config.taskFilterEntries,
+    );
   lane.shardTextareas.clear();
   lane.shardAttachments.clear();
   lane.quoteDrafts.clear();
@@ -541,7 +535,6 @@ function laneStreamState(target) {
     renderedStatusFingerprint: "",
     renderedFusedStatusLine: false,
     lastRenderedStatusLine: target.statusLine || null,
-    renewalIntent: target.renewalIntent || {},
     statusTransientTimer: null,
     latestPayload: null,
     ackContextByKey: new Map(),
@@ -1016,6 +1009,13 @@ function renderLaneViewShell(lane) {
   renderLaneFiltersPane(lane);
   renderLaneMetricsPane(lane);
   renderLaneInfoPane(lane);
+}
+
+function renderLaneViewBadge(lane, view) {
+  const button = lane.element.querySelector(
+    '[data-lane-view-button="' + view + '"]',
+  );
+  if (button) syncLaneViewBadge(lane, view, button);
 }
 
 function syncLaneViewBadge(lane, view, button) {
