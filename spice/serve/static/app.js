@@ -226,6 +226,7 @@ const liveRelativeTimeDiagnostics = {
 };
 /** @type {any} */ (window).__spiceRelativeTimeDiagnostics =
   liveRelativeTimeDiagnostics;
+/** @type {number | null} */
 let liveRelativeTimeTimer = null;
 
 function setServeLifecycle(state, reason = "") {
