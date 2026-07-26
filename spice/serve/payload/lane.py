@@ -12,6 +12,7 @@ from spice.serve.payload.chrome import (
     LaneChromeObservation,
     LaneChromeOrder,
     assemble_lane_chrome,
+    lane_chrome_generation,
 )
 from spice.serve.payload.identity import (
     _agent_name_for_target,
@@ -148,7 +149,8 @@ def lane_chrome_payload(
     Facets whose authority keeps no counter are never published, because a
     producer that cannot say which of two observations is newer must not
     publish either. That is why ``identity`` and ``lifecycle`` are absent
-    today; WEB-1kGvkZqD settles the epoch source that lets those two join.
+    today: neither authority keeps a durable store to date a generation from,
+    so neither can order two observations of itself.
     """
     observations: list[LaneChromeObservation] = []
     if team_identity is not None:
@@ -175,7 +177,11 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "taskBoard",
-                LaneChromeOrder(epoch=str(task_filter_inventory.get("revision", ""))),
+                LaneChromeOrder(
+                    epoch=lane_chrome_generation(
+                        task_filter_inventory.get("revision", "")
+                    )
+                ),
                 {
                     "taskFilters": team_facts.get("taskFilters", []),
                     "taskFilterEntries": team_facts.get("taskFilterEntries", []),

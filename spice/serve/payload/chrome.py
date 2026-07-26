@@ -26,6 +26,28 @@ from spice.serve.payload.wire import (
 _EPOCH_RUNS = re.compile(r"\d+|\D+")
 
 
+def lane_chrome_generation(value: object) -> str:
+    """Admit only a generation an authority could have counted forward from.
+
+    A generation marks when an authority's counter last restarted, so it is
+    worth publishing only if it rises. A hash identity never does: it moves at
+    random, and it would still reach the browser as a well-formed order the
+    reducer cannot fault, pinning the facet at whichever digest happened to
+    sort highest until one sorted higher. That comparator is a total order over
+    whatever it is handed and cannot recover monotonicity the producer never
+    had, so the producer declines to mint anything but a count.
+
+    An empty value is an authority saying it has no generation to report, which
+    orders below every minted one.
+    """
+    text = str(value or "")
+    if not text:
+        return ""
+    if not (text.isascii() and text.isdigit()):
+        raise SpiceError(f"lane chrome generation must be a decimal count: {text!r}")
+    return text
+
+
 @dataclass(frozen=True)
 class LaneChromeOrder:
     """One authority's place in its own counter.
