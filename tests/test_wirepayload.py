@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from spice.serve import (
     livebusmutation,
     observer,
     submissions,
+    typecheck,
     workroutes,
 )
 from spice.serve.payload import chrome, message, metric, wire
@@ -168,6 +170,32 @@ def test_generated_app_types_are_the_exact_schema_render():
     actual = (PROJECT_ROOT / wire.APP_TYPES_GIT_PATH).read_text(encoding="utf-8")
 
     assert actual == wire.render_app_types_js()
+
+
+def _checkjs_probe(tmp_path: Path, source: str) -> int:
+    """Run the shipped checkJs lane over app.types.js plus one probe file."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "app.types.js").write_text(wire.render_app_types_js(), encoding="utf-8")
+    probe = tmp_path / "probe.js"
+    probe.write_text(source, encoding="utf-8")
+    argv = typecheck.serve_web_typecheck_argv(("app.types.js", "probe.js"))
+    return subprocess.run(argv, cwd=tmp_path, capture_output=True).returncode
+
+
+# The generated types describe both directions only if the lane's flags say so.
+# PlanItem.status is a required string, so writing undefined into it is the
+# smallest statement of "this frame is missing a field the server promised".
+UNDEFINED_WIRE_FIELD_PROBE = """/** @type {PlanItem} */
+const item = { step: "one", status: undefined };
+"""
+PRESENT_WIRE_FIELD_PROBE = """/** @type {PlanItem} */
+const item = { step: "one", status: "ok" };
+"""
+
+
+def test_checkjs_lane_rejects_undefined_written_into_a_wire_required_field(tmp_path):
+    assert _checkjs_probe(tmp_path / "ok", PRESENT_WIRE_FIELD_PROBE) == 0
+    assert _checkjs_probe(tmp_path / "undef", UNDEFINED_WIRE_FIELD_PROBE) != 0
 
 
 def test_named_opaque_json_fields_have_the_exact_intentional_allowlist():

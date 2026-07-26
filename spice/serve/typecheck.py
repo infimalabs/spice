@@ -49,8 +49,13 @@ TSC_CHECKJS_ARGS = (
     "DOM,ES2023",
     "--noImplicitAny",
     "false",
+    # With strictNullChecks off, `undefined` is assignable to every type, so a
+    # wire-required field could be written as undefined and the lane would not
+    # notice: the generated app.types.js only described the read side. On, the
+    # schema binds assignments too -- see the mutation probe in
+    # tests/test_wirepayload.py.
     "--strictNullChecks",
-    "false",
+    "true",
 )
 
 
