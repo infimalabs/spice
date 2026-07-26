@@ -64,7 +64,6 @@ LAUNCH_REPORT_FIELDS = (
     "pid",
     "pgid",
     "thread",
-    "service_tier",
     "prompt",
 )
 
@@ -78,7 +77,6 @@ def _git_worktree_tmp_path(request, tmp_path):
 def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
-    assert CODEX_DRIVER.default_service_tier == ""
     assert CLAUDE_DRIVER.default_model == "claude-opus-4-8"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
@@ -112,7 +110,6 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
         thread_id_env="FAKEENV_THIRD_THREAD_ID",
         default_model="third-model",
         default_reasoning_effort="",
-        default_service_tier="",
         stdout_assistant_marker="third",
         stdout_section_markers=frozenset(),
         stdout_compaction_marker="",
@@ -164,7 +161,7 @@ def test_claim_meta_uses_actor_as_thread_without_ambient(tmp_path, monkeypatch):
     assert "claim_context_turn:actorthird" in claim
 
 
-def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_mcp(
+def test_codex_driver_command_honors_explicit_fast_mode_and_playwright_mcp(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
@@ -177,7 +174,6 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
         model="gpt-test",
         reasoning_effort="xhigh",
         personality="pragmatic",
-        service_tier="fast",
         binary="codex-test",
         fast_mode=True,
     )
@@ -215,7 +211,6 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
         (agent_root / "playwright-mcp.json").read_text(encoding="utf-8")
     ) == {"browser": {"contextOptions": {"colorScheme": "dark"}}}
     assert 'personality="pragmatic"' in configs
-    assert 'service_tier="fast"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command[-3:] == ["resume", "thread-1", prompt]
 
@@ -339,7 +334,6 @@ def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monke
     assert result.command[result.command.index("--model") + 1] == "gpt-5.5"
     configs = _config_values(result.command)
     assert 'model_reasoning_effort="xhigh"' in configs
-    assert not any(config.startswith("service_tier=") for config in configs)
 
 
 def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
@@ -413,9 +407,6 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     assert started.command[0] == "codex-test"
     assert 'model_reasoning_effort="high"' in _config_values(started.command)
     assert 'personality="friendly"' in _config_values(started.command)
-    assert not any(
-        config.startswith("service_tier=") for config in _config_values(started.command)
-    )
     assert resumed.action == "would-resume"
     assert resumed.command[-3:] == ["resume", "resume-thread", resumed.prompt]
     assert renewed.action == "would-renew"
@@ -686,7 +677,6 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
         command=["codex", "exec", "prompt"],
         model="gpt-test",
         reasoning_effort="medium",
-        service_tier="",
         resume_thread_id="",
         prompt_skill_path=tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH,
         fast_mode=False,
@@ -752,7 +742,6 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(
         command=["codex", "exec", "resume", "thread", "prompt"],
         model="gpt-test",
         reasoning_effort="high",
-        service_tier="fast",
         resume_thread_id="thread",
         prompt_skill_path=tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH,
         fast_mode=True,
@@ -763,7 +752,6 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(
     assert returned == log_path
     assert spawned[0]["repo_root"] == tmp_path
     assert spawned[0]["action"] == action
-    assert spawned[0]["service_tier"] == "fast"
     assert spawned[0]["fast_mode"] is True
     assert "prompt_skill_path" not in spawned[0]
     assert required == [(SUPERVISOR_PID, tmp_path, log_path)]
@@ -795,7 +783,6 @@ def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatc
         command=["codex", "exec", "prompt"],
         model="gpt-test",
         reasoning_effort="medium",
-        service_tier="",
         resume_thread_id="",
         log_path=log_path,
         fast_mode=False,
@@ -841,7 +828,6 @@ def test_supervisor_command_carries_the_launch_claim_to_the_supervisor(
             command=["codex", "exec", "prompt"],
             model="gpt-test",
             reasoning_effort="medium",
-            service_tier="",
             resume_thread_id="",
             log_path=log_path,
             fast_mode=False,

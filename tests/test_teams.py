@@ -42,7 +42,6 @@ def _record_identity(
         actual_driver="codex",
         actual_model=actual_model,
         actual_effort=actual_effort,
-        actual_service_tier="default",
         desired_driver="codex",
         desired_model=desired_model,
         desired_effort=desired_effort,
@@ -1283,7 +1282,6 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
         actual_driver="codex",
         actual_model="gpt-5",
         actual_effort="high",
-        actual_service_tier="default",
         desired_driver="codex",
         desired_model="gpt-5",
         desired_effort="high",
@@ -1296,7 +1294,6 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
         actual_driver="claude",
         actual_model="claude-sonnet-4-6",
         actual_effort="medium",
-        actual_service_tier="fast",
         desired_driver="codex",
         desired_model="gpt-5.5",
         desired_effort="xhigh",
@@ -1314,7 +1311,6 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
     assert updated.updated_at >= first.updated_at
     assert stored.actual_driver == "claude"
     assert stored.actual_model == "claude-sonnet-4-6"
-    assert stored.actual_service_tier == "fast"
     assert stored.desired_model == "gpt-5.5"
     assert stored.renewal_revision == IDENTITY_RENEWAL_REVISION
     assert stored.updated_at == updated.updated_at

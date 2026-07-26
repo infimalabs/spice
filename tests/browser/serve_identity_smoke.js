@@ -25,7 +25,6 @@ function mismatchPayload(targetId) {
         actual: {
           model: "claude-opus",
           effort: "low",
-          serviceTier: "",
           source: "agent state",
         },
       },

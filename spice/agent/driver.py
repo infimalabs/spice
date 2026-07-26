@@ -111,7 +111,6 @@ class AgentDriver:
     thread_id_env: str
     default_model: str
     default_reasoning_effort: str
-    default_service_tier: str
     # `exec` stdout structure: the marker line opening an assistant message
     # block and the marker lines that terminate one.
     stdout_assistant_marker: str
@@ -222,7 +221,6 @@ class AgentDriver:
         model: str = "",
         reasoning_effort: str = "",
         personality: str = "",
-        service_tier: str = "",
         binary: str = "",
         fast_mode: bool = False,
     ) -> list[str]:
@@ -579,7 +577,6 @@ class CodexDriver(AgentDriver):
         model: str = "",
         reasoning_effort: str = "",
         personality: str = "",
-        service_tier: str = "",
         binary: str = "",
         fast_mode: bool = False,
     ) -> list[str]:
@@ -590,8 +587,6 @@ class CodexDriver(AgentDriver):
         ]
         if personality:
             config_overrides.append(f'personality="{personality}"')
-        if fast_mode and service_tier:
-            config_overrides.append(f'service_tier="{service_tier}"')
         command = [
             binary or self.binary(),
             "exec",
@@ -885,14 +880,13 @@ class ClaudeDriver(AgentDriver):
         model: str = "",
         reasoning_effort: str = "",
         personality: str = "",
-        service_tier: str = "",
         binary: str = "",
         fast_mode: bool = False,
     ) -> list[str]:
-        # `claude --print` has no launch-time seam for any of these. Personality
-        # and fast mode are declared unhonored, so the launch path withholds
-        # them; the service tier rides fast mode and so arrives empty with it.
-        del personality, service_tier, fast_mode
+        # `claude --print` has no launch-time seam for either of these:
+        # personality and fast mode are declared unhonored, so the launch path
+        # withholds them.
+        del personality, fast_mode
         # The same generic preamble+prompt rides both the system prompt and the
         # trailing prompt (so the agent re-grounds in the skill every turn), with
         # the worktree's steering token appended to its tail: the agent then sees
@@ -1196,7 +1190,6 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     thread_id_env="CODEX_THREAD_ID",  # env-policy: allow
     default_model="gpt-5.5",
     default_reasoning_effort="xhigh",
-    default_service_tier="",
     # Codex takes all four through `-c` config overrides and its own flags.
     honored_launch_knobs=LAUNCH_KNOBS,
     stdout_assistant_marker="codex",
@@ -1233,7 +1226,6 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     thread_id_env="CLAUDE_CODE_SESSION_ID",  # env-policy: allow
     default_model=CLAUDE_DEFAULT_MODEL,
     default_reasoning_effort="xhigh",
-    default_service_tier="",
     # `claude --print` takes a model and an effort at launch. Its personality
     # and fast mode are interactive, with no launch-time flag to carry them.
     honored_launch_knobs=LAUNCH_KNOBS

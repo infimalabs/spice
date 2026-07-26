@@ -48,7 +48,6 @@ class AgentIdentityRecordRequest:
     actual_driver: str | None = ""
     actual_model: str | None = ""
     actual_effort: str | None = ""
-    actual_service_tier: str | None = ""
     desired_driver: str | None = ""
     desired_model: str | None = ""
     desired_effort: str | None = ""
@@ -84,7 +83,6 @@ def _identity_from_record_request(
         actual_driver=_clean_record_text(request.actual_driver),
         actual_model=_clean_record_text(request.actual_model),
         actual_effort=_clean_record_text(request.actual_effort),
-        actual_service_tier=_clean_record_text(request.actual_service_tier),
         desired_driver=_clean_record_text(request.desired_driver),
         desired_model=_clean_record_text(request.desired_model),
         desired_effort=_clean_record_text(request.desired_effort),
@@ -129,7 +127,7 @@ class TeamIdentityStoreMixin:
     ) -> sqlite3.Row | None:
         return connection.execute(
             "SELECT actor_id, target_id, thread_id, actual_driver, actual_model, "
-            "actual_effort, actual_service_tier, desired_driver, desired_model, "
+            "actual_effort, desired_driver, desired_model, "
             "desired_effort, transcript_owner, renewal_state, "
             "renewal_ancestor_thread_id, renewal_successor_thread_id, "
             "renewal_revision, updated_at FROM agent_identities WHERE actor_id = ?",
@@ -154,18 +152,17 @@ class TeamIdentityStoreMixin:
         identity = _identity_from_record_request(request)
         connection.execute(
             "INSERT INTO agent_identities (actor_id, target_id, thread_id, "
-            "actual_driver, actual_model, actual_effort, actual_service_tier, "
+            "actual_driver, actual_model, actual_effort, "
             "desired_driver, desired_model, desired_effort, transcript_owner, "
             "renewal_state, renewal_ancestor_thread_id, "
             "renewal_successor_thread_id, renewal_revision, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(actor_id) DO UPDATE SET "
             "target_id = excluded.target_id, "
             "thread_id = excluded.thread_id, "
             "actual_driver = excluded.actual_driver, "
             "actual_model = excluded.actual_model, "
             "actual_effort = excluded.actual_effort, "
-            "actual_service_tier = excluded.actual_service_tier, "
             "desired_driver = excluded.desired_driver, "
             "desired_model = excluded.desired_model, "
             "desired_effort = excluded.desired_effort, "
@@ -182,7 +179,6 @@ class TeamIdentityStoreMixin:
                 identity.actual_driver,
                 identity.actual_model,
                 identity.actual_effort,
-                identity.actual_service_tier,
                 identity.desired_driver,
                 identity.desired_model,
                 identity.desired_effort,
@@ -232,7 +228,6 @@ class TeamIdentityStoreMixin:
                 actual_driver=identity.actual_driver,
                 actual_model=identity.actual_model,
                 actual_effort=identity.actual_effort,
-                actual_service_tier=identity.actual_service_tier,
                 desired_driver=identity.desired_driver,
                 desired_model=identity.desired_model,
                 desired_effort=identity.desired_effort,
@@ -253,7 +248,6 @@ class TeamIdentityStoreMixin:
         actual_driver: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
         actual_model: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
         actual_effort: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
-        actual_service_tier: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
         desired_driver: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
         desired_model: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
         desired_effort: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
@@ -297,9 +291,6 @@ class TeamIdentityStoreMixin:
                     ),
                     actual_effort=_preserved_identity_text(
                         actual_effort, current.actual_effort
-                    ),
-                    actual_service_tier=_preserved_identity_text(
-                        actual_service_tier, current.actual_service_tier
                     ),
                     desired_driver=_preserved_identity_text(
                         desired_driver, current.desired_driver
@@ -384,7 +375,6 @@ def agent_identity_from_row(row: sqlite3.Row) -> TeamAgentIdentity:
         actual_driver=str(row["actual_driver"]),
         actual_model=str(row["actual_model"]),
         actual_effort=str(row["actual_effort"]),
-        actual_service_tier=str(row["actual_service_tier"]),
         desired_driver=str(row["desired_driver"]),
         desired_model=str(row["desired_model"]),
         desired_effort=str(row["desired_effort"]),
@@ -405,7 +395,7 @@ def select_agent_identity_rows(
     placeholders = ",".join("?" for _ in actor_ids)
     return connection.execute(
         "SELECT actor_id, target_id, thread_id, actual_driver, actual_model, "
-        "actual_effort, actual_service_tier, desired_driver, desired_model, "
+        "actual_effort, desired_driver, desired_model, "
         "desired_effort, transcript_owner, renewal_state, "
         "renewal_ancestor_thread_id, renewal_successor_thread_id, "
         "renewal_revision, updated_at FROM agent_identities "

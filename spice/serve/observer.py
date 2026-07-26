@@ -350,7 +350,6 @@ def observer_agent_status_payload(session: ObserverSession) -> dict[str, Any]:
         "threadId": session.thread_id,
         "model": "observer",
         "effort": "observer",
-        "serviceTier": "",
         "launchable": False,
         "bindingStatus": "bound",
         "bindingError": "",

@@ -224,7 +224,6 @@ def _write_idle_binding(
             "driver": "codex",
             "model": "gpt-5.6-sol",
             "reasoning_effort": "xhigh",
-            "service_tier": "",
             "thread_id": thread_id,
             "prompt_skill_path": str(repo_root / ".agents/skills/spice/SKILL.md"),
             "log_path": "",

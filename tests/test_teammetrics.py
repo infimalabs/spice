@@ -68,7 +68,6 @@ def _record_identity(
         actual_driver="codex",
         actual_model="actual-model",
         actual_effort="low",
-        actual_service_tier="default",
         desired_driver="codex",
         desired_model="desired-model",
         desired_effort="high",

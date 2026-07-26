@@ -28,11 +28,10 @@ class ToyAgentDriver(AgentDriver):
         model: str = "",
         reasoning_effort: str = "",
         personality: str = "",
-        service_tier: str = "",
         binary: str = "",
         fast_mode: bool = False,
     ) -> list[str]:
-        del repo_root, reasoning_effort, personality, service_tier, fast_mode
+        del repo_root, reasoning_effort, personality, fast_mode
         command = [binary or self.binary(), "exec"]
         if thread_id:
             command.extend(["--thread", thread_id])
@@ -50,7 +49,6 @@ def _driver(name: str) -> ToyAgentDriver:
         thread_id_env="FAKEENV_THIRD_THREAD_ID",
         default_model="toy-model",
         default_reasoning_effort="low",
-        default_service_tier="",
         stdout_assistant_marker="[toy-assistant]",
         stdout_section_markers=frozenset({"[toy-done]"}),
         stdout_compaction_marker="[toy-compacted]",

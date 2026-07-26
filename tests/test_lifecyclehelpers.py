@@ -23,7 +23,6 @@ def status(*, thread_id: str = "") -> AgentStatus:
         driver="",
         model="",
         reasoning_effort="",
-        service_tier="",
         started_at="",
         ready_at="",
         startup_failure="",

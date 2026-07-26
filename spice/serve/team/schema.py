@@ -104,7 +104,6 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     actual_driver TEXT NOT NULL DEFAULT '',
     actual_model TEXT NOT NULL DEFAULT '',
     actual_effort TEXT NOT NULL DEFAULT '',
-    actual_service_tier TEXT NOT NULL DEFAULT '',
     desired_driver TEXT NOT NULL DEFAULT '',
     desired_model TEXT NOT NULL DEFAULT '',
     desired_effort TEXT NOT NULL DEFAULT '',

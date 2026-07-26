@@ -82,7 +82,6 @@ class AgentStatus:
     driver: str
     model: str
     reasoning_effort: str
-    service_tier: str
     started_at: str
     ready_at: str
     startup_failure: str
@@ -139,7 +138,6 @@ def agent_status(
         driver=str(agent_state.get("driver") or ""),
         model=str(agent_state.get("model") or ""),
         reasoning_effort=str(agent_state.get("reasoning_effort") or ""),
-        service_tier=str(agent_state.get("service_tier") or ""),
         started_at=str(agent_state.get("started_at") or ""),
         ready_at=str(agent_state.get("ready_at") or ""),
         startup_failure=str(agent_state.get("startup_failure") or ""),
@@ -547,7 +545,6 @@ def bind_ambient_agent_thread(repo_root: Path) -> AgentStatus:
             "driver": driver.name,
             "model": "",
             "reasoning_effort": "",
-            "service_tier": "",
             "thread_id": ambient,
             "prompt_skill_path": str(prompt_skill_path or ""),
             "log_path": "",
@@ -606,7 +603,6 @@ def _carry_member_driver(
         actual_driver=driver,
         actual_model=prior.actual_model if prior else "",
         actual_effort=prior.actual_effort if prior else "",
-        actual_service_tier=prior.actual_service_tier if prior else "",
         desired_driver=driver,
         desired_model=prior.desired_model if prior else "",
         desired_effort=prior.desired_effort if prior else "",
