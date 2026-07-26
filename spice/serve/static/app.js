@@ -85,11 +85,16 @@ let targetsLoadPromise = null;
 let taskFilterStemPills = [];
 let taskFilterInventoryRevision = "";
 let renderedFilterPillsFingerprint = "";
+/** @type {HTMLDivElement | null} */
 let spiceMenuEl = null;
+/** @type {(() => void) | null} */
 let spiceMenuPositionHandler = null;
+/** @type {((event: PointerEvent) => void) | null} */
 let spiceMenuDismissHandler = null;
+/** @type {((event: KeyboardEvent) => void) | null} */
 let spiceMenuKeyHandler = null;
 let spiceMenuDragTargetId = "";
+/** @type {SpiceMenuTargetDragState | null} */
 let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];

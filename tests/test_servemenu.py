@@ -696,7 +696,7 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert "spiceMenuTargetDragState = state;" in app_menu
     assert "state.dragGhost = createSpiceMenuTargetDragGhost(state.button);" in app_menu
     assert "updateSpiceMenuTargetDragGhost(state, event);" in app_menu
-    assert "function spiceMenuTargetDragMatches(state, event, targetId)" in app_menu
+    assert "function spiceMenuTargetDragForEvent(event, targetId)" in app_menu
     assert "function wireSpiceMenuTargetPointerDocumentEvents(target)" in app_menu
     assert "function updateSpiceMenuTargetDragFromEvent(event, target" in app_menu
     assert "function finishSpiceMenuTargetDragFromEvent(event, target)" in app_menu

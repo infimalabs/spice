@@ -2,6 +2,29 @@
 
 const spiceMenuNewTeamDropId = "__new_team_drop__";
 
+/**
+ * A target chip lifted out of the spice menu: the chip itself, the target it
+ * addresses, and where the pointer is over the two drop surfaces. A release
+ * over overContainer moves the target into that team; over the desktop it
+ * opens as its own team. The declaration lives in app.js with the rest of the
+ * menu's module state.
+ * @typedef {{
+ *   button: HTMLElement,
+ *   targetId: string,
+ *   pointerId: number,
+ *   startX: number,
+ *   startY: number,
+ *   offsetX: number,
+ *   offsetY: number,
+ *   dragging: boolean,
+ *   dragGhost: HTMLElement | null,
+ *   overContainer: HTMLElement | null,
+ *   overDesktop: boolean,
+ *   pointerCleanup: (() => void) | null,
+ *   pointerCaptureFailed: boolean,
+ * }} SpiceMenuTargetDragState
+ */
+
 // ---- spice context menu -----------------------------------------------------------
 
 function toggleSpiceMenu() {
@@ -218,6 +241,16 @@ function renderSpiceMenuActions() {
   return section;
 }
 
+/**
+ * A pressed of null is a plain menu item; true or false makes it a checkbox
+ * item and decides its aria-checked.
+ * @param {{
+ *   label: string,
+ *   detail?: string,
+ *   pressed?: boolean | null,
+ *   onClick: (event: MouseEvent) => void,
+ * }} options
+ */
 function renderSpiceMenuAction({ label, detail = "", pressed = null, onClick }) {
   const button = document.createElement("button");
   button.type = "button";
@@ -227,11 +260,11 @@ function renderSpiceMenuAction({ label, detail = "", pressed = null, onClick }) 
     pressed === null ? "menuitem" : "menuitemcheckbox",
   );
   if (pressed !== null) button.setAttribute("aria-checked", String(pressed));
-  button.innerHTML =
-    '<span class="spice-menu-action-label"></span>' +
-    '<span class="spice-menu-action-detail"></span>';
-  button.querySelector(".spice-menu-action-label").textContent = label;
-  button.querySelector(".spice-menu-action-detail").textContent = detail;
+  const actionLabel = serveSpanWithClass("spice-menu-action-label");
+  actionLabel.textContent = label;
+  const actionDetail = serveSpanWithClass("spice-menu-action-detail");
+  actionDetail.textContent = detail;
+  button.append(actionLabel, actionDetail);
   button.addEventListener("click", onClick);
   return button;
 }
@@ -459,6 +492,7 @@ function defaultTeamConfig() {
   return { lifetime: defaultAgentLifetime };
 }
 
+/** @param {{ unassigned: boolean } | null} [group] */
 function renderTargetChoice(target, group = null) {
   const alreadyOpen = laneStore.hasLane(target.id);
   let actionLabel = "Create team";
@@ -494,6 +528,7 @@ function wireSpiceMenuTargetDrag(button, target) {
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
     clearSpiceMenuTargetDrag();
+    /** @type {SpiceMenuTargetDragState} */
     const state = {
       button,
       targetId: target.id,
@@ -553,9 +588,10 @@ function wireSpiceMenuTargetPointerDocumentEvents(target) {
   };
 }
 
+/** @param {(() => void) | null} [onStart] */
 function updateSpiceMenuTargetDragFromEvent(event, target, onStart = null) {
-  const state = spiceMenuTargetDragState;
-  if (!spiceMenuTargetDragMatches(state, event, target.id)) return;
+  const state = spiceMenuTargetDragForEvent(event, target.id);
+  if (!state) return;
   if (!state.dragging) {
     const dx = event.clientX - state.startX;
     const dy = event.clientY - state.startY;
@@ -596,8 +632,8 @@ function updateSpiceMenuTargetDropTarget(state, targetId, clientX, clientY) {
 }
 
 function finishSpiceMenuTargetDragFromEvent(event, target) {
-  const state = spiceMenuTargetDragState;
-  if (!spiceMenuTargetDragMatches(state, event, target.id)) return;
+  const state = spiceMenuTargetDragForEvent(event, target.id);
+  if (!state) return;
   if (state.dragging)
     updateSpiceMenuTargetDropTarget(
       state,
@@ -648,8 +684,8 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
 }
 
 function cancelSpiceMenuTargetDragFromEvent(event, targetId) {
-  const state = spiceMenuTargetDragState;
-  if (!spiceMenuTargetDragMatches(state, event, targetId)) return;
+  const state = spiceMenuTargetDragForEvent(event, targetId);
+  if (!state) return;
   const suppressClick = state.dragging;
   endMenuTargetDrag(state);
   spiceMenuTargetDragState = null;
@@ -658,12 +694,14 @@ function cancelSpiceMenuTargetDragFromEvent(event, targetId) {
   event.preventDefault();
 }
 
-function spiceMenuTargetDragMatches(state, event, targetId) {
-  return (
-    state &&
-    state.pointerId === event.pointerId &&
-    state.targetId === targetId
-  );
+// Hands back the drag the event belongs to, the way the lane and composer
+// drags in app.groups.js do: the caller then acts on the state it proved
+// rather than reaching for module state a second time.
+function spiceMenuTargetDragForEvent(event, targetId) {
+  const state = spiceMenuTargetDragState;
+  if (!state || state.pointerId !== event.pointerId) return null;
+  if (state.targetId !== targetId) return null;
+  return state;
 }
 
 function endMenuTargetDrag(state) {
