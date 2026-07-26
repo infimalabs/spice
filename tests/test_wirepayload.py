@@ -456,6 +456,34 @@ def test_ensure_answers_carry_only_the_facts_their_own_outcome_has():
             wire.validate_wire_payload("AgentEnsurePayload", crossing)
 
 
+def _carried(schema_name: str) -> set[str]:
+    """The fields an arm actually carries, as opposed to names only to deny."""
+    schema = wire.WIRE_OBJECTS_BY_NAME[schema_name]
+    return {
+        field.name for field in schema.fields if field.value_type != wiretypes.ABSENT
+    }
+
+
+def _denied(schema_name: str) -> set[str]:
+    schema = wire.WIRE_OBJECTS_BY_NAME[schema_name]
+    return {
+        field.name for field in schema.fields if field.value_type == wiretypes.ABSENT
+    }
+
+
+def test_each_ensure_arm_denies_exactly_what_the_other_one_carries():
+    # The arms are written from shared field groups so that holds by
+    # construction, which is the whole reason a reader may ask either arm about
+    # any field. Pinned here because a field added straight to one arm rather
+    # than to a group would restore the silent undefined the split removed.
+    assert _denied("AgentEnsureLaunched") == _carried(
+        "AgentEnsureUnstarted"
+    ) - _carried("AgentEnsureLaunched")
+    assert _denied("AgentEnsureUnstarted") == _carried(
+        "AgentEnsureLaunched"
+    ) - _carried("AgentEnsureUnstarted")
+
+
 def test_lane_chrome_patch_rejects_cross_authority_and_global_ordering():
     identity = valid_wire_payload(
         "LaneChromeIdentityFacet",
