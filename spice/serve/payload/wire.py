@@ -1111,8 +1111,13 @@ BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
     "worktree.inventory.work_trees_payload": "TargetsPayload",
 }
 
+# Every field whose interior the contract declines to describe, named so the
+# generated types carry why. Both payloads that report a refusal name it here:
+# they carry the same driver-supplied facts under the same type, and listing one
+# alone left the other rendering the identical property undocumented.
 OPAQUE_JSON_ALLOWLIST = {
     "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+    "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
     "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
 }
 
