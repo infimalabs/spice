@@ -606,6 +606,10 @@ const laneMetricSeriesRanges = [
   ["21600", "6h"],
   ["86400", "24h"],
 ];
+// A query pins its end timestamp so ordinary DOM re-renders deduplicate. Move
+// that window only while somebody can see it; otherwise an empty first result
+// remains "no series" forever and every hidden lane wastes the same read.
+const laneMetricSeriesRefreshMs = 15 * 1000;
 
 function renderLaneMetricsPane(lane) {
   if (!lane.metricsGridEl) return;
@@ -622,7 +626,7 @@ function requestLaneMetrics(lane) {
   // On demand only: the metrics tab is never the first view, so the counters --
   // and the status:completed export that backs "drained" -- load exactly once
   // the pane is opened, never in the eager per-lane message payload.
-  if (laneViewMode(lane.selectedView) !== "metrics") return;
+  if (!laneMetricsPaneIsWatched(lane)) return;
   const key = lane.targetId;
   if (!key) return;
   if (lane.laneMetricsRequestKey === key || lane.laneMetricsPendingKey === key)
@@ -704,6 +708,7 @@ function syncLaneMetricSeriesControlHandler(lane) {
     if (detail.lens) lane.metricSeriesLens = String(detail.lens);
     if (detail.rangeSeconds)
       lane.metricSeriesRangeSeconds = Math.max(60, Number(detail.rangeSeconds) || 3600);
+    stopLaneMetricSeriesRefresh(lane);
     lane.metricSeries = null;
     lane.metricSeriesRequestKey = "";
     lane.metricSeriesPendingKey = "";
@@ -715,6 +720,12 @@ function syncLaneMetricSeriesControlHandler(lane) {
 }
 
 function requestLaneMetricSeries(lane, model) {
+  if (!laneMetricsPaneIsWatched(lane)) {
+    stopLaneMetricSeriesRefresh(lane);
+    lane.metricSeriesRequestKey = "";
+    lane.metricSeriesQueryEnd = 0;
+    return;
+  }
   if (typeof liveBusRequest !== "function") return;
   const query = laneMetricSeriesQuery(lane, model);
   if (!query) return;
@@ -730,13 +741,43 @@ function requestLaneMetricSeries(lane, model) {
       const frame = /** @type {MetricSeriesFrame} */ (message);
       applyLaneMetricSeriesResult(lane, frame.result);
       renderLaneMetricsPane(lane);
+      scheduleLaneMetricSeriesRefresh(lane);
     },
     () => {
       if (lane.metricSeriesPendingKey !== key) return;
       lane.metricSeriesPendingKey = "";
       reportLaneMetricSeriesError();
+      scheduleLaneMetricSeriesRefresh(lane);
     },
   );
+}
+
+function laneMetricSeriesRefreshDelay() {
+  return laneMetricSeriesRefreshMs;
+}
+
+function laneMetricsPaneIsWatched(lane) {
+  return (
+    laneViewMode(lane.selectedView) === "metrics" &&
+    (typeof isShadowLane !== "function" || !isShadowLane(lane))
+  );
+}
+
+function scheduleLaneMetricSeriesRefresh(lane) {
+  stopLaneMetricSeriesRefresh(lane);
+  if (lane.closed || !laneMetricsPaneIsWatched(lane)) return;
+  lane.metricSeriesRefreshTimer = setTimeout(() => {
+    lane.metricSeriesRefreshTimer = 0;
+    lane.metricSeriesQueryEnd = 0;
+    lane.metricSeriesRequestKey = "";
+    renderLaneMetricsPane(lane);
+  }, laneMetricSeriesRefreshDelay());
+}
+
+function stopLaneMetricSeriesRefresh(lane) {
+  if (lane.metricSeriesRefreshTimer)
+    clearTimeout(lane.metricSeriesRefreshTimer);
+  lane.metricSeriesRefreshTimer = 0;
 }
 
 /** @param {MetricSeriesPayload} result */

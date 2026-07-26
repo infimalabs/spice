@@ -703,6 +703,38 @@ def test_teardown_abandons_a_stuck_read_within_the_join_budget(tmp_path, monkeyp
         compute_release.set()
 
 
+def test_lane_configure_reuses_the_subscribed_target_without_rediscovery(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+
+    def unexpected_resolution(_selector):
+        raise AssertionError("a subscribed lane was rediscovered")
+
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        resolve_target=unexpected_resolution,
+    )
+    session = LiveBusSession(connection, callbacks)
+    subscription = session._replace_subscription(target, {"limit": 5})
+
+    try:
+        session._handle_lane_configure(
+            {
+                "type": "lane.configure",
+                "requestId": "configure-1",
+                "targetId": target.id,
+                "query": {"limit": 5, "focused": False},
+            }
+        )
+    finally:
+        session._teardown()
+
+    assert subscription.query == {"limit": 5, "focused": False}
+    assert connection.sent == [{"type": "lane.configured", "requestId": "configure-1"}]
+
+
 def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

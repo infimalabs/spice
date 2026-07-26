@@ -492,6 +492,9 @@ function closeLaneCore(lane) {
   if (lane.paneResizeObserver) lane.paneResizeObserver.disconnect();
   if (lane.paneMetricsFrame) cancelAnimationFrame(lane.paneMetricsFrame);
   lane.paneMetricsFrame = 0;
+  if (lane.metricSeriesRefreshTimer)
+    clearTimeout(lane.metricSeriesRefreshTimer);
+  lane.metricSeriesRefreshTimer = 0;
   abortLaneSpeech(lane);
   lane.element.remove();
   laneStore.removeLane(lane.targetId);
