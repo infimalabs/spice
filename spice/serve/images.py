@@ -20,6 +20,8 @@ from typing import Any
 from urllib.parse import quote
 
 from spice.agent.driver import AgentDriver
+from spice.transcript.events import Image
+from spice.transcript.reader import TranscriptEventReader, offset_after_line
 
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
@@ -67,33 +69,29 @@ def view_image_markdown(payload: dict[str, Any]) -> str | None:
 
 
 def rollout_image_from_offset(
-    rollout_path: Path, *, offset: int, item_index: int, driver: AgentDriver
+    rollout_path: Path, *, offset: int, image_index: int, driver: AgentDriver
 ) -> tuple[bytes, str] | None:
-    """Decode the embedded image at (line offset, content item) in a rollout."""
-    if offset < 0 or item_index < 0:
+    """Decode the embedded image at (line offset, picture position) in a rollout.
+
+    The position counts pictures on that one line rather than content items,
+    because that is the one ordinal both dialects agree on: a Codex message
+    keeps its images inline among prose, while a Claude tool result folds them
+    into a list of their own. A line the reader cannot type, or one carrying
+    fewer pictures than asked for, is simply absent rather than an error.
+    """
+    if offset < 0 or image_index < 0:
         return None
-    try:
-        with rollout_path.open("rb") as handle:
-            handle.seek(offset)
-            raw_line = handle.readline()
-    except OSError:
+    read = TranscriptEventReader(
+        path=rollout_path, driver=driver, source_actor=None
+    ).read(
+        "bounded",
+        start_offset=offset,
+        end_offset=offset_after_line(rollout_path, offset),
+    )
+    images = [event for event in read.events if isinstance(event, Image)]
+    if image_index >= len(images):
         return None
-    try:
-        loaded = json.loads(raw_line.decode("utf-8", errors="replace"))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(loaded, dict):
-        return None
-    event = driver.normalize_transcript_line(loaded)
-    if event is None or event.get("type") != "response_item":
-        return None
-    payload = event.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    items = _image_content_items(payload)
-    if items is None or item_index >= len(items):
-        return None
-    return _decode_data_image(_item_image_url(items[item_index]))
+    return _decode_data_image(images[image_index].url)
 
 
 def markdown_image_reference(alt: str, target: str) -> str:
@@ -120,11 +118,13 @@ def worktree_file_image_url(
     return url
 
 
-def embedded_image_url(worktree_id: str, *, source_offset: int, item_index: int) -> str:
+def embedded_image_url(
+    worktree_id: str, *, source_offset: int, image_index: int
+) -> str:
     encoded = quote(worktree_id, safe="")
     return (
         f"/api/work/trees/{encoded}/messages/image"
-        f"?offset={source_offset}&item={item_index}"
+        f"?offset={source_offset}&image={image_index}"
     )
 
 
@@ -132,7 +132,7 @@ def _image_items_markdown(
     items: list[Any], *, worktree_id: str | None, source_offset: int | None
 ) -> str | None:
     parts: list[str] = []
-    for item_index, item in enumerate(items):
+    for item in items:
         url = _item_image_url(item)
         if not url:
             continue
@@ -145,21 +145,13 @@ def _image_items_markdown(
             and source_offset is not None
             and DATA_IMAGE_RE.match(url) is not None
         ):
+            # Pictures emitted so far is this picture's position on the line,
+            # which is what the typed decoder counts back to find it again.
             target = embedded_image_url(
-                worktree_id, source_offset=source_offset, item_index=item_index
+                worktree_id, source_offset=source_offset, image_index=len(parts)
             )
         parts.append(markdown_image_reference(alt, target))
     return "\n\n".join(parts) if parts else None
-
-
-def _image_content_items(payload: dict[str, Any]) -> list[Any] | None:
-    if payload.get("type") == "function_call_output":
-        output = payload.get("output")
-        return output if isinstance(output, list) else None
-    if payload.get("type") == "message" and payload.get("role") == "assistant":
-        content = payload.get("content")
-        return content if isinstance(content, list) else None
-    return None
 
 
 def _item_image_url(item: Any) -> str:

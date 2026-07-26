@@ -15,6 +15,8 @@ from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
 from spice.paths import atomic_write_json
+from spice.transcript.events import AssistantText, StreamFailure, ToolCall
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
@@ -172,42 +174,31 @@ def supervised_launch_outcome(
 def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
     """Activity counts and structural failure fields from one launch log.
 
-    Stream-json lines classify through the driver's canonical-event and
-    failure-signal vocabularies; non-JSON lines (marker-format stdout) simply
-    contribute nothing, leaving the text-pattern fallback to the caller.
+    A launch log is the agent CLI's own stream-json stdout, one JSON event per
+    line, so it reads through the shared transcript reader like any other
+    typed source: assistant prose and tool calls are the liveness counters, and
+    a `StreamFailure` is the terminal classification the account itself
+    reported. Marker-format stdout lines carry no typed fact and so count for
+    nothing, leaving the text-pattern fallback to the caller. An unreadable log
+    yields the same empty counts a silent one does.
     """
-    driver = driver_for(repo_root)
-    assistant_messages = 0
-    tool_calls = 0
+    read = TranscriptEventReader(
+        path=log_path,
+        driver=driver_for(repo_root),
+        source_actor=None,
+    ).read("forward")
     failure: dict[str, Any] = {}
-    try:
-        handle = log_path.open(encoding="utf-8", errors="replace")
-    except OSError:
-        return {"assistant_messages": 0, "tool_calls": 0}
-    with handle:
-        for line in handle:
-            stripped = line.strip()
-            if not stripped.startswith("{"):
-                continue
-            try:
-                raw = json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(raw, dict):
-                continue
-            event = driver.normalize_transcript_line(raw) or {}
-            payload = event.get("payload") or {}
-            payload_type = payload.get("type") if isinstance(payload, dict) else ""
-            if payload_type == "message" and payload.get("role") == "assistant":
-                assistant_messages += 1
-            elif payload_type == "function_call":
-                tool_calls += 1
-            fields = driver.stream_failure_fields(raw)
-            if fields:
-                failure.update(fields)
+    for event in read.events:
+        if not isinstance(event, StreamFailure):
+            continue
+        failure["kind"] = event.kind
+        if event.reset_epoch is not None:
+            failure["reset_epoch"] = event.reset_epoch
     return {
-        "assistant_messages": assistant_messages,
-        "tool_calls": tool_calls,
+        "assistant_messages": sum(
+            1 for event in read.events if isinstance(event, AssistantText)
+        ),
+        "tool_calls": sum(1 for event in read.events if isinstance(event, ToolCall)),
         **failure,
     }
 
