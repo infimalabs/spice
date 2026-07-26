@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,6 +25,7 @@ from spice.paths import git_common_dir
 from spice.serve.team.schema import TEAM_DATABASE_FILENAME
 from spice.serve.team.store import ServeTeamStore, team_database_path
 from spice.tasks import config, create, tw
+from tests.test_reposcaffolding import run as _run
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -160,7 +160,3 @@ def _repo_with_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
     _run(repo, "git", "commit", "-qm", "initial")
     _run(repo, "git", "worktree", "add", "-q", "-b", "linked", str(linked))
     return repo, linked
-
-
-def _run(cwd: Path, *args: str) -> None:
-    subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
-import subprocess
 
-from spice.config import edit, layers, values
 from spice.agent import maximmetrics, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
-from spice.agent.maximcli import render_maxim_report, run_maxim_report_cli
-from spice.agent.maximcli import SCOPE_DECISION_EVIDENCE_ROW
+from spice.agent.maximcli import (
+    SCOPE_DECISION_EVIDENCE_ROW,
+    render_maxim_report,
+    run_maxim_report_cli,
+)
 from spice.agent.maximmetrics import (
     MAXIM_EVENT_FIRE,
     MAXIM_EVENT_GATE_SUPPRESSED,
@@ -31,13 +32,9 @@ from spice.agent.maximmetrics import (
 )
 from spice.agent.maxims import MaximVerdict
 from spice.cli.parser import build_parser
+from spice.config import edit, layers, values
 from spice.sqliteconnection import sqlite_connection
-
-
-def _init_repo(path):
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    return path
+from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
 
 def _write_maxim_config(repo, *, name: str = "alpha") -> None:

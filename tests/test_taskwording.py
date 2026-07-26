@@ -1,11 +1,11 @@
 """Task creation suspect wording detector."""
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from spice.tasks import create
+from tests.test_reposcaffolding import init_empty_repo as _init_repo
 
 INCLUSIVE_TASTE_SUGGESTIONS = (
     ("whitelist", "allowlist"),
@@ -263,15 +263,3 @@ def test_repo_task_wording_retains_exact_builtin_inflection(repo):
 
 def _write_pyproject(path: Path, text: str) -> None:
     path.joinpath("pyproject.toml").write_text(text, encoding="utf-8")
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    subprocess.run(
-        ["git", "init", "-b", "main"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return path

@@ -1,6 +1,5 @@
 """spice agent import: team-membership carry (import as a renewal)."""
 
-import subprocess
 from pathlib import Path
 
 from spice.agent import lifecycle
@@ -15,15 +14,6 @@ __all__ = ["task_repo"]
 
 PREDECESSOR_UUID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 SUCCESSOR_UUID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-
-
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "spice@example.test"], cwd=path, check=True
-    )
-    subprocess.run(["git", "config", "user.name", "Spice Tests"], cwd=path, check=True)
 
 
 def test_import_carries_predecessor_team_slot_to_successor(tmp_path, monkeypatch):

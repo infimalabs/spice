@@ -5,26 +5,28 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from spice.cli.parser import build_parser
 from spice.agent import lifecycle
 from spice.agent.driver import DRIVER
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.tasks import (
     artifacts,
     claimstate,
-    cli as task_cli,
     config,
     create,
     identity,
     ops,
     render,
 )
-
+from spice.tasks import (
+    cli as task_cli,
+)
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
+from tests.test_reposcaffolding import run as _run
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -1159,20 +1161,6 @@ def _row(
     }
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _configure_git_identity(path)
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -5,12 +5,12 @@ from spice.mail.ackstate import AckStateWrite, record_acked_inbox_items
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
 from spice.serve.payload import message
 from tests.test_messagepayload import (
-    _State,
-    _Target,
-    _init_repo,
     _message,
+    _State,
     _stub_messages_payload,
+    _Target,
 )
+from tests.test_reposcaffolding import init_existing_repo as _init_repo
 
 ACK_CONTEXT_BACKLOG_DEPTH = 60
 

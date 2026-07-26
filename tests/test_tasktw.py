@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
-from spice.agent.driver import DRIVER
 from spice.tasks import config, create, tw
+from tests.test_reposcaffolding import (
+    init_committed_repo as _init_repo,
+)
+from tests.test_reposcaffolding import (
+    make_task_repo_fixture,
+)
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -18,18 +22,7 @@ pytestmark = pytest.mark.skipif(
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
-@pytest.fixture
-def task_repo(tmp_path, monkeypatch):
-    repo = _init_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
-    config.set_backend(str(backend))
-    try:
-        yield repo
-    finally:
-        config.set_backend(None)
+task_repo = make_task_repo_fixture(lambda path: _init_repo(path), actor=ACTOR_A)
 
 
 def test_task_event_file_advances_on_mutation_and_stays_stable_on_export(task_repo):
@@ -70,18 +63,3 @@ def test_task_run_disables_bulk_confirmation(monkeypatch, tmp_path):
     tw.run(["export"])
 
     assert "rc.bulk=0" in seen["command"]
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

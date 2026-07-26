@@ -3,7 +3,6 @@
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +16,7 @@ from spice.agent.activation import (
 from spice.agent.driver import DRIVER
 from spice.agent.rtkhealth import RtkHealth
 from spice.tasks import claimstate, config, create, identity, tw
+from tests.test_reposcaffolding import run as _run
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -451,7 +451,3 @@ def _advance_upstream(tmp_path: Path) -> None:
 
 def _git(cwd: Path, *args: str) -> str:
     return _run(cwd, "git", *args).stdout.strip()
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

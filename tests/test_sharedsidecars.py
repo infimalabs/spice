@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,6 +29,7 @@ from spice.mail.attachments import (
 from spice.paths import git_common_dir, git_dir, shared_attachment_root
 from spice.studies import complexity, fileloc, repodocs
 from spice.tasks import artifacts, config, create
+from tests.test_reposcaffolding import run as _run
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ORIGIN = "ack:1kCxkWxr"
@@ -212,7 +212,3 @@ def _repo_with_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
     _run(repo, "git", "commit", "-qm", "initial")
     _run(repo, "git", "worktree", "add", "-q", "-b", "linked", str(linked))
     return repo, linked
-
-
-def _run(cwd: Path, *args: str) -> None:
-    subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
