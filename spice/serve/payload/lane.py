@@ -181,9 +181,9 @@ def lane_chrome_payload(
                     "taskFilterEntries": team_facts.get("taskFilterEntries", []),
                     "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
                     "taskFilterInventory": task_filter_inventory,
-                    # No server pass counts a lane's private tasks yet, and a
-                    # facet may not carry half of itself, so the board reports
-                    # the count it can stand behind.
+                    # The filters above are observed; no server pass counts a
+                    # lane's private tasks yet. The board's shape requires a
+                    # number, so it publishes the only one nothing contradicts.
                     "privateTaskCount": 0,
                 },
             )
