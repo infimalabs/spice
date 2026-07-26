@@ -349,6 +349,62 @@ def test_typed_access_modes_preserve_overlaps_and_cursor_resume(tmp_path) -> Non
     )
 
 
+def test_typed_since_mode_pages_to_timestamp_with_source_line_context(
+    tmp_path,
+) -> None:
+    lines = [
+        _raw(
+            {
+                "timestamp": f"2026-07-26T01:15:0{index}.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"line {index}"}],
+                },
+            }
+        )
+        for index in range(5)
+    ]
+    path = tmp_path / "codex.jsonl"
+    path.write_bytes(b"".join(lines))
+
+    read = TranscriptEventReader(path, CODEX_DRIVER).read(
+        "since",
+        start_timestamp="2026-07-26T01:15:03Z",
+        context_lines_before_start=1,
+        max_bytes=64,
+    )
+
+    assert [
+        event.text for event in read.events if isinstance(event, AssistantText)
+    ] == ["line 2", "line 3", "line 4"]
+
+
+def test_public_typed_reader_reads_gzip_through_the_same_entry_point(tmp_path) -> None:
+    line = _raw(
+        {
+            "timestamp": TIMESTAMP,
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "compressed fact"}],
+            },
+        }
+    )
+    path = tmp_path / "codex.jsonl.gz"
+    _write_transcript(path, line, compressed=True)
+
+    read = TranscriptEventReader(path, CODEX_DRIVER).read("forward")
+
+    assert len(read.events) == 1
+    assert isinstance(read.events[0], AssistantText)
+    assert read.events[0].text == "compressed fact"
+    assert read.events[0].at.offset == 0
+    assert read.end_offset == len(line)
+
+
 def test_one_typed_read_parses_and_decodes_once_before_many_projections(
     tmp_path, monkeypatch
 ) -> None:

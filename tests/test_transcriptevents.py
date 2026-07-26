@@ -11,6 +11,7 @@ from spice.agent.claudetranscript import claude_line_events
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -21,6 +22,7 @@ from spice.transcript.events import (
     ToolCall,
     ToolOutput,
     TranscriptEvent,
+    TurnLifecycle,
     Unknown,
     UserMessage,
     WebSearch,
@@ -72,6 +74,20 @@ def _one_of_every_kind(at: Provenance) -> list[object]:
             ),
             cumulative=None,
             model_context_window=258_400,
+        ),
+        TurnLifecycle(
+            at=at,
+            state="completed",
+            turn_id="turn-7",
+            last_assistant_message="done",
+        ),
+        CommandExecution(
+            at=at,
+            turn_id="turn-7",
+            cwd="/repo",
+            command="pytest",
+            exit_code=0,
+            status="completed",
         ),
         Unknown(at=at, reason="malformed json", raw_type=None),
     ]

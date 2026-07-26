@@ -8,12 +8,14 @@ from spice.agent.codextranscript import codex_line_events, project_codex_events
 from spice.agent.driver import CODEX_DRIVER
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
     Reasoning,
     ToolCall,
     ToolOutput,
+    TurnLifecycle,
     Unknown,
     UserMessage,
     WebSearch,
@@ -342,6 +344,45 @@ def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -
     # The extra rate-limit fact cannot be projected from ContextUsage, so the
     # exactness gate preserves the original line rather than partially rewriting it.
     assert CODEX_DRIVER.normalize_transcript_line(raw) is raw
+
+
+@pytest.mark.parametrize(
+    ("payload", "event_type"),
+    [
+        ({"type": "task_started", "turn_id": TURN_ID}, TurnLifecycle),
+        (
+            {
+                "type": "task_complete",
+                "turn_id": TURN_ID,
+                "last_agent_message": "settled",
+            },
+            TurnLifecycle,
+        ),
+        ({"type": "error", "turn_id": TURN_ID}, TurnLifecycle),
+        (
+            {
+                "type": "exec_command_end",
+                "turn_id": TURN_ID,
+                "cwd": "/repo",
+                "command": ["spice", "task", "status"],
+                "exit_code": "0",
+                "status": "completed",
+            },
+            CommandExecution,
+        ),
+    ],
+)
+def test_codex_event_messages_cross_as_typed_session_facts(
+    payload: dict, event_type: type
+) -> None:
+    raw = {"timestamp": TIMESTAMP, "type": "event_msg", "payload": payload}
+
+    events = codex_line_events(raw, source=SOURCE, line=LINE)
+
+    assert [type(event) for event in events] == [event_type]
+    assert events[0].at.source == SOURCE
+    assert events[0].at.line == LINE
+    assert events[0].at.timestamp == TIMESTAMP
 
 
 def test_unrecognized_response_item_survives_as_unknown_and_identity() -> None:

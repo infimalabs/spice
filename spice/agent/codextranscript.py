@@ -21,6 +21,7 @@ from typing import Any, Literal
 from spice.transcript.events import (
     UNLOCATED_SOURCE,
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -31,6 +32,7 @@ from spice.transcript.events import (
     ToolOutput,
     ToolOutputType,
     TranscriptEvent,
+    TurnLifecycle,
     Unknown,
     UserMessage,
     WebSearch,
@@ -57,8 +59,10 @@ def codex_line_events(
     if not isinstance(payload, dict):
         return []
     payload_type = payload.get("type")
-    if outer_type == "event_msg" and payload_type == "token_count":
-        return _codex_context_usage_events(stamper, payload)
+    if outer_type == "event_msg":
+        if payload_type == "token_count":
+            return _codex_context_usage_events(stamper, payload)
+        return _codex_event_message_events(stamper, payload)
     if outer_type != "response_item":
         return []
     if payload_type == "message":
@@ -83,6 +87,62 @@ def codex_line_events(
             raw_type=payload_type if isinstance(payload_type, str) else None,
         )
     ]
+
+
+def _codex_event_message_events(
+    stamper: LineStamper, payload: dict[str, Any]
+) -> list[TranscriptEvent]:
+    payload_type = payload.get("type")
+    turn_id = _optional_str(payload.get("turn_id"))
+    if payload_type == "task_started":
+        return [
+            TurnLifecycle(
+                at=stamper.stamp(),
+                state="started",
+                turn_id=turn_id,
+            )
+        ]
+    if payload_type == "task_complete":
+        return [
+            TurnLifecycle(
+                at=stamper.stamp(),
+                state="completed",
+                turn_id=turn_id,
+                last_assistant_message=_optional_str(payload.get("last_agent_message")),
+            )
+        ]
+    if payload_type == "error":
+        return [
+            TurnLifecycle(
+                at=stamper.stamp(),
+                state="error",
+                turn_id=turn_id,
+            )
+        ]
+    if payload_type == "exec_command_end":
+        return [
+            CommandExecution(
+                at=stamper.stamp(),
+                turn_id=turn_id,
+                cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
+                command=_render_command(payload.get("command") or payload.get("cmd")),
+                exit_code=_command_exit_code(payload.get("exit_code")),
+                status=_optional_str(payload.get("status")) or "completed",
+            )
+        ]
+    if payload_type == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str) and message:
+            return [
+                UserMessage(
+                    at=stamper.stamp(),
+                    text=message,
+                    prompt_id=None,
+                    turn_id=turn_id,
+                    transcript_kind="event_msg",
+                )
+            ]
+    return []
 
 
 def normalize_codex_line(raw: dict[str, Any]) -> dict[str, Any]:
@@ -614,6 +674,24 @@ def _optional_str(value: Any) -> str | None:
 
 def _optional_int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _command_exit_code(value: Any) -> int | None:
+    direct = _optional_int(value)
+    if direct is not None:
+        return direct
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _render_command(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return value if isinstance(value, str) else "-"
 
 
 def _int(value: Any) -> int:

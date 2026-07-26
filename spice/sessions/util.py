@@ -28,23 +28,6 @@ def format_float(value: float | None) -> str:
     return f"{value:.1f}"
 
 
-def int_or_none(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
-
-
-def int_or_zero(value: Any) -> int:
-    parsed = int_or_none(value)
-    return parsed if parsed is not None else 0
-
-
 def dedupe_paths(paths: Iterable[Path]) -> list[Path]:
     seen: set[str] = set()
     unique: list[Path] = []

@@ -9,7 +9,12 @@ from typing import Any, Iterable
 
 from spice.sessions import records
 from spice.sessions.records import TurnRecord
-from spice.sessions.util import first_text, format_float
+from spice.sessions.util import format_float
+from spice.transcript.events import (
+    AssistantText,
+    TurnLifecycle,
+    UserMessage as TranscriptUserMessage,
+)
 from spice.transcript.timestamps import normalize_timestamp, parse_timestamp
 
 QUESTION_WORDS = ("what", "why", "how", "can", "is", "are", "should", "could", "would")
@@ -80,79 +85,49 @@ def collect_messages(files: list[Path]) -> list[MessageRecord]:
 def _collect_messages_from_file(path: Path) -> list[MessageRecord]:
     rows: list[MessageRecord] = []
     current_turn_id: str | None = None
-    for obj in records.iter_events(path):
-        ts = normalize_timestamp(obj.get("timestamp"))
+    for event in records.iter_events(path):
+        ts = normalize_timestamp(event.at.timestamp)
         if not ts:
             continue
-        payload = obj.get("payload") or {}
-        top_type = obj.get("type")
-        if top_type == "event_msg" and payload.get("type") == "task_started":
-            current_turn_id = (
-                payload.get("turn_id")
-                if isinstance(payload.get("turn_id"), str)
-                else None
-            )
+        if isinstance(event, TurnLifecycle) and event.state == "started":
+            current_turn_id = event.turn_id
             continue
-        if top_type == "event_msg" and payload.get("type") == "task_complete":
+        if isinstance(event, TurnLifecycle) and event.state == "completed":
             current_turn_id = None
             continue
-        if top_type == "event_msg" and payload.get("type") == "user_message":
-            record = _user_event_message(path, ts, current_turn_id, payload)
-        elif _is_response_message(top_type, payload):
-            record = _response_message(path, ts, current_turn_id, payload)
-        else:
-            record = None
+        record = _message_from_event(path, ts, current_turn_id, event)
         if record is not None:
             rows.append(record)
     return rows
 
 
-def _user_event_message(
-    path: Path, ts: str, turn_id: str | None, payload: dict[str, Any]
+def _message_from_event(
+    path: Path,
+    ts: str,
+    turn_id: str | None,
+    event: object,
 ) -> MessageRecord | None:
-    message = payload.get("message")
-    if not isinstance(message, str) or not message.strip():
-        return None
-    return _message_record(
-        path,
-        ts,
-        turn_id,
-        side="user",
-        phase="prompt",
-        text=message,
-    )
-
-
-def _is_response_message(top_type: Any, payload: dict[str, Any]) -> bool:
-    return top_type == "response_item" and payload.get("type") == "message"
-
-
-def _response_message(
-    path: Path, ts: str, turn_id: str | None, payload: dict[str, Any]
-) -> MessageRecord | None:
-    text = first_text(payload.get("content"))
-    if not text:
-        return None
-    role = payload.get("role")
-    if role == "user":
+    if isinstance(event, TranscriptUserMessage):
+        if event.role != "user" or not event.text:
+            return None
         return _message_record(
             path,
             ts,
             turn_id,
             side="user",
             phase="prompt",
-            text=text,
+            text=event.text,
         )
-    if role == "assistant":
-        return _message_record(
-            path,
-            ts,
-            turn_id,
-            side="assistant",
-            phase=str(payload.get("phase") or "commentary"),
-            text=text,
-        )
-    return None
+    if not isinstance(event, AssistantText) or not event.text:
+        return None
+    return _message_record(
+        path,
+        ts,
+        turn_id,
+        side="assistant",
+        phase=event.phase or ("final_answer" if event.final else "commentary"),
+        text=event.text,
+    )
 
 
 def _message_record(
