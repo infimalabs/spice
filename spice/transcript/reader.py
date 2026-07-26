@@ -1,9 +1,10 @@
-"""Shared file-access engine for authoritative transcript JSONL.
+"""Shared typed reader for authoritative transcript JSONL.
 
 The transcript remains the sole stored truth.  This module only owns access to
 that truth: opening plain or gzip files, byte-offset seeks, bounded and reverse
-windows, cursor offsets, malformed-line handling, and one parsed line-record
-handoff.  Dialect decoding and consumer-specific projection stay above it.
+windows, cursor offsets, malformed-line handling, and one internal parsed
+line-record handoff to the driver-backed decoder. Public reads expose only the
+resulting typed event stream. Consumer-specific projection stays above it.
 """
 
 from __future__ import annotations
@@ -16,10 +17,26 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
+
+from spice.agent.driver import AgentDriver
+from spice.transcript.decode import _decode_parsed_line
+from spice.transcript.events import TranscriptEvent
 
 REVERSE_WINDOW_BYTES = 8 * 1024 * 1024
 BinaryTranscript = BinaryIO | gzip.GzipFile
+
+__all__ = [
+    "REVERSE_WINDOW_BYTES",
+    "TranscriptCursor",
+    "TranscriptEventRead",
+    "TranscriptEventReader",
+    "cursor_offset",
+    "locked_cursor",
+    "offset_after_line",
+    "render_cursor",
+    "transcript_size",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +61,7 @@ class TranscriptFileIdentity:
 
 @dataclass(frozen=True, slots=True)
 class TranscriptRead:
-    """One bounded access pass whose records were each parsed exactly once."""
+    """Internal access pass whose line records were each parsed exactly once."""
 
     records: tuple[TranscriptLine, ...]
     access_start_offset: int
@@ -53,6 +70,99 @@ class TranscriptRead:
     file_size: int
     file_identity: TranscriptFileIdentity | None
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptEventRead:
+    """One access pass decoded into ordered typed facts exactly once."""
+
+    events: tuple[TranscriptEvent, ...]
+    access_start_offset: int
+    start_offset: int
+    end_offset: int
+    file_size: int
+    error: str | None = None
+
+    def dispatch(self, *consumers: EventConsumer) -> None:
+        """Hand each already-decoded fact to every projection in source order."""
+        for event in self.events:
+            for consumer in consumers:
+                consumer(event)
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptEventReader:
+    """Driver-bound typed access to one authoritative transcript."""
+
+    path: Path
+    driver: AgentDriver
+    source_actor: str | None
+
+    def read(
+        self,
+        mode: Literal["forward", "bounded", "reverse"],
+        *,
+        cursor: TranscriptCursor | None = None,
+        start_offset: int = 0,
+        end_offset: int | None = None,
+        align_partial_start: bool = False,
+        max_bytes: int = REVERSE_WINDOW_BYTES,
+    ) -> TranscriptEventRead:
+        """Decode one explicit access mode into ordered typed facts.
+
+        ``forward`` resumes through the one cursor identity contract and runs
+        to EOF. ``bounded`` covers ``start_offset`` through the required
+        ``end_offset``. ``reverse`` reads the byte window ending before
+        ``end_offset`` (or EOF).
+        """
+        if mode == "forward":
+            if start_offset:
+                raise ValueError("forward transcript reads resume through cursor")
+            raw_read = read_forward(
+                self.path,
+                cursor=cursor if cursor is not None else TranscriptCursor(),
+            )
+        elif mode == "bounded":
+            if end_offset is None:
+                raise ValueError("bounded transcript reads require end_offset")
+            raw_read = read_bounded(
+                self.path,
+                start_offset=start_offset,
+                end_offset=end_offset,
+                align_partial_start=align_partial_start,
+            )
+        elif mode == "reverse":
+            raw_read = read_reverse_window(
+                self.path,
+                end_offset=end_offset,
+                max_bytes=max_bytes,
+            )
+        else:
+            raise ValueError(f"unsupported transcript read mode: {mode}")
+        return self._decode(raw_read)
+
+    def _decode(self, read: TranscriptRead) -> TranscriptEventRead:
+        source = str(self.path)
+        events: list[TranscriptEvent] = []
+        for record in read.records:
+            events.extend(
+                _decode_parsed_line(
+                    record.parsed,
+                    self.driver,
+                    source=source,
+                    line=record.offset,
+                    offset=record.offset,
+                    source_actor=self.source_actor,
+                )
+            )
+        return TranscriptEventRead(
+            events=tuple(events),
+            access_start_offset=read.access_start_offset,
+            start_offset=read.start_offset,
+            end_offset=read.end_offset,
+            file_size=read.file_size,
+            error=read.error,
+        )
 
 
 @dataclass
@@ -72,6 +182,9 @@ def dispatch_records(
     for record in records:
         for consumer in consumers:
             consumer(record)
+
+
+EventConsumer = Callable[[TranscriptEvent], None]
 
 
 @contextmanager

@@ -603,7 +603,10 @@ def _wait_for_send_followup(connection: _Connection) -> dict[str, Any]:
         return None
 
     with connection.arrival:
-        followup = connection.arrival.wait_for(first_followup, timeout=1.0)
+        followup = connection.arrival.wait_for(
+            first_followup,
+            timeout=BLOCKED_ENSURE_ENTRY_SECONDS,
+        )
     if followup is not None:
         return followup
     pytest.fail(f"timed out waiting for send followup; sent={connection.sent!r}")
