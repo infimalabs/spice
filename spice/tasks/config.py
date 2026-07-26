@@ -426,9 +426,9 @@ def _bootstrap_lock(root: Path | None = None):
 def task_event_generation() -> str:
     """Mint the token every task-backend event is ordered by.
 
-    Microseconds, not nanoseconds: a reader that orders these as numbers needs
-    them to stay exact, and a nanosecond count is already past the range a
-    double holds exactly, where two distinct instants compare equal.
+    Microseconds, not nanoseconds: this is the count every generation in the
+    repo is minted in, so a reader that meets more than one of them meets one
+    kind of token rather than one encoding per authority.
     """
     return str(time.time_ns() // 1000)
 
