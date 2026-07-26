@@ -16,6 +16,7 @@ from spice import defaults
 from spice.config.layers import SYSTEM_SOURCE, contextualize_config_error, load_config
 from spice.config.pyproject import pyproject_table, read_pyproject
 from spice.errors import SpiceError
+from spice.serve.payload.wire import validate_emitter_payload
 from spice.version import runtime_version
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -145,35 +146,49 @@ def render_index_html(
     resolved = branding or serve_branding(repo_root)
     brand_html = html.escape(resolved.name)
     brand_attr = html.escape(resolved.name, quote=True)
-    brand_json = json.dumps(
-        {
-            "name": resolved.name,
-            "defaultLifetime": resolved.default_lifetime,
-            "version": runtime_version(),
-        },
-        ensure_ascii=False,
-    ).replace("</", "<\\/")
-    global_settings_json = json.dumps(
-        {
-            "fastMode": (
-                initial_global_settings.get("fastMode") is True
-                if initial_global_settings
-                else False
-            ),
-            "observerMode": (
-                initial_global_settings.get("observerMode") is True
-                if initial_global_settings
-                else False
-            ),
-        },
-        ensure_ascii=False,
-    ).replace("</", "<\\/")
+    brand_json = _page_global_json(
+        validate_emitter_payload(
+            "web.branding_payload",
+            {
+                "name": resolved.name,
+                "defaultLifetime": resolved.default_lifetime,
+                "version": runtime_version(),
+            },
+        )
+    )
+    global_settings_json = _page_global_json(
+        validate_emitter_payload(
+            "web.initial_global_settings_payload",
+            {
+                "fastMode": (
+                    initial_global_settings.get("fastMode") is True
+                    if initial_global_settings
+                    else False
+                ),
+                "observerMode": (
+                    initial_global_settings.get("observerMode") is True
+                    if initial_global_settings
+                    else False
+                ),
+            },
+        )
+    )
     return _INDEX_HTML_TEMPLATE.format(
         brand_html=brand_html,
         brand_attr=brand_attr,
         brand_json=brand_json,
         global_settings_json=global_settings_json,
     )
+
+
+def _page_global_json(payload: Any) -> str:
+    """A page global as script text that cannot terminate its own element.
+
+    The browser parses ``</`` inside a script as the start of the end tag no
+    matter where it sits, so a brand carrying that pair would close the element
+    early and spill the rest of the object into the document as markup.
+    """
+    return json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
 
 
 def _string(value: Any) -> str:

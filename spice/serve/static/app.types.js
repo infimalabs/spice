@@ -954,15 +954,15 @@
 
 /**
  * @typedef {Object} ServeBranding
- * @property {string=} name
- * @property {string=} defaultLifetime
- * @property {string=} version
+ * @property {string} name
+ * @property {string} defaultLifetime
+ * @property {string} version
  */
 
 /**
  * @typedef {Object} ServeInitialGlobalSettings
- * @property {boolean=} fastMode
- * @property {boolean=} observerMode
+ * @property {boolean} fastMode
+ * @property {boolean} observerMode
  */
 
 /** @type {ServeBranding} */
