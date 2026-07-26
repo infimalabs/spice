@@ -24,73 +24,221 @@ let globalTransientStatusIsError = false;
 let globalTransientStatusTimestamp = "";
 let globalActivityStatusText = "";
 
+/** Apply the one server-owned chrome envelope carried by an ingress payload. */
+function applyLaneChromePayload(payload) {
+  const chrome = (payload || {}).chrome;
+  return chrome ? laneStore.applyLaneChrome(chrome) : null;
+}
+
+function laneChromeRecord(subject) {
+  const targetId =
+    typeof subject === "string" ? subject : String((subject || {}).targetId || "");
+  return laneStore.laneChrome(targetId);
+}
+
+function laneChromeTaskBoard(subject) {
+  return (laneChromeRecord(subject) || {}).taskBoard || {};
+}
+
+/** @returns {LaneChromePendingInbox} */
+function laneChromePendingInbox(subject) {
+  return (laneChromeRecord(subject) || {}).pendingInbox || {
+    count: 0,
+    label: "0",
+    keys: [],
+  };
+}
+
+function laneChromeRenewal(subject) {
+  return (laneChromeRecord(subject) || {}).renewal || {};
+}
+
+function laneChromeTeamIdentity(subject) {
+  return (
+    ((laneChromeRecord(subject) || {}).teamConfig || {}).teamIdentity || {
+      state: "none",
+    }
+  );
+}
+
+function laneChromeActivity(subject) {
+  return (laneChromeRecord(subject) || {}).activity || {};
+}
+
+function laneChromeLifecycle(subject) {
+  return (laneChromeRecord(subject) || {}).lifecycle || {};
+}
+
+function laneChromeConfigRevision(subject) {
+  return teamIdentityConfigRevision(laneChromeTeamIdentity(subject));
+}
+
+function laneChromeTeamRevision(subject) {
+  return teamIdentityRevision(laneChromeTeamIdentity(subject));
+}
+
+function laneChromeTeamId(subject) {
+  return teamIdentityTeamId(laneChromeTeamIdentity(subject));
+}
+
 /**
+ * @param {Object} lane
+ * @param {StatusLine} statusLine
+ * @returns {StatusLine}
+ */
+function laneChromeStatusLine(lane, statusLine = {}) {
+  const pending = laneChromePendingInbox(lane);
+  const activity = laneChromeActivity(lane);
+  const lifecycle = laneChromeLifecycle(lane);
+  return {
+    ...statusLine,
+    pendingInboxCount: Math.max(0, Number(pending.count) || 0),
+    pendingInboxLabel: String(pending.label || pending.count || 0),
+    pendingInboxKeys: Array.isArray(pending.keys) ? pending.keys : [],
+    lastAssistantAt:
+      String(activity.lastAssistantAt || "") ||
+      String(statusLine.lastAssistantAt || ""),
+    agentProcessStatus:
+      String(lifecycle.processStatus || "") ||
+      String(statusLine.agentProcessStatus || ""),
+    agentVisualStatus:
+      String(lifecycle.visualStatus || "") ||
+      String(statusLine.agentVisualStatus || ""),
+    bindingStatus:
+      String(lifecycle.bindingStatus || "") ||
+      String(statusLine.bindingStatus || ""),
+    rolloutStatus:
+      String(lifecycle.rolloutStatus || "") ||
+      String(statusLine.rolloutStatus || ""),
+  };
+}
+
+function renderLaneChromeTransition(transition) {
+  if (!transition || transition.disposition !== "applied") return;
+  const changed = new Set(transition.changedFacets || []);
+  const lane = laneStore.laneForId(transition.targetId);
+  let inventoryChanged = false;
+  if (changed.has("taskBoard")) {
+    const board = transition.record.taskBoard || {};
+    inventoryChanged = applyTaskFilterInventory(board.taskFilterInventory || {});
+  }
+  if (!lane) return;
+  const host = laneGroupHost(lane);
+  if (changed.has("pendingInbox")) {
+    reconcileLanePendingChrome(lane);
+    if (lane.lastRenderedStatusLine && lane.pipEl)
+      applyRetainedLaneStatus(
+        lane,
+        laneChromeStatusLine(
+          lane,
+          (lane.latestPayload || {}).statusLine || lane.lastRenderedStatusLine,
+        ),
+      );
+    renderLaneViewBadge(host, "compose");
+    syncComposerPlaceholders(host);
+  }
+  if (changed.has("taskBoard")) {
+    if (!inventoryChanged) renderLaneFiltersPane(host);
+    renderLaneViewBadge(host, "filters");
+    renderFilterPills();
+  }
+  if (changed.has("renewal")) {
+    const renewal = transition.record.renewal || {};
+    applyServerLaneLifetime(lane, renewal.lifetime, {
+      configRevision: laneChromeConfigRevision(lane),
+      supersedePending: true,
+    });
+    renderLaneFiltersPane(host);
+    renderLaneViewBadge(host, "filters");
+    renderFilterPills();
+    syncComposerShards(
+      host,
+      laneIsFusedHost(host) ? laneGroupMemberLanes(host) : [host],
+    );
+  }
+  if (
+    changed.has("identity") ||
+    changed.has("lifecycle") ||
+    changed.has("activity")
+  ) {
+    const statusLine = laneChromeStatusLine(
+      lane,
+      (lane.latestPayload || {}).statusLine || lane.lastRenderedStatusLine || {},
+    );
+    applyRetainedLaneStatus(lane, statusLine);
+    syncFusedLaneLights(host);
+    syncFusedLaneStatusLine(host);
+  }
+  if (changed.has("teamConfig")) syncLaneTeamMenuButton(host);
+}
+
+function subscribeLaneChromeRendering(store) {
+  return store.subscribe((change) => {
+    if (change.kind === "laneChrome")
+      renderLaneChromeTransition(change.transition);
+  });
+}
+
+if (typeof laneStore !== "undefined") subscribeLaneChromeRendering(laneStore);
+
+/**
+ * Apply the non-faceted part of a lane payload. The chrome envelope must have
+ * reached ServeLaneStore before this function is allowed to paint.
+ *
  * @param {Object} lane
  * @param {LaneChromeSourcePayload} payload
  */
-function renderLaneChrome(lane, payload) {
-  const staleTeamConfig = lanePayloadTeamConfigIsStale(lane, payload);
+function renderLanePayloadPresentation(lane, payload) {
+  const hasIdentity =
+    payloadHasField(payload, "targetIdentity") ||
+    payloadHasField(payload, "serveAgentIdentity");
+  const previousIdentity = hasIdentity
+    ? laneIdentityPresentationFingerprint(lane)
+    : "";
   applyLaneTargetIdentity(lane, payload);
   applyLaneServeAgentIdentity(lane, payload);
-  if (!staleTeamConfig) {
-    lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
-    lane.effectiveTaskFilters = uniqueStringList(
-      payload.effectiveTaskFilters || lane.effectiveTaskFilters,
-    );
-    if (payloadHasField(payload, "laneFilterVersion"))
-      lane.laneFilterVersion = String(payload.laneFilterVersion || "");
-    applyLaneTeamIdentity(lane, payload);
+  const identityChanged =
+    hasIdentity && previousIdentity !== laneIdentityPresentationFingerprint(lane);
+  if (payload.laneInfo) {
+    lane.laneInfo = payload.laneInfo;
+    renderLaneInfoPane(laneGroupHost(lane));
   }
-  if (payload.taskFilterInventory)
-    applyTaskFilterInventory(payload.taskFilterInventory);
-  if (payload.privateTaskCount !== undefined)
-    lane.privateTaskCount = Math.max(0, Number(payload.privateTaskCount) || 0);
-  if (payload.laneInfo) lane.laneInfo = payload.laneInfo;
-  if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
-  if (!staleTeamConfig && payload.lifetime)
-    applyServerLaneLifetime(lane, payload.lifetime, {
-      configRevision: payloadHasField(payload, "teamIdentity")
-        ? teamIdentityConfigRevision(payload.teamIdentity)
-        : lane.configRevision,
-    });
-  const rawStatusLine = payload.statusLine || {};
-  const pendingApplied = syncLaneBackendPending(lane, rawStatusLine);
-  const statusLine = applyRetainedLaneStatus(
-    lane,
-    pendingApplied
-      ? rawStatusLine
-      : statusLineWithLanePendingIdentity(lane, rawStatusLine),
-  );
-  renderLaneViewShell(laneGroupHost(lane));
-  renderFilterPills();
-  syncFusedLaneChrome(laneGroupHost(lane));
-  syncComposerPlaceholders(laneGroupHost(lane));
+  if (payload.statusLine) {
+    applyRetainedLaneStatus(
+      lane,
+      laneChromeStatusLine(lane, payload.statusLine),
+    );
+  }
+  const host = laneGroupHost(lane);
+  if (identityChanged) {
+    syncComposerShards(
+      host,
+      laneIsFusedHost(host) ? laneGroupMemberLanes(host) : [host],
+    );
+    syncComposerPlaceholders(host);
+  }
+  if (identityChanged || payload.statusLine) {
+    syncFusedLaneLights(host);
+    syncFusedLaneStatusLine(host);
+  }
+}
+
+function laneIdentityPresentationFingerprint(lane) {
+  return JSON.stringify([
+    lane.branchName || "",
+    lane.agentName || "",
+    lane.driverName || "",
+    lane.driverModel || "",
+    lane.driverEffort || "",
+    lane.driverIconName || "",
+    lane.targetThreadId || "",
+    lane.activeThreadId || "",
+    lane.serveAgentIdentity || {},
+  ]);
 }
 
 function payloadHasField(payload, name) {
   return Object.prototype.hasOwnProperty.call(payload || {}, name);
-}
-
-function lanePayloadTeamConfigIsStale(lane, payload) {
-  if (!payloadHasField(payload, "teamIdentity")) return false;
-  const identity = payload.teamIdentity || {};
-  const incomingState = identityPayloadState(identity, "team identity");
-  const currentTeamId = String(lane.teamId || "");
-  const currentConfigRevision = Math.max(0, Number(lane.configRevision) || 0);
-  const currentTeamRevision = Math.max(0, Number(lane.teamRevision) || 0);
-  if (incomingState === "none")
-    return Boolean(currentTeamId && (currentConfigRevision || currentTeamRevision));
-  if (incomingState !== "member")
-    throw new Error("invalid team identity state: " + (incomingState || "-"));
-  const incomingRevision = teamIdentityConfigRevision(identity);
-  if (
-    !incomingRevision ||
-    !currentConfigRevision ||
-    incomingRevision >= currentConfigRevision
-  )
-    return false;
-  const incomingTeamId = teamIdentityTeamId(identity);
-  return Boolean(incomingTeamId && currentTeamId && incomingTeamId === currentTeamId);
 }
 
 function applyLaneTargetIdentity(lane, payload) {
@@ -139,29 +287,6 @@ function applyLaneServeAgentIdentity(lane, payload) {
   const threadId = serveAgentThreadId(identity);
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
-}
-
-function applyLaneTeamIdentity(lane, payload) {
-  if (!payloadHasField(payload, "teamIdentity")) return;
-  const identity = payload.teamIdentity || {};
-  const state = identityPayloadState(identity, "team identity");
-  if (state === "none") {
-    lane.teamId = "";
-    lane.teamRevision = 0;
-    lane.configRevision = 0;
-    return;
-  }
-  if (state !== "member")
-    throw new Error("invalid team identity state: " + (state || "-"));
-  lane.teamId = requiredIdentityText(identity.teamId, "team id");
-  lane.teamRevision = nonnegativeIdentityNumber(
-    identity.teamRevision,
-    "team revision",
-  );
-  lane.configRevision = nonnegativeIdentityNumber(
-    identity.configRevision,
-    "config revision",
-  );
 }
 
 function targetIdentityBranch(identity) {
@@ -459,15 +584,13 @@ function beginLanePendingSubmission(lane) {
 
 function finishLanePendingSubmission(lane, options = {}) {
   const accepted = Boolean(options.accepted);
-  const hasBackendCount =
-    Number.isFinite(Number(options.pendingInboxCount)) &&
-    Number.isFinite(Number(options.pendingInboxVersion));
   const inboxKey = String(options.inboxKey || "");
   lane.pendingSubmissionCount = Math.max(0, lane.pendingSubmissionCount - 1);
-  if (hasBackendCount) applyLaneBackendPendingPayload(lane, options);
-  const submittedPendingFloor = hasBackendCount
-    ? lane.backendPendingInboxCount
-    : lane.optimisticPendingInboxCount;
+  const backendCount = laneChromePendingCount(lane);
+  const submittedPendingFloor = Math.max(
+    backendCount,
+    lane.optimisticPendingInboxCount,
+  );
   if (accepted && inboxKey && submittedPendingFloor > 0) {
     lane.optimisticSubmittedInboxKeys.add(inboxKey);
     lane.optimisticPendingInboxFloor = Math.max(
@@ -475,14 +598,14 @@ function finishLanePendingSubmission(lane, options = {}) {
       submittedPendingFloor,
     );
   }
-  if (accepted && !hasBackendCount) {
+  if (accepted) {
     lane.optimisticPendingInboxCount = Math.max(
-      lane.backendPendingInboxCount,
+      backendCount,
       lane.optimisticPendingInboxCount,
     );
   } else if (!lane.pendingSubmissionCount) {
     lane.optimisticPendingInboxCount = Math.max(
-      lane.backendPendingInboxCount,
+      backendCount,
       laneSubmittedMessagePendingFloor(lane),
     );
   }
@@ -496,12 +619,12 @@ function syncPendingSubmissionComposerState(lane) {
     syncComposerPendingSendState(laneGroupHost(lane));
 }
 
-function syncLaneBackendPending(lane, payload) {
-  if (!applyLaneBackendPendingPayload(lane, payload)) return false;
+function reconcileLanePendingChrome(lane) {
+  const backendCount = laneChromePendingCount(lane);
   if (lane.pendingSubmissionCount > 0) {
     lane.optimisticPendingInboxCount = Math.max(
       lane.optimisticPendingInboxCount,
-      lane.backendPendingInboxCount,
+      backendCount,
       laneSubmittedMessagePendingFloor(lane),
     );
     return true;
@@ -509,74 +632,25 @@ function syncLaneBackendPending(lane, payload) {
   reconcileSubmittedMessagePredictions(lane);
   clearDrainedSubmittedMessagePredictions(lane);
   lane.optimisticPendingInboxCount = Math.max(
-    lane.backendPendingInboxCount,
+    backendCount,
     laneSubmittedMessagePendingFloor(lane),
   );
   return true;
 }
 
-function applyLaneBackendPendingPayload(lane, payload) {
-  const identity = pendingIdentityFromPayload(payload);
-  if (!pendingIdentityIsCurrent(lane, identity)) return false;
-  lane.backendPendingInboxCount = identity.count;
-  lane.backendPendingInboxVersion =
-    identity.version || lane.backendPendingInboxVersion || 0;
-  if (identity.keys !== null) {
-    lane.backendPendingInboxKeys = new Set(identity.keys);
-    lane.backendPendingInboxRevision = identity.revision;
-    lane.backendPendingInboxKeysAuthoritative = true;
-  } else {
-    lane.backendPendingInboxKeysAuthoritative = false;
-  }
-  return true;
-}
-
-function pendingIdentityFromPayload(payload) {
-  if (!payload || typeof payload !== "object")
-    throw new Error("pending identity payload is required");
-  const source = payload;
-  const count = Math.max(0, Number(source.pendingInboxCount) || 0);
-  const version = Number(source.pendingInboxVersion);
-  if (!Number.isFinite(version) || version <= 0)
-    throw new Error("pending identity version is required");
-  const keys = Array.isArray(source.pendingInboxKeys)
-    ? source.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
-    : null;
-  return {
-    count,
-    keys,
-    revision: String(source.pendingInboxRevision || ""),
-    version,
-  };
-}
-
-function pendingIdentityIsCurrent(lane, identity) {
-  const currentVersion = Math.max(0, Number(lane.backendPendingInboxVersion) || 0);
-  return !currentVersion || identity.version >= currentVersion;
-}
-
-function statusLineWithLanePendingIdentity(lane, statusLine) {
-  return {
-    ...statusLine,
-    pendingInboxCount: Math.max(0, Number(lane.backendPendingInboxCount) || 0),
-    pendingInboxLabel: String(
-      Math.max(0, Number(lane.backendPendingInboxCount) || 0),
-    ),
-    pendingInboxKeys: [...(lane.backendPendingInboxKeys || new Set())],
-    pendingInboxRevision: lane.backendPendingInboxRevision || "",
-    pendingInboxVersion: Math.max(0, Number(lane.backendPendingInboxVersion) || 0),
-  };
+function laneChromePendingCount(lane) {
+  return Math.max(0, Number(laneChromePendingInbox(lane).count) || 0);
 }
 
 function lanePendingDisplayCount(lane) {
   return Math.max(
-    lane.backendPendingInboxCount || 0,
+    laneChromePendingCount(lane),
     lane.optimisticPendingInboxCount || 0,
   );
 }
 
 function clearDrainedSubmittedMessagePredictions(lane) {
-  if (lane.backendPendingInboxCount > 0) return;
+  if (laneChromePendingCount(lane) > 0) return;
   if (Math.max(0, Number(lane.pendingSubmissionCount) || 0) > 0) return;
   if (!lane.optimisticSubmittedInboxKeys.size) return;
   lane.optimisticSubmittedInboxKeys.clear();
@@ -594,18 +668,9 @@ function reconcileSubmittedMessagePredictions(lane) {
     lane.optimisticPendingInboxFloor = 0;
     return;
   }
-  if (lane.backendPendingInboxKeysAuthoritative) {
-    for (const key of [...lane.optimisticSubmittedInboxKeys]) {
-      if (!lane.backendPendingInboxKeys.has(key))
-        lane.optimisticSubmittedInboxKeys.delete(key);
-    }
-    if (!lane.optimisticSubmittedInboxKeys.size)
-      lane.optimisticPendingInboxFloor = 0;
-    return;
-  }
-  const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));
+  const backendKeys = new Set(laneChromePendingInbox(lane).keys || []);
   for (const key of [...lane.optimisticSubmittedInboxKeys]) {
-    if (ackedKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);
+    if (!backendKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);
   }
   if (!lane.optimisticSubmittedInboxKeys.size)
     lane.optimisticPendingInboxFloor = 0;

@@ -10,6 +10,12 @@ const context = {
   laneGroupHost(lane) {
     return lane.groupHost || lane;
   },
+  laneChromeRenewal(lane) {
+    return { lifetime: lane.canonicalLifetime || "Drive" };
+  },
+  laneChromeConfigRevision(lane) {
+    return lane.canonicalConfigRevision || 0;
+  },
   persistLaneHints() {},
   syncLaneEffectiveControls(lane) {
     lane.renderedLifetime = context.laneEffectiveLifetime(lane);
@@ -43,7 +49,8 @@ function assert(condition, message) {
 function lane() {
   return {
     lifetime: "Drive",
-    serverLifetime: "Drive",
+    canonicalLifetime: "Drive",
+    canonicalConfigRevision: 10,
     speechMode: "speak",
     configRevision: 10,
     pendingLifetimeCommit: "",
@@ -84,6 +91,8 @@ assert(
 
 const currentMatch = lane();
 context.setLaneLifetime(currentMatch, "Steer");
+currentMatch.canonicalLifetime = "Steer";
+currentMatch.canonicalConfigRevision = 11;
 context.applyServerLaneLifetime(currentMatch, "Steer", {
   configRevision: 11,
   requestId: currentMatch.pendingLifetimeRequestId,
@@ -92,8 +101,6 @@ context.applyServerLaneLifetime(currentMatch, "Steer", {
 assert(currentMatch.lifetime === "Steer", "matching response keeps selection");
 assert(currentMatch.pendingLifetimeCommit === "", "matching response settles");
 
-currentMatch.configRevision = 11;
-currentMatch.serverLifetime = "Steer";
 const settledStaleApplied = context.applyServerLaneLifetime(currentMatch, "Drive", {
   configRevision: 10,
 });
@@ -103,8 +110,8 @@ assert(
   "settled stale revision does not rewind lifetime",
 );
 assert(
-  currentMatch.serverLifetime === "Steer",
-  "settled stale revision does not rewind server lifetime",
+  context.laneServerLifetime(currentMatch) === "Steer",
+  "settled stale revision does not rewind canonical server lifetime",
 );
 
 const rollback = lane();

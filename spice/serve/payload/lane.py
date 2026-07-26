@@ -151,11 +151,15 @@ def lane_chrome_payload(
     today; WEB-1kGvkZqD settles the epoch source that lets those two join.
     """
     observations: list[LaneChromeObservation] = []
+    team_revision = int((team_identity or {}).get("teamRevision", 0))
     if team_identity is not None:
         observations.append(
             LaneChromeObservation(
                 "teamConfig",
-                LaneChromeOrder(revision=int(team_identity.get("configRevision", 0))),
+                # Team revision is the store's global event counter for this
+                # team. It advances for membership, config, and renewal
+                # mutations, whereas configRevision advances for config only.
+                LaneChromeOrder(revision=team_revision),
                 {"teamIdentity": dict(team_identity)},
             )
         )
@@ -175,7 +179,13 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "taskBoard",
-                LaneChromeOrder(epoch=str(task_filter_inventory.get("revision", ""))),
+                # The joined lane board changes when either authority feeding
+                # it changes: task rows/catalog advance the board epoch, while
+                # this team's filters/lifetime advance the team revision.
+                LaneChromeOrder(
+                    epoch=str(task_filter_inventory.get("revision", "")),
+                    revision=team_revision,
+                ),
                 {
                     "taskFilters": team_facts.get("taskFilters", []),
                     "taskFilterEntries": team_facts.get("taskFilterEntries", []),
@@ -192,7 +202,16 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "renewal",
-                LaneChromeOrder(revision=int(renewal_intent.get("revision", 0))),
+                # Lifetime and renewal intent are one team-store observation.
+                # Both mutations advance the team's event revision; max keeps
+                # a legacy renewal row carrying a later explicit revision
+                # ordered without inventing a second browser authority.
+                LaneChromeOrder(
+                    revision=max(
+                        team_revision,
+                        int(renewal_intent.get("revision", 0)),
+                    )
+                ),
                 {
                     "lifetime": team_facts.get("lifetime", ""),
                     "renewalIntent": dict(renewal_intent),

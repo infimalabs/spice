@@ -491,17 +491,15 @@ function emptyTeamMessageFingerprint(lane) {
 }
 
 function emptyTeamTargetFingerprint(target) {
-  const statusLine = target.statusLine || {};
+  const statusLine = laneChromeStatusLine(target.id, target.statusLine || {});
   return [
     target.id || "",
     targetIdentityBranch(target.targetIdentity),
     targetIdentityAgentName(target.targetIdentity),
     targetIdentityThreadId(target.targetIdentity),
-    target.lastAssistantAt || "",
     statusLine.lastAssistantAt || "",
     statusLine.latestActivityKind || "",
-    target.pendingCount || 0,
-    target.pendingInboxCount || 0,
+    laneChromePendingInbox(target.id).count || 0,
     target.agentProcessStatus || "",
     target.agentVisualStatus || statusLine.agentVisualStatus || "",
     targetIdentityThreadState(target.targetIdentity),
@@ -822,7 +820,7 @@ function applyLaneSendResult(
 ) {
   result = /** @type {WorkTreeSendResult} */ (result);
   const previousThreadId = lane.targetThreadId || "";
-  applyTaskDrainRouteConfig(lane, result);
+  applyLaneSendChrome(lane, result);
   if (!result.ok) {
     finishLanePendingSubmission(lane, { accepted: false });
     setLaneTransientStatus(sourceLane, result.error || "send failed");
@@ -831,10 +829,6 @@ function applyLaneSendResult(
   finishLanePendingSubmission(lane, {
     accepted: true,
     inboxKey: result.key,
-    pendingInboxCount: result.pendingInboxCount,
-    pendingInboxKeys: result.pendingInboxKeys,
-    pendingInboxRevision: result.pendingInboxRevision,
-    pendingInboxVersion: result.pendingInboxVersion,
   });
   rememberAckContext(
     lane,
@@ -900,58 +894,45 @@ function taskDrainRouteConfig(result) {
 }
 
 /** @param {RoutedResult} result */
-function applyTaskDrainRouteConfig(lane, result) {
+function applyLaneSendChrome(lane, result) {
   const config = taskDrainRouteConfig(result);
-  if (!config) return;
-  applyRouteConfigToTargetInventory(lane, config);
-  if (payloadHasField(config, "targetIdentity"))
-    applyLaneTargetIdentity(lane, config);
-  if (payloadHasField(config, "serveAgentIdentity"))
-    applyLaneServeAgentIdentity(lane, config);
-  if (Array.isArray(config.taskFilters)) {
-    lane.taskFilters = uniqueStringList(config.taskFilters);
-    lane.laneFilterVersion = String(config.laneFilterVersion || "");
+  let identityChanged = false;
+  let routeTransition = null;
+  if (config) {
+    identityChanged = routeIdentityDiffers(lane, config);
+    if (identityChanged) {
+      applyRouteIdentityToTargetInventory(lane, config);
+      applyLaneTargetIdentity(lane, config);
+      applyLaneServeAgentIdentity(lane, config);
+    }
+    routeTransition = applyLaneChromePayload(config);
   }
-  if (Array.isArray(config.effectiveTaskFilters))
-    lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
-  if (Array.isArray(config.taskFilterEntries))
-    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
-  if (payloadHasField(config, "teamIdentity")) {
-    lane.teamId = teamIdentityTeamId(config.teamIdentity);
-    lane.teamRevision = teamIdentityRevision(config.teamIdentity);
-    lane.configRevision = teamIdentityConfigRevision(config.teamIdentity);
+  const resultTransition = applyLaneChromePayload(result);
+  if (identityChanged) {
+    const host = laneGroupHost(lane);
+    syncFusedLaneChrome(host);
+    syncComposerPlaceholders(host);
   }
-  if (config.lifetime)
-    applyServerLaneLifetime(lane, config.lifetime, {
-      configRevision: payloadHasField(config, "teamIdentity")
-        ? teamIdentityConfigRevision(config.teamIdentity)
-        : lane.configRevision,
-    });
-  renderLaneViewShell(laneGroupHost(lane));
-  renderFilterPills();
+  return { identityChanged, routeTransition, resultTransition };
 }
 
-function applyRouteConfigToTargetInventory(lane, config) {
+function routeIdentityDiffers(lane, config) {
+  const target = laneStore.targetForId(lane.targetId) || {};
+  return (
+    (payloadHasField(config, "targetIdentity") &&
+      !sameLaneChromeValue(config.targetIdentity, target.targetIdentity)) ||
+    (payloadHasField(config, "serveAgentIdentity") &&
+      !sameLaneChromeValue(config.serveAgentIdentity, target.serveAgentIdentity))
+  );
+}
+
+function applyRouteIdentityToTargetInventory(lane, config) {
   laneStore.updateTarget(lane.targetId, (target) => {
     const updated = { ...target };
     if (payloadHasField(config, "targetIdentity"))
       updated.targetIdentity = config.targetIdentity;
     if (payloadHasField(config, "serveAgentIdentity"))
       updated.serveAgentIdentity = config.serveAgentIdentity;
-    if (payloadHasField(config, "teamIdentity"))
-      updated.teamIdentity = config.teamIdentity;
-    if (Array.isArray(config.taskFilters))
-      updated.taskFilters = uniqueStringList(config.taskFilters);
-    if (Array.isArray(config.effectiveTaskFilters))
-      updated.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);
-    if (Array.isArray(config.taskFilterEntries))
-      updated.taskFilterEntries = normalizedTaskFilterEntries(
-        config.taskFilterEntries,
-      );
-    if (payloadHasField(config, "laneFilterVersion"))
-      updated.laneFilterVersion = String(config.laneFilterVersion || "");
-    if (payloadHasField(config, "lifetime"))
-      updated.lifetime = String(config.lifetime || "");
     return updated;
   });
 }

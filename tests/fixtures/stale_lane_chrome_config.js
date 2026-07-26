@@ -1,250 +1,214 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
-const currentConfigRevision = 11;
-const freshConfigRevision = 12;
-const lifetimeCalls = [];
-const statusWrites = [];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
+const freshRevision = 12;
+const renders = { pending: 0, filters: 0, lifetime: 0, team: 0 };
 const context = {
   console,
-  uniqueStringList(values) {
-    return Array.from(new Set(values || []));
-  },
   laneGroupHost(lane) {
     return lane;
   },
-  relativeAgeSeconds() {
-    return null;
+  laneIsFusedHost() {
+    return false;
+  },
+  laneGroupMemberLanes(lane) {
+    return [lane];
+  },
+  applyTaskFilterInventory() {
+    return false;
+  },
+  renderLaneFiltersPane() {
+    renders.filters += 1;
+  },
+  renderLaneViewBadge(_lane, view) {
+    if (view === "compose") renders.pending += 1;
+  },
+  renderFilterPills() {},
+  syncComposerPlaceholders() {},
+  syncComposerShards() {},
+  syncFusedLaneLights() {},
+  syncFusedLaneStatusLine() {},
+  syncLaneTeamMenuButton() {
+    renders.team += 1;
+  },
+  applyServerLaneLifetime(lane, lifetime) {
+    renders.lifetime += 1;
+    lane.lifetime = lifetime;
+    return true;
   },
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
-
-context.applyServerLaneLifetime = (lane, lifetime, options) => {
-  lifetimeCalls.push({ lifetime, configRevision: options.configRevision });
-  lane.lifetime = lifetime;
-  lane.serverLifetime = lifetime;
-  return true;
-};
-context.renderLaneViewShell = () => {};
-context.renderFilterPills = () => {};
-context.syncFusedLaneChrome = () => {};
-context.syncComposerPlaceholders = () => {};
-context.setLaneStatus = (_lane, statusLine) => {
-  statusWrites.push(statusLine);
-};
+const laneStore = vm.runInContext("laneStore", context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function lane() {
+const fusion = { hostTargetId: "lane-a", members: ["lane-a", "lane-b"] };
+const draft = { value: "do not replace" };
+const focus = { id: "composer-a" };
+const lane = {
+  targetId: "lane-a",
+  lifetime: "Drive",
+  fusion,
+  draft,
+  focus,
+  optimisticPendingInboxCount: 0,
+  optimisticSubmittedInboxKeys: new Set(),
+  optimisticPendingInboxFloor: 0,
+  pendingSubmissionCount: 0,
+};
+laneStore.registerLane(lane);
+
+function chrome({ teamRevision, boardEpoch, renewalRevision, pendingRevision, count }) {
   return {
-    teamId: "team-a",
-    teamRevision: 4,
-    configRevision: currentConfigRevision,
-    taskFilters: ["serve.ui"],
-    laneFilterVersion: "v11",
-    lifetime: "Drain",
-    serverLifetime: "Drain",
-    backendPendingInboxCount: 0,
-    backendPendingInboxKeys: new Set(),
-    backendPendingInboxRevision: "",
-    backendPendingInboxVersion: 0,
-    backendPendingInboxKeysAuthoritative: false,
-    optimisticPendingInboxCount: 0,
-    optimisticSubmittedInboxKeys: new Set(),
-    optimisticPendingInboxFloor: 0,
-    pendingSubmissionCount: 0,
-    knownMessages: [],
-    pipEl: { dataset: {}, title: "" },
+    targetId: lane.targetId,
+    teamConfig: {
+      authority: "team-store",
+      order: { epoch: "", revision: teamRevision },
+      value: {
+        teamIdentity: {
+          state: "member",
+          teamId: "team-a",
+          teamRevision,
+          configRevision: teamRevision,
+        },
+      },
+    },
+    taskBoard: {
+      authority: "task-board",
+      order: { epoch: boardEpoch, revision: 0 },
+      value: {
+        taskFilters: ["serve." + boardEpoch],
+        taskFilterEntries: [],
+        effectiveTaskFilters: ["serve"],
+        taskFilterInventory: {
+          revision: boardEpoch,
+          catalog: { approvedStems: [] },
+          primaryStems: [],
+        },
+        privateTaskCount: 0,
+      },
+    },
+    renewal: {
+      authority: "team-store",
+      order: { epoch: "", revision: renewalRevision },
+      value: {
+        lifetime: renewalRevision >= freshRevision ? "Drain" : "Drive",
+        renewalIntent: { revision: renewalRevision, requested: false },
+      },
+    },
+    pendingInbox: {
+      authority: "inbox",
+      order: { epoch: "", revision: pendingRevision },
+      value: { count, label: String(count), keys: count ? ["queued"] : [] },
+    },
   };
 }
 
-const guarded = lane();
-const currentGuardedMetrics = { completed: 3 };
-guarded.laneMetrics = currentGuardedMetrics;
-context.renderLaneChrome(guarded, {
-  teamIdentity: {
-    state: "member",
-    teamId: "team-a",
-    teamRevision: 3,
-    configRevision: 10,
-  },
-  taskFilters: ["old.filter"],
-  laneFilterVersion: "v10",
-  lifetime: "Drive",
-  laneMetrics: { completed: 2 },
-  statusLine: {
-    agentProcessStatus: "idle",
-    pendingInboxCount: 1,
-    pendingInboxKeys: ["queued"],
-    pendingInboxRevision: "rev-queued",
-    pendingInboxVersion: 20,
-  },
-});
+laneStore.applyLaneChrome(
+  chrome({
+    teamRevision: 11,
+    boardEpoch: "11",
+    renewalRevision: 11,
+    pendingRevision: 20,
+    count: 1,
+  }),
+);
+const accepted = laneStore.laneChrome(lane.targetId);
+const rendersAfterInitial = { ...renders };
 
-assert(
-  guarded.configRevision === currentConfigRevision,
-  "stale config revision is not applied",
+const mixed = laneStore.applyLaneChrome(
+  chrome({
+    teamRevision: 10,
+    boardEpoch: "10",
+    renewalRevision: 10,
+    pendingRevision: 21,
+    count: 0,
+  }),
 );
-assert(guarded.teamRevision === 4, "stale team revision is not applied");
+assert(mixed.disposition === "applied", "fresh pending can accompany stale config");
 assert(
-  guarded.taskFilters.join(",") === "serve.ui",
-  "stale task filters do not rewind filter badge state",
+  mixed.changedFacets.join(",") === "pendingInbox",
+  "only the fresh facet is reported changed",
 );
-assert(guarded.laneFilterVersion === "v11", "stale filter version is ignored");
-assert(guarded.lifetime === "Drain", "stale lifetime does not rewind slider");
 assert(
-  guarded.laneMetrics === currentGuardedMetrics,
-  "stale chrome preserves the on-demand lane metrics snapshot",
+  mixed.staleFacets.join(",") === "teamConfig,taskBoard,renewal",
+  "reordered config facets are reported stale",
 );
-assert(lifetimeCalls.length === 0, "stale lifetime is not handed to controls");
+const afterMixed = laneStore.laneChrome(lane.targetId);
 assert(
-  guarded.backendPendingInboxCount === 1,
-  "non-config pending chrome still applies",
+  afterMixed.teamConfig === accepted.teamConfig &&
+    afterMixed.taskBoard === accepted.taskBoard &&
+    afterMixed.renewal === accepted.renewal,
+  "reordered facets cannot rewind canonical chrome",
 );
-assert(statusWrites.at(-1).pendingInboxCount === 1, "status still renders");
+assert(afterMixed.pendingInbox.count === 0, "fresh pending facet still applies");
+assert(
+  renders.filters === rendersAfterInitial.filters &&
+    renders.lifetime === rendersAfterInitial.lifetime &&
+    renders.team === rendersAfterInitial.team,
+  "pending-only change rerenders no unrelated surface",
+);
+assert(renders.pending === rendersAfterInitial.pending + 1, "pending badge rerenders");
 
-context.renderLaneChrome(guarded, {
-  teamIdentity: { state: "none" },
-  taskFilters: [],
-  laneFilterVersion: "",
-  lifetime: "Steer",
-  statusLine: {
-    agentProcessStatus: "idle",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "rev-clear",
-    pendingInboxVersion: 21,
-  },
-});
+const mixedRecord = laneStore.laneChrome(lane.targetId);
+const renderSignature = JSON.stringify(renders);
+const duplicate = laneStore.applyLaneChrome(
+  chrome({
+    teamRevision: 10,
+    boardEpoch: "10",
+    renewalRevision: 10,
+    pendingRevision: 21,
+    count: 0,
+  }),
+);
+assert(duplicate.disposition === "stale", "duplicate envelope is stale");
+assert(
+  laneStore.laneChrome(lane.targetId) === mixedRecord,
+  "duplicate envelope preserves canonical record identity",
+);
+assert(JSON.stringify(renders) === renderSignature, "duplicate rerenders nothing");
 
+laneStore.applyLaneChrome(
+  chrome({
+    teamRevision: freshRevision,
+    boardEpoch: String(freshRevision),
+    renewalRevision: freshRevision,
+    pendingRevision: 22,
+    count: 2,
+  }),
+);
+const fresh = laneStore.laneChrome(lane.targetId);
 assert(
-  guarded.teamId === "team-a",
-  "revisionless none team identity does not clear accepted team id",
+  fresh.teamConfig.teamIdentity.configRevision === freshRevision,
+  "fresh team applies",
 );
 assert(
-  guarded.configRevision === currentConfigRevision,
-  "revisionless none team identity does not clear accepted config revision",
+  fresh.taskBoard.taskFilters[0] === "serve." + freshRevision,
+  "fresh board applies",
+);
+assert(fresh.renewal.lifetime === "Drain", "fresh renewal applies");
+assert(fresh.pendingInbox.count === 2, "fresh pending applies");
+assert(
+  laneStore.laneForId(lane.targetId) === lane &&
+    lane.fusion === fusion &&
+    lane.draft === draft &&
+    lane.focus === focus,
+  "facet reconciliation preserves lane, fusion, draft, and focus continuity",
 );
 assert(
-  guarded.teamRevision === 4,
-  "revisionless none team identity does not clear accepted team revision",
-);
-assert(
-  guarded.taskFilters.join(",") === "serve.ui",
-  "revisionless none payload does not clear accepted task filters",
-);
-assert(
-  guarded.laneFilterVersion === "v11",
-  "revisionless none payload does not clear accepted filter version",
-);
-assert(
-  guarded.lifetime === "Drain",
-  "revisionless none payload does not clear accepted lifetime",
-);
-assert(lifetimeCalls.length === 0, "revisionless none lifetime is ignored");
-assert(
-  guarded.backendPendingInboxCount === 0,
-  "revisionless stale chrome still applies non-config pending state",
-);
-assert(statusWrites.at(-1).pendingInboxCount === 0, "clear status still renders");
-
-context.renderLaneChrome(guarded, {
-  teamIdentity: {
-    state: "member",
-    teamId: "team-a",
-    teamRevision: 5,
-    configRevision: freshConfigRevision,
-  },
-  taskFilters: ["serve.api"],
-  laneFilterVersion: "v12",
-  lifetime: "Drive",
-  statusLine: {
-    agentProcessStatus: "idle",
-    pendingInboxCount: 1,
-    pendingInboxKeys: ["queued"],
-    pendingInboxRevision: "rev-queued",
-    pendingInboxVersion: 20,
-  },
-});
-
-assert(guarded.configRevision === freshConfigRevision, "fresh config revision applies");
-assert(guarded.teamRevision === 5, "fresh team revision applies");
-assert(guarded.taskFilters.join(",") === "serve.api", "fresh filters apply");
-assert(guarded.laneFilterVersion === "v12", "fresh filter version applies");
-assert(guarded.lifetime === "Drive", "fresh lifetime applies");
-assert(
-  lifetimeCalls.at(-1).configRevision === freshConfigRevision,
-  "fresh revision reaches controls",
-);
-
-const direct = lane();
-const currentDirectMetrics = { completed: 6 };
-direct.laneMetrics = currentDirectMetrics;
-const eagerDirectMetrics = { completed: 7 };
-const directInfo = {
-  summaryRows: [{ key: "thread", value: "thread-direct" }],
-  members: [],
-};
-const directRenewal = { requested: true };
-context.renderLaneChrome(direct, {
-  targetIdentity: {
-    targetId: "target-direct",
-    worktreeName: "direct-tree",
-    branch: "direct-branch",
-    driver: { name: "codex", model: "gpt-direct", effort: "high" },
-    agent: { state: "configured", name: "agent-direct" },
-    thread: { state: "bound", threadId: "thread-direct" },
-  },
-  taskFilters: ["serve.direct"],
-  effectiveTaskFilters: ["serve"],
-  laneFilterVersion: "direct-filter-version",
-  teamIdentity: {
-    state: "member",
-    teamId: "team-direct",
-    teamRevision: 8,
-    configRevision: 20,
-  },
-  lifetime: "Drive",
-  renewalIntent: directRenewal,
-  laneMetrics: eagerDirectMetrics,
-  laneInfo: directInfo,
-  privateTaskCount: 4,
-  statusLine: {
-    agentProcessStatus: "running",
-    pendingInboxCount: 2,
-    pendingInboxKeys: ["direct-a", "direct-b"],
-    pendingInboxRevision: "direct-revision",
-    pendingInboxVersion: 30,
-  },
-});
-
-assert(direct.branchName === "direct-branch", "direct identity reaches chrome");
-assert(direct.agentName === "agent-direct", "direct agent identity reaches chrome");
-assert(direct.teamId === "team-direct", "direct team identity reaches chrome");
-assert(
-  direct.taskFilters.join(",") === "serve.direct",
-  "direct filters reach chrome",
-);
-assert(
-  direct.effectiveTaskFilters.join(",") === "serve",
-  "direct effective filters reach chrome",
-);
-assert(direct.lifetime === "Drive", "direct lifetime reaches chrome");
-assert(direct.renewalIntent === directRenewal, "direct renewal intent reaches chrome");
-assert(
-  direct.laneMetrics === currentDirectMetrics,
-  "direct chrome preserves the on-demand lane metrics snapshot",
-);
-assert(direct.laneInfo === directInfo, "direct info reaches chrome");
-assert(direct.privateTaskCount === 4, "direct private count reaches chrome");
-assert(
-  statusWrites.at(-1).pendingInboxCount === 2,
-  "direct status line reaches chrome",
+  !("taskFilters" in lane) &&
+    !("renewalIntent" in lane) &&
+    !("backendPendingInboxCount" in lane),
+  "lane contains no canonical field copies",
 );

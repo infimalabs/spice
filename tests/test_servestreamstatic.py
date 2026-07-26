@@ -145,14 +145,15 @@ def test_live_lane_payload_refreshes_global_task_filter_inventory():
 
     assert "function applyTaskFilterInventory(inventory)" in app_lanes
     assert "function taskFilterInventoryIsFresh(inventory)" in app_lanes
-    assert "function syncTaskFilterInventoryState(inventory)" in app_lanes
     assert "function renderTaskFilterInventoryPanes()" in app_lanes
-    assert "applyTaskFilterInventory(payload.taskFilterInventory || {});" in app_lanes
+    assert "function syncTaskFilterInventoryState(inventory)" not in app_lanes
     assert (
-        "if (payload.taskFilterInventory)\n"
-        "    applyTaskFilterInventory(payload.taskFilterInventory);" in app_render
+        "applyTaskFilterInventory(payload.taskFilterInventory || {});" not in app_lanes
     )
-    assert "lane.taskFilterInventory = payload.taskFilterInventory;" not in app_render
+    assert "const board = transition.record.taskBoard || {};" in app_render
+    assert "applyTaskFilterInventory(board.taskFilterInventory || {});" in app_render
+    assert "function laneChromeTaskBoard(subject)" in app_render
+    assert "lane.taskFilterInventory =" not in app_lanes + app_render
 
 
 def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
@@ -281,38 +282,25 @@ def test_static_filter_pane_renders_server_effective_filters_not_durable_rows():
     # source to effectiveTaskFilters and lock the plumbing that feeds it.
     app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
     # The chip/count source is the server lens, never the durable rows.
     assert "function laneAssignedTaskFilters(lane) {" in app_panes
-    assert "for (const filter of member.effectiveTaskFilters || []) {" in app_panes
+    assert "const board = laneTaskBoardPresentation(member);" in app_panes
+    assert "for (const filter of board.effectiveTaskFilters || []) {" in app_panes
 
-    # The lens rides in on every route/config path that seeds a lane or target.
-    assert "payload.effectiveTaskFilters || lane.effectiveTaskFilters" in app_render
-    assert (
-        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
-        in app_stream
-    )
-    assert (
-        "updated.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
-        in app_stream
-    )
-    assert (
-        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
-        in app_lanes
-    )
-    assert "laneStore.replaceTargets(payload.workTrees || []);" in app_lanes
-    assert "renderLaneChrome(lane, laneStore.targetForId(lane.targetId));" in app_lanes
-    assert (
-        "effectiveTaskFilters: uniqueStringList(target.effectiveTaskFilters || []),"
-        in app_shell
-    )
-    assert (
-        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
-        in app_shell
-    )
+    # Every ingress reduces the same task-board facet; no route, snapshot, target,
+    # or lane object keeps a second mutable copy of the server lens.
+    assert "function laneChromeTaskBoard(subject)" in app_render
+    assert "applyLaneChromePayload(payload);" in app_live_bus
+    assert "applyLaneChromePayload(config);" in app_stream
+    assert "applyLaneChromePayload(target);" in app_lanes
+    assert "lane.effectiveTaskFilters =" not in app_stream + app_lanes + app_shell
+    assert "updated.effectiveTaskFilters =" not in app_stream
+    assert "effectiveTaskFilters:" not in app_shell
 
 
 def test_static_filter_model_helpers_are_pure_and_covered():

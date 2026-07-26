@@ -39,6 +39,9 @@ const context = {
   uniqueStringList(values) {
     return Array.from(new Set(values || []));
   },
+  payloadHasField(payload, name) {
+    return Object.prototype.hasOwnProperty.call(payload || {}, name);
+  },
   laneViewMode(value) {
     const modes = ["compose", "filters", "metrics", "info"];
     return modes.includes(value || "") ? value : "compose";
@@ -53,6 +56,13 @@ const context = {
   },
   renderFilterPills() {},
   renderSpiceMenu() {},
+  applyLaneTargetIdentity() {},
+  applyLaneServeAgentIdentity() {},
+  applyLaneChromePayload() {},
+  renderLanePayloadPresentation() {},
+  laneChromeTeamId() {
+    return "";
+  },
   syncNarrationMediaSession() {},
   applyGlobalSettingsPayload(settings) {
     if (!settings || settings.fastMode !== false)

@@ -1073,7 +1073,7 @@ function toggleComposerAgentRenewalIntent(
 }
 
 function composerRenewalIntent(member) {
-  return (member && member.renewalIntent) || {};
+  return member ? laneChromeRenewal(member).renewalIntent || {} : {};
 }
 
 function composerRenewalIntentRequested(member) {

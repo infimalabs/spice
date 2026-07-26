@@ -107,12 +107,12 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
     assert calls == {
         "registerLane": 2,
         "removeLane": 1,
-        "laneForId": 29,
+        "laneForId": 31,
         "hasLane": 8,
         # The relative-time tick once walked every lane a second time to sync
         # fused status; it now collects the fused hosts during the first walk
         # and drives those, so that snapshot consumer is gone by design.
-        "lanesSnapshot": 23,
+        "lanesSnapshot": 22,
     }
 
 
@@ -138,7 +138,61 @@ def test_target_inventory_is_owned_by_the_store_and_consumed_through_its_api():
     )
     assert instance_owners == ["app.lane-store.js"]
 
-    assert "laneStore.replaceTargets(payload.workTrees || []);" in production
+    assert (
+        "laneStore.replaceTargets(workTrees.map(targetInventoryRecord));" in production
+    )
+    assert "applyLaneChromePayload(target);" in production
+    assert "laneStore.applyLaneChrome(chrome)" in production
     assert "laneStore.targetsSnapshot()" in production
     assert "laneStore.targetForId(" in production
     assert "laneStore.updateTarget(targetId" in production
+
+
+def test_server_lane_chrome_has_one_browser_write_boundary():
+    sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(STATIC_ROOT.glob("app*.js"))
+    }
+    production = "\n".join(
+        source for name, source in sources.items() if name != "app.lane-store.js"
+    )
+
+    # Every wire ingress enters through one adapter, and only that adapter calls
+    # the reducer. Rendering is driven by the reducer's changed-facet transition.
+    assert production.count("laneStore.applyLaneChrome(chrome)") == 1
+    assert "function applyLaneChromePayload(payload)" in sources["app.render.js"]
+    assert "renderLaneChromeTransition(change.transition);" in sources["app.render.js"]
+    assert (
+        "const changed = new Set(transition.changedFacets || []);"
+        in (sources["app.render.js"])
+    )
+    assert "applyLaneChromePayload(target);" in sources["app.lanes.js"]
+    assert sources["app.live-bus.js"].count("applyLaneChromePayload(payload)") == 2
+    assert "applyLaneChromePayload(config);" in sources["app.stream.js"]
+    assert "applyLaneChromePayload(result);" in sources["app.stream.js"]
+
+    forbidden_assignments = (
+        "taskFilters",
+        "effectiveTaskFilters",
+        "taskFilterEntries",
+        "taskFilterInventory",
+        "privateTaskCount",
+        "renewalIntent",
+        "backendPendingInboxCount",
+        "backendPendingInboxKeys",
+        "backendPendingInboxRevision",
+        "backendPendingInboxVersion",
+        "serverLifetime",
+        "teamIdentity",
+    )
+    for field in forbidden_assignments:
+        assert not re.search(
+            rf"\b(?:lane|host|member|target|updated)\.{field}\s*=",
+            production,
+        ), field
+
+    assert "function syncTaskFilterInventoryState(" not in production
+    assert "function applyTaskDrainRouteConfig(" not in production
+    assert "lane.renewalIntent =" not in production
+    assert "lane.taskFilters =" not in production
+    assert "updated.teamIdentity =" not in production

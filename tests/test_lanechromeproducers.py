@@ -18,6 +18,7 @@ from spice.agent.driver import CODEX_DRIVER
 from spice.serve import agentapi, lifecycle as serve_lifecycle, observer
 from spice.serve.lifecycle import LifecycleDecision
 from spice.serve.payload import message
+from spice.serve.payload.lane import lane_chrome_payload
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 from spice.serve.team.schema import DEFAULT_LIFETIME
 from spice.serve.worktree import inventory
@@ -55,6 +56,8 @@ WHOLE_LANE_FACETS = {
     "renewal",
     "activity",
 }
+TEAM_REVISION_BEFORE_CONFIG = 11
+TEAM_REVISION_AFTER_CONFIG = 12
 
 
 class _FailedDiscoveryState(_State):
@@ -166,6 +169,59 @@ def test_a_task_filter_change_advances_the_board_facet_epoch(tmp_path, monkeypat
     assert [
         item["name"] for item in after["value"]["taskFilterInventory"]["filters"]
     ] == ["serve.two"]
+
+
+def test_a_team_config_change_advances_joined_board_and_renewal_facets() -> None:
+    inventory_payload = _task_facet_board(
+        "task-board-9",
+        "same",
+    ).task_filter_inventory
+    before = lane_chrome_payload(
+        target_id="wt",
+        team_identity={
+            "state": "member",
+            "teamId": "team-a",
+            "teamRevision": TEAM_REVISION_BEFORE_CONFIG,
+            "configRevision": 3,
+        },
+        team_facts={
+            "taskFilters": ["serve.old"],
+            "taskFilterEntries": [],
+            "effectiveTaskFilters": ["serve.old"],
+            "lifetime": "Drive",
+        },
+        renewal_intent={"revision": 0, "requested": False},
+        task_filter_inventory=inventory_payload,
+    )
+    after = lane_chrome_payload(
+        target_id="wt",
+        team_identity={
+            "state": "member",
+            "teamId": "team-a",
+            "teamRevision": TEAM_REVISION_AFTER_CONFIG,
+            "configRevision": 4,
+        },
+        team_facts={
+            "taskFilters": ["serve.new"],
+            "taskFilterEntries": [],
+            "effectiveTaskFilters": ["serve.new"],
+            "lifetime": "Drain",
+        },
+        renewal_intent={"revision": 0, "requested": False},
+        task_filter_inventory=inventory_payload,
+    )
+
+    assert before["taskBoard"]["order"] == {
+        "epoch": "task-board-9",
+        "revision": TEAM_REVISION_BEFORE_CONFIG,
+    }
+    assert after["taskBoard"]["order"] == {
+        "epoch": "task-board-9",
+        "revision": TEAM_REVISION_AFTER_CONFIG,
+    }
+    assert before["renewal"]["order"]["revision"] == TEAM_REVISION_BEFORE_CONFIG
+    assert after["renewal"]["order"]["revision"] == TEAM_REVISION_AFTER_CONFIG
+    assert after["renewal"]["value"]["lifetime"] == "Drain"
 
 
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):
@@ -317,4 +373,12 @@ def test_a_direct_route_reports_only_the_team_it_settled(tmp_path, monkeypatch):
     assert (
         chrome["teamConfig"]["value"]["teamIdentity"]
         == (payload["route"]["teamIdentity"])
+    )
+    assert (
+        chrome["teamConfig"]["order"]["revision"]
+        == payload["route"]["teamIdentity"]["teamRevision"]
+    )
+    assert (
+        chrome["taskBoard"]["order"]["revision"]
+        == payload["route"]["teamIdentity"]["teamRevision"]
     )

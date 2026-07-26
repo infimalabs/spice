@@ -262,7 +262,7 @@ function spiceMenuTeamGroups(choices) {
   const grouped = new Map();
   const unassigned = [];
   for (const target of choices) {
-    const teamId = teamIdentityTeamId(target.teamIdentity);
+    const teamId = laneChromeTeamId(target.id);
     if (!teamId) {
       unassigned.push(target);
       continue;
@@ -271,7 +271,7 @@ function spiceMenuTeamGroups(choices) {
       grouped.set(teamId, {
         teamId,
         totalCount: choices.filter(
-          (item) => teamIdentityTeamId(item.teamIdentity) === teamId,
+          (item) => laneChromeTeamId(item.id) === teamId,
         ).length,
         targets: [],
         unassigned: false,
@@ -759,7 +759,7 @@ function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
   const target = laneStore.targetForId(targetId);
   if (!target) return false;
   if (teamId === spiceMenuNewTeamDropId) return true;
-  return teamIdentityTeamId(target.teamIdentity) !== (teamId || "");
+  return laneChromeTeamId(target.id) !== (teamId || "");
 }
 
 function rememberSpiceMenuNewTeamPlacement(targetId) {
@@ -771,7 +771,7 @@ function rememberSpiceMenuNewTeamPlacement(targetId) {
   );
   spiceMenuNewTeamPlacementHints.push({
     targetId: id,
-    sourceTeamId: target ? teamIdentityTeamId(target.teamIdentity) : "",
+    sourceTeamId: target ? laneChromeTeamId(target.id) : "",
     teamId: "",
   });
 }
@@ -796,7 +796,7 @@ async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
       }),
     );
   } else {
-    const currentTeamId = teamIdentityTeamId(target.teamIdentity);
+    const currentTeamId = laneChromeTeamId(target.id);
     if (!currentTeamId) throw new Error("remove target requires current team");
     await requestTeamCommand(
       teamCommandPayload("removeAgentFromTeam", {

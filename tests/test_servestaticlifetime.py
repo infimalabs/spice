@@ -35,16 +35,16 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
         (
             "data-lifetime-label>Drive</span>",
             "data-submit>Drive</button>",
-            "const lifetime = target.lifetime || defaultAgentLifetime;",
-            "serverLifetime: lifetime,",
+            "const renewal = laneChromeRenewal(target.id);",
+            "const lifetime = renewal.lifetime || defaultAgentLifetime;",
             'pendingLifetimeCommit: "",',
             "pendingLifetimeConfigRevision: 0,",
             "pendingLifetimeRequestId: 0,",
             "lifetimeRequestId: 0,",
-            "applyServerLaneLifetime(lane, config.lifetime, {",
-            "configRevision: config.revision,",
         ),
     )
+    assert "serverLifetime:" not in app_shell
+    assert "target.lifetime" not in app_shell
     assert "renewAgent" not in app_controls
     assert '"Renew"' not in app
 
@@ -58,7 +58,8 @@ def test_static_lifetime_slider_tracks_pending_state_in_controls():
             "host.lifetimeRequestId = Math.max",
             "host.pendingLifetimeCommit = lifetime;",
             "host.pendingLifetimeRequestId = host.lifetimeRequestId;",
-            "host.serverLifetime = laneServerLifetime(host);",
+            "function laneServerLifetime(lane) {",
+            "const canonical = laneChromeRenewal(host).lifetime;",
             "function updateLaneTeamConfigForLane(lane, configPatch) {",
             'return Promise.reject(new Error("team config update requires team id"));',
             'teamCommandPayload("updateTeamConfig", {',
@@ -115,23 +116,20 @@ def test_static_lifetime_slider_syncs_server_state_sources():
             "taskFilters: uniqueStringList(updateFilters(laneManualTaskFilters(host)))",
             'setLaneTransientStatus(host, "task filters update failed");',
             "function laneManualTaskFilters(lane) {",
-            "manualTaskFilterProjects(member.taskFilterEntries)",
-        ),
-    )
-    _assert_contains_all(
-        app_lanes,
-        (
-            "applyServerLaneLifetime(lane, config.lifetime, {",
-            "configRevision: config.revision,",
+            "manualTaskFilterProjects(board.taskFilterEntries)",
         ),
     )
     _assert_contains_all(
         app_render,
         (
-            'payloadHasField(payload, "teamIdentity")',
-            "teamIdentityConfigRevision(payload.teamIdentity)",
+            'changed.has("renewal")',
+            "const renewal = transition.record.renewal || {};",
+            "applyServerLaneLifetime(lane, renewal.lifetime, {",
+            "configRevision: laneChromeConfigRevision(lane),",
         ),
     )
+    assert "applyServerLaneLifetime(lane, config.lifetime" not in app_lanes
+    assert "lane.renewalIntent =" not in app_lanes + app_render + app_stream
     _assert_contains_all(
         app_groups,
         (

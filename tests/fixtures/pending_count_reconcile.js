@@ -1,37 +1,50 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const streamPath = process.argv[2];
+const storePath = process.argv[2];
 const renderPath = process.argv[3];
-const currentPendingVersion = 20;
-const newerPendingVersion = 30;
 let placeholderSyncs = 0;
+let badgeRenders = 0;
 const context = {
   console,
-  WebSocket: { OPEN: 1, CONNECTING: 0 },
   laneGroupHost: (lane) => lane,
+  laneIsFusedHost: () => false,
+  laneGroupMemberLanes: (lane) => [lane],
   renderLaneViewShell: () => {},
+  renderLaneViewBadge: () => {
+    badgeRenders += 1;
+  },
   syncComposerPlaceholders: () => {
     placeholderSyncs += 1;
   },
-  window: { location: { protocol: "http:", host: "localhost" } },
+  syncComposerShards: () => {},
+  renderLaneFiltersPane: () => {},
+  renderFilterPills: () => {},
+  syncFusedLaneLights: () => {},
+  syncFusedLaneStatusLine: () => {},
+  syncLaneTeamMenuButton: () => {},
+  applyTaskFilterInventory: () => false,
+  applyServerLaneLifetime: () => false,
 };
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(streamPath, "utf8"), context, {
-  filename: "app.stream.js",
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
 });
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
+const laneStore = vm.runInContext("laneStore", context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+let laneIndex = 0;
 function lane(overrides = {}) {
-  return {
-    backendPendingInboxCount: 0,
+  laneIndex += 1;
+  const value = {
+    targetId: "pending-" + laneIndex,
     optimisticPendingInboxCount: 2,
     optimisticSubmittedInboxKeys: new Set(["inbox-a", "inbox-b"]),
     optimisticPendingInboxFloor: 2,
@@ -40,178 +53,113 @@ function lane(overrides = {}) {
     knownMessages: [],
     ...overrides,
   };
+  laneStore.registerLane(value);
+  return value;
+}
+
+function pendingChrome(subject, version, count, keys) {
+  return {
+    targetId: subject.targetId,
+    pendingInbox: {
+      authority: "inbox",
+      order: { epoch: "", revision: version },
+      value: { count, label: String(count), keys },
+    },
+  };
 }
 
 const drained = lane();
-context.syncLaneBackendPending(drained, {
-  pendingInboxCount: 0,
-  pendingInboxKeys: [],
-  pendingInboxRevision: "rev-drained",
-  pendingInboxVersion: 10,
-});
+laneStore.applyLaneChrome(pendingChrome(drained, 10, 0, []));
 assert(
   context.lanePendingDisplayCount(drained) === 0,
-  "drained backend clears stale optimistic pending count",
+  "drained canonical pending facet clears stale optimistic count",
 );
 assert(
   drained.optimisticSubmittedInboxKeys.size === 0,
-  "drained backend clears unobserved submitted inbox keys",
-);
-assert(
-  drained.optimisticPendingInboxFloor === 0,
-  "drained backend clears submitted pending floor",
+  "drained canonical keys clear unobserved submitted keys",
 );
 
 const submissionInFlight = lane({ pendingSubmissionCount: 1 });
-context.syncLaneBackendPending(submissionInFlight, {
-  pendingInboxCount: 0,
-  pendingInboxKeys: [],
-  pendingInboxRevision: "rev-in-flight",
-  pendingInboxVersion: 11,
-});
+laneStore.applyLaneChrome(pendingChrome(submissionInFlight, 11, 0, []));
 assert(
   context.lanePendingDisplayCount(submissionInFlight) === 2,
-  "pending submission keeps optimistic pending count through backend zero",
+  "in-flight submission keeps optimistic count through canonical zero",
 );
 assert(
   submissionInFlight.optimisticSubmittedInboxKeys.size === 2,
-  "pending submission keeps submitted inbox keys",
-);
-
-const acceptedSendRefresh = lane({ sendAwaitingBackendCount: 1 });
-context.syncLaneBackendPending(acceptedSendRefresh, {
-  pendingInboxCount: 0,
-  pendingInboxKeys: [],
-  pendingInboxRevision: "rev-accepted",
-  pendingInboxVersion: 12,
-});
-assert(
-  context.lanePendingDisplayCount(acceptedSendRefresh) === 0,
-  "accepted send refresh trusts drained backend count",
-);
-assert(
-  acceptedSendRefresh.optimisticSubmittedInboxKeys.size === 0,
-  "accepted send refresh clears submitted inbox keys",
+  "in-flight submission keeps submitted keys",
 );
 
 const sameCountDifferentKeys = lane({
-  backendPendingInboxCount: 1,
   optimisticPendingInboxCount: 1,
   optimisticSubmittedInboxKeys: new Set(["submitted-key"]),
   optimisticPendingInboxFloor: 1,
 });
-context.syncLaneBackendPending(sameCountDifferentKeys, {
-  pendingInboxCount: 1,
-  pendingInboxKeys: ["other-key"],
-  pendingInboxRevision: "rev-other",
-  pendingInboxVersion: 13,
-});
+laneStore.applyLaneChrome(
+  pendingChrome(sameCountDifferentKeys, 13, 1, ["other-key"]),
+);
 assert(
   context.lanePendingDisplayCount(sameCountDifferentKeys) === 1,
-  "same-count backend key replacement remains visibly pending",
+  "same-count canonical key replacement remains visible",
 );
 assert(
   sameCountDifferentKeys.optimisticSubmittedInboxKeys.size === 0,
-  "authoritative backend keys clear stale submitted key with same count",
+  "canonical keys clear stale submitted key at the same count",
 );
 assert(
-  sameCountDifferentKeys.backendPendingInboxKeys.has("other-key"),
-  "authoritative backend keys are retained on the lane",
-);
-
-const submittedKeyStillPending = lane({
-  backendPendingInboxCount: 1,
-  optimisticPendingInboxCount: 1,
-  optimisticSubmittedInboxKeys: new Set(["submitted-key"]),
-  optimisticPendingInboxFloor: 1,
-});
-context.syncLaneBackendPending(submittedKeyStillPending, {
-  pendingInboxCount: 1,
-  pendingInboxKeys: ["submitted-key"],
-  pendingInboxRevision: "rev-submitted",
-  pendingInboxVersion: 14,
-});
-assert(
-  submittedKeyStillPending.optimisticSubmittedInboxKeys.has("submitted-key"),
-  "authoritative backend keys preserve submitted key that is still pending",
-);
-
-const stillQueued = lane();
-context.syncLaneBackendPending(stillQueued, {
-  pendingInboxCount: 2,
-  pendingInboxKeys: ["inbox-a", "inbox-b"],
-  pendingInboxRevision: "rev-still-queued",
-  pendingInboxVersion: 15,
-});
-assert(
-  context.lanePendingDisplayCount(stillQueued) === 2,
-  "nonzero backend pending count remains visible",
-);
-assert(
-  stillQueued.optimisticSubmittedInboxKeys.size === 2,
-  "nonzero backend pending count keeps submitted inbox keys",
+  laneStore.laneChrome(sameCountDifferentKeys.targetId).pendingInbox.keys[0] ===
+    "other-key",
+  "canonical record, not the lane, retains pending keys",
 );
 
 const versioned = lane({
-  backendPendingInboxCount: 2,
-  backendPendingInboxKeys: new Set(["new-a", "new-b"]),
-  backendPendingInboxRevision: "rev-new",
-  backendPendingInboxVersion: currentPendingVersion,
-  backendPendingInboxKeysAuthoritative: true,
   optimisticPendingInboxCount: 2,
   optimisticSubmittedInboxKeys: new Set(),
   optimisticPendingInboxFloor: 0,
 });
-context.syncLaneBackendPending(versioned, {
-  pendingInboxCount: 0,
-  pendingInboxKeys: [],
-  pendingInboxRevision: "rev-old",
-  pendingInboxVersion: 10,
-});
+laneStore.applyLaneChrome(
+  pendingChrome(versioned, 20, 2, ["new-a", "new-b"]),
+);
+const acceptedRecord = laneStore.laneChrome(versioned.targetId);
+const rendersBeforeStale = badgeRenders;
+const stale = laneStore.applyLaneChrome(pendingChrome(versioned, 10, 0, []));
+assert(stale.disposition === "stale", "older pending facet is rejected");
+assert(
+  laneStore.laneChrome(versioned.targetId) === acceptedRecord,
+  "older pending facet preserves record identity",
+);
 assert(
   context.lanePendingDisplayCount(versioned) === 2,
-  "older pending snapshot does not lower compose badge count",
+  "older pending facet cannot lower compose count",
 );
 assert(
-  versioned.backendPendingInboxRevision === "rev-new",
-  "older pending snapshot does not replace backend revision",
-);
-assert(
-  versioned.backendPendingInboxVersion === currentPendingVersion,
-  "older pending snapshot does not replace backend version",
+  badgeRenders === rendersBeforeStale,
+  "older pending facet rerenders no compose badge",
 );
 
-context.syncLaneBackendPending(versioned, {
-  pendingInboxCount: 0,
-  pendingInboxKeys: [],
-  pendingInboxRevision: "rev-drained",
-  pendingInboxVersion: newerPendingVersion,
-});
+laneStore.applyLaneChrome(pendingChrome(versioned, 30, 0, []));
 assert(
   context.lanePendingDisplayCount(versioned) === 0,
-  "newer pending snapshot can clear compose badge count",
+  "newer pending facet can clear compose count",
 );
 assert(
-  versioned.backendPendingInboxRevision === "rev-drained",
-  "newer pending snapshot replaces backend revision",
-);
-assert(
-  versioned.backendPendingInboxVersion === newerPendingVersion,
-  "newer pending snapshot replaces backend version",
+  !("backendPendingInboxCount" in versioned),
+  "lane retains no backend pending copy",
 );
 
 const optimisticSubmission = lane({
-  backendPendingInboxCount: 1,
   optimisticPendingInboxCount: 1,
   optimisticSubmittedInboxKeys: new Set(),
   optimisticPendingInboxFloor: 0,
 });
+laneStore.applyLaneChrome(pendingChrome(optimisticSubmission, 1, 1, ["queued"]));
+const placeholderBeforeBegin = placeholderSyncs;
 context.beginLanePendingSubmission(optimisticSubmission);
 assert(
   context.lanePendingDisplayCount(optimisticSubmission) === 2,
-  "pending submission immediately increments composer pending count",
+  "local pending submission increments the canonical count presentation",
 );
 assert(
-  placeholderSyncs === 1,
-  "pending submission immediately syncs composer placeholder",
+  placeholderSyncs === placeholderBeforeBegin + 1,
+  "local submission immediately syncs the composer placeholder",
 );
