@@ -16,6 +16,8 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.serve import agentapi, lifecycle as serve_lifecycle, observer
+from spice.serve.lifecycle import LifecycleDecision
+from spice.serve.payload import message
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 from spice.serve.team.schema import DEFAULT_LIFETIME
 from spice.serve.worktree import inventory
@@ -251,6 +253,39 @@ def test_a_renewal_send_reports_the_lifetime_with_its_intent(tmp_path, monkeypat
     )
     assert chrome["renewal"]["value"]["renewalIntent"]["agentId"] == ACTOR_A
     assert chrome["renewal"]["order"]["revision"] > 0
+
+
+def test_a_send_followup_carries_its_lifecycle_outcome_beside_the_facets(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _record_identity(state, target, ACTOR_A, THREAD_A)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+    ensure = {"ok": True, "threadId": THREAD_A, "action": "start"}
+
+    payload = message.messages_payload_for_worktree(
+        state,
+        target,
+        limit=5,
+        decision=LifecycleDecision(
+            thread_id=THREAD_A,
+            predecessor_actor=ACTOR_A,
+            renewal_intent=False,
+            agent_ensure=ensure,
+        ),
+    )
+
+    chrome = payload["chrome"]
+    # The follow-up is the render that reports the start its send queued. That
+    # outcome belongs to the reconciler, whose facet no producer may mint yet,
+    # so it stays the flat field a client already keys its lane state off while
+    # the facts that do have counting authorities ride the facets beside it.
+    assert payload["agentEnsure"] == ensure
+    assert payload["agentProcessStatus"] == "running"
+    assert set(chrome) == WHOLE_LANE_FACETS
+    assert _facet_authorities(chrome) == _contract_authorities(chrome)
 
 
 def test_a_direct_route_reports_only_the_team_it_settled(tmp_path, monkeypatch):
