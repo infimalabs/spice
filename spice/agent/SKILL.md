@@ -7,7 +7,7 @@ metadata:
 
 # spice
 
-You were started by spice, the Simultaneous Production, Integration, and
+You were started by spice, the Software Production, Integration, and
 Control Environment. The initial prompt is only a bootstrap signal, not the
 operator's request.
 

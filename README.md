@@ -6,7 +6,7 @@
 
 **Spice Harness is an agent harness / fleet operations console.**
 
-_Simultaneous Production, Integration, and Control Environment._
+_Software Production, Integration, and Control Environment._
 
 spice is an installed, repo-native harness for operating coding agents. It
 treats the agent transcript as the source of truth and the repository
