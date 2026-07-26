@@ -131,7 +131,13 @@ def _codex_message_events(
             continue
         block_type = block.get("type")
         text = block.get("text")
-        if isinstance(block_type, str) and isinstance(text, str):
+        if isinstance(text, str):
+            # Text is the discriminant, not the declared type. Codex writes the
+            # type on every block it emits itself, but transcripts in the wild
+            # carry bare `{"text": ...}` blocks, and the dict seam this decoder
+            # replaces read those as prose. Requiring the type here would file
+            # real assistant text as `Unknown` and silently stop delivering it.
+            content_type = block_type if isinstance(block_type, str) else "text"
             if role == "assistant":
                 events.append(
                     AssistantText(
@@ -139,7 +145,7 @@ def _codex_message_events(
                         text=text,
                         final=phase == "final_answer",
                         item_id=item_id,
-                        content_type=block_type,
+                        content_type=content_type,
                         phase=phase,
                         turn_id=turn_id,
                         turn_metadata_key=metadata_key,
@@ -153,7 +159,7 @@ def _codex_message_events(
                         prompt_id=None,
                         role=role,
                         item_id=item_id,
-                        content_type=block_type,
+                        content_type=content_type,
                         phase=phase,
                         turn_id=turn_id,
                         turn_metadata_key=metadata_key,
