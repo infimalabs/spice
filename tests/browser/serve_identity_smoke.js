@@ -189,10 +189,12 @@ async function run() {
         page,
         server.backendDir,
       );
-      await installIsolatedLaneFixture(page, { globals: ["renderLaneChrome"] });
+      await installIsolatedLaneFixture(page, {
+        globals: ["renderLanePayloadPresentation"],
+      });
       const result = await page.evaluate((payload) => {
         const lane = resolveIsolatedLane("identity-smoke-team");
-        renderLaneChrome(lane, {
+        renderLanePayloadPresentation(lane, {
           ...payload,
           targetIdentity: { ...payload.targetIdentity, targetId: lane.targetId },
         });

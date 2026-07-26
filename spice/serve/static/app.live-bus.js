@@ -546,7 +546,9 @@ function applyLaneBusPayloadState(lane, payload, source) {
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, payload);
   reconcileLaneSubmissionMessages(lane, lane.knownMessages);
-  renderLaneChrome(lane, payload);
+  cacheLaneLatestPayload(lane, payload);
+  applyLaneChromePayload(payload);
+  renderLanePayloadPresentation(lane, payload);
   cacheLaneLatestPayload(lane, payload);
   if (!lane.speechPrimed) {
     queueSpeechForMessages(lane, initialSpeechMessages);
@@ -562,30 +564,19 @@ function applyLaneBusPayloadState(lane, payload, source) {
 
 function applyLanePendingBusPayload(lane, payload) {
   lane.serverReachable = true;
-  if (!syncLaneBackendPending(lane, payload)) return;
+  const transition = applyLaneChromePayload(payload);
+  if (!transition || transition.disposition !== "applied") return;
   if (lane.latestPayload) cacheLaneLatestPayload(lane, lane.latestPayload);
-  renderLaneViewShell(laneGroupHost(lane));
-  syncComposerPlaceholders(laneGroupHost(lane));
 }
 
 function cacheLaneLatestPayload(lane, payload) {
   const latestPayload = payload || {};
-  const version = Math.max(0, Number(lane.backendPendingInboxVersion) || 0);
-  if (!version) {
-    lane.latestPayload = latestPayload;
-    return;
-  }
-  const statusLine = statusLineWithLanePendingIdentity(
+  const statusLine = laneChromeStatusLine(
     lane,
     latestPayload.statusLine || {},
   );
   lane.latestPayload = {
     ...latestPayload,
-    pendingInboxCount: statusLine.pendingInboxCount,
-    pendingInboxLabel: statusLine.pendingInboxLabel,
-    pendingInboxKeys: statusLine.pendingInboxKeys,
-    pendingInboxRevision: statusLine.pendingInboxRevision,
-    pendingInboxVersion: statusLine.pendingInboxVersion,
     statusLine,
   };
 }

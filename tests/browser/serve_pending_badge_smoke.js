@@ -54,6 +54,7 @@ async function installPendingSmokeHelpers(page) {
       pendingSmokeLane,
       pendingSmokeTextarea,
       pendingSmokeBadgeText,
+      pendingSmokeChrome,
       pendingSmokePayload,
       pendingSmokeSubmission,
       pendingSmokeLiveBusRequest,
@@ -77,16 +78,16 @@ function setupPendingSmokePage(config) {
   lane.knownMessageKeys = new Set(messages.map((message) => message.key));
   lane.oldestMessageKey = messages[0].key;
   lane.newestMessageKey = messages[messages.length - 1].key;
-  lane.backendPendingInboxCount = 0;
-  lane.backendPendingInboxVersion = config.initialVersion;
-  lane.backendPendingInboxKeys = new Set();
-  lane.backendPendingInboxRevision = "rev-initial";
+  laneStore.applyLaneChrome(
+    pendingSmokeChrome(lane.targetId, 0, [], config.initialVersion),
+  );
   lane.lastRenderedStatusLine = pendingSmokePayload(
+    lane.targetId,
     0,
     [],
     "rev-initial",
     config.initialVersion,
-  );
+  ).statusLine;
   lane.latestPayload = { statusLine: lane.lastRenderedStatusLine };
   renderLaneViewShell(laneGroupHost(lane));
   const originalLiveBusRequest = liveBusRequest;
@@ -113,10 +114,12 @@ function pendingSmokeLiveBusRequest(smoke, config, type, fields) {
         ok: true,
         key: config.pendingKey,
         requestText: (fields.payload || {}).text || "",
-        pendingInboxCount: 1,
-        pendingInboxKeys: [config.pendingKey],
-        pendingInboxRevision: "rev-send",
-        pendingInboxVersion: config.sendVersion,
+        chrome: pendingSmokeChrome(
+          smoke.lane.targetId,
+          1,
+          [config.pendingKey],
+          config.sendVersion,
+        ),
         submission: pendingSmokeSubmission(config.pendingKey),
         agentEnsure: { ok: true, threadId: smoke.lane.targetThreadId || "" },
       },
@@ -167,7 +170,13 @@ async function applyPendingAckSmokePage(config) {
   ).length;
   await handleLiveBusMessage(
     JSON.stringify({
-      payload: pendingSmokePayload(0, [], "rev-ack", config.ackVersion),
+      payload: pendingSmokePayload(
+        lane.targetId,
+        0,
+        [],
+        "rev-ack",
+        config.ackVersion,
+      ),
       source: "watch",
       subscriptionGeneration: lane.liveBusSubscriptionGeneration,
       targetId: lane.targetId,
@@ -177,7 +186,7 @@ async function applyPendingAckSmokePage(config) {
   await Promise.resolve();
   return {
     badgeAfterAck: pendingSmokeBadgeText(lane),
-    latestPayloadPending: lane.latestPayload.pendingInboxCount,
+    latestPayloadPending: lane.latestPayload.statusLine.pendingInboxCount,
     pendingAfterAck: lanePendingDisplayCount(lane),
     placeholderAfterAck: smoke.textarea.placeholder,
     refreshCallsAfterAck: smoke.calls.filter((call) => call.type === "lane.refresh")
@@ -214,12 +223,26 @@ function pendingSmokeBadgeText(lane) {
   return badge && !badge.hidden ? badge.textContent : "";
 }
 
-function pendingSmokePayload(count, keys, revision, version) {
+function pendingSmokeChrome(targetId, count, keys, version) {
   return {
-    pendingInboxCount: count,
-    pendingInboxKeys: keys,
-    pendingInboxRevision: revision,
-    pendingInboxVersion: version,
+    targetId,
+    pendingInbox: {
+      authority: "inbox",
+      order: { epoch: "", revision: version },
+      value: { count, label: String(count), keys },
+    },
+  };
+}
+
+function pendingSmokePayload(targetId, count, keys, revision, version) {
+  return {
+    chrome: pendingSmokeChrome(targetId, count, keys, version),
+    statusLine: {
+      pendingInboxCount: count,
+      pendingInboxKeys: keys,
+      pendingInboxRevision: revision,
+      pendingInboxVersion: version,
+    },
   };
 }
 

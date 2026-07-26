@@ -371,7 +371,7 @@ class ServeTeamStore(
     ) -> None:
         """Date this store the instant it is created, once and never again.
 
-        Every counter this store keeps -- a team's config revision, an agent's
+        Every counter this store keeps -- a team's event revision, an agent's
         renewal revision -- restarts from zero in a store that was deleted and
         remade, so a reader keeping the highest revision it has seen would
         refuse the rebuilt store until it counted back past where the replaced
@@ -379,9 +379,9 @@ class ServeTeamStore(
         store is only ever created after every store it replaces, so this
         instant rises exactly where those revisions restart.
 
-        It is written in microseconds because the readers that order it compare
-        digit runs as doubles, and a nanosecond count is already past the range
-        a double holds exactly, where two distinct instants compare equal.
+        It is counted in microseconds because that is what every generation
+        this repo mints is counted in, so a reader that meets more than one of
+        them meets one kind of token rather than one encoding per authority.
         """
         existing = connection.execute(
             "SELECT value FROM global_settings WHERE key = ?",

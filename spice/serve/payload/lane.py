@@ -162,9 +162,10 @@ def lane_chrome_payload(
     so neither can order two observations of itself.
     """
     observations: list[LaneChromeObservation] = []
-    # Both team-store facets count in the same store, so both are dated by the
-    # one generation it was created at: their revisions restart together when
-    # that store is remade, and nothing counted inside it can say so.
+    team_revision = int((team_identity or {}).get("teamRevision", 0))
+    # The team store counts that revision, so a store deleted and remade counts
+    # it from the start again and nothing counted inside it can say so. The two
+    # facets it alone orders are dated by the instant that store was created.
     team_generation = lane_chrome_generation(
         (team_facts or {}).get("storeGeneration", "")
     )
@@ -172,10 +173,10 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "teamConfig",
-                LaneChromeOrder(
-                    epoch=team_generation,
-                    revision=int(team_identity.get("configRevision", 0)),
-                ),
+                # Team revision is the store's global event counter for this
+                # team. It advances for membership, config, and renewal
+                # mutations, whereas configRevision advances for config only.
+                LaneChromeOrder(epoch=team_generation, revision=team_revision),
                 {"teamIdentity": dict(team_identity)},
             )
         )
@@ -195,10 +196,14 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "taskBoard",
+                # The joined lane board changes when either authority feeding
+                # it changes: task rows/catalog advance the board epoch, while
+                # this team's filters/lifetime advance the team revision.
                 LaneChromeOrder(
                     epoch=lane_chrome_generation(
                         task_filter_inventory.get("revision", "")
-                    )
+                    ),
+                    revision=team_revision,
                 ),
                 {
                     "taskFilters": team_facts.get("taskFilters", []),
@@ -216,9 +221,16 @@ def lane_chrome_payload(
         observations.append(
             LaneChromeObservation(
                 "renewal",
+                # Lifetime and renewal intent are one team-store observation.
+                # Both mutations advance the team's event revision; max keeps
+                # a legacy renewal row carrying a later explicit revision
+                # ordered without inventing a second browser authority.
                 LaneChromeOrder(
                     epoch=team_generation,
-                    revision=int(renewal_intent.get("revision", 0)),
+                    revision=max(
+                        team_revision,
+                        int(renewal_intent.get("revision", 0)),
+                    ),
                 ),
                 {
                     "lifetime": team_facts.get("lifetime", ""),

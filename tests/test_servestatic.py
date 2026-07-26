@@ -111,26 +111,43 @@ def test_static_send_route_applies_fresh_start_identity_before_refresh():
             "\n}\n\nfunction agentEnsureFailureStatus", send_start
         )
     ]
-    route_start = app_stream.index("function applyTaskDrainRouteConfig(")
+    route_start = app_stream.index("function applyLaneSendChrome(")
     route_body = app_stream[
         route_start : app_stream.index(
-            "\n}\n\nfunction applyRouteConfigToTargetInventory",
+            "\n}\n\nfunction applyRouteIdentityToTargetInventory",
             route_start,
         )
     ]
-    inventory_start = app_stream.index("function applyRouteConfigToTargetInventory(")
+    inventory_start = app_stream.index("function applyRouteIdentityToTargetInventory(")
     inventory_body = app_stream[inventory_start:]
 
     assert 'const previousThreadId = lane.targetThreadId || "";' in send_body
     assert "const changed = ensure.threadId !== previousThreadId;" in send_body
-    assert "applyRouteConfigToTargetInventory(lane, config);" in route_body
-    assert 'payloadHasField(config, "targetIdentity")' in route_body
+    assert "applyRouteIdentityToTargetInventory(lane, config);" in route_body
     assert "applyLaneTargetIdentity(lane, config);" in route_body
-    assert 'payloadHasField(config, "serveAgentIdentity")' in route_body
     assert "applyLaneServeAgentIdentity(lane, config);" in route_body
+    assert "applyLaneChromePayload(config);" in route_body
+    assert "applyLaneChromePayload(result);" in route_body
     assert "updated.targetIdentity = config.targetIdentity;" in inventory_body
     assert "updated.serveAgentIdentity = config.serveAgentIdentity;" in inventory_body
-    assert "updated.teamIdentity = config.teamIdentity;" in inventory_body
+    assert "updated.teamIdentity = config.teamIdentity;" not in inventory_body
+    assert "function applyTaskDrainRouteConfig(" not in app_stream
+
+
+def test_route_feedback_reduces_chrome_once_and_preserves_local_lane_state():
+    script = Path(__file__).with_name("fixtures") / "lane_chrome_route_reconcile.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.render.js"),
+            str(STATIC_ROOT / "app.stream.js"),
+        ],
+        check=True,
+    )
+    assert result.returncode == 0
 
 
 def test_static_lane_status_preview_requires_relative_time():
@@ -653,6 +670,7 @@ def test_static_composer_terminal_status_placeholder_uses_idle_visual_status():
         [
             "node",
             str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
             str(app_render),
             str(app_submissions),
             str(app_composer),
@@ -687,7 +705,8 @@ def test_static_submitted_message_predictions_reconcile_against_server_echoes():
     assert "optimisticSubmittedInboxKeys: new Set()," in app_shell
     assert "optimisticPendingInboxFloor: 0," in app_shell
     assert 'const inboxKey = String(options.inboxKey || "");' in app_render
-    assert "const submittedPendingFloor = hasBackendCount" in app_render
+    assert "const backendCount = laneChromePendingCount(lane);" in app_render
+    assert "const submittedPendingFloor = Math.max(" in app_render
     assert "if (accepted && inboxKey && submittedPendingFloor > 0)" in app_render
     assert "lane.optimisticSubmittedInboxKeys.add(inboxKey);" in app_render
     assert "laneSubmittedMessagePendingFloor(lane)" in app_render
@@ -695,22 +714,27 @@ def test_static_submitted_message_predictions_reconcile_against_server_echoes():
     assert "Number(lane.pendingSubmissionCount)" in app_render
     assert "function laneSubmittedMessagePendingFloor(lane)" in app_render
     assert "function reconcileSubmittedMessagePredictions(lane)" in app_render
-    assert "const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));" in (
+    assert "const backendKeys = new Set(laneChromePendingInbox(lane).keys || []);" in (
         app_render
     )
-    assert "if (ackedKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);" in (
-        app_render
+    assert (
+        "if (!backendKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);"
+        in (app_render)
     )
     assert "inboxKey: result.key," in app_stream
 
 
 def test_static_pending_count_clears_stale_submitted_predictions_after_drain():
-    app_stream = STATIC_ROOT / "app.stream.js"
     app_render = STATIC_ROOT / "app.render.js"
     script = Path(__file__).with_name("fixtures") / "pending_count_reconcile.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_stream), str(app_render)],
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.lane-store.js"),
+            str(app_render),
+        ],
         check=True,
     )
     assert result.returncode == 0

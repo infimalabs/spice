@@ -28,13 +28,12 @@ function setLaneLifetime(lane, label) {
   const host = laneGroupHost(lane);
   const lifetime = agentLifetimeLabels.includes(label) ? label : defaultAgentLifetime;
   host.lifetimeRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0) + 1;
-  host.serverLifetime = laneServerLifetime(host);
   host.lifetime = lifetime;
   host.pendingLifetimeCommit = lifetime;
   host.pendingLifetimeRequestId = host.lifetimeRequestId;
   host.pendingLifetimeConfigRevision = Math.max(
     0,
-    Number(host.configRevision) || 0,
+    lanePresentationConfigRevision(host),
   );
   syncLaneEffectiveControls(host);
   renderFilterPills();
@@ -43,11 +42,19 @@ function setLaneLifetime(lane, label) {
 
 function laneServerLifetime(lane) {
   const host = laneGroupHost(lane);
-  return agentLifetimeLabels.includes(host.serverLifetime)
-    ? host.serverLifetime
+  const canonical = laneChromeRenewal(host).lifetime;
+  return agentLifetimeLabels.includes(canonical)
+    ? canonical
     : agentLifetimeLabels.includes(host.lifetime)
       ? host.lifetime
       : defaultAgentLifetime;
+}
+
+function lanePresentationConfigRevision(lane) {
+  const host = laneGroupHost(lane);
+  return host.emptyTeam
+    ? Math.max(0, Number(host.configRevision) || 0)
+    : laneChromeConfigRevision(host);
 }
 
 function laneLifetimeRevision(options = {}) {
@@ -78,7 +85,7 @@ function serverLifetimeSettlesPending(host, lifetime, options = {}) {
 function serverLifetimeIsOlderThanLaneConfig(host, options = {}) {
   if (options.force) return false;
   const revision = laneLifetimeRevision(options);
-  const currentRevision = Math.max(0, Number(host.configRevision) || 0);
+  const currentRevision = lanePresentationConfigRevision(host);
   return revision > 0 && currentRevision > 0 && revision < currentRevision;
 }
 
@@ -108,8 +115,6 @@ function updateLaneLifetimeForLane(lane) {
     .then(() => {
       if (!laneLifetimeCommitMatches(host, requestedLifetime, { requestId }))
         return;
-      clearLaneLifetimeCommitState(host);
-      host.serverLifetime = requestedLifetime;
       syncLaneEffectiveControls(host);
     })
     .catch(() => {
@@ -129,7 +134,6 @@ function applyServerLaneLifetime(lane, lifetime, options = {}) {
     clearLaneLifetimeCommitState(host);
   }
   const previous = host.lifetime;
-  host.serverLifetime = lifetime;
   host.lifetime = lifetime;
   syncLaneEffectiveControls(host);
   return previous !== lifetime;
@@ -162,7 +166,6 @@ function laneLifetimeRuntimeState(lane) {
   const host = laneGroupHost(lane);
   return {
     lifetime: host.lifetime,
-    serverLifetime: laneServerLifetime(host),
     pendingLifetimeCommit: host.pendingLifetimeCommit || "",
     pendingLifetimeRequestId: Math.max(
       0,
@@ -182,9 +185,6 @@ function restoreLaneLifetimeRuntimeState(lane, state) {
   host.lifetime = agentLifetimeLabels.includes(state.lifetime)
     ? state.lifetime
     : defaultAgentLifetime;
-  host.serverLifetime = agentLifetimeLabels.includes(state.serverLifetime)
-    ? state.serverLifetime
-    : host.lifetime;
   host.pendingLifetimeCommit = agentLifetimeLabels.includes(
     state.pendingLifetimeCommit,
   )
@@ -281,8 +281,12 @@ function submitLaneForm(lane, event, targetId = "") {
         lifetime,
         threadId: member.targetThreadId || "",
         teamId: member.teamId || "",
-        teamRevision: member.teamRevision || 0,
-        configRevision: member.configRevision || 0,
+        teamRevision: member.emptyTeam
+          ? member.teamRevision || 0
+          : laneChromeTeamRevision(member),
+        configRevision: member.emptyTeam
+          ? member.configRevision || 0
+          : laneChromeConfigRevision(member),
         attachments,
       },
       host,

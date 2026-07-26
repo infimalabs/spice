@@ -6,34 +6,48 @@ const renderPath = process.argv[3];
 const lanesPath = process.argv[4];
 const statusWrites = [];
 const lifetimeCalls = [];
-const renderedPayloads = [];
+const errors = [];
 const context = {
   console,
   Map,
   Set,
   observerModeEnabled: false,
-  targetsLoaded: false,
-  taskFilterInventoryRevision: "99",
+  targetsLoaded: true,
+  taskFilterInventoryRevision: "",
   taskFilterStemPills: [],
   spiceMenuEl: null,
+  filterStripEl: null,
   uniqueStringList(values) {
     return Array.from(new Set(values || []));
   },
   laneGroupHost(lane) {
     return lane;
   },
+  laneIsFusedHost() {
+    return false;
+  },
+  laneGroupMemberLanes(lane) {
+    return [lane];
+  },
   relativeAgeSeconds() {
     return null;
   },
   clearGlobalActivityStatus() {},
+  setGlobalTransientError(message) {
+    errors.push(message);
+  },
   renderFilterPills() {},
-  syncFusedLaneChrome() {},
+  renderLaneFiltersPane() {},
+  renderLaneInfoPane() {},
+  renderLaneViewBadge() {},
+  syncFusedLaneLights() {},
+  syncFusedLaneStatusLine() {},
+  syncLaneTeamMenuButton() {},
+  syncComposerShards() {},
   syncComposerPlaceholders() {},
-  renderLaneViewShell() {},
   applyServerLaneLifetime(lane, lifetime, options) {
     lifetimeCalls.push({ lifetime, configRevision: options.configRevision });
     lane.lifetime = lifetime;
-    lane.serverLifetime = lifetime;
     return true;
   },
 };
@@ -42,24 +56,15 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
   filename: "app.lane-store.js",
 });
-const laneStore = vm.runInContext("laneStore", context);
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
-
+const laneStore = vm.runInContext("laneStore", context);
 context.setLaneStatus = (_lane, statusLine) => statusWrites.push(statusLine);
-context.renderFilterPills = () => {};
-context.renderLaneViewShell = () => {};
-context.syncFusedLaneChrome = () => {};
-context.syncComposerPlaceholders = () => {};
-const canonicalRenderLaneChrome = context.renderLaneChrome;
-context.renderLaneChrome = (lane, payload) => {
-  renderedPayloads.push(payload);
-  return canonicalRenderLaneChrome(lane, payload);
-};
+context.setGlobalTransientError = (message) => errors.push(message);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -67,67 +72,52 @@ function assert(condition, message) {
 
 const transcriptMessages = [{ key: "live-message", display_text: "live text" }];
 const knownMessages = [...transcriptMessages];
+const composerDraft = { text: "operator draft" };
+const focusToken = { name: "focused textarea" };
 const cachedPayload = {
   messages: transcriptMessages,
-  statusLine: {
-    agentProcessStatus: "running",
-    preview: "cached live preview",
-    pendingInboxCount: 2,
-    pendingInboxKeys: ["live-a", "live-b"],
-    pendingInboxRevision: "live-revision",
-    pendingInboxVersion: 40,
-  },
+  statusLine: { agentProcessStatus: "running", preview: "cached preview" },
 };
 const currentMetrics = { completed: 1 };
-const staleInfo = {
-  summaryRows: [{ key: "thread", value: "thread-stale" }],
-  members: [],
-};
 const lane = {
   targetId: "lane-a",
   emptyTeam: false,
   latestPayload: cachedPayload,
   knownMessages,
+  composerDraft,
+  focusToken,
   branchName: "stale-branch",
   agentName: "stale-agent",
-  driverName: "stale-driver",
-  driverModel: "stale-model",
-  driverEffort: "low",
-  serveAgentIdentity: { actorId: "stale-actor" },
   targetThreadId: "thread-stale",
   activeThreadId: "thread-stale",
   teamId: "team-stale",
-  teamRevision: 1,
-  configRevision: 1,
-  taskFilters: ["stale.filter"],
-  effectiveTaskFilters: ["stale"],
-  laneFilterVersion: "stale-filter-version",
   lifetime: "Drain",
-  serverLifetime: "Drain",
-  renewalIntent: { requested: false },
   laneMetrics: currentMetrics,
-  laneInfo: staleInfo,
-  privateTaskCount: 1,
-  backendPendingInboxCount: 2,
-  backendPendingInboxKeys: new Set(["live-a", "live-b"]),
-  backendPendingInboxRevision: "live-revision",
-  backendPendingInboxVersion: 40,
-  backendPendingInboxKeysAuthoritative: true,
+  laneInfo: { summaryRows: [], members: [] },
   optimisticPendingInboxCount: 2,
-  optimisticSubmittedInboxKeys: new Set(),
-  optimisticPendingInboxFloor: 0,
+  optimisticSubmittedInboxKeys: new Set(["live-a", "live-b"]),
+  optimisticPendingInboxFloor: 2,
   pendingSubmissionCount: 0,
   lastRenderedStatusLine: cachedPayload.statusLine,
   pipEl: { dataset: {}, title: "" },
 };
+laneStore.replaceTargets([
+  {
+    id: lane.targetId,
+    targetIdentity: {
+      branch: "stale-branch",
+      driver: { name: "codex", model: "old", effort: "low" },
+      agent: { state: "configured", name: "stale-agent" },
+      thread: { state: "bound", threadId: "thread-stale" },
+    },
+  },
+]);
 laneStore.registerLane(lane);
 
-const eagerPayloadMetrics = { completed: 9 };
 const refreshedInfo = {
   summaryRows: [{ key: "thread", value: "thread-fresh" }],
   members: [{ actorId: "fresh-actor" }],
 };
-const refreshedRenewal = { requested: true };
 const refreshedTarget = {
   id: lane.targetId,
   targetIdentity: {
@@ -151,91 +141,112 @@ const refreshedTarget = {
       actual: { model: "actual-model", effort: "medium" },
     },
   },
-  taskFilters: ["serve.ui"],
-  effectiveTaskFilters: ["serve"],
-  laneFilterVersion: "fresh-filter-version",
-  teamIdentity: {
-    state: "member",
-    teamId: "team-fresh",
-    teamRevision: 2,
-    configRevision: 2,
-  },
-  lifetime: "Drive",
-  renewalIntent: refreshedRenewal,
-  laneMetrics: eagerPayloadMetrics,
   laneInfo: refreshedInfo,
-  privateTaskCount: 7,
   statusLine: {
     agentProcessStatus: "idle",
     preview: "refreshed target status",
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "drained-revision",
-    pendingInboxVersion: 41,
+  },
+  chrome: {
+    targetId: lane.targetId,
+    teamConfig: {
+      authority: "team-store",
+      order: { epoch: "", revision: 2 },
+      value: {
+        teamIdentity: {
+          state: "member",
+          teamId: "team-fresh",
+          teamRevision: 2,
+          configRevision: 2,
+        },
+      },
+    },
+    taskBoard: {
+      authority: "task-board",
+      order: { epoch: "2", revision: 2 },
+      value: {
+        taskFilters: ["serve.ui"],
+        taskFilterEntries: [{ project: "serve.ui", sources: ["manual"] }],
+        effectiveTaskFilters: ["serve"],
+        taskFilterInventory: {
+          revision: "2",
+          catalog: { approvedStems: [] },
+          primaryStems: [],
+        },
+        privateTaskCount: 7,
+      },
+    },
+    renewal: {
+      authority: "team-store",
+      order: { epoch: "", revision: 2 },
+      value: { lifetime: "Drive", renewalIntent: { requested: true } },
+    },
+    pendingInbox: {
+      authority: "inbox",
+      order: { epoch: "", revision: 41 },
+      value: { count: 0, label: "0", keys: [] },
+    },
+    activity: {
+      authority: "transcript",
+      order: { epoch: "2026-07-26T05:00:00Z", revision: 0 },
+      value: { lastAssistantAt: "2026-07-26T05:00:00Z" },
+    },
   },
 };
 
 context.applyTargetsPayload({
   workTrees: [refreshedTarget],
   observerErrors: [],
-  taskFilterInventory: { revision: "1" },
 });
 
-assert(
-  renderedPayloads.length === 1 && renderedPayloads[0] === refreshedTarget,
-  "target refresh renders the canonical target payload directly",
-);
-assert(lane.branchName === "fresh-branch", "refresh updates target identity");
+const chrome = laneStore.laneChrome(lane.targetId);
+const storedTarget = laneStore.targetForId(lane.targetId);
+assert(laneStore.laneForId(lane.targetId) === lane, "refresh preserves lane object");
+assert(lane.branchName === "fresh-branch", "refresh updates non-faceted identity");
 assert(lane.agentName === "fresh-agent", "refresh updates agent identity");
-assert(
-  lane.serveAgentIdentity === refreshedTarget.serveAgentIdentity,
-  "refresh updates serve-agent identity",
-);
-assert(
-  lane.driverName === "actual-driver -> desired-driver",
-  "refresh updates live driver identity",
-);
 assert(lane.targetThreadId === "thread-fresh", "refresh updates thread identity");
-assert(lane.teamId === "team-fresh", "refresh updates team identity");
-assert(lane.teamRevision === 2, "refresh updates team revision");
-assert(lane.configRevision === 2, "refresh updates team config revision");
-assert(lane.taskFilters.join(",") === "serve.ui", "refresh updates task filters");
-assert(
-  lane.effectiveTaskFilters.join(",") === "serve",
-  "refresh updates effective task filters",
-);
-assert(
-  lane.laneFilterVersion === "fresh-filter-version",
-  "refresh updates filter version",
-);
-assert(lane.lifetime === "Drive", "refresh updates lifetime");
+assert(chrome.teamConfig.teamIdentity.teamId === "team-fresh", "team is canonical");
+assert(chrome.taskBoard.effectiveTaskFilters[0] === "serve", "board is canonical");
+assert(chrome.renewal.lifetime === "Drive", "renewal is canonical");
+assert(chrome.pendingInbox.count === 0, "pending identity is canonical");
 assert(
   lifetimeCalls.length === 1 && lifetimeCalls[0].configRevision === 2,
-  "refresh applies lifetime at the refreshed config revision",
-);
-assert(lane.renewalIntent === refreshedRenewal, "refresh updates renewal intent");
-assert(
-  lane.laneMetrics === currentMetrics,
-  "refresh preserves the on-demand lane metrics snapshot",
-);
-assert(lane.laneInfo === refreshedInfo, "refresh updates lane info");
-assert(lane.privateTaskCount === 7, "refresh updates private task count");
-assert(
-  lane.backendPendingInboxCount === 0 &&
-    lane.backendPendingInboxRevision === "drained-revision",
-  "refresh applies pending identity through canonical chrome rendering",
+  "renewal transition applies lifetime at canonical config revision",
 );
 assert(
-  statusWrites.at(-1).agentProcessStatus === "idle" &&
-    statusWrites.at(-1).preview === "refreshed target status",
-  "refresh updates non-pending lane status",
+  !("taskFilters" in lane) &&
+    !("renewalIntent" in lane) &&
+    !("backendPendingInboxCount" in lane),
+  "lane retains no server chrome copies",
 );
+assert(
+  !("chrome" in storedTarget) &&
+    !("taskFilters" in storedTarget) &&
+    !("teamIdentity" in storedTarget),
+  "target inventory retains only descriptor and non-faceted identity state",
+);
+assert(lane.laneMetrics === currentMetrics, "on-demand metrics survive refresh");
+assert(lane.laneInfo === refreshedInfo, "non-faceted lane info updates");
 assert(
   lane.latestPayload === cachedPayload &&
-    lane.latestPayload.messages === transcriptMessages,
-  "refresh preserves the authoritative cached transcript payload",
+    lane.knownMessages === knownMessages &&
+    lane.composerDraft === composerDraft &&
+    lane.focusToken === focusToken,
+  "refresh preserves transcript, draft, and focus-local state",
 );
 assert(
-  lane.knownMessages === knownMessages && lane.knownMessages[0].key === "live-message",
-  "refresh preserves materialized live transcript state",
+  statusWrites.at(-1).pendingInboxCount === 0 &&
+    statusWrites.at(-1).lastAssistantAt === "2026-07-26T05:00:00Z",
+  "status presentation overlays canonical pending and activity",
+);
+
+const recordBeforeFailure = laneStore.laneChrome(lane.targetId);
+context.applyTargetsPayload({
+  workTrees: [],
+  targetsDiscoveryErrors: ["discovery offline"],
+});
+assert(errors.at(-1) === "discovery offline", "discovery failure is surfaced");
+assert(laneStore.laneForId(lane.targetId) === lane, "failure retains open lane");
+assert(
+  laneStore.laneChrome(lane.targetId) === recordBeforeFailure,
+  "failure retains canonical chrome record",
 );

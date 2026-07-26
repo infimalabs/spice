@@ -95,6 +95,7 @@ def test_global_filter_pills_reject_stale_inventory_resurrection():
             "node",
             str(script),
             str(STATIC_ROOT / "app.lane-store.js"),
+            str(STATIC_ROOT / "app.render.js"),
             str(STATIC_ROOT / "app.lanes.js"),
         ],
         check=True,

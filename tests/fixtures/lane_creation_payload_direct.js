@@ -2,7 +2,8 @@ const fs = require("fs");
 const vm = require("vm");
 
 const storePath = process.argv[2];
-const shellPath = process.argv[3];
+const renderPath = process.argv[3];
+const shellPath = process.argv[4];
 const target = {
   id: "target-a",
   targetIdentity: {
@@ -14,11 +15,11 @@ const target = {
     thread: { state: "bound", threadId: "thread-a" },
   },
   serveAgentIdentity: { actorId: "agent-a" },
-  teamIdentity: { state: "member", teamId: "team-a" },
   statusLine: { agentProcessStatus: "running" },
 };
 const rendered = [];
 const identityCalls = [];
+const teamCalls = [];
 const context = {
   console,
   observerModeEnabled: false,
@@ -28,10 +29,29 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
   filename: "app.lane-store.js",
 });
+vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
+  filename: "app.render.js",
+});
 vm.runInContext(fs.readFileSync(shellPath, "utf8"), context, {
   filename: "app.shell.js",
 });
-vm.runInContext("laneStore", context).replaceTargets([target]);
+const laneStore = vm.runInContext("laneStore", context);
+laneStore.replaceTargets([target]);
+laneStore.applyLaneChrome({
+  targetId: target.id,
+  teamConfig: {
+    authority: "team-store",
+    order: { epoch: "", revision: 4 },
+    value: {
+      teamIdentity: {
+        state: "member",
+        teamId: "team-a",
+        teamRevision: 3,
+        configRevision: 4,
+      },
+    },
+  },
+});
 
 context.createLaneShellElement = () => ({ classList: { add() {} } });
 context.laneTargetIdentityFields = (
@@ -44,7 +64,10 @@ context.laneTargetIdentityFields = (
 };
 context.laneStreamState = () => ({ latestPayload: null });
 context.laneControlState = () => ({});
-context.laneTeamState = () => ({});
+context.laneTeamState = (_emptyTeam, teamIdentity) => {
+  teamCalls.push(teamIdentity);
+  return {};
+};
 context.laneBackendState = () => ({});
 context.laneOverlayState = () => ({});
 context.laneDraftState = () => ({});
@@ -53,7 +76,9 @@ context.laneElementRefs = () => ({ historySentinelEl: { dataset: {} } });
 context.wireLaneShell = () => {};
 context.syncComposerShards = () => {};
 context.syncLaneEffectiveControls = () => {};
-context.renderLaneChrome = (lane, payload) => rendered.push({ lane, payload });
+context.renderLanePayloadPresentation = (lane, payload) =>
+  rendered.push({ lane, payload });
+context.renderLaneViewShell = () => {};
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -74,4 +99,8 @@ assert(
 assert(
   identityCalls[0].serveAgentIdentity === target.serveAgentIdentity,
   "lane creation reads serve identity from the canonical payload",
+);
+assert(
+  teamCalls[0].teamId === "team-a" && teamCalls[0].configRevision === 4,
+  "lane creation reads team config from canonical chrome",
 );

@@ -10,7 +10,8 @@
 function laneAssignedTaskFilters(lane) {
   const filters = [];
   for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
-    for (const filter of member.effectiveTaskFilters || []) {
+    const board = laneTaskBoardPresentation(member);
+    for (const filter of board.effectiveTaskFilters || []) {
       if (filter && !filters.includes(filter)) filters.push(filter);
     }
   }
@@ -23,7 +24,8 @@ function laneAssignedTaskFilters(lane) {
 function laneManualTaskFilters(lane) {
   const pins = [];
   for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
-    for (const project of manualTaskFilterProjects(member.taskFilterEntries)) {
+    const board = laneTaskBoardPresentation(member);
+    for (const project of manualTaskFilterProjects(board.taskFilterEntries)) {
       if (project && !pins.includes(project)) pins.push(project);
     }
   }
@@ -31,7 +33,19 @@ function laneManualTaskFilters(lane) {
 }
 
 function laneFilterInventory(lane) {
-  return laneGroupHost(lane).taskFilterInventory;
+  return laneTaskBoardPresentation(laneGroupHost(lane)).taskFilterInventory || null;
+}
+
+function laneTaskBoardPresentation(lane) {
+  if (lane.emptyTeam)
+    return {
+      taskFilters: lane.emptyTeamTaskFilters || [],
+      effectiveTaskFilters: lane.emptyTeamEffectiveTaskFilters || [],
+      taskFilterEntries: lane.emptyTeamTaskFilterEntries || [],
+      taskFilterInventory: null,
+      privateTaskCount: 0,
+    };
+  return laneChromeTaskBoard(lane);
 }
 
 function laneFilterAvailableOpenTaskCount(lane, assignedFilters) {
@@ -188,7 +202,10 @@ function lanePrivateQueues(lane) {
   const queues = [];
   for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
     const label = member.agentName || "private";
-    const count = Math.max(0, Number(member.privateTaskCount) || 0);
+    const count = Math.max(
+      0,
+      Number(laneTaskBoardPresentation(member).privateTaskCount) || 0,
+    );
     const key = label + "\n" + (member.targetId || "");
     const existing = queues.find((queue) => queue.key === key);
     if (existing) existing.count += count;

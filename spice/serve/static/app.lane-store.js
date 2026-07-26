@@ -608,8 +608,13 @@ function compareLaneChromeEpoch(epoch, other) {
     const run = runs[index];
     const otherRun = otherRuns[index];
     const numeric = /^\d/.test(run) && /^\d/.test(otherRun);
-    if (numeric && Number(run) !== Number(otherRun))
-      return Number(run) < Number(otherRun) ? -1 : 1;
+    if (numeric) {
+      const digits = run.replace(/^0+(?=\d)/, "");
+      const otherDigits = otherRun.replace(/^0+(?=\d)/, "");
+      if (digits.length !== otherDigits.length)
+        return digits.length < otherDigits.length ? -1 : 1;
+      if (digits !== otherDigits) return digits < otherDigits ? -1 : 1;
+    }
     if (!numeric && run !== otherRun) return run < otherRun ? -1 : 1;
   }
   if (runs.length !== otherRuns.length)

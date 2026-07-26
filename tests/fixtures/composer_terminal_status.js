@@ -1,9 +1,10 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const renderPath = process.argv[2];
-const submissionsPath = process.argv[3];
-const composerPath = process.argv[4];
+const storePath = process.argv[2];
+const renderPath = process.argv[3];
+const submissionsPath = process.argv[4];
+const composerPath = process.argv[5];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -21,6 +22,9 @@ const context = {
 };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(storePath, "utf8"), context, {
+  filename: "app.lane-store.js",
+});
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
