@@ -153,13 +153,20 @@ def _claude_tool_result_events(
             call_id=str(block.get("tool_use_id") or ""),
             content=body if isinstance(body, str) else "",
             failed=bool(block.get("is_error")),
+            tool_output_type="function_call_output",
         )
     ]
     for item in body if isinstance(body, list) else []:
         if isinstance(item, dict) and item.get("type") == "image":
             url = _claude_image_url(item)
             if url is not None:
-                events.append(Image(at=stamper.stamp(), url=url))
+                events.append(
+                    Image(
+                        at=stamper.stamp(),
+                        url=url,
+                        tool_output_type="function_call_output",
+                    )
+                )
     return events
 
 
