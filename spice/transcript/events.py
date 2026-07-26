@@ -20,14 +20,15 @@ a reader concern with its own consolidation underway; keeping the raw string
 here means the substrate never becomes the home of yet another date parser.
 
 The set is closed but not frozen for all time: a kind is added when a decoder
-actually emits it, never speculatively. Codex-only facts (a provider-side web
-search, and context-usage accounting that is still a driver side channel today)
-join when the Codex adapter lands and settles them.
+actually emits it, never speculatively. Both built-in dialects decode onto the
+set below; provider-only details stay explicit typed fields on the nearest
+plane-neutral event rather than leaking an untyped payload bag through the seam.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 # The dict seam that predates this substrate hands its decoder one raw line with
 # no idea which file or offset it came from. Events decoded through that legacy
@@ -57,6 +58,13 @@ class AssistantText:
     at: Provenance
     text: str
     final: bool
+    item_id: str | None = None
+    content_type: str = "text"
+    phase: str | None = None
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -65,6 +73,14 @@ class Reasoning:
 
     at: Provenance
     summary: str
+    item_id: str | None = None
+    summary_type: str | None = "summary_text"
+    encrypted_content: str | None = None
+    content_present: bool = False
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -75,6 +91,14 @@ class ToolCall:
     call_id: str
     name: str
     arguments: str
+    item_id: str | None = None
+    custom: bool = False
+    status: str | None = None
+    namespace: str | None = None
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -85,6 +109,13 @@ class ToolOutput:
     call_id: str
     content: str
     failed: bool
+    item_id: str | None = None
+    content_type: str | None = None
+    output_is_list: bool = False
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,6 +128,15 @@ class Image:
 
     at: Provenance
     url: str
+    content_type: str = "image"
+    detail: str | None = None
+    role: str | None = None
+    item_id: str | None = None
+    call_id: str | None = None
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -110,6 +150,14 @@ class UserMessage:
     at: Provenance
     text: str
     prompt_id: str | None
+    role: str = "user"
+    item_id: str | None = None
+    content_type: str = "text"
+    phase: str | None = None
+    turn_id: str | None = None
+    turn_metadata_key: (
+        Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
+    ) = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -125,6 +173,41 @@ class Compaction:
     at: Provenance
     active: bool
     boundary: bool
+
+
+@dataclass(slots=True, frozen=True)
+class WebSearch:
+    """A provider-side web search, page open, or in-page find request."""
+
+    at: Provenance
+    status: str | None
+    action_type: str | None
+    query: str | None = None
+    queries: tuple[str, ...] = ()
+    url: str | None = None
+    pattern: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class TokenUsage:
+    """One explicit set of token counters reported by a transcript dialect."""
+
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+    total_tokens: int
+
+
+@dataclass(slots=True, frozen=True)
+class ContextUsage:
+    """Last-turn and cumulative token usage plus the provider context window."""
+
+    at: Provenance
+    last: TokenUsage
+    cumulative: TokenUsage | None
+    model_context_window: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -149,6 +232,8 @@ TranscriptEvent = (
     | Image
     | UserMessage
     | Compaction
+    | WebSearch
+    | ContextUsage
     | Unknown
 )
 
