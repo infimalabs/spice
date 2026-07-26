@@ -248,6 +248,7 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
         return 0
     if not args.value:
         print(f"personality={values.configured_agent_personality(repo_root)}")
+        print(_personality_driver_note(repo_root))
         return 0
     edit.set_scope_section(
         repo_root,
@@ -256,7 +257,26 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
         {values.AGENT_PERSONALITY_KEY: args.value},
     )
     print(f"personality={args.value}")
+    print(_personality_driver_note(repo_root))
     return 0
+
+
+def _personality_driver_note(repo_root: Path) -> str:
+    """Whether the driver this worktree launches acts on a set personality.
+
+    Personality is a launch knob, and not every agent CLI has a flag to carry
+    one. Saying so where the value is written keeps a setting that cannot take
+    from reading as one that did.
+    """
+    from spice.agent.driver import PERSONALITY_LAUNCH_KNOB, driver_for
+
+    driver = driver_for(repo_root)
+    if PERSONALITY_LAUNCH_KNOB in driver.honored_launch_knobs:
+        return f"driver={driver.name} carries personality into every launch"
+    return (
+        f"driver={driver.name} has no launch-time seam for personality, "
+        "so this value does not reach the agent"
+    )
 
 
 _CONFIG_ACTIONS = {

@@ -297,6 +297,14 @@ def render_ensure_result(result: Any) -> str:
         f"service_tier={result.status.service_tier or '-'}",
         f"prompt={result.prompt}",
     ]
+    unhonored = result.unhonored_launch_knobs
+    if unhonored:
+        # Said out loud only when this launch was asked for something its
+        # driver cannot carry; the usual launch asks for nothing of the kind.
+        lines.append(
+            f"unhonored={','.join(unhonored)} "
+            "(no launch-time seam on this driver; not sent)"
+        )
     if result.log_path:
         lines.append(f"log={result.log_path}")
     if result.command:

@@ -27,7 +27,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, overload
+from typing import Any, Callable, Iterable, Mapping, overload
 
 from spice import defaults
 from spice.agent.claudetranscript import claude_line_events
@@ -68,6 +68,19 @@ class PostToolHookCapability:
     unsupported_tools: tuple[str, ...] = ()
     context_output_field: str = ""
     note: str = ""
+
+
+# The closed vocabulary of launch knobs a caller can ask a driver for. Every
+# name here is something `build_exec_command` accepts and some driver's CLI has
+# a launch-time seam for; a driver that lacks the seam declares its absence
+# rather than accepting the value and dropping it where nobody can see. These
+# are argument names, not config keys: `effort` is configured but asked for as
+# `reasoning_effort`, so a caller holding a config key names the knob from here.
+PERSONALITY_LAUNCH_KNOB = "personality"
+FAST_MODE_LAUNCH_KNOB = "fast_mode"
+LAUNCH_KNOBS: frozenset[str] = frozenset(
+    {"model", "reasoning_effort", PERSONALITY_LAUNCH_KNOB, FAST_MODE_LAUNCH_KNOB}
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +131,11 @@ class AgentDriver:
     # native tool calls. Consumers must check this rather than assuming every
     # driver has Claude-equivalent PostToolUse coverage.
     post_tool_hook: PostToolHookCapability | None = None
+    # Which of LAUNCH_KNOBS this driver writes into its `exec` command. The
+    # launch path consults this and sends nothing else, so a knob a CLI has no
+    # seam for is dropped once, in the open, instead of separately and silently
+    # inside each driver body. A driver that grows a seam declares it here.
+    honored_launch_knobs: frozenset[str] = frozenset()
 
     @property
     def state_dirname(self) -> str:
@@ -187,6 +205,13 @@ class AgentDriver:
     def observer_roots(self) -> tuple[Path, ...]:
         """Conventional read-only transcript roots this driver can discover."""
         return ()
+
+    def unhonored_launch_knobs(self, requested: Iterable[str]) -> tuple[str, ...]:
+        """The requested knobs this driver's CLI has no launch-time seam for.
+
+        Sorted so a caller reporting them names them the same way every time.
+        """
+        return tuple(sorted(set(requested) - self.honored_launch_knobs))
 
     def build_exec_command(
         self,
@@ -864,6 +889,10 @@ class ClaudeDriver(AgentDriver):
         binary: str = "",
         fast_mode: bool = False,
     ) -> list[str]:
+        # `claude --print` has no launch-time seam for any of these. Personality
+        # and fast mode are declared unhonored, so the launch path withholds
+        # them; the service tier rides fast mode and so arrives empty with it.
+        del personality, service_tier, fast_mode
         # The same generic preamble+prompt rides both the system prompt and the
         # trailing prompt (so the agent re-grounds in the skill every turn), with
         # the worktree's steering token appended to its tail: the agent then sees
@@ -1168,6 +1197,8 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     default_model="gpt-5.5",
     default_reasoning_effort="xhigh",
     default_service_tier="",
+    # Codex takes all four through `-c` config overrides and its own flags.
+    honored_launch_knobs=LAUNCH_KNOBS,
     stdout_assistant_marker="codex",
     stdout_section_markers=frozenset(
         {"context compacted", "exec", "tokens used", "user"}
@@ -1203,6 +1234,10 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_model=CLAUDE_DEFAULT_MODEL,
     default_reasoning_effort="xhigh",
     default_service_tier="",
+    # `claude --print` takes a model and an effort at launch. Its personality
+    # and fast mode are interactive, with no launch-time flag to carry them.
+    honored_launch_knobs=LAUNCH_KNOBS
+    - {PERSONALITY_LAUNCH_KNOB, FAST_MODE_LAUNCH_KNOB},
     stdout_assistant_marker="",
     stdout_section_markers=frozenset(),
     stdout_compaction_marker="",

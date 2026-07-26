@@ -29,7 +29,12 @@ from pathlib import Path
 from threading import Condition, Event, Thread
 from typing import Any, cast
 
-from spice.agent.driver import driver_for
+from spice.agent.driver import (
+    FAST_MODE_LAUNCH_KNOB,
+    AgentDriver,
+    PERSONALITY_LAUNCH_KNOB,
+    driver_for,
+)
 from spice.agent.identity import canonical_thread_id, uuid_thread_id
 from spice.agent.shadow import ensure_origin_head
 from spice.agent.paths import (
@@ -107,6 +112,7 @@ from spice.agent.watchdog import (
     startup_signal_for_supervised_thread,
 )
 from spice.config.values import (
+    DEFAULT_AGENT_PERSONALITY,
     configured_agent_effort,
     configured_agent_model,
     configured_agent_personality,
@@ -160,6 +166,25 @@ class AgentEnsureResult:
     command: list[str]
     prompt: str
     log_path: Path | None
+    # Knobs this launch was asked for that its driver has no seam to carry.
+    # Empty on a launch that asked for nothing the driver cannot do.
+    unhonored_launch_knobs: tuple[str, ...] = ()
+
+
+def _requested_launch_knobs(*, personality: str, fast_mode: bool) -> tuple[str, ...]:
+    """The launch knobs this call actually asks for, past the shipped defaults.
+
+    A model and an effort always resolve to something, so neither is an ask.
+    Personality resolves to a documented default, so only a value departing
+    from it is one, and fast mode is off until somebody turns it on. Reporting
+    a knob nobody chose would make every launch on every driver noisy.
+    """
+    requested = []
+    if personality and personality != DEFAULT_AGENT_PERSONALITY:
+        requested.append(PERSONALITY_LAUNCH_KNOB)
+    if fast_mode:
+        requested.append(FAST_MODE_LAUNCH_KNOB)
+    return tuple(requested)
 
 
 @dataclass(frozen=True)
@@ -205,6 +230,125 @@ def agent_ensure_lock(repo_root: Path):
     )
 
 
+@dataclass(frozen=True)
+class PreparedLaunch:
+    """Everything one launch resolves to, decided before a process exists.
+
+    Resolved once, under the ensure-lock, so the dry run reports exactly what a
+    real start would run. `unhonored_knobs` names what the caller asked for that
+    this driver has no launch-time seam for: those values are withheld here
+    rather than handed to a driver body that would ignore them.
+    """
+
+    action: str
+    command: list[str]
+    resume_thread_id: str
+    model: str
+    reasoning_effort: str
+    service_tier: str
+    fast_mode: bool
+    unhonored_knobs: tuple[str, ...]
+
+
+def _refuse_restart_after_rapid_deaths(repo_root: Path) -> None:
+    """Raise when launches keep dying young and this wake is automatic.
+
+    Only automatic wake paths honor the refusal; an explicit operator start is
+    itself the grant of exactly one new attempt, and the journal it leaves
+    behind re-arms the refusal if that attempt also dies young.
+    """
+    refusal = launch_refusal(repo_root)
+    if refusal is None:
+        return
+    raise AgentRestartRefusedError(
+        "automatic restart refused: "
+        f"{refusal['consecutive_rapid_deaths']} consecutive launches "
+        f"died within {RAPID_DEATH_LIFETIME_SECONDS:g}s; "
+        f"holding until epoch {refusal['hold_until_epoch']} "
+        "unless an operator starts the agent explicitly",
+        refusal=refusal,
+    )
+
+
+def _attachable_thread_id(driver: AgentDriver, repo_root: Path, thread_id: str) -> str:
+    """`thread_id` if a `--resume` of it can attach here, else no thread at all.
+
+    A bound thread with no conversation this worktree can resume (a reset, a
+    superseded id, a pointer crisscrossed from another lane) dies on startup and,
+    left bound, bricks every retry into the same loop. Dropping the id starts a
+    fresh thread instead, so the lane self-heals.
+    """
+    if thread_id and not driver.thread_resumable_here(repo_root, thread_id):
+        return ""
+    return thread_id
+
+
+def _prepare_launch(
+    driver: AgentDriver,
+    repo_root: Path,
+    status: AgentStatus,
+    *,
+    prompt: str,
+    force_new: bool,
+    model: str,
+    reasoning_effort: str,
+    personality: str | None,
+    agent_bin: str,
+    fast_mode: bool,
+) -> PreparedLaunch:
+    """Resolve the command and every value that decided it.
+
+    Model and effort resolve in one order: explicit argument, then the claimed
+    task's phase mapping for this driver, then the effective four-layer
+    configuration, then the driver's shipped default. Personality and fast mode
+    resolve instead against what the driver declares it honors, so a knob
+    without a launch-time seam stops here, in the open.
+    """
+    resume_thread_id = _attachable_thread_id(
+        driver, repo_root, "" if force_new else status.thread_id
+    )
+    resolved_personality = personality or configured_agent_personality(repo_root)
+    honors = driver.honored_launch_knobs
+    unhonored = driver.unhonored_launch_knobs(
+        _requested_launch_knobs(personality=resolved_personality, fast_mode=fast_mode)
+    )
+    launch_personality = (
+        resolved_personality if PERSONALITY_LAUNCH_KNOB in honors else ""
+    )
+    launch_fast_mode = fast_mode and FAST_MODE_LAUNCH_KNOB in honors
+    service_tier = driver.default_service_tier if launch_fast_mode else ""
+    phase_launch = _claimed_task_phase_launch(repo_root, driver.name, status)
+    model = driver.resolve_model(
+        model or phase_launch.get("model", "") or configured_agent_model(repo_root)
+    )
+    reasoning_effort = (
+        reasoning_effort
+        or phase_launch.get("effort", "")
+        or configured_agent_effort(repo_root)
+        or driver.default_reasoning_effort
+    )
+    return PreparedLaunch(
+        action="renew" if force_new else ("resume" if resume_thread_id else "start"),
+        command=driver.build_exec_command(
+            repo_root=repo_root,
+            prompt=prompt,
+            thread_id=resume_thread_id,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            personality=launch_personality,
+            service_tier=service_tier,
+            binary=agent_bin,
+            fast_mode=launch_fast_mode,
+        ),
+        resume_thread_id=resume_thread_id,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        service_tier=service_tier,
+        fast_mode=launch_fast_mode,
+        unhonored_knobs=unhonored,
+    )
+
+
 def ensure_agent(
     repo_root: Path,
     *,
@@ -238,86 +382,50 @@ def ensure_agent(
                 prompt=prompt,
                 log_path=status.log_path,
             )
-        # Only automatic wake paths honor the refusal; an explicit operator
-        # start is itself the grant of exactly one new attempt, and the
-        # journal it leaves behind re-arms the refusal if that attempt also
-        # dies young.
         if automatic:
-            refusal = launch_refusal(resolved_root)
-            if refusal is not None:
-                raise AgentRestartRefusedError(
-                    "automatic restart refused: "
-                    f"{refusal['consecutive_rapid_deaths']} consecutive launches "
-                    f"died within {RAPID_DEATH_LIFETIME_SECONDS:g}s; "
-                    f"holding until epoch {refusal['hold_until_epoch']} "
-                    "unless an operator starts the agent explicitly",
-                    refusal=refusal,
-                )
-        resume_thread_id = "" if force_new else status.thread_id
-        if resume_thread_id and not driver.thread_resumable_here(
-            resolved_root, resume_thread_id
-        ):
-            # The bound thread has no conversation this worktree can `--resume`
-            # (a reset, a superseded id, or a pointer crisscrossed from another
-            # lane). Resuming it dies on startup and, left bound, bricks every
-            # retry into the same loop; drop the id so the launch starts a fresh
-            # thread and the lane self-heals.
-            resume_thread_id = ""
-        service_tier = driver.default_service_tier if fast_mode else ""
-        phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
-        # Resolution order: explicit argument > the claimed task's phase
-        # mapping for this driver > the effective four-layer configuration >
-        # the driver's shipped default.
-        phase_model = phase_launch.get("model", "")
-        model = driver.resolve_model(
-            model or phase_model or configured_agent_model(resolved_root)
-        )
-        reasoning_effort = (
-            reasoning_effort
-            or phase_launch.get("effort", "")
-            or configured_agent_effort(resolved_root)
-            or driver.default_reasoning_effort
-        )
-        command = driver.build_exec_command(
-            repo_root=resolved_root,
+            _refuse_restart_after_rapid_deaths(resolved_root)
+        launch = _prepare_launch(
+            driver,
+            resolved_root,
+            status,
             prompt=prompt,
-            thread_id=resume_thread_id,
+            force_new=force_new,
             model=model,
             reasoning_effort=reasoning_effort,
-            personality=personality or configured_agent_personality(resolved_root),
-            service_tier=service_tier,
-            binary=agent_bin,
+            personality=personality,
+            agent_bin=agent_bin,
             fast_mode=fast_mode,
         )
-        action = "renew" if force_new else ("resume" if resume_thread_id else "start")
         if dry_run:
             return AgentEnsureResult(
-                action=f"would-{action}",
+                action=f"would-{launch.action}",
                 status=status,
-                command=command,
+                command=launch.command,
                 prompt=prompt,
                 log_path=None,
+                unhonored_launch_knobs=launch.unhonored_knobs,
             )
         ensure_origin_head(resolved_root)
         log_path = start_agent(
             resolved_root,
-            action=action,
-            command=command,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            service_tier=service_tier,
-            resume_thread_id=resume_thread_id,
+            action=launch.action,
+            command=launch.command,
+            model=launch.model,
+            reasoning_effort=launch.reasoning_effort,
+            service_tier=launch.service_tier,
+            resume_thread_id=launch.resume_thread_id,
             prompt_skill_path=prompt_skill_path,
-            fast_mode=fast_mode,
+            fast_mode=launch.fast_mode,
             supervise_stdout=supervise_stdout,
             launch_claim=launch_claim,
         )
         return AgentEnsureResult(
-            action=action,
+            action=launch.action,
             status=agent_status(resolved_root),
-            command=command,
+            command=launch.command,
             prompt=prompt,
             log_path=log_path,
+            unhonored_launch_knobs=launch.unhonored_knobs,
         )
 
 

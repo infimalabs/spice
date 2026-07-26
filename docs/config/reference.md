@@ -301,6 +301,14 @@ Agent personality defaults to the worktree scope through `spice config
 personality`; pass `--scope system`, `--scope pyproject`, or `--scope
 repository` to set it in another layer. The effective default is `pragmatic`.
 
+Personality is a launch knob, and unlike `model` and `effort` it does not cross
+every driver: Codex carries it into each launch as a config override, while
+`claude --print` has no launch-time flag for a personality or for fast mode.
+Each driver declares which knobs it can carry, the launch path sends only those,
+and `spice config personality` names the active driver's answer as it writes the
+value. A launch asked for a knob its driver cannot carry reports the knob on the
+`spice agent ensure` output rather than dropping it quietly.
+
 ### Supervised Claude tool boundary
 
 Spice is the sole task control plane in supervised Claude lanes. Every
