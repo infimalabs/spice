@@ -489,28 +489,35 @@ def _emphasis_run_before(text: str, pos: int) -> tuple[int, str]:
 
 
 def _consume_body_wrapper_close(text: str, index: int, limit: int, wrapper: str) -> int:
-    """Skip a wrapper-closing emphasis run (and trailing space) at `index`."""
+    """Skip a wrapper-closing emphasis run (and trailing space) at `index`.
+
+    Like the separator, the run this skips is the marker's own width, so it
+    stops at the line boundary and leaves the next line's indentation for the
+    suppression walk to read.
+    """
     if text[index : index + len(wrapper)] != wrapper:
         return index
     index += len(wrapper)
-    while index < limit and text[index] in _ACK_BODY_SPACE_CHARS:
+    while index < limit and text[index] in _ACK_HEADER_INLINE_SPACE_CHARS:
         index += 1
     return index
 
 
 def _consume_ack_header_separator(
-    text: str, header_end: int, line_end: int
+    text: str, header_end: int, limit: int
 ) -> tuple[int, bool]:
-    """Skip an immediate ACK separator after the key list, when present."""
+    """Skip an immediate ACK separator after the key list, when present.
+
+    `limit` bounds the whole text, not the header's line: the separator's own
+    width is what stops this walk, so it never leaves the marker's line.
+    """
     index = header_end
     closers = _ACK_KEY_CLOSER_CHARS + _ACK_HEADER_INLINE_SPACE_CHARS
-    while index < line_end and text[index] in closers:
+    while index < limit and text[index] in closers:
         index += 1
-    if index < line_end and text[index] in _ACK_HEADER_SEPARATOR_CHARS:
+    if index < limit and text[index] in _ACK_HEADER_SEPARATOR_CHARS:
         body_start = index + 1
-        while (
-            body_start < line_end and text[body_start] in _ACK_HEADER_INLINE_SPACE_CHARS
-        ):
+        while body_start < limit and text[body_start] in _ACK_HEADER_INLINE_SPACE_CHARS:
             body_start += 1
         return body_start, True
     return header_end, False
