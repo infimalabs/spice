@@ -291,13 +291,13 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     ]
 
 
-def test_check_and_publish_reach_the_gates_through_one_shared_body(
+def test_every_gate_running_mode_reaches_the_gates_through_one_shared_body(
     tmp_path, monkeypatch, capsys
 ):
-    # Both entry points must call run_release_gates itself, not merely end up at
-    # the same leaf gates. That is what makes the check honest: an edit to what a
-    # release verifies changes what the check verifies in the same edit, because
-    # there is only one sequence to edit.
+    # Every mode that runs the gates must call run_release_gates itself, not
+    # merely end up at the same leaf gates. That is what makes the check honest:
+    # an edit to what a release verifies changes what every mode verifies in the
+    # same edit, because there is only one sequence to edit.
     gate_calls = []
 
     def reached_a_leaf_gate_directly(*args, **kwargs):
@@ -308,18 +308,25 @@ def test_check_and_publish_reach_the_gates_through_one_shared_body(
             "release modes must reach the gates through run_release_gates"
         )
 
+    def record_gate_run(root, choose_version):
+        # Resolving the seam is the point: it reports which version each mode
+        # asked the artifact gate to build.
+        version = choose_version()
+        gate_calls.append((root, version))
+        return version
+
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(release, "bump_version", lambda bump: f"1.0.0-from-{bump}")
     monkeypatch.setattr(release, "clean_build_artifacts", reached_a_leaf_gate_directly)
     monkeypatch.setattr(release, "run_constitution_gate", reached_a_leaf_gate_directly)
     monkeypatch.setattr(release, "run_artifact_gate", reached_a_leaf_gate_directly)
-    monkeypatch.setattr(
-        release,
-        "run_release_gates",
-        lambda root, version: gate_calls.append((root, version)),
-    )
+    monkeypatch.setattr(release, "run_release_gates", record_gate_run)
     monkeypatch.setattr(release, "ensure_notes_file", lambda notes_file: None)
+    monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
+    monkeypatch.setattr(release, "run", lambda command: None)
+    monkeypatch.setattr(release, "print_prepare_instructions", lambda version: None)
     monkeypatch.setattr(
         release, "release_commit_for_target", lambda version, target: "head"
     )
@@ -333,15 +340,20 @@ def test_check_and_publish_reach_the_gates_through_one_shared_body(
     )
     parser = build_release_parser()
 
-    check_result = release._handle_release_from_root(
-        parser.parse_args(["check"]), tmp_path
-    )
-    publish_result = release._handle_release_from_root(
-        parser.parse_args(["publish"]), tmp_path
-    )
+    results = [
+        release._handle_release_from_root(parser.parse_args(argv), tmp_path)
+        for argv in (["check"], ["publish"], ["prepare", "minor"], ["patch"])
+    ]
 
-    assert (check_result, publish_result) == (0, 0)
-    assert gate_calls == [(tmp_path, "0.9.0"), (tmp_path, "0.9.0")]
+    assert results == [0, 0, 0, 0]
+    # check and publish verify the version already in the tree; prepare and
+    # release verify the version they are about to ship.
+    assert gate_calls == [
+        (tmp_path, "0.9.0"),
+        (tmp_path, "0.9.0"),
+        (tmp_path, "1.0.0-from-minor"),
+        (tmp_path, "1.0.0-from-patch"),
+    ]
     assert "release gates passed for 0.9.0" in capsys.readouterr().out
 
 
