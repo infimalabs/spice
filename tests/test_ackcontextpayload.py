@@ -1,9 +1,16 @@
 """ACK-context payload completeness and retirement-order contracts."""
 
+from pathlib import Path
+
 from spice.mail.ackarchive import archive_ackd_inbox_items
-from spice.mail.ackstate import AckStateWrite, record_acked_inbox_items
+from spice.mail.ackstate import (
+    AckStateWrite,
+    ack_state_database_path,
+    record_acked_inbox_items,
+)
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
 from spice.serve.payload import message
+from spice.serve.team.store import ServeTeamStore
 from tests.test_messagepayload import (
     _message,
     _State,
@@ -13,6 +20,15 @@ from tests.test_messagepayload import (
 from tests.test_reposcaffolding import init_existing_repo as _init_repo
 
 ACK_CONTEXT_BACKLOG_DEPTH = 60
+
+
+def _isolated_state(tmp_path: Path) -> _State:
+    return _State(
+        team_store=ServeTeamStore(
+            path=tmp_path / "teams.sqlite3",
+            directive_state_path=ack_state_database_path(tmp_path),
+        )
+    )
 
 
 def test_messages_payload_finds_ack_context_outside_recent_archive_window(
@@ -48,7 +64,7 @@ def test_messages_payload_finds_ack_context_outside_recent_archive_window(
     )
 
     payload = message.messages_payload_for_worktree(
-        _State(),
+        _isolated_state(tmp_path),
         _Target(id="wt", repo_root=tmp_path),
         limit=5,
     )
@@ -98,7 +114,7 @@ def test_messages_payload_closes_pending_to_consumed_hydration_gap(
     )
 
     payload = message.messages_payload_for_worktree(
-        _State(),
+        _isolated_state(tmp_path),
         _Target(id="wt", repo_root=tmp_path),
         limit=5,
     )

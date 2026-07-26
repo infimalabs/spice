@@ -19,11 +19,17 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from spice.errors import SpiceError
+from spice.mail.ackschema import (
+    ACK_STATE_TABLE_SQL as ACK_STATE_TABLE_SQL,
+    sync_ack_state_schema,
+    validate_current_ack_state_schema,
+)
 from spice.paths import shared_state_path
 from spice.sqliteconnection import ensure_sqlite_schema_once, sqlite_connection
 
@@ -47,29 +53,6 @@ DIRECTIVE_PROVENANCES = frozenset(
     }
 )
 
-ACK_STATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS acked_inbox_items (
-  key TEXT PRIMARY KEY,
-  inbox_name TEXT NOT NULL,
-  text TEXT NOT NULL,
-  attachments_json TEXT NOT NULL DEFAULT '[]',
-  lineage_json TEXT NOT NULL DEFAULT '{}',
-  ack_text TEXT NOT NULL DEFAULT '',
-  ack_content TEXT NOT NULL DEFAULT '',
-  disposition TEXT NOT NULL DEFAULT 'acked',
-  archived_at REAL NOT NULL,
-  target_actor TEXT NOT NULL DEFAULT '',
-  team_id TEXT NOT NULL DEFAULT '',
-  sent_at REAL,
-  published_text TEXT NOT NULL DEFAULT '',
-  acknowledged_at REAL,
-  provenance TEXT NOT NULL DEFAULT 'archiveOnly'
-);
-"""
-ACK_STATE_INDEX_SQL = """
-CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
-  ON acked_inbox_items(archived_at);
-"""
 ACK_STATE_RECORD_SELECT_SQL = """
 SELECT key, inbox_name, text, attachments_json, lineage_json,
        ack_text, ack_content, disposition, archived_at
@@ -168,12 +151,7 @@ def record_acked_inbox_items_to_database(
         return []
     when = float(time.time() if now is None else now)
     database_path = Path(path)
-    _ensure_schema_once(database_path)
-    with sqlite_connection(
-        database_path,
-        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
-        wal=True,
-    ) as connection:
+    with _ack_state_write_connection(database_path) as connection:
         for item in writes:
             _record_ack_locked(connection, item, acknowledged_at=when)
     return [item.key for item in writes]
@@ -205,12 +183,7 @@ def record_directive_publications_to_database(
     if not writes:
         return []
     database_path = Path(path)
-    _ensure_schema_once(database_path)
-    with sqlite_connection(
-        database_path,
-        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
-        wal=True,
-    ) as connection:
+    with _ack_state_write_connection(database_path) as connection:
         for item in writes:
             _record_publication_locked(connection, item)
     return [item.key for item in writes]
@@ -295,7 +268,21 @@ def _ensure_schema_once(path: Path) -> None:
         path,
         busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
         initialize=_ensure_schema,
+        validate=validate_current_ack_state_schema,
+        wal_after_initialize=True,
     )
+
+
+@contextmanager
+def _ack_state_write_connection(path: Path) -> Iterator[sqlite3.Connection]:
+    _ensure_schema_once(path)
+    with sqlite_connection(
+        path,
+        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+    ) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        validate_current_ack_state_schema(connection)
+        yield connection
 
 
 def _ack_state_record(row: tuple[Any, ...]) -> AckStateRecord:
@@ -666,102 +653,7 @@ def _proposed_ack_signature(
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(ACK_STATE_TABLE_SQL)
-    _ensure_column(
-        connection,
-        "inbox_name",
-        "ALTER TABLE acked_inbox_items ADD COLUMN inbox_name TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "text",
-        "ALTER TABLE acked_inbox_items ADD COLUMN text TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "attachments_json",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'",
-    )
-    _ensure_column(
-        connection,
-        "lineage_json",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN lineage_json TEXT NOT NULL DEFAULT '{}'",
-    )
-    _ensure_column(
-        connection,
-        "ack_text",
-        "ALTER TABLE acked_inbox_items ADD COLUMN ack_text TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "ack_content",
-        "ALTER TABLE acked_inbox_items ADD COLUMN ack_content TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "disposition",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN disposition TEXT NOT NULL DEFAULT 'acked'",
-    )
-    _ensure_column(
-        connection,
-        "archived_at",
-        "ALTER TABLE acked_inbox_items ADD COLUMN archived_at REAL NOT NULL DEFAULT 0",
-    )
-    _ensure_column(
-        connection,
-        "target_actor",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN target_actor TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "team_id",
-        "ALTER TABLE acked_inbox_items ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "sent_at",
-        "ALTER TABLE acked_inbox_items ADD COLUMN sent_at REAL",
-    )
-    _ensure_column(
-        connection,
-        "published_text",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN published_text TEXT NOT NULL DEFAULT ''",
-    )
-    _ensure_column(
-        connection,
-        "acknowledged_at",
-        "ALTER TABLE acked_inbox_items ADD COLUMN acknowledged_at REAL",
-    )
-    _ensure_column(
-        connection,
-        "provenance",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN provenance TEXT NOT NULL DEFAULT 'archiveOnly'",
-    )
-    connection.execute(
-        "UPDATE acked_inbox_items SET published_text = text WHERE published_text = ''"
-    )
-    connection.execute(
-        "UPDATE acked_inbox_items SET acknowledged_at = archived_at "
-        "WHERE acknowledged_at IS NULL AND disposition IN (?, ?)",
-        (ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED),
-    )
-    connection.execute(ACK_STATE_INDEX_SQL)
-
-
-def _ensure_column(connection: sqlite3.Connection, column: str, statement: str) -> None:
-    columns = {
-        str(row[1])
-        for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
-    }
-    if column in columns:
-        return
-    connection.execute(statement)
+    sync_ack_state_schema(connection)
 
 
 def _decode_attachments_json(raw: str) -> tuple[dict[str, Any], ...]:
