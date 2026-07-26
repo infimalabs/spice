@@ -148,10 +148,10 @@ def agent_status(
 
 
 def agent_output_observation(
-    status: Any, *, now: datetime | None = None
+    status: AgentStatus, *, now: datetime | None = None
 ) -> AgentOutputObservation | None:
     """Measure a running agent's output recency from driver-owned artifacts."""
-    if str(getattr(status, "process_status", "") or "") != "running":
+    if status.process_status != "running":
         return None
     path, source = _agent_output_path(status)
     reference = now or datetime.now(UTC)
@@ -170,7 +170,7 @@ def agent_output_observation(
                 observed_epoch=observed_epoch,
                 reference=reference,
             )
-    started_epoch = _timestamp_epoch(str(getattr(status, "started_at", "") or ""))
+    started_epoch = _timestamp_epoch(status.started_at)
     if started_epoch is None:
         return AgentOutputObservation("unknown", "", None, "", None)
     observation = _output_observation(
@@ -188,11 +188,11 @@ def agent_output_observation(
     )
 
 
-def _agent_output_path(status: Any) -> tuple[Path | None, str]:
-    thread_id = canonical_thread_id(getattr(status, "thread_id", ""))
-    repo_root = Path(getattr(status, "repo_root", Path.cwd())).expanduser().resolve()
+def _agent_output_path(status: AgentStatus) -> tuple[Path | None, str]:
+    thread_id = canonical_thread_id(status.thread_id)
+    repo_root = status.repo_root.expanduser().resolve()
     if thread_id:
-        driver_name = str(getattr(status, "driver", "") or "")
+        driver_name = status.driver
         try:
             driver = (
                 select_driver(driver_name) if driver_name else driver_for(repo_root)
@@ -203,7 +203,7 @@ def _agent_output_path(status: Any) -> tuple[Path | None, str]:
         else:
             if transcript.is_file():
                 return transcript, "transcript"
-    log_path = state_path_value(getattr(status, "log_path", None))
+    log_path = status.log_path
     if log_path is not None and log_path.is_file():
         return log_path.resolve(), "log"
     return None, ""
@@ -237,19 +237,15 @@ def _timestamp_epoch(value: str) -> float | None:
     return parsed.timestamp() if parsed is not None else None
 
 
-def agent_binding_error(repo_root: Path, status: Any) -> str:
+def agent_binding_error(repo_root: Path, status: AgentStatus) -> str:
     expected_root = repo_root.expanduser().resolve()
-    status_root = (
-        Path(getattr(status, "repo_root", expected_root) or expected_root)
-        .expanduser()
-        .resolve()
-    )
+    status_root = status.repo_root.expanduser().resolve()
     if status_root != expected_root:
         return (
             "agent binding mismatch: status root "
             f"{status_root} != lane root {expected_root}"
         )
-    command_cwd = agent_command_cwd(getattr(status, "command", ()))
+    command_cwd = agent_command_cwd(status.command)
     command_root = command_cwd.expanduser().resolve() if command_cwd else None
     if command_root is not None and command_root != expected_root:
         return (

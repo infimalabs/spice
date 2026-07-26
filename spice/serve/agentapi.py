@@ -14,6 +14,7 @@ from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import (
     AGENT_FAILURE_OUT_OF_CREDITS,
     AGENT_FAILURE_RESTART_REFUSED,
+    AgentEnsureResult,
     AgentOutOfCreditsError,
     AgentRestartRefusedError,
     LaunchClaim,
@@ -79,8 +80,8 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
         "threadId": status.thread_id,
         "model": status.model,
         "effort": status.reasoning_effort,
-        "readyAt": str(getattr(status, "ready_at", "") or ""),
-        "startupFailure": str(getattr(status, "startup_failure", "") or ""),
+        "readyAt": status.ready_at,
+        "startupFailure": status.startup_failure,
         "launchable": not status.running,
         "bindingStatus": "mismatch"
         if binding_error
@@ -127,7 +128,7 @@ def agent_ensure_response_payload(
     return agent_ensure_payload(result), HTTPStatus.OK
 
 
-def agent_ensure_payload(result: Any) -> dict[str, Any]:
+def agent_ensure_payload(result: AgentEnsureResult) -> dict[str, Any]:
     """The launched arm of the ensure answer: a thread, and the process behind it."""
     payload = {
         "ok": True,
@@ -137,8 +138,8 @@ def agent_ensure_payload(result: Any) -> dict[str, Any]:
         "pid": result.status.pid or 0,
         "processGroupId": result.status.process_group_id or 0,
         "threadId": result.status.thread_id,
-        "readyAt": str(getattr(result.status, "ready_at", "") or ""),
-        "startupFailure": str(getattr(result.status, "startup_failure", "") or ""),
+        "readyAt": result.status.ready_at,
+        "startupFailure": result.status.startup_failure,
         "prompt": result.prompt,
         "logPath": str(result.log_path) if result.log_path else "",
     }

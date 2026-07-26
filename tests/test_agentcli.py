@@ -189,17 +189,22 @@ def test_agent_show_parses_to_agent_handler():
 def test_agent_show_renders_bound_agent_state_through_real_parser(
     tmp_path, monkeypatch, capsys
 ):
-    status = SimpleNamespace(
+    status = lifecycle.AgentStatus(
         repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
         process_status="running",
         pid=123,
         process_group_id=456,
         thread_id="thread-agent",
+        driver="codex",
         model="gpt-test",
         reasoning_effort="high",
         started_at="2026-07-03T00:00:00Z",
-        prompt_skill_path=tmp_path / "skill.md",
+        ready_at="",
+        startup_failure="",
         log_path=tmp_path / "agent.log",
+        prompt_skill_path=tmp_path / "skill.md",
+        command=(),
     )
     calls: list[Path] = []
 
@@ -311,19 +316,22 @@ def test_agent_output_observation_uses_log_when_transcript_is_unavailable(tmp_pa
 
 
 def test_agent_show_renders_startup_stall_diagnostic(tmp_path):
-    status = SimpleNamespace(
+    status = lifecycle.AgentStatus(
         repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
         process_status="startup-stalled",
         pid=123,
         process_group_id=123,
         thread_id="thread-agent",
+        driver="codex",
         model="gpt-test",
         reasoning_effort="high",
         started_at="2026-07-03T00:00:00Z",
         ready_at="",
         startup_failure="no driver-defined first activity within 120s",
-        prompt_skill_path=tmp_path / "skill.md",
         log_path=tmp_path / "agent.log",
+        prompt_skill_path=tmp_path / "skill.md",
+        command=(),
     )
 
     rendered = agent_cli.render_agent_status(status)

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from spice.agent.driver import CODEX_DRIVER
+from spice.agent.lifecycle import AgentStatus
 from spice.serve import agentapi, app, taskboard, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
@@ -177,24 +178,35 @@ def _record_identity(
 
 
 def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
-    status = SimpleNamespace(
-        running=running,
-        thread_id=thread_id,
-        process_status="running" if running else "idle",
-        pid=123 if running else 0,
-        process_group_id=123 if running else 0,
-        model="gpt-test",
-        reasoning_effort="low",
-        started_at="",
-        log_path=None,
-        prompt_skill_path=None,
-    )
-    monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(identity, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)
+    """Bind every reader to the real status type, built per lane root.
+
+    ``agent_status`` answers for one repo root, and ``agent_binding_error``
+    compares that root against the lane's, so the fake has to echo back the
+    root it was asked about rather than serve one shared value.
+    """
+
+    def _status(repo_root: Path, *_args: Any, **_kwargs: Any) -> AgentStatus:
+        root = Path(repo_root)
+        return AgentStatus(
+            repo_root=root,
+            state_path=root / "state.json",
+            process_status="running" if running else "idle",
+            pid=123 if running else 0,
+            process_group_id=123 if running else 0,
+            thread_id=thread_id,
+            driver="",
+            model="gpt-test",
+            reasoning_effort="low",
+            started_at="",
+            ready_at="",
+            startup_failure="",
+            log_path=None,
+            prompt_skill_path=None,
+            command=(),
+        )
+
+    for module in (agentapi, identity, lane, message, workroutes, inventory):
+        monkeypatch.setattr(module, "agent_status", _status)
 
 
 def test_rollout_cursors_are_isolated_per_client_and_evicted(tmp_path):

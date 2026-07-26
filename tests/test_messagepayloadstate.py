@@ -27,7 +27,7 @@ from tests.test_messagepayload import (
     _pending_identity,
     _record_identity,
     _State,
-    _Status,
+    _status,
     _stub_messages_payload,
     _Target,
     _task_board,
@@ -93,9 +93,7 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
     monkeypatch.setattr(
         message,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id=actor,
         ),
@@ -103,9 +101,7 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
     monkeypatch.setattr(
         identity,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id=actor,
         ),
@@ -113,9 +109,7 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id=actor,
         ),
@@ -394,9 +388,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     monkeypatch.setattr(
         message,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id="agent-a",
         ),
@@ -404,9 +396,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     monkeypatch.setattr(
         identity,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id="agent-a",
         ),
@@ -414,9 +404,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda _repo: _status(
             process_status="running",
             thread_id="agent-a",
         ),
@@ -550,7 +538,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     monkeypatch.setattr(
         message,
         "agent_status",
-        lambda _repo: _Status(running=False, started_at=""),
+        lambda repo: _status(repo_root=repo),
     )
 
     payload = message.messages_payload_for_worktree(

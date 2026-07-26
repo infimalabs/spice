@@ -287,16 +287,19 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
     target = _Target(id="lane", repo_root=repo)
-    status = SimpleNamespace(
+    status = lifecycle.AgentStatus(
         repo_root=repo,
-        running=True,
-        thread_id="thread",
+        state_path=repo / "state.json",
         process_status="running",
         pid=123,
         process_group_id=123,
+        thread_id="thread",
+        driver="",
         model="gpt-test",
         reasoning_effort="low",
         started_at="",
+        ready_at="",
+        startup_failure="",
         log_path=None,
         prompt_skill_path=None,
         command=(),
@@ -454,24 +457,38 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         session._teardown()
 
 
-def _agent_status(*, running: bool, pid: int) -> SimpleNamespace:
-    return SimpleNamespace(
-        running=running,
-        thread_id=THREAD_ID,
-        process_status="idle",
+def _agent_status(repo_root: Path, *, running: bool, pid: int) -> lifecycle.AgentStatus:
+    """The real status type, whose ``running`` is derived rather than declared.
+
+    The caller names the process it wants, and ``process_status`` carries it:
+    the dataclass answers ``running`` from that one field, so a status cannot
+    claim to be running while reporting itself idle.
+    """
+    return lifecycle.AgentStatus(
+        repo_root=repo_root,
+        state_path=repo_root / "state.json",
+        process_status="running" if running else "idle",
         pid=pid,
         process_group_id=pid,
+        thread_id=THREAD_ID,
+        driver="",
         model="gpt-test",
         reasoning_effort="low",
         started_at="",
+        ready_at="",
+        startup_failure="",
         log_path=None,
         prompt_skill_path=None,
+        command=(),
     )
 
 
-def _patch_agent_status(monkeypatch, status: SimpleNamespace) -> None:
+def _patch_agent_status(monkeypatch, *, running: bool, pid: int) -> None:
+    def status(repo_root: Path, *_args: object, **_kwargs: object):
+        return _agent_status(Path(repo_root), running=running, pid=pid)
+
     for module in (agentapi, identity, lane, message, inventory):
-        monkeypatch.setattr(module, "agent_status", lambda *_args, **_kwargs: status)
+        monkeypatch.setattr(module, "agent_status", status)
 
 
 def _pending_signature(repo: Path, transcript: Path):
@@ -537,7 +554,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
-    _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
+    _patch_agent_status(monkeypatch, running=False, pid=0)
     ensure_calls: list[dict[str, object]] = []
 
     def fake_ensure(ensured_target, **kwargs):
@@ -725,7 +742,7 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
     created = state.team_store.create_team(members=[f"target:{target.id}"])
     # Active-mode Serve owns the reconciler every lane decision is submitted to.
     start_lifecycle_reconciler(state)
-    _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
+    _patch_agent_status(monkeypatch, running=False, pid=0)
     ensure_calls: list[dict[str, object]] = []
     ensure_threads: list[str] = []
     ensure_entered = Event()
@@ -1118,7 +1135,7 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
-    _patch_agent_status(monkeypatch, _agent_status(running=True, pid=123))
+    _patch_agent_status(monkeypatch, running=True, pid=123)
     connection = _Connection()
     watcher_ready = Event()
     change_written = Event()
