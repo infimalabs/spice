@@ -13,6 +13,15 @@ from spice.serve.team.ids import target_actor_id as _target_actor_id
 from spice.serve.team.models import TeamAgentIdentity
 
 
+class _OmittedIdentityField:
+    """Marker for a public identity field the caller did not supply."""
+
+
+_OMITTED_IDENTITY_FIELD = _OmittedIdentityField()
+type _IdentityTextArgument = str | None | _OmittedIdentityField
+type _IdentityRevisionArgument = int | None | _OmittedIdentityField
+
+
 @dataclass(frozen=True, slots=True)
 class AgentIdentityRecordRequest:
     """One requested identity write, before anything about it is trusted.
@@ -34,20 +43,20 @@ class AgentIdentityRecordRequest:
     """
 
     actor_id: str
-    target_id: str = ""
-    thread_id: str = ""
-    actual_driver: str = ""
-    actual_model: str = ""
-    actual_effort: str = ""
-    actual_service_tier: str = ""
-    desired_driver: str = ""
-    desired_model: str = ""
-    desired_effort: str = ""
-    transcript_owner: str = ""
-    renewal_state: str = ""
-    renewal_ancestor_thread_id: str = ""
-    renewal_successor_thread_id: str = ""
-    renewal_revision: int = 0
+    target_id: str | None = ""
+    thread_id: str | None = ""
+    actual_driver: str | None = ""
+    actual_model: str | None = ""
+    actual_effort: str | None = ""
+    actual_service_tier: str | None = ""
+    desired_driver: str | None = ""
+    desired_model: str | None = ""
+    desired_effort: str | None = ""
+    transcript_owner: str | None = ""
+    renewal_state: str | None = ""
+    renewal_ancestor_thread_id: str | None = ""
+    renewal_successor_thread_id: str | None = ""
+    renewal_revision: int | None = 0
     updated_at: float | None = None
 
 
@@ -92,16 +101,26 @@ def _identity_from_record_request(
     )
 
 
-def _clean_record_text(value: str) -> str:
+def _clean_record_text(value: str | None) -> str:
     return str(value or "").strip()
 
 
-def _nonnegative_record_int(value: int) -> int:
+def _nonnegative_record_int(value: int | None) -> int:
     return max(0, int(value or 0))
 
 
 def _record_updated_at(value: float | None) -> float:
     return time.time() if value is None else float(value)
+
+
+def _preserved_identity_text(value: _IdentityTextArgument, current: str) -> str | None:
+    return current if isinstance(value, _OmittedIdentityField) else value
+
+
+def _preserved_identity_revision(
+    value: _IdentityRevisionArgument, current: int
+) -> int | None:
+    return current if isinstance(value, _OmittedIdentityField) else value
 
 
 class TeamIdentityStoreMixin:
@@ -229,40 +248,81 @@ class TeamIdentityStoreMixin:
         self: _TeamIdentityStore,
         *,
         actor_id: str,
-        target_id: str = "",
-        thread_id: str = "",
-        actual_driver: str = "",
-        actual_model: str = "",
-        actual_effort: str = "",
-        actual_service_tier: str = "",
-        desired_driver: str = "",
-        desired_model: str = "",
-        desired_effort: str = "",
-        transcript_owner: str = "",
-        renewal_state: str = "",
-        renewal_ancestor_thread_id: str = "",
-        renewal_successor_thread_id: str = "",
-        renewal_revision: int = 0,
+        target_id: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        thread_id: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        actual_driver: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        actual_model: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        actual_effort: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        actual_service_tier: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        desired_driver: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        desired_model: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        desired_effort: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        transcript_owner: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        renewal_state: _IdentityTextArgument = _OMITTED_IDENTITY_FIELD,
+        renewal_ancestor_thread_id: _IdentityTextArgument = (_OMITTED_IDENTITY_FIELD),
+        renewal_successor_thread_id: _IdentityTextArgument = (_OMITTED_IDENTITY_FIELD),
+        renewal_revision: _IdentityRevisionArgument = _OMITTED_IDENTITY_FIELD,
     ) -> TeamAgentIdentity:
+        """Merge a public identity write without confusing omission with clearing.
+
+        A keyword the caller omits preserves that column from the existing row;
+        a new actor starts from canonical empty text and revision zero. Any
+        explicitly supplied value remains a write: None or blank text clears a
+        text column, and zero clears the revision. The private full-record
+        request and locked writer continue to replace every column.
+        """
+        actor_id = _normalized_id(actor_id, "actor_id")
         with self.connect() as connection:
+            row = self._agent_identity_row_locked(connection, actor_id)
+            current = (
+                agent_identity_from_row(row)
+                if row is not None
+                else TeamAgentIdentity(actor_id=actor_id)
+            )
             return self._record_agent_identity_locked(
                 connection,
                 AgentIdentityRecordRequest(
                     actor_id=actor_id,
-                    target_id=target_id,
-                    thread_id=thread_id,
-                    actual_driver=actual_driver,
-                    actual_model=actual_model,
-                    actual_effort=actual_effort,
-                    actual_service_tier=actual_service_tier,
-                    desired_driver=desired_driver,
-                    desired_model=desired_model,
-                    desired_effort=desired_effort,
-                    transcript_owner=transcript_owner,
-                    renewal_state=renewal_state,
-                    renewal_ancestor_thread_id=renewal_ancestor_thread_id,
-                    renewal_successor_thread_id=renewal_successor_thread_id,
-                    renewal_revision=renewal_revision,
+                    target_id=_preserved_identity_text(target_id, current.target_id),
+                    thread_id=_preserved_identity_text(thread_id, current.thread_id),
+                    actual_driver=_preserved_identity_text(
+                        actual_driver, current.actual_driver
+                    ),
+                    actual_model=_preserved_identity_text(
+                        actual_model, current.actual_model
+                    ),
+                    actual_effort=_preserved_identity_text(
+                        actual_effort, current.actual_effort
+                    ),
+                    actual_service_tier=_preserved_identity_text(
+                        actual_service_tier, current.actual_service_tier
+                    ),
+                    desired_driver=_preserved_identity_text(
+                        desired_driver, current.desired_driver
+                    ),
+                    desired_model=_preserved_identity_text(
+                        desired_model, current.desired_model
+                    ),
+                    desired_effort=_preserved_identity_text(
+                        desired_effort, current.desired_effort
+                    ),
+                    transcript_owner=_preserved_identity_text(
+                        transcript_owner, current.transcript_owner
+                    ),
+                    renewal_state=_preserved_identity_text(
+                        renewal_state, current.renewal_state
+                    ),
+                    renewal_ancestor_thread_id=_preserved_identity_text(
+                        renewal_ancestor_thread_id,
+                        current.renewal_ancestor_thread_id,
+                    ),
+                    renewal_successor_thread_id=_preserved_identity_text(
+                        renewal_successor_thread_id,
+                        current.renewal_successor_thread_id,
+                    ),
+                    renewal_revision=_preserved_identity_revision(
+                        renewal_revision, current.renewal_revision
+                    ),
                 ),
             )
 
