@@ -3,6 +3,7 @@
 from spice.mail.ackschema import ACK_STATE_MIGRATION_SOURCES
 from spice.serve.team.schema import (
     TEAM_AUTHORITY_MIGRATIONS,
+    TEAM_AUTHORITY_MONOTONIC_VERSION_MAX,
     TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
 )
@@ -26,6 +27,7 @@ def test_durable_stores_support_at_most_one_prior_source_shape():
 
 
 def test_team_authority_keeps_only_the_current_forward_migration():
+    assert 0 < TEAM_AUTHORITY_SCHEMA_VERSION <= TEAM_AUTHORITY_MONOTONIC_VERSION_MAX
     assert set(TEAM_AUTHORITY_MIGRATIONS) == {TEAM_AUTHORITY_SCHEMA_VERSION}
     assert set(TEAM_AUTHORITY_SCHEMAS) <= {
         TEAM_AUTHORITY_SCHEMA_VERSION - 1,

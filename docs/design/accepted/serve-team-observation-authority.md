@@ -99,17 +99,19 @@ writer supports.
 
 Opening a database follows one atomic sequence:
 
-1. Read the durable table shape and resolve the source version from it, without
-   mutating the database. The stored stamp records which migrations a database
-   has been through, and the shape is what it has to show for them; where they
-   disagree the shape is what the next migration must operate on, so the shape
-   decides and exactly one version can match it. A database stamped behind its
-   own shape is therefore carried forward by being opened, rather than by
-   editing it.
-2. Reject a version newer than this writer before changing journal mode,
-   starting schema work, or writing any row. A newer stamp is the one claim the
-   shape cannot settle: those rows are described by a shape this writer does not
-   hold, so nothing may be assumed about them.
+1. Read the stored stamp without mutating the database. Consecutive authority
+   versions occupy a reserved low positive integer namespace. Reject an
+   above-current stamp in that namespace before shape matching, journal mode,
+   schema work, or any row write; this remains safe when a future version only
+   adds a new authority table that an older writer does not know to inspect.
+2. Resolve every other nonzero stamp from its durable authority shape. This
+   adopts the pre-versioned v0.27 store: its CRC32 stamp is outside the
+   monotonic namespace, while its authority tables carry the retained
+   predecessor shape. The stored stamp otherwise records which migrations a
+   versioned database has been through, and the shape is what it has to show for
+   them; where they disagree the shape is what the next migration must operate
+   on, so exactly one retained shape decides. A database stamped behind its own
+   shape is likewise carried forward by being opened rather than edited.
 3. Acquire `BEGIN IMMEDIATE`, then reread and revalidate the source version so a
    concurrent migrator cannot make the preflight decision stale.
 4. Create a store that does not exist yet at the current shape directly, or
@@ -124,18 +126,22 @@ Opening a database follows one atomic sequence:
 A fresh empty database is created at the current version rather than replayed
 into existence through history, so the shapes the writer retains stay a record
 of what it can open rather than the steps by which anything is built. A
-populated database reporting version `0` or a retired fingerprint predates
-versions entirely, and no migration claims to know what it is, so it fails
-without mutation — as does one whose authority tables match no supported shape. Tables outside the named
-authority set are outside its schema contract and are never queried, migrated,
-or dropped. There is no compatibility alias and no destructive recovery branch.
-Every caller must arrive on an exact supported authority shape.
+populated database reporting version `0` predates both contracts, and no
+migration claims to know what it is, so it fails without mutation — as does one
+whose authority tables match no supported shape. A pre-version fingerprint
+outside the monotonic namespace does not need a registry: a retained authority
+shape authenticates its source. Tables outside the named authority set are
+outside its schema contract and are never queried, migrated, or dropped. There
+is no compatibility alias and no destructive recovery branch. Every caller
+must arrive on an exact supported authority shape.
 
 ## Writer-Version Rule
 
-A writer may open its current version or a source version for which it carries
-an explicit forward migration and shape contract. A database stamped above the
-writer's supported authority version fails loudly before mutation. Operators
+A writer may open its current version or a source shape for which it carries an
+explicit forward migration and shape contract. That includes a pre-version
+fingerprint outside the reserved monotonic namespace: shape resolution adopts
+it without retaining a fingerprint registry. An above-current stamp inside the
+monotonic namespace fails loudly before mutation or shape matching. Operators
 must use a current writer; an older process never attempts a best-effort open,
 schema downgrade, projection repair, or authority reset.
 
@@ -250,6 +256,13 @@ Focused migration and terminal parity tests prove:
   identity reads intact afterward;
 - a database stamped behind its own shape is carried forward by being opened,
   leaving every authority row byte-identical;
+- a realistic v0.27 fingerprint-stamped database is recognized from its
+  predecessor authority shape, migrated once, and stamped current while every
+  authority value except the explicitly dropped service-tier field survives
+  and all six retired non-authority tables remain byte-identical;
+- an above-current stamp in the monotonic namespace is refused before shape
+  matching even when a simulated future writer leaves every current authority
+  table unchanged and adds only one new authority table;
 - an injected multi-statement migration failure restores the complete logical
   dump and prior version;
 - a newer writer version leaves rows, schema, version, and journal mode
