@@ -55,6 +55,7 @@ _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
 # is the wrapper's opening delimiter and its close is consumed with it.
 _EMPHASIS_CHARS = "*_"
 _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
+_CONTROL_LINE_LIST_MARKERS = ("- ", "* ", "+ ")
 _SOURCE_CONTEXT_LINE_RE = re.compile(r"^\s*(?:[./\w-]+/)*[\w.-]+:\d+(?::\d+)?:")
 _ACK_HYPOTHETICAL_WORDS = frozenset(
     {"could", "hypothetically", "if", "should", "whether", "would"}
@@ -247,6 +248,18 @@ def extract_nack_segments_from_text(text: str) -> list[AckSegment]:
 def extract_task_batch_lines_from_text(text: str) -> list[str]:
     """Return inline TASK batch payloads carried by an assistant message."""
     return _task_batch_lines(text)
+
+
+def keyed_response_reason(content: str) -> str:
+    """The reason text a keyed response carries, with control lines removed.
+
+    A segment's content reaches this from two directions: archival hands over
+    text this module already cleaned, while a display hands over the body it
+    kept whole so task directives could still become cards. Cleaning is
+    idempotent, so running it here lets both arrive at the same reason and
+    keeps the decision from depending on which door the text came through.
+    """
+    return _clean_segment_content(content, drop_task_directives=True)
 
 
 def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
@@ -547,15 +560,64 @@ def _is_task_directive_line(line: str) -> bool:
 
 
 def _task_batch_line_from_directive(line: str) -> str | None:
-    stripped = line.strip()
+    stripped = _undecorated_control_line(line)
     token_end = len(TASK_DIRECTIVE_TOKEN)
     if not stripped.startswith(TASK_DIRECTIVE_TOKEN):
         return None
-    if len(stripped) > token_end and stripped[token_end] not in (
-        _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
+    rest = stripped[token_end:]
+    # `**TASK** payload` closes its wrapper before the separator; the run is the
+    # decoration, not the directive, so it is consumed rather than refused.
+    wrapper_end = _emphasis_run_size(rest)
+    if wrapper_end:
+        rest = rest[wrapper_end:]
+    if rest and rest[0] not in _TASK_DIRECTIVE_SEPARATOR_CHARS:
         return None
+    return TASK_DIRECTIVE_TOKEN + rest
+
+
+def _undecorated_control_line(line: str) -> str:
+    """Return `line` without the markdown decoration a directive may wear.
+
+    A control line is recognized by its token, not by how the agent chose to
+    render it, and the ACK grammar already reads through emphasis wrappers and
+    list markers to find its own token. This is that same permission stated once
+    for a whole line, so a bold or bulleted TASK header is the directive it
+    plainly is instead of silently becoming prose. Whether a line is eligible at
+    all remains the suppression rule's decision, which is unchanged.
+    """
+    stripped = line.strip()
+    marker = _list_marker_size(stripped)
+    if marker:
+        stripped = stripped[marker:].lstrip()
+    wrapper_size = _emphasis_run_size(stripped)
+    if not wrapper_size:
+        return stripped
+    delimiter = stripped[:wrapper_size]
+    stripped = stripped[wrapper_size:]
+    # Only the run that closes this wrapper comes off, so a payload ending in
+    # its own emphasis character keeps it.
+    if stripped.endswith(delimiter):
+        stripped = stripped[:-wrapper_size].rstrip()
     return stripped
+
+
+def _list_marker_size(text: str) -> int:
+    """Length of a leading markdown list marker, including its trailing space."""
+    for marker in _CONTROL_LINE_LIST_MARKERS:
+        if text.startswith(marker):
+            return len(marker)
+    return 0
+
+
+def _emphasis_run_size(text: str) -> int:
+    """Length of the uniform leading run of markdown-emphasis characters."""
+    if not text or text[0] not in _EMPHASIS_CHARS:
+        return 0
+    char = text[0]
+    size = 0
+    while size < len(text) and text[size] == char:
+        size += 1
+    return size
 
 
 def _suppressed_control_line_ranges(text: str) -> list[tuple[int, int]]:

@@ -7,7 +7,7 @@ from spice.agent.paths import write_agent_thread_pointer
 from spice.cli.parser import build_parser
 from spice.mail.inbox import collect_inbox_items, write_inbox_item
 from spice.mail.replies import append_reply_record, read_reply_records
-from spice.serve import messages as message_reader
+from spice.serve.messagepresentation import reply_card_message
 from tests.test_reposcaffolding import init_identified_repo as _init_git_repo
 
 THREAD = "f2249a9fb99641e29e1854cb381cc634"
@@ -35,7 +35,7 @@ def test_agent_reply_retires_key_and_logs_a_reply_card(tmp_path, monkeypatch):
 def test_reply_record_synthesizes_a_chip_bearing_card():
     # The reply text runs through the ordinary ACK-message builder, so the card
     # carries the acknowledgment key as a chip -- exactly like a prose ACK.
-    card = message_reader.reply_card_message(
+    card = reply_card_message(
         "2026-07-06T01:00:00.000000Z#reply-card:0",
         0,
         "2026-07-06T01:00:00.000000Z",

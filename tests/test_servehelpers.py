@@ -15,6 +15,7 @@ from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.lifecycle import start_lifecycle_reconciler
+from spice.serve.messages import TranscriptResolution
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.websocket import EncodedTextFrame
 from spice.serve.worktree.target import WorktreeTarget
@@ -100,8 +101,8 @@ def _target(repo: Path) -> WorktreeTarget:
     return WorktreeTarget(id="target-1", repo_root=repo, name=repo.name, branch="main")
 
 
-def _transcript_resolution(thread_id: str, path: Path) -> app.TranscriptResolution:
-    return app.TranscriptResolution(
+def _transcript_resolution(thread_id: str, path: Path) -> TranscriptResolution:
+    return TranscriptResolution(
         thread_id=thread_id,
         path=path,
         owner_driver=CODEX_DRIVER,

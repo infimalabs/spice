@@ -10,7 +10,7 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.serve import messages as message_reader
-from spice.serve.messages import AssistantMessage
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload import identity, lane
 from spice.serve.team.store import ServeTeamStore
 from tests.test_reposcaffolding import init_existing_repo as _init_repo

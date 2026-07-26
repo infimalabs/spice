@@ -14,6 +14,7 @@ from typing import Any, cast
 from spice.errors import SpiceError
 from spice.tasks import config as task_config
 from spice.tasks import tw
+from spice.tasks.opslog import OPERATIONS_DB_FILENAME
 
 TASK_FILTER_STATE_COUNT_FIELDS = (
     "openTaskCount",
@@ -30,12 +31,17 @@ TASK_BOARD_OBSERVATION_TIMEOUT_SECONDS = 2 * (
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
 class TaskBoardObservation:
-    """One stable task-backend revision and its normalized rows."""
+    """One stable task-backend revision, the store it was read from, and rows."""
 
     backend_identity: str
     revision: str
     rows: tuple[Mapping[str, Any], ...]
     error: str | None = None
+    # Which store these rows were read out of, beside the revision that says
+    # when. Defaulting to the empty witness is what an observation assembled
+    # without one deserves: it matches no store that exists, so it is replaced
+    # rather than reused.
+    store_identity: str = ""
     _projection_lock: threading.Lock = field(
         default_factory=threading.Lock,
         compare=False,
@@ -50,11 +56,21 @@ class TaskBoardObservation:
 
 @dataclass(frozen=True, slots=True)
 class OpenTaskBoardProjection:
-    """Task indexes and the open-task payload over one observation."""
+    """Task indexes and the open-task payload over one observation.
+
+    Every index answers empty over a failed observation, because a caller
+    reading one of them is asking what this pass saw and the answer is nothing.
+    The inventory is the exception: it is published to a browser that orders it
+    by the task revision it carries, and a board nobody could read carries the
+    live one. Stamped that way an empty inventory reads as the newest truth
+    about the board, and the recovered inventory that follows it at the same
+    revision is refused as a redelivery. So a failed observation has no
+    inventory at all, and a publisher with nothing to publish names no facet.
+    """
 
     backend_identity: str
     revision: str
-    task_filter_inventory: dict[str, Any]
+    task_filter_inventory: dict[str, Any] | None
     _active_claims: Mapping[str, Mapping[str, Any]]
     _task_cards_by_origin: Mapping[str, tuple[Mapping[str, Any], ...]]
     _completed_reviews_by_author: Mapping[str, tuple[Mapping[str, Any], ...]]
@@ -114,6 +130,50 @@ _task_board_builds: set[str] = set()
 
 def _backend_identity(root: Path) -> str:
     return str(root.expanduser().resolve())
+
+
+def _store_identity(root: Path) -> str:
+    """Witness which TaskChampion store a backend root is holding right now.
+
+    The revision that dates the board is carried by the wake file, which is a
+    different file from the store the rows are read out of. A store deleted,
+    remade, or atomically renamed into place under an untouched wake file
+    therefore leaves that revision saying nothing happened, and rows exported
+    from the store that is gone would keep being served as current.
+
+    Device and inode name which file the store is, so a replacement renamed
+    into place is a different store the moment it lands. Deliberately not size
+    or modification time: an export writes the store it reads, so those move
+    whenever the board is built and would make every store look replaced by the
+    very read that observed it. Identity has to say which store, not which
+    version of it -- the revision already says that.
+
+    Creation time joins them wherever the platform records it, so that a
+    filesystem free to reuse a freed inode number cannot hand a remade store
+    the identity of the one it replaced.
+
+    A store that is absent or cannot be stat'd witnesses nothing, and that is
+    itself an identity: it equals no store that exists, so an observation taken
+    across that boundary is replaced instead of reused.
+    """
+    try:
+        stat = (task_config.data_dir(root) / OPERATIONS_DB_FILENAME).stat()
+    except OSError:
+        return ""
+    return f"{stat.st_dev}:{stat.st_ino}:{getattr(stat, 'st_birthtime', '')}"
+
+
+def _store_held_still(before: str, after: str) -> bool:
+    """Say whether the rows just read can be trusted to one store.
+
+    A store that witnessed the same identity on both sides of the export never
+    moved. A root that had no store beforehand is the other way this holds: the
+    export is what creates the store on first use, and rows read out of a store
+    that has just come into being cannot be stale against a store that was not
+    there. Anything else is a store swapped under the read, and the rows belong
+    to no single authority.
+    """
+    return after == before or not before
 
 
 def _normalize_task_row(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -417,18 +477,21 @@ def _drained_task_count_index(
 def _build_open_task_board_projection(
     observation: TaskBoardObservation,
 ) -> OpenTaskBoardProjection:
-    catalog = task_config.task_project_validation_catalog()
     open_rows, ready, waiting, blocked = _open_task_states(observation.rows)
     return OpenTaskBoardProjection(
         backend_identity=observation.backend_identity,
         revision=observation.revision,
-        task_filter_inventory=_task_filter_inventory(
-            observation,
-            open_rows,
-            ready,
-            waiting,
-            blocked,
-            catalog,
+        task_filter_inventory=(
+            None
+            if observation.error
+            else _task_filter_inventory(
+                observation,
+                open_rows,
+                ready,
+                waiting,
+                blocked,
+                task_config.task_project_validation_catalog(),
+            )
         ),
         _active_claims=_active_claim_index(open_rows),
         _task_cards_by_origin=_row_tuple_index(
@@ -455,6 +518,16 @@ def current_task_board_observation(
 ) -> TaskBoardObservation:
     """Return the current coherent board, coalescing concurrent cache misses.
 
+    Coherent means both that the revision held still across the export and that
+    the rows came out of the store still in place afterwards. The revision alone
+    cannot say the second, because it is carried by the wake file rather than by
+    the store, so a store replaced under an untouched wake file would leave the
+    old rows looking current for as long as nothing else moved.
+
+    Re-reading the identity keeps the export off the hot path all the same: an
+    unchanged authority still matches on both and returns the cached rows
+    without an export, and only a genuine change costs one.
+
     A backend failure degrades only the current call. Its empty observation is
     deliberately not cached, so a peer or later request can recover without a
     task revision change.
@@ -466,9 +539,14 @@ def current_task_board_observation(
 
     while True:
         revision = task_config.task_event_revision(selected_root)
+        store_identity = _store_identity(selected_root)
         with _task_board_condition:
             cached = _task_board_observations.get(backend_identity)
-            if cached is not None and cached.revision == revision:
+            if (
+                cached is not None
+                and cached.revision == revision
+                and cached.store_identity == store_identity
+            ):
                 return cached
             if backend_identity in _task_board_builds:
                 remaining = wait_deadline - time.monotonic()
@@ -478,6 +556,7 @@ def current_task_board_observation(
                         revision=revision,
                         rows=(),
                         error="timed out waiting for the current task board",
+                        store_identity=store_identity,
                     )
                 _task_board_condition.wait(timeout=remaining)
                 continue
@@ -487,10 +566,14 @@ def current_task_board_observation(
     try:
         while True:
             revision = task_config.task_event_revision(selected_root)
+            store_identity = _store_identity(selected_root)
             rows = _read_task_board(selected_root)
             normalized = tuple(_normalize_task_row(row) for row in rows)
             observed_revision = task_config.task_event_revision(selected_root)
-            if observed_revision == revision:
+            observed_store_identity = _store_identity(selected_root)
+            if observed_revision == revision and _store_held_still(
+                store_identity, observed_store_identity
+            ):
                 break
             if time.monotonic() >= wait_deadline:
                 _release_task_board_build(backend_identity)
@@ -499,6 +582,7 @@ def current_task_board_observation(
                     revision=observed_revision,
                     rows=(),
                     error="timed out building the current task board",
+                    store_identity=observed_store_identity,
                 )
     except SpiceError as exc:
         _release_task_board_build(backend_identity)
@@ -507,19 +591,29 @@ def current_task_board_observation(
             revision=revision,
             rows=(),
             error=str(exc),
+            store_identity=_store_identity(selected_root),
         )
     except BaseException:
         _release_task_board_build(backend_identity)
         raise
 
+    # The store the rows are known to have come out of, which is the one seen
+    # after the export rather than before it: on first use no store existed
+    # until that export created it.
+    settled_store_identity = observed_store_identity
     candidate = TaskBoardObservation(
         backend_identity=backend_identity,
         revision=revision,
         rows=normalized,
+        store_identity=settled_store_identity,
     )
     with _task_board_condition:
         current = _task_board_observations.get(backend_identity)
-        if current is None or current.revision != revision:
+        if (
+            current is None
+            or current.revision != revision
+            or current.store_identity != settled_store_identity
+        ):
             _task_board_observations[backend_identity] = candidate
             current = candidate
         _task_board_builds.discard(backend_identity)

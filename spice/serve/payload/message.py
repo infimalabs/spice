@@ -21,6 +21,11 @@ from spice.mail.inbox import (
 )
 from spice.serve import messages as message_reader
 from spice.serve.attachments import inbox_attachment_payloads
+from spice.serve.messagepresentation import (
+    AssistantMessage,
+    reply_card_message,
+    task_card_message,
+)
 from spice.serve.payload.identity import (
     _binding_status,
     resolve_thread_id_for_target,
@@ -63,7 +68,7 @@ def target_activity_items(
     *,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> tuple[
-    list[message_reader.AssistantMessage],
+    list[AssistantMessage],
     str | None,
     message_reader.TranscriptResolution | None,
 ]:
@@ -92,7 +97,7 @@ def target_activity_items(
 
 
 def _card_window_after(
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     after: str | None,
     before: str | None,
 ) -> str | None:
@@ -104,13 +109,13 @@ def _card_window_after(
 
 
 def _merge_synthetic_cards(
-    items: list[message_reader.AssistantMessage],
-    cards: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
+    cards: list[AssistantMessage],
     *,
     limit: int,
     after: str | None,
     before: str | None,
-) -> list[message_reader.AssistantMessage]:
+) -> list[AssistantMessage]:
     if not cards:
         return items
     bounded = max(1, min(limit, message_reader.MAX_MESSAGE_LIMIT))
@@ -131,13 +136,13 @@ def _merge_synthetic_cards(
 
 def _merge_task_card_messages(
     thread_id: str,
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     *,
     limit: int,
     after: str | None = None,
     before: str | None = None,
     task_board: OpenTaskBoardProjection | None = None,
-) -> list[message_reader.AssistantMessage]:
+) -> list[AssistantMessage]:
     cards = _task_card_messages_for_thread(
         thread_id,
         after=_card_window_after(items, after, before),
@@ -149,14 +154,14 @@ def _merge_task_card_messages(
 
 def _merge_reply_card_messages(
     thread_id: str,
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     *,
     repo_root: Path,
     worktree_id: str | None,
     limit: int,
     after: str | None = None,
     before: str | None = None,
-) -> list[message_reader.AssistantMessage]:
+) -> list[AssistantMessage]:
     cards = _reply_card_messages_for_thread(
         thread_id,
         repo_root=repo_root,
@@ -174,14 +179,14 @@ def _reply_card_messages_for_thread(
     worktree_id: str | None,
     after: str | None,
     before: str | None,
-) -> list[message_reader.AssistantMessage]:
-    cards: list[message_reader.AssistantMessage] = []
+) -> list[AssistantMessage]:
+    cards: list[AssistantMessage] = []
     for index, record in enumerate(read_reply_records(repo_root, thread_id)):
         timestamp = str(record.get("timestamp") or "").strip()
         text = str(record.get("text") or "").strip()
         if not timestamp or not text:
             continue
-        card = message_reader.reply_card_message(
+        card = reply_card_message(
             f"{timestamp}#reply-card:{index}",
             index,
             timestamp,
@@ -199,7 +204,7 @@ def _task_card_messages_for_thread(
     after: str | None,
     before: str | None,
     task_board: OpenTaskBoardProjection | None = None,
-) -> list[message_reader.AssistantMessage]:
+) -> list[AssistantMessage]:
     rows = (task_board or open_task_board_projection()).task_card_rows(thread_id)
     cards = [
         card for row in rows if (card := _task_card_message_from_row(row)) is not None
@@ -213,7 +218,7 @@ def _task_card_messages_for_thread(
 
 def _task_card_message_from_row(
     row: Mapping[str, Any],
-) -> message_reader.AssistantMessage | None:
+) -> AssistantMessage | None:
     timestamp = _task_row_timestamp(row)
     if not timestamp:
         return None
@@ -222,7 +227,7 @@ def _task_card_message_from_row(
         return None
     handle = task_identity.render_handle(row)
     classes, kicker = _task_card_presentation(row)
-    return message_reader.task_card_message(
+    return task_card_message(
         key=f"{timestamp}#task-card:{str(row.get('uuid') or handle)}",
         index=_task_card_index(row),
         timestamp=timestamp,
@@ -338,11 +343,11 @@ def _parse_task_timestamp(raw: str) -> datetime | None:
 
 
 def _filter_non_offset_boundary(
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     *,
     after: str | None,
     before: str | None,
-) -> list[message_reader.AssistantMessage]:
+) -> list[AssistantMessage]:
     after_boundary = None if _key_has_transcript_offset(after) else after
     before_boundary = None if _key_has_transcript_offset(before) else before
     if not after_boundary and not before_boundary:
@@ -357,7 +362,7 @@ def _filter_non_offset_boundary(
 
 
 def _message_inside_time_boundary(
-    item: message_reader.AssistantMessage,
+    item: AssistantMessage,
     *,
     after: str | None,
     before: str | None,
@@ -392,25 +397,25 @@ def _key_has_transcript_offset(key: str | None) -> bool:
 
 
 def _newest_message(
-    items: list[message_reader.AssistantMessage],
-) -> message_reader.AssistantMessage | None:
+    items: list[AssistantMessage],
+) -> AssistantMessage | None:
     newest = _newest_messages(items, limit=1)
     return newest[0] if newest else None
 
 
 def _oldest_message(
-    items: list[message_reader.AssistantMessage],
-) -> message_reader.AssistantMessage | None:
+    items: list[AssistantMessage],
+) -> AssistantMessage | None:
     return min(items, key=_message_sort_key) if items else None
 
 
 def _newest_messages(
-    items: list[message_reader.AssistantMessage], *, limit: int
-) -> list[message_reader.AssistantMessage]:
+    items: list[AssistantMessage], *, limit: int
+) -> list[AssistantMessage]:
     return sorted(items, key=_message_sort_key, reverse=True)[:limit]
 
 
-def _message_sort_key(item: message_reader.AssistantMessage) -> tuple[float, int, str]:
+def _message_sort_key(item: AssistantMessage) -> tuple[float, int, str]:
     timestamp = parse_timestamp(item.timestamp)
     epoch = timestamp.timestamp() if timestamp is not None else 0.0
     return (epoch, item.index, item.key)
@@ -427,7 +432,7 @@ class _ResolvedMessagesThread:
 
 @dataclass(frozen=True)
 class _ThreadMessages:
-    items: list[message_reader.AssistantMessage]
+    items: list[AssistantMessage]
     error: str | None
     transcript: message_reader.TranscriptResolution | None
     removed_keys: list[str]
@@ -593,7 +598,7 @@ def _messages_worktree_payload(
     renew_intent: bool,
     agent_ensure: dict[str, Any] | None,
     pending_identity: dict[str, Any],
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     removed_keys: list[str],
     error: str | None,
     transcript: message_reader.TranscriptResolution | None,
@@ -688,7 +693,7 @@ def lane_metrics_summary_payload(state: Any, target: WorktreeTarget) -> dict[str
     )
 
 
-def _ack_keys_for_messages(items: list[message_reader.AssistantMessage]) -> list[str]:
+def _ack_keys_for_messages(items: list[AssistantMessage]) -> list[str]:
     keys: list[str] = []
     for item in items:
         for key in item.ack_keys:

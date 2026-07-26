@@ -13,11 +13,11 @@ from spice.mail.inbox import format_relative_seconds
 from spice.policy import MAGIC_BASELINE_REF
 from spice.policyconfig import ComplexityPolicy, resolve_policy
 from spice.process.groups import run_bounded_process_group
+from spice.sessions.util import clip
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
 
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
-PREVIEW_CHARS = 200
 BRIEFING_PROVIDER_TIMEOUT_SECONDS = 15.0
 
 
@@ -48,15 +48,6 @@ class DirtyWorktreePressure(TypedDict, total=False):
     oldestDirtyPath: str
     newestDirtyAgeSeconds: int
     newestDirtyPath: str
-
-
-def _clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
-    if not text:
-        return "-"
-    flat = " ".join(text.split())
-    if len(flat) <= limit:
-        return flat
-    return flat[: limit - 1].rstrip() + "…"
 
 
 def git_posture_lines() -> list[str]:
@@ -571,7 +562,7 @@ def _format_dirty_age(raw_seconds: int | float) -> str:
 
 
 def _dirty_pressure_error(label: str, exc: BaseException) -> str:
-    return f"{label}: {_clip(str(exc), 120)}"
+    return f"{label}: {clip(str(exc), 120)}"
 
 
 def _magic_literal_abs(literal: str) -> float:

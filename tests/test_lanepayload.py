@@ -13,7 +13,7 @@ from spice.agent import watchdog
 from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
 from spice.serve import taskboard
-from spice.serve.messages import AssistantMessage
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
     agent_uptime_seconds,
@@ -596,23 +596,30 @@ def test_ack_archival_supervisor_error_updates_presence_preview(tmp_path):
     )
 
 
-def test_ack_error_without_keys_still_renders_the_failure():
-    output = (
-        "Output:\n"
-        "Supervisor Feedback\n"
-        "  " + supervisor_feedback_line("ack.error", error="database is locked") + "\n"
+def test_ack_error_without_keys_still_renders_the_failure(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 12, 3, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "function_call_output",
+            "call_id": "call-ack-error-without-keys",
+            "output": (
+                "Output:\n"
+                "Supervisor Feedback\n"
+                "  "
+                + supervisor_feedback_line("ack.error", error="database is locked")
+                + "\n"
+            ),
+        },
     )
 
-    items = message_reader._supervisor_feedback_items(output)
+    items = message_reader.read_assistant_messages(transcript, limit=5)
 
-    assert items == [
-        {
-            "kind": "ack.error",
-            "label": "Acknowledgment failed",
-            "detail": "database is locked",
-            "keys": [],
-        }
-    ]
+    assert len(items) == 1
+    assert items[0].kind == "presence:function_call_output"
+    assert items[0].preview == "Acknowledgment failed: database is locked"
 
 
 def test_ack_error_presence_is_retained_behind_later_tool_output():

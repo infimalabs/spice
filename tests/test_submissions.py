@@ -28,6 +28,7 @@ from spice.mail.replies import (
 )
 from spice.serve import livebus, messages as message_reader, submissions
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
+from spice.serve.messagepresentation import reply_card_message
 from spice.serve.payload import lane
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
@@ -265,7 +266,7 @@ def _submission_callbacks(
         transcript_size = transcript.stat().st_size
         for index, record in enumerate(read_reply_records(target.repo_root, THREAD_ID)):
             items.append(
-                message_reader.reply_card_message(
+                reply_card_message(
                     f"reply:{record['timestamp']}#{index}",
                     transcript_size + index,
                     str(record["timestamp"]),
