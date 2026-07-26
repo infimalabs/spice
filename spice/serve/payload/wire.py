@@ -509,6 +509,14 @@ WIRE_OBJECTS = (
             "statusLine": _ref("StatusLine"),
         },
     ),
+    # The epoch names the generation of the authority that produced the facet,
+    # and revisions restart within each one. Producers owe monotonicity, not a
+    # particular spelling: the browser reducer compares epochs under natural
+    # order -- digit runs as numbers, the text between them as text -- so a
+    # decimal counter, an ISO instant, and a prefixed label all advance
+    # correctly, including across the carry where plain string collation would
+    # sort "10" below "9". tests/fixtures/lane_store_chrome.js holds the
+    # conformance sweep that keeps the reducer honest about this.
     _object(
         "LaneChromeFacetOrder",
         {"epoch": STRING, "revision": INTEGER},

@@ -309,6 +309,114 @@ assert(
   "a newer epoch supersedes a higher revision from the epoch before it",
 );
 
+// An authority is free to name its generations with a plain decimal counter,
+// which is where JS string collation would betray the reducer: "10" sorts below
+// "9", so the generation after the carry would be classified stale forever and
+// the facet would hold the pre-restart value for the life of the session.
+const carriedActivity = { lastAssistantAt: "2026-07-25T22:00:00Z" };
+const beforeCarry = apply(
+  chrome("target-i", {
+    activity: facet("activity", { lastAssistantAt: "2026-07-25T21:00:00Z" }, 7, "9"),
+  }),
+);
+const afterCarry = apply(
+  chrome("target-i", { activity: facet("activity", carriedActivity, 0, "10") }),
+);
+assert(
+  JSON.stringify({
+    before: summary(beforeCarry).disposition,
+    ...summary(afterCarry),
+    activity: afterCarry.record.activity,
+  }) ===
+    JSON.stringify({
+      before: "applied",
+      targetId: "target-i",
+      disposition: "applied",
+      changed: ["activity"],
+      stale: [],
+      activity: carriedActivity,
+    }),
+  "a decimal generation counter supersedes across the carry from 9 to 10",
+);
+
+// The rule is an order, not "any different epoch wins": the generation left
+// behind stays behind, however high its revisions climbed.
+const afterLapsed = apply(
+  chrome("target-i", {
+    activity: facet("activity", { lastAssistantAt: "2026-07-25T21:59:00Z" }, 99, "9"),
+  }),
+);
+assert(
+  JSON.stringify({
+    ...summary(afterLapsed),
+    activity: afterLapsed.record.activity,
+  }) ===
+    JSON.stringify({
+      targetId: "target-i",
+      disposition: "stale",
+      changed: [],
+      stale: ["activity"],
+      activity: carriedActivity,
+    }),
+  "a superseded generation cannot reclaim the facet with a higher revision",
+);
+
+// The wire contract lets an authority spell its generations however it likes
+// and asks only that they advance, so every encoding a producer might plausibly
+// reach for gets swept here: each generation in turn must supersede the one
+// before it while restarting its revisions, and no generation left behind may
+// reclaim the facet however high its revisions later climb.
+const EPOCH_ENCODINGS = [
+  ["decimal counter", ["2", "9", "10", "100"]],
+  [
+    "ISO instant",
+    ["2026-07-25T21:00:00Z", "2026-07-25T21:30:00Z", "2026-07-26T01:00:00Z"],
+  ],
+  ["prefixed label", ["gen-2", "gen-9", "gen-10"]],
+];
+const SWEEP_REVISION = 0;
+const SWEEP_LAPSED_REVISION = 99;
+const SWEEP_TARGET = "target-sweep";
+
+for (const [encoding, epochs] of EPOCH_ENCODINGS) {
+  const sweepStore = new ServeLaneStore();
+  const generation = (index) => {
+    return { lastAssistantAt: encoding + " generation " + index };
+  };
+  const applied = epochs.map((epoch, index) => {
+    return sweepStore.applyLaneChrome(
+      chrome(SWEEP_TARGET, {
+        activity: facet("activity", generation(index), SWEEP_REVISION, epoch),
+      }),
+    ).disposition;
+  });
+  const lapsed = epochs.slice(0, -1).map((epoch, index) => {
+    return sweepStore.applyLaneChrome(
+      chrome(SWEEP_TARGET, {
+        activity: facet(
+          "activity",
+          generation(index),
+          SWEEP_LAPSED_REVISION,
+          epoch,
+        ),
+      }),
+    ).disposition;
+  });
+  assert(
+    JSON.stringify({
+      applied,
+      lapsed,
+      activity: sweepStore.laneChrome(SWEEP_TARGET).activity,
+    }) ===
+      JSON.stringify({
+        applied: epochs.map(() => "applied"),
+        lapsed: epochs.slice(0, -1).map(() => "stale"),
+        activity: generation(epochs.length - 1),
+      }),
+    encoding + " epochs advance in order and no lapsed generation reclaims",
+  );
+}
+
 // Records are per target: another target's chrome neither rewrites this one nor
 // publishes a transition naming it.
 const settled = store.laneChrome("target-f");
