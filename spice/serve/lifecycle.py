@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from collections import deque
 from concurrent.futures import Future
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event, Lock, Thread
 from time import monotonic
-from typing import Any, Callable, TypeAlias
+from typing import Any, Callable, Iterator, Protocol, TypeAlias
 
 from spice.serve.payload.identity import (
     record_started_renewal_from_ensure,
@@ -119,6 +120,14 @@ LifecycleHandler: TypeAlias = Callable[
 ]
 
 
+class ExplicitPendingInboxEnsure(Protocol):
+    """The one explicit pending-inbox launch grant yielded by the authority."""
+
+    def __call__(
+        self, *, fast_mode: bool = False, force_new: bool = False
+    ) -> dict[str, Any] | None: ...
+
+
 @dataclass(slots=True)
 class _QueuedInput:
     value: LifecycleInput
@@ -173,11 +182,6 @@ class LifecycleDecisionAuthority:
         self._target_locks: dict[str, Lock] = {}
         self._attempt_cache: dict[str, float] = {}
 
-    @property
-    def attempt_cache(self) -> dict[str, float]:
-        """Expose the one cache during the explicit-send migration."""
-        return self._attempt_cache
-
     def handle(
         self,
         value: LifecycleInput,
@@ -207,6 +211,39 @@ class LifecycleDecisionAuthority:
         target_lock = self._target_lock(target.id)
         with target_lock:
             return self._evaluate_target_locked(target, thread_id=thread_id)
+
+    @contextmanager
+    def explicit_pending_inbox(
+        self, target: WorktreeTarget
+    ) -> Iterator[ExplicitPendingInboxEnsure]:
+        """Serialize publication and its one unthrottled explicit launch grant."""
+        target_lock = self._target_lock(target.id)
+        with target_lock:
+            active = True
+            used = False
+
+            def ensure(
+                *, fast_mode: bool = False, force_new: bool = False
+            ) -> dict[str, Any] | None:
+                nonlocal used
+                if not active:
+                    raise RuntimeError("explicit pending-inbox grant is out of scope")
+                if used:
+                    raise RuntimeError("explicit pending-inbox grant already used")
+                used = True
+                return ensure_agent_for_pending_inbox(
+                    target,
+                    retry_due=self._attempt_due,
+                    retry_seconds=0.0,
+                    fast_mode=fast_mode,
+                    force_new=force_new,
+                    automatic=False,
+                )
+
+            try:
+                yield ensure
+            finally:
+                active = False
 
     def _evaluate_target_locked(
         self,
@@ -239,7 +276,7 @@ class LifecycleDecisionAuthority:
             )
         fast_mode = bool(store.global_fast_mode_enabled())
         ensure_kwargs: dict[str, Any] = {
-            "attempt_cache": self._attempt_cache,
+            "retry_due": self._attempt_due,
             "fast_mode": fast_mode,
             "force_new": renewal_intent,
         }
@@ -262,6 +299,14 @@ class LifecycleDecisionAuthority:
             renewal_intent=renewal_intent,
             agent_ensure=agent_ensure,
         )
+
+    def _attempt_due(self, target_id: str, retry_seconds: float) -> bool:
+        now = monotonic()
+        last_attempt = self._attempt_cache.get(target_id)
+        if last_attempt is not None and now - last_attempt < retry_seconds:
+            return False
+        self._attempt_cache[target_id] = now
+        return True
 
     def _target_lock(self, target_id: str) -> Lock:
         with self._lock:

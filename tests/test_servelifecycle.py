@@ -8,10 +8,13 @@ from argparse import Namespace
 from dataclasses import fields
 from types import SimpleNamespace
 
+import pytest
+
 from spice.serve import app as serve_app, lifecycle
 from spice.serve.lifecycle import (
     AutomaticLifecycleWake,
     ExplicitLifecycleIntent,
+    LifecycleDecisionAuthority,
     LifecycleOutcome,
     LifecycleOutcomeStatus,
     LifecycleReconciler,
@@ -116,6 +119,78 @@ def test_target_chains_serialize_while_sibling_targets_run_concurrently() -> Non
         assert reconciler.join(timeout=1.0) is True
 
     assert calls == ["intent-a1", "intent-b1", "intent-a2"]
+
+
+def test_explicit_grant_and_automatic_decision_share_the_target_lock(
+    monkeypatch,
+) -> None:
+    authority = LifecycleDecisionAuthority(SimpleNamespace())
+    target_a = SimpleNamespace(id="lane-a")
+    target_b = SimpleNamespace(id="lane-b")
+    explicit_started = threading.Event()
+    release_explicit = threading.Event()
+    same_target_started = threading.Event()
+    sibling_started = threading.Event()
+    ensure_calls: list[dict[str, object]] = []
+
+    def ensure_pending(_target, **kwargs):
+        ensure_calls.append(kwargs)
+        return None
+
+    def evaluate_locked(_authority, target, *, thread_id):
+        del thread_id
+        if target.id == target_a.id:
+            same_target_started.set()
+        else:
+            sibling_started.set()
+
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(
+        LifecycleDecisionAuthority,
+        "_evaluate_target_locked",
+        evaluate_locked,
+    )
+
+    def hold_explicit_grant() -> None:
+        with authority.explicit_pending_inbox(target_a) as ensure:
+            ensure(fast_mode=True, force_new=True)
+            with pytest.raises(RuntimeError, match="already used"):
+                ensure()
+            explicit_started.set()
+            assert release_explicit.wait(timeout=2.0) is True
+
+    explicit = threading.Thread(target=hold_explicit_grant)
+    same_target = threading.Thread(
+        target=authority.evaluate_target,
+        args=(target_a,),
+    )
+    sibling = threading.Thread(
+        target=authority.evaluate_target,
+        args=(target_b,),
+    )
+    explicit.start()
+    assert explicit_started.wait(timeout=1.0) is True
+    same_target.start()
+    sibling.start()
+    assert sibling_started.wait(timeout=1.0) is True
+    assert same_target_started.is_set() is False
+    release_explicit.set()
+    for thread in (explicit, same_target, sibling):
+        thread.join(timeout=1.0)
+        assert thread.is_alive() is False
+    assert same_target_started.is_set() is True
+
+    assert len(ensure_calls) == 1
+    ensure_call = ensure_calls[0]
+    assert ensure_call["retry_seconds"] == 0.0
+    assert ensure_call["automatic"] is False
+    assert ensure_call["fast_mode"] is True
+    assert ensure_call["force_new"] is True
+    retry_due = ensure_call["retry_due"]
+    assert callable(retry_due)
+    assert retry_due(target_a.id, 5.0) is True
+    assert retry_due(target_a.id, 5.0) is False
+    assert retry_due(target_b.id, 5.0) is True
 
 
 def test_duplicate_automatic_wakes_coalesce_but_explicit_intents_remain_distinct() -> (
@@ -246,11 +321,14 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
 
     authority = state.lifecycle_decision_authority
     assert authority is not None
+    assert not hasattr(authority, "attempt_cache")
+    retry_due = pending_calls[0]["retry_due"]
+    assert callable(retry_due)
     assert outcome.detail == "pending-inbox"
     assert "available-work" not in calls
     assert pending_calls == [
         {
-            "attempt_cache": authority.attempt_cache,
+            "retry_due": retry_due,
             "fast_mode": True,
             "force_new": True,
         }
@@ -264,7 +342,7 @@ def test_automatic_authority_evaluates_pending_before_drain_work(
         (
             "pending",
             {
-                "attempt_cache": authority.attempt_cache,
+                "retry_due": retry_due,
                 "fast_mode": True,
                 "force_new": True,
             },
@@ -358,8 +436,12 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
 
     authority = state.lifecycle_decision_authority
     assert authority is not None
+    pending_kwargs = calls[1][1]
+    assert isinstance(pending_kwargs, dict)
+    retry_due = pending_kwargs["retry_due"]
+    assert callable(retry_due)
     ensure_kwargs = {
-        "attempt_cache": authority.attempt_cache,
+        "retry_due": retry_due,
         "fast_mode": True,
         "force_new": False,
     }
@@ -384,6 +466,12 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
             },
         ),
     ]
+    available_kwargs = calls[3][1]
+    assert isinstance(available_kwargs, dict)
+    assert available_kwargs["retry_due"] is retry_due
+    assert retry_due("lane-a", 5.0) is True
+    assert retry_due("lane-a", 5.0) is False
+    assert retry_due("lane-b", 5.0) is True
 
 
 def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(

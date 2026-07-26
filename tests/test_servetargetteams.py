@@ -83,10 +83,12 @@ def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
     result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
 
     assert result.agent_ensure == {"ok": True, "trigger": "available-work"}
+    retry_due = observed[0]["retry_due"]
+    assert callable(retry_due)
     assert observed == [
         {
             "thread_id": THREAD_A,
-            "attempt_cache": state.lifecycle_decision_authority.attempt_cache,
+            "retry_due": retry_due,
             "fast_mode": False,
             "force_new": False,
         }
@@ -199,10 +201,12 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     assert [member.agent_id for member in snapshot_members] == [ACTOR_A]
     renewal = snapshot_members[0].renewal
     assert renewal.agent_id == ACTOR_A
+    retry_due = ensure_calls[0]["retry_due"]
+    assert callable(retry_due)
     assert ensure_calls == [
         {
             "target": target,
-            "attempt_cache": state.lifecycle_decision_authority.attempt_cache,
+            "retry_due": retry_due,
             "fast_mode": False,
             "force_new": True,
         }
@@ -275,6 +279,11 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
         return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        agentapi.ensure_agent_for_pending_inbox,
+    )
 
     result, status = work_tree_send_response_payload(
         state,

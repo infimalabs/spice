@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from types import SimpleNamespace
@@ -61,6 +62,20 @@ SETTLE_COUNTDOWN_TOLERANCE_SECONDS = 1.0
 # already settled, so its burst dispatches at once and the test exercises the
 # claim/start path rather than the settle wait.
 SETTLED_WAIT_SECONDS = 30.0
+
+
+def _retry_gate():
+    attempts: dict[str, float] = {}
+
+    def due(target_id: str, retry_seconds: float) -> bool:
+        now = time.monotonic()
+        last_attempt = attempts.get(target_id)
+        if last_attempt is not None and now - last_attempt < retry_seconds:
+            return False
+        attempts[target_id] = now
+        return True
+
+    return due
 
 
 def _ready_row(uuid: str, *, waiting_seconds: float = 0.0) -> dict[str, str]:
@@ -134,6 +149,7 @@ def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
         ),
     )
     ensure_calls = 0
+    retry_calls: list[tuple[str, float]] = []
 
     def fake_ensure(ensured_target, **kwargs):
         nonlocal ensure_calls
@@ -145,12 +161,15 @@ def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
 
     payload = agentapi.ensure_agent_for_pending_inbox(
         target,
-        attempt_cache={},
+        retry_due=lambda target_id, seconds: (
+            retry_calls.append((target_id, seconds)) or True
+        ),
         retry_seconds=0.0,
     )
 
     assert payload is None
     assert ensure_calls == 0
+    assert retry_calls == []
     assert pending_inbox_count(repo) == 2
 
 
@@ -189,7 +208,7 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
 
     payload = agentapi.ensure_agent_for_pending_inbox(
         target,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -258,7 +277,7 @@ def test_pending_inbox_ensure_starts_a_skipped_lane_without_deadletter(
 
     payload = agentapi.ensure_agent_for_pending_inbox(
         target,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -312,7 +331,7 @@ def test_available_work_ensure_claims_as_bound_lane_before_start(tmp_path, monke
     payload = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -375,7 +394,7 @@ def test_available_work_ensure_reports_lost_claim_as_terminal_decision(
     payload = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -431,7 +450,7 @@ def test_available_work_ensure_releases_confirmed_claim_after_start_failure(
     payload = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -495,7 +514,7 @@ def test_available_work_concurrent_lane_decisions_start_one_expansion(
                 agentapi.ensure_agent_for_available_work(
                     lane,
                     thread_id=actor,
-                    attempt_cache={},
+                    retry_due=_retry_gate(),
                     retry_seconds=0.0,
                 )
             )
@@ -529,8 +548,12 @@ def test_second_ready_task_settles_before_dispatching_a_new_lane(tmp_path, monke
     candidates = [_ready_row("task-a")]
     claims: list[str] = []
     launch_policies: list[str] = []
-    attempt_cache: dict[str, float] = {}
-    monkeypatch.setattr(agentapi.time, "monotonic", lambda: 100.0)
+    retry_calls: list[tuple[str, float]] = []
+
+    def retry_due(target_id: str, seconds: float) -> bool:
+        retry_calls.append((target_id, seconds))
+        return True
+
     monkeypatch.setattr(
         agentapi.alloc,
         "ordered_visible_ready_rows",
@@ -556,7 +579,7 @@ def test_second_ready_task_settles_before_dispatching_a_new_lane(tmp_path, monke
     below_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache=attempt_cache,
+        retry_due=retry_due,
     )
     # A second, fresh row clears the count threshold, but the chosen row is still
     # freshly READY, so the burst holds for the settle instead of starting.
@@ -564,14 +587,14 @@ def test_second_ready_task_settles_before_dispatching_a_new_lane(tmp_path, monke
     settling = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache=attempt_cache,
+        retry_due=retry_due,
     )
     # Once the chosen row has sat READY past the settle, the pass dispatches it.
     candidates[0] = _ready_row("task-a", waiting_seconds=SETTLED_WAIT_SECONDS)
     at_capacity = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache=attempt_cache,
+        retry_due=retry_due,
     )
 
     assert below_capacity == {
@@ -605,6 +628,7 @@ def test_second_ready_task_settles_before_dispatching_a_new_lane(tmp_path, monke
     # decline, each of which reschedules the watcher rather than reserving early.
     assert claims == ["task-a"]
     assert launch_policies == ["restart-held"]
+    assert retry_calls == [(target.id, agentapi.AVAILABLE_WORK_ENSURE_RETRY_SECONDS)]
 
 
 def test_available_work_fresh_burst_settles_before_starting_a_lane(
@@ -706,7 +730,7 @@ def test_available_work_storm_stops_at_the_rapid_death_refusal(tmp_path, monkeyp
         agentapi.ensure_agent_for_available_work(
             target,
             thread_id=THREAD_A,
-            attempt_cache={},
+            retry_due=_retry_gate(),
             retry_seconds=0.0,
         )
         for _ in range(6)
@@ -740,7 +764,7 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
     """A reservation handed straight back is not a fresh reason to launch."""
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    attempt_cache: dict[str, float] = {}
+    retry_due = _retry_gate()
     starts: list[str] = []
     # Settled chosen row: the first pass dispatches, so the second pass exercises
     # the recorded-attempt debounce rather than declining for the settle.
@@ -766,12 +790,12 @@ def test_capacity_dispatch_records_its_attempt_against_the_next_pass(
     started = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache=attempt_cache,
+        retry_due=retry_due,
     )
     immediately_again = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache=attempt_cache,
+        retry_due=retry_due,
     )
 
     assert agentapi.AVAILABLE_WORK_ENSURE_RETRY_SECONDS == CAPACITY_RETRY_SECONDS
@@ -902,7 +926,7 @@ def test_available_work_age_outlives_the_process_that_first_saw_the_task(
     started = agentapi.ensure_agent_for_available_work(
         target,
         thread_id=THREAD_A,
-        attempt_cache={},
+        retry_due=_retry_gate(),
         retry_seconds=0.0,
     )
 
@@ -1108,7 +1132,7 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
 
     payloads = [
         agentapi.ensure_agent_for_pending_inbox(
-            target, attempt_cache={}, retry_seconds=0.0
+            target, retry_due=_retry_gate(), retry_seconds=0.0
         )
         for _ in range(6)
     ]
@@ -1146,10 +1170,10 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
         compose_inbox_text(body="operator retry", priority=None, stop=False),
     )
     granted = agentapi.ensure_agent_for_pending_inbox(
-        target, attempt_cache={}, retry_seconds=0.0, automatic=False
+        target, retry_due=_retry_gate(), retry_seconds=0.0, automatic=False
     )
     reopened = agentapi.ensure_agent_for_pending_inbox(
-        target, attempt_cache={}, retry_seconds=0.0
+        target, retry_due=_retry_gate(), retry_seconds=0.0
     )
 
     assert granted["action"] == "start"
@@ -1256,10 +1280,10 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
         daemon=True,
     )
     background_thread.start()
-    # The watcher is now at the real launch boundary, blocked behind the UI
-    # route's pre-publication acquisition. Releasing the paused route must let
-    # its reentrant automatic=False decision run before the watcher proceeds.
-    assert background_at_launch_lock.wait(timeout=5.0) is True
+    # The watcher cannot reach even the pending-inbox launch guard: the
+    # authority's target lock covers publication through the explicit grant.
+    assert background_at_launch_lock.wait(timeout=0.1) is False
+    assert background_finished.is_set() is False
     release_direct_send.set()
     direct_thread.join(timeout=5.0)
     background_thread.join(timeout=5.0)
@@ -1269,6 +1293,7 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     assert response["agentEnsure"]["action"] == "start"
     assert attempts[0] is False
     assert agent_started.is_set() is True
+    assert background_at_launch_lock.is_set() is True
     assert background_finished.is_set() is True
     reconciler.cancel()
     assert reconciler.join(timeout=1.0) is True
