@@ -26,11 +26,17 @@ def _patch(monkeypatch, tmp_path, *, env_failed, task_problems, fix_seen=None):
     def fake_env(repo_root, *, fix=False):
         if fix_seen is not None:
             fix_seen.append(fix)
-        return _env_report(repo_root, failed=env_failed)
+        report = _env_report(repo_root, failed=env_failed)
+        return report.render(), report.failed
 
-    monkeypatch.setattr("spice.hooks.doctor.run_doctor", fake_env)
     monkeypatch.setattr(
-        "spice.tasks.render.render_doctor_report",
+        topdoctor,
+        "_environment_doctor_result",
+        fake_env,
+    )
+    monkeypatch.setattr(
+        topdoctor,
+        "_render_task_doctor_report",
         lambda: ("task readout", list(task_problems)),
     )
 

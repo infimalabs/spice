@@ -794,6 +794,12 @@ def _working_state_clean_text(value: object) -> str:
     return " ".join(str(value or "").split())
 
 
+def _export_working_state_tasks(filters: list[str]) -> list[dict[str, Any]]:
+    from spice.tasks import tw
+
+    return tw.export(filters)
+
+
 def _working_state_claim(
     repo_root: Path, *, now: float | None
 ) -> tuple[str, str, int | None, int | None]:
@@ -801,9 +807,9 @@ def _working_state_claim(
     if not actor:
         return "", "", None, None
     try:
-        from spice.tasks import identity, tw
+        from spice.tasks import identity
 
-        rows = tw.export(["+ACTIVE"])
+        rows = _export_working_state_tasks(["+ACTIVE"])
     except Exception:
         return "", "", None, None
     own_rows = [
