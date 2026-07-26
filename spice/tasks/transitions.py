@@ -142,7 +142,8 @@ class _History:
 
 
 _history_lock = threading.Lock()
-_histories: dict[Path, _History] = {}
+_HistoryKey = tuple[Path, opslog.OperationsLogIdentity]
+_histories: dict[_HistoryKey, _History] = {}
 
 
 def task_transitions(task_ids: Iterable[str] = ()) -> tuple[TaskTransition, ...]:
@@ -163,15 +164,17 @@ def task_transitions(task_ids: Iterable[str] = ()) -> tuple[TaskTransition, ...]
 def _whole_log_transitions() -> tuple[TaskTransition, ...]:
     """Fold every task's history, reusing what an earlier read already folded.
 
-    An operations log only ever grows, so a fold that stopped at a tail id is
-    still exactly right for everything at or below it. Holding the fold's
-    resume state lets a later read cover only the operations appended since,
-    which keeps a whole-plane read affordable on a per-request path.
+    One operations-log identity only ever grows, so a fold that stopped at a
+    tail id is still exactly right for everything at or below it. Holding the
+    fold's resume state lets a later read cover only the operations appended
+    since, while a same-path replacement receives a new identity and a clean
+    fold.
     """
     with opslog.connect() as log:
+        history_key = (log.path, log.identity)
         tail_id = _tail_id(log)
         with _history_lock:
-            cached = _histories.get(log.path, _History())
+            cached = _histories.get(history_key, _History())
         if cached.tail_id == tail_id:
             return cached.transitions
         if cached.tail_id > tail_id:
@@ -179,9 +182,9 @@ def _whole_log_transitions() -> tuple[TaskTransition, ...]:
             cached = _History()
         history = _fold_log(log, (), cached, tail_id=tail_id)
     with _history_lock:
-        current = _histories.get(log.path)
+        current = _histories.get(history_key)
         if current is None or current.tail_id < history.tail_id:
-            _histories[log.path] = history
+            _histories[history_key] = history
     return history.transitions
 
 
