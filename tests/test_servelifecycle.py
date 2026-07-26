@@ -8,7 +8,7 @@ from argparse import Namespace
 from dataclasses import fields
 from types import SimpleNamespace
 
-from spice.serve import app as serve_app
+from spice.serve import app as serve_app, lifecycle
 from spice.serve.lifecycle import (
     AutomaticLifecycleWake,
     ExplicitLifecycleIntent,
@@ -159,6 +159,315 @@ def test_duplicate_automatic_wakes_coalesce_but_explicit_intents_remain_distinct
         assert reconciler.join(timeout=1.0) is True
 
     assert calls == ["task:revision-7", "intent-1", "intent-2"]
+
+
+def test_automatic_authority_evaluates_pending_before_drain_work(
+    monkeypatch,
+) -> None:
+    calls: list[object] = []
+    pending_calls: list[dict[str, object]] = []
+    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
+    store = SimpleNamespace(
+        agent_renewal_active=lambda actor: calls.append(("renewal", actor)) or True,
+        global_fast_mode_enabled=lambda: calls.append("fast-mode") or True,
+    )
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: [target],
+    )
+    pending_result = {
+        "ok": True,
+        "trigger": "pending-inbox",
+        "threadId": "successor",
+    }
+
+    monkeypatch.setattr(
+        lifecycle,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: calls.append("resolve-thread") or "predecessor",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_actor_for_target",
+        lambda _store, _target, thread_id: (
+            calls.append(("team-actor", thread_id)) or "thread:predecessor"
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "serve_agent_identity_payload",
+        lambda *_args, **_kwargs: calls.append("renewal-identity") or {},
+    )
+
+    def ensure_pending(_target, **kwargs):
+        pending_calls.append(kwargs)
+        calls.append(("pending", kwargs))
+        return pending_result
+
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(
+        lifecycle,
+        "team_facts_for_target",
+        lambda _store, _target, thread_id: (
+            calls.append(("team-facts", thread_id)) or {"lifetime": "Drain"}
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: calls.append("available-work"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda _store, **kwargs: (
+            calls.append(("record-renewal", kwargs)) or "successor"
+        ),
+    )
+
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    try:
+        outcome = reconciler.submit_automatic(
+            AutomaticLifecycleWake(
+                "lane-a",
+                LifecycleWakeSource.INBOX,
+                "inbox-revision-4",
+            )
+        ).result(timeout=1.0)
+    finally:
+        reconciler.cancel()
+        assert reconciler.join(timeout=1.0) is True
+
+    authority = state.lifecycle_decision_authority
+    assert authority is not None
+    assert outcome.detail == "pending-inbox"
+    assert "available-work" not in calls
+    assert pending_calls == [
+        {
+            "attempt_cache": authority.attempt_cache,
+            "fast_mode": True,
+            "force_new": True,
+        }
+    ]
+    assert calls == [
+        "resolve-thread",
+        ("team-actor", "predecessor"),
+        ("renewal", "thread:predecessor"),
+        "renewal-identity",
+        "fast-mode",
+        (
+            "pending",
+            {
+                "attempt_cache": authority.attempt_cache,
+                "fast_mode": True,
+                "force_new": True,
+            },
+        ),
+        ("team-facts", "predecessor"),
+        (
+            "record-renewal",
+            {
+                "predecessor_agent_id": "thread:predecessor",
+                "agent_ensure": pending_result,
+            },
+        ),
+    ]
+
+
+def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
+    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
+    store = SimpleNamespace(
+        agent_renewal_active=lambda _actor: False,
+        global_fast_mode_enabled=lambda: True,
+    )
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: [target],
+    )
+    calls: list[tuple[str, object]] = []
+    available_result = {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "available-work",
+        "reason": "claim-lost",
+        "taskHandle": "LIFECYC-example",
+    }
+    monkeypatch.setattr(
+        lifecycle,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "bound-thread",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_actor_for_target",
+        lambda _store, _target, thread_id: (
+            calls.append(("actor", thread_id)) or "thread:bound-thread"
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        lambda _target, **kwargs: calls.append(("pending", kwargs)),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_facts_for_target",
+        lambda _store, _target, thread_id: (
+            calls.append(("team", thread_id)) or {"lifetime": "Drain"}
+        ),
+    )
+
+    def ensure_available(_target, **kwargs):
+        calls.append(("available", kwargs))
+        return available_result
+
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_available_work",
+        ensure_available,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda _store, **kwargs: calls.append(("record", kwargs)) or "",
+    )
+
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    try:
+        outcome = reconciler.submit_automatic(
+            AutomaticLifecycleWake(
+                "lane-a",
+                LifecycleWakeSource.TASK,
+                "task-revision-9",
+            )
+        ).result(timeout=1.0)
+    finally:
+        reconciler.cancel()
+        assert reconciler.join(timeout=1.0) is True
+
+    authority = state.lifecycle_decision_authority
+    assert authority is not None
+    ensure_kwargs = {
+        "attempt_cache": authority.attempt_cache,
+        "fast_mode": True,
+        "force_new": False,
+    }
+    assert outcome.detail == "available-work:skipped:claim-lost"
+    assert calls == [
+        ("actor", "bound-thread"),
+        ("pending", ensure_kwargs),
+        ("team", "bound-thread"),
+        (
+            "available",
+            {
+                "thread_id": "bound-thread",
+                **ensure_kwargs,
+            },
+        ),
+        (
+            "record",
+            {
+                "predecessor_agent_id": "thread:bound-thread",
+                "agent_ensure": available_result,
+            },
+        ),
+    ]
+
+
+def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(
+    monkeypatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    writes: list[str] = []
+    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
+    store = SimpleNamespace(
+        agent_renewal_active=lambda _actor: True,
+        global_fast_mode_enabled=lambda: False,
+    )
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: [target],
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "predecessor",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_actor_for_target",
+        lambda _store, _target, _thread: "thread:predecessor",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "serve_agent_identity_payload",
+        lambda *_args, **_kwargs: writes.append("renewal-identity") or {},
+    )
+
+    def ensure_pending(_target, **_kwargs):
+        writes.append("launch-or-deadletter")
+        started.set()
+        assert release.wait(timeout=2.0) is True
+        return {
+            "ok": True,
+            "trigger": "pending-inbox",
+            "threadId": "successor",
+            "deadletteredInboxKey": "inbox-1",
+        }
+
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(
+        lifecycle,
+        "team_facts_for_target",
+        lambda *_args: {"lifetime": "Drain"},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_available_work",
+        lambda *_args, **_kwargs: writes.append("available-work"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda *_args, **_kwargs: writes.append("renewal-start") or "successor",
+    )
+
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    try:
+        wake = AutomaticLifecycleWake(
+            "lane-a",
+            LifecycleWakeSource.INBOX,
+            "inbox-revision-4",
+        )
+        first = reconciler.submit_automatic(wake)
+        assert started.wait(timeout=1.0) is True
+        duplicate = reconciler.submit_automatic(wake)
+        assert duplicate is first
+        release.set()
+        assert first.result(timeout=1.0).detail == "pending-inbox"
+    finally:
+        release.set()
+        reconciler.cancel()
+        assert reconciler.join(timeout=1.0) is True
+
+    assert writes == [
+        "renewal-identity",
+        "launch-or-deadletter",
+        "renewal-start",
+    ]
 
 
 def test_automatic_key_stays_coalescible_until_its_future_completes() -> None:

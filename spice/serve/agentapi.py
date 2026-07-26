@@ -35,6 +35,7 @@ from spice.process.git import git_read
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.lifecycle import lifecycle_decision_authority
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
@@ -207,7 +208,7 @@ def sent_steering_response_payload(
         return sent_steering_payload(sent, target=None)
     agent_ensure = ensure_agent_for_pending_inbox(
         target,
-        attempt_cache=state.pending_agent_ensure_attempts,
+        attempt_cache=lifecycle_decision_authority(state).attempt_cache,
         retry_seconds=0.0,
         fast_mode=fast_mode,
         force_new=force_new,

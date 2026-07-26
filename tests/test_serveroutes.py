@@ -487,7 +487,7 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
     assert ensure_calls == [
         {"target": target, "fast_mode": False, "force_new": False, "automatic": True}
     ]
-    assert state.pending_agent_ensure_attempts[target.id] > 0
+    assert state.lifecycle_decision_authority.attempt_cache[target.id] > 0
 
 
 def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeypatch):

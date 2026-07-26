@@ -16,6 +16,15 @@ from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any, Callable, TypeAlias
 
+from spice.serve.payload.identity import (
+    record_started_renewal_from_ensure,
+    resolve_thread_id_for_target,
+    serve_agent_identity_payload,
+    team_actor_for_target,
+    team_facts_for_target,
+)
+from spice.serve.worktree.target import WorktreeTarget
+
 LIFECYCLE_RECONCILER_JOIN_SECONDS = 3.0
 LIFECYCLE_RECONCILER_THREAD_PREFIX = "spice-serve-lifecycle"
 
@@ -92,6 +101,16 @@ class LifecycleOutcome:
     detail: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class AutomaticLifecycleDecision:
+    """The compact result of one authoritative automatic lane evaluation."""
+
+    thread_id: str
+    predecessor_actor: str
+    renewal_intent: bool
+    agent_ensure: dict[str, Any] | None
+
+
 LifecycleHandler: TypeAlias = Callable[
     [LifecycleInput, Event],
     LifecycleOutcome,
@@ -121,6 +140,168 @@ def _observe_input(
         input_kind=value.input_kind,
         status=LifecycleOutcomeStatus.OBSERVED,
     )
+
+
+def ensure_agent_for_pending_inbox(
+    target: WorktreeTarget,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Call the pending-inbox actuator without creating an import cycle."""
+    from spice.serve.agentapi import ensure_agent_for_pending_inbox as ensure
+
+    return ensure(target, **kwargs)
+
+
+def ensure_agent_for_available_work(
+    target: WorktreeTarget,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Call the available-work actuator without creating an import cycle."""
+    from spice.serve.agentapi import ensure_agent_for_available_work as ensure
+
+    return ensure(target, **kwargs)
+
+
+class LifecycleDecisionAuthority:
+    """Own automatic lifecycle policy and its target-local attempt bookkeeping."""
+
+    def __init__(self, state: Any) -> None:
+        self._state = state
+        self._lock = Lock()
+        self._target_locks: dict[str, Lock] = {}
+        self._attempt_cache: dict[str, float] = {}
+
+    @property
+    def attempt_cache(self) -> dict[str, float]:
+        """Expose the one cache during the explicit-send migration."""
+        return self._attempt_cache
+
+    def handle(
+        self,
+        value: LifecycleInput,
+        cancelled: Event,
+    ) -> LifecycleOutcome:
+        """Evaluate automatic wakes; later slices migrate explicit intents."""
+        if not isinstance(value, AutomaticLifecycleWake):
+            return _observe_input(value, cancelled)
+        target = self._target(value.target_id)
+        decision = self.evaluate_target(target)
+        return LifecycleOutcome(
+            target_id=value.target_id,
+            input_identity=value.input_identity,
+            input_kind=value.input_kind,
+            status=LifecycleOutcomeStatus.OBSERVED,
+            detail=_automatic_decision_detail(decision),
+        )
+
+    def evaluate_target(
+        self,
+        target: WorktreeTarget,
+        *,
+        thread_id: str | None = None,
+    ) -> AutomaticLifecycleDecision:
+        """Run the one pending-inbox-first automatic decision for ``target``."""
+        target_lock = self._target_lock(target.id)
+        with target_lock:
+            return self._evaluate_target_locked(target, thread_id=thread_id)
+
+    def _evaluate_target_locked(
+        self,
+        target: WorktreeTarget,
+        *,
+        thread_id: str | None,
+    ) -> AutomaticLifecycleDecision:
+        bound_thread_id = (
+            resolve_thread_id_for_target(self._state, target) or ""
+            if thread_id is None
+            else thread_id
+        )
+        store = self._state.team_store
+        predecessor_actor = team_actor_for_target(
+            store,
+            target,
+            bound_thread_id,
+        )
+        renewal_intent = bool(
+            bound_thread_id
+            and predecessor_actor
+            and store.agent_renewal_active(predecessor_actor)
+        )
+        if renewal_intent:
+            serve_agent_identity_payload(
+                target,
+                bound_thread_id,
+                actor_id=predecessor_actor,
+                store=store,
+            )
+        fast_mode = bool(store.global_fast_mode_enabled())
+        ensure_kwargs: dict[str, Any] = {
+            "attempt_cache": self._attempt_cache,
+            "fast_mode": fast_mode,
+            "force_new": renewal_intent,
+        }
+        agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
+        team_facts = team_facts_for_target(store, target, bound_thread_id)
+        if agent_ensure is None and team_facts.get("lifetime") == "Drain":
+            agent_ensure = ensure_agent_for_available_work(
+                target,
+                thread_id=bound_thread_id,
+                **ensure_kwargs,
+            )
+        ensured_thread_id = record_started_renewal_from_ensure(
+            store,
+            predecessor_agent_id=predecessor_actor,
+            agent_ensure=agent_ensure,
+        )
+        return AutomaticLifecycleDecision(
+            thread_id=ensured_thread_id or bound_thread_id,
+            predecessor_actor=predecessor_actor,
+            renewal_intent=renewal_intent,
+            agent_ensure=agent_ensure,
+        )
+
+    def _target_lock(self, target_id: str) -> Lock:
+        with self._lock:
+            return self._target_locks.setdefault(target_id, Lock())
+
+    def _target(self, target_id: str) -> WorktreeTarget:
+        for target in self._state.worktree_targets():
+            if target.id == target_id:
+                return target
+        raise RuntimeError(f"unknown lifecycle target: {target_id}")
+
+
+def lifecycle_decision_authority(state: Any) -> LifecycleDecisionAuthority:
+    """Return the one ephemeral lifecycle policy owner attached to Serve state."""
+    authority = getattr(state, "lifecycle_decision_authority", None)
+    if authority is None:
+        authority = LifecycleDecisionAuthority(state)
+        state.lifecycle_decision_authority = authority
+    return authority
+
+
+def evaluate_automatic_lifecycle(
+    state: Any,
+    target: WorktreeTarget,
+    *,
+    thread_id: str | None = None,
+) -> AutomaticLifecycleDecision:
+    """Transitional direct entry point shared by inventory and message callers."""
+    return lifecycle_decision_authority(state).evaluate_target(
+        target,
+        thread_id=thread_id,
+    )
+
+
+def _automatic_decision_detail(decision: AutomaticLifecycleDecision) -> str:
+    agent_ensure = decision.agent_ensure
+    if agent_ensure is None:
+        return "no-action"
+    parts = [
+        str(agent_ensure.get(field) or "")
+        for field in ("trigger", "action", "reason", "failure")
+    ]
+    return ":".join(part for part in parts if part) or "agent-ensure"
 
 
 class LifecycleReconciler:
@@ -282,7 +463,7 @@ class LifecycleReconciler:
 def start_lifecycle_reconciler(
     state: Any,
     *,
-    handler: LifecycleHandler = _observe_input,
+    handler: LifecycleHandler | None = None,
 ) -> LifecycleReconciler | None:
     """Start the one active-mode reconciler and attach it to Serve state."""
     if state.observer_mode:
@@ -290,7 +471,9 @@ def start_lifecycle_reconciler(
         return None
     if state.lifecycle_reconciler is not None:
         raise RuntimeError("Serve state already owns a lifecycle reconciler")
-    reconciler = LifecycleReconciler(handler)
+    reconciler = LifecycleReconciler(
+        handler or lifecycle_decision_authority(state).handle
+    )
     reconciler.start()
     state.lifecycle_reconciler = reconciler
     return reconciler

@@ -11,7 +11,7 @@ import pytest
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import taskboard
+from spice.serve import lifecycle, taskboard
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore
@@ -133,7 +133,6 @@ class _State:
     ) -> None:
         self._sends = sends
         self.team_store = team_store or ServeTeamStore()
-        self.pending_agent_ensure_attempts: dict[str, float] = {}
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
@@ -229,12 +228,12 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
@@ -331,10 +330,10 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_available_work", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
         inventory, "resolve_thread_id_for_target", lambda _state, _target: ""
@@ -405,10 +404,10 @@ def test_work_trees_payload_indexes_shared_review_rows_per_lane(tmp_path, monkey
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_available_work", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
         inventory,
@@ -490,10 +489,10 @@ def test_work_trees_payload_projects_active_claims_without_an_export(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_available_work", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
         inventory,
@@ -573,10 +572,10 @@ def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
         inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_pending_inbox", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
-        inventory, "ensure_agent_for_available_work", lambda *_a, **_k: None
+        lifecycle, "ensure_agent_for_available_work", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
         inventory,

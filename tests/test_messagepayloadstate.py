@@ -10,6 +10,7 @@ from spice.mail.ackarchive import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
 from spice.paths import shared_attachment_root
+from spice.serve import lifecycle
 from spice.serve import messages as message_reader
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.payload import identity, lane, message
@@ -76,12 +77,12 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
@@ -281,12 +282,12 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
@@ -375,12 +376,12 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )
@@ -537,12 +538,12 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         message, "resolve_thread_id_for_target", lambda _state, _target: ""
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )

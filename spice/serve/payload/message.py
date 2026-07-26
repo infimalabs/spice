@@ -39,8 +39,8 @@ from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
 from spice.serve.worktree.inventory import (
-    _ensure_work_tree_agent,
     _work_tree_renewal_intent,
+    ensure_work_tree_agent,
 )
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import claimstate
@@ -436,9 +436,11 @@ def _resolve_messages_thread(
 ) -> _ResolvedMessagesThread:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
-    thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
-        state, target, thread_id
-    )
+    decision = ensure_work_tree_agent(state, target, thread_id)
+    thread_id = decision.thread_id
+    predecessor_actor = decision.predecessor_actor
+    renew_intent = decision.renewal_intent
+    agent_ensure = decision.agent_ensure
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     return _ResolvedMessagesThread(

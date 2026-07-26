@@ -142,7 +142,11 @@ class AvailableWorkWatch:
         remaining = AVAILABLE_WORK_STARVATION_SECONDS
         for target in state.worktree_targets():
             thread_id = resolve_thread_id_for_target(state, target) or ""
-            *_, agent_ensure = ensure_work_tree_agent(state, target, thread_id)
+            agent_ensure = ensure_work_tree_agent(
+                state,
+                target,
+                thread_id,
+            ).agent_ensure
             # The lane that declined is the one holding the oldest candidate's
             # deadline: it already read the rows under the claim lock, so the
             # wake it needs rides back out with the refusal instead of costing

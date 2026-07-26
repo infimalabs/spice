@@ -129,7 +129,6 @@ class _State:
     ) -> None:
         self._sends = sends
         self.team_store = team_store or ServeTeamStore()
-        self.pending_agent_ensure_attempts: dict[str, float] = {}
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends

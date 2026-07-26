@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from spice.serve import agentapi, app, workroutes
+from spice.serve import agentapi, app, lifecycle, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
@@ -47,14 +47,14 @@ def test_available_work_expansion_is_scoped_to_drain_lifetime(
     )
     _patch_payload_dependencies(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: {"ok": True, "trigger": "available-work"},
     )
 
-    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
 
-    assert result[3] == expected_ensure
+    assert result.agent_ensure == expected_ensure
 
 
 def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
@@ -75,18 +75,18 @@ def test_drain_expansion_passes_ready_backlog_policy_without_lane_capacity(
         return {"ok": True, "trigger": "available-work"}
 
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         capture_available_work,
     )
 
-    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
 
-    assert result[3] == {"ok": True, "trigger": "available-work"}
+    assert result.agent_ensure == {"ok": True, "trigger": "available-work"}
     assert observed == [
         {
             "thread_id": THREAD_A,
-            "attempt_cache": state.pending_agent_ensure_attempts,
+            "attempt_cache": state.lifecycle_decision_authority.attempt_cache,
             "fast_mode": False,
             "force_new": False,
         }
@@ -108,14 +108,14 @@ def test_operator_wake_bypasses_steer_available_work_gate(tmp_path, monkeypatch)
         "threadId": THREAD_A,
     }
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: operator_wake,
     )
 
-    result = inventory._ensure_work_tree_agent(state, target, THREAD_A)
+    result = inventory.ensure_work_tree_agent(state, target, THREAD_A)
 
-    assert result[3] == operator_wake
+    assert result.agent_ensure == operator_wake
 
 
 def test_unstarted_target_id_membership_is_visible_in_target_payload(
@@ -202,7 +202,7 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     assert ensure_calls == [
         {
             "target": target,
-            "attempt_cache": state.pending_agent_ensure_attempts,
+            "attempt_cache": state.lifecycle_decision_authority.attempt_cache,
             "fast_mode": False,
             "force_new": True,
         }
@@ -446,7 +446,7 @@ def _patch_payload_dependencies(
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
-    monkeypatch.setattr(inventory, "ensure_agent_for_pending_inbox", fake_ensure)
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", fake_ensure)
     monkeypatch.setattr(
         message.message_reader,
         "assistant_messages_for_thread_id",
