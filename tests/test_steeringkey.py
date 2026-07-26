@@ -5,6 +5,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import spice.mail.steeringkey as steeringkey
 from spice.mail.inbox import write_inbox_item
@@ -28,19 +29,27 @@ def test_steering_token_is_empty_without_a_repo():
     assert steering_token(None) == ""
 
 
-def test_steering_token_mint_never_queries_the_task_backend(tmp_path, monkeypatch):
-    # The token is minted on the inbox-readout hot path, so it must not depend on
-    # the task DB: a `tw.export()` there both couples a cosmetic recognition aid
-    # to the backend and drags its failure surface into the readout. Make any
-    # export blow up; minting must still yield a valid token.
+def test_steering_token_mint_passes_an_explicit_empty_collision_set(
+    tmp_path, monkeypatch
+):
+    # An explicit collision set keeps the identity helper on its pure minting
+    # path, without asking the task backend to discover occupied identifiers.
     _init_git_repo(tmp_path)
+    observed: list[set[str] | None] = []
+    real_mint = identity.mint_incepted
 
-    def _explode(*_args, **_kwargs):
-        raise AssertionError("steering token mint must not call tw.export")
+    def record_mint(*, existing=None):
+        observed.append(existing)
+        return real_mint(existing=existing)
 
-    monkeypatch.setattr("spice.tasks.tw.export", _explode)
+    monkeypatch.setattr(
+        steeringkey,
+        "identity",
+        SimpleNamespace(mint_incepted=record_mint),
+    )
 
     token = steering_token(tmp_path)
+    assert observed == [set()]
     assert token and all(ch in identity.ALPHABET for ch in token)
 
 

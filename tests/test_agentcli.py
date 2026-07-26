@@ -634,7 +634,7 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
             }
         ]
 
-    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    monkeypatch.setattr(wrap, "_export_working_state_tasks", fake_export)
     write_inbox_item(
         tmp_path,
         "1jN54zJT.txt",

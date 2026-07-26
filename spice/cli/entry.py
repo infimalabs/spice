@@ -60,10 +60,9 @@ def _dispatch(argv: list[str]) -> int:
         # argparse.REMAINDER cannot start with a flag token, and pytest
         # invocations usually do (`pytest -q ...`), so this forwards ahead of
         # parsing — the same shape as `agent run` above.
-        from spice.hooks.devpytest import run_checkout_pytest
         from spice.paths import require_repo_root
 
-        return run_checkout_pytest(require_repo_root(), argv[2:])
+        return _run_dev_pytest(require_repo_root(), argv[2:])
 
     if argv and not argv[0].startswith("-"):
         from spice.cli.mounts import find_mounted_command, run_mounted_command
@@ -78,6 +77,12 @@ def _dispatch(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args))
+
+
+def _run_dev_pytest(repo_root: Path, args: list[str]) -> int:
+    from spice.hooks.devpytest import run_checkout_pytest
+
+    return run_checkout_pytest(repo_root, args)
 
 
 def _extract_worktree_target(argv: list[str]) -> tuple[list[str], str | None]:

@@ -24,6 +24,7 @@ from spice.serve.payload.identity import (
     record_started_renewal_from_ensure,
     record_serve_agent_identity,
     resolve_thread_id_for_target,
+    target_bound_actor,
     team_actor_for_target,
     team_facts_for_target,
 )
@@ -455,11 +456,32 @@ class LifecycleDecisionAuthority:
         ensured_thread_id = self._converge_renewal_locked(
             observed=observed, agent_ensure=agent_ensure
         )
+        decision_thread_id = ensured_thread_id or bound_thread_id
+        self._converge_automatic_identity_locked(target, decision_thread_id)
         return LifecycleDecision(
-            thread_id=ensured_thread_id or bound_thread_id,
+            thread_id=decision_thread_id,
             predecessor_actor=predecessor_actor,
             renewal_intent=renewal_intent,
             agent_ensure=agent_ensure,
+        )
+
+    def _converge_automatic_identity_locked(
+        self,
+        target: WorktreeTarget,
+        thread_id: str,
+    ) -> None:
+        """Persist the real actor an automatic observation or launch resolved."""
+        if not thread_id:
+            return
+        store = self._state.team_store
+        actor = target_bound_actor(target, thread_id)
+        if projected_team_actor_for_target(store, target, thread_id) != actor:
+            actor = team_actor_for_target(store, target, thread_id)
+        record_serve_agent_identity(
+            store,
+            target,
+            thread_id,
+            actor_id=actor,
         )
 
     def _converge_renewal_locked(

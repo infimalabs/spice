@@ -700,16 +700,18 @@ def test_dev_pytest_dispatch_forwards_flag_leading_arguments(tmp_path, monkeypat
     from spice.cli import entry
 
     calls: list[tuple[Path, list[str]]] = []
+    repo = _git_init(tmp_path / "repo")
+    monkeypatch.chdir(repo)
     monkeypatch.setattr(
-        "spice.hooks.devpytest.run_checkout_pytest",
+        entry,
+        "_run_dev_pytest",
         lambda repo_root, args: calls.append((repo_root, args)) or 0,
     )
-    monkeypatch.setattr("spice.paths.require_repo_root", lambda: tmp_path)
 
     result = entry._dispatch(["dev", "pytest", "-q", "tests/test_cliversion.py"])
 
     assert result == 0
-    assert calls == [(tmp_path, ["-q", "tests/test_cliversion.py"])]
+    assert calls == [(repo, ["-q", "tests/test_cliversion.py"])]
 
 
 def test_dev_pytest_runs_in_process_under_worktree_venv(tmp_path, monkeypatch):
