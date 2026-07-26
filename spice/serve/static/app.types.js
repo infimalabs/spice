@@ -28,6 +28,10 @@
  */
 
 /**
+ * @typedef {(TeamCommandApplied|TeamCommandRefused)} TeamCommandResponse
+ */
+
+/**
  * @typedef {Object} MessageAttachment
  * @property {string} name
  * @property {string} contentType
@@ -624,12 +628,17 @@
  */
 
 /**
- * @typedef {Object} TeamCommandResponse
- * @property {boolean} ok
- * @property {number=} revision
- * @property {boolean=} differential
- * @property {TeamSnapshot=} snapshot
- * @property {string=} error
+ * @typedef {Object} TeamCommandApplied
+ * @property {true} ok
+ * @property {number} revision
+ * @property {boolean} differential
+ * @property {TeamSnapshot} snapshot
+ */
+
+/**
+ * @typedef {Object} TeamCommandRefused
+ * @property {false} ok
+ * @property {string} error
  */
 
 /**

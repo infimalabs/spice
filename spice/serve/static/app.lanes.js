@@ -174,20 +174,23 @@ async function requestTeamCommand(payload) {
     await liveBusRequest("teams.command", { payload })
   );
   const result = response.result;
-  if (result.snapshot)
-    applyTeamSnapshotPayload(
-      {
-        revision: result.revision,
-        changed: true,
-        differential: Boolean(result.differential),
-        snapshot: result.snapshot,
-      },
-      { force: true },
-    );
+  // A refusal carries its reason and nothing else, so it is answered before the
+  // applied arm is read at all. Past this branch the response is the applied
+  // shape, which always carries the revision and snapshot it produced -- there
+  // is no half-applied answer to defend against downstream.
   if (result.ok === false) {
     await refreshTeamSnapshot({ force: true });
     throw new Error(result.error || "team command failed");
   }
+  applyTeamSnapshotPayload(
+    {
+      revision: result.revision,
+      changed: true,
+      differential: result.differential,
+      snapshot: result.snapshot,
+    },
+    { force: true },
+  );
   return result;
 }
 
