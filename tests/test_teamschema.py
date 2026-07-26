@@ -258,6 +258,57 @@ def test_cached_store_rechecks_newer_writer_version_before_use(tmp_path):
     assert _logical_state(path) == before
 
 
+def test_drifted_projection_table_is_rebuilt_from_the_current_ddl(tmp_path):
+    path = tmp_path / "drifted-projection.sqlite3"
+    _initialize(path)
+    _seed_authority(path)
+    before = _authority_state(path)
+    with sqlite_connection(path) as connection:
+        connection.execute('DROP TABLE "agent_metric_cursors"')
+        connection.execute(
+            "CREATE TABLE agent_metric_cursors ("
+            "agent_id TEXT NOT NULL, source_path TEXT NOT NULL, "
+            "offset INTEGER NOT NULL, updated_at REAL NOT NULL, "
+            "PRIMARY KEY (agent_id, source_path))"
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_cursors VALUES ('agent-a', '/t.jsonl', 10, 1.0)"
+        )
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, team_id, tool_calls, updated_at) VALUES ('agent-a', 'team-a', 3, 1.0)"
+        )
+
+    _initialize(path)
+
+    with sqlite_connection(path) as connection:
+        columns = tuple(
+            str(row[1])
+            for row in connection.execute('PRAGMA table_info("agent_metric_cursors")')
+        )
+        cursor_rows = connection.execute(
+            "SELECT count(*) FROM agent_metric_cursors"
+        ).fetchone()[0]
+        kept_tool_calls = connection.execute(
+            "SELECT tool_calls FROM agent_metrics WHERE agent_id = 'agent-a'"
+        ).fetchone()[0]
+
+    # A projection whose shape drifted is discarded and rebuilt from the current
+    # DDL; the projections that still match keep their rows, and authority is
+    # untouched either way.
+    assert columns == (
+        "agent_id",
+        "source_path",
+        "offset",
+        "source_device",
+        "source_inode",
+        "updated_at",
+    )
+    assert cursor_rows == 0
+    assert kept_tool_calls == 3
+    assert _authority_state(path) == before
+
+
 def test_projection_schema_reset_cannot_change_authority_or_its_version(tmp_path):
     path = tmp_path / "projection-reset.sqlite3"
     _initialize(path)

@@ -328,28 +328,6 @@ def read_assistant_messages(
     )
 
 
-def read_metric_messages_from_offset(
-    transcript_path: Path,
-    *,
-    start_offset: int,
-    worktree_id: str | None = None,
-) -> tuple[list[AssistantMessage], int]:
-    """Read metric-relevant transcript records from a byte offset to EOF."""
-    driver = driver_for_transcript(transcript_path)
-    read = read_forward(
-        transcript_path,
-        cursor=TranscriptCursor(offset=start_offset),
-    )
-    return (
-        _messages_from_records(
-            read.records,
-            driver=driver,
-            worktree_id=worktree_id,
-        ),
-        read.end_offset,
-    )
-
-
 def _read_locked(
     transcript_path: Path,
     *,
