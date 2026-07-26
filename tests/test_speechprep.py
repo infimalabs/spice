@@ -371,7 +371,11 @@ const context = {
     requests.push(text);
     if (requests.length === 1) firstRequestedResolve();
     if (text === "manual") manualRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
