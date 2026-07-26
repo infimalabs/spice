@@ -16,9 +16,9 @@ from spice.serve.team.projection import (
     FIRST_GENERATION,
     PROJECTION_TABLES,
     ServeProjectionStore,
+    rebuild_projection_family,
 )
 from spice.serve.team.schema import (
-    LEGACY_TEAM_SCHEMA_FINGERPRINT,
     TEAM_AUTHORITY_MIGRATIONS,
     TEAM_AUTHORITY_SCHEMA,
     TEAM_AUTHORITY_SCHEMAS,
@@ -162,50 +162,6 @@ def _logical_state(path: Path) -> tuple[int, tuple[str, ...]]:
         return version, tuple(connection.iterdump())
 
 
-def _schema_state(path: Path) -> tuple[tuple[Any, ...], ...]:
-    with sqlite_connection(path) as connection:
-        return tuple(
-            tuple(row)
-            for row in connection.execute(
-                "SELECT type, name, tbl_name, sql FROM sqlite_master "
-                "WHERE name NOT LIKE 'sqlite_autoindex_%' "
-                "ORDER BY type, name"
-            ).fetchall()
-        )
-
-
-def test_legacy_current_schema_upgrades_without_rewriting_authority(tmp_path):
-    path = tmp_path / "legacy.sqlite3"
-    with sqlite_connection(path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.execute(f"PRAGMA user_version = {LEGACY_TEAM_SCHEMA_FINGERPRINT}")
-    _seed_authority(path)
-    before = _authority_state(path)
-
-    _initialize(path)
-
-    assert _authority_state(path) == before
-    with sqlite_connection(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == (
-            TEAM_AUTHORITY_SCHEMA_VERSION
-        )
-
-
-def test_fresh_and_legacy_upgrade_converge_on_one_schema_and_version(tmp_path):
-    fresh_path = tmp_path / "fresh.sqlite3"
-    legacy_path = tmp_path / "legacy.sqlite3"
-    _initialize(fresh_path)
-    with sqlite_connection(legacy_path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.execute(f"PRAGMA user_version = {LEGACY_TEAM_SCHEMA_FINGERPRINT}")
-
-    _initialize(legacy_path)
-
-    assert _logical_state(fresh_path)[0] == TEAM_AUTHORITY_SCHEMA_VERSION
-    assert _logical_state(legacy_path)[0] == TEAM_AUTHORITY_SCHEMA_VERSION
-    assert _schema_state(legacy_path) == _schema_state(fresh_path)
-
-
 def test_failed_forward_migration_rolls_back_every_logical_change(
     tmp_path, monkeypatch
 ):
@@ -337,7 +293,11 @@ def test_projection_lifecycle_cannot_change_authority_or_its_version(tmp_path):
         version_before = connection.execute("PRAGMA user_version").fetchone()[0]
     projections = _open_projections(path)
 
-    projections.reset()
+    rebuild_projection_family(
+        projections,
+        AGENT_ACTIVITY.name,
+        lambda _stage: None,
+    )
     projections.path.write_bytes(b"not a database at all")
     _forget_projection_file(projections)
     with projections.connect() as connection:
@@ -351,8 +311,9 @@ def test_projection_lifecycle_cannot_change_authority_or_its_version(tmp_path):
     with projections.connect():
         pass
 
-    # Emptying it, corrupting it, and deleting it outright are all recoverable
-    # in one file: each one costs a replay and the store rebuilds itself.
+    # Rebuilding it empty, corrupting it, and deleting it outright are all
+    # recoverable in one file: each one costs a replay and the store rebuilds
+    # itself.
     assert set(PROJECTION_TABLES) <= rebuilt_tables
     assert projections.path.exists()
     # None of it reached authority, whose rows and version are byte-identical.

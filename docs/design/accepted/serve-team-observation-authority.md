@@ -1,6 +1,6 @@
 # Serve Team Observation Authority
 
-Status: implemented contract, 2026-07-25.
+Status: implemented contract, 2026-07-26.
 
 ## Decision
 
@@ -26,21 +26,31 @@ are not members of the authority schema and no longer share its file. They have
 completed their transition into `spiceprojections.sqlite3`, whose own schema,
 version, connection, and failure domain are described in
 [Serve Projection Store](serve-projection-store.md). Directive facts completed
-the same transition: their canonical rows now live in
-repository-owned `spiceacks.sqlite3`, and the former `directives` and
-`directive_totals` tables are removed after checked migration. Task lifecycle
-facts completed it too, in the other direction: the former `task_events` mirror
-is removed and Serve derives every claim, phase advance, review, completion,
-and drain from the task plane's own mutation history.
+the same transition: their canonical rows now live in repository-owned
+`spiceacks.sqlite3`; there is no compatibility read or rewrite from a retired
+Serve mirror. Task lifecycle facts completed it too, in the other direction:
+Serve derives every claim, phase advance, review, completion, and drain from
+the task plane's own mutation history.
 
-## Context
+## Fact-Family Inventory
 
-The former initializer stamped `PRAGMA user_version` with a CRC32 of one
-combined schema string. Any mismatch—including a projection edit or whitespace
-change—dropped every non-SQLite table before recreating the current schema.
-That policy contradicted the store's role as the durable, revisioned team
-control plane: a display or observation schema edit could erase team revisions,
-events, memberships, settings, merge restoration state, renewals, and identity.
+| Metric/fact family | Canonical owner | Storage class | Dependencies |
+| --- | --- | --- | --- |
+| Team topology, membership, renewal lineage, identity | `spiceteams.sqlite3` authority tables and immutable events | Irreplaceable authority | No projection dependency for authority reads |
+| Directive lifecycle and ACK latency | `spiceacks.sqlite3` publication/disposition rows | Irreplaceable authority | Team events only for lineage or team-at-send lenses |
+| Task lifecycle, distribution, and stall state | TaskChampion operations folded by `spice.tasks.transitions` | Irreplaceable authority | Team events only for team-at-event-time attribution |
+| Agent activity totals and time buckets | Typed driver transcript events materialized in `spiceprojections.sqlite3` | Disposable projection | Transcript bytes, cursor manifest, and team events for attribution |
+
+Exactly one owner exists for each native fact. Cross-family views compose owner
+answers in Python; no table is mirrored into a second owner and no query
+silently chooses between stores.
+
+## Historical Context
+
+The retired initializer treated one combined authority/projection schema as a
+fingerprint and destructively recreated the entire file on mismatch. A display
+or observation schema edit could therefore erase team revisions, events,
+memberships, settings, merge restoration state, renewals, and identity.
 
 Those authority facts cannot be reconstructed from the projection tables.
 Treating the whole database as disposable was therefore data loss, not cache
@@ -73,12 +83,13 @@ Opening a database follows one atomic sequence:
    version, and commit. No projection DDL runs on this connection.
 6. Roll back the entire transaction on any exception.
 
-Fresh empty databases migrate from version `0`. A populated database that still
-reports version `0` has no supported migration and fails without mutation. The
-one exact CRC32 stamp emitted by the former current writer is recognized as a
-source alias for version 1 and is replaced transactionally with the explicit
-version. Other drifted or partial shapes fail without mutation; there is no
-destructive recovery branch.
+Fresh empty databases migrate from version `0`. A populated database that
+reports version `0`, a retired fingerprint, an unsupported version, an
+or a partial/changed authority table shape fails without mutation. Tables
+outside the named authority set are outside its schema contract and are never
+queried, migrated, or dropped. There is no compatibility alias and no
+destructive recovery branch. Every caller must arrive on an explicitly
+supported integer version and exact authority shape.
 
 ## Writer-Version Rule
 
@@ -136,7 +147,7 @@ lineage edge from team authority and the suspect rows from the projection, so
 it is a standing proof about the current writer rather than a migration guard,
 and a projection that fails it is rebuilt from its source.
 
-## Directive Authority Cutover
+## Directive Authority
 
 `spiceacks.sqlite3` carries the complete lifecycle of metric-bearing steering
 under the inbox key. Publication writes immutable `target_actor`, `team_id`
@@ -155,16 +166,12 @@ Renewal never updates a steering row. Transcript activity ingestion no longer
 parses ACK keys into metric mutations, and team snapshot pruning never touches
 directive history.
 
-The one-time cutover reads both legacy team tables before removal. It first
-proves that `directive_totals` exactly equals the surviving keyed `directives`
-rows; a mismatch identifies prior pruning and requires native-fact replay.
-Pending legacy rows can migrate from their complete metric provenance. A
-legacy acknowledged row must join an ACK archive containing its auditable
-disposition and content. Conflicting actor/team/time values,
-refused-versus-acked collisions, incomplete table pairs, pruned totals, and
-missing ACK archives fail with recovery guidance and leave both legacy tables
-intact. Only after every row is durably represented in the ACK database does
-the team transaction drop `directives` and `directive_totals`.
+The completed cutover has no runtime bridge. The ACK database schema contains
+only the current publication/disposition contract. The current writer never
+reads, drops, or rewrites retired mixed-store tables; if inert physical vestiges
+exist beside authority, they remain outside the named schema contract and every
+query path. An operator needing their former facts must use the release that
+owns that migration.
 
 ## Constraints
 
@@ -174,8 +181,9 @@ the team transaction drop `directives` and `directive_totals`.
   table remains beside authority.
 - Schema validation compares each durable `CREATE TABLE` definition and its
   complete column shape, including column order, types, nullability, defaults,
-  primary-key positions, and hidden-column flags. Extra, missing, or
-  semantically different durable definitions are incompatible.
+  primary-key positions, and hidden-column flags. Missing or semantically
+  different authority definitions are incompatible; unrelated tables are not
+  treated as authority.
 - Projection creation, drift, reset, rebuild, and corruption reach nothing but
   the projection file. None of them may mutate an authority row, and none of
   them may prevent an authority read.
@@ -183,10 +191,8 @@ the team transaction drop `directives` and `directive_totals`.
 
 ## Validation
 
-Focused migration tests seed every authority table and prove:
+Focused migration and terminal parity tests prove:
 
-- the exact legacy current database upgrades without row or revision changes;
-- fresh creation and legacy upgrade converge on the same schema and version;
 - an injected multi-statement migration failure restores the complete logical
   dump and prior version;
 - a newer writer version leaves rows, schema, version, and journal mode
@@ -196,14 +202,10 @@ Focused migration tests seed every authority table and prove:
 - emptying, corrupting, and deleting the projection file outright each leave
   authority contents and version unchanged; and
 - drifted or partial authority shapes fail without destructive rebuilding or a
-  partial open.
-
-## Follow-Ups
-
-- `TEAM-1kGsmG2B`: preserve immutable source actor and renewal lineage.
-- `TEAM-1kGsmLMf`: directive facts cut over to steering/ACK authority.
-- `TEAM-1kGsmQdq`: project activity from the typed transcript stream.
-- `TEAM-1kGsmWFT`: read canonical task-lifecycle facts from the task plane.
-- `TEAM-1kGsmbtF`: physically isolate rebuildable Serve projections, settled by
-  [Serve Projection Store](serve-projection-store.md).
-- `TEAM-1kGsmjZY`: prove destructive projection rebuild and parity end to end.
+  partial open;
+- static source audits find no retired task mirror writer, directive aggregate
+  mutation, authority drop fallback, renewal-event rewrite, raw transcript
+  parsing in Serve attribution, or silent projection connection; and
+- the representative parity fixture leaves authority contents, revision
+  history, schema, version, and logical checksum unchanged across projection
+  schema discard, deterministic replay, and retry.

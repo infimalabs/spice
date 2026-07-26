@@ -23,10 +23,6 @@ METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 
 TEAM_AUTHORITY_SCHEMA_VERSION = 1
-# Databases written before authority versions used this CRC32 value for the
-# exact schema below. It is recognized only as a one-time source version; new
-# databases and every successful upgrade are stamped with the explicit version.
-LEGACY_TEAM_SCHEMA_FINGERPRINT = 783663365
 
 TEAM_AUTHORITY_TABLES = frozenset(
     {

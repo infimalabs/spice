@@ -44,7 +44,7 @@ from spice.serve.team.membership import (
     event_payload,
     membership_intervals_from_events,
 )
-from spice.serve.team.projection import ServeProjectionStore
+from spice.serve.team.projection import AGENT_ACTIVITY, ServeProjectionStore
 from spice.serve.team.schema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
@@ -161,6 +161,10 @@ class _TeamMetricStore(Protocol):
         start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals: ...
 
+    def _prune_metric_history_locked(
+        self, connection: sqlite3.Connection, *, now: float
+    ) -> None: ...
+
 
 class TeamMetricStoreMixin:
     def observation_actor_ids(
@@ -225,7 +229,7 @@ class TeamMetricStoreMixin:
         # one source reverses only its own contribution. Activity counted
         # outside a transcript pass has no source to replay from.
         source_path = "" if checkpoint is None else checkpoint.source_path
-        with self.projections.connect() as projection:
+        with self.projections._write(AGENT_ACTIVITY) as projection:
             if checkpoint is not None:
                 _reset_unaccountable_metrics_locked(
                     projection, agent_id, source_path=source_path
@@ -260,7 +264,7 @@ class TeamMetricStoreMixin:
         authority transaction, and the two no longer share one.
         """
         agent_id = _normalized_id(agent_id, "agent_id")
-        with self.projections.connect() as projection:
+        with self.projections.read(AGENT_ACTIVITY) as projection:
             row = _agent_metric_cursor_row(projection, (agent_id,), source_path)
             if row is None:
                 with self.connect() as connection:
@@ -280,6 +284,20 @@ class TeamMetricStoreMixin:
         with self.connect() as connection:
             return _metric_history_retention_seconds_locked(connection)
 
+    def prune_metric_history(
+        self: _TeamMetricStore, *, now: float | None = None
+    ) -> None:
+        """Apply the authority-configured retention horizon to activity buckets.
+
+        Rebuilders call this against their isolated projection before publish.
+        Keeping the operation public prevents recovery code from reaching into
+        the store's locked implementation while preserving the same retention
+        rule used by the ordinary team snapshot pass.
+        """
+        prune_time = time.time() if now is None else max(0.0, float(now))
+        with self.connect() as connection:
+            self._prune_metric_history_locked(connection, now=prune_time)
+
     def lane_metric_summary(
         self: _TeamMetricStore,
         agent_id: str,
@@ -297,7 +315,10 @@ class TeamMetricStoreMixin:
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
         summary_time = time.time() if now is None else max(0.0, float(now))
-        with self.connect() as connection, self.projections.connect() as projection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             # Derive the lane summary from CURRENT membership: the metric is the
             # aggregate of the team's current members' per-agent counters, so work
             # follows the agent across moves rather than staying bolted to a team.
@@ -367,7 +388,10 @@ class TeamMetricStoreMixin:
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
         summary_time = time.time() if now is None else max(0.0, float(now))
-        with self.connect() as connection, self.projections.connect() as projection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             intervals = [
                 interval
                 for interval in membership_intervals_from_events(
@@ -420,7 +444,10 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         floor = metric_bucket_start(start, bucket_seconds)
         ceiling = metric_bucket_start(end, bucket_seconds)
-        with self.connect() as connection, self.projections.connect() as projection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
                 _require_source_attribution_locked(
                     connection, projection, requested_ids
@@ -482,11 +509,8 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         start_time = max(0.0, float(start))
         end_time = max(start_time, float(end))
-        with self.connect() as connection, self.projections.connect() as projection:
+        with self.connect() as connection:
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
-                _require_source_attribution_locked(
-                    connection, projection, requested_agents
-                )
                 agents = requested_agents
             elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
                 agents = _lineage_actor_ids_locked(connection, requested_agents)
@@ -606,7 +630,7 @@ class TeamMetricStoreMixin:
                 agent_ids=agents,
                 team_ids=teams,
             )
-        with self.projections.connect() as projection:
+        with self.projections.read(AGENT_ACTIVITY) as projection:
             activity_by_agent = _activity_bucket_times_by_agent_locked(
                 projection, claims
             )
@@ -686,9 +710,15 @@ class TeamMetricStoreMixin:
         # projection can rebuild is exactly the work that may fail alone.
         retention_seconds = _metric_history_retention_seconds_locked(connection)
         floor = int(now) - retention_seconds
-        with self.projections.connect() as projection:
+        with self.projections._write(AGENT_ACTIVITY) as projection:
             projection.execute(
                 "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
+            )
+            projection.execute(
+                "UPDATE projection_status SET retention_floor = "
+                "CASE WHEN retention_floor IS NULL OR retention_floor < ? "
+                "THEN ? ELSE retention_floor END WHERE family = ?",
+                (floor, floor, AGENT_ACTIVITY.name),
             )
 
     def _record_agent_metric_delta_locked(

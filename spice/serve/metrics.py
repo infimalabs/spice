@@ -19,10 +19,21 @@ bytes once rather than counting them twice or stepping over them unread.
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Iterable
 
-from spice.agent.driver import driver_for_transcript
+from spice.agent.driver import driver_for_transcript, select_driver
+from spice.serve.team.projection import (
+    AGENT_ACTIVITY,
+    ProjectionFamilyState,
+    PROJECTION_STATUS_INCOMPATIBLE,
+    PROJECTION_STATUS_UNAVAILABLE,
+    ProjectionUnavailableError,
+    ServeProjectionStore,
+    rebuild_projection_family,
+)
 from spice.serve.team.store import ServeTeamStore
 from spice.transcript.events import (
     AssistantText,
@@ -52,6 +63,106 @@ ACTIVITY_EVENTS = (
     ToolOutput,
     WebSearch,
 )
+
+
+def transcript_metric_sources(
+    store: ServeTeamStore,
+) -> tuple[tuple[str, Path], ...]:
+    """Resolve replay sources by the one documented recovery order.
+
+    A servable projection supplies its exact checkpoint manifest. Authority
+    identities then add any transcript still discoverable by its recorded
+    owner/thread pair, which is also how recovery proceeds after an
+    incompatible projection discarded its cursor table. Neither source is a
+    metric answer: both only name native transcript files for typed replay.
+    """
+    selected: dict[tuple[str, str], tuple[str, Path]] = {}
+    checkpointed_agents: set[str] = set()
+    try:
+        with store.projections.read(AGENT_ACTIVITY) as projection:
+            rows = projection.execute(
+                "SELECT agent_id, source_path FROM agent_metric_cursors "
+                "ORDER BY agent_id, source_path"
+            ).fetchall()
+        for row in rows:
+            agent_id = str(row["agent_id"])
+            source_path = str(row["source_path"])
+            if agent_id and source_path:
+                path = Path(source_path)
+                selected[(agent_id, str(path))] = (agent_id, path)
+                checkpointed_agents.add(agent_id)
+    except ProjectionUnavailableError:
+        pass
+    with store.connect() as authority:
+        identities = authority.execute(
+            "SELECT actor_id, thread_id, transcript_owner "
+            "FROM agent_identities WHERE thread_id != '' "
+            "AND transcript_owner != '' ORDER BY actor_id"
+        ).fetchall()
+    for row in identities:
+        agent_id = str(row["actor_id"])
+        if agent_id in checkpointed_agents:
+            continue
+        transcript = select_driver(
+            str(row["transcript_owner"])
+        ).find_session_transcript(str(row["thread_id"]))
+        if transcript is not None:
+            selected[(agent_id, str(transcript))] = (agent_id, transcript)
+    return tuple(selected[key] for key in sorted(selected))
+
+
+def rebuild_transcript_metrics(
+    store: ServeTeamStore,
+    *,
+    sources: Iterable[tuple[str, Path]] | None = None,
+) -> ProjectionFamilyState:
+    """Replay transcript activity in isolation and publish it atomically."""
+    published = next(
+        state
+        for state in store.projections.family_states()
+        if state.family == AGENT_ACTIVITY
+    )
+    retention_floor = published.retention_floor
+    if retention_floor is None and published.status in {
+        PROJECTION_STATUS_INCOMPATIBLE,
+        PROJECTION_STATUS_UNAVAILABLE,
+    }:
+        retention_floor = int(time.time()) - store.metric_history_retention_seconds()
+    selected = (
+        transcript_metric_sources(store)
+        if sources is None
+        else tuple(
+            (str(agent_id), Path(path))
+            for agent_id, path in sources
+            if str(agent_id) and str(path)
+        )
+    )
+
+    def populate(stage: ServeProjectionStore) -> float | None:
+        staging_store = ServeTeamStore(
+            path=store.path,
+            directive_state_path=store.directive_state_path,
+            projection_path=stage.path,
+        )
+        freshness: float | None = None
+        for agent_id, transcript_path in selected:
+            record_transcript_metrics_for_agent(
+                staging_store,
+                agent_id=agent_id,
+                transcript_path=transcript_path,
+            )
+            try:
+                modified = transcript_path.stat().st_mtime
+            except OSError:
+                continue
+            freshness = modified if freshness is None else max(freshness, modified)
+        if retention_floor is not None:
+            staging_store.prune_metric_history(
+                now=(retention_floor + staging_store.metric_history_retention_seconds())
+            )
+        return freshness
+
+    return rebuild_projection_family(store.projections, AGENT_ACTIVITY.name, populate)
 
 
 def record_transcript_metrics_for_agent(

@@ -6,10 +6,10 @@ import importlib
 import re
 import sqlite3
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
-import spice.serve.team.projection as projection_module
 from spice.errors import SpiceError
 from spice.serve.diagnostics import team_diagnostics_payload
 from spice.serve.team.ids import thread_actor_id
@@ -19,8 +19,12 @@ from spice.serve.team.projection import (
     PROJECTION_FAMILIES,
     PROJECTION_SCHEMA,
     PROJECTION_SCHEMA_VERSION,
+    PROJECTION_STATUS_REBUILDING,
+    PROJECTION_STATUS_STALE,
+    PROJECTION_STATUS_UNAVAILABLE,
     PROJECTION_TABLES,
     ServeProjectionStore,
+    rebuild_projection_family,
 )
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.sqliteconnection import sqlite_connection
@@ -32,7 +36,7 @@ ACTIVITY_TIMESTAMP = 1000.0
 REPEATED_READS = 5
 # The store's own bookkeeping rather than a replayable family: it records which
 # build of each family a reader is looking at.
-BOOKKEEPING_TABLES = frozenset({"projection_generations"})
+BOOKKEEPING_TABLES = frozenset({"projection_generations", "projection_status"})
 DOTTED_SPICE_NAME = re.compile(r"spice(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+")
 
 
@@ -86,6 +90,30 @@ def _published_state(projections: ServeProjectionStore) -> tuple[int, dict[str, 
     return generation, counts
 
 
+def _populate_activity(
+    stage: ServeProjectionStore,
+    *,
+    tool_calls: int,
+    started: Event | None = None,
+    release: Event | None = None,
+    error: str = "",
+) -> float:
+    with stage.connect() as connection:
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, team_id, source_path, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (AGENT_A, AGENT_A, "/transcripts/rebuilt.jsonl", tool_calls, 2000.0),
+        )
+    if started is not None:
+        started.set()
+    if release is not None and not release.wait(timeout=5):
+        raise AssertionError("test did not release staged projection rebuild")
+    if error:
+        raise RuntimeError(error)
+    return 2000.0
+
+
 def test_every_family_registers_a_replay_contract_that_resolves():
     """Registration answers all five questions, and its code references are real."""
     for family in PROJECTION_FAMILIES:
@@ -126,49 +154,116 @@ def test_the_schema_builds_exactly_the_registered_families():
     assert len(PROJECTION_TABLES) == len(set(PROJECTION_TABLES))
 
 
-def test_reset_is_idempotent_and_republishes_on_every_run(tmp_path):
-    store = _seeded_store(tmp_path)
-    projections = store.projections
-
-    first = projections.reset()
-    after_first = _published_state(projections)
-    second = projections.reset()
-    after_second = _published_state(projections)
-
-    # Emptying an empty family is not a no-op for the reader: the generation
-    # still advances, which is what makes a reset retried after a crash arrive
-    # at the same place as one that ran once.
-    assert first == second == PROJECTION_FAMILIES
-    assert after_first[1] == dict.fromkeys(AGENT_ACTIVITY.tables, 0)
-    assert after_second[1] == after_first[1]
-    assert after_first[0] == FIRST_GENERATION + 1
-    assert after_second[0] == FIRST_GENERATION + 2
-
-
-def test_a_reader_never_sees_a_new_generation_beside_old_rows(tmp_path, monkeypatch):
-    """The emptied rows and the new generation are published as one fact."""
+def test_isolated_rebuild_serves_the_prior_generation_until_atomic_publish(tmp_path):
     store = _seeded_store(tmp_path)
     projections = store.projections
     before = _published_state(projections)
-    observed: list[tuple[int, dict[str, int]]] = []
-    publish = projection_module._bump_generation_locked
+    started = Event()
+    release = Event()
+    failures: list[BaseException] = []
 
-    def observing_publish(connection, family, now):
-        # The writer has already deleted the rows in its open transaction. A
-        # separate connection must still see the whole previous build.
-        observed.append(_published_state(projections))
-        publish(connection, family, now)
+    def rebuild() -> None:
+        try:
+            rebuild_projection_family(
+                projections,
+                AGENT_ACTIVITY.name,
+                lambda stage: _populate_activity(
+                    stage,
+                    tool_calls=9,
+                    started=started,
+                    release=release,
+                ),
+            )
+        except BaseException as exc:
+            failures.append(exc)
 
-    monkeypatch.setattr(projection_module, "_bump_generation_locked", observing_publish)
+    worker = Thread(target=rebuild)
+    worker.start()
+    assert started.wait(timeout=5)
 
-    projections.reset()
-
-    assert before[1]["agent_metrics"] == 1
-    assert observed == [before]
-    assert _published_state(projections) == (
-        before[0] + 1,
-        dict.fromkeys(AGENT_ACTIVITY.tables, 0),
+    state = projections.family_states()[0]
+    served_during_rebuild = store.lane_metric_summary(
+        AGENT_A, bucket_count=1, now=2000.0
     )
+
+    assert state.status == PROJECTION_STATUS_REBUILDING
+    assert state.servable is True
+    assert _published_state(projections) == before
+    assert served_during_rebuild.tool_calls == RECORDED_TOOL_CALLS
+    with pytest.raises(SpiceError, match=PROJECTION_STATUS_REBUILDING):
+        store.record_agent_metric_delta(AGENT_A, tool_calls=1)
+
+    release.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert failures == []
+    assert _published_state(projections)[0] == before[0] + 1
+    assert (
+        store.lane_metric_summary(AGENT_A, bucket_count=1, now=2000.0).tool_calls == 9
+    )
+
+
+def test_failed_isolated_rebuild_keeps_the_prior_generation_stale_and_servable(
+    tmp_path,
+):
+    store = _seeded_store(tmp_path)
+    projections = store.projections
+    before = _published_state(projections)
+
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        rebuild_projection_family(
+            projections,
+            AGENT_ACTIVITY.name,
+            lambda stage: _populate_activity(
+                stage,
+                tool_calls=9,
+                error="synthetic interruption",
+            ),
+        )
+
+    state = projections.family_states()[0]
+    assert state.status == PROJECTION_STATUS_STALE
+    assert state.servable is True
+    assert "synthetic interruption" in state.detail
+    assert _published_state(projections) == before
+    assert (
+        store.lane_metric_summary(AGENT_A, bucket_count=1, now=2000.0).tool_calls
+        == RECORDED_TOOL_CALLS
+    )
+
+
+def test_destructive_reset_and_failed_recovery_are_explicitly_unavailable(tmp_path):
+    store = _seeded_store(tmp_path)
+    projections = store.projections
+    with projections.connect() as connection:
+        connection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION + 1}")
+    _reopen(projections)
+    state = projections.family_states()[0]
+
+    with pytest.raises(SpiceError) as reset_error:
+        store.lane_metric_summary(AGENT_A, bucket_count=1, now=2000.0)
+    assert state.status == "incompatible"
+    assert "incompatible" in str(reset_error.value)
+    assert AGENT_ACTIVITY.recovery_action in str(reset_error.value)
+
+    with pytest.raises(RuntimeError, match="still interrupted"):
+        rebuild_projection_family(
+            projections,
+            AGENT_ACTIVITY.name,
+            lambda stage: _populate_activity(
+                stage,
+                tool_calls=9,
+                error="still interrupted",
+            ),
+        )
+
+    state = projections.family_states()[0]
+    assert state.status == PROJECTION_STATUS_UNAVAILABLE
+    assert state.servable is False
+    assert state.row_counts == dict.fromkeys(AGENT_ACTIVITY.tables, 0)
+    with pytest.raises(SpiceError, match="still interrupted"):
+        store.lane_metric_summary(AGENT_A, bucket_count=1, now=2000.0)
 
 
 def test_authority_answers_every_read_while_projections_are_unavailable(
@@ -345,7 +440,11 @@ def test_an_unknown_family_name_is_named_beside_the_known_ones(tmp_path):
     projections = _store(tmp_path).projections
 
     with pytest.raises(SpiceError) as exc_info:
-        projections.reset("laneWarehouse")
+        rebuild_projection_family(
+            projections,
+            "laneWarehouse",
+            lambda _stage: None,
+        )
 
     assert "laneWarehouse" in str(exc_info.value)
     assert AGENT_ACTIVITY.name in str(exc_info.value)

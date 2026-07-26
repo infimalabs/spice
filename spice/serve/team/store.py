@@ -25,7 +25,6 @@ from spice.errors import SpiceError
 from spice.mail.ackstate import (
     ACK_STATE_DATABASE_FILENAME,
     ack_state_database_path,
-    migrate_serve_directive_history,
     prepare_directive_history_database,
 )
 from spice.sqliteconnection import sqlite_connection
@@ -63,6 +62,7 @@ from spice.serve.team.metrics import (
 )
 from spice.serve.team.projection import (
     PROJECTION_DATABASE_FILENAME as PROJECTION_DATABASE_FILENAME,
+    ProjectionUnavailableError,
     ServeProjectionStore,
     projection_database_path,
 )
@@ -83,7 +83,6 @@ from spice.serve.team.renewals import (
 )
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
-    LEGACY_TEAM_SCHEMA_FINGERPRINT,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
@@ -271,7 +270,6 @@ class ServeTeamStore(
             ]
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
-            self._migrate_legacy_directive_projection_locked(connection)
             if source_version == 0:
                 self._write_store_generation_locked(connection)
             self._validate_authority_schema_locked(
@@ -282,58 +280,6 @@ class ServeTeamStore(
         except BaseException:
             connection.rollback()
             raise
-
-    def _migrate_legacy_directive_projection_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' "
-                "AND name IN ('directives', 'directive_totals')"
-            )
-        }
-        if not tables:
-            return
-        if tables != {"directives", "directive_totals"}:
-            raise SpiceError(
-                "legacy Serve directive projection is incomplete: expected both "
-                "directives and directive_totals. Restore both tables or replay "
-                "canonical steering/ACK facts; no legacy table was removed"
-            )
-        raw_directive_rows = connection.execute(
-            "SELECT directive_key, agent_id, team_id, sent_at, acked, acked_at "
-            "FROM directives ORDER BY sent_at, directive_key"
-        ).fetchall()
-        directive_rows = [
-            {
-                "directive_key": row[0],
-                "agent_id": row[1],
-                "team_id": row[2],
-                "sent_at": row[3],
-                "acked": row[4],
-                "acked_at": row[5],
-            }
-            for row in raw_directive_rows
-        ]
-        raw_total_rows = connection.execute(
-            "SELECT agent_id, team_id, sends, acked FROM directive_totals "
-            "ORDER BY agent_id, team_id"
-        ).fetchall()
-        total_rows = [
-            {
-                "agent_id": row[0],
-                "team_id": row[1],
-                "sends": row[2],
-                "acked": row[3],
-            }
-            for row in raw_total_rows
-        ]
-        migrate_serve_directive_history(
-            self.directive_state_path, directive_rows, total_rows
-        )
-        connection.execute("DROP TABLE directives")
-        connection.execute("DROP TABLE directive_totals")
 
     def _write_store_generation_locked(self, connection: sqlite3.Connection) -> None:
         """Date this store the instant it is created, and only then.
@@ -378,9 +324,6 @@ class ServeTeamStore(
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if stored == LEGACY_TEAM_SCHEMA_FINGERPRINT:
-            self._validate_authority_schema_locked(connection, 1)
-            return 1
         if stored == 0:
             tables = {
                 str(row[0])
@@ -758,7 +701,14 @@ class ServeTeamStore(
 
     def _team_snapshot_locked(self, connection: sqlite3.Connection) -> TeamSnapshot:
         self._prune_zero_activity_closed_teams_locked(connection)
-        self._prune_metric_history_locked(connection, now=time.time())
+        try:
+            self._prune_metric_history_locked(connection, now=time.time())
+        except ProjectionUnavailableError:
+            # Projection maintenance may be unavailable during an isolated
+            # rebuild or after an incompatible/corrupt projection was
+            # discarded. Authority remains readable in that state; projection
+            # diagnostics carry the exact recovery action.
+            pass
         self._ensure_open_team_locked(connection)
         revision_row = connection.execute(
             "SELECT MAX(revision) AS r FROM events"
