@@ -21,6 +21,7 @@ from spice.mail.ackgrammar import (
     iter_control_lines,
     split_keyed_response,
     task_directive_fields,
+    trim_blank_lines,
 )
 from spice.transcript.events import (
     AssistantText,
@@ -318,7 +319,7 @@ def _segment_spans(
     pending: list[str] = []
 
     def flush_pending() -> None:
-        text = "\n".join(pending).strip()
+        text = trim_blank_lines("\n".join(pending))
         pending.clear()
         if text:
             spans.append(
