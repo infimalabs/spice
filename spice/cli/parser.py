@@ -41,7 +41,7 @@ def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentPar
     parser = RecoveringArgumentParser(
         prog="spice",
         description=(
-            "Simultaneous Production, Integration, and Control Environment "
+            "Software Production, Integration, and Control Environment "
             "for the enclosing repository: the agent command wrapper, inbox "
             "steering, worktree-bound agent lifecycle, the task control plane, "
             "session forensics, the supervisor web UI, maxim judging, "
