@@ -11,6 +11,7 @@ from threading import Event, Thread
 
 import pytest
 
+from spice.agent import driver as agent_driver
 from spice.agent import runwatch, sidechannel, sidechannelnotify, wrap
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
@@ -27,6 +28,71 @@ SIDE_CHANNEL_SHUTDOWN_DEADLINE_S = 10.0
 def _git_worktree_tmp_path(request, tmp_path):
     if "tmp_path" in request.fixturenames:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+
+def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.setenv("ZDOTDIR", "hook")
+    monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
+    events: list[tuple[str, object, object | None]] = []
+    stderr = io.StringIO()
+    watch_thread = object()
+
+    class FakeProcess:
+        pid = 123
+
+        def wait(self) -> int:
+            events.append(("wait", None, None))
+            return 7
+
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        events.append(
+            (
+                "popen",
+                command,
+                None if env is None else (env.get("ZDOTDIR"), env.get("BASH_ENV")),
+            )
+        )
+        return FakeProcess()
+
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_inbox_signature=None,
+    ):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_inbox_signature),
+            )
+        )
+        return watch_thread
+
+    def fake_join(thread):
+        events.append(("join", thread, None))
+
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", fake_watch)
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", fake_join)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["find", ".", "-maxdepth", "0", "-print"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == 7
+    assert events == [
+        ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
+        ("watch", tmp_path, (123, stderr, ())),
+        ("wait", None, None),
+        ("join", watch_thread, None),
+    ]
 
 
 def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
