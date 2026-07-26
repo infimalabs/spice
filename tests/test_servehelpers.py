@@ -14,6 +14,7 @@ from spice.serve import agentapi, app, taskboard, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
+from spice.serve.lifecycle import start_lifecycle_reconciler
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.websocket import EncodedTextFrame
 from spice.serve.worktree.target import WorktreeTarget
@@ -113,6 +114,12 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
+    # Active-mode Serve owns a reconciler, and every lane decision is submitted
+    # to it. Starting one here only arms the boundary: its per-target workers are
+    # daemon threads created on the first submission and retired when that
+    # target's queue drains, so a state that never decides anything costs one
+    # flag.
+    start_lifecycle_reconciler(state)
     return state
 
 
