@@ -52,6 +52,21 @@ class TeamConfig:
 
 @dataclass(frozen=True)
 class TeamAgentIdentity:
+    """One agent identity as the store holds it: normalized and fully stamped.
+
+    Every field is settled. Text is stripped, the actor id is canonical, the
+    revision is non-negative, and ``updated_at`` is a real timestamp rather
+    than a request to pick one. Readers project this straight to the wire, so
+    nothing here is allowed to still need cleaning.
+
+    The write side carries its own record, ``AgentIdentityRecordRequest``,
+    which this one deliberately cannot replace: a request accepts unvalidated
+    caller text and leaves ``updated_at`` as None to mean "stamp me at write
+    time", where here it is a concrete float. Folding the two would either
+    force writers to invent a timestamp or make every reader re-check whether
+    the fields it just read were ever normalized.
+    """
+
     actor_id: str
     target_id: str = ""
     thread_id: str = ""
