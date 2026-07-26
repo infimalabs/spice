@@ -11,13 +11,13 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
-from spice.errors import SpiceError
 from spice.mail.ackstate import (
     DirectivePublicationWrite,
     record_directive_publications,
 )
 from spice.serve.payload import identity
 from spice.serve.agentapi import (
+    explicit_send_decision,
     pending_inbox_launch_lock,
     sent_steering_payload,
     sent_steering_response_payload,
@@ -175,7 +175,6 @@ def _work_tree_send_response_payload(
         state,
         target,
         sent,
-        force_new=force_new,
         renew_intent=renew_intent,
         predecessor=predecessor,
         predecessor_actor=predecessor_actor,
@@ -226,13 +225,9 @@ def _work_tree_renewal_request_text(
     )
     if status.running:
         # Renew never yanks a running agent; the message asks for a clean
-        # handoff and the successor starts on the next send.
-        try:
-            state.team_store.record_pending_renewal(
-                agent_id=predecessor_actor, ancestor_thread_id=predecessor
-            )
-        except SpiceError:
-            pass  # renewal bookkeeping requires a team; steering still lands
+        # handoff and the successor starts on the next send. Choosing the text
+        # is all this does -- the reconciler settles the renewal itself once it
+        # sees whether the attempt produced a successor.
         return renewal_handoff_request_text(text), False
     return renewal_steering_text(text, previous_thread_id=predecessor), True
 
@@ -242,7 +237,6 @@ def _work_tree_send_result_payload(
     target: WorktreeTarget,
     sent: Any,
     *,
-    force_new: bool,
     renew_intent: bool,
     predecessor: str,
     predecessor_actor: str,
@@ -260,22 +254,16 @@ def _work_tree_send_result_payload(
         _record_directive_publication(state, target, sent, send_actor=send_actor)
         return response_payload
 
+    decision = explicit_send_decision(grant)
     response_payload = sent_steering_response_payload(
         sent,
         target=target,
-        grant=grant,
+        decision=decision,
     )
     agent_ensure = response_payload.get("agentEnsure")
-    ensured_thread_id = _work_tree_send_ensured_thread_id(
-        state,
-        agent_ensure=agent_ensure,
-        renew_intent=renew_intent,
-        force_new=force_new,
-        predecessor_actor=predecessor_actor,
-    )
-    send_agent_id = (
-        ensured_thread_id or identity.resolve_thread_id_for_target(state, target) or ""
-    )
+    # The reconciler already settled which thread this send belongs to, renewal
+    # included. Reading it here keeps the reply a report of that decision.
+    send_agent_id = decision.thread_id if decision is not None else ""
     send_actor = ""
     if send_agent_id:
         send_actor = identity.team_actor_for_target(
@@ -335,24 +323,6 @@ def _record_directive_publication(
             )
         ],
     )
-
-
-def _work_tree_send_ensured_thread_id(
-    state: Any,
-    *,
-    agent_ensure: Any,
-    renew_intent: bool,
-    force_new: bool,
-    predecessor_actor: str,
-) -> str:
-    agent_ensure_payload = agent_ensure if isinstance(agent_ensure, dict) else None
-    if renew_intent and force_new:
-        return identity.record_started_renewal_from_ensure(
-            state.team_store,
-            predecessor_agent_id=predecessor_actor,
-            agent_ensure=agent_ensure_payload,
-        )
-    return identity.agent_ensure_thread_id(agent_ensure_payload)
 
 
 def _apply_lifetime_to_team(

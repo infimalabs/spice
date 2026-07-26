@@ -833,9 +833,10 @@ def test_claude_context_fields_sum_prompt_and_fit_window():
         },
     }
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
-    assert fields["total_tokens"] == fresh + cache_read + cache_create + output
-    assert fields["cached_input_tokens"] == cache_read + cache_create
-    assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
+    assert fields is not None
+    assert fields.last.total_tokens == fresh + cache_read + cache_create + output
+    assert fields.last.cached_input_tokens == cache_read + cache_create
+    assert fields.model_context_window == CLAUDE_DRIVER.default_context_window
 
 
 def test_claude_context_window_stays_at_standard_tier_when_overflowing():
@@ -853,10 +854,11 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
         },
     }
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
-    assert fields["total_tokens"] == cache_read + output
+    assert fields is not None
+    assert fields.last.total_tokens == cache_read + output
     # Overflow no longer promotes to the 1M tier; it stays pinned at 200K so
     # pressure reads past 100% and drives compaction.
-    assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
+    assert fields.model_context_window == CLAUDE_DRIVER.default_context_window
 
 
 def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():

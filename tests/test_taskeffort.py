@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from spice.serve.payload import metric
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import ServeTeamStore
@@ -27,6 +27,14 @@ ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
 ACTOR_B_MEMBER = thread_actor_id(ACTOR_B)
 BASE_TS = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
 USAGE_TRANSCRIPT_TOTAL_TOKENS = 402
+CLAUDE_INPUT_TOKENS = 100
+CLAUDE_CACHE_READ_TOKENS = 200
+CLAUDE_CACHE_CREATE_TOKENS = 30
+CLAUDE_OUTPUT_TOKENS = 20
+CLAUDE_CACHED_INPUT_TOKENS = CLAUDE_CACHE_READ_TOKENS + CLAUDE_CACHE_CREATE_TOKENS
+CLAUDE_TOTAL_TOKENS = (
+    CLAUDE_INPUT_TOKENS + CLAUDE_CACHED_INPUT_TOKENS + CLAUDE_OUTPUT_TOKENS
+)
 
 
 @pytest.fixture
@@ -332,16 +340,73 @@ def test_phase_effort_usage_aggregates_transcript_spend_by_window(tmp_path):
     ]
 
 
-def test_phase_effort_usage_resolves_driver_once_per_transcript(tmp_path, monkeypatch):
+def test_phase_effort_usage_preserves_claude_context_fields(tmp_path, monkeypatch):
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "timestamp": _ts(10),
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "measured"}],
+                    "usage": {
+                        "input_tokens": CLAUDE_INPUT_TOKENS,
+                        "cache_read_input_tokens": CLAUDE_CACHE_READ_TOKENS,
+                        "cache_creation_input_tokens": CLAUDE_CACHE_CREATE_TOKENS,
+                        "output_tokens": CLAUDE_OUTPUT_TOKENS,
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(effort, "driver_for_transcript", lambda _path: CLAUDE_DRIVER)
+    window = effort.PhaseEffortWindow(
+        task_id="task-claude",
+        handle="EFFORT-CLAUDE",
+        title="Preserve Claude usage",
+        phase="todo",
+        phase_index=0,
+        actor_id=ACTOR_A_MEMBER,
+        thread_id=ACTOR_A,
+        team_id="team-a",
+        driver="claude",
+        model="claude-sonnet",
+        effort="medium",
+        started_at=_epoch(0),
+        ended_at=_epoch(20),
+    )
+
+    usage = effort.phase_effort_usage_for_windows((window,), {ACTOR_A: [transcript]})[0]
+
+    assert usage.input_tokens == CLAUDE_INPUT_TOKENS
+    assert usage.cached_input_tokens == CLAUDE_CACHED_INPUT_TOKENS
+    assert usage.output_tokens == CLAUDE_OUTPUT_TOKENS
+    assert usage.reasoning_output_tokens == 0
+    assert usage.total_tokens == CLAUDE_TOTAL_TOKENS
+
+
+def test_phase_effort_usage_reads_typed_events_once_per_transcript(
+    tmp_path, monkeypatch
+):
     transcript = tmp_path / "thread-a.jsonl"
     _write_usage_transcript(transcript)
     resolved: list[Path] = []
+    typed_reads: list[tuple[Path, str]] = []
+    original_read = effort.TranscriptEventReader.read
 
     def resolve_driver(path: Path):
         resolved.append(path)
         return DRIVER
 
+    def read_typed(reader, mode):
+        typed_reads.append((reader.path, mode))
+        return original_read(reader, mode)
+
     monkeypatch.setattr(effort, "driver_for_transcript", resolve_driver)
+    monkeypatch.setattr(effort.TranscriptEventReader, "read", read_typed)
     window = effort.PhaseEffortWindow(
         task_id="task-1",
         handle="EFFORT-00000001",
@@ -361,6 +426,7 @@ def test_phase_effort_usage_resolves_driver_once_per_transcript(tmp_path, monkey
     usage = effort.phase_effort_usage_for_windows((window,), {ACTOR_A: [transcript]})
 
     assert resolved == [transcript]
+    assert typed_reads == [(transcript, "forward")]
     assert usage[0].total_tokens == USAGE_TRANSCRIPT_TOTAL_TOKENS
 
 

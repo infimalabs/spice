@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -15,10 +14,12 @@ from spice.serve.team.store import ServeTeamStore
 from spice.sessions import records
 from spice.sessions.meter import (
     ActiveContextSnapshot,
-    active_context_snapshot_from_object,
+    active_context_snapshot_from_event,
 )
 from spice.sessions.slices import turn_activity_ts
 from spice.tasks import claimstate, identity
+from spice.transcript.events import ContextUsage
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import parse_timestamp
 
 PARTIAL_MISSING_START = "missing_start"
@@ -541,17 +542,13 @@ def _active_context_snapshots(
     snapshots: list[ActiveContextSnapshot] = []
     for path in paths:
         driver = driver_for_transcript(path)
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(raw, dict):
-                    continue
-                snapshot = active_context_snapshot_from_object(path, raw, driver)
-                if snapshot is not None:
-                    snapshots.append(snapshot)
+        read = TranscriptEventReader(path, driver, source_actor=None).read("forward")
+        for event in read.events:
+            if not isinstance(event, ContextUsage):
+                continue
+            snapshot = active_context_snapshot_from_event(event)
+            if snapshot is not None:
+                snapshots.append(snapshot)
     return tuple(sorted(snapshots, key=lambda item: (item.ts, item.source_file)))
 
 
