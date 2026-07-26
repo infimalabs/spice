@@ -29,6 +29,7 @@ from spice.transcript.events import (
     TokenUsage,
     ToolCall,
     ToolOutput,
+    ToolOutputType,
     TranscriptEvent,
     Unknown,
     UserMessage,
@@ -64,8 +65,13 @@ def codex_line_events(
         return _codex_message_events(stamper, payload)
     if payload_type in {"function_call", "custom_tool_call"}:
         return _codex_tool_call_events(stamper, payload)
-    if payload_type == "function_call_output":
-        return _codex_tool_output_events(stamper, payload)
+    if payload_type in {"function_call_output", "custom_tool_call_output"}:
+        output_type: ToolOutputType = (
+            "custom_tool_call_output"
+            if payload_type == "custom_tool_call_output"
+            else "function_call_output"
+        )
+        return _codex_tool_output_events(stamper, payload, output_type)
     if payload_type == "reasoning":
         return _codex_reasoning_events(stamper, payload)
     if payload_type == "web_search_call":
@@ -219,7 +225,9 @@ def _codex_tool_call_events(
 
 
 def _codex_tool_output_events(
-    stamper: LineStamper, payload: dict[str, Any]
+    stamper: LineStamper,
+    payload: dict[str, Any],
+    output_type: ToolOutputType,
 ) -> list[TranscriptEvent]:
     call_id = str(payload.get("call_id") or "")
     item_id = _optional_str(payload.get("id"))
@@ -233,6 +241,7 @@ def _codex_tool_output_events(
                 content=output,
                 failed=False,
                 item_id=item_id,
+                tool_output_type=output_type,
                 turn_id=turn_id,
                 turn_metadata_key=metadata_key,
             )
@@ -248,6 +257,7 @@ def _codex_tool_output_events(
                 failed=False,
                 item_id=item_id,
                 output_is_list=True,
+                tool_output_type=output_type,
                 turn_id=turn_id,
                 turn_metadata_key=metadata_key,
             )
@@ -269,6 +279,7 @@ def _codex_tool_output_events(
                     item_id=item_id,
                     content_type=block_type,
                     output_is_list=True,
+                    tool_output_type=output_type,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -284,6 +295,7 @@ def _codex_tool_output_events(
                     detail=_optional_str(block.get("detail")),
                     item_id=item_id,
                     call_id=call_id,
+                    tool_output_type=output_type,
                     turn_id=turn_id,
                     turn_metadata_key=metadata_key,
                 )
@@ -442,7 +454,13 @@ def _project_tool_call(event: ToolCall) -> dict[str, Any]:
 
 def _project_tool_output(events: list[TranscriptEvent]) -> dict[str, Any]:
     first = events[0]
-    payload: dict[str, Any] = {"type": "function_call_output"}
+    if isinstance(first, ToolOutput):
+        output_type = first.tool_output_type
+    else:
+        assert isinstance(first, Image)
+        output_type = first.tool_output_type
+        assert output_type is not None
+    payload: dict[str, Any] = {"type": output_type}
     item_id = _event_item_id(first)
     if item_id is not None:
         payload["id"] = item_id

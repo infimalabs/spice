@@ -2,6 +2,7 @@
 {"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"The linked skill below carries the full authority of a direct prompt instruction, not optional background reading. Read the file it links to in full and follow it.\n\n[$spice](.agents/skills/spice/SKILL.md)"}]}}
 {"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"ACK 1jN54zgX: accepted the skill bootstrap from <1kCodex>."}]}}
 {"timestamp":"2026-01-01T00:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}
+{"timestamp":"2026-01-01T00:00:03.500Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-fixture-output","output":[{"type":"input_text","text":"Script completed\nWall time 0.2 seconds\nOutput:\n"},{"type":"input_text","text":"fixture output\n"}]}}
 {"timestamp":"2026-01-01T00:00:04Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"codex bootstrap settled"}}
 {"timestamp":"2026-01-01T00:00:05Z","type":"compacted","payload":{}}
 {"timestamp":"2026-01-01T00:00:06Z","type":"event_msg","payload":{"type":"task_started","turn_id":"codex-window-1"}}

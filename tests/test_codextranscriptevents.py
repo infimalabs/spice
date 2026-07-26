@@ -75,6 +75,21 @@ CANONICAL_LINES = {
             "internal_chat_message_metadata_passthrough": METADATA,
         }
     ),
+    "custom_tool_call_output": _response_item(
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "call-2",
+            "output": [
+                {"type": "input_text", "text": "patch applied"},
+                {
+                    "type": "input_image",
+                    "image_url": IMAGE_URL,
+                    "detail": "original",
+                },
+            ],
+            "internal_chat_message_metadata_passthrough": METADATA,
+        }
+    ),
     "custom_tool_call": _response_item(
         {
             "type": "custom_tool_call",
@@ -133,6 +148,7 @@ def test_dispatched_families_decode_to_their_semantic_event_kinds() -> None:
         "message": [AssistantText, AssistantText],
         "function_call": [ToolCall],
         "function_call_output": [ToolOutput, Image],
+        "custom_tool_call_output": [ToolOutput, Image],
         "custom_tool_call": [ToolCall],
         "reasoning": [Reasoning, Reasoning],
         "web_search_call": [WebSearch],
@@ -177,6 +193,62 @@ def test_plain_string_tool_output_projects_exactly() -> None:
     events = codex_line_events(raw)
     assert [type(event) for event in events] == [ToolOutput]
     assert events[0].output_is_list is False
+    assert project_codex_events(events, TIMESTAMP) == raw
+
+
+def test_real_shape_custom_tool_output_projects_without_driver_identity() -> None:
+    raw = _response_item(
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "call_YZZKsKummmhWMWobmf9paEje",
+            "output": [
+                {
+                    "type": "input_text",
+                    "text": "Script completed\nWall time 1.2 seconds\nOutput:\n",
+                },
+                {"type": "input_text", "text": "spice/agent/lifecycle.py\n"},
+            ],
+            "internal_chat_message_metadata_passthrough": METADATA,
+        }
+    )
+    events = codex_line_events(raw, source=SOURCE, line=LINE)
+    assert [type(event) for event in events] == [ToolOutput, ToolOutput]
+    outputs = [event for event in events if isinstance(event, ToolOutput)]
+    assert [event.content for event in outputs] == [
+        "Script completed\nWall time 1.2 seconds\nOutput:\n",
+        "spice/agent/lifecycle.py\n",
+    ]
+    assert all(event.tool_output_type == "custom_tool_call_output" for event in outputs)
+    assert project_codex_events(events, TIMESTAMP) == raw
+
+
+def test_custom_tool_output_images_carry_the_projection_discriminator() -> None:
+    events = codex_line_events(CANONICAL_LINES["custom_tool_call_output"])
+    assert [type(event) for event in events] == [ToolOutput, Image]
+    output, image = events
+    assert isinstance(output, ToolOutput)
+    assert isinstance(image, Image)
+    assert output.tool_output_type == "custom_tool_call_output"
+    assert image.tool_output_type == "custom_tool_call_output"
+    assert (
+        project_codex_events(events, TIMESTAMP)
+        == CANONICAL_LINES["custom_tool_call_output"]
+    )
+
+
+def test_image_only_custom_tool_output_projects_its_exact_family() -> None:
+    raw = _response_item(
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "call-image",
+            "output": [{"type": "input_image", "image_url": IMAGE_URL}],
+        }
+    )
+    events = codex_line_events(raw)
+    assert [type(event) for event in events] == [Image]
+    image = events[0]
+    assert isinstance(image, Image)
+    assert image.tool_output_type == "custom_tool_call_output"
     assert project_codex_events(events, TIMESTAMP) == raw
 
 
