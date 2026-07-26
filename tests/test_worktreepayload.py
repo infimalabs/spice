@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.errors import SpiceError
 from spice.serve import lifecycle, taskboard
 from spice.serve import messages as message_reader
 from spice.serve.messagepresentation import AssistantMessage
@@ -292,6 +293,33 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     ]
 
 
+@pytest.mark.parametrize(
+    "pre_epoch",
+    (
+        "0001-01-01T00:00:00Z",
+        "1900-01-01T00:00:00+00:00",
+        "1969-12-31T23:59:59Z",
+    ),
+)
+def test_work_trees_payload_with_pre_epoch_activity_keeps_the_lane(
+    tmp_path, monkeypatch, pre_epoch
+):
+    target = _Target(id="wt", repo_root=tmp_path)
+    _stub_running_inventory_dependencies(monkeypatch, target=target)
+    monkeypatch.setattr(
+        message,
+        "target_activity_items",
+        lambda *_args, **_kwargs: ([_message(pre_epoch)], None, None),
+    )
+
+    payload = inventory.work_trees_payload(_InventoryState(target))
+
+    activity = payload["workTrees"][0]["chrome"]["activity"]
+    assert activity["order"]["epoch"] == ""
+    assert activity["value"]["lastAssistantAt"] == pre_epoch
+    assert payload.get("targetsDiscoveryErrors", []) == []
+
+
 class _MultiInventoryState(_State):
     def __init__(self, targets: list[_Target]) -> None:
         super().__init__()
@@ -439,6 +467,40 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
     assert len(payload["workTrees"]) == 2
     assert config_calls == [targets[0].repo_root, targets[1].repo_root]
     assert voice_calls == [targets[0].repo_root, targets[1].repo_root]
+
+
+def test_work_trees_payload_isolates_one_target_projection_failure(
+    tmp_path, monkeypatch
+):
+    targets = [
+        _Target(id="healthy-a", repo_root=tmp_path / "a"),
+        _Target(id="broken", repo_root=tmp_path / "broken"),
+        _Target(id="healthy-b", repo_root=tmp_path / "b"),
+    ]
+    _stub_running_inventory_dependencies(monkeypatch, target=targets[0])
+    project_chrome = inventory.lane_chrome_payload
+    projected: list[str] = []
+
+    def project_or_fail(**kwargs):
+        target_id = kwargs["target_id"]
+        projected.append(target_id)
+        if target_id == "broken":
+            raise SpiceError("lane chrome generation is corrupt")
+        return project_chrome(**kwargs)
+
+    monkeypatch.setattr(inventory, "lane_chrome_payload", project_or_fail)
+
+    payload = inventory.work_trees_payload(_MultiInventoryState(targets))
+
+    assert projected == [target.id for target in targets]
+    assert [tree["id"] for tree in payload["workTrees"]] == [
+        "healthy-a",
+        "healthy-b",
+    ]
+    assert payload["defaultTargetId"] == "healthy-a"
+    assert payload["targetsDiscoveryErrors"] == [
+        "could not project worktree broken: lane chrome generation is corrupt"
+    ]
 
 
 def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
