@@ -90,6 +90,7 @@ def _codex_event_message_events(
     stamper: LineStamper, payload: dict[str, Any]
 ) -> list[TranscriptEvent]:
     payload_type = payload.get("type")
+    turn_id = _optional_str(payload.get("turn_id"))
     if payload_type == "token_count":
         # AgentDriver attaches the dialect-decoded ContextUsage fact.
         return []
@@ -98,7 +99,7 @@ def _codex_event_message_events(
             TurnBoundary(
                 at=stamper.stamp(),
                 kind="started",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
             )
         ]
     if payload_type == "task_complete":
@@ -106,22 +107,18 @@ def _codex_event_message_events(
             TurnBoundary(
                 at=stamper.stamp(),
                 kind="completed",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
+                last_assistant_message=_optional_str(payload.get("last_agent_message")),
             )
         ]
-    if payload_type == "user_message":
-        message = payload.get("message")
-        if isinstance(message, str):
-            return [
-                UserMessage(
-                    at=stamper.stamp(),
-                    text=message,
-                    prompt_id=None,
-                    phase="prompt",
-                    turn_id=_optional_str(payload.get("turn_id")),
-                )
-            ]
-        return []
+    if payload_type == "error":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="error",
+                turn_id=turn_id,
+            )
+        ]
     if payload_type == "exec_command_end":
         return [
             CommandExecution(
@@ -130,9 +127,22 @@ def _codex_event_message_events(
                 cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
                 exit_code=_command_int(payload.get("exit_code")),
                 status=_optional_str(payload.get("status")) or "completed",
-                turn_id=_optional_str(payload.get("turn_id")),
+                turn_id=turn_id,
             )
         ]
+    if payload_type == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str) and message:
+            return [
+                UserMessage(
+                    at=stamper.stamp(),
+                    text=message,
+                    prompt_id=None,
+                    phase="prompt",
+                    turn_id=turn_id,
+                    transcript_kind="event_msg",
+                )
+            ]
     return []
 
 

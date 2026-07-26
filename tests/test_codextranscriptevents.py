@@ -397,6 +397,45 @@ def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
     assert CODEX_DRIVER.normalize_transcript_line(raw) is raw
 
 
+@pytest.mark.parametrize(
+    ("payload", "event_type"),
+    [
+        ({"type": "task_started", "turn_id": TURN_ID}, TurnBoundary),
+        (
+            {
+                "type": "task_complete",
+                "turn_id": TURN_ID,
+                "last_agent_message": "settled",
+            },
+            TurnBoundary,
+        ),
+        ({"type": "error", "turn_id": TURN_ID}, TurnBoundary),
+        (
+            {
+                "type": "exec_command_end",
+                "turn_id": TURN_ID,
+                "cwd": "/repo",
+                "command": ["spice", "task", "status"],
+                "exit_code": "0",
+                "status": "completed",
+            },
+            CommandExecution,
+        ),
+    ],
+)
+def test_codex_event_messages_cross_as_typed_session_facts(
+    payload: dict, event_type: type
+) -> None:
+    raw = {"timestamp": TIMESTAMP, "type": "event_msg", "payload": payload}
+
+    events = codex_line_events(raw, source=SOURCE, line=LINE)
+
+    assert [type(event) for event in events] == [event_type]
+    assert events[0].at.source == SOURCE
+    assert events[0].at.line == LINE
+    assert events[0].at.timestamp == TIMESTAMP
+
+
 def test_unrecognized_response_item_survives_as_unknown_and_identity() -> None:
     raw = _response_item({"type": "future_provider_item", "fact": 7})
     events = codex_line_events(raw)
