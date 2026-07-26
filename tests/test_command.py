@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 
@@ -122,9 +123,9 @@ def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
     (tmp_path / ".git" / "info" / "exclude").write_text(".spice/\n", encoding="utf-8")
     claim_phase = ["todo"]
     claim_at = (
-        wrap.datetime.datetime.fromtimestamp(
+        datetime.fromtimestamp(
             COMMAND_WORKING_STATE_NOW - COMMAND_WORKING_STATE_ELAPSED_SECONDS,
-            wrap.datetime.UTC,
+            UTC,
         )
         .isoformat()
         .replace("+00:00", "Z")

@@ -332,7 +332,10 @@ def test_typed_access_modes_preserve_overlaps_and_cursor_resume(tmp_path) -> Non
         start_offset=0,
         end_offset=offsets[2],
     )
-    resumed = event_reader.read("forward", start_offset=first.end_offset)
+    resumed = event_reader.read(
+        "forward",
+        cursor=TranscriptCursor(offset=first.end_offset),
+    )
     reverse = event_reader.read(
         "reverse",
         end_offset=offsets[3],

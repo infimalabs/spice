@@ -102,6 +102,7 @@ class TranscriptEventReader:
         self,
         mode: Literal["forward", "bounded", "reverse"],
         *,
+        cursor: TranscriptCursor | None = None,
         start_offset: int = 0,
         end_offset: int | None = None,
         align_partial_start: bool = False,
@@ -109,12 +110,18 @@ class TranscriptEventReader:
     ) -> TranscriptEventRead:
         """Decode one explicit access mode into ordered typed facts.
 
-        ``forward`` resumes at ``start_offset`` and runs to EOF. ``bounded``
-        covers ``start_offset`` through the required ``end_offset``. ``reverse``
-        reads the byte window ending before ``end_offset`` (or EOF).
+        ``forward`` resumes through the one cursor identity contract and runs
+        to EOF. ``bounded`` covers ``start_offset`` through the required
+        ``end_offset``. ``reverse`` reads the byte window ending before
+        ``end_offset`` (or EOF).
         """
         if mode == "forward":
-            raw_read = read_forward(self.path, start_offset=start_offset)
+            if start_offset:
+                raise ValueError("forward transcript reads resume through cursor")
+            raw_read = read_forward(
+                self.path,
+                cursor=cursor if cursor is not None else TranscriptCursor(),
+            )
         elif mode == "bounded":
             if end_offset is None:
                 raise ValueError("bounded transcript reads require end_offset")
