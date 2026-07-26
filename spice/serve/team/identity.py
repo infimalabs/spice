@@ -15,6 +15,24 @@ from spice.serve.team.models import TeamAgentIdentity
 
 @dataclass(frozen=True, slots=True)
 class AgentIdentityRecordRequest:
+    """One requested identity write, before anything about it is trusted.
+
+    Field-for-field this looks like ``TeamAgentIdentity`` and the resemblance
+    is the point: this is what a caller asks the row to become, and that is a
+    different thing from what the row is. Text here may carry surrounding
+    whitespace, the actor id may not be canonical, and the revision may be
+    negative, because none of it has been through the store yet.
+
+    ``updated_at`` is where the two records genuinely part. None means "stamp
+    this write at the time it lands", which only a request can express; the
+    stored record always holds a settled float. That is why the stored record
+    cannot stand in here, and why folding the two would erase the distinction
+    between an unset timestamp and the epoch.
+
+    ``_identity_from_record_request`` is the only crossing between the two, so
+    normalization happens once for every writer instead of at each call site.
+    """
+
     actor_id: str
     target_id: str = ""
     thread_id: str = ""
@@ -104,6 +122,16 @@ class TeamIdentityStoreMixin:
         connection: sqlite3.Connection,
         request: AgentIdentityRecordRequest,
     ) -> TeamAgentIdentity:
+        """Write the requested identity, replacing every column of the row.
+
+        The upsert sets all sixteen columns from the request, so this states
+        the whole row rather than the part of it a caller happens to care
+        about. A request built from a subset of the fields therefore erases
+        the rest instead of leaving them alone, which is silent -- the write
+        succeeds and the omitted facts are simply gone. Callers holding an
+        existing row must carry its fields forward, as
+        ``_update_agent_identity_renewal_locked`` does.
+        """
         identity = _identity_from_record_request(request)
         connection.execute(
             "INSERT INTO agent_identities (actor_id, target_id, thread_id, "

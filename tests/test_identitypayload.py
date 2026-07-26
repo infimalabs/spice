@@ -396,3 +396,28 @@ def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypat
 def test_team_identity_payload_rejects_missing_member_revisions():
     with pytest.raises(SpiceError, match="team revision is required"):
         identity.team_identity_payload({"teamId": "team-1"})
+
+
+def test_identity_write_normalizes_every_writer_through_one_seam(tmp_path):
+    # The write record and the stored record carry the same fifteen fields, so
+    # the only thing separating a request from a row is the crossing between
+    # them. Hand the public writer values no stored row is allowed to hold --
+    # padded text, a negative revision, an unstamped time -- and read the row
+    # back settled, which is observable only if the crossing ran.
+    store = ServeTeamStore(tmp_path / "seam.sqlite")
+
+    stored = store.record_agent_identity(
+        actor_id="thread:thread-seam",
+        target_id="  worktree-seam  ",
+        thread_id="  thread-seam  ",
+        actual_driver=" claude ",
+        renewal_revision=-5,
+    )
+    read_back = store.agent_identity_for_actor("thread:thread-seam")
+
+    assert stored.target_id == "worktree-seam"
+    assert stored.thread_id == "thread-seam"
+    assert stored.actual_driver == "claude"
+    assert stored.renewal_revision == 0
+    assert stored.updated_at > 0.0
+    assert read_back == stored
