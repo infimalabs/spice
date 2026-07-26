@@ -299,6 +299,90 @@ class _MultiInventoryState(_State):
         return []
 
 
+def _task_facet_board(revision: str, label: str) -> taskboard.OpenTaskBoardProjection:
+    rows = (
+        {
+            "id": 1,
+            "uuid": f"card-{label}",
+            "entry": "20260610T120001Z",
+            "description": f"{label.title()} task card",
+            "project": f"serve.{label}",
+            "origin_thread": "agenta",
+            "creation_surface": "cli",
+            "status": "pending",
+        },
+        {
+            "uuid": f"claim-{label}",
+            "description": f"{label.title()} active claim",
+            "project": f"serve.{label}",
+            "claim_by": "agenta",
+            "claim_at": "2026-06-10T12:00:02Z",
+            "start": "20260610T120002Z",
+            "phase": "todo",
+            "status": "pending",
+        },
+        {
+            "uuid": f"review-{label}",
+            "status": "completed",
+            "review_author": "agent-a",
+            "review_by": "peer-a",
+            "review_finding": "changes",
+            "review_at": "2026-06-10T12:00:03Z",
+        },
+        {
+            "uuid": f"followup-{label}",
+            "description": f"{label.title()} review follow-up",
+            "project": f"serve.{label}",
+            "status": "pending",
+            "depends": [f"review-{label}"],
+        },
+    )
+    return taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision=revision,
+            rows=rows,
+        )
+    )
+
+
+def _stub_running_inventory_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    target: _Target,
+    thread_id: str = "agent-a",
+) -> None:
+    status = _Status(
+        running=True,
+        started_at="",
+        process_status="running",
+        thread_id=thread_id,
+    )
+    monkeypatch.setattr(
+        inventory, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        lifecycle, "ensure_agent_for_pending_inbox", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        lifecycle, "ensure_agent_for_available_work", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        inventory,
+        "resolve_thread_id_for_target",
+        lambda _state, candidate: thread_id if candidate == target else "",
+    )
+    monkeypatch.setattr(inventory, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(identity, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: _message_read(),
+    )
+
+
 def test_work_trees_payload_resolves_agent_config_once_per_target(
     tmp_path, monkeypatch
 ):
@@ -350,6 +434,129 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
     assert len(payload["workTrees"]) == 2
     assert config_calls == [targets[0].repo_root, targets[1].repo_root]
     assert voice_calls == [targets[0].repo_root, targets[1].repo_root]
+
+
+def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
+    tmp_path, monkeypatch
+):
+    target = _Target(id="wt", repo_root=tmp_path)
+    before = _task_facet_board("revision-before", "before")
+    after = _task_facet_board("revision-after", "after")
+    selected: list[str] = []
+    fallback_calls: list[str] = []
+
+    def select_board() -> taskboard.OpenTaskBoardProjection:
+        selected.append(before.revision)
+        return before
+
+    def later_board(surface: str) -> taskboard.OpenTaskBoardProjection:
+        fallback_calls.append(surface)
+        return after
+
+    monkeypatch.setattr(inventory, "open_task_board_projection", select_board)
+    monkeypatch.setattr(
+        lane,
+        "open_task_board_projection",
+        lambda: later_board("lane"),
+    )
+    monkeypatch.setattr(
+        message,
+        "open_task_board_projection",
+        lambda: later_board("message"),
+    )
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail(
+            "one inventory observation must serve every task facet"
+        ),
+    )
+    _stub_running_inventory_dependencies(monkeypatch, target=target)
+
+    payload = inventory.work_trees_payload(_InventoryState(target))
+
+    work_tree = payload["workTrees"][0]
+    task_filter = payload["taskFilterInventory"]
+    pressure = work_tree["laneInfo"]["reviewPressure"]
+    assert selected == ["revision-before"]
+    assert fallback_calls == []
+    assert task_filter["revision"] == "revision-before"
+    assert [item["name"] for item in task_filter["filters"]] == ["serve.before"]
+    assert work_tree["taskFilterInventory"] == task_filter
+    assert work_tree["statusLine"]["claimedTask"] == {
+        "handle": "claim-before",
+        "phase": "todo",
+        "title": "Before active claim",
+    }
+    assert work_tree["statusLine"]["latestActivityKind"] == "task_card"
+    assert work_tree["statusLine"]["preview"] == (
+        "Task capture: Before task card (serve.before)"
+    )
+    assert pressure["count"] == 1
+    assert pressure["openFollowupCount"] == 1
+    assert pressure["items"][0]["reviewedTask"] == "review-before"
+
+
+def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure(
+    tmp_path, monkeypatch
+):
+    target = _Target(id="wt", repo_root=tmp_path)
+    failed = taskboard.open_task_board_projection(
+        taskboard.TaskBoardObservation(
+            backend_identity="test",
+            revision="stable-revision",
+            rows=(),
+            error="backend unavailable",
+        )
+    )
+    recovered = _task_facet_board("stable-revision", "recovered")
+    observations = iter((failed, recovered))
+    monkeypatch.setattr(
+        inventory,
+        "open_task_board_projection",
+        lambda: next(observations),
+    )
+    monkeypatch.setattr(
+        lane,
+        "open_task_board_projection",
+        lambda: pytest.fail("inventory must pass its selected task board to lanes"),
+    )
+    monkeypatch.setattr(
+        message,
+        "open_task_board_projection",
+        lambda: pytest.fail("inventory must pass its selected task board to messages"),
+    )
+    monkeypatch.setattr(
+        taskboard.tw,
+        "export",
+        lambda *_args, **_kwargs: pytest.fail(
+            "projection recovery must not perform a per-view export"
+        ),
+    )
+    _stub_running_inventory_dependencies(monkeypatch, target=target)
+    state = _InventoryState(target)
+
+    degraded = inventory.work_trees_payload(state)
+    healthy = inventory.work_trees_payload(state)
+
+    degraded_tree = degraded["workTrees"][0]
+    healthy_tree = healthy["workTrees"][0]
+    assert degraded["taskFilterInventory"]["revision"] == "stable-revision"
+    assert degraded["taskFilterInventory"]["filters"] == []
+    assert degraded_tree["statusLine"]["claimedTask"] == {}
+    assert degraded_tree["statusLine"]["latestActivityKind"] == ""
+    assert degraded_tree["laneInfo"]["reviewPressure"] == {
+        "count": 0,
+        "openFollowupCount": 0,
+        "items": [],
+    }
+    assert healthy["taskFilterInventory"]["revision"] == "stable-revision"
+    assert [item["name"] for item in healthy["taskFilterInventory"]["filters"]] == [
+        "serve.recovered"
+    ]
+    assert healthy_tree["statusLine"]["claimedTask"]["handle"] == "claim-recovered"
+    assert healthy_tree["statusLine"]["latestActivityKind"] == "task_card"
+    assert healthy_tree["laneInfo"]["reviewPressure"]["count"] == 1
 
 
 def test_work_trees_payload_indexes_shared_review_rows_per_lane(tmp_path, monkeypatch):
