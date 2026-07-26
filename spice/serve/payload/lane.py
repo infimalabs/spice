@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from spice.agent.lifecycle import agent_binding_error, agent_status
+from spice.agent.lifecycle import AgentStatus, agent_binding_error, agent_status
 from spice.serve import messages as message_reader
 from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload.chrome import (
@@ -82,7 +82,7 @@ def _claimed_task_payload(
 
 def _status_line_payload_from_status(
     *,
-    status: Any,
+    status: AgentStatus,
     thread_id: str,
     binding_error: str,
     items: list[AssistantMessage],
@@ -481,7 +481,7 @@ def lane_metrics_payload(
     *,
     thread_id: str,
     items: list[AssistantMessage],
-    status: Any,
+    status: AgentStatus,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
     """Lane counters from durable per-agent metrics plus live process uptime."""
@@ -504,7 +504,7 @@ def lane_metrics_payload(
     }
 
 
-def agent_uptime_seconds(status: Any, items: list[AssistantMessage]) -> int:
+def agent_uptime_seconds(status: AgentStatus, items: list[AssistantMessage]) -> int:
     if not status.running or not status.started_at:
         return 0
     started = parse_timestamp(status.started_at)

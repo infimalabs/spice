@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from spice.agent.lifecycle import AgentStatus
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.serve import agentapi, app, lifecycle, workroutes
 from spice.serve.worktree import inventory
@@ -29,6 +30,31 @@ from spice.worktrees import WorktreeRecord
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_A = f"thread:{THREAD_A}"
+
+
+def _status(repo_root: Path, *, thread_id: str = "", running: bool = False):
+    """The real status type, so a target reader meets production's shape.
+
+    ``running`` is derived from ``process_status`` in production, so it stays an
+    argument here only to name what the caller is staging.
+    """
+    return AgentStatus(
+        repo_root=repo_root,
+        state_path=repo_root / "state.json",
+        process_status="running" if running else "idle",
+        pid=None,
+        process_group_id=None,
+        thread_id=thread_id,
+        driver="",
+        model="",
+        reasoning_effort="",
+        started_at="",
+        ready_at="",
+        startup_failure="",
+        log_path=None,
+        prompt_skill_path=None,
+        command=(),
+    )
 
 
 @pytest.mark.parametrize(
@@ -238,19 +264,17 @@ def test_automatic_first_start_converges_identity_and_membership_once(
     created = state.team_store.create_team(members=[f"target:{target.id}"])
     _record_target_identity(state, target)
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
-    status = SimpleNamespace(
-        running=False,
-        thread_id="",
-        process_status="idle",
-        started_at="",
-    )
+    # The status is frozen, as production's is, so the start this test drives
+    # rebinds the cell every reader reads rather than mutating one in place.
+    status = _status(repo)
     for module in (agentapi, identity, lane, message, inventory, workroutes):
         monkeypatch.setattr(module, "agent_status", lambda _repo: status)
     ensure_calls: list[str] = []
 
     def ensure_pending(_target, **_kwargs):
+        nonlocal status
         ensure_calls.append(target.id)
-        status.thread_id = THREAD_A
+        status = _status(repo, thread_id=THREAD_A)
         return {"ok": True, "trigger": "pending-inbox", "threadId": THREAD_A}
 
     monkeypatch.setattr(
@@ -656,24 +680,16 @@ def _patch_payload_dependencies(
     running: bool,
     ensure_calls: list[dict[str, object]] | None = None,
 ) -> None:
-    status = SimpleNamespace(
-        running=running,
-        thread_id=thread_id,
-        process_status="running" if running else "idle",
-        started_at="",
-    )
-
     def fake_ensure(target, **kwargs):
         if ensure_calls is not None:
             ensure_calls.append({"target": target, **kwargs})
         return None
 
-    monkeypatch.setattr(identity, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(lane, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(message, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(inventory, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(workroutes, "agent_status", lambda _repo: status)
+    def status(repo: Path) -> AgentStatus:
+        return _status(Path(repo), thread_id=thread_id, running=running)
+
+    for module in (identity, lane, message, inventory, agentapi, workroutes):
+        monkeypatch.setattr(module, "agent_status", status)
     monkeypatch.setattr(lane, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(message, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")

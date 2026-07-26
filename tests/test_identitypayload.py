@@ -77,17 +77,6 @@ def _message_read(
 
 
 @dataclass(frozen=True)
-class _Status:
-    running: bool
-    started_at: str
-    process_status: str = "idle"
-    thread_id: str = ""
-    model: str = ""
-    reasoning_effort: str = ""
-    state_path: Path | None = None
-
-
-@dataclass(frozen=True)
 class _Target:
     id: str
     repo_root: Path | None = None

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.agent.lifecycle import AgentStatus
 from spice.errors import SpiceError
 from spice.serve import lifecycle, taskboard
 from spice.serve import messages as message_reader
@@ -116,15 +117,39 @@ def _message_read(
     )
 
 
-@dataclass(frozen=True)
-class _Status:
-    running: bool
-    started_at: str
-    process_status: str = "idle"
-    thread_id: str = ""
-    model: str = ""
-    reasoning_effort: str = ""
-    state_path: Path | None = None
+def _status(
+    *,
+    process_status: str = "idle",
+    started_at: str = "",
+    thread_id: str = "",
+    model: str = "",
+    reasoning_effort: str = "",
+    repo_root: Path | None = None,
+) -> AgentStatus:
+    """The real status type, so an inventory reader meets production's shape.
+
+    ``running`` is derived from ``process_status`` here exactly as it is in
+    production, and every remaining field is present because the dataclass
+    requires it.
+    """
+    root = repo_root if repo_root is not None else Path.cwd()
+    return AgentStatus(
+        repo_root=root,
+        state_path=root / "state.json",
+        process_status=process_status,
+        pid=None,
+        process_group_id=None,
+        thread_id=thread_id,
+        driver="",
+        model=model,
+        reasoning_effort=reasoning_effort,
+        started_at=started_at,
+        ready_at="",
+        startup_failure="",
+        log_path=None,
+        prompt_skill_path=None,
+        command=(),
+    )
 
 
 @dataclass(frozen=True)
@@ -248,8 +273,8 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     monkeypatch.setattr(
         inventory,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
+        lambda repo: _status(
+            repo_root=repo,
             started_at="",
             process_status="running",
             thread_id="agent-a",
@@ -258,8 +283,8 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     monkeypatch.setattr(
         identity,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
+        lambda repo: _status(
+            repo_root=repo,
             started_at="",
             process_status="running",
             thread_id="agent-a",
@@ -381,8 +406,7 @@ def _stub_running_inventory_dependencies(
     target: _Target,
     thread_id: str = "agent-a",
 ) -> None:
-    status = _Status(
-        running=True,
+    status = _status(
         started_at="",
         process_status="running",
         thread_id=thread_id,
@@ -435,7 +459,7 @@ def test_work_trees_payload_resolves_agent_config_once_per_target(
         voice_calls.append(repo_root)
         return "Ava (Premium)"
 
-    idle = _Status(running=False, started_at="", process_status="idle", thread_id="")
+    idle = _status(process_status="idle", started_at="", thread_id="")
     monkeypatch.setattr(inventory, "effective_agent_config", counting_config)
     monkeypatch.setattr(identity, "effective_agent_config", counting_config)
     monkeypatch.setattr(identity, "configured_say_voice", counting_voice)
@@ -649,9 +673,9 @@ def test_work_trees_payload_indexes_shared_review_rows_per_lane(tmp_path, monkey
     ]
     threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
 
-    def running_status(repo_root: Path) -> _Status:
-        return _Status(
-            running=True,
+    def running_status(repo_root: Path) -> AgentStatus:
+        return _status(
+            repo_root=repo_root,
             started_at="",
             process_status="running",
             thread_id=threads[repo_root],
@@ -734,9 +758,9 @@ def test_work_trees_payload_projects_active_claims_without_an_export(
     ]
     threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
 
-    def running_status(repo_root: Path) -> _Status:
-        return _Status(
-            running=True,
+    def running_status(repo_root: Path) -> AgentStatus:
+        return _status(
+            repo_root=repo_root,
             started_at="",
             process_status="running",
             thread_id=threads[repo_root],
@@ -815,9 +839,9 @@ def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
     ]
     threads = {targets[0].repo_root: "agent-a", targets[1].repo_root: "agent-b"}
 
-    def running_status(repo_root: Path) -> _Status:
-        return _Status(
-            running=True,
+    def running_status(repo_root: Path) -> AgentStatus:
+        return _status(
+            repo_root=repo_root,
             started_at="",
             process_status="running",
             thread_id=threads[repo_root],
@@ -909,8 +933,7 @@ def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
 def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monkeypatch):
     thread_id = "019f6eddab8c7ab2870af6b81dfc5b7f"
     target = _Target(id="wt", repo_root=tmp_path)
-    status = _Status(
-        running=True,
+    status = _status(
         started_at="",
         process_status="running",
         thread_id=thread_id,

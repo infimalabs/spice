@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spice.agent.lifecycle import agent_binding_error, agent_status
+from spice.agent.lifecycle import AgentStatus, agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
 from spice.serve.lifecycle import project_lifecycle
 from spice.serve.payload.identity import (
@@ -150,7 +150,7 @@ def _work_tree_status_payloads(
     thread_id: str,
     binding_status: str,
     binding_error: str,
-    status: Any,
+    status: AgentStatus,
     desired_config: dict[str, str] | None = None,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:

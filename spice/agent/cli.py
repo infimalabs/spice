@@ -13,6 +13,11 @@ from spice.errors import SpiceError
 from spice.paths import require_repo_root
 
 if TYPE_CHECKING:
+    from spice.agent.lifecycle import (
+        AgentEnsureResult,
+        AgentOutputObservation,
+        AgentStatus,
+    )
     from spice.agent.rtkhealth import RtkHealth
 
 
@@ -249,7 +254,9 @@ def _print_reply_outcomes(label, content_by_key, retired, canonical_key) -> None
         print(f"{label} {key}: {'retired' if matched else 'no pending item matched'}")
 
 
-def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
+def render_agent_status(
+    status: AgentStatus, *, output_observation: AgentOutputObservation | None = None
+) -> str:
     lines = [
         f"worktree={status.repo_root}",
         f"status={status.process_status}",
@@ -259,11 +266,11 @@ def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
         f"model={status.model or '-'} effort={status.reasoning_effort or '-'}",
         f"started_at={status.started_at or '-'}",
     ]
-    if getattr(status, "ready_at", ""):
+    if status.ready_at:
         lines.append(f"ready_at={status.ready_at}")
-    if getattr(status, "startup_failure", ""):
+    if status.startup_failure:
         lines.append(f"startup_failure={status.startup_failure}")
-    if getattr(status, "claim_carry", ""):
+    if status.claim_carry:
         lines.append(status.claim_carry)
     if output_observation is not None:
         lines.append(f"output_status={output_observation.status}")
@@ -282,7 +289,7 @@ def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
     return "\n".join(lines)
 
 
-def render_ensure_result(result: Any) -> str:
+def render_ensure_result(result: AgentEnsureResult) -> str:
     lines = [
         f"action={result.action}",
         f"status={result.status.process_status}",

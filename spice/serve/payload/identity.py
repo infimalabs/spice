@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from spice.agent.identity import canonical_thread_id
-from spice.agent.lifecycle import agent_status
+from spice.agent.lifecycle import AgentStatus, agent_status
 from spice.config.values import configured_say_voice, effective_agent_config
 from spice.errors import SpiceError
 from spice.serve.team.store import ServeTeamStore, renewal_intent_payload
@@ -219,7 +219,7 @@ def serve_agent_identity_payload(
         if desired_config is not None
         else effective_agent_config(target.repo_root)
     )
-    bound_thread = canonical_thread_id(thread_id or getattr(status, "thread_id", ""))
+    bound_thread = canonical_thread_id(thread_id or status.thread_id)
     actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
     actual_launch = _actual_launch_identity(status)
     identity = {
@@ -545,11 +545,10 @@ def _target_actor_previous_names(
     return names
 
 
-def _actual_launch_identity(status: Any) -> dict[str, str]:
-    model = str(getattr(status, "model", "") or "")
-    effort = str(getattr(status, "reasoning_effort", "") or "")
-    started_at = str(getattr(status, "started_at", "") or "")
-    has_actual = bool(getattr(status, "thread_id", "") or model or effort or started_at)
+def _actual_launch_identity(status: AgentStatus) -> dict[str, str]:
+    model = status.model
+    effort = status.reasoning_effort
+    has_actual = bool(status.thread_id or model or effort or status.started_at)
     return {
         "model": model,
         "effort": effort,
@@ -557,12 +556,12 @@ def _actual_launch_identity(status: Any) -> dict[str, str]:
     }
 
 
-def _actual_driver_identity(status: Any, actual_launch: dict[str, str]) -> str:
+def _actual_driver_identity(status: AgentStatus, actual_launch: dict[str, str]) -> str:
     # The driver is recorded in the agent state record (lifecycle state is no
     # longer namespaced by driver directory).
     if not actual_launch.get("source"):
         return ""
-    return getattr(status, "driver", "") or ""
+    return status.driver
 
 
 def _serve_renewal_identity(

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import watchdog
+from spice.agent.lifecycle import AgentStatus
 from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
 from spice.serve import taskboard
@@ -106,15 +107,39 @@ def _message_read(
     )
 
 
-@dataclass(frozen=True)
-class _Status:
-    running: bool
-    started_at: str
-    process_status: str = "idle"
-    thread_id: str = ""
-    model: str = ""
-    reasoning_effort: str = ""
-    state_path: Path | None = None
+def _status(
+    *,
+    process_status: str = "idle",
+    started_at: str = "",
+    thread_id: str = "",
+    model: str = "",
+    reasoning_effort: str = "",
+    repo_root: Path | None = None,
+) -> AgentStatus:
+    """The real status type, so a lane reader meets the shape production builds.
+
+    ``running`` is derived from ``process_status`` here exactly as it is in
+    production, and every remaining field is present because the dataclass
+    requires it.
+    """
+    root = repo_root if repo_root is not None else Path.cwd()
+    return AgentStatus(
+        repo_root=root,
+        state_path=root / "state.json",
+        process_status=process_status,
+        pid=None,
+        process_group_id=None,
+        thread_id=thread_id,
+        driver="",
+        model=model,
+        reasoning_effort=reasoning_effort,
+        started_at=started_at,
+        ready_at="",
+        startup_failure="",
+        log_path=None,
+        prompt_skill_path=None,
+        command=(),
+    )
 
 
 @dataclass(frozen=True)
@@ -193,13 +218,13 @@ def _identity_status(
 def test_uptime_measures_started_at_to_latest_message():
     started = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
     latest = started + timedelta(minutes=5)
-    status = _Status(running=True, started_at=_stamp(started))
+    status = _status(process_status="running", started_at=_stamp(started))
     uptime = agent_uptime_seconds(status, [_message(_stamp(latest))])
     assert uptime == FIVE_MINUTES_SECONDS
 
 
 def test_uptime_reads_zero_while_agent_is_off():
-    status = _Status(running=False, started_at="2026-06-10T12:00:00.000000Z")
+    status = _status(process_status="idle", started_at="2026-06-10T12:00:00.000000Z")
     assert agent_uptime_seconds(status, []) == 0
 
 
@@ -212,7 +237,7 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+        lambda repo: _status(repo_root=repo, process_status="running", started_at=""),
     )
     line = lane.status_line_payload(_State(), target, items=items, error=None)
 
@@ -230,10 +255,10 @@ def test_status_line_derives_visual_status_from_structural_activity_kind(
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda repo: _status(
+            repo_root=repo,
             process_status="running",
+            started_at="",
             thread_id="thread",
         ),
     )
@@ -268,10 +293,10 @@ def test_status_line_renders_claimed_task_handle_and_title(tmp_path, monkeypatch
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
+        lambda repo: _status(
+            repo_root=repo,
             process_status="running",
+            started_at="",
             thread_id="019f6edd-ab8c-7ab2-870a-f6b81dfc5b7f",
         ),
     )
@@ -337,7 +362,7 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+        lambda repo: _status(repo_root=repo, process_status="running", started_at=""),
     )
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(
@@ -391,7 +416,7 @@ def test_tool_output_preview_uses_matching_call_context(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+        lambda repo: _status(repo_root=repo, process_status="running", started_at=""),
     )
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(
@@ -469,7 +494,7 @@ def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monke
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+        lambda repo: _status(repo_root=repo, process_status="running", started_at=""),
     )
     items = message_reader.read_assistant_messages(transcript, limit=5)
     item_payloads = [item.to_payload() for item in items]
@@ -695,7 +720,7 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
     monkeypatch.setattr(
         lane,
         "agent_status",
-        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+        lambda repo: _status(repo_root=repo, process_status="running", started_at=""),
     )
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = lane.status_line_payload(_State(), target, items=items, error=None)
@@ -732,7 +757,7 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
         _message(_stamp(latest), kind="presence:web_search_call"),
         _message(_stamp(latest), kind="presence:reasoning"),
     ]
-    status = _Status(running=False, started_at="")
+    status = _status(process_status="idle", started_at="")
     metrics = lane_metrics_payload(
         _State(team_store=store),
         _Target(id="wt"),
