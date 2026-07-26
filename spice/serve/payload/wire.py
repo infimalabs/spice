@@ -86,6 +86,8 @@ BROWSER_ONLY_FRAME_SCHEMAS = {
 }
 
 BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
+    "agentapi.agent_ensure_failure_payload": "AgentEnsurePayload",
+    "agentapi.agent_ensure_payload": "AgentEnsurePayload",
     "agentapi.agent_status_payload": "AgentStatusPayload",
     "httpapi.team_command_response_payload": "TeamCommandResponse",
     "httpapi.team_snapshot_response_payload": "TeamSnapshotResponse",

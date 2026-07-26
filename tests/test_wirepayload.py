@@ -118,23 +118,101 @@ LANE_CHROME_ENVELOPE_SUPERSESSIONS = {
 }
 
 
-def test_browser_payload_emitters_match_the_exact_schema_registry():
-    modules = (
-        agentapi,
-        chrome,
-        httpapi,
-        observer,
-        message,
-        metric,
-        submissions,
-        web,
-        workroutes,
-        inventory,
+# Every module that builds a payload for a browser, beside the prefix its
+# registry keys carry. The prefix is spelled out rather than derived from the
+# module path because the keys shorten some paths and not others.
+BROWSER_PAYLOAD_MODULES = (
+    ("agentapi", agentapi),
+    ("httpapi", httpapi),
+    ("observer", observer),
+    ("payload.chrome", chrome),
+    ("payload.message", message),
+    ("payload.metric", metric),
+    ("submissions", submissions),
+    ("web", web),
+    ("workroutes", workroutes),
+    ("worktree.inventory", inventory),
+)
+# Every module-level payload builder in those modules that does not validate
+# itself, beside what does validate it instead. Most nest into an emitter that
+# validates the whole envelope, which is why they need no schema of their own.
+# The three metrics responses are the exception and say so: they answer an HTTP
+# client directly with no wire object declared for them at all.
+UNVALIDATED_PAYLOAD_BUILDERS = {
+    "agentapi.agent_ensure_response_payload": (
+        "returns only the two arms its builders already validated"
+    ),
+    "agentapi.deadletter_failed_agent_ensure_payload": (
+        "adds declared excuses to an unstarted arm already validated"
+    ),
+    "agentapi.deadletter_refused_ensure_payload": (
+        "adds declared excuses to an unstarted arm already validated"
+    ),
+    "agentapi.sent_steering_payload": (
+        "nests into workroutes.work_tree_send_response_payload"
+    ),
+    "agentapi.sent_steering_response_payload": (
+        "nests into workroutes.work_tree_send_response_payload"
+    ),
+    "httpapi.task_burndown_metrics_response_payload": (
+        "UNVALIDATED: answers a browser with no wire object declared"
+    ),
+    "httpapi.task_distribution_metrics_response_payload": (
+        "UNVALIDATED: answers a browser with no wire object declared"
+    ),
+    "httpapi.team_historical_metrics_response_payload": (
+        "UNVALIDATED: answers a browser with no wire object declared"
+    ),
+    "observer._observer_lane_payload": (
+        "nests into observer.observer_messages_payload and observer.targets_payload"
+    ),
+    "observer.observer_target_payload": "nests into observer.targets_payload",
+    "payload.message.lane_metrics_summary_payload": (
+        "rides a live-bus frame, which validate_live_bus_frame checks"
+    ),
+    "payload.message.send_followup_messages_payload": (
+        "rides a live-bus frame, which validate_live_bus_frame checks"
+    ),
+    "workroutes._work_tree_route_payload": (
+        "nests into workroutes.work_tree_send_response_payload "
+        "and workroutes.work_tree_task_drain_response_payload"
+    ),
+    "workroutes._work_tree_send_response_payload": (
+        "nests into workroutes.work_tree_send_response_payload "
+        "and workroutes.work_tree_send_accepted_response_payload"
+    ),
+    "workroutes._work_tree_send_result_payload": (
+        "nests into workroutes.work_tree_send_response_payload"
+    ),
+    "worktree.inventory._work_tree_payload": (
+        "nests into worktree.inventory.work_trees_payload"
+    ),
+}
+
+
+def test_every_payload_builder_validates_itself_or_is_named_unvalidated():
+    # The registry alone cannot say what is missing from it: a builder that never
+    # calls the validator owns no key, so the call-site census below holds whether
+    # or not it exists. Naming each unregistered builder is what closes that, and
+    # it is the addition of a new one -- registered, or named here with what
+    # covers it instead -- that the reader of a diff has to answer for.
+    builders = {
+        f"{prefix}.{node.name}"
+        for prefix, module in BROWSER_PAYLOAD_MODULES
+        for node in ast.parse(inspect.getsource(module)).body
+        if isinstance(node, ast.FunctionDef) and node.name.endswith("_payload")
+    }
+
+    assert sorted(builders - set(wire.BROWSER_PAYLOAD_EMITTER_SCHEMAS)) == sorted(
+        UNVALIDATED_PAYLOAD_BUILDERS
     )
+
+
+def test_validated_call_sites_are_exactly_the_registered_emitters():
     actual = sorted(
         {
             call.args[0].value
-            for module in modules
+            for _prefix, module in BROWSER_PAYLOAD_MODULES
             for call in ast.walk(ast.parse(inspect.getsource(module)))
             if isinstance(call, ast.Call)
             and isinstance(call.func, ast.Name)
