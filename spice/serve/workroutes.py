@@ -18,13 +18,13 @@ from spice.mail.ackstate import (
 from spice.serve.payload import identity
 from spice.serve.agentapi import (
     explicit_send_decision,
-    pending_inbox_launch_lock,
     sent_steering_payload,
     sent_steering_response_payload,
 )
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.lifecycle import (
     LifecycleOutcome,
+    explicit_send_publication,
     submit_explicit_send_intent,
     submit_inbox_wake,
 )
@@ -138,7 +138,7 @@ def _work_tree_send_response_payload(
         )
     grants_explicit_launch = ensure_agent_before_reply or force_new
     try:
-        with _publication_guard(grants_explicit_launch):
+        with _publication_guard(state, target, grants_explicit_launch):
             sent = submit_steering_message(
                 text=text,
                 priority=None,
@@ -184,19 +184,22 @@ def _work_tree_send_response_payload(
 
 
 @contextmanager
-def _publication_guard(grants_explicit_launch: bool) -> Iterator[None]:
-    """Hold the launch guard exactly while a send owes itself a launch attempt.
+def _publication_guard(
+    state: Any,
+    target: WorktreeTarget,
+    grants_explicit_launch: bool,
+) -> Iterator[None]:
+    """Hold the target guard exactly while a send reserves its launch attempt.
 
     A send that reserves an explicit grant must publish and reserve as one step,
     or a background decision already inside the guard consumes the item in
     between. A send that hands its lane to the background watcher has no grant to
-    protect, and taking a server-wide lock to reply fast would be the opposite of
-    what that route is for.
+    protect. Sibling targets never enter this lane's guard.
     """
     if not grants_explicit_launch:
         yield
         return
-    with pending_inbox_launch_lock():
+    with explicit_send_publication(state, target):
         yield
 
 

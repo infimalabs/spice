@@ -14,7 +14,6 @@ from spice.serve import app as serve_app, lifecycle
 from spice.serve.lifecycle import (
     AutomaticLifecycleWake,
     ExplicitLifecycleIntent,
-    LifecycleDecisionAuthority,
     LifecycleOutcome,
     LifecycleOutcomeStatus,
     LifecycleReconciler,
@@ -171,76 +170,80 @@ def test_target_chains_serialize_while_sibling_targets_run_concurrently() -> Non
     assert calls == ["intent-a1", "intent-b1", "intent-a2"]
 
 
-def test_explicit_grant_and_automatic_decision_share_the_target_lock(
+def test_blocked_launch_does_not_delay_a_sibling_target(
     monkeypatch,
 ) -> None:
-    authority = LifecycleDecisionAuthority(SimpleNamespace())
-    target_a = SimpleNamespace(id="lane-a")
-    target_b = SimpleNamespace(id="lane-b")
-    explicit_started = threading.Event()
-    release_explicit = threading.Event()
-    same_target_started = threading.Event()
-    sibling_started = threading.Event()
-    ensure_calls: list[dict[str, object]] = []
+    targets = [
+        SimpleNamespace(id="lane-a", repo_root="/lane-a"),
+        SimpleNamespace(id="lane-b", repo_root="/lane-b"),
+    ]
+    first_started = threading.Event()
+    release_first = threading.Event()
+    sibling_finished = threading.Event()
+    store = SimpleNamespace(
+        agent_renewal_active=lambda _actor: False,
+        global_fast_mode_enabled=lambda: False,
+    )
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: targets,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "resolve_thread_id_for_target",
+        lambda _state, target: f"thread-{target.id}",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_actor_for_target",
+        lambda _store, _target, thread_id: f"thread:{thread_id}",
+    )
+    _patch_automatic_identity_projection(
+        monkeypatch,
+        lambda *_args, **_kwargs: {},
+    )
 
-    def ensure_pending(_target, **kwargs):
-        ensure_calls.append(kwargs)
-        return None
-
-    def evaluate_locked(_authority, target, *, thread_id):
-        del thread_id
-        if target.id == target_a.id:
-            same_target_started.set()
+    def ensure_pending(target, **_kwargs):
+        if target.id == "lane-a":
+            first_started.set()
+            assert release_first.wait(timeout=2.0) is True
         else:
-            sibling_started.set()
+            sibling_finished.set()
+        return {
+            "ok": True,
+            "trigger": "pending-inbox",
+            "threadId": f"thread-{target.id}",
+        }
 
     monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(lifecycle, "team_facts_for_target", lambda *_args: {})
     monkeypatch.setattr(
-        LifecycleDecisionAuthority,
-        "_evaluate_target_locked",
-        evaluate_locked,
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda _store, **kwargs: str(
+            (kwargs.get("agent_ensure") or {}).get("threadId") or ""
+        ),
     )
-
-    def hold_explicit_grant() -> None:
-        with authority.explicit_pending_inbox(target_a) as ensure:
-            ensure(fast_mode=True, force_new=True)
-            with pytest.raises(RuntimeError, match="already used"):
-                ensure()
-            explicit_started.set()
-            assert release_explicit.wait(timeout=2.0) is True
-
-    explicit = threading.Thread(target=hold_explicit_grant)
-    same_target = threading.Thread(
-        target=authority.evaluate_target,
-        args=(target_a,),
-    )
-    sibling = threading.Thread(
-        target=authority.evaluate_target,
-        args=(target_b,),
-    )
-    explicit.start()
-    assert explicit_started.wait(timeout=1.0) is True
-    same_target.start()
-    sibling.start()
-    assert sibling_started.wait(timeout=1.0) is True
-    assert same_target_started.is_set() is False
-    release_explicit.set()
-    for thread in (explicit, same_target, sibling):
-        thread.join(timeout=1.0)
-        assert thread.is_alive() is False
-    assert same_target_started.is_set() is True
-
-    assert len(ensure_calls) == 1
-    ensure_call = ensure_calls[0]
-    assert ensure_call["retry_seconds"] == 0.0
-    assert ensure_call["automatic"] is False
-    assert ensure_call["fast_mode"] is True
-    assert ensure_call["force_new"] is True
-    retry_due = ensure_call["retry_due"]
-    assert callable(retry_due)
-    assert retry_due(target_a.id, 5.0) is True
-    assert retry_due(target_a.id, 5.0) is False
-    assert retry_due(target_b.id, 5.0) is True
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    try:
+        first = reconciler.submit_automatic(
+            AutomaticLifecycleWake("lane-a", LifecycleWakeSource.INBOX, "lane-a-inbox")
+        )
+        assert first_started.wait(timeout=1.0) is True
+        sibling = reconciler.submit_automatic(
+            AutomaticLifecycleWake("lane-b", LifecycleWakeSource.INBOX, "lane-b-inbox")
+        )
+        assert sibling_finished.wait(timeout=1.0) is True
+        assert sibling.result(timeout=1.0).detail == "pending-inbox"
+        assert first.done() is False
+    finally:
+        release_first.set()
+        reconciler.cancel()
+        assert reconciler.join(timeout=1.0) is True
 
 
 def _grant_release_lane(monkeypatch, *, ensure_calls: list[dict[str, object]]):
@@ -354,6 +357,34 @@ def test_a_failed_intent_releases_only_the_grant_it_reserved(monkeypatch) -> Non
     assert later.status is LifecycleOutcomeStatus.OBSERVED
     assert later.detail == "no-action"
     assert ensure_calls == []
+
+
+def test_a_rejected_explicit_submission_returns_its_reservation(monkeypatch) -> None:
+    """Shutdown rejection cannot leave later automatic decisions declined."""
+    ensure_calls: list[dict[str, object]] = []
+    lane = _grant_release_lane(monkeypatch, ensure_calls=ensure_calls)
+    lane.discoverable.append(lane.target)
+    submit_intent = lane.state.submit_lifecycle_intent
+
+    def reject_submission(_intent):
+        raise RuntimeError("lifecycle reconciler is shutting down")
+
+    lane.state.submit_lifecycle_intent = reject_submission
+    try:
+        with pytest.raises(RuntimeError, match="shutting down"):
+            submit_explicit_send_intent(lane.state, lane.target, "1kGwRejected")
+        lane.state.submit_lifecycle_intent = submit_intent
+        later = submit_inbox_wake(
+            lane.state,
+            lane.target,
+            "inbox-after-rejected-submit",
+        ).result(timeout=1.0)
+    finally:
+        lane.reconciler.cancel()
+        assert lane.reconciler.join(timeout=1.0) is True
+
+    assert later.detail == "pending-inbox"
+    assert len(ensure_calls) == 1
 
 
 def test_duplicate_automatic_wakes_coalesce_but_explicit_intents_remain_distinct() -> (
