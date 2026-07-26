@@ -23,6 +23,7 @@ from typing import Any, BinaryIO, Literal
 from spice.agent.driver import AgentDriver
 from spice.transcript.decode import decode_parsed_line
 from spice.transcript.events import UNLOCATED_SOURCE, AssistantText, TranscriptEvent
+from spice.transcript.timestamps import normalize_timestamp
 
 REVERSE_WINDOW_BYTES = 8 * 1024 * 1024
 BinaryTranscript = BinaryIO | gzip.GzipFile
@@ -98,15 +99,17 @@ class TranscriptEventReader:
 
     path: Path
     driver: AgentDriver
-    source_actor: str | None
+    source_actor: str | None = None
 
     def read(
         self,
-        mode: Literal["forward", "bounded", "reverse"],
+        mode: Literal["forward", "bounded", "reverse", "since"],
         *,
         cursor: TranscriptCursor | None = None,
         start_offset: int = 0,
         end_offset: int | None = None,
+        start_timestamp: str | None = None,
+        context_lines_before_start: int = 0,
         align_partial_start: bool = False,
         max_bytes: int = REVERSE_WINDOW_BYTES,
     ) -> TranscriptEventRead:
@@ -115,7 +118,9 @@ class TranscriptEventReader:
         ``forward`` resumes through the one cursor identity contract and runs
         to EOF. ``bounded`` covers ``start_offset`` through the required
         ``end_offset``. ``reverse`` reads the byte window ending before
-        ``end_offset`` (or EOF).
+        ``end_offset`` (or EOF). ``since`` returns the timestamp tail plus the
+        requested number of source lines immediately before it, using the same
+        reverse-window engine without exposing raw records.
         """
         if mode == "forward":
             if start_offset:
@@ -137,6 +142,15 @@ class TranscriptEventReader:
             raw_read = read_reverse_window(
                 self.path,
                 end_offset=end_offset,
+                max_bytes=max_bytes,
+            )
+        elif mode == "since":
+            if not start_timestamp:
+                raise ValueError("since transcript reads require start_timestamp")
+            raw_read = _read_since_timestamp(
+                self.path,
+                start_timestamp=start_timestamp,
+                context_lines_before_start=context_lines_before_start,
                 max_bytes=max_bytes,
             )
         else:
@@ -356,6 +370,65 @@ def read_reverse_window(
             )
     except OSError as exc:
         return _failed_read(exc)
+
+
+def _read_since_timestamp(
+    path: Path,
+    *,
+    start_timestamp: str,
+    context_lines_before_start: int,
+    max_bytes: int,
+) -> TranscriptRead:
+    """Select a timestamp tail by paging the one internal reverse reader."""
+    threshold = normalize_timestamp(start_timestamp) or start_timestamp
+    context_limit = max(0, context_lines_before_start)
+    selected_descending: list[TranscriptLine] = []
+    context_count = 0
+    end_offset: int | None = None
+    earliest_access = 0
+    file_size = 0
+    file_identity: TranscriptFileIdentity | None = None
+    while True:
+        read = read_reverse_window(
+            path,
+            end_offset=end_offset,
+            max_bytes=max_bytes,
+        )
+        if read.error is not None:
+            return read
+        earliest_access = read.access_start_offset
+        file_size = read.file_size
+        file_identity = read.file_identity
+        stop = False
+        for record in reversed(read.records):
+            timestamp = _record_timestamp(record)
+            if timestamp and timestamp < threshold:
+                if context_count >= context_limit:
+                    stop = True
+                    break
+                context_count += 1
+            selected_descending.append(record)
+        if stop or read.access_start_offset <= 0:
+            break
+        if end_offset is not None and read.access_start_offset >= end_offset:
+            break
+        end_offset = read.access_start_offset
+    records = tuple(reversed(selected_descending))
+    start_offset = records[0].offset if records else file_size
+    return TranscriptRead(
+        records=records,
+        access_start_offset=earliest_access,
+        start_offset=start_offset,
+        end_offset=file_size,
+        file_size=file_size,
+        file_identity=file_identity,
+    )
+
+
+def _record_timestamp(record: TranscriptLine) -> str | None:
+    if record.parsed is None:
+        return None
+    return normalize_timestamp(record.parsed.get("timestamp"))
 
 
 def read_line(path: Path, offset: int) -> TranscriptLine | None:

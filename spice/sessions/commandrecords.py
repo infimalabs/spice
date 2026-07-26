@@ -66,7 +66,10 @@ def _collect_command_records_for_file(path: Path) -> list[CommandRecord]:
     for event in read.events:
         ts = normalize_timestamp(event.at.timestamp) or ""
         if isinstance(event, TurnBoundary):
-            current_turn_id = event.turn_id if event.kind == "started" else None
+            if event.kind == "started":
+                current_turn_id = event.turn_id
+            elif event.kind == "completed":
+                current_turn_id = None
             continue
         if isinstance(event, CommandExecution):
             if ts:
@@ -135,7 +138,7 @@ def _update_function_call_command_record(
         return
     output = event.content
     if match := EXEC_EXIT_RE.search(output):
-        record.exit_code = _coerce_command_int(match.group(1))
+        record.exit_code = int(match.group(1))
         record.status = "completed"
         return
     if "Process running with session ID" in output:
@@ -166,19 +169,6 @@ def _load_json(value: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return None
-
-
-def _coerce_command_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
 
 
 def _string_or_none(value: Any) -> str | None:
