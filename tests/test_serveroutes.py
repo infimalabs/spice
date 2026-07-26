@@ -12,6 +12,10 @@ from spice.agent.renewal import (
     RENEWAL_HANDOFF_REQUEST_SUFFIX,
     renewal_rehydration_text,
 )
+from spice.mail.ackstate import (
+    ack_state_database_path,
+    directive_history_records_from_database,
+)
 from spice.mail.inbox import (
     INBOX_CONTROL_DRAIN_QUEUE,
     collect_deadlettered_inbox_items,
@@ -70,6 +74,9 @@ from tests.test_servehelpers import (
 # the release bound is the failure escape hatch for a test that stops early.
 BLOCKED_ENSURE_ENTRY_SECONDS = 5.0
 BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
+# Short enough that a parked decision is reported as absent while the test still
+# holds the launch, long enough not to race a decision that does arrive.
+PARKED_DECISION_WAIT_SECONDS = 0.5
 
 
 def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkeypatch):
@@ -173,6 +180,50 @@ def test_work_tree_send_accepted_response_schedules_ensure_without_waiting(
                 "automatic": True,
             }
         ]
+    finally:
+        release_ensure.set()
+
+
+def test_send_attributes_its_publication_when_no_decision_arrives(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target, ACTOR_A, THREAD_A)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    release_ensure = threading.Event()
+
+    def fake_ensure(_target, **_kwargs):
+        release_ensure.wait(timeout=BLOCKED_ENSURE_RELEASE_SECONDS)
+        return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+    monkeypatch.setattr(
+        agentapi,
+        "LIFECYCLE_DECISION_WAIT_SECONDS",
+        PARKED_DECISION_WAIT_SECONDS,
+    )
+
+    try:
+        payload, status = work_tree_send_response_payload(
+            state,
+            target,
+            {"text": "steer this lane"},
+        )
+
+        directive = directive_history_records_from_database(
+            ack_state_database_path(repo)
+        )[0]
+        assert status == HTTPStatus.OK
+        assert payload["ok"] is True
+        # The decision is still parked inside the launch, so the reply reports
+        # the durable publication against the lane it landed in rather than
+        # dropping its attribution with the decision.
+        assert payload["agentEnsure"] == {}
+        assert payload["route"]["actor"] == ACTOR_A
+        assert (directive.target_actor, directive.team_id) == (ACTOR_A, created.team_id)
     finally:
         release_ensure.set()
 

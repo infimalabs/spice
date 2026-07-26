@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 import textwrap
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -214,9 +214,16 @@ def collect_turns(files: list[Path], *, start: str | None = None) -> list[TurnRe
 
 
 def _collect_turns_for_file(path: Path, *, start: str | None) -> list[TurnRecord]:
+    return collect_turns_from_events(path, iter_events(path, start=start))
+
+
+def collect_turns_from_events(
+    path: Path, events: Iterable[TranscriptEvent]
+) -> list[TurnRecord]:
+    """Fold one already-decoded typed stream into forensic turns."""
     turns: list[TurnRecord] = []
     current: TurnRecord | None = None
-    for event in iter_events(path, start=start):
+    for event in events:
         ts = normalize_timestamp(event.at.timestamp) or ""
         if isinstance(event, TurnLifecycle):
             current = _apply_turn_lifecycle(turns, current, path, ts, event)
@@ -363,38 +370,46 @@ def collect_compactions(
 ) -> list[CompactionRecord]:
     records: list[CompactionRecord] = []
     for path in files:
-        last_assistant: str | None = None
-        pending: CompactionRecord | None = None
-        for event in iter_events(path, start=start, context_lines_before_start=20):
-            ts = normalize_timestamp(event.at.timestamp) or ""
-            if isinstance(event, Compaction) and event.boundary:
-                pending = CompactionRecord(
-                    source_file=str(path),
-                    ts=ts,
-                    last_assistant_before_text=last_assistant,
-                )
-                records.append(pending)
-                continue
-            if isinstance(event, AssistantText) and event.text:
-                last_assistant = event.text
-            elif (
-                isinstance(event, TranscriptUserMessage)
-                and event.role == "user"
-                and event.text
-                and event.transcript_kind != "event_msg"
-                and pending is not None
-            ):
-                shape = classify_user_message(event.text)
-                if shape is MessageShape.COMPACTION_SUMMARY:
-                    if pending.summary_after_text is None:
-                        pending.summary_after_text = event.text
-                        pending.intent_text = parse_compaction_summary_intent(
-                            event.text
-                        )
-                elif shape is MessageShape.HUMAN:
-                    pending.first_user_after_text = event.text
-                    pending = None
+        events = iter_events(path, start=start, context_lines_before_start=20)
+        records.extend(collect_compactions_from_events(path, events))
     records.sort(key=lambda record: (record.ts, record.source_file))
+    return records
+
+
+def collect_compactions_from_events(
+    path: Path, events: Iterable[TranscriptEvent]
+) -> list[CompactionRecord]:
+    """Fold one already-decoded typed stream into compaction records."""
+    records: list[CompactionRecord] = []
+    last_assistant: str | None = None
+    pending: CompactionRecord | None = None
+    for event in events:
+        ts = normalize_timestamp(event.at.timestamp) or ""
+        if isinstance(event, Compaction) and event.boundary:
+            pending = CompactionRecord(
+                source_file=str(path),
+                ts=ts,
+                last_assistant_before_text=last_assistant,
+            )
+            records.append(pending)
+            continue
+        if isinstance(event, AssistantText) and event.text:
+            last_assistant = event.text
+        elif (
+            isinstance(event, TranscriptUserMessage)
+            and event.role == "user"
+            and event.text
+            and event.transcript_kind != "event_msg"
+            and pending is not None
+        ):
+            shape = classify_user_message(event.text)
+            if shape is MessageShape.COMPACTION_SUMMARY:
+                if pending.summary_after_text is None:
+                    pending.summary_after_text = event.text
+                    pending.intent_text = parse_compaction_summary_intent(event.text)
+            elif shape is MessageShape.HUMAN:
+                pending.first_user_after_text = event.text
+                pending = None
     return records
 
 

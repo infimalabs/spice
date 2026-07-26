@@ -149,10 +149,15 @@ CREATE TABLE IF NOT EXISTS agent_metric_buckets (
     tool_calls INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, team_id, bucket_start)
 );
+-- A resume checkpoint carries the source's filesystem identity beside its byte
+-- offset: a replaced transcript reuses the path, and only device/inode separate
+-- a resumable append from a new file whose bytes start over.
 CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     agent_id TEXT NOT NULL,
     source_path TEXT NOT NULL,
     offset INTEGER NOT NULL,
+    source_device INTEGER,
+    source_inode INTEGER,
     updated_at REAL NOT NULL,
     PRIMARY KEY (agent_id, source_path)
 );

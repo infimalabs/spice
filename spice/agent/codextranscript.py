@@ -7,11 +7,10 @@ input dictionary exactly. ``normalize_codex_line`` enforces that equality
 before returning the projection. An unfamiliar extension therefore retains the
 existing identity behavior instead of being partially rewritten.
 
-Context usage is decoded into a typed event here, closing the event vocabulary.
-Meter and effort deliberately continue reading ``context_snapshot_fields`` from
-the raw object: their side channel is cumulative accounting rather than the
-canonical response-item stream, and moving those consumers is a separate seam
-migration.
+Context usage joins this vocabulary through ``AgentDriver.context_snapshot_fields``
+instead: that hook is the sole dialect-local usage decoder, and the driver
+attaches its typed fact alongside the adapter events before consumers see the
+line.
 """
 
 from __future__ import annotations
@@ -60,8 +59,6 @@ def codex_line_events(
         return []
     payload_type = payload.get("type")
     if outer_type == "event_msg":
-        if payload_type == "token_count":
-            return _codex_context_usage_events(stamper, payload)
         return _codex_event_message_events(stamper, payload)
     if outer_type != "response_item":
         return []
@@ -446,25 +443,6 @@ def _codex_web_search_events(
     ]
 
 
-def _codex_context_usage_events(
-    stamper: LineStamper, payload: dict[str, Any]
-) -> list[TranscriptEvent]:
-    info = payload.get("info")
-    if not isinstance(info, dict):
-        return [_unknown(stamper, "malformed Codex context usage", "token_count")]
-    last = _token_usage(info.get("last_token_usage"))
-    if last is None:
-        return [_unknown(stamper, "malformed last-token usage", "token_count")]
-    return [
-        ContextUsage(
-            at=stamper.stamp(),
-            last=last,
-            cumulative=_token_usage(info.get("total_token_usage")),
-            model_context_window=_optional_int(info.get("model_context_window")),
-        )
-    ]
-
-
 def _project_message(events: list[TranscriptEvent]) -> dict[str, Any]:
     first = events[0]
     role = (
@@ -622,19 +600,6 @@ def _project_token_usage(usage: TokenUsage) -> dict[str, int]:
     }
 
 
-def _token_usage(value: Any) -> TokenUsage | None:
-    if not isinstance(value, dict):
-        return None
-    return TokenUsage(
-        input_tokens=_int(value.get("input_tokens")),
-        cached_input_tokens=_int(value.get("cached_input_tokens")),
-        cache_write_input_tokens=_int(value.get("cache_write_input_tokens")),
-        output_tokens=_int(value.get("output_tokens")),
-        reasoning_output_tokens=_int(value.get("reasoning_output_tokens")),
-        total_tokens=_int(value.get("total_tokens")),
-    )
-
-
 def _turn_metadata(
     payload: dict[str, Any],
 ) -> tuple[str | None, TurnMetadataKey | None]:
@@ -692,10 +657,6 @@ def _render_command(value: Any) -> str:
     if isinstance(value, list):
         return " ".join(str(part) for part in value)
     return value if isinstance(value, str) else "-"
-
-
-def _int(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:

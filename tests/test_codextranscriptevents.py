@@ -293,7 +293,7 @@ def test_status_only_web_search_projects_without_inventing_an_action() -> None:
     assert project_codex_events(codex_line_events(raw), TIMESTAMP) == raw
 
 
-def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -> None:
+def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
     last = {
         "input_tokens": 20_401,
         "cached_input_tokens": 300,
@@ -323,7 +323,7 @@ def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -
             "rate_limits": {"primary": {"used_percent": 7.0}},
         },
     }
-    events = codex_line_events(raw, source=SOURCE, line=LINE)
+    events = CODEX_DRIVER.transcript_line_events(raw, source=SOURCE, line=LINE)
     assert [type(event) for event in events] == [ContextUsage]
     usage = events[0]
     assert usage.last.total_tokens == LAST_TOTAL_TOKENS
@@ -331,16 +331,11 @@ def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -
     assert usage.cumulative.total_tokens == CUMULATIVE_TOTAL_TOKENS
     assert usage.model_context_window == MODEL_CONTEXT_WINDOW
 
-    # Accounting consumers intentionally retain the raw driver side channel.
-    assert CODEX_DRIVER.context_snapshot_fields(raw) == {
-        "input_tokens": 20_401,
-        "cached_input_tokens": 300,
-        "output_tokens": 177,
-        "reasoning_output_tokens": 73,
-        "total_tokens": LAST_TOTAL_TOKENS,
-        "model_context_window": MODEL_CONTEXT_WINDOW,
-        "cumulative_total_tokens": CUMULATIVE_TOTAL_TOKENS,
-    }
+    fields = CODEX_DRIVER.context_snapshot_fields(raw)
+    assert fields is not None
+    assert fields.last == usage.last
+    assert fields.cumulative == usage.cumulative
+    assert fields.model_context_window == MODEL_CONTEXT_WINDOW
     # The extra rate-limit fact cannot be projected from ContextUsage, so the
     # exactness gate preserves the original line rather than partially rewriting it.
     assert CODEX_DRIVER.normalize_transcript_line(raw) is raw
