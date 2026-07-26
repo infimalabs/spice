@@ -198,11 +198,46 @@ def test_checkjs_lane_rejects_undefined_written_into_a_wire_required_field(tmp_p
     assert _checkjs_probe(tmp_path / "undef", UNDEFINED_WIRE_FIELD_PROBE) != 0
 
 
+def _reaches_opaque_json(value_type: wire.WireType, seen: frozenset[str]) -> bool:
+    """Whether a declared type bottoms out in the opaque json primitive.
+
+    Aliases are followed the way validation follows them, so opacity reached one
+    hop away -- a record of JsonValue wearing a name -- counts the same as the
+    primitive written inline. Object references are not followed: an opaque field
+    inside a referenced object is named by that object's own key, not by every
+    field pointing at it. ``seen`` makes a self-naming alias terminate here.
+    """
+    if value_type.kind == "json":
+        return True
+    if value_type.kind == "reference":
+        if value_type.name in seen or value_type.name not in wire.WIRE_ALIASES:
+            return False
+        return _reaches_opaque_json(
+            wire.WIRE_ALIASES[value_type.name], seen | {value_type.name}
+        )
+    return any(_reaches_opaque_json(item, seen) for item in value_type.items)
+
+
+def _opaque_json_fields() -> set[str]:
+    """Every field the schema itself leaves opaque, as `Schema.field` keys."""
+    return {
+        f"{schema.name}.{field.name}"
+        for schema in wire.WIRE_OBJECTS
+        for field in schema.fields
+        if _reaches_opaque_json(field.value_type, frozenset())
+    }
+
+
 def test_named_opaque_json_fields_have_the_exact_intentional_allowlist():
+    # The dict pins what was intended, prose included. The set pins what the
+    # schema actually does, so a field that becomes opaque without being named
+    # fails here rather than reaching the browser as an undescribed hole.
     assert wire.OPAQUE_JSON_ALLOWLIST == {
         "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+        "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
         "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
     }
+    assert _opaque_json_fields() == set(wire.OPAQUE_JSON_ALLOWLIST)
 
 
 def test_browser_only_frame_registry_names_the_append_variant():
@@ -414,3 +449,79 @@ def test_lane_chrome_is_the_assembler_emitted_contract():
     assert " * @property {string} targetId" in rendered
     assert " * @property {LaneChromeIdentityFacet=} identity" in rendered
     assert " * @property {LaneChromeActivityFacet=} activity" in rendered
+
+
+def _arms_reported(message: str, arms: tuple[str, ...]) -> list[str]:
+    """The arms a union rejection actually measured the value against."""
+    return [arm for arm in arms if f"as {arm}," in message]
+
+
+TEAM_COMMAND_ARMS = ("TeamCommandApplied", "TeamCommandRefused")
+LANE_CHROME_ARMS = tuple(wire.LANE_CHROME_FACET_SCHEMAS.values())
+ROUTED_RESULT_ARMS = ("TaskDrainResult", "WorkTreeSendResult")
+
+
+def test_union_rejection_names_the_one_arm_a_discriminant_narrows_to():
+    snapshot = valid_wire_payload("TeamSnapshot")
+    del snapshot["globalSettings"]
+    applied = {"ok": True, "revision": 3, "differential": False, "snapshot": snapshot}
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("TeamCommandResponse", applied)
+
+    message = str(rejection.value)
+    assert _arms_reported(message, TEAM_COMMAND_ARMS) == ["TeamCommandApplied"]
+    assert (
+        "TeamCommandResponse.snapshot is missing required fields: globalSettings"
+        in message
+    )
+
+
+def test_union_rejection_keeps_every_arm_that_shares_the_literal_value():
+    facet = valid_wire_payload("LaneChromeTeamConfigFacet")
+    del facet["value"]
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("LaneChromeFacet", facet)
+
+    message = str(rejection.value)
+    assert _arms_reported(message, LANE_CHROME_ARMS) == [
+        "LaneChromeTeamConfigFacet",
+        "LaneChromeRenewalFacet",
+    ]
+    assert "LaneChromeFacet is missing required fields: value" in message
+
+
+def test_union_rejection_reports_every_arm_when_none_pins_a_literal():
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("RoutedResult", {"bogus": 1})
+
+    message = str(rejection.value)
+    assert _arms_reported(message, ROUTED_RESULT_ARMS) == list(ROUTED_RESULT_ARMS)
+    assert "RoutedResult has undeclared fields: bogus" in message
+
+
+def test_union_rejection_reports_every_arm_when_the_literal_matches_none():
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("LaneChromeFacet", {"authority": "nowhere"})
+
+    message = str(rejection.value)
+    assert _arms_reported(message, LANE_CHROME_ARMS) == list(LANE_CHROME_ARMS)
+
+
+def test_union_rejection_draws_the_literal_an_otherwise_complete_value_missed():
+    applied = valid_wire_payload("TeamCommandApplied")
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("TeamCommandResponse", {**applied, "ok": "maybe"})
+
+    message = str(rejection.value)
+    assert "as TeamCommandApplied, TeamCommandResponse.ok must equal True" in message
+
+
+def test_union_acceptance_is_unchanged_by_the_rejection_detail():
+    applied = valid_wire_payload("TeamCommandApplied")
+    refused = valid_wire_payload("TeamCommandRefused")
+
+    assert wire.validate_wire_payload("TeamCommandResponse", applied) == applied
+    assert wire.validate_wire_payload("TeamCommandResponse", refused) == refused

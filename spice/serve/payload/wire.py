@@ -1116,8 +1116,13 @@ BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
     "worktree.inventory.work_trees_payload": "TargetsPayload",
 }
 
+# Every field whose interior the contract declines to describe, named so the
+# generated types carry why. Both payloads that report a refusal name it here:
+# they carry the same driver-supplied facts under the same type, and listing one
+# alone left the other rendering the identical property undocumented.
 OPAQUE_JSON_ALLOWLIST = {
     "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+    "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
     "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
 }
 
@@ -1167,6 +1172,87 @@ def _validate(
         )
         return
     _validate_scalar(value_type, value, path=path)
+
+
+def _union_arm_object(candidate: WireType) -> WireObject | None:
+    """The object a union arm names, or None when the arm does not name one.
+
+    Resolves aliases by recursion, the way validation itself does, so a schema
+    that ever names itself through one raises RecursionError here too instead of
+    spinning in place.
+    """
+    if candidate.kind != "reference":
+        return None
+    if candidate.name in WIRE_ALIASES:
+        return _union_arm_object(WIRE_ALIASES[candidate.name])
+    return WIRE_OBJECTS_BY_NAME.get(candidate.name)
+
+
+def _union_arm_literals(candidate: WireType) -> dict[str, Any] | None:
+    """The fields a union arm pins to a literal, or None when it names no object."""
+    schema = _union_arm_object(candidate)
+    if schema is None:
+        return None
+    return {
+        field.name: field.value_type.literal
+        for field in schema.fields
+        if field.value_type.kind == "literal"
+    }
+
+
+def _narrow_union_arms(value_type: WireType, value: Any) -> list[WireType]:
+    """The arms a value could still be, by the literals every arm pins.
+
+    Arms routinely pin a shared field to a literal: `ok` on a team command
+    response, `authority` on a lane chrome facet. Where the value carries such a
+    field, the arms whose literal disagrees are not what it meant, and their
+    complaints bury the one that matters. Arms sharing a literal value stay
+    together rather than being resolved further, so `authority` still cuts seven
+    chrome facets down to the two the team store produces.
+
+    Two shapes deliberately narrow to everything. Arms that pin nothing in
+    common leave the intersection empty, and every arm passes vacuously. A value
+    whose field matches no arm's literal has named a shape the union does not
+    have, so every arm reports rather than none. What each one then says depends
+    on how much else is wrong: an otherwise-complete value draws the literal that
+    arm wanted, because an object reports the fields it is missing before it
+    checks the value of any field it has.
+    """
+    literals = [_union_arm_literals(candidate) for candidate in value_type.items]
+    pinned = [entry for entry in literals if entry is not None]
+    if not isinstance(value, dict) or len(pinned) != len(literals):
+        return list(value_type.items)
+    shared = set.intersection(*(set(entry) for entry in pinned)) & set(value)
+    narrowed = [
+        candidate
+        for candidate, entry in zip(value_type.items, pinned)
+        if all(entry[field] == value[field] for field in shared)
+    ]
+    return narrowed or list(value_type.items)
+
+
+def _union_rejection(
+    value_type: WireType,
+    value: Any,
+    *,
+    path: str,
+    descend_references: bool,
+) -> str:
+    """Why each arm a value could plausibly have been refused it.
+
+    Reached only once every arm has already refused, so re-validating the
+    plausible ones costs nothing on the accepting path and buys back the field
+    paths the union would otherwise discard.
+    """
+    reasons = []
+    for candidate in _narrow_union_arms(value_type, value):
+        try:
+            _validate(
+                candidate, value, path=path, descend_references=descend_references
+            )
+        except SpiceError as exc:
+            reasons.append(f"as {_jsdoc_type(candidate)}, {exc}")
+    return f"{path} does not match {_jsdoc_type(value_type)}: " + "; ".join(reasons)
 
 
 def _validate_composite(
@@ -1232,7 +1318,14 @@ def _validate_composite(
                 return
             except SpiceError:
                 continue
-        raise SpiceError(f"{path} does not match {_jsdoc_type(value_type)}")
+        raise SpiceError(
+            _union_rejection(
+                value_type,
+                value,
+                path=path,
+                descend_references=descend_references,
+            )
+        )
     raise AssertionError(f"unknown composite wire type: {value_type.kind}")
 
 

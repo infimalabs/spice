@@ -379,7 +379,7 @@
  * @property {boolean} launchable
  * @property {string} bindingStatus
  * @property {string} bindingError
- * @property {RestartRefusal=} restartRefusal
+ * @property {RestartRefusal=} restartRefusal - driver-specific launch refusal facts
  * @property {string=} readyAt
  * @property {string=} startupFailure
  */
