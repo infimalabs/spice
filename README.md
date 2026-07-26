@@ -6,7 +6,7 @@
 
 **Spice Harness is an agent harness / fleet operations console.**
 
-_Simultaneous Production, Integration, and Control Environment._
+_Software Production, Integration, and Control Environment._
 
 spice is an installed, repo-native harness for operating coding agents. It
 treats the agent transcript as the source of truth and the repository
@@ -163,6 +163,26 @@ spice task next
 | Open the operator UI | `spice serve` |
 | Observe explicit session roots read-only | `spice watch <session-dir>...` |
 | Run studies and gates | `spice study ...` / git pre-commit hook |
+
+### Serve projection storage
+
+Serve writes replayable observation materializations to
+`spiceprojections.sqlite3` in the task backend. This database is disposable:
+it is safe to delete at the cost of replaying the surviving native transcript
+facts. Run `spice serve rebuild-projections` to rebuild every registered family
+and atomically publish the completed generation; pass `agentActivity` to
+rebuild only that family.
+
+Do not apply that recovery rule to `spiceteams.sqlite3`. It is a separate,
+non-disposable authority database containing team topology, membership,
+renewal, identity, configuration, and revision history.
+
+`spice serve teams` prints the resolved authority and projection-store paths
+and, for each projection family, its generation, status, servability,
+freshness, retention floor, row counts, last successful rebuild, failure
+detail, rebuild entry point, and exact recovery action. Add `--json` for the
+machine-readable payload, including source, cursor, replay horizon, and
+beyond-horizon behavior.
 
 Configuration lives in [CONFIG.md](https://github.com/infimalabs/spice/blob/main/CONFIG.md). The design contract lives in
 [DESIGN.md](https://github.com/infimalabs/spice/blob/main/DESIGN.md). Wrapper command behavior is detailed in

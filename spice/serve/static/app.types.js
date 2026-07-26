@@ -727,6 +727,79 @@
  */
 
 /**
+ * @typedef {Object} MetricWindow
+ * @property {number} start
+ * @property {number} end
+ */
+
+/**
+ * @typedef {Object} TeamHistoricalMetricsPoint
+ * @property {number} bucketStart
+ * @property {number} messages
+ */
+
+/**
+ * @typedef {Object} TeamHistoricalMetricsResponse
+ * @property {true} ok
+ * @property {"team-historical"} lens
+ * @property {string} teamId
+ * @property {Array.<string>} agentIds
+ * @property {number} messages
+ * @property {number} cumulativeMessages
+ * @property {number} bucketSeconds
+ * @property {number} bucketCount
+ * @property {MetricWindow} range
+ * @property {Array.<number>} sparkline
+ * @property {Array.<TeamHistoricalMetricsPoint>} series
+ */
+
+/**
+ * @typedef {Object} TaskBurndownMetricsPoint
+ * @property {number} bucketStart
+ * @property {number} completed
+ * @property {number} drained
+ */
+
+/**
+ * @typedef {Object} TaskBurndownMetricsResponse
+ * @property {true} ok
+ * @property {"task-burndown"} lens
+ * @property {Array.<string>} agentIds
+ * @property {Array.<string>} teamIds
+ * @property {number} completed
+ * @property {number} drained
+ * @property {number} bucketSeconds
+ * @property {number} bucketCount
+ * @property {MetricWindow} range
+ * @property {Array.<TaskBurndownMetricsPoint>} series
+ */
+
+/**
+ * @typedef {Object} TaskDistributionMetricsPoint
+ * @property {number} bucketStart
+ * @property {string} agentId
+ * @property {number} claimed
+ * @property {number} active
+ * @property {number} work
+ * @property {number} share
+ */
+
+/**
+ * @typedef {Object} TaskDistributionMetricsResponse
+ * @property {true} ok
+ * @property {"task-distribution"} lens
+ * @property {Array.<string>} agentIds
+ * @property {Array.<string>} teamIds
+ * @property {number} claimed
+ * @property {number} active
+ * @property {number} work
+ * @property {number} bucketSeconds
+ * @property {number} bucketCount
+ * @property {MetricWindow} range
+ * @property {Array.<TaskDistributionMetricsPoint>} series
+ */
+
+/**
  * @typedef {Object} SubmissionStage
  * @property {string} at
  * @property {string} source

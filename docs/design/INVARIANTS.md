@@ -110,6 +110,35 @@ checklist.
   only compact prose; image markdown is described, not read; every prose message
   keeps a manual play affordance.
 
+## Storage Classes And Shape Changes
+
+The storage split is asymmetric: losing a projection costs a replay; losing
+authority costs facts no replay can recover. The five SQLite stores therefore
+have these fixed classes:
+
+| Store | Storage class | Role |
+| --- | --- | --- |
+| `taskchampion.sqlite3` | Durable authority | Task documents and their TaskChampion mutation history |
+| `spiceteams.sqlite3` | Durable authority | Team topology, configuration, membership, renewal, identity, and revisioned events |
+| `spiceacks.sqlite3` | Durable authority | Directive publications, ACK/refusal dispositions, and their provenance |
+| `spicemaxims.sqlite3` | Durable authority | Maxim evaluations, gate decisions, and reminder-publication events |
+| `spiceprojections.sqlite3` | Rebuildable projection | Agent-activity materializations derived from typed driver-transcript facts |
+
+- An authority migration is a singular, row-preserving, forward step from one
+  supported source shape to the current shape, not an accumulating ladder of
+  per-release arms. Refusing an older or otherwise unsupported shape without
+  mutation is legitimate when the refusal names the release that owns the
+  required one-time migration.
+- A projection store carries no migration ladder. An unknown version, drifted
+  shape, corrupt file, or missing file is discarded and recreated at the
+  current shape, then explicitly replayed from its native source before its
+  facts are served.
+- Superseded code paths, compatibility branches, and aliases are deleted
+  outright once callers use the current shape. That cleanup rule does not
+  authorize deleting, resetting, or silently rewriting durable authority;
+  conversely, a required durable-data migration does not justify retaining
+  superseded runtime paths.
+
 ## Constitution
 
 - Namespace package policy rejects `__init__.py` under configured package roots.

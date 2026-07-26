@@ -59,13 +59,13 @@ and lifetime counters are not. It is refilled by
 from the transcript bytes that remain: activity whose source file is gone does
 not come back, and the rebuilt family says so by starting at the earliest bucket
 the surviving sources produce. Its recovery action is the exact command
-`spice serve reset-projections agentActivity`, which resolves sources in one
+`spice serve rebuild-projections agentActivity`, which resolves sources in one
 documented order — the exact checkpoint manifest of a servable generation, then
 authority identities whose recorded transcript owner can still discover their
 recorded thread — and replays each selected source from its first byte through
 the typed transcript reader.
 
-## Publication, Rebuild, and Reset
+## Publication and Rebuild
 
 `projection_generations` records which build of each family a reader is looking
 at. `projection_status` records `ready`, `rebuilding`, `stale`, `unavailable`,
@@ -88,8 +88,8 @@ generation becomes explicitly `unavailable`. A killed process can leave the
 status `rebuilding`, but its prior generation remains the only servable rows.
 Retrying the recovery command stages another complete replacement.
 
-`spice serve reset-projections` performs the isolated rebuild despite its
-historical command name.
+`spice serve rebuild-projections` is the operator entry point to that isolated
+rebuild and its atomic publication.
 
 `spice serve teams` prints the projection store path and, per family, its
 generation, status, servability, source freshness, retention floor, last

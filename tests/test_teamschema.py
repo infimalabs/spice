@@ -22,15 +22,16 @@ from spice.serve.team.projection import (
 from spice.serve.team.schema import (
     TEAM_AUTHORITY_MIGRATIONS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
 )
 from spice.serve.team.store import ServeTeamStore
 
-# The shape each authority version describes, pinned. Databases in the field
-# are stamped with these numbers, so a number cannot come to mean a different
-# set of columns later: changing a migration changes a digest here and fails,
-# and a new authority shape adds the next version, its forward migration, and
-# its own line below.
+# The shape each retained authority version describes, pinned. Databases in the
+# field are stamped with these numbers, so a number cannot come to mean a
+# different set of columns later: editing a shape in place changes a digest here
+# and fails. Adding a version adds its line and drops the one that falls out of
+# the supported range.
 AUTHORITY_SHAPE_DIGESTS = {
     1: "2db781a8730ca90bf610f8c03add298fbbd2a02a925004612ca0d28a89af8eb8",
     2: "5f0f10de12a33355365d89f984d589508a75ee6e78605f148fed306933209a24",
@@ -42,9 +43,12 @@ AUTHORITY_SHAPE_DIGESTS = {
 PRIOR_AUTHORITY_VERSION = TEAM_AUTHORITY_SCHEMA_VERSION - 1
 
 
-def _shape_digest(version: int) -> str:
-    shape = team_store_module._authority_schema_shape(version)
+def _digest_of_shape(shape: dict[str, Any]) -> str:
     return hashlib.sha256(repr(sorted(shape.items())).encode("utf-8")).hexdigest()
+
+
+def _shape_digest(version: int) -> str:
+    return _digest_of_shape(team_store_module._authority_schema_shape(version))
 
 
 def _forget_initialized(path: Path) -> None:
@@ -54,10 +58,9 @@ def _forget_initialized(path: Path) -> None:
 def _build_authority_at(path: Path, version: int) -> None:
     """Leave a database exactly as the writer that stamped `version` left it."""
     with sqlite_connection(path) as connection:
-        for step in range(1, version + 1):
-            team_store_module._execute_schema_script(
-                connection, TEAM_AUTHORITY_MIGRATIONS[step]
-            )
+        team_store_module._execute_schema_script(
+            connection, TEAM_AUTHORITY_SCHEMAS[version]
+        )
         connection.execute(f"PRAGMA user_version = {version}")
 
 
@@ -384,26 +387,48 @@ def test_unversioned_drifted_authority_fails_without_destructive_rebuild(tmp_pat
 
 
 def test_changing_an_authority_shape_without_advancing_the_version_fails_here():
-    versions = sorted(TEAM_AUTHORITY_MIGRATIONS)
+    versions = sorted(TEAM_AUTHORITY_SCHEMAS)
 
-    # Every version this writer supports is reachable by consecutive forward
-    # steps from an empty database, and each one describes the shape pinned to
-    # it. Editing a migration in place moves a digest and lands here, which is
-    # the whole point: a version number stamped on a database in the field has
-    # to keep naming the columns that database has.
-    assert versions == list(range(1, TEAM_AUTHORITY_SCHEMA_VERSION + 1))
+    # The retained shapes are the current version and the one predecessor this
+    # writer converts, and each describes the shape pinned to it. Editing one in
+    # place moves a digest and lands here, which is the whole point: a version
+    # number stamped on a database in the field has to keep naming the columns
+    # that database has.
+    assert versions == [PRIOR_AUTHORITY_VERSION, TEAM_AUTHORITY_SCHEMA_VERSION]
     assert {version: _shape_digest(version) for version in versions} == (
         AUTHORITY_SHAPE_DIGESTS
     )
 
 
 def test_no_two_authority_versions_describe_the_same_table_shape():
-    digests = [_shape_digest(version) for version in sorted(TEAM_AUTHORITY_MIGRATIONS)]
+    digests = [_shape_digest(version) for version in sorted(TEAM_AUTHORITY_SCHEMAS)]
 
     # This is what lets the opener read a database's version off its columns
     # when the stamp disagrees with them: matching a shape identifies exactly
-    # one version. Two versions sharing a shape would make that answer a guess.
+    # one version. Two versions sharing a shape would make that answer a guess,
+    # so pointing the predecessor entry back at the current DDL -- the aliasing
+    # that cost a fleet its authority store -- fails right here.
     assert len(set(digests)) == len(digests)
+
+
+def test_the_forward_migration_carries_the_predecessor_onto_the_current_shape():
+    upgraded = sqlite3.connect(":memory:")
+    try:
+        team_store_module._execute_schema_script(
+            upgraded, TEAM_AUTHORITY_SCHEMAS[PRIOR_AUTHORITY_VERSION]
+        )
+        team_store_module._execute_schema_script(
+            upgraded, TEAM_AUTHORITY_MIGRATIONS[TEAM_AUTHORITY_SCHEMA_VERSION]
+        )
+        migrated = team_store_module._authority_table_shape(upgraded)
+    finally:
+        upgraded.close()
+
+    # Two roads reach the current version: a store being created runs its DDL,
+    # and a store at the predecessor runs the migration. Nothing else makes
+    # those agree, so without this an upgraded store and a new one could wear
+    # one version number over two different sets of columns.
+    assert _digest_of_shape(migrated) == _shape_digest(TEAM_AUTHORITY_SCHEMA_VERSION)
 
 
 def test_a_prior_shape_store_reaches_the_settled_shape_in_one_forward_step(

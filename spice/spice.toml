@@ -278,7 +278,7 @@ message = "😊 Commit to a single deterministic path and let violated assumptio
 
 [maxims.backwards-compat]
 words = ["compatibilities", "compatibility", "compatible"]
-message = "😊 Migrate every caller directly to the current shape, delete the prior one outright, and hold every new addition to that same shape going forward!"
+message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
 
 [maxims.shims]
 words = ["shim", "shimmed", "shimming", "shims"]
@@ -290,7 +290,7 @@ message = "😊 Rename in place, update every reference immediately, and let the
 
 [maxims.legacy]
 words = ["legacy", "legacies"]
-message = "😊 Delete superseded code, dead branches, and commented-out history outright, trust the current thinking as the complete record, and bring everything forward to match it!"
+message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
 
 [serve]
 brand = "spice"

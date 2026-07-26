@@ -204,7 +204,7 @@ const context = {
         + branding
         + """
   document: {
-    title: "spice - Simultaneous Production, Integration, and Control Environment",
+    title: "spice - Software Production, Integration, and Control Environment",
     querySelectorAll: () => [],
   },
   navigator: { mediaSession: { metadata: null } },

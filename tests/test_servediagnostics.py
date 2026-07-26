@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,15 @@ TASK_FILTERS = ("serve.ui", "task.review")
 # other canonical family in this table publishes.
 TASK_OPERATION_EPOCH = 1785095505.29108
 TEAM_ID = "team-main"
+
+
+def test_operator_projection_docs_use_the_registered_recovery_command():
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    command = AGENT_ACTIVITY.recovery_action.rsplit(" ", 1)[0]
+
+    assert f"Run `{command}`" in readme
+    assert "`spiceprojections.sqlite3`" in readme
+    assert "`spiceteams.sqlite3`" in readme
 
 
 def _record_identity(store: ServeTeamStore) -> None:
@@ -305,10 +315,10 @@ def test_serve_teams_parser_dispatches_json_subcommand(tmp_path):
     assert args.json_output is True
 
 
-def test_serve_reset_projections_rebuilds_and_reports_the_new_build(tmp_path, capsys):
+def test_serve_rebuild_projections_rebuilds_and_reports_the_new_build(tmp_path, capsys):
     backend = tmp_path / "task-backend"
     args = build_parser().parse_args(
-        ["serve", "--task-backend", str(backend), "reset-projections"]
+        ["serve", "--task-backend", str(backend), "rebuild-projections"]
     )
     set_state_backend(str(tmp_path / "managed-state"))
     task_config.set_backend(str(backend))

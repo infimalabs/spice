@@ -39,7 +39,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert 'id="fast-mode-toggle"' not in html
     assert 'class="add-lane"' not in html
     assert "<title>spice</title>" in html
-    assert "Simultaneous Production, Integration, and Control Environment" not in html
+    assert 'title="Open spice menu" aria-label="Open spice menu"' in html
     assert "<h1>spice</h1>" not in html
     assert ">+</button>" not in html
     assert html.index("/static/app.lanes.js") < html.index("/static/app.menu.js")

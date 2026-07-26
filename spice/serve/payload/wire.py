@@ -86,8 +86,15 @@ BROWSER_ONLY_FRAME_SCHEMAS = {
 }
 
 BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
+    "agentapi.agent_ensure_failure_payload": "AgentEnsurePayload",
+    "agentapi.agent_ensure_payload": "AgentEnsurePayload",
     "agentapi.agent_status_payload": "AgentStatusPayload",
+    "httpapi.task_burndown_metrics_response_payload": "TaskBurndownMetricsResponse",
+    "httpapi.task_distribution_metrics_response_payload": (
+        "TaskDistributionMetricsResponse"
+    ),
     "httpapi.team_command_response_payload": "TeamCommandResponse",
+    "httpapi.team_historical_metrics_response_payload": "TeamHistoricalMetricsResponse",
     "httpapi.team_snapshot_response_payload": "TeamSnapshotResponse",
     "observer.observer_agent_status_payload": "AgentStatusPayload",
     "observer.observer_messages_payload": "LanePayload",

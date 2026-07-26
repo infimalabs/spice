@@ -1,6 +1,6 @@
 # spice - design
 
-spice is the Simultaneous Production, Integration, and Control Environment: an
+spice is the Software Production, Integration, and Control Environment: an
 installed agent harness for operating coding agents inside real git worktrees.
 This root file states the system contract. Detail lives deeper:
 

@@ -25,3 +25,10 @@ def test_root_version_flag_reports_installed_distribution(flag, capsys):
 
 def test_root_help_documents_version_flags():
     assert "-V, --version" in build_parser().format_help()
+
+
+def test_root_help_expands_the_spice_name():
+    assert (
+        "Software Production, Integration, and Control Environment"
+        in build_parser().format_help()
+    )

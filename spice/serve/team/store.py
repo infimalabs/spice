@@ -89,6 +89,7 @@ from spice.serve.team.schema import (
     TASK_FILTER_SOURCES as TASK_FILTER_SOURCES,
     TEAM_AUTHORITY_MIGRATIONS,
     TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
@@ -172,21 +173,28 @@ def _authority_migration(version: int) -> str:
         ) from exc
 
 
+def _authority_schema(version: int) -> str:
+    try:
+        return TEAM_AUTHORITY_SCHEMAS[version]
+    except KeyError as exc:
+        raise SpiceError(
+            f"missing team authority schema for version {version}"
+        ) from exc
+
+
 def _authority_schema_shape(
     version: int,
 ) -> dict[str, tuple[str, tuple[tuple[object, ...], ...]]]:
-    """Return the one table shape `version` describes, built the way it was built.
+    """Return the one table shape `version` describes.
 
-    A version's shape is derived by replaying its own migrations into an empty
-    database rather than read from a separate declaration of the same thing.
-    A separate declaration is what failed before: it was written as an alias for
-    the writer's current schema, so editing the schema redefined a version that
-    databases in the field were already stamped with.
+    The shape comes from that version's own frozen DDL, never from the writer's
+    current one. Reading it from the current DDL is what failed before: editing
+    the schema silently redefined a version that databases in the field were
+    already stamped with, so one version named two different sets of columns.
     """
     expected = sqlite3.connect(":memory:")
     try:
-        for step in range(1, version + 1):
-            _execute_schema_script(expected, _authority_migration(step))
+        _execute_schema_script(expected, _authority_schema(version))
         return _authority_table_shape(expected)
     finally:
         expected.close()
@@ -304,16 +312,21 @@ class ServeTeamStore(
         try:
             source_version = self._authority_source_version_locked(connection)
             prepare_directive_history_database(self.directive_state_path)
-            migration_scripts = [
-                _authority_migration(version)
-                for version in range(
-                    source_version + 1, TEAM_AUTHORITY_SCHEMA_VERSION + 1
-                )
-            ]
-            for script in migration_scripts:
-                _execute_schema_script(connection, script)
             if source_version == 0:
+                # A store that does not exist yet is created at the current
+                # shape rather than replayed into existence through history, so
+                # the shapes this writer retains stay a record of what it can
+                # open rather than the steps by which anything is built.
+                _execute_schema_script(
+                    connection, _authority_schema(TEAM_AUTHORITY_SCHEMA_VERSION)
+                )
                 self._write_store_generation_locked(connection)
+            elif source_version != TEAM_AUTHORITY_SCHEMA_VERSION:
+                # The source resolver admits no version but the predecessor
+                # here, so this is the one forward step a writer ever runs.
+                _execute_schema_script(
+                    connection, _authority_migration(TEAM_AUTHORITY_SCHEMA_VERSION)
+                )
             _require_authority_shape(connection, TEAM_AUTHORITY_SCHEMA_VERSION)
             connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
             connection.commit()
@@ -373,16 +386,20 @@ class ServeTeamStore(
         in front of it, and the recovery was to edit the database by hand.
 
         Reading the source from the shape makes that recoverable instead: a
-        database whose columns match a version this writer knows is migrated
+        database whose columns match a shape this writer carries is migrated
         forward from there, however it came to be stamped otherwise, and one
-        whose columns match no version at all still fails untouched. Exactly one
-        version can match, because no two versions share a shape.
+        whose columns match none of them still fails untouched. Exactly one can
+        match, because no two of the retained shapes describe the same tables.
 
         The stamp keeps the two jobs it can still do honestly. A stamp above
         this writer means a newer writer has been here, and its rows are not
         described by any shape this writer holds, so nothing may be assumed
         about them. A stamp of zero on a populated database is from before
         versions existed, and no migration claims to know what that is.
+
+        The shapes are bounded to the current version and the one predecessor
+        it converts, so a database older than that matches nothing and is
+        refused for the release that still owns its conversion.
         """
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
@@ -405,7 +422,7 @@ class ServeTeamStore(
                 "unversioned populated team database has no supported migration; "
                 "refusing to rebuild or open durable team state"
             )
-        for version in sorted(TEAM_AUTHORITY_MIGRATIONS):
+        for version in sorted(TEAM_AUTHORITY_SCHEMAS):
             if not _authority_shape_mismatches(connection, version):
                 return version
         # Report the drift against the version the database claims to be, which

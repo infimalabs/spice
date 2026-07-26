@@ -12,7 +12,7 @@ import pytest
 
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
-from spice.serve.cli import run_serve_reset_projections
+from spice.serve.cli import run_serve_rebuild_projections
 from spice.serve.diagnostics import team_diagnostics_payload
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.projection import (
@@ -143,8 +143,26 @@ def test_every_family_registers_a_replay_contract_that_resolves():
         command = family.recovery_action.split()
         assert command[0] == "spice"
         recovery = build_parser().parse_args(command[1:])
-        assert recovery.func is run_serve_reset_projections
+        assert recovery.func is run_serve_rebuild_projections
         assert recovery.families == [family.name]
+
+
+def test_schema_sync_refreshes_persisted_recovery_actions(tmp_path):
+    projections = _store(tmp_path).projections
+    projections.family_states()
+    with sqlite_connection(projections.path) as connection:
+        connection.execute(
+            "UPDATE projection_status SET recovery_action = ? WHERE family = ?",
+            (
+                "spice serve reset-projections agentActivity",
+                AGENT_ACTIVITY.name,
+            ),
+        )
+    _reopen(projections)
+
+    assert projections.family_states()[0].recovery_action == (
+        AGENT_ACTIVITY.recovery_action
+    )
 
 
 def test_the_schema_builds_exactly_the_registered_families():

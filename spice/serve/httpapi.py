@@ -177,19 +177,22 @@ def team_historical_metrics_response_payload(
         for index, count in enumerate(summary.sparkline)
     ]
     range_messages = sum(summary.sparkline)
-    return {
-        "ok": True,
-        "lens": "team-historical",
-        "teamId": summary.team_id,
-        "agentIds": list(summary.agent_ids),
-        "messages": range_messages,
-        "cumulativeMessages": summary.messages,
-        "bucketSeconds": bucket_seconds,
-        "bucketCount": len(summary.sparkline),
-        "range": {"start": window_start, "end": window_end},
-        "sparkline": list(summary.sparkline),
-        "series": series,
-    }
+    return validate_emitter_payload(
+        "httpapi.team_historical_metrics_response_payload",
+        {
+            "ok": True,
+            "lens": "team-historical",
+            "teamId": summary.team_id,
+            "agentIds": list(summary.agent_ids),
+            "messages": range_messages,
+            "cumulativeMessages": summary.messages,
+            "bucketSeconds": bucket_seconds,
+            "bucketCount": len(summary.sparkline),
+            "range": {"start": window_start, "end": window_end},
+            "sparkline": list(summary.sparkline),
+            "series": series,
+        },
+    )
 
 
 def task_burndown_metrics_response_payload(
@@ -240,18 +243,21 @@ def task_burndown_metrics_response_payload(
     ]
     completed = sum(point.completed for point in series)
     drained = sum(point.drained for point in series)
-    return {
-        "ok": True,
-        "lens": "task-burndown",
-        "agentIds": list(agent_ids),
-        "teamIds": list(team_ids),
-        "completed": completed,
-        "drained": drained,
-        "bucketSeconds": bucket_seconds,
-        "bucketCount": bucket_count,
-        "range": {"start": window_start, "end": window_end},
-        "series": points,
-    }
+    return validate_emitter_payload(
+        "httpapi.task_burndown_metrics_response_payload",
+        {
+            "ok": True,
+            "lens": "task-burndown",
+            "agentIds": list(agent_ids),
+            "teamIds": list(team_ids),
+            "completed": completed,
+            "drained": drained,
+            "bucketSeconds": bucket_seconds,
+            "bucketCount": bucket_count,
+            "range": {"start": window_start, "end": window_end},
+            "series": points,
+        },
+    )
 
 
 def task_distribution_metrics_response_payload(
@@ -305,19 +311,22 @@ def task_distribution_metrics_response_payload(
     ]
     claimed = sum(point.claimed for point in series)
     active = sum(point.active for point in series)
-    return {
-        "ok": True,
-        "lens": "task-distribution",
-        "agentIds": list(agent_ids),
-        "teamIds": list(team_ids),
-        "claimed": claimed,
-        "active": active,
-        "work": claimed + active,
-        "bucketSeconds": bucket_seconds,
-        "bucketCount": bucket_count,
-        "range": {"start": window_start, "end": window_end},
-        "series": points,
-    }
+    return validate_emitter_payload(
+        "httpapi.task_distribution_metrics_response_payload",
+        {
+            "ok": True,
+            "lens": "task-distribution",
+            "agentIds": list(agent_ids),
+            "teamIds": list(team_ids),
+            "claimed": claimed,
+            "active": active,
+            "work": claimed + active,
+            "bucketSeconds": bucket_seconds,
+            "bucketCount": bucket_count,
+            "range": {"start": window_start, "end": window_end},
+            "series": points,
+        },
+    )
 
 
 def lane_watch_paths_for_target(
