@@ -27,6 +27,9 @@ from spice.transcript import reader as transcript_reader
 
 THREAD = "11111111222233334444555555555555"
 TIMESTAMP = "2026-06-20T04:45:00.000000Z"
+# Enough append reads over the unfinished record to catch a cursor that walks
+# forward once per read rather than staying on the last complete boundary.
+QUIET_APPEND_READS = 3
 
 
 def test_resolve_thread_transcript_returns_codex_owner(tmp_path, monkeypatch):
@@ -111,6 +114,86 @@ def test_append_only_read_uses_cursor_delta_and_matches_full_window(
     assert [item.display_text for item in delta] == ["second"]
     assert [item.key for item in cursor.window or []] == [item.key for item in expected]
     assert cursor.offset > old_offset
+
+
+def test_append_only_read_delivers_a_record_the_writer_finished_after_the_seed(
+    tmp_path,
+) -> None:
+    """A record split across two flushes is delivered once, not skipped.
+
+    Serve seeds its live cursor from the same reverse read that draws the
+    history window, and a live writer can be caught mid-record. Seeding at
+    end-of-file would put the resume offset inside that half-written line, so
+    the append pass would decode only its suffix and the completed record would
+    never reach the lane.
+    """
+    transcript = tmp_path / "rollout.jsonl"
+    _append_codex_message(transcript, TIMESTAMP, "before")
+    line = _codex_message_line("2026-06-20T04:46:00.000000Z", "after")
+    flushed = line.index('"payload"')
+    _append_text(transcript, line[:flushed])
+    cursor = RolloutCursor()
+
+    initial = read_assistant_messages(
+        transcript, limit=5, cursor=cursor, driver=CODEX_DRIVER
+    )
+    _append_text(transcript, line[flushed:])
+    delta = read_assistant_messages(
+        transcript,
+        limit=5,
+        append_only=True,
+        cursor=cursor,
+        driver=CODEX_DRIVER,
+    )
+
+    assert [item.display_text for item in initial] == ["before"]
+    assert [item.display_text for item in delta] == ["after"]
+    assert [
+        item.display_text
+        for item in read_assistant_messages(transcript, limit=5, driver=CODEX_DRIVER)
+    ] == ["after", "before"]
+
+
+def test_append_only_reads_over_a_partial_tail_still_deliver_the_record(
+    tmp_path,
+) -> None:
+    """Reads taken while the writer is still mid-record do not skip past it.
+
+    A lane reads far more often than a writer flushes, so the half-written
+    record is normally observed several times before it is complete. Each of
+    those reads sees a file that has not grown since the window was drawn, and
+    treating that as 'caught up to the end' would move the cursor over the
+    prefix the writer is still finishing.
+    """
+    transcript = tmp_path / "rollout.jsonl"
+    _append_codex_message(transcript, TIMESTAMP, "before")
+    line = _codex_message_line("2026-06-20T04:46:00.000000Z", "after")
+    flushed = line.index('"payload"')
+    _append_text(transcript, line[:flushed])
+    cursor = RolloutCursor()
+    read_assistant_messages(transcript, limit=5, cursor=cursor, driver=CODEX_DRIVER)
+
+    quiet = [
+        read_assistant_messages(
+            transcript,
+            limit=5,
+            append_only=True,
+            cursor=cursor,
+            driver=CODEX_DRIVER,
+        )
+        for _ in range(QUIET_APPEND_READS)
+    ]
+    _append_text(transcript, line[flushed:])
+    delta = read_assistant_messages(
+        transcript,
+        limit=5,
+        append_only=True,
+        cursor=cursor,
+        driver=CODEX_DRIVER,
+    )
+
+    assert quiet == [[] for _ in range(QUIET_APPEND_READS)]
+    assert [item.display_text for item in delta] == ["after"]
 
 
 def test_append_only_cursor_restarts_on_a_larger_rotated_transcript(tmp_path) -> None:
@@ -434,8 +517,17 @@ def _write_codex_transcript(tmp_path, monkeypatch, text: str) -> Path:
 
 
 def _append_codex_message(path: Path, timestamp: str, text: str) -> None:
-    _append_codex_payload(
-        path,
+    _append_text(path, _codex_message_line(timestamp, text))
+
+
+def _append_codex_payload(
+    path: Path, timestamp: str, payload: dict[str, object]
+) -> None:
+    _append_text(path, _codex_payload_line(timestamp, payload))
+
+
+def _codex_message_line(timestamp: str, text: str) -> str:
+    return _codex_payload_line(
         timestamp,
         {
             "type": "message",
@@ -445,18 +537,20 @@ def _append_codex_message(path: Path, timestamp: str, text: str) -> None:
     )
 
 
-def _append_codex_payload(
-    path: Path, timestamp: str, payload: dict[str, object]
-) -> None:
+def _codex_payload_line(timestamp: str, payload: dict[str, object]) -> str:
+    return (
+        json.dumps(
+            {"timestamp": timestamp, "type": "response_item", "payload": payload},
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
+def _append_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            json.dumps(
-                {"timestamp": timestamp, "type": "response_item", "payload": payload},
-                separators=(",", ":"),
-            )
-            + "\n"
-        )
+        handle.write(text)
 
 
 def _write_claude_transcript(tmp_path, monkeypatch, text: str) -> Path:
