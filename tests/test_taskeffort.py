@@ -469,7 +469,6 @@ def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypat
     ]
     state = SimpleNamespace(
         team_store=store,
-        phase_effort_task_rows=[row],
         phase_effort_transcript_files_by_thread={ACTOR_A: (transcript,)},
     )
 
