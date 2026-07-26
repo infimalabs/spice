@@ -19,7 +19,6 @@ runs is an opportunity for the operator to be heard.
 
 from __future__ import annotations
 
-import datetime
 import json
 import math
 import os
@@ -80,6 +79,7 @@ from spice.agent.shellhook import (
     rtk_rewrite_yield_selectors,
 )
 from spice.errors import SpiceError
+from spice.transcript.timestamps import parse_timestamp
 
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
@@ -893,15 +893,8 @@ def _working_state_last_maxim_bag(repo_root: Path) -> str:
 
 
 def _iso_timestamp_seconds(value: str) -> float | None:
-    clean = str(value or "").strip()
-    if not clean:
-        return None
-    if clean.endswith("Z"):
-        clean = f"{clean[:-1]}+00:00"
-    try:
-        return datetime.datetime.fromisoformat(clean).timestamp()
-    except ValueError:
-        return None
+    parsed = parse_timestamp(str(value or "").strip())
+    return parsed.timestamp() if parsed is not None else None
 
 
 def read_context_meter_cache_payload(path: Path) -> dict[str, Any]:

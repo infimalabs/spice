@@ -13,6 +13,7 @@ from spice.errors import SpiceError
 from spice.mail.ackstate import ack_state_records
 from spice.mail.inbox import inbox_item_key
 from spice.serve.payload.wire import validate_emitter_payload
+from spice.transcript.timestamps import parse_timestamp
 
 SUBMISSION_STAGES = ("accepted", "received", "completed")
 MAX_TRACKED_SUBMISSIONS = 200
@@ -287,12 +288,8 @@ def _timestamp_epoch(value: str) -> float:
 
 
 def _optional_timestamp_epoch(value: str) -> float | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    parsed = parse_timestamp(value)
+    return parsed.timestamp() if parsed is not None else None
 
 
 def _iso_timestamp(epoch: float) -> str:

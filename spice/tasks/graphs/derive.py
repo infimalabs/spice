@@ -45,6 +45,10 @@ def epoch(row: TaskRow, field: str) -> datetime | None:
 
 
 def iso(row: TaskRow, field: str) -> datetime | None:
+    # Graph stamps stay on the local wall clock instead of the shared transcript
+    # reader's UTC: ``epoch`` above hands back naive local datetimes and the
+    # histograms subtract the two kinds against each other, so reading these as
+    # UTC would shift every duration by the machine offset.
     raw = row.get(field)
     if not raw:
         return None

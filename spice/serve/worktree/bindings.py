@@ -123,6 +123,10 @@ def _authoritative_binding(
 
 
 def _started_at(binding: _TargetThreadBinding) -> datetime:
+    # Start stamps are read strictly here rather than through the shared
+    # transcript reader: choosing the newest copy of a thread compares real
+    # instants, so zoneless or malformed text is an ambiguity to surface rather
+    # than a UTC guess that could pick the wrong worktree.
     raw = str(binding.status.started_at or "").strip()
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
