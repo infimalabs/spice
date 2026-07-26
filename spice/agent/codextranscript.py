@@ -20,6 +20,7 @@ from typing import Any, Literal
 from spice.transcript.events import (
     UNLOCATED_SOURCE,
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -30,6 +31,7 @@ from spice.transcript.events import (
     ToolOutput,
     ToolOutputType,
     TranscriptEvent,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -56,6 +58,8 @@ def codex_line_events(
     if not isinstance(payload, dict):
         return []
     payload_type = payload.get("type")
+    if outer_type == "event_msg":
+        return _codex_event_message_events(stamper, payload)
     if outer_type != "response_item":
         return []
     if payload_type == "message":
@@ -80,6 +84,56 @@ def codex_line_events(
             raw_type=payload_type if isinstance(payload_type, str) else None,
         )
     ]
+
+
+def _codex_event_message_events(
+    stamper: LineStamper, payload: dict[str, Any]
+) -> list[TranscriptEvent]:
+    payload_type = payload.get("type")
+    if payload_type == "token_count":
+        # AgentDriver attaches the dialect-decoded ContextUsage fact.
+        return []
+    if payload_type == "task_started":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="started",
+                turn_id=_optional_str(payload.get("turn_id")),
+            )
+        ]
+    if payload_type == "task_complete":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="completed",
+                turn_id=_optional_str(payload.get("turn_id")),
+            )
+        ]
+    if payload_type == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str):
+            return [
+                UserMessage(
+                    at=stamper.stamp(),
+                    text=message,
+                    prompt_id=None,
+                    phase="prompt",
+                    turn_id=_optional_str(payload.get("turn_id")),
+                )
+            ]
+        return []
+    if payload_type == "exec_command_end":
+        return [
+            CommandExecution(
+                at=stamper.stamp(),
+                command=_command_value(payload.get("command") or payload.get("cmd")),
+                cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
+                exit_code=_command_int(payload.get("exit_code")),
+                status=_optional_str(payload.get("status")) or "completed",
+                turn_id=_optional_str(payload.get("turn_id")),
+            )
+        ]
+    return []
 
 
 def normalize_codex_line(raw: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +629,25 @@ def _unknown(stamper: LineStamper, reason: str, raw_type: str | None) -> Unknown
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _command_value(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return value if isinstance(value, str) else "-"
+
+
+def _command_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:

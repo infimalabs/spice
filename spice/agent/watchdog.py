@@ -54,9 +54,9 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.process.groups import popen_new_process_group_kwargs
-from spice.sessions.util import first_text
 from spice.tasks import config as task_config
 from spice.tasks.create import TaskAddResult
+from spice.transcript.decode import first_text
 
 LEGACY_REMINDER_PREFIX = "WATCHDOG:"
 WATCHDOG_REMINDER_PREFIX = "[MAXIM]"
