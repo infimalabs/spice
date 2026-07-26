@@ -219,20 +219,22 @@ class ServeProjectionStore:
     file. The store carries no forward migration ladder on purpose: a shape
     change costs a replay, so a drifted family is dropped and rebuilt rather
     than migrated, and a database written by a newer schema is discarded rather
-    than refused.
+    than refused. A file that goes missing under a running process is rebuilt
+    on the next read for the same reason: losing this store costs a replay, and
+    a replay is not something a process has to restart to perform.
     """
 
     _init_lock = Lock()
-    _initialized_paths: set[Path] = set()
+    _initialized_files: dict[Path, tuple[int, int]] = {}
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or projection_database_path()
 
     def _ensure_schema(self) -> None:
-        if self.path in self._initialized_paths:
+        if self._matches_initialized_file():
             return
         with self._init_lock:
-            if self.path in self._initialized_paths:
+            if self._matches_initialized_file():
                 return
             try:
                 self._open_and_sync_locked()
@@ -243,7 +245,30 @@ class ServeProjectionStore:
                 # block the reads it exists to accelerate.
                 self._discard_file_locked()
                 self._open_and_sync_locked()
-            self._initialized_paths.add(self.path)
+            if (identity := self._file_identity()) is not None:
+                self._initialized_files[self.path] = identity
+
+    def _matches_initialized_file(self) -> bool:
+        """Whether the file on disk is still the one this process synced.
+
+        An operator who deletes a database documented as disposable is owed a
+        rebuild on the next read, not a process that answers `no such table`
+        until it restarts, so what is remembered is the file rather than the
+        path. Establishing that costs one stat, which keeps an unchanged file on
+        the fast path instead of repeating the schema pass per connection.
+        """
+        identity = self._file_identity()
+        if identity is None:
+            return False
+        return self._initialized_files.get(self.path) == identity
+
+    def _file_identity(self) -> tuple[int, int] | None:
+        """Device and inode of the database, or None when nothing is there."""
+        try:
+            status = self.path.stat()
+        except OSError:
+            return None
+        return (status.st_dev, status.st_ino)
 
     def _open_and_sync_locked(self) -> None:
         with sqlite_connection(

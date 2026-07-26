@@ -89,6 +89,11 @@ preserve every row. The projection store deliberately has none of that.
   and rebuilt.
 - A file SQLite cannot open at all is discarded and recreated. Refusing instead
   would let a corrupt projection block the reads it exists to accelerate.
+- A file that goes missing or is replaced under a running process is rebuilt on
+  the next read. What a process remembers having synced is the file — its device
+  and inode — not the path, so an operator who deletes a database documented as
+  disposable pays a replay rather than a restart. The check is one stat, so an
+  unchanged file never repeats the schema pass.
 
 A shape change here costs a replay. Paying that is cheaper and safer than
 carrying migration code for facts that can be produced again.
@@ -148,7 +153,10 @@ Executable proofs in `tests/test_serveprojection.py` and
 - deleting the projection file leaves the authority dump byte-identical;
 - an unrecognized projection version discards the whole file, including tables
   this writer does not know, and rebuilds at the current version;
-- a corrupt projection file is rebuilt rather than reported; and
+- a corrupt projection file is rebuilt rather than reported;
+- a file deleted under a live store is rebuilt for that store's next diagnostics
+  read and next recorded delta, with authority byte-identical throughout, while
+  repeated reads of an unchanged file sync it exactly once; and
 - a drifted family is dropped whole, rebuilt from current DDL, and republished
   as a new generation while the authority file is untouched.
 
