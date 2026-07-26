@@ -250,7 +250,6 @@ class PreparedLaunch:
     resume_thread_id: str
     model: str
     reasoning_effort: str
-    service_tier: str
     fast_mode: bool
     unhonored_knobs: tuple[str, ...]
 
@@ -325,7 +324,6 @@ def _prepare_launch(
         resolved_personality if PERSONALITY_LAUNCH_KNOB in honors else ""
     )
     launch_fast_mode = fast_mode and FAST_MODE_LAUNCH_KNOB in honors
-    service_tier = driver.default_service_tier if launch_fast_mode else ""
     phase_launch = _claimed_task_phase_launch(repo_root, driver.name, status)
     model = driver.resolve_model(
         model or phase_launch.get("model", "") or configured_agent_model(repo_root)
@@ -345,14 +343,12 @@ def _prepare_launch(
             model=model,
             reasoning_effort=reasoning_effort,
             personality=launch_personality,
-            service_tier=service_tier,
             binary=agent_bin,
             fast_mode=launch_fast_mode,
         ),
         resume_thread_id=resume_thread_id,
         model=model,
         reasoning_effort=reasoning_effort,
-        service_tier=service_tier,
         fast_mode=launch_fast_mode,
         unhonored_knobs=unhonored,
     )
@@ -421,7 +417,6 @@ def ensure_agent(
             command=launch.command,
             model=launch.model,
             reasoning_effort=launch.reasoning_effort,
-            service_tier=launch.service_tier,
             resume_thread_id=launch.resume_thread_id,
             prompt_skill_path=prompt_skill_path,
             fast_mode=launch.fast_mode,
@@ -445,7 +440,6 @@ def start_agent(
     command: list[str],
     model: str,
     reasoning_effort: str,
-    service_tier: str,
     resume_thread_id: str,
     prompt_skill_path: Path,
     fast_mode: bool,
@@ -467,7 +461,6 @@ def start_agent(
             command=command,
             model=model,
             reasoning_effort=reasoning_effort,
-            service_tier=service_tier,
             resume_thread_id=resume_thread_id,
             log_path=log_path,
             fast_mode=fast_mode,
@@ -491,7 +484,6 @@ def start_agent(
             driver=driver_for(repo_root).name,
             model=model,
             reasoning_effort=reasoning_effort,
-            service_tier=service_tier,
             thread_id=started_thread_id,
             prompt_skill_path=prompt_skill_path,
             log_path=log_path,
@@ -515,7 +507,6 @@ def build_agent_state(
     driver: str,
     model: str,
     reasoning_effort: str,
-    service_tier: str,
     thread_id: str,
     prompt_skill_path: Path,
     log_path: Path,
@@ -531,7 +522,6 @@ def build_agent_state(
         "driver": driver,
         "model": model,
         "reasoning_effort": reasoning_effort,
-        "service_tier": service_tier,
         "thread_id": thread_id,
         "prompt_skill_path": str(prompt_skill_path),
         "log_path": str(log_path),
@@ -549,7 +539,6 @@ def spawn_agent_supervisor(
     command: list[str],
     model: str,
     reasoning_effort: str,
-    service_tier: str,
     resume_thread_id: str,
     log_path: Path,
     fast_mode: bool,
@@ -569,8 +558,6 @@ def spawn_agent_supervisor(
         model,
         "--reasoning-effort",
         reasoning_effort,
-        "--service-tier",
-        service_tier,
         "--resume-thread-id",
         resume_thread_id,
         "--log-path",
@@ -1170,7 +1157,6 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 driver=driver_for(repo_root).name,
                 model=str(args.model),
                 reasoning_effort=str(args.reasoning_effort),
-                service_tier=str(args.service_tier or ""),
                 thread_id=started_thread_id,
                 prompt_skill_path=prompt_skill_path,
                 log_path=log_path,
@@ -1418,7 +1404,6 @@ def import_agent(
             "driver": driver,
             "model": "",
             "reasoning_effort": "",
-            "service_tier": "",
             "thread_id": thread_id,
             "prompt_skill_path": str(prompt_skill_path or ""),
             "log_path": "",

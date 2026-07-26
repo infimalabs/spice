@@ -34,7 +34,6 @@ def _record_identity(
         actual_driver="codex",
         actual_model="actual-model",
         actual_effort="low",
-        actual_service_tier="fast",
         desired_driver="codex",
         desired_model="desired-model",
         desired_effort="high",
@@ -85,7 +84,6 @@ class _Status:
     thread_id: str = ""
     model: str = ""
     reasoning_effort: str = ""
-    service_tier: str = ""
     state_path: Path | None = None
 
 
@@ -158,7 +156,6 @@ def _identity_status(
     thread_id: str = "",
     model: str = "",
     effort: str = "",
-    service_tier: str = "",
     started_at: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
@@ -167,7 +164,6 @@ def _identity_status(
         thread_id=thread_id,
         model=model,
         reasoning_effort=effort,
-        service_tier=service_tier,
         started_at=started_at,
         driver=driver,
         state_path=repo / ".git" / ".spice" / "agents" / "state.json",
@@ -264,7 +260,6 @@ def test_serve_agent_identity_reports_unbound_target_identity(tmp_path, monkeypa
     assert payload["launch"]["actual"] == {
         "model": "",
         "effort": "",
-        "serviceTier": "",
         "source": "",
     }
     assert payload["renewal"] == {
@@ -295,7 +290,6 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
             thread_id="thread-a",
             model="actual-model",
             effort="low",
-            service_tier="fast",
             started_at="2026-06-20T04:00:00Z",
         ),
     )
@@ -326,7 +320,6 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
     assert payload["launch"]["actual"] == {
         "model": "actual-model",
         "effort": "low",
-        "serviceTier": "fast",
         "source": "agent state",
     }
     assert stored is not None
@@ -339,7 +332,6 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
     assert stored.actual_driver == "claude"
     assert stored.actual_model == "actual-model"
     assert stored.actual_effort == "low"
-    assert stored.actual_service_tier == "fast"
     assert stored.desired_driver == "codex"
     assert stored.desired_model == "desired-model"
     assert stored.desired_effort == "high"

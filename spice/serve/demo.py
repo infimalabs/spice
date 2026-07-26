@@ -267,7 +267,6 @@ def _write_demo_agent_state(repo_root: Path) -> None:
             "driver": "claude",
             "model": "claude-opus-4-8",
             "reasoning_effort": "",
-            "service_tier": "",
             "pid": 0,
             "process_group_id": 0,
         },

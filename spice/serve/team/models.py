@@ -73,7 +73,6 @@ class TeamAgentIdentity:
     actual_driver: str = ""
     actual_model: str = ""
     actual_effort: str = ""
-    actual_service_tier: str = ""
     desired_driver: str = ""
     desired_model: str = ""
     desired_effort: str = ""
@@ -95,7 +94,6 @@ class TeamAgentIdentity:
             "actualDriver": self.actual_driver,
             "actualModel": self.actual_model,
             "actualEffort": self.actual_effort,
-            "actualServiceTier": self.actual_service_tier,
             "desiredDriver": self.desired_driver,
             "desiredModel": self.desired_model,
             "desiredEffort": self.desired_effort,

@@ -97,7 +97,6 @@ def configure_agent_parser(subparsers: Any) -> None:
     supervise.add_argument("--action", required=True)
     supervise.add_argument("--model", required=True)
     supervise.add_argument("--reasoning-effort", required=True)
-    supervise.add_argument("--service-tier", default="")
     supervise.add_argument("--resume-thread-id", default="")
     supervise.add_argument("--log-path", required=True)
     supervise.add_argument("--fast-mode", action="store_true")
@@ -257,11 +256,7 @@ def render_agent_status(status: Any, *, output_observation: Any = None) -> str:
         f"pid={status.pid or '-'}",
         f"pgid={status.process_group_id or '-'}",
         f"thread={status.thread_id or '-'}",
-        (
-            f"model={status.model or '-'} "
-            f"effort={status.reasoning_effort or '-'} "
-            f"service_tier={status.service_tier or '-'}"
-        ),
+        f"model={status.model or '-'} effort={status.reasoning_effort or '-'}",
         f"started_at={status.started_at or '-'}",
     ]
     if getattr(status, "ready_at", ""):
@@ -294,7 +289,6 @@ def render_ensure_result(result: Any) -> str:
         f"pid={result.status.pid or '-'}",
         f"pgid={result.status.process_group_id or '-'}",
         f"thread={result.status.thread_id or '-'}",
-        f"service_tier={result.status.service_tier or '-'}",
         f"prompt={result.prompt}",
     ]
     unhonored = result.unhonored_launch_knobs

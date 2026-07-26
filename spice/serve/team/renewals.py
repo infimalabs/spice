@@ -205,7 +205,6 @@ class TeamRenewalStoreMixin:
             "actualDriver": "",
             "actualModel": "",
             "actualEffort": "",
-            "actualServiceTier": "",
             "desiredDriver": desired_driver,
             "desiredModel": desired_model,
             "desiredEffort": desired_effort,

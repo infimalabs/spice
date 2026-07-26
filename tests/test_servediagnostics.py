@@ -43,7 +43,6 @@ def _record_identity(store: ServeTeamStore) -> None:
         actual_driver="codex",
         actual_model="actual-model",
         actual_effort="low",
-        actual_service_tier="fast",
         desired_driver="codex",
         desired_model="desired-model",
         desired_effort="high",

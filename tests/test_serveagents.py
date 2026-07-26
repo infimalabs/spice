@@ -1368,7 +1368,6 @@ def test_agent_status_payload_distinguishes_starting_and_startup_stalled(
         thread_id=THREAD_A,
         model="gpt-test",
         reasoning_effort="high",
-        service_tier="",
         ready_at="",
         startup_failure="",
         running=True,

@@ -141,7 +141,6 @@
  * @typedef {Object} ServeAgentLaunchFacts
  * @property {string=} model
  * @property {string=} effort
- * @property {string=} serviceTier
  * @property {string=} source
  */
 
@@ -195,7 +194,6 @@
  * @property {string=} actualDriver
  * @property {string=} actualModel
  * @property {string=} actualEffort
- * @property {string=} actualServiceTier
  * @property {string=} desiredDriver
  * @property {string=} desiredModel
  * @property {string=} desiredEffort
@@ -352,7 +350,6 @@
  * @property {string=} status
  * @property {number=} pid
  * @property {number=} processGroupId
- * @property {string=} serviceTier
  * @property {string=} readyAt
  * @property {string=} startupFailure
  * @property {string=} prompt
@@ -388,7 +385,6 @@
  * @property {undefined=} status
  * @property {undefined=} pid
  * @property {undefined=} processGroupId
- * @property {undefined=} serviceTier
  * @property {undefined=} readyAt
  * @property {undefined=} startupFailure
  * @property {undefined=} prompt
@@ -406,7 +402,6 @@
  * @property {string} threadId
  * @property {string} model
  * @property {string} effort
- * @property {string} serviceTier
  * @property {boolean} launchable
  * @property {string} bindingStatus
  * @property {string} bindingError

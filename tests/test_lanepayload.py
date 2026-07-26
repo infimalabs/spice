@@ -61,7 +61,6 @@ def _record_identity(
         actual_driver="codex",
         actual_model="actual-model",
         actual_effort="low",
-        actual_service_tier="fast",
         desired_driver="codex",
         desired_model="desired-model",
         desired_effort="high",
@@ -115,7 +114,6 @@ class _Status:
     thread_id: str = ""
     model: str = ""
     reasoning_effort: str = ""
-    service_tier: str = ""
     state_path: Path | None = None
 
 
@@ -178,7 +176,6 @@ def _identity_status(
     thread_id: str = "",
     model: str = "",
     effort: str = "",
-    service_tier: str = "",
     started_at: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
@@ -187,7 +184,6 @@ def _identity_status(
         thread_id=thread_id,
         model=model,
         reasoning_effort=effort,
-        service_tier=service_tier,
         started_at=started_at,
         driver=driver,
         state_path=repo / ".git" / ".spice" / "agents" / "state.json",

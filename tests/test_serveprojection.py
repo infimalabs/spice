@@ -294,7 +294,6 @@ def test_authority_answers_every_read_while_projections_are_unavailable(
         actual_driver="codex",
         actual_model="gpt-current",
         actual_effort="high",
-        actual_service_tier="priority",
         desired_driver="codex",
         desired_model="gpt-next",
         desired_effort="xhigh",

@@ -70,7 +70,7 @@ context.renderLanePayloadPresentation(lane, {
     driver: { desired: "codex", actual: "", transcriptOwner: "" },
     launch: {
       desired: { model: "gpt-5.5", effort: "xhigh" },
-      actual: { model: "", effort: "", serviceTier: "", source: "" },
+      actual: { model: "", effort: "", source: "" },
     },
     renewal: { state: "none" },
     target: {},
@@ -107,7 +107,7 @@ context.renderLanePayloadPresentation(lane, {
     },
     launch: {
       desired: { model: "gpt-5.5", effort: "xhigh" },
-      actual: { model: "claude-opus", effort: "low", serviceTier: "", source: "agent state" },
+      actual: { model: "claude-opus", effort: "low", source: "agent state" },
     },
     renewal: { state: "requested" },
     target: {},

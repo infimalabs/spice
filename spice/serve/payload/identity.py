@@ -306,7 +306,6 @@ def record_serve_agent_identity(
         "actual_driver": identity["driver"]["actual"],
         "actual_model": actual_launch["model"],
         "actual_effort": actual_launch["effort"],
-        "actual_service_tier": actual_launch["serviceTier"],
         "desired_driver": identity["driver"]["desired"],
         "desired_model": identity["launch"]["desired"]["model"],
         "desired_effort": identity["launch"]["desired"]["effort"],
@@ -549,19 +548,11 @@ def _target_actor_previous_names(
 def _actual_launch_identity(status: Any) -> dict[str, str]:
     model = str(getattr(status, "model", "") or "")
     effort = str(getattr(status, "reasoning_effort", "") or "")
-    service_tier = str(getattr(status, "service_tier", "") or "")
     started_at = str(getattr(status, "started_at", "") or "")
-    has_actual = bool(
-        getattr(status, "thread_id", "")
-        or model
-        or effort
-        or service_tier
-        or started_at
-    )
+    has_actual = bool(getattr(status, "thread_id", "") or model or effort or started_at)
     return {
         "model": model,
         "effort": effort,
-        "serviceTier": service_tier,
         "source": "agent state" if has_actual else "",
     }
 

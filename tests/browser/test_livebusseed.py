@@ -105,7 +105,6 @@ def _write_state(worktree_root: Path, thread_id: str, agent_pid: int) -> None:
             "driver": "claude",
             "model": "claude-opus-4-8",
             "reasoning_effort": "",
-            "service_tier": "",
             "pid": agent_pid,
             "process_group_id": agent_pid,
         },

@@ -60,7 +60,7 @@ That is explicit and useful for display, but it is desired launch state, not a
 complete description of the currently running or previously bound session.
 
 Agent status endpoints in `spice/serve/agentapi.py` expose `provider`,
-`threadId`, `model`, `effort`, and `serviceTier` from `agent_status`. That is
+`threadId`, `model`, and `effort` from `agent_status`. That is
 closer to current session state, but it is separate from route identity, team
 membership, renewal state, and the lane info contract.
 
@@ -149,7 +149,6 @@ renewal, and metrics callers consume it. The shape should be driver-neutral:
     "actual": {
       "model": "gpt-5.5",
       "effort": "xhigh",
-      "serviceTier": "fast",
       "source": "agent state"
     }
   },
@@ -192,7 +191,6 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     driver_transcript_owner TEXT NOT NULL DEFAULT '',
     actual_model TEXT NOT NULL DEFAULT '',
     actual_effort TEXT NOT NULL DEFAULT '',
-    actual_service_tier TEXT NOT NULL DEFAULT '',
     desired_model TEXT NOT NULL DEFAULT '',
     desired_effort TEXT NOT NULL DEFAULT '',
     team_index INTEGER,
@@ -249,7 +247,7 @@ should join through `agent_identities`, not parse the actor id.
 - The team schema and store persist `agent_identities`, promote explicit
   `target:<id>` placeholders to `thread:<id>` actors, and preserve aliases.
 - Transcript resolution reports its owner driver; payloads separate actual and
-  desired driver/model/effort/service-tier facts.
+  desired driver/model/effort facts.
 - Renewal payloads record predecessor, successor, ancestor, and team-slot
   identity without inferring meaning from UUID shape.
 - Identity payload, persistence, routing, rendering, and renewal tests pin the

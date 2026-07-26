@@ -117,11 +117,11 @@ def _seed_authority(path: Path) -> None:
         connection.execute(
             "INSERT INTO agent_identities "
             "(actor_id, target_id, thread_id, actual_driver, actual_model, "
-            "actual_effort, actual_service_tier, desired_driver, desired_model, "
+            "actual_effort, desired_driver, desired_model, "
             "desired_effort, transcript_owner, renewal_state, "
             "renewal_ancestor_thread_id, renewal_successor_thread_id, "
             "renewal_revision, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "agent-a",
                 "main-c",
@@ -129,7 +129,6 @@ def _seed_authority(path: Path) -> None:
                 "codex",
                 "gpt-current",
                 "high",
-                "priority",
                 "codex",
                 "gpt-next",
                 "xhigh",
