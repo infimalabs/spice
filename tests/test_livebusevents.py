@@ -424,7 +424,17 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
             "pendingInboxKeys",
             "pendingInboxRevision",
             "pendingInboxVersion",
+            "chrome",
         }
+        chrome = pushed["payload"]["chrome"]
+        assert set(chrome) == {"targetId", "pendingInbox"}
+        assert chrome["targetId"] == target.id
+        assert chrome["pendingInbox"]["authority"] == "inbox"
+        assert chrome["pendingInbox"]["value"]["keys"] == ["1jN54zJK"]
+        assert (
+            chrome["pendingInbox"]["order"]["revision"]
+            == (pushed["payload"]["pendingInboxVersion"])
+        )
         assert message_payload_calls == 1
         assert transcript.read_text(encoding="utf-8") == ""
     finally:

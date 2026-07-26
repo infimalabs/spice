@@ -424,6 +424,7 @@
  * @property {Array.<string>=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
  * @property {number=} pendingInboxVersion
+ * @property {LaneChromePayload=} chrome
  */
 
 /**
@@ -813,6 +814,7 @@
  * @property {WorkTreeRoute=} route
  * @property {ServerTiming=} serverTiming
  * @property {SubmissionLifecycle=} submission
+ * @property {LaneChromePayload=} chrome
  */
 
 /**

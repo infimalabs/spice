@@ -29,6 +29,7 @@ from spice.serve.livebuswatch import (
     _KqueueWatch,
     wait_for_change,
 )
+from spice.serve.payload.lane import lane_chrome_payload
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_live_bus_frame, validate_wire_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
@@ -983,6 +984,13 @@ def _pending_lane_payload(target: Any) -> dict[str, Any]:
         for key in PENDING_LANE_PAYLOAD_KEYS
         if key in pending_identity
     }
+    # A pending-only change saw the inbox and nothing else, so the frame names
+    # exactly one facet. Whatever the client holds for team configuration, the
+    # task board, or activity is left standing rather than restated from a pass
+    # that never looked at them.
+    payload["chrome"] = lane_chrome_payload(
+        target_id=target.id, pending_identity=pending_identity
+    )
     return validate_wire_payload("PendingLanePayload", payload)
 
 

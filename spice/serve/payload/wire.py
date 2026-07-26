@@ -500,6 +500,7 @@ WIRE_OBJECTS = (
             "pendingInboxKeys": STRINGS,
             "pendingInboxRevision": STRING,
             "pendingInboxVersion": INTEGER,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -893,6 +894,7 @@ WIRE_OBJECTS = (
             "route": _ref("WorkTreeRoute"),
             "serverTiming": _ref("ServerTiming"),
             "submission": _ref("SubmissionLifecycle"),
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(

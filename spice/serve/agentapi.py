@@ -38,6 +38,7 @@ from spice.serve.lifecycle import (
     LifecycleDecision,
     LifecycleOutcome,
 )
+from spice.serve.payload.lane import lane_chrome_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
@@ -181,6 +182,13 @@ def sent_steering_payload(
     }
     if pending_identity is not None:
         payload.update(pending_identity)
+        if target is not None:
+            # The send just republished this lane's inbox and read the result
+            # back, so the reply names the pending facet alone. The route it
+            # carries speaks for the team facets it settled separately.
+            payload["chrome"] = lane_chrome_payload(
+                target_id=target.id, pending_identity=pending_identity
+            )
     elif pending_count is not None:
         payload["pendingInboxCount"] = pending_count
         payload["pendingInboxLabel"] = str(pending_count)
