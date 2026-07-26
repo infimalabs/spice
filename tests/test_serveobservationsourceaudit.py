@@ -53,7 +53,7 @@ def test_serve_activity_attribution_uses_typed_events_and_family_reads():
     assert "projections.connect()" not in ingestion
     assert "projections.connect()" not in metric_queries
     assert "projections.read(AGENT_ACTIVITY)" in metric_queries
-    assert "projections.write(AGENT_ACTIVITY)" in metric_queries
+    assert "projections._write(AGENT_ACTIVITY)" in metric_queries
 
 
 def test_task_lifecycle_query_has_no_projection_or_duplicate_store_read():

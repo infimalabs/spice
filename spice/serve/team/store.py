@@ -108,6 +108,8 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
 PRUNE_EVENT_TEAM_ID = "__system__"
 GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
+GLOBAL_STORE_GENERATION_KEY = "store_generation"
+_NANOSECONDS_PER_MICROSECOND = 1000
 
 
 def _schema_statements(script: str) -> tuple[str, ...]:
@@ -268,6 +270,8 @@ class ServeTeamStore(
             ]
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
+            if source_version == 0:
+                self._write_store_generation_locked(connection)
             self._validate_authority_schema_locked(
                 connection, TEAM_AUTHORITY_SCHEMA_VERSION
             )
@@ -276,6 +280,47 @@ class ServeTeamStore(
         except BaseException:
             connection.rollback()
             raise
+
+    def _write_store_generation_locked(self, connection: sqlite3.Connection) -> None:
+        """Date this store the instant it is created, and only then.
+
+        Every counter this store keeps -- a team's event revision, an agent's
+        renewal revision -- restarts from zero in a store that was deleted and
+        remade, so a reader keeping the highest revision it has seen would
+        refuse the rebuilt store until it counted back past where the replaced
+        one stopped. The generation is what carries a reader across that: a
+        store is only ever created after every store it replaces, so this
+        instant rises exactly where those revisions restart.
+
+        Only a store being created writes one. A store that already existed is
+        left with no generation at all, which is what it truthfully has and
+        which orders below every minted one -- correctly, because that store
+        does predate them all. Its own remake mints one and rises above it.
+        Migration reaches authority rows for no other reason, and dating a
+        store by when it was upgraded would be the wrong instant anyway.
+
+        It is counted in microseconds because that is what every generation
+        this repo mints is counted in, so a reader that meets more than one of
+        them meets one kind of token rather than one encoding per authority.
+        """
+        connection.execute(
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, 0)",
+            (
+                GLOBAL_STORE_GENERATION_KEY,
+                str(time.time_ns() // _NANOSECONDS_PER_MICROSECOND),
+                time.time(),
+            ),
+        )
+
+    def store_generation(self) -> str:
+        """Return the instant this store was created, as its readers order it."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM global_settings WHERE key = ?",
+                (GLOBAL_STORE_GENERATION_KEY,),
+            ).fetchone()
+        return str(row["value"]) if row is not None else ""
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])

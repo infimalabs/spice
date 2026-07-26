@@ -303,7 +303,7 @@ def _representative_history(
 def _discard_projection_schema(store: ServeTeamStore) -> None:
     with store.projections.connect() as projection:
         projection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION + 1}")
-    ServeProjectionStore._initialized_paths.discard(store.projections.path)
+    ServeProjectionStore._initialized_files.pop(store.projections.path, None)
 
 
 def test_representative_history_has_full_parity_after_schema_reset_and_rebuild(

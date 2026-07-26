@@ -316,7 +316,7 @@ def test_incompatible_projection_diagnostics_report_explicit_unavailability(
     store.record_agent_metric_delta(AGENT_A, tool_calls=1, message_timestamps=[1000.0])
     with store.projections.connect() as projection:
         projection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION + 1}")
-    ServeProjectionStore._initialized_paths.discard(store.projections.path)
+    ServeProjectionStore._initialized_files.pop(store.projections.path, None)
 
     payload = team_diagnostics_payload(store=store)
     projection = payload["projections"][0]

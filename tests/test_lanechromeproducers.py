@@ -22,12 +22,15 @@ from spice.serve import agentapi, lifecycle as serve_lifecycle, observer, taskbo
 from spice.serve.lifecycle import LifecycleDecision
 from spice.serve.payload import lane, message
 from spice.serve.payload.chrome import (
+    LANE_CHROME_GENERATION_JOIN,
     LaneChromeObservation,
     LaneChromeOrder,
     assemble_lane_chrome,
 )
+from spice.serve.payload.identity import team_facts_for_actor, team_identity_payload
 from spice.serve.payload.wire import LANE_CHROME_FACET_AUTHORITIES
 from spice.serve.team.schema import DEFAULT_LIFETIME
+from spice.serve.team.store import ServeTeamStore
 from spice.serve.worktree import inventory
 from spice.serve.workroutes import (
     work_tree_send_accepted_response_payload,
@@ -69,6 +72,13 @@ WHOLE_LANE_FACETS = {
 }
 TEAM_REVISION_BEFORE_CONFIG = 11
 TEAM_REVISION_AFTER_CONFIG = 12
+TEAM_ACTOR = "agent-a"
+# The two facets the team store alone orders, and so the two it dates by the
+# generation it was created at.
+TEAM_STORE_FACETS = ("teamConfig", "renewal")
+# Seated into a store that is about to be replaced, so its revision counts past
+# anything the store that remade it will reach.
+BOARD_EXTRA_MEMBERS = ("agent-b", "agent-c", "agent-d")
 
 
 class _FailedDiscoveryState(_State):
@@ -173,10 +183,12 @@ def test_a_task_filter_change_advances_the_board_facet_epoch(tmp_path, monkeypat
 
     before = first["workTrees"][0]["chrome"]["taskBoard"]
     after = second["workTrees"][0]["chrome"]["taskBoard"]
-    # The board's own revision is what orders this facet, so a filter change is
-    # a new epoch rather than a lane-wide counter someone had to advance.
-    assert before["order"]["epoch"] == BEFORE_GENERATION
-    assert after["order"]["epoch"] == AFTER_GENERATION
+    # The board's own generation leads the epoch, so a filter change is a new
+    # epoch rather than a lane-wide counter someone had to advance. This pass
+    # observed no team, and that authority still holds its place in the epoch
+    # rather than dropping out of it.
+    assert before["order"]["epoch"] == BEFORE_GENERATION + LANE_CHROME_GENERATION_JOIN
+    assert after["order"]["epoch"] == AFTER_GENERATION + LANE_CHROME_GENERATION_JOIN
     assert [
         item["name"] for item in after["value"]["taskFilterInventory"]["filters"]
     ] == ["serve.two"]
@@ -222,12 +234,15 @@ def test_a_team_config_change_advances_joined_board_and_renewal_facets() -> None
         task_filter_inventory=inventory_payload,
     )
 
+    # Neither store was remade here, so the board's epoch stands still and the
+    # team revision is what moves. These passes carry team facts without a
+    # generation, and that authority still holds its place in the joined epoch.
     assert before["taskBoard"]["order"] == {
-        "epoch": STABLE_GENERATION,
+        "epoch": STABLE_GENERATION + LANE_CHROME_GENERATION_JOIN,
         "revision": TEAM_REVISION_BEFORE_CONFIG,
     }
     assert after["taskBoard"]["order"] == {
-        "epoch": STABLE_GENERATION,
+        "epoch": STABLE_GENERATION + LANE_CHROME_GENERATION_JOIN,
         "revision": TEAM_REVISION_AFTER_CONFIG,
     }
     assert before["renewal"]["order"]["revision"] == TEAM_REVISION_BEFORE_CONFIG
@@ -246,13 +261,30 @@ def _real_board_chrome(target_id: str) -> dict:
     )
 
 
-def test_a_remade_task_store_supersedes_the_generation_it_replaced(
-    tmp_path, monkeypatch
-):
+def _seat_task_backend(tmp_path, monkeypatch):
+    """Point the task store at an empty backend under ``tmp_path``."""
     backend = tmp_path / "task-backend"
     monkeypatch.setenv(task_config.TASK_BACKEND_ENV, str(backend))
     monkeypatch.setattr(taskboard.tw, "export", lambda *_args, **_kwargs: [])
     task_config.mark_task_backend_changed("task")
+    return backend
+
+
+def _board_epoch_parts(facet: dict) -> tuple[str, str]:
+    """Split a board epoch back into the generation each store contributed.
+
+    The task store re-mints its generation on every board change, and the team
+    store mints one when it is created, so a board epoch names the task store's
+    first and the team store's behind it. Unpacking holds it to exactly those.
+    """
+    board, team = facet["order"]["epoch"].split(LANE_CHROME_GENERATION_JOIN)
+    return board, team
+
+
+def test_a_remade_task_store_supersedes_the_generation_it_replaced(
+    tmp_path, monkeypatch
+):
+    backend = _seat_task_backend(tmp_path, monkeypatch)
 
     before = _real_board_chrome("wt")["taskBoard"]
     shutil.rmtree(backend)
@@ -269,8 +301,8 @@ def test_a_remade_task_store_supersedes_the_generation_it_replaced(
     # what makes the comparison worth anything. Re-observing the same
     # generation publishes nothing, which is what says the first result is a
     # supersession rather than an assembler that republishes whatever it holds.
-    assert before["order"]["epoch"].isdigit()
-    assert after["order"]["epoch"].isdigit()
+    assert _board_epoch_parts(before)[0].isdigit()
+    assert _board_epoch_parts(after)[0].isdigit()
     assert assemble_lane_chrome("wt", [remade], published=replaced).changed == (
         "taskBoard",
     )
@@ -341,6 +373,161 @@ def test_the_activity_generation_orders_stamps_across_a_written_offset():
     assert earlier["value"]["lastAssistantAt"] > later["value"]["lastAssistantAt"]
     assert int(later["order"]["epoch"]) > int(earlier["order"]["epoch"])
     assert landed.changed == ("activity",)
+
+
+def _team_store(path) -> ServeTeamStore:
+    """Open a store the way a restarted serve does, and seat one team in it.
+
+    The schema memo is process-wide, so discarding this path is what stands in
+    for the restart that actually separates a replaced store from the one that
+    remade it.
+    """
+    ServeTeamStore._initialized_paths.discard(path)
+    store = ServeTeamStore(path=path)
+    store.create_team(members=[TEAM_ACTOR])
+    return store
+
+
+def _real_team_chrome(store: ServeTeamStore) -> dict:
+    """Build team chrome the way a lane pass does, off the live team store."""
+    facts = team_facts_for_actor(store, TEAM_ACTOR)
+    return lane.lane_chrome_payload(
+        target_id="wt",
+        team_identity=team_identity_payload(facts),
+        team_facts=facts,
+        renewal_intent=facts["renewalIntent"],
+    )
+
+
+def _orders(chrome: dict) -> dict:
+    return {
+        facet: LaneChromeOrder(
+            epoch=chrome[facet]["order"]["epoch"],
+            revision=chrome[facet]["order"]["revision"],
+        )
+        for facet in TEAM_STORE_FACETS
+    }
+
+
+def test_a_remade_team_store_supersedes_the_generation_it_replaced(tmp_path):
+    path = tmp_path / "teams.sqlite3"
+
+    replaced = _real_team_chrome(_team_store(path))
+    path.unlink()
+    remade = _real_team_chrome(_team_store(path))
+
+    remade_orders = _orders(remade)
+    observed = [
+        LaneChromeObservation(facet, remade_orders[facet], remade[facet]["value"])
+        for facet in TEAM_STORE_FACETS
+    ]
+
+    # Both stores were seated the same way, so their revisions match exactly and
+    # the generation is the only thing left that can say which store spoke last.
+    # Every order here comes from the authority; nothing in this test writes
+    # one. Re-observing the same generation publishes nothing, which is what
+    # says the first result is a supersession rather than an assembler
+    # republishing what it holds.
+    assert [replaced[facet]["order"]["revision"] for facet in TEAM_STORE_FACETS] == [
+        remade[facet]["order"]["revision"] for facet in TEAM_STORE_FACETS
+    ]
+    assert (
+        assemble_lane_chrome("wt", observed, published=_orders(replaced)).changed
+        == TEAM_STORE_FACETS
+    )
+    assert assemble_lane_chrome("wt", observed, published=remade_orders).changed == ()
+    assert int(remade["teamConfig"]["order"]["epoch"]) > int(
+        replaced["teamConfig"]["order"]["epoch"]
+    )
+
+
+def _real_joined_board_chrome(store: ServeTeamStore) -> dict:
+    """Build board chrome the way a lane pass does, off both live stores."""
+    facts = team_facts_for_actor(store, TEAM_ACTOR)
+    return lane.lane_chrome_payload(
+        target_id="wt",
+        team_identity=team_identity_payload(facts),
+        team_facts=facts,
+        task_filter_inventory=(
+            taskboard.open_task_board_projection().task_filter_inventory
+        ),
+    )["taskBoard"]
+
+
+def _board_observation(facet: dict) -> LaneChromeObservation:
+    """Carry the producer's own order for the board, never one written here."""
+    return LaneChromeObservation(
+        "taskBoard",
+        LaneChromeOrder(
+            epoch=facet["order"]["epoch"], revision=facet["order"]["revision"]
+        ),
+        facet["value"],
+    )
+
+
+def test_a_remade_team_store_supersedes_the_board_that_counts_in_it(
+    tmp_path, monkeypatch
+):
+    _seat_task_backend(tmp_path, monkeypatch)
+    path = tmp_path / "teams.sqlite3"
+
+    store = _team_store(path)
+    team_id = store.current_team_for_agent(TEAM_ACTOR)
+    for member in BOARD_EXTRA_MEMBERS:
+        store.assign_agent(team_id=team_id, agent_id=member)
+    replaced = _real_joined_board_chrome(store)
+    path.unlink()
+    remade = _real_joined_board_chrome(_team_store(path))
+
+    # The board's revision counts in the team store, so the remade store counts
+    # it from the start again and lands below where the replaced store left it.
+    # The task store stood through all of this, so its generation is identical on
+    # both sides and cannot be what carries the board across -- only the team
+    # generation joined beside it can. Re-observing the same order publishes
+    # nothing, which is what says the first result is a supersession rather than
+    # an assembler republishing whatever it holds.
+    assert replaced["order"]["revision"] > remade["order"]["revision"]
+    observed = [_board_observation(remade)]
+    assert assemble_lane_chrome(
+        "wt", observed, published={"taskBoard": _board_observation(replaced).order}
+    ).changed == ("taskBoard",)
+    assert (
+        assemble_lane_chrome(
+            "wt", observed, published={"taskBoard": observed[0].order}
+        ).changed
+        == ()
+    )
+    assert _board_epoch_parts(replaced)[0] == _board_epoch_parts(remade)[0]
+    assert int(_board_epoch_parts(remade)[1]) > int(_board_epoch_parts(replaced)[1])
+
+
+def test_a_remade_task_store_supersedes_the_board_the_team_still_counts(
+    tmp_path, monkeypatch
+):
+    backend = _seat_task_backend(tmp_path, monkeypatch)
+    store = _team_store(tmp_path / "teams.sqlite3")
+
+    replaced = _real_joined_board_chrome(store)
+    shutil.rmtree(backend)
+    remade = _real_joined_board_chrome(store)
+
+    # The other store is the one remade this time, and the team store stood
+    # through it, so its revision and its generation are both identical on the
+    # two sides and the board's own generation is all that moved. A facet dated
+    # by two stores has to cross a remake of either one.
+    assert replaced["order"]["revision"] == remade["order"]["revision"]
+    observed = [_board_observation(remade)]
+    assert assemble_lane_chrome(
+        "wt", observed, published={"taskBoard": _board_observation(replaced).order}
+    ).changed == ("taskBoard",)
+    assert (
+        assemble_lane_chrome(
+            "wt", observed, published={"taskBoard": observed[0].order}
+        ).changed
+        == ()
+    )
+    assert _board_epoch_parts(replaced)[1] == _board_epoch_parts(remade)[1]
+    assert int(_board_epoch_parts(remade)[0]) > int(_board_epoch_parts(replaced)[0])
 
 
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):
