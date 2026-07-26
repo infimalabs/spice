@@ -13,7 +13,7 @@ from spice.agent.paths import (
 )
 from spice.serve.app import ServeState
 from spice.serve.payload.identity import (
-    serve_agent_identity_payload,
+    record_serve_agent_identity,
     target_bound_actor,
 )
 from spice.serve.team.store import ServeTeamStore
@@ -91,8 +91,7 @@ def test_newest_lane_owns_a_thread_reused_across_distinct_worktrees(tmp_path):
     ] == [f"target:{target_a.id}", f"thread:{THREAD_ID}"]
 
     identities = [
-        serve_agent_identity_payload(target, store=store)
-        for target in (target_a, target_c)
+        record_serve_agent_identity(store, target) for target in (target_a, target_c)
     ]
     assert [item["actorId"] for item in identities] == [
         f"target:{target_a.id}",
