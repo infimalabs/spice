@@ -29,7 +29,9 @@ from spice.serve.lifecycle import (
     submit_inbox_wake,
 )
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.payload.lane import lane_chrome_payload
 from spice.serve.payload.wire import validate_emitter_payload
+from spice.serve.taskboard import open_task_board_projection
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.serve.worktree.target import WorktreeTarget, match_serve_worktree
@@ -246,22 +248,34 @@ def _work_tree_send_result_payload(
     grant: Future[LifecycleOutcome] | None,
 ) -> dict[str, Any]:
     if grant is None:
+        # One read of the inbox this send just published into, shared by the
+        # flat result fields and the facet that orders them, so the reply cannot
+        # describe two different instants of the same lane.
+        pending_identity = pending_inbox_identity_payload(target.repo_root)
         response_payload = sent_steering_payload(
             sent,
             target=target,
-            pending_identity=pending_inbox_identity_payload(target.repo_root),
+            pending_identity=pending_identity,
         )
         send_actor = identity.team_actor_for_target(
             state.team_store, target, predecessor
         )
         _record_directive_publication(state, target, sent, send_actor=send_actor)
+        response_payload["chrome"] = lane_chrome_payload(
+            target_id=target.id, pending_identity=pending_identity
+        )
         return response_payload
 
     decision = explicit_send_decision(grant)
+    # The reply reports the inbox as it stands once the reconciler has settled
+    # this send: a launch that consumed the item leaves nothing pending, so this
+    # read waits for the decision instead of racing it.
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
     response_payload = sent_steering_response_payload(
         sent,
         target=target,
         decision=decision,
+        pending_identity=pending_identity,
     )
     agent_ensure = response_payload.get("agentEnsure")
     # The reconciler already settled which thread this send belongs to, renewal
@@ -285,10 +299,24 @@ def _work_tree_send_result_payload(
     if send_actor and not deadlettered:
         _record_directive_publication(state, target, sent, send_actor=send_actor)
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
+    renewal_facts: dict[str, Any] = {}
     if renewal_agent_id:
+        # The lifetime and the renewal request are one team-store observation of
+        # the actor this send leaves the lane with. An actor outside any team
+        # still has a renewal state to report, but no lifetime to pair it with,
+        # so the facet stays unnamed rather than carrying half of itself.
+        renewal_facts = identity.team_facts_for_actor(
+            state.team_store, renewal_agent_id
+        )
         response_payload["renewalIntent"] = identity.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
         )
+    response_payload["chrome"] = lane_chrome_payload(
+        target_id=target.id,
+        pending_identity=pending_identity,
+        team_facts=renewal_facts or None,
+        renewal_intent=renewal_facts.get("renewalIntent"),
+    )
     route_thread_id = send_agent_id or predecessor
     route_actor = identity.team_actor_for_target(
         state.team_store, target, route_thread_id
@@ -417,6 +445,7 @@ def _work_tree_route_payload(
     actor: str,
 ) -> dict[str, Any]:
     facts = identity.team_facts_for_actor(state.team_store, actor)
+    team_identity = identity.team_identity_payload(facts)
     return {
         "actor": actor,
         "targetIdentity": identity.target_identity_payload(target, thread_id),
@@ -425,15 +454,20 @@ def _work_tree_route_payload(
             target,
             thread_id,
         ),
-        "teamIdentity": identity.team_identity_payload(facts),
+        "teamIdentity": team_identity,
         "memberAgents": [actor] if actor else [],
-        "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
         "effectiveTaskFilters": facts.get("effectiveTaskFilters", []),
         "taskFilterEntries": facts.get("taskFilterEntries", []),
-        "routeFilters": facts.get("taskFilters", []),
-        "filterTerms": facts.get("taskFilters", []),
-        "filterArgs": facts.get("taskFilters", []),
         "laneFilterVersion": "",
         "lifetime": facts.get("lifetime", ""),
+        # A route reply reports the team configuration it just settled and
+        # nothing else: it read no inbox and no transcript, so those facets stay
+        # unnamed and the client keeps what it already holds for them.
+        "chrome": lane_chrome_payload(
+            target_id=target.id,
+            team_identity=team_identity,
+            team_facts=facts,
+            task_filter_inventory=open_task_board_projection().task_filter_inventory,
+        ),
     }

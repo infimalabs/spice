@@ -31,6 +31,7 @@ from spice.serve.payload.identity import (
 )
 from spice.serve.payload.lane import (
     _lane_info_payload,
+    lane_chrome_payload,
     lane_metrics_payload,
     status_line_payload,
 )
@@ -623,11 +624,18 @@ def _messages_worktree_payload(
     ack_contexts = _ack_contexts_for_worktree(
         target, keys=_ack_keys_for_messages(items)
     )
+    status_line = status_line_payload(
+        state,
+        target,
+        items=items,
+        error=error,
+        pending_count=pending,
+        pending_identity=pending_identity,
+        task_board=task_board,
+    )
     payload = {
         "messages": [item.to_payload() for item in items],
         "ackContexts": ack_contexts,
-        "targetWorktreeName": target.name,
-        "targetBranch": target.branch or target.name,
         "targetIdentity": target_identity_payload(
             target,
             thread_id,
@@ -652,14 +660,15 @@ def _messages_worktree_payload(
         "error": error or "",
         **pending_identity,
         "agentEnsure": agent_ensure or {},
-        "statusLine": status_line_payload(
-            state,
-            target,
-            items=items,
-            error=error,
-            pending_count=pending,
+        "statusLine": status_line,
+        "chrome": lane_chrome_payload(
+            target_id=target.id,
+            team_identity=team_identity,
+            team_facts=team_facts,
+            renewal_intent=renewal_intent,
+            task_filter_inventory=task_board.task_filter_inventory,
             pending_identity=pending_identity,
-            task_board=task_board,
+            last_assistant_at=status_line["lastAssistantAt"],
         ),
     }
     if removed_keys:

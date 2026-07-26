@@ -15,6 +15,7 @@ from spice.errors import SpiceError
 from spice.agent.identity import canonical_thread_id
 from spice.serve.livebus import LaneSignature
 from spice.serve.messages import TranscriptResolution, read_assistant_messages
+from spice.serve.payload.lane import lane_chrome_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -335,7 +336,6 @@ def observer_target_payload(session: ObserverSession) -> dict[str, Any]:
         "branch": session.target.branch,
         **payload,
         "pendingCount": 0,
-        "pendingLabel": "0",
         "privateTaskCount": 0,
         "agentProcessStatus": "observer",
     }
@@ -390,38 +390,54 @@ def _observer_lane_payload(session: ObserverSession) -> dict[str, Any]:
         },
         "thread": {"state": "bound", "threadId": session.thread_id},
     }
-    return {
-        "targetWorktreeName": session.target.name,
-        "targetBranch": session.target.branch,
+    # A read-only lane observes each chrome fact exactly once and never again:
+    # no inbox to fill, no team to reconfigure, no board to claim from. Naming
+    # the facts here and projecting them through the shared assembler keeps the
+    # observer answering in the same contract as a live lane, at a standing
+    # order that nothing later supersedes.
+    pending_identity = {
         "pendingInboxCount": 0,
+        "pendingInboxLabel": "0",
         "pendingInboxKeys": [],
         "pendingInboxRevision": "observer",
         "pendingInboxVersion": 1,
-        "targetIdentity": target_identity,
-        "serveAgentIdentity": serve_identity,
+    }
+    team_identity = {
+        "state": "member",
+        "teamId": team_id,
+        "teamRevision": 1,
+        "configRevision": 1,
+    }
+    team_facts = {
         "taskFilters": [],
         "taskFilterEntries": [],
         "effectiveTaskFilters": [],
-        "laneFilterVersion": "",
-        "teamIdentity": {
-            "state": "member",
-            "teamId": team_id,
-            "teamRevision": 1,
-            "configRevision": 1,
-        },
         "lifetime": "Steer",
         "renewalIntent": {},
+    }
+    return {
+        **pending_identity,
+        "targetIdentity": target_identity,
+        "serveAgentIdentity": serve_identity,
+        **team_facts,
+        "laneFilterVersion": "",
+        "teamIdentity": team_identity,
         "taskFilterInventory": {},
         "laneInfo": {"summaryRows": [], "members": []},
         "statusLine": {
             "agentVisualStatus": "idle",
             "preview": f"read-only {driver_name} transcript",
-            "pendingInboxCount": 0,
-            "pendingInboxKeys": [],
-            "pendingInboxRevision": "observer",
-            "pendingInboxVersion": 1,
+            **pending_identity,
         },
         "agentEnsure": {},
+        "chrome": lane_chrome_payload(
+            target_id=session.target.id,
+            team_identity=team_identity,
+            team_facts=team_facts,
+            renewal_intent=team_facts["renewalIntent"],
+            task_filter_inventory={},
+            pending_identity=pending_identity,
+        ),
     }
 
 

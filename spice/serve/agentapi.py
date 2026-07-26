@@ -213,15 +213,14 @@ def sent_steering_response_payload(
     *,
     target: WorktreeTarget,
     decision: LifecycleDecision | None,
+    pending_identity: dict[str, Any],
 ) -> dict[str, Any]:
     agent_ensure = decision.agent_ensure if decision is not None else None
-    pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
     return sent_steering_payload(
         sent,
         target=target,
         agent_ensure_override=agent_ensure or {},
-        pending_count=pending,
+        pending_count=int(pending_identity["pendingInboxCount"]),
         pending_identity=pending_identity,
     )
 

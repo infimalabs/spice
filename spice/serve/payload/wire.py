@@ -464,8 +464,6 @@ WIRE_OBJECTS = (
         {
             "messages": _array(_ref("LaneMessage")),
             "ackContexts": _array(_ref("AckContext")),
-            "targetWorktreeName": STRING,
-            "targetBranch": STRING,
             "pendingInboxCount": INTEGER,
             "pendingInboxKeys": STRINGS,
             "pendingInboxRevision": STRING,
@@ -489,6 +487,7 @@ WIRE_OBJECTS = (
             "pendingInboxLabel": STRING,
             "agentProcessStatus": STRING,
             "removedMessageKeys": STRINGS,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -499,6 +498,7 @@ WIRE_OBJECTS = (
             "pendingInboxKeys": STRINGS,
             "pendingInboxRevision": STRING,
             "pendingInboxVersion": INTEGER,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -667,13 +667,10 @@ WIRE_OBJECTS = (
             "displayName": STRING,
             "branch": STRING,
             "pendingCount": INTEGER,
-            "pendingLabel": STRING,
             "privateTaskCount": INTEGER,
             "agentProcessStatus": STRING,
         },
         {
-            "targetWorktreeName": STRING,
-            "targetBranch": STRING,
             "targetIdentity": _ref("TargetIdentity"),
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
             "taskFilters": STRINGS,
@@ -694,6 +691,7 @@ WIRE_OBJECTS = (
             "agentVisualStatus": STRING,
             "lastAssistantAt": STRING,
             "statusLine": _ref("StatusLine"),
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -858,15 +856,12 @@ WIRE_OBJECTS = (
             "serveAgentIdentity": _ref("ServeAgentIdentity"),
             "teamIdentity": _ref("TeamIdentity"),
             "memberAgents": STRINGS,
-            "laneName": STRING,
             "taskFilters": STRINGS,
             "effectiveTaskFilters": STRINGS,
             "taskFilterEntries": _array(_ref("TaskFilterEntry")),
-            "routeFilters": STRINGS,
-            "filterTerms": STRINGS,
-            "filterArgs": STRINGS,
             "laneFilterVersion": STRING,
             "lifetime": STRING,
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(
@@ -893,6 +888,7 @@ WIRE_OBJECTS = (
             "route": _ref("WorkTreeRoute"),
             "serverTiming": _ref("ServerTiming"),
             "submission": _ref("SubmissionLifecycle"),
+            "chrome": _ref("LaneChromePayload"),
         },
     ),
     _object(

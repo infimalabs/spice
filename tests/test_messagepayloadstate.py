@@ -562,8 +562,6 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     assert set(payload) == {
         "messages",
         "ackContexts",
-        "targetWorktreeName",
-        "targetBranch",
         "targetIdentity",
         "serveAgentIdentity",
         "taskFilters",
@@ -584,6 +582,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "pendingInboxVersion",
         "agentEnsure",
         "statusLine",
+        "chrome",
     }
     assert payload["messages"] == []
     assert payload["targetIdentity"]["thread"] == {"state": "unbound"}
