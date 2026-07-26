@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
+from spice.errors import SpiceError
 from spice.process.groups import run_bounded_process_group
 
 ToolPolicy = Literal[
@@ -68,6 +70,28 @@ def run_tool_command(
         capture_output=capture_output,
         check=check,
     )
+
+
+def run_typecheck_command(argv: tuple[str, ...], *, operation: str, cwd: Path) -> None:
+    """Run one typecheck command and raise its stable, output-bearing error."""
+    result = run_tool_command(
+        list(argv),
+        policy="typecheck",
+        operation=operation,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+    output = "\n".join(
+        part for part in (result.stdout.strip(), result.stderr.strip()) if part
+    )
+    message = f"{shlex.join(argv)} exited {result.returncode}"
+    if output:
+        message += ":\n" + output
+    raise SpiceError(message)
 
 
 def run_parent_lifetime_command(
