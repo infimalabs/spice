@@ -408,14 +408,14 @@ def test_a_remade_team_store_supersedes_the_generation_it_replaced(tmp_path):
         )
         for facet in TEAM_STORE_FACETS
     }
-    assert int(remade["teamConfig"]["order"]["epoch"]) > int(
-        replaced["teamConfig"]["order"]["epoch"]
-    )
     assert (
         assemble_lane_chrome("wt", observed, published=_orders(replaced)).changed
         == TEAM_STORE_FACETS
     )
     assert assemble_lane_chrome("wt", observed, published=remade_orders).changed == ()
+    assert int(remade["teamConfig"]["order"]["epoch"]) > int(
+        replaced["teamConfig"]["order"]["epoch"]
+    )
 
 
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):

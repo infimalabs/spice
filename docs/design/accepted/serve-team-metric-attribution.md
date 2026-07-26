@@ -99,9 +99,10 @@ merits only, never for metric reasons.
 **D9 — Renewal lineage is a read model.** Per-agent facts retain the actor that
 produced them. A `renewalStarted` event links predecessor to successor, and the
 LINEAGE-CUMULATIVE lens recursively folds source actors at query time. Renewal
-never updates, merges, or deletes historical fact rows. Replay checkpoints may
-be copied forward so a successor does not reread a predecessor transcript, but
-the predecessor checkpoint remains and is not fact attribution.
+never updates, merges, or deletes historical fact rows. A successor resumes a
+predecessor transcript at the furthest point its lineage reached, derived from
+lineage at read time rather than copied forward into a checkpoint row, and that
+inheritance is a resume point rather than fact attribution.
 
 ## Views & projections
 
@@ -111,9 +112,10 @@ activity buckets (messages/tool_calls), task-lifecycle events
 (claim/phase/complete/drain), and membership events from the team event log.
 Directive sends and dispositions live only in repository-owned
 `spiceacks.sqlite3`; Serve folds those rows directly and owns neither a
-`directives` copy nor `directive_totals`. `agent_metrics` remains a transitional
-materialized activity total, not a second directive truth. New views add folds
-over native facts plus the team event log, not mutable directive aggregates.
+`directives` copy nor `directive_totals`. `agent_metrics` is a materialized
+activity total in the rebuildable projection store, not a second directive
+truth. New views add folds over native facts plus the team event log, not
+mutable directive aggregates.
 
 **D11 — Explicit lenses, one default.** Lane default = LINEAGE-CUMULATIVE: D9
 event folding means the lane shows total work achieved by that lineage across

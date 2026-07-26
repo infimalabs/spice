@@ -530,8 +530,9 @@ WIRE_OBJECTS = (
     # settings when it is created, because both count inside that store and
     # both restart together when it is remade. All three are counted in
     # microseconds so that a reader meeting more than one meets one kind of
-    # token rather than one encoding per authority. payload.chrome.lane_chrome_generation
-    # admits only a count, so a hash identity cannot become an epoch -- it would
+    # token rather than one encoding per authority.
+    # payload.chrome.lane_chrome_generation admits only a count, so a hash
+    # identity cannot become an epoch -- it would
     # arrive as an order the reducer cannot fault and then mis-order silently
     # behind it.
     _object(

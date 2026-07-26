@@ -76,10 +76,6 @@ class _TeamMemberStore(Protocol):
         team_id: str,
     ) -> None: ...
 
-    def _inherit_agent_metric_cursors_locked(
-        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
-    ) -> None: ...
-
     def _record_merge_subgroup_locked(
         self,
         connection: sqlite3.Connection,
@@ -334,9 +330,6 @@ class TeamMemberStoreMixin:
             if alias_id != agent_id:
                 self._transfer_active_renewal_locked(
                     connection, alias_id, agent_id, team_id
-                )
-                self._inherit_agent_metric_cursors_locked(
-                    connection, alias_id, agent_id
                 )
         inherited_position, previous_team_ids = self._vacate_assigned_slots_locked(
             connection, team_id, agent_id, alias_ids
