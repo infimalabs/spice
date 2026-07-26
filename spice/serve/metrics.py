@@ -6,6 +6,7 @@ from pathlib import Path
 
 from spice.serve import messages as message_reader
 from spice.serve.team.store import ServeTeamStore
+from spice.transcript.timestamps import parse_timestamp
 
 TOOL_CALL_KINDS = frozenset(
     {
@@ -33,12 +34,12 @@ def record_transcript_metrics_for_agent(
             parsed.timestamp()
             for item in items
             if item.kind in TOOL_CALL_KINDS
-            if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
+            if (parsed := parse_timestamp(item.timestamp)) is not None
         ),
         message_timestamps=(
             parsed.timestamp()
             for item in items
-            if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
+            if (parsed := parse_timestamp(item.timestamp)) is not None
         ),
     )
     store.record_agent_metric_cursor(

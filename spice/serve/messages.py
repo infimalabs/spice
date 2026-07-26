@@ -60,6 +60,7 @@ from spice.transcript.reader import (
     render_cursor,
     transcript_size,
 )
+from spice.transcript.timestamps import parse_timestamp
 
 IMAGE_REFERENCE_RE = re.compile(r"!\[[^\]]*\]\((?:<[^>]*>|[^)]*)\)")
 
@@ -1345,15 +1346,3 @@ def _preview_for_web_search(payload: dict[str, Any]) -> str:
     if isinstance(query, str) and query.strip():
         return f"search: {query}"
     return ""
-
-
-def parse_timestamp(raw: str) -> datetime | None:
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

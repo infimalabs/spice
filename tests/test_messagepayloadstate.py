@@ -17,6 +17,7 @@ from spice.serve.payload import identity, lane, message
 from spice.serve.steering import submit_steering_message
 from spice.serve.team.store import ServeTeamStore
 from spice.serve.worktree import inventory
+from spice.transcript.timestamps import parse_timestamp
 from tests.test_messagepayload import (
     IMAGE_DATA_URL,
     _EmptyOpenTaskBoard,
@@ -212,10 +213,10 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
         "hello",
         "Task capture: Later CLI follow-up (serve.ui)",
     ]
-    boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.001000Z")
+    boundary = parse_timestamp("2026-06-10T12:00:01.001000Z")
     assert boundary is not None
     assert all(
-        (timestamp := message_reader.parse_timestamp(item.timestamp)) is not None
+        (timestamp := parse_timestamp(item.timestamp)) is not None
         and timestamp > boundary
         for item in merged
     )

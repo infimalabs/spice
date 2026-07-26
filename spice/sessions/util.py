@@ -1,29 +1,9 @@
-"""Small shared helpers for transcript timestamps, text, and rendering."""
+"""Small shared helpers for transcript text and rendering."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
-
-
-def normalize_timestamp(raw: str | None) -> str | None:
-    if not isinstance(raw, str) or not raw:
-        return None
-    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    dt = dt.astimezone(UTC)
-    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def parse_iso_ts(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt
 
 
 def first_text(content: Any) -> str | None:
