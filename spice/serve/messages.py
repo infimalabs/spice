@@ -10,11 +10,9 @@ scanned backwards in chunks so a season-long transcript stays cheap to page.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar
 
 from spice.agent.driver import (
     AgentDriver,
@@ -23,45 +21,9 @@ from spice.agent.driver import (
     driver_for_transcript,
 )
 from spice.agent.identity import canonical_thread_id
-from spice.serve.images import image_markdown, view_image_markdown
 from spice.serve.messagepresentation import (
-    _REASONING_KIND,
-    _SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES,
-    _TOOL_CALL_TYPES,
-    _TOOL_OUTPUT_TYPES,
-    _WEB_SEARCH_KIND,
     AssistantMessage,
-    _assistant_message,
-    _plan_items,
-    _PresenceFacts,
-    _presence_message,
-    _preview_for_presence,
-    _preview_from_text,
-    _remember_call_preview,
-    _render_tool_output_preview,
-    _simple_message,
-    _supervisor_feedback_items as _supervisor_feedback_items,
-    _supervisor_feedback_preview,
-    _TextGroup,
-    _text_groups,
-    reply_card_message as reply_card_message,
-    task_card_message as task_card_message,
-)
-from spice.transcript.assembly import (
-    AssembledMessage,
-    AssembledMessageReducer,
-    ClassifiedSpan,
-    SpanKind,
-)
-from spice.transcript.events import (
-    AssistantText,
-    Compaction,
-    Image,
-    Reasoning,
-    ToolCall,
-    ToolOutput,
-    TranscriptEvent,
-    WebSearch,
+    MessagePresenter,
 )
 from spice.transcript.reader import (
     REVERSE_WINDOW_BYTES,
@@ -70,7 +32,6 @@ from spice.transcript.reader import (
     cursor_offset,
     locked_cursor,
     offset_after_line,
-    render_cursor,
     transcript_file_identity,
     transcript_size,
 )
@@ -80,8 +41,6 @@ ACTIVE_ASSISTANT_SECONDS = 60
 ACTIVEISH_ASSISTANT_SECONDS = 5 * 60
 DEFAULT_MESSAGE_LIMIT = 200
 MAX_MESSAGE_LIMIT = 400
-
-_EventT = TypeVar("_EventT", bound=TranscriptEvent)
 
 
 @dataclass
@@ -107,56 +66,6 @@ class AssistantMessageRead:
     items: list[AssistantMessage]
     error: str | None
     transcript: TranscriptResolution | None
-
-
-@dataclass
-class _ToolPreviewIndex:
-    """Call/output preview facts collected during one event projection pass."""
-
-    calls: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
-    outputs: dict[int, tuple[str, str]] = field(default_factory=dict)
-
-    def observe(self, presence: _PresenceFacts, *, offset: int, preview: str) -> None:
-        if presence.kind in _TOOL_CALL_TYPES:
-            if presence.call_id and preview:
-                self.calls.setdefault(presence.call_id, []).append((offset, preview))
-            return
-        if presence.kind not in _TOOL_OUTPUT_TYPES:
-            return
-        if _supervisor_feedback_preview(presence.output_text):
-            return
-        self.outputs[offset] = (
-            presence.call_id,
-            _preview_from_text(presence.output_text),
-        )
-
-    def resolve(self, messages: list[AssistantMessage]) -> list[AssistantMessage]:
-        resolved: list[AssistantMessage] = []
-        for message in messages:
-            output = self.outputs.get(message.index)
-            if output is None:
-                resolved.append(message)
-                continue
-            call_id, output_preview = output
-            call_preview = self._call_preview_before(call_id, message.index)
-            resolved.append(
-                replace(
-                    message,
-                    preview=_render_tool_output_preview(
-                        call_preview=call_preview,
-                        output_preview=output_preview,
-                    ),
-                )
-            )
-        return resolved
-
-    def _call_preview_before(self, call_id: str, output_offset: int) -> str:
-        candidates = (
-            (offset, preview)
-            for offset, preview in self.calls.get(call_id, ())
-            if offset < output_offset
-        )
-        return max(candidates, default=(-1, ""))[1]
 
 
 def resolve_thread_transcript(
@@ -394,7 +303,7 @@ def _read_appended_window(
             worktree_id=worktree_id,
             driver=driver,
         )
-    appended = _messages_from_events(read.events, worktree_id=worktree_id)
+    appended = MessagePresenter().project(read.events, worktree_id=worktree_id)
     end_offset = read.end_offset
     previous = list(reversed(cursor.window))
     previous_tail = previous[-1:] if previous else []
@@ -429,7 +338,7 @@ def _read_chronological_from_offset(
         cursor=TranscriptCursor(offset=start_offset),
     )
     return (
-        _messages_from_events(read.events, worktree_id=worktree_id),
+        MessagePresenter().project(read.events, worktree_id=worktree_id),
         read.resume_offset,
     )
 
@@ -463,11 +372,10 @@ def _read_window(
         end_offset=end_offset,
         max_bytes=REVERSE_WINDOW_BYTES,
     )
-    preview_index = _ToolPreviewIndex()
-    scanned = _messages_from_events(
+    presenter = MessagePresenter()
+    scanned = presenter.project(
         read.events,
         worktree_id=worktree_id,
-        preview_index=preview_index,
     )
     visible_count = sum(not message.kind.startswith("presence:") for message in scanned)
     scan_start = read.access_start_offset
@@ -481,17 +389,16 @@ def _read_window(
         if older.access_start_offset >= scan_start:
             break
         if older.events:
-            projected = _messages_from_events(
+            projected = presenter.project(
                 older.events,
                 worktree_id=worktree_id,
-                preview_index=preview_index,
             )
             scanned[0:0] = projected
             visible_count += sum(
                 not message.kind.startswith("presence:") for message in projected
             )
         scan_start = older.access_start_offset
-    scanned = preview_index.resolve(scanned)
+    scanned = presenter.resolve(scanned)
     visible = [
         message for message in scanned if not message.kind.startswith("presence:")
     ]
@@ -521,35 +428,6 @@ def _read_window(
 
 def _reader(transcript_path: Path, driver: AgentDriver) -> TranscriptEventReader:
     return TranscriptEventReader(transcript_path, driver, source_actor=None)
-
-
-def _messages_from_events(
-    events: Sequence[TranscriptEvent],
-    *,
-    worktree_id: str | None,
-    preview_index: _ToolPreviewIndex | None = None,
-) -> list[AssistantMessage]:
-    """Project one access pass of typed facts into envelopes, in source order."""
-    messages: list[AssistantMessage] = []
-    call_previews: dict[str, str] = {}
-    reducer = AssembledMessageReducer()
-
-    def consume(assembled: AssembledMessage) -> None:
-        message = _build_message(
-            assembled,
-            worktree_id=worktree_id,
-            call_previews=call_previews,
-            preview_index=preview_index,
-        )
-        if message is not None:
-            messages.append(message)
-
-    for event in events:
-        for assembled in reducer.push(event):
-            consume(assembled)
-    for assembled in reducer.finish():
-        consume(assembled)
-    return messages
 
 
 def _collapse_view_image_pairs(
@@ -588,10 +466,7 @@ def _line_has_tool_output_image(
     read = _reader(transcript_path, driver).read(
         "bounded", start_offset=offset, end_offset=offset + 1
     )
-    return any(
-        isinstance(event, Image) and _is_tool_output_image(event)
-        for event in read.events
-    )
+    return MessagePresenter.contains_tool_output_image(read.events)
 
 
 def _trim_chronological(
@@ -618,14 +493,12 @@ def _trim_chronological(
 
 
 def _kept_presence_messages(messages: list[AssistantMessage]) -> list[AssistantMessage]:
-    feedback = [
-        message for message in messages if _is_supervisor_feedback_presence(message)
-    ]
+    feedback = [message for message in messages if message.is_supervisor_feedback]
     latest_presence = next(
         (
             message
             for message in reversed(messages)
-            if not _is_supervisor_feedback_presence(message)
+            if not message.is_supervisor_feedback
         ),
         None,
     )
@@ -635,14 +508,6 @@ def _kept_presence_messages(messages: list[AssistantMessage]) -> list[AssistantM
     return sorted(
         {message.key: message for message in kept}.values(),
         key=lambda message: message.index,
-    )
-
-
-def _is_supervisor_feedback_presence(message: AssistantMessage) -> bool:
-    return (
-        message.kind.startswith("presence:")
-        and message.source_kind in _TOOL_OUTPUT_TYPES
-        and message.preview.startswith(_SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES)
     )
 
 
@@ -658,207 +523,3 @@ def activity_status(messages: list[AssistantMessage]) -> str:
     if age_seconds < ACTIVEISH_ASSISTANT_SECONDS:
         return "active-ish"
     return "inactive"
-
-
-def _build_message(
-    message: AssembledMessage,
-    *,
-    worktree_id: str | None = None,
-    call_previews: dict[str, str] | None = None,
-    preview_index: _ToolPreviewIndex | None = None,
-) -> AssistantMessage | None:
-    """Project one assembled locus into the single envelope it can carry."""
-    spans = message.spans
-    at = message.at
-    offset = at.offset if at.offset is not None else at.line
-    timestamp = str(at.timestamp or "")
-    key = render_cursor(timestamp, offset)
-    compaction = _first_event(spans, Compaction)
-    if compaction is not None:
-        if not compaction.boundary:
-            return None
-        return _simple_message(
-            key, offset, timestamp, kind="compaction", text="Context compacted"
-        )
-    visible = _visible_message(spans, key, offset, timestamp, worktree_id=worktree_id)
-    if visible is not None:
-        return visible
-    return _presence_envelope(
-        spans,
-        key,
-        offset,
-        timestamp,
-        call_previews=call_previews,
-        preview_index=preview_index,
-    )
-
-
-def _visible_message(
-    spans: Sequence[ClassifiedSpan],
-    key: str,
-    offset: int,
-    timestamp: str,
-    *,
-    worktree_id: str | None,
-) -> AssistantMessage | None:
-    """The prose, picture, or picture request this locus shows the operator."""
-    groups = _text_groups(spans)
-    if groups:
-        return _assistant_message(
-            key,
-            offset,
-            timestamp,
-            _source_text(spans),
-            groups=groups,
-            kind="final" if _has_final_answer(spans) else "assistant",
-            source_kind="assistant_text",
-            worktree_id=worktree_id,
-        )
-    images = [span.event for span in spans if isinstance(span.event, Image)]
-    source_kind = _image_source_kind(images)
-    if source_kind is not None:
-        markdown = image_markdown(images, worktree_id=worktree_id, source_offset=offset)
-        if markdown is not None:
-            return _markdown_message(
-                key, offset, timestamp, markdown, source_kind, worktree_id
-            )
-    call = _first_event(spans, ToolCall)
-    view_markdown = None if call is None else view_image_markdown(call)
-    if view_markdown is not None:
-        return _markdown_message(
-            key, offset, timestamp, view_markdown, "view_image_call", worktree_id
-        )
-    return None
-
-
-def _presence_envelope(
-    spans: Sequence[ClassifiedSpan],
-    key: str,
-    offset: int,
-    timestamp: str,
-    *,
-    call_previews: dict[str, str] | None,
-    preview_index: _ToolPreviewIndex | None,
-) -> AssistantMessage | None:
-    """The activity record a locus with nothing visible still contributes."""
-    presence = _presence_facts(spans)
-    if presence is None:
-        return None
-    if presence.call is not None:
-        plan_items = _plan_items(presence.call)
-        if plan_items is not None:
-            return _presence_message(
-                key,
-                offset,
-                timestamp,
-                kind="update_plan",
-                preview="to-do list update",
-                plan_items=plan_items,
-            )
-    preview = _preview_for_presence(presence, call_previews=call_previews)
-    _remember_call_preview(presence, preview, call_previews)
-    if preview_index is not None:
-        preview_index.observe(presence, offset=offset, preview=preview)
-    return _presence_message(
-        key, offset, timestamp, kind=presence.kind, preview=preview
-    )
-
-
-def _markdown_message(
-    key: str,
-    offset: int,
-    timestamp: str,
-    markdown: str,
-    source_kind: str,
-    worktree_id: str | None,
-) -> AssistantMessage:
-    """One picture rendered as the whole of an otherwise wordless message."""
-    group = _TextGroup(kind=SpanKind.PROSE, keys=())
-    group.lines.append(markdown)
-    group.spoken_lines.append(markdown)
-    return _assistant_message(
-        key,
-        offset,
-        timestamp,
-        markdown,
-        groups=[group],
-        kind="assistant",
-        source_kind=source_kind,
-        worktree_id=worktree_id,
-    )
-
-
-def _first_event(
-    spans: Sequence[ClassifiedSpan], wanted: type[_EventT]
-) -> _EventT | None:
-    return next(
-        (span.event for span in spans if isinstance(span.event, wanted)),
-        None,
-    )
-
-
-def _has_final_answer(spans: Sequence[ClassifiedSpan]) -> bool:
-    return any(span.kind is SpanKind.FINAL_ANSWER for span in spans)
-
-
-def _source_text(spans: Sequence[ClassifiedSpan]) -> str:
-    """The prose exactly as written, with each block of a line kept apart."""
-    texts: list[str] = []
-    previous: AssistantText | None = None
-    for span in spans:
-        event = span.event
-        if isinstance(event, AssistantText) and event is not previous:
-            previous = event
-            if event.text.strip():
-                texts.append(event.text)
-    return "\n\n".join(texts).strip()
-
-
-def _is_tool_output_image(image: Image) -> bool:
-    return image.tool_output_type == "function_call_output"
-
-
-def _image_source_kind(images: Sequence[Image]) -> str | None:
-    """Where a locus' pictures came from, or None when it shows none."""
-    if not images:
-        return None
-    if any(_is_tool_output_image(image) for image in images):
-        return "tool_output_image"
-    if all(image.role in (None, "assistant") for image in images):
-        return "assistant_image"
-    return None
-
-
-def _presence_facts(spans: Sequence[ClassifiedSpan]) -> _PresenceFacts | None:
-    """The single activity a locus reports, tool results before requests."""
-    outputs = [span.event for span in spans if isinstance(span.event, ToolOutput)]
-    if outputs:
-        return _PresenceFacts(
-            kind=outputs[0].tool_output_type,
-            call_id=_event_call_id(outputs[0]),
-            output_text="\n".join(output.content for output in outputs),
-        )
-    call = _first_event(spans, ToolCall)
-    if call is not None:
-        return _PresenceFacts(
-            kind="custom_tool_call" if call.custom else "function_call",
-            call_id=_event_call_id(call),
-            call=call,
-        )
-    search = _first_event(spans, WebSearch)
-    if search is not None:
-        return _PresenceFacts(kind=_WEB_SEARCH_KIND, search=search)
-    reasonings = [span.event for span in spans if isinstance(span.event, Reasoning)]
-    if reasonings:
-        summary = next(
-            (event.summary for event in reasonings if event.summary.strip()), ""
-        )
-        return _PresenceFacts(kind=_REASONING_KIND, reasoning=summary)
-    return None
-
-
-def _event_call_id(event: ToolCall | ToolOutput) -> str:
-    for value in (event.call_id, event.item_id):
-        if value and value.strip():
-            return value.strip()
-    return ""

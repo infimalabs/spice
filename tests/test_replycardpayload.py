@@ -5,13 +5,13 @@ which reuses the same _merge_synthetic_cards but sources cards from
 read_reply_records instead of the task backend.
 """
 
-from spice.serve import messages as message_reader
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload import message
 from spice.transcript.timestamps import parse_timestamp
 
 
 def _message(timestamp):
-    return message_reader.AssistantMessage(
+    return AssistantMessage(
         key=f"{timestamp}#0",
         index=0,
         timestamp=timestamp,

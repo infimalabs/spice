@@ -15,7 +15,12 @@ from pathlib import Path
 from spice.agent import launchhistory
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.serve import messages as message_reader
-from spice.serve.messages import AssistantMessage, RolloutCursor
+from spice.serve.messagepresentation import (
+    AssistantMessage,
+    MessagePresenter,
+    reply_card_message,
+)
+from spice.serve.messages import RolloutCursor
 from tests.test_transcriptparity import (
     CorpusCase,
     ParityOutput,
@@ -117,8 +122,9 @@ def served_ack_presentations(case: CorpusCase) -> tuple[ParityOutput, ...]:
 def assembled_ack_presentations(case: CorpusCase) -> tuple[ParityOutput, ...]:
     """The same presentation projected directly from reducer output."""
     outputs: list[ParityOutput] = []
+    presenter = MessagePresenter()
     for assembled in assembled_messages(case):
-        message = message_reader._build_message(assembled)
+        message = presenter.present(assembled)
         if message is not None and message.ack_keys:
             outputs.append(
                 ParityOutput(
@@ -200,7 +206,7 @@ def test_mail_and_launch_match_reducer_spans_on_recorded_and_one_live_transcript
 
 
 def test_bodyless_keyed_reply_keeps_both_response_dispositions() -> None:
-    message = message_reader.reply_card_message(
+    message = reply_card_message(
         "bodyless",
         1,
         "2026-07-26T06:01:00.000Z",

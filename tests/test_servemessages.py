@@ -17,6 +17,7 @@ from spice.agent.driver import (
 from spice.config.edit import set_scope_section
 from spice.config.layers import WORKTREE_SOURCE
 from spice.serve import messages as message_reader
+from spice.serve.messagepresentation import MessagePresenter
 from spice.serve.messages import (
     RolloutCursor,
     assistant_messages_for_thread_id,
@@ -448,7 +449,7 @@ def test_sparse_reverse_chunks_project_each_accessed_record_once(
     )
     expected = read_assistant_messages(transcript, limit=2, driver=CODEX_DRIVER)
     original_parse = transcript_reader._parse_json_object
-    original_projection = message_reader._build_message
+    original_projection = MessagePresenter.present
     parses: Counter[str] = Counter()
     projections: Counter[int] = Counter()
 
@@ -456,13 +457,13 @@ def test_sparse_reverse_chunks_project_each_accessed_record_once(
         parses[raw] += 1
         return original_parse(raw)
 
-    def count_projection(*args, **kwargs):
-        projections[args[0].at.offset] += 1
-        return original_projection(*args, **kwargs)
+    def count_projection(self, assembled, *args, **kwargs):
+        projections[assembled.at.offset] += 1
+        return original_projection(self, assembled, *args, **kwargs)
 
     monkeypatch.setattr(message_reader, "REVERSE_WINDOW_BYTES", 256)
     monkeypatch.setattr(transcript_reader, "_parse_json_object", count_parse)
-    monkeypatch.setattr(message_reader, "_build_message", count_projection)
+    monkeypatch.setattr(MessagePresenter, "present", count_projection)
 
     items = read_assistant_messages(transcript, limit=2, driver=CODEX_DRIVER)
 

@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore

@@ -76,7 +76,6 @@ from spice.serve.livebus import LiveBusCallbacks, serve_live_bus
 from spice.serve.messages import (
     DEFAULT_MESSAGE_LIMIT,
     RolloutCursor,
-    TranscriptResolution as TranscriptResolution,
     resolve_thread_transcript,
 )
 from spice.serve.observer import (
