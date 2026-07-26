@@ -194,7 +194,7 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
         lambda text: watchdog.process_supervised_assistant_message(
             task_repo, text, log, gate
         ),
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=gate.note_compaction,
     )
 

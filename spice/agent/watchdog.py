@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from threading import Condition, Thread
 from typing import Any, Callable, Protocol, TextIO, cast
@@ -56,7 +57,19 @@ from spice.mail.inbox import (
 from spice.process.groups import popen_new_process_group_kwargs
 from spice.tasks import config as task_config
 from spice.tasks.create import TaskAddResult
-from spice.transcript.decode import first_text
+from spice.transcript.assembly import (
+    AssembledMessage,
+    AssembledMessageReducer,
+    SpanKind,
+)
+from spice.transcript.decode import decode_parsed_line
+from spice.transcript.events import (
+    AssistantText,
+    Compaction,
+    LineStamper,
+    ToolCall,
+    TranscriptEvent,
+)
 
 LEGACY_REMINDER_PREFIX = "WATCHDOG:"
 WATCHDOG_REMINDER_PREFIX = "[MAXIM]"
@@ -587,7 +600,7 @@ def make_stdout_scanner(
     if driver.stdout_format == "json":
         return JsonStdoutScanner(
             on_message,
-            driver.normalize_transcript_line,
+            driver,
             on_compaction=on_compaction,
             on_text_starvation=on_text_starvation,
             on_activity=on_activity,
@@ -597,6 +610,7 @@ def make_stdout_scanner(
         driver,
         on_message,
         on_compaction=on_compaction,
+        on_text_starvation=on_text_starvation,
         on_activity=on_activity,
     )
 
@@ -608,90 +622,72 @@ def make_stdout_scanner(
 # normal narrate-every-step cadence and cheap to nudge.
 TEXT_STARVATION_THRESHOLD = 12
 
+# The spans an assistant's own text produces. Any of them is prose the agent
+# materialized, which is what starvation is the absence of; a directive line is
+# still text the agent wrote, so it breaks a streak exactly as narration does.
+TEXT_SPAN_KINDS = frozenset(
+    {SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK, SpanKind.DIRECTIVE}
+)
 
-class JsonStdoutScanner:
-    """Reassemble assistant messages from a stream-json `exec` stdout.
+# The synthetic source both stdout dialects stamp their facts with. Nothing
+# reads it back: stdout is a stream, not a file anyone can seek into again.
+STDOUT_SOURCE = "<agent-stdout>"
 
-    Each stdout line is one transcript event; the injected normalizer turns an
-    assistant-message line into canonical prose, which feeds ACK archiving and
-    maxim judging exactly as the marker scanner's reassembled blocks do.
 
-    The scanner also watches for text starvation: canonical assistant events
-    that keep calling tools while emitting zero text blocks. Once the streak
-    reaches `TEXT_STARVATION_THRESHOLD` the starvation callback fires (once per
-    streak) so the supervisor can nudge the lane; any real text resets it.
+class SupervisedProseFold:
+    """Fold one supervised stdout stream into the judgments the lane acts on.
 
-    Compaction events report on their own callback rather than as activity: a
-    compacting agent is alive but has produced nothing, so it must hold the
-    startup deadline open without being mistaken for a ready lane.
+    Both dialects arrive here as typed transcript facts -- the json scanner
+    decodes its lines through the driver, the marker scanner reassembles a
+    block into one assistant-text fact -- and the shared reducer classifies
+    them. Visible prose, activity, and starvation accounting then read those
+    classified spans, so no supervisor policy reads a provider's JSON shape and
+    neither dialect reassembles prose a second way.
+
+    Starvation is the absence of materialized prose while tools keep firing:
+    the streak counts assembled messages that call a tool and carry no text of
+    any kind, and any text at all resets it. The threshold and the nudge stay
+    with the supervisor; this fold only reports the streak.
     """
 
     def __init__(
         self,
         on_message: Callable[[str], None],
-        normalize: Callable[[dict], dict | None],
         *,
-        on_compaction: Callable[[], None] | None = None,
-        on_text_starvation: Callable[[int], None] | None = None,
-        on_activity: Callable[[], None] | None = None,
-        on_compaction_active: Callable[[bool], None] | None = None,
+        on_text_starvation: Callable[[int], None],
+        on_activity: Callable[[], None],
     ) -> None:
-        self.on_message = on_message
-        self._normalize = normalize
-        self._on_compaction = on_compaction or (lambda: None)
-        self._on_text_starvation = on_text_starvation or (lambda _count: None)
-        self._on_activity = on_activity or (lambda: None)
-        self._on_compaction_active = on_compaction_active or (lambda _active: None)
+        self._on_message = on_message
+        self._on_text_starvation = on_text_starvation
+        self._on_activity = on_activity
+        self._reducer = AssembledMessageReducer()
         self._textless_streak = 0
         self._starvation_fired = False
 
-    def process_line(self, line: str) -> None:
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError:
-            return
-        if not isinstance(raw, dict):
-            return
-        self._track_text_starvation(raw)
-        event = self._normalize(raw)
-        if event is None:
-            return
-        if event.get("type") == "compacting":
-            payload = event.get("payload") or {}
-            self._on_compaction_active(bool(payload.get("active")))
-            return
-        if event.get("type") == "compacted":
-            self._on_compaction()
-            # A boundary is the compaction's own completion notice, so the
-            # startup deadline goes back to waiting on real first activity.
-            self._on_compaction_active(False)
-            return
-        payload = event.get("payload") or {}
-        if payload.get("role") == "assistant" or payload.get("type") in {
-            "function_call",
-            "tool_use",
-        }:
-            self._on_activity()
-        if payload.get("type") != "message" or payload.get("role") != "assistant":
-            return
-        text = first_text(payload.get("content"))
-        if text and text.strip():
-            self.on_message(text.strip())
+    def push(self, events: Sequence[TranscriptEvent]) -> None:
+        """Fold one record's typed facts and act on the message they assemble.
 
-    def _track_text_starvation(self, raw: dict) -> None:
-        if raw.get("type") != "assistant":
-            return
-        message = raw.get("message")
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            return
-        blocks = [item.get("type") for item in content if isinstance(item, dict)]
-        text = first_text(content)
-        if text and text.strip():
+        A stdout record is whole when it arrives, so the reducer finishes it
+        immediately rather than holding it until the next record: a supervisor
+        that archived an ACK one line late would nudge a lane for silence it
+        had already broken.
+        """
+        for event in events:
+            self._reducer.push(event)
+        for message in self._reducer.finish():
+            self._consume(message)
+
+    def _consume(self, message: AssembledMessage) -> None:
+        events = [span.event for span in message.spans]
+        if any(isinstance(event, (AssistantText, ToolCall)) for event in events):
+            self._on_activity()
+        text = self._visible_text(message)
+        if text:
             self._textless_streak = 0
             self._starvation_fired = False
+            self._on_message(text)
             return
-        if "tool_use" not in blocks:
+        if not any(isinstance(event, ToolCall) for event in events):
             return
         self._textless_streak += 1
         if self._starvation_fired:
@@ -699,6 +695,86 @@ class JsonStdoutScanner:
         if self._textless_streak >= TEXT_STARVATION_THRESHOLD:
             self._starvation_fired = True
             self._on_text_starvation(self._textless_streak)
+
+    def _visible_text(self, message: AssembledMessage) -> str:
+        """Every assistant text fact this message carried, in source order.
+
+        The spans say whether the agent produced text; the facts behind them
+        say what it was. Consumers below still read the assistant's own words
+        -- an ACK header only survives whole because the text is theirs, not a
+        rendering of the spans it was classified into.
+        """
+        texts: list[str] = []
+        spoken: AssistantText | None = None
+        for span in message.spans:
+            event = span.event
+            if span.kind not in TEXT_SPAN_KINDS or not isinstance(event, AssistantText):
+                continue
+            # One text fact classifies into several spans; it is spoken once.
+            if event is spoken:
+                continue
+            spoken = event
+            texts.append(event.text)
+        return "\n".join(texts).strip()
+
+
+class JsonStdoutScanner:
+    """Read a stream-json `exec` stdout as typed transcript facts.
+
+    Each stdout line is one transcript record in the driver's own dialect, so
+    it crosses into typed events exactly once, through the same decode the
+    transcript reader uses. A line carrying prose and a tool call together
+    stays both facts instead of collapsing to whichever one a canonical
+    projection kept.
+
+    Compaction reports on its own callback rather than as activity: a
+    compacting agent is alive but has produced nothing, so it must hold the
+    startup deadline open without being mistaken for a ready lane.
+    """
+
+    def __init__(
+        self,
+        on_message: Callable[[str], None],
+        driver: AgentDriver,
+        *,
+        on_compaction: Callable[[], None] | None = None,
+        on_text_starvation: Callable[[int], None] | None = None,
+        on_activity: Callable[[], None] | None = None,
+        on_compaction_active: Callable[[bool], None] | None = None,
+    ) -> None:
+        self.on_message = on_message
+        self._driver = driver
+        self._on_compaction = on_compaction or (lambda: None)
+        self._on_compaction_active = on_compaction_active or (lambda _active: None)
+        self._fold = SupervisedProseFold(
+            on_message,
+            on_text_starvation=on_text_starvation or (lambda _count: None),
+            on_activity=on_activity or (lambda: None),
+        )
+        self._line = 0
+
+    def process_line(self, line: str) -> None:
+        self._line += 1
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(raw, dict):
+            return
+        events = decode_parsed_line(
+            raw, self._driver, source=STDOUT_SOURCE, line=self._line
+        )
+        compactions = [event for event in events if isinstance(event, Compaction)]
+        for compaction in compactions:
+            if compaction.boundary:
+                self._on_compaction()
+                # A boundary is the compaction's own completion notice, so the
+                # startup deadline goes back to waiting on real first activity.
+                self._on_compaction_active(False)
+                continue
+            self._on_compaction_active(compaction.active)
+        if not compactions:
+            self._fold.push(events)
 
     def close(self) -> None:
         return
@@ -709,7 +785,9 @@ class AgentStdoutMessageScanner:
 
     The driver prints a marker line before each assistant block and distinct
     marker lines for other sections; everything between an assistant marker
-    and the next section marker is one message.
+    and the next section marker is one message. The marker grammar is all this
+    scanner owns: the block it reassembles becomes one assistant-text fact and
+    is classified by the same reducer the json dialect feeds.
     """
 
     def __init__(
@@ -718,14 +796,21 @@ class AgentStdoutMessageScanner:
         on_message: Callable[[str], None],
         *,
         on_compaction: Callable[[], None] | None = None,
+        on_text_starvation: Callable[[int], None] | None = None,
         on_activity: Callable[[], None] | None = None,
     ) -> None:
         self._driver = driver
         self.on_message = on_message
         self._on_compaction = on_compaction or (lambda: None)
         self._on_activity = on_activity or (lambda: None)
+        self._fold = SupervisedProseFold(
+            on_message,
+            on_text_starvation=on_text_starvation or (lambda _count: None),
+            on_activity=lambda: None,
+        )
         self._capturing = False
         self._message_lines: list[str] = []
+        self._block = 0
 
     def process_line(self, line: str) -> None:
         marker = line.rstrip("\r\n")
@@ -753,8 +838,13 @@ class AgentStdoutMessageScanner:
         text = "\n".join(self._message_lines).strip()
         self._capturing = False
         self._message_lines = []
-        if text:
-            self.on_message(text)
+        if not text:
+            return
+        self._block += 1
+        stamper = LineStamper(source=STDOUT_SOURCE, line=self._block, timestamp=None)
+        # A marker block is complete prose by construction: the next section
+        # marker is what ended it, so the fact it becomes is a finished turn.
+        self._fold.push([AssistantText(at=stamper.stamp(), text=text, final=True)])
 
 
 def publish_maxim_hits_as_inbox(
