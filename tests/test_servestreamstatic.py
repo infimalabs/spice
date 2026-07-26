@@ -1017,6 +1017,15 @@ def test_ack_context_hydration_precedes_initial_reconnect_and_interleaved_messag
             "text": "reconnected context",
             "trace": ["resolved"],
         },
+        # A withheld refusal claims no key, so the context that arrived beside it
+        # is retained by nothing and prunes away; the identical payload shape
+        # under an honored refusal keeps both the key and its context.
+        "withheld": {
+            "final": "pending",
+            "honoredFinal": "resolved",
+            "honoredRetained": ["honored-key"],
+            "retained": [],
+        },
     }
 
 

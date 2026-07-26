@@ -594,6 +594,10 @@ def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
     assert "nackQuoteAccentIsWarn" in smoke
     assert 'result.nackBadges.includes("NACK")' in smoke
     assert "mixedHasBoth" in smoke
+    # A refusal left pending answered nothing: muted body, no quotes, no chip.
+    assert "message-body--withheld" in smoke
+    assert "withheldBodyAccentIsMuted" in smoke
+    assert "withheldTakesNeitherPolarity" in smoke
     assert "page.screenshot(" in smoke
 
 

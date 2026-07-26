@@ -93,6 +93,31 @@ const SEED_MESSAGES = [
       },
     ],
   },
+  // MESSAGE-1kH4VHSj: a refusal the archival authority left pending answered no
+  // key, so it claims none and takes neither polarity. It still carries what the
+  // message captured, so the body renders -- muted and quoteless, never dressed
+  // as the acknowledgment it was not.
+  {
+    index: 3,
+    key: "2027-01-01T00:00:03.000000Z#withheld",
+    kind: "assistant",
+    timestamp: "2027-01-01T00:00:03.000000Z",
+    text: "NACK withheld-key:\nTASK serve.messages: follow up",
+    display_text: "Follow up.",
+    display_html: "<p>Follow up on the gate.</p>",
+    ack_count: 0,
+    ack_keys: [],
+    nack_count: 0,
+    nack_keys: [],
+    preamble_html: "",
+    ack_segments: [
+      {
+        keys: [],
+        disposition: "withheld",
+        html: "<p>Follow up on the gate.</p>",
+      },
+    ],
+  },
 ];
 
 // Runs in the browser: seed the lane with the polarity fixtures, render, then
@@ -125,13 +150,20 @@ async function applySeedAndMeasure(seed) {
   const ackCard = cardFor("#ack");
   const nackCard = cardFor("#nack");
   const mixedCard = cardFor("#mixed");
-  const warn = getComputedStyle(document.documentElement)
-    .getPropertyValue("--warn")
-    .trim();
+  const withheldCard = cardFor("#withheld");
+  const rootStyle = getComputedStyle(document.documentElement);
+  const warn = rootStyle.getPropertyValue("--warn").trim();
+  const muted = rootStyle.getPropertyValue("--muted").trim();
   const nackQuoteAccent = nackCard
     ? getComputedStyle(nackCard.querySelector(".ack-quote"))
         .getPropertyValue("--quote-accent")
         .trim()
+    : "";
+  const withheldBody = withheldCard
+    ? withheldCard.querySelector(".message-body--withheld")
+    : null;
+  const withheldBodyAccent = withheldBody
+    ? getComputedStyle(withheldBody).getPropertyValue("--quote-accent").trim()
     : "";
   return {
     ackHasAckedClass: Boolean(ackCard && ackCard.classList.contains("acked")),
@@ -158,6 +190,17 @@ async function applySeedAndMeasure(seed) {
     mixedRefusedSegments: mixedCard
       ? mixedCard.querySelectorAll(".ack-quotes--refused").length
       : 0,
+    withheldHasMutedBody: Boolean(withheldBody),
+    withheldBodyAccentIsMuted: Boolean(muted) && withheldBodyAccent === muted,
+    withheldTakesNeitherPolarity: Boolean(
+      withheldCard &&
+        !withheldCard.classList.contains("acked") &&
+        !withheldCard.classList.contains("refused"),
+    ),
+    withheldQuoteBlocks: withheldCard
+      ? withheldCard.querySelectorAll(".ack-quotes").length
+      : -1,
+    withheldBadges: withheldCard ? badgeLabels(withheldCard) : [],
   };
 }
 
@@ -202,6 +245,21 @@ function assertResult(result) {
     [
       "mixed card has exactly one refused quote block",
       result.mixedRefusedSegments === 1,
+    ],
+    ["withheld body carries the withheld class", result.withheldHasMutedBody],
+    [
+      "withheld body accent resolves to --muted",
+      result.withheldBodyAccentIsMuted,
+    ],
+    [
+      "withheld card takes neither polarity tint",
+      result.withheldTakesNeitherPolarity,
+    ],
+    ["withheld card quotes no steering", result.withheldQuoteBlocks === 0],
+    [
+      "withheld card shows neither chip",
+      !result.withheldBadges.includes("ACK") &&
+        !result.withheldBadges.includes("NACK"),
     ],
   ];
   const failed = checks.filter(([, ok]) => !ok).map(([label]) => label);
