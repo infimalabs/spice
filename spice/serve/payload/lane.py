@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
@@ -33,6 +33,15 @@ LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 
 
 REVIEW_PRESSURE_LIMIT = 3
+
+
+# Every generation this producer publishes is a count of microseconds, so an
+# authority that dates itself by an instant is counted the same way the task
+# store counts itself rather than in a second encoding only this facet uses.
+_EPOCH_START = datetime.fromtimestamp(0, UTC)
+
+
+_ONE_MICROSECOND = timedelta(microseconds=1)
 
 
 def status_line_payload(
@@ -206,17 +215,38 @@ def lane_chrome_payload(
             )
         )
     if last_assistant_at is not None:
-        # The transcript's own last assistant instant is what advances here:
-        # zero-padded, so it orders naturally, and it moves exactly when the
-        # activity the facet describes does.
         observations.append(
             LaneChromeObservation(
                 "activity",
-                LaneChromeOrder(epoch=str(last_assistant_at)),
+                LaneChromeOrder(
+                    epoch=lane_chrome_generation(
+                        _transcript_generation(last_assistant_at)
+                    )
+                ),
                 {"lastAssistantAt": last_assistant_at},
             )
         )
     return assemble_lane_chrome(target_id, observations).payload
+
+
+def _transcript_generation(last_assistant_at: str) -> str:
+    """Date the activity facet by the instant its transcript last moved.
+
+    The instant itself is what the facet carries; what orders it is a count,
+    because an instant written out orders by its text and text puts a stamp
+    written at one offset ahead of a later stamp written at another. Counting
+    it settles that, and the count is the same one every other generation here
+    is, so the producer publishes one kind of token rather than one per facet.
+
+    Text no instant can be read out of is no generation at all. A transcript's
+    malformed line must not end the pass -- spice.transcript.timestamps holds
+    that rule for every reader -- and an identity that was never a date must
+    not become an epoch, so both arrive here as nothing to report.
+    """
+    instant = parse_timestamp(last_assistant_at)
+    if instant is None:
+        return ""
+    return str((instant - _EPOCH_START) // _ONE_MICROSECOND)
 
 
 def _lane_info_payload(
