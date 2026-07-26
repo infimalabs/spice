@@ -89,6 +89,7 @@ class TranscriptRead:
     access_start_offset: int
     start_offset: int
     end_offset: int
+    resume_offset: int
     file_size: int
     file_identity: TranscriptFileIdentity | None
     error: str | None = None
@@ -97,12 +98,23 @@ class TranscriptRead:
 
 @dataclass(frozen=True, slots=True)
 class TranscriptEventRead:
-    """One access pass decoded into ordered typed facts exactly once."""
+    """One access pass decoded into ordered typed facts exactly once.
+
+    `end_offset` is where the pass stopped reading, which a static or bounded
+    read may leave inside a half-written record so forensics can still see the
+    partial tail. `resume_offset` is the last record boundary the pass actually
+    completed, and it is the only offset a live cursor may resume from: a
+    writer flushes one record in several writes, so resuming past the prefix
+    would decode its suffix as malformed and the completed record would never
+    be delivered. The two differ only when a pass delivered an unterminated
+    final line.
+    """
 
     events: tuple[TranscriptEvent, ...]
     access_start_offset: int
     start_offset: int
     end_offset: int
+    resume_offset: int
     file_size: int
     file_identity: TranscriptFileIdentity | None = None
     error: str | None = None
@@ -198,6 +210,7 @@ class TranscriptEventReader:
             access_start_offset=read.access_start_offset,
             start_offset=read.start_offset,
             end_offset=read.end_offset,
+            resume_offset=read.resume_offset,
             file_size=read.file_size,
             file_identity=read.file_identity,
             error=read.error,
@@ -299,7 +312,7 @@ def read_forward(
         except OSError as exc:
             read = _failed_read(exc)
         else:
-            cursor.offset = read.end_offset
+            cursor.offset = read.resume_offset
             cursor.file_identity = read.file_identity
         return read
 
@@ -373,6 +386,7 @@ def _read_since_timestamp(
     end_offset: int | None = None
     earliest_access = 0
     file_size = 0
+    resume_offset = 0
     file_identity: TranscriptFileIdentity | None = None
     while True:
         read = read_reverse_window(
@@ -386,6 +400,10 @@ def _read_since_timestamp(
         earliest_access = read.access_start_offset
         file_size = read.file_size
         file_identity = read.file_identity
+        if end_offset is None:
+            # Only the first page ends at EOF, so it is the one page that can
+            # carry the file's unterminated tail and set the live boundary.
+            resume_offset = read.resume_offset
         stop = False
         for record in reversed(read.records):
             timestamp = _record_timestamp(record)
@@ -407,6 +425,7 @@ def _read_since_timestamp(
         access_start_offset=earliest_access,
         start_offset=start_offset,
         end_offset=file_size,
+        resume_offset=resume_offset,
         file_size=file_size,
         file_identity=file_identity,
         stats=stats,
@@ -473,6 +492,7 @@ def _read_open_range(
             bytes_read += len(handle.readline())
     actual_start = handle.tell()
     records: list[TranscriptLine] = []
+    resume_offset = actual_start
     while True:
         offset = handle.tell()
         if offset >= end:
@@ -489,11 +509,16 @@ def _read_open_range(
             handle.seek(offset)
             break
         records.append(_line_record(offset, raw))
+        if raw.endswith(b"\n"):
+            # Only a terminated line is a boundary a resuming reader can trust;
+            # a delivered partial tail leaves the boundary where it was.
+            resume_offset = handle.tell()
     return TranscriptRead(
         records=tuple(records),
         access_start_offset=start,
         start_offset=actual_start,
         end_offset=handle.tell(),
+        resume_offset=resume_offset,
         file_size=file_size,
         file_identity=file_identity,
         stats=TranscriptReadStats(
@@ -523,6 +548,7 @@ def _failed_read(exc: OSError) -> TranscriptRead:
         access_start_offset=0,
         start_offset=0,
         end_offset=0,
+        resume_offset=0,
         file_size=0,
         file_identity=None,
         error=str(exc),

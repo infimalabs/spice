@@ -581,6 +581,10 @@ def test_bounded_and_reverse_reads_still_deliver_a_partial_tail(
     assert bounded.records[-1].raw == truncated.decode()
     assert reverse.records[-1].raw == truncated.decode()
     assert bounded.end_offset == reverse.end_offset == len(payload)
+    # Showing the partial tail and being resumable past it are separate facts:
+    # forensics reads the record that is there, and a live cursor takes the
+    # boundary before it so the writer's completion is still delivered whole.
+    assert bounded.resume_offset == reverse.resume_offset == len(complete)
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])

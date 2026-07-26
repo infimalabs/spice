@@ -378,7 +378,9 @@ def _read_appended_window(
             driver=driver,
         )
     if file_size == cursor.window_size:
-        cursor.offset = file_size
+        # Nothing has been written since the window was drawn, so the cursor is
+        # already at the boundary that window ended on. Advancing it to the
+        # observed size here would step over a tail the writer has not finished.
         return []
     read = _reader(transcript_path, driver).read("forward", cursor=cursor)
     if read.error is not None:
@@ -428,7 +430,7 @@ def _read_chronological_from_offset(
     )
     return (
         _messages_from_events(read.events, worktree_id=worktree_id),
-        read.end_offset,
+        read.resume_offset,
     )
 
 
@@ -505,7 +507,10 @@ def _read_window(
         kept = _drop_trailing_view_image_call(kept)
     result = list(reversed(kept))
     if cursor is not None and end_offset is None:
-        cursor.offset = read.file_size
+        # The window this seeds from is a reverse read, which shows a partial
+        # tail rather than holding it back, so the live cursor takes the last
+        # complete boundary instead of the end of the file it observed.
+        cursor.offset = read.resume_offset
         cursor.last_key = kept[-1].key if kept else None
         cursor.window = result
         cursor.window_size = read.file_size
