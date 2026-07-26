@@ -18,6 +18,7 @@ from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any, Callable, Protocol, TypeAlias
 
+from spice.errors import SpiceError
 from spice.serve.payload.identity import (
     record_started_renewal_from_ensure,
     resolve_thread_id_for_target,
@@ -268,15 +269,27 @@ class LifecycleDecisionAuthority:
         """
         try:
             with self.explicit_pending_inbox(target) as ensure_pending:
+                # Observe before the launch, not after. A force-new renewal
+                # rebinds the lane to the successor, so a later read would name
+                # the successor as its own predecessor and close the lineage on
+                # itself.
+                observed = self._observe_target_locked(target, thread_id=None)
                 agent_ensure = ensure_pending(
                     fast_mode=intent.fast_mode,
                     force_new=intent.force_new,
                 )
-                observed = self._observe_target_locked(target, thread_id=None)
+                ensured_thread_id = self._converge_renewal_locked(
+                    observed=observed,
+                    agent_ensure=agent_ensure,
+                    # A send that does not force a successor is the one that
+                    # carried the handoff request, so it is the send whose
+                    # renewal settles as pending.
+                    handoff_asked=not intent.force_new,
+                )
         finally:
             self._release_explicit_grant(target.id)
         return LifecycleDecision(
-            thread_id=observed.thread_id,
+            thread_id=ensured_thread_id or observed.thread_id,
             predecessor_actor=observed.predecessor_actor,
             renewal_intent=observed.renewal_intent,
             agent_ensure=agent_ensure,
@@ -427,10 +440,8 @@ class LifecycleDecisionAuthority:
                 thread_id=bound_thread_id,
                 **ensure_kwargs,
             )
-        ensured_thread_id = record_started_renewal_from_ensure(
-            store,
-            predecessor_agent_id=predecessor_actor,
-            agent_ensure=agent_ensure,
+        ensured_thread_id = self._converge_renewal_locked(
+            observed=observed, agent_ensure=agent_ensure
         )
         return LifecycleDecision(
             thread_id=ensured_thread_id or bound_thread_id,
@@ -438,6 +449,48 @@ class LifecycleDecisionAuthority:
             renewal_intent=renewal_intent,
             agent_ensure=agent_ensure,
         )
+
+    def _converge_renewal_locked(
+        self,
+        *,
+        observed: _TargetObservation,
+        agent_ensure: dict[str, Any] | None,
+        handoff_asked: bool = False,
+    ) -> str:
+        """Settle one active renewal against what the launch attempt just did.
+
+        This is the only place a renewal fact is written. Both decision paths
+        reach it, so a send, an inbox wake, and a task wake all converge on the
+        same durable row rather than each carrying their own bookkeeping; the
+        store's own transactions make repeats idempotent.
+
+        A successor thread means the renewal started, and the store transfers
+        the team slot and lineage with it. A renewal only turns pending when the
+        send carrying the handoff request produced no successor: that request is
+        what the predecessor answers, so an automatic wake -- which delivers no
+        such text -- leaves the request standing for the next send.
+        """
+        store = self._state.team_store
+        ensured_thread_id = record_started_renewal_from_ensure(
+            store,
+            predecessor_agent_id=observed.predecessor_actor,
+            agent_ensure=agent_ensure,
+        )
+        if ensured_thread_id or not handoff_asked or not observed.renewal_intent:
+            return ensured_thread_id
+        # Only a still-requested renewal converges to pending. Reading the
+        # request rather than the broader active state is what keeps a lane that
+        # is sent to repeatedly during a handoff from restamping the same fact.
+        if not store.agent_renewal_requested(observed.predecessor_actor):
+            return ensured_thread_id
+        try:
+            store.record_pending_renewal(
+                agent_id=observed.predecessor_actor,
+                ancestor_thread_id=observed.thread_id,
+            )
+        except SpiceError:
+            pass  # renewal bookkeeping requires a team; steering still lands
+        return ensured_thread_id
 
     def _attempt_due(self, target_id: str, retry_seconds: float) -> bool:
         now = monotonic()
