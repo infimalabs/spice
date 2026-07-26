@@ -650,7 +650,7 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
     activities: list[str] = []
     scanner = JsonStdoutScanner(
         captured.append,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: compactions.append(1),
         on_activity=lambda: activities.append("activity"),
     )
@@ -676,7 +676,7 @@ def test_claude_json_stdout_scanner_flags_text_starvation_once_per_streak():
     starvations: list[int] = []
     scanner = JsonStdoutScanner(
         captured.append,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: None,
         on_text_starvation=starvations.append,
     )
@@ -708,7 +708,7 @@ def test_claude_json_stdout_scanner_text_resets_starvation_streak():
     starvations: list[int] = []
     scanner = JsonStdoutScanner(
         lambda _text: None,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: None,
         on_text_starvation=starvations.append,
     )
@@ -769,7 +769,7 @@ def test_claude_json_stdout_scanner_reports_compaction_apart_from_activity():
     observed: list[str] = []
     scanner = JsonStdoutScanner(
         lambda text: observed.append(f"message:{text}"),
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: observed.append("compacted"),
         on_activity=lambda: observed.append("activity"),
         on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
@@ -800,7 +800,7 @@ def test_claude_json_stdout_scanner_settles_compaction_on_a_boundary():
     observed: list[str] = []
     scanner = JsonStdoutScanner(
         lambda _text: None,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: observed.append("compacted"),
         on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
     )

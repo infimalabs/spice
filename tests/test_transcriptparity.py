@@ -85,6 +85,7 @@ HARNESS_API = (
     "assembled_messages",
     "assert_parity",
     "first_divergence",
+    "forward_read",
     "observed_shapes",
     "parity_corpus",
     "typed_events",
