@@ -447,8 +447,10 @@ function assertMetrics(result) {
     throw new Error("series recovery fixture did not begin empty");
   if (!recovery.recoveredSvg)
     throw new Error("empty metric series did not refresh into an SVG");
-  if (recovery.queryCount < 2)
-    throw new Error("watched metric series was not queried again");
+  if (recovery.queryCount !== 2)
+    throw new Error(
+      "watched metric series expected one refresh, got " + recovery.queryCount,
+    );
   if (new Set(recovery.queryEnds).size < 2)
     throw new Error("metric series refresh did not advance the query window");
   const expectedSourceOrder = [
