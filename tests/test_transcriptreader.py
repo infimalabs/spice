@@ -456,7 +456,7 @@ def test_one_typed_read_parses_and_decodes_once_before_many_projections(
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
-def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
+def test_garbled_mid_file_is_a_counted_skip_and_a_partial_tail_is_held(
     tmp_path: Path, *, compressed: bool
 ) -> None:
     before = _raw({"timestamp": TIMESTAMP, "value": "before"})
@@ -474,13 +474,53 @@ def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
         "before",
         None,
         "after",
-        None,
     ]
-    assert sum(record.parsed is None for record in read.records) == 2
+    assert sum(record.parsed is None for record in read.records) == 1
     assert "\ufffd" in read.records[1].raw
-    assert read.records[-1].raw == truncated.decode()
-    assert read.end_offset == read.file_size == len(payload)
+    assert read.end_offset == len(payload) - len(truncated)
+    assert read.file_size == len(payload)
     assert read_forward(transcript, cursor=cursor).records == ()
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
+def test_a_record_flushed_in_two_writes_is_read_once_when_it_completes(
+    tmp_path: Path, *, compressed: bool
+) -> None:
+    settled = _raw({"timestamp": TIMESTAMP, "value": "settled"})
+    split = _raw({"timestamp": TIMESTAMP, "value": "split"})
+    flushed, marker, pending = split.partition(b'"value"')
+    transcript = _transcript_path(tmp_path, compressed=compressed)
+    _write_transcript(transcript, settled + flushed, compressed=compressed)
+
+    cursor = TranscriptCursor()
+    first = read_forward(transcript, cursor=cursor)
+    _append_transcript(transcript, marker + pending, compressed=compressed)
+    second = read_forward(transcript, cursor=cursor)
+    third = read_forward(transcript, cursor=cursor)
+
+    delivered = (*first.records, *second.records, *third.records)
+    assert [record.raw for record in delivered] == [settled.decode(), split.decode()]
+    assert [record.offset for record in delivered] == [0, len(settled)]
+    assert first.end_offset == len(settled)
+    assert second.end_offset == second.file_size == len(settled + split)
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
+def test_bounded_and_reverse_reads_still_deliver_a_partial_tail(
+    tmp_path: Path, *, compressed: bool
+) -> None:
+    complete = _raw({"timestamp": TIMESTAMP, "value": "complete"})
+    truncated = b'{"timestamp":"unterminated"'
+    payload = complete + truncated
+    transcript = _transcript_path(tmp_path, compressed=compressed)
+    _write_transcript(transcript, payload, compressed=compressed)
+
+    bounded = read_bounded(transcript, start_offset=0, end_offset=len(payload))
+    reverse = read_reverse_window(transcript)
+
+    assert bounded.records[-1].raw == truncated.decode()
+    assert reverse.records[-1].raw == truncated.decode()
+    assert bounded.end_offset == reverse.end_offset == len(payload)
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])

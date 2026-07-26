@@ -265,11 +265,16 @@ def read_forward(
     *,
     cursor: TranscriptCursor,
 ) -> TranscriptRead:
-    """Read from the cursor's exact resume offset to EOF.
+    """Read from the cursor's exact resume offset to the last complete line.
 
     A truncated source resets the resume offset to zero, matching the existing
     append-only contract.  Filesystem identity detects a replaced source
     independently of size.  Successful reads advance both pieces of state.
+
+    An unterminated final line is held back rather than delivered: a live
+    transcript can flush one record in several writes, and resuming past the
+    prefix would split that record into fragments no consumer ever reassembles.
+    The cursor stops at its offset so the completed line is read exactly once.
     """
     with locked_cursor(cursor):
         try:
@@ -290,6 +295,7 @@ def read_forward(
                     file_size=file_size,
                     file_identity=file_identity,
                     align_partial_start=False,
+                    hold_partial_end=True,
                 )
         except OSError as exc:
             read = _failed_read(exc)
@@ -407,6 +413,7 @@ def _read_open_range(
     file_size: int,
     file_identity: TranscriptFileIdentity,
     align_partial_start: bool,
+    hold_partial_end: bool = False,
 ) -> TranscriptRead:
     handle.seek(start)
     if align_partial_start and not _is_line_boundary(handle, start):
@@ -419,6 +426,13 @@ def _read_open_range(
             break
         raw = handle.readline()
         if not raw:
+            break
+        if hold_partial_end and not raw.endswith(b"\n"):
+            # A writer mid-flush leaves its last line unterminated. Resuming
+            # after that prefix would decode it as garbage and then decode the
+            # rest of the same line as more garbage, so the complete record
+            # would never be seen. Leave it for the pass that finds it whole.
+            handle.seek(offset)
             break
         records.append(_line_record(offset, raw))
     return TranscriptRead(
