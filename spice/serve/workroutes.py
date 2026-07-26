@@ -248,9 +248,9 @@ def _work_tree_send_result_payload(
     grant: Future[LifecycleOutcome] | None,
 ) -> dict[str, Any]:
     if grant is None:
-        # One read of the inbox this send just published into, shared by the
-        # flat result fields and the facet that orders them, so the reply cannot
-        # describe two different instants of the same lane.
+        # Read the inbox once after this send publishes, then build only the
+        # chrome.pendingInbox facet from that observation so its value and order
+        # describe the same instant.
         pending_identity = pending_inbox_identity_payload(target.repo_root)
         response_payload = sent_steering_payload(
             sent,
