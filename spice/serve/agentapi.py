@@ -110,33 +110,26 @@ def agent_ensure_response_payload(
         )
     except AgentRestartRefusedError as exc:
         return (
-            {
-                "ok": False,
-                "failure": AGENT_FAILURE_RESTART_REFUSED,
-                "error": f"Could not ensure agent: {exc}",
-                "restartRefusal": exc.refusal,
-            },
+            agent_ensure_failure_payload(
+                exc,
+                failure=AGENT_FAILURE_RESTART_REFUSED,
+                refusal=exc.refusal,
+            ),
             HTTPStatus.TOO_MANY_REQUESTS,
         )
     except AgentOutOfCreditsError as exc:
         return (
-            {
-                "ok": False,
-                "failure": AGENT_FAILURE_OUT_OF_CREDITS,
-                "error": f"Could not ensure agent: {exc}",
-            },
+            agent_ensure_failure_payload(exc, failure=AGENT_FAILURE_OUT_OF_CREDITS),
             HTTPStatus.PAYMENT_REQUIRED,
         )
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        return (
-            {"ok": False, "error": f"Could not ensure agent: {exc}"},
-            HTTPStatus.INTERNAL_SERVER_ERROR,
-        )
+        return agent_ensure_failure_payload(exc), HTTPStatus.INTERNAL_SERVER_ERROR
     return agent_ensure_payload(result), HTTPStatus.OK
 
 
 def agent_ensure_payload(result: Any) -> dict[str, Any]:
-    return {
+    """The launched arm of the ensure answer: a thread, and the process behind it."""
+    payload = {
         "ok": True,
         "provider": driver_for(result.status.repo_root).name,
         "action": result.action,
@@ -149,6 +142,28 @@ def agent_ensure_payload(result: Any) -> dict[str, Any]:
         "prompt": result.prompt,
         "logPath": str(result.log_path) if result.log_path else "",
     }
+    return validate_emitter_payload("agentapi.agent_ensure_payload", payload)
+
+
+def agent_ensure_failure_payload(
+    exc: Exception,
+    *,
+    failure: str = "",
+    refusal: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The unstarted arm of the ensure answer: no agent, and why not.
+
+    One builder for every way an ensure can fail, so the arm is validated where
+    it is built rather than at whichever caller happens to nest it. Only a named
+    failure carries a kind; the rest is an error a reader can only display. A
+    refusal arrives with its driver-supplied facts and nothing else does.
+    """
+    payload: dict[str, Any] = {"ok": False, "error": f"Could not ensure agent: {exc}"}
+    if failure:
+        payload["failure"] = failure
+    if refusal is not None:
+        payload["restartRefusal"] = refusal
+    return validate_emitter_payload("agentapi.agent_ensure_failure_payload", payload)
 
 
 def sent_steering_payload(
