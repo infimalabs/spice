@@ -23,6 +23,12 @@ METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 
 TEAM_AUTHORITY_SCHEMA_VERSION = 2
+# Consecutive authority versions own this low positive namespace. The team
+# database used a 31-bit CRC32 schema fingerprint before versions existed;
+# keeping monotonic versions below this boundary lets an older writer reject
+# every future version before shape matching while recognizing the v0.27
+# fingerprint as a different kind of stamp without retaining its value.
+TEAM_AUTHORITY_MONOTONIC_VERSION_MAX = 0xFFFF
 
 TEAM_AUTHORITY_TABLES = frozenset(
     {

@@ -21,6 +21,7 @@ from spice.serve.team.projection import (
 )
 from spice.serve.team.schema import (
     TEAM_AUTHORITY_MIGRATIONS,
+    TEAM_AUTHORITY_MONOTONIC_VERSION_MAX,
     TEAM_AUTHORITY_SCHEMA_VERSION,
     TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
@@ -41,6 +42,72 @@ AUTHORITY_SHAPE_DIGESTS = {
 # one, so the release that adds the next authority version rehearses upgrading
 # from the shape it is leaving behind without anyone remembering to.
 PRIOR_AUTHORITY_VERSION = TEAM_AUTHORITY_SCHEMA_VERSION - 1
+
+V027_TEAM_SCHEMA_FINGERPRINT = 783663365
+V027_RETIRED_TABLES = (
+    "agent_metrics",
+    "agent_metric_buckets",
+    "agent_metric_cursors",
+    "task_events",
+    "directives",
+    "directive_totals",
+)
+V027_RETIRED_SCHEMA = """
+CREATE TABLE agent_metrics (
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, team_id)
+);
+CREATE TABLE agent_metric_buckets (
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, team_id, bucket_start)
+);
+CREATE TABLE agent_metric_cursors (
+    agent_id TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    offset INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, source_path)
+);
+CREATE TABLE task_events (
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL CHECK (
+        kind IN ('claim', 'phaseAdvance', 'review', 'complete', 'drain')
+    ),
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL
+);
+CREATE TABLE directives (
+    directive_key TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    sent_at REAL NOT NULL,
+    acked INTEGER NOT NULL DEFAULT 0,
+    acked_at REAL
+);
+CREATE TABLE directive_totals (
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    sends INTEGER NOT NULL DEFAULT 0,
+    acked INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, team_id)
+);
+CREATE INDEX agent_metric_buckets_by_start
+    ON agent_metric_buckets (bucket_start);
+CREATE INDEX task_events_by_ts
+    ON task_events (ts);
+CREATE INDEX task_events_by_agent_team_ts
+    ON task_events (agent_id, team_id, ts);
+CREATE INDEX directives_by_sent_at
+    ON directives (sent_at);
+"""
 
 
 def _digest_of_shape(shape: dict[str, Any]) -> str:
@@ -191,6 +258,44 @@ def _authority_state(path: Path) -> dict[str, tuple[tuple[Any, ...], ...]]:
         }
 
 
+def _table_state(
+    path: Path, tables: tuple[str, ...]
+) -> dict[str, tuple[str, tuple[tuple[Any, ...], ...]]]:
+    with sqlite_connection(path) as connection:
+        return {
+            table: (
+                str(
+                    connection.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' AND name = ?",
+                        (table,),
+                    ).fetchone()[0]
+                ),
+                tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        f'SELECT * FROM "{table}" ORDER BY rowid'
+                    ).fetchall()
+                ),
+            )
+            for table in tables
+        }
+
+
+def _identity_state(path: Path) -> tuple[dict[str, Any], ...]:
+    with sqlite_connection(path) as connection:
+        columns = tuple(
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(agent_identities)")
+        )
+        return tuple(
+            dict(zip(columns, row, strict=True))
+            for row in connection.execute(
+                "SELECT * FROM agent_identities ORDER BY actor_id"
+            ).fetchall()
+        )
+
+
 def _logical_state(path: Path) -> tuple[int, tuple[str, ...]]:
     with sqlite_connection(path) as connection:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
@@ -231,9 +336,13 @@ def test_failed_forward_migration_rolls_back_every_logical_change(
 def test_newer_writer_fails_before_mutating_database_or_journal_mode(tmp_path):
     path = tmp_path / "newer.sqlite3"
     _build_authority_at(path, TEAM_AUTHORITY_SCHEMA_VERSION)
-    with sqlite_connection(path) as connection:
-        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
     _seed_authority(path)
+    with sqlite_connection(path) as connection:
+        connection.execute(
+            "CREATE TABLE future_authority_records ("
+            "record_id TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
     before = _logical_state(path)
     with sqlite_connection(path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
@@ -244,6 +353,78 @@ def test_newer_writer_fails_before_mutating_database_or_journal_mode(tmp_path):
     assert _logical_state(path) == before
     with sqlite_connection(path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+def test_v027_fingerprint_store_migrates_by_shape_and_leaves_retired_tables_whole(
+    tmp_path,
+):
+    assert V027_TEAM_SCHEMA_FINGERPRINT > TEAM_AUTHORITY_MONOTONIC_VERSION_MAX
+    path = tmp_path / "v0.27.sqlite3"
+    _build_authority_at(path, PRIOR_AUTHORITY_VERSION)
+    with sqlite_connection(path) as connection:
+        team_store_module._execute_schema_script(connection, V027_RETIRED_SCHEMA)
+        connection.execute(
+            "INSERT INTO agent_metrics VALUES ('agent-a', 'team-a', 13, 10.8)"
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_buckets VALUES ('agent-a', 'team-a', 60, 5, 13)"
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_cursors "
+            "VALUES ('agent-a', '/tmp/agent-a.jsonl', 41, 10.9)"
+        )
+        connection.execute(
+            "INSERT INTO task_events "
+            "VALUES (11.0, 'claim', 'TASK-1', 'agent-a', 'team-a')"
+        )
+        connection.execute(
+            "INSERT INTO directives "
+            "VALUES ('directive-1', 'agent-a', 'team-a', 11.1, 1, 11.2)"
+        )
+        connection.execute(
+            "INSERT INTO directive_totals VALUES ('agent-a', 'team-a', 3, 2)"
+        )
+        connection.execute(f"PRAGMA user_version = {V027_TEAM_SCHEMA_FINGERPRINT}")
+    _seed_authority(path)
+    authority_before = _authority_state(path)
+    identity_before = _identity_state(path)
+    retired_before = _table_state(path, V027_RETIRED_TABLES)
+
+    store = ServeTeamStore(path=path)
+    _forget_initialized(path)
+    identity = store.agent_identity_for_actor("agent-a")
+
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    authority_after = _authority_state(path)
+    identity_after = _identity_state(path)
+    retired_after = _table_state(path, V027_RETIRED_TABLES)
+
+    assert (identity.actor_id, identity.actual_model, identity.renewal_revision) == (
+        "agent-a",
+        "gpt-current",
+        16,
+    )
+    assert {
+        table: rows
+        for table, rows in authority_after.items()
+        if table != "agent_identities"
+    } == {
+        table: rows
+        for table, rows in authority_before.items()
+        if table != "agent_identities"
+    }
+    assert identity_after == tuple(
+        {
+            column: value
+            for column, value in row.items()
+            if column != "actual_service_tier"
+        }
+        for row in identity_before
+    )
+    assert retired_after == retired_before
 
 
 def test_cached_store_rechecks_newer_writer_version_before_use(tmp_path):

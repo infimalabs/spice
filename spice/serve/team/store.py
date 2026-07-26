@@ -88,6 +88,7 @@ from spice.serve.team.schema import (
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
     TASK_FILTER_SOURCES as TASK_FILTER_SOURCES,
     TEAM_AUTHORITY_MIGRATIONS,
+    TEAM_AUTHORITY_MONOTONIC_VERSION_MAX,
     TEAM_AUTHORITY_SCHEMA_VERSION,
     TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
@@ -391,18 +392,29 @@ class ServeTeamStore(
         whose columns match none of them still fails untouched. Exactly one can
         match, because no two of the retained shapes describe the same tables.
 
-        The stamp keeps the two jobs it can still do honestly. A stamp above
-        this writer means a newer writer has been here, and its rows are not
-        described by any shape this writer holds, so nothing may be assumed
-        about them. A stamp of zero on a populated database is from before
-        versions existed, and no migration claims to know what that is.
+        The stamp keeps the two jobs it can still do honestly. Consecutive
+        versions own a reserved low positive namespace, so a stamp above this
+        writer within that namespace means a newer writer has been here and is
+        refused before shape matching. That ordering matters when a future
+        version adds an authority table this writer does not know to inspect.
+
+        Before monotonic versions, this database stored a 31-bit CRC32 schema
+        fingerprint in the same field. The v0.27 fingerprint sits outside the
+        version namespace while its authority tables still carry a retained
+        source shape, so that shape authenticates the migration source without
+        a fingerprint registry. A stamp of zero on a populated database is from
+        before either contract, and no migration claims to know what that is.
 
         The shapes are bounded to the current version and the one predecessor
         it converts, so a database older than that matches nothing and is
         refused for the release that still owns its conversion.
         """
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
+        if (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+            < stored
+            <= TEAM_AUTHORITY_MONOTONIC_VERSION_MAX
+        ):
             raise SpiceError(
                 "team authority database was written by newer schema version "
                 f"{stored}; this writer supports through "
@@ -425,6 +437,12 @@ class ServeTeamStore(
         for version in sorted(TEAM_AUTHORITY_SCHEMAS):
             if not _authority_shape_mismatches(connection, version):
                 return version
+        if stored > TEAM_AUTHORITY_SCHEMA_VERSION:
+            raise SpiceError(
+                "pre-version team authority database has unsupported durable "
+                f"table shape under schema fingerprint {stored}; refusing to "
+                "rebuild or open it"
+            )
         # Report the drift against the version the database claims to be, which
         # is the comparison an operator reading the message is already holding.
         raise _authority_shape_error(connection, stored)
