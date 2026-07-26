@@ -24,6 +24,8 @@ from spice.agent.driver import (
     CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
     CODEX_DRIVER,
     DRIVER,
+    FAST_MODE_LAUNCH_KNOB,
+    PERSONALITY_LAUNCH_KNOB,
     POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
@@ -33,6 +35,7 @@ from spice.agent.driver import (
     post_tool_hook_config_path,
     write_playwright_mcp_config,
 )
+from spice.agent.cli import render_ensure_result
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.paths import git_dir
@@ -50,6 +53,20 @@ SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
 LAUNCH_CLAIM_UUID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 LAUNCH_CLAIM_ACTOR = "dddddddddddddddddddddddddddddddd"
+# A real effort both drivers accept, differing from the shipped default so
+# asking for it is visible in the command either one builds.
+PROBE_REASONING_EFFORT = "low"
+# What `spice agent ensure` reports about every launch, before the lines it
+# adds only when there is something to add.
+LAUNCH_REPORT_FIELDS = (
+    "action",
+    "status",
+    "pid",
+    "pgid",
+    "thread",
+    "service_tier",
+    "prompt",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -201,6 +218,98 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
     assert 'service_tier="fast"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command[-3:] == ["resume", "thread-1", prompt]
+
+
+def test_every_driver_honors_exactly_the_launch_knobs_it_declares(
+    tmp_path, monkeypatch
+):
+    # The declaration is checked against the command each driver actually
+    # builds, so a driver cannot claim a knob it drops or drop one it claims.
+    # A driver growing a launch seam without declaring it fails here too.
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
+    probes: dict[str, object] = {
+        "model": "probe-model",
+        "reasoning_effort": PROBE_REASONING_EFFORT,
+        "personality": "friendly",
+        "fast_mode": True,
+    }
+    assert set(probes) == agent_driver.LAUNCH_KNOBS
+
+    for driver in agent_driver.all_drivers():
+        baseline = driver.build_exec_command(
+            repo_root=tmp_path, prompt="P", binary="probe-bin"
+        )
+        for knob, probe in probes.items():
+            asked = driver.build_exec_command(
+                repo_root=tmp_path, prompt="P", binary="probe-bin", **{knob: probe}
+            )
+            reaches_command = asked != baseline
+            assert reaches_command == (knob in driver.honored_launch_knobs), (
+                f"{driver.name} declares honored={knob in driver.honored_launch_knobs} "
+                f"for {knob} but reaches_command={reaches_command}"
+            )
+
+
+def test_launch_sends_no_knob_its_driver_cannot_carry_and_says_which(
+    tmp_path, monkeypatch
+):
+    # Claude has no launch-time seam for either knob, so the launch withholds
+    # both in the open and names them instead of handing them to a driver body
+    # that ignores them. Assert on what the driver is handed: a driver that
+    # ignores an argument builds the same command either way, so the command
+    # alone cannot tell a withheld knob from a dropped one.
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: status())
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+    handed = _record_launch_arguments(monkeypatch, CLAUDE_DRIVER)
+    edit.set_scope_section(
+        tmp_path,
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_PERSONALITY_KEY: "friendly"},
+    )
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True, fast_mode=True)
+
+    assert result.unhonored_launch_knobs == ("fast_mode", "personality")
+    assert handed == [{"personality": "", "fast_mode": False}]
+    assert LAUNCH_REPORT_FIELDS + ("unhonored", "command") == _report_fields(result)
+    assert (
+        "unhonored=fast_mode,personality (no launch-time seam on this driver; not sent)"
+    ) in render_ensure_result(result).splitlines()
+
+
+def test_launch_stays_quiet_about_knobs_nobody_asked_for(tmp_path, monkeypatch):
+    # The shipped personality default is the contract's own answer, not a
+    # request, so an ordinary Claude launch reports nothing and prints nothing.
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: status())
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.unhonored_launch_knobs == ()
+    assert LAUNCH_REPORT_FIELDS + ("command",) == _report_fields(result)
+
+
+def test_codex_carries_both_knobs_the_launch_asks_it_for(tmp_path, monkeypatch):
+    # The same request on the driver that does have the seams: nothing is
+    # dropped, nothing is reported, and both land in the built command.
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
+    monkeypatch.setattr(lifecycle, "agent_status", lambda *_args, **_kwargs: status())
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CODEX_DRIVER)
+    handed = _record_launch_arguments(monkeypatch, CODEX_DRIVER)
+    edit.set_scope_section(
+        tmp_path,
+        layers.WORKTREE_SOURCE,
+        values.AGENT_KEY,
+        {values.AGENT_PERSONALITY_KEY: "friendly"},
+    )
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True, fast_mode=True)
+
+    assert result.unhonored_launch_knobs == ()
+    assert handed == [{"personality": "friendly", "fast_mode": True}]
+    assert 'personality="friendly"' in _config_values(result.command)
+    assert result.command[result.command.index("--enable") + 1] == "fast_mode"
 
 
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
@@ -833,3 +942,31 @@ def _config_values(command: list[str]) -> list[str]:
     return [
         command[index + 1] for index, part in enumerate(command) if part == "--config"
     ]
+
+
+def _record_launch_arguments(
+    monkeypatch, driver: agent_driver.AgentDriver
+) -> list[dict[str, object]]:
+    """The knobs each launch hands this driver, recorded as the launch sends them.
+
+    Reads the seam between the launch path and the driver, which is where a
+    withheld knob and a knob the driver body silently ignores stop looking the
+    same. Delegates to the real builder so the command is still the shipped one.
+    """
+    handed: list[dict[str, object]] = []
+    build_exec_command = type(driver).build_exec_command
+    watched = {PERSONALITY_LAUNCH_KNOB, FAST_MODE_LAUNCH_KNOB}
+
+    def record(self, **kwargs):
+        handed.append({key: kwargs[key] for key in sorted(watched & set(kwargs))})
+        return build_exec_command(self, **kwargs)
+
+    monkeypatch.setattr(type(driver), "build_exec_command", record)
+    return handed
+
+
+def _report_fields(result: lifecycle.AgentEnsureResult) -> tuple[str, ...]:
+    """The field names `spice agent ensure` prints for a result, in order."""
+    return tuple(
+        line.split("=", 1)[0] for line in render_ensure_result(result).splitlines()
+    )

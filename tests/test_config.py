@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 from spice.config import edit, layers, values
-from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, SPICE_AGENT_DRIVER_ENV
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.configcli import handle_config
@@ -357,6 +357,38 @@ def test_personality_and_judge_setters_write_each_named_scope(
 
     assert layers.layer_table(tmp_path, scope, "agent")["personality"] == "friendly"
     assert layers.layer_table(tmp_path, scope, "judge")["bin"] == f"judge-{scope}"
+
+
+@pytest.mark.parametrize(
+    ("driver", "note"),
+    [
+        (CODEX_DRIVER, "driver=codex carries personality into every launch"),
+        (
+            CLAUDE_DRIVER,
+            "driver=claude has no launch-time seam for personality, "
+            "so this value does not reach the agent",
+        ),
+    ],
+)
+def test_personality_setter_names_whether_the_active_driver_carries_it(
+    tmp_path, monkeypatch, capsys, driver, note
+):
+    # The value is written either way; what differs is whether it means anything
+    # at launch, so the setter says which driver will be reading it and whether
+    # that driver has a seam to carry it.
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr("spice.agent.driver.driver_for", lambda _repo_root: driver)
+    parser = build_parser()
+
+    handle_config(parser.parse_args(["config", "personality", "friendly"]))
+    handle_config(parser.parse_args(["config", "personality"]))
+
+    assert capsys.readouterr().out.splitlines() == [
+        "personality=friendly",
+        note,
+        "personality=friendly",
+        note,
+    ]
 
 
 def test_judge_cli_toggles_worktree_adjudication_mode(tmp_path, monkeypatch):
