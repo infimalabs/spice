@@ -57,7 +57,7 @@ def valid_live_bus_callback_payloads(**overrides: Any) -> dict[str, Any]:
             "TeamSnapshotResponse"
         ),
         "team_command_payload": lambda _payload: (
-            valid_wire_payload("TeamCommandResponse"),
+            valid_wire_payload("TeamCommandApplied"),
             None,
         ),
         "metric_series_payload": lambda _query: valid_metric_series_payload(),

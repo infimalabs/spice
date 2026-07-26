@@ -726,14 +726,17 @@ WIRE_OBJECTS = (
         },
     ),
     _object(
-        "TeamCommandResponse",
-        {"ok": BOOLEAN},
+        "TeamCommandApplied",
         {
+            "ok": _literal(True),
             "revision": INTEGER,
             "differential": BOOLEAN,
             "snapshot": _ref("TeamSnapshot"),
-            "error": STRING,
         },
+    ),
+    _object(
+        "TeamCommandRefused",
+        {"ok": _literal(False), "error": STRING},
     ),
     _object(
         "MetricSeriesSubject",
@@ -1051,6 +1054,16 @@ WIRE_ALIASES = {
     # rather than against whichever one a reader happened to have in mind.
     "LaneChromeFacet": _union(
         *(_ref(name) for name in LANE_CHROME_FACET_SCHEMAS.values())
+    ),
+    # The two shapes a team command actually answers with: applied carries the
+    # revision and snapshot it produced, refused carries the reason it did not.
+    # Held as one object with every field optional, a reader could take the
+    # revision off a refusal that never had one, and the checkJs lane could not
+    # say otherwise -- it runs with strictNullChecks off, so undefined satisfies
+    # a required number. Split on the `ok` literal, that read is a type error
+    # until the reader narrows, which is the enforcement the flag cannot give.
+    "TeamCommandResponse": _union(
+        _ref("TeamCommandApplied"), _ref("TeamCommandRefused")
     ),
 }
 

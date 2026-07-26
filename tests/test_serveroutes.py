@@ -832,7 +832,7 @@ def _route_test_livebus_callbacks(target, calls, messages_payload):
             ),
             team_command_payload=lambda payload: (
                 calls.append(("teamCommand", payload))
-                or valid_wire_payload("TeamCommandResponse", revision=2),
+                or valid_wire_payload("TeamCommandApplied", revision=2),
                 HTTPStatus.OK,
             ),
         ),
@@ -976,7 +976,7 @@ def _assert_livebus_route_results(
         },
         "team-1": {
             "type": "teams.commandResult",
-            "result": {"ok": True, "revision": 2},
+            "result": valid_wire_payload("TeamCommandApplied", revision=2),
             "requestId": "team-1",
         },
         "history-1": {
