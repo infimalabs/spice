@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.lifecycle import WORKTREE_SKILL_RELATIVE_PATH
+from spice.errors import SpiceError
 from spice.hooks.initplan import (
     InitOperation,
     InitOperationKind,
@@ -21,6 +22,7 @@ from spice.hooks.initplan import (
     InitializationMode,
     InitializationPlan,
     apply_initialization_plan,
+    git_config_file_get,
     initialization_plan_payload,
     initialization_preview_rows,
     initialization_receipt_path,
@@ -28,6 +30,16 @@ from spice.hooks.initplan import (
     load_initialization_receipt,
     plan_initialization,
 )
+
+
+def test_git_config_file_get_distinguishes_present_absent_and_failure(tmp_path):
+    config = tmp_path / "config"
+    _run(["git", "config", "--file", str(config), "core.hooksPath", ".shared-hooks"])
+    assert git_config_file_get(config, "core.hooksPath") == ".shared-hooks"
+    assert git_config_file_get(config, "missing.key") is None
+    config.write_text("[broken\n", encoding="utf-8")
+    with pytest.raises(SpiceError, match="Git config.*bad config line"):
+        git_config_file_get(config, "core.hooksPath")
 
 
 def test_full_plan_is_ordered_complete_deterministic_and_side_effect_free(tmp_path):
@@ -436,7 +448,6 @@ def test_bare_common_lane_plan_names_a_failing_git_rather_than_the_tree(
 ):
     """Under contention this plan reports the git that failed, not a false verdict."""
     import spice.paths as paths
-    from spice.errors import SpiceError
 
     seed = _git_init(tmp_path / "seed")
     (seed / "README.md").write_text("seed\n", encoding="utf-8")

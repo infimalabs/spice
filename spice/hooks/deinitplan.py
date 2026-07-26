@@ -24,6 +24,7 @@ from spice.hooks.initplan import (
     initialization_receipt_from_payload,
     initialization_receipt_path,
     initialization_receipt_payload,
+    git_config_file_get,
     load_initialization_receipt,
     write_initialization_receipt,
 )
@@ -296,7 +297,7 @@ def _reverse_config_operation(
     initialization_index: int,
     receipt: DeinitializationReceipt,
 ) -> DeinitOperationState:
-    observed = _git_config_file_get(operation.scope_path, operation.target)
+    observed = git_config_file_get(operation.scope_path, operation.target)
     if not operation.managed:
         return _config_outcome(
             initialization_index, DeinitOutcome.PRESERVED_UNMANAGED, observed
@@ -479,20 +480,6 @@ def _worktree_roots(repo_root: Path) -> tuple[Path, ...]:
         for field in result.stdout.split("\0")
         if field.startswith("worktree ")
     )
-
-
-def _git_config_file_get(path: Path, key: str) -> str | None:
-    result = run_git_command(
-        ["git", "config", "--file", str(path), "--get", key],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode in {0, 1}:
-        return result.stdout.strip() or None
-    detail = (result.stderr or result.stdout).strip()
-    suffix = f": {detail}" if detail else ""
-    raise SpiceError(f"could not inspect Git config {path}{suffix}")
 
 
 def _restore_git_config(operation: InitOperation) -> None:
