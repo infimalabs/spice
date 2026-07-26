@@ -13,6 +13,7 @@ from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
 )
+from spice.serve.team.metrics import AgentMetricCheckpoint
 from spice.serve.team.schema import (
     LEGACY_TEAM_SCHEMA_FINGERPRINT,
     OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
@@ -52,12 +53,11 @@ def _record_session_facts(
         tool_calls=1,
         message_timestamps=[timestamp],
         tool_call_timestamps=[timestamp],
-    )
-    store.record_agent_metric_cursor(
-        actor_id,
-        source_path=f"/transcripts/{suffix}.jsonl",
-        offset=int(timestamp),
-        file_identity=TranscriptFileIdentity(device=1, inode=int(timestamp)),
+        checkpoint=AgentMetricCheckpoint(
+            source_path=f"/transcripts/{suffix}.jsonl",
+            offset=int(timestamp),
+            file_identity=TranscriptFileIdentity(device=1, inode=int(timestamp)),
+        ),
     )
     publish_directive_fact(
         store.directive_state_path,
