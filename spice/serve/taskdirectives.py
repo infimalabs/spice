@@ -12,21 +12,13 @@ import html
 from collections.abc import Iterator
 from typing import Any
 
-from spice.mail.ackgrammar import iter_control_lines
+from spice.mail.ackgrammar import iter_control_lines, task_directive_fields
 from spice.serve.markdown import render_message_html
 
-_TASK_DIRECTIVE_TOKEN = "TASK"
-_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-# Display order for the capture card; ordering only.
+# Display order for the capture card; ordering only. Whether a line is a
+# directive at all is not decided here -- spice.mail.ackgrammar owns that, so
+# this display and the supervisor cannot disagree about which lines act.
 _TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
-# A line is a directive exactly when the supervisor would convert it into a
-# task. Inline supervised creation requires title and project and treats
-# acceptance as optional -- an acceptance-less directive lands in the plan phase
-# but is still created -- so recognition must not demand acceptance, or a
-# converted plan-phase task renders raw here while its capture card shows
-# elsewhere. Mirrors the require_project title+project rule in
-# spice.tasks.create._batch_field_errors.
-_TASK_DIRECTIVE_REQUIRED_FIELDS = ("title", "project")
 
 
 def _render_message_html_with_task_directives(
@@ -97,37 +89,8 @@ def _task_directive_count(text: str) -> int:
 
 
 def _task_directive_from_line(line: str) -> dict[str, Any] | None:
-    stripped = line.strip()
-    token_end = len(_TASK_DIRECTIVE_TOKEN)
-    if not stripped.startswith(_TASK_DIRECTIVE_TOKEN):
-        return None
-    if len(stripped) > token_end and stripped[token_end] not in (
-        _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        return None
-    payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
-    fields = _task_directive_fields(payload)
-    if not _task_directive_has_required_fields(fields):
-        return None
-    return {"payload": payload, "fields": fields}
-
-
-def _task_directive_fields(payload: str) -> list[tuple[str, str]]:
-    fields: list[tuple[str, str]] = []
-    for part in payload.split("|"):
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        key = " ".join(key.strip().split())
-        value = " ".join(value.strip().split())
-        if key and value:
-            fields.append((key, value))
-    return fields
-
-
-def _task_directive_has_required_fields(fields: list[tuple[str, str]]) -> bool:
-    keys = {key for key, _value in fields}
-    return all(key in keys for key in _TASK_DIRECTIVE_REQUIRED_FIELDS)
+    fields = task_directive_fields(line)
+    return None if fields is None else {"fields": fields}
 
 
 def _task_directive_summary(directive: dict[str, Any]) -> str:

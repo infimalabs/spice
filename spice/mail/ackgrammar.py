@@ -39,6 +39,11 @@ from spice.tasks import identity
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
 TASK_DIRECTIVE_TOKEN = "TASK"
+# Inline supervised creation requires title and project and treats acceptance
+# as optional -- an acceptance-less directive lands in the plan phase but is
+# still created. Mirrors the require_project rule in
+# spice.tasks.create._batch_field_errors.
+TASK_DIRECTIVE_REQUIRED_FIELDS = ("title", "project")
 
 # A valid ACK header runs from `ACK` through its consecutive key-like tokens.
 # Plain `ACK <key> prose` is body-bearing: the header ends at the key and the
@@ -584,6 +589,41 @@ def _task_batch_line_from_directive(line: str) -> str | None:
     if rest and rest[0] not in _TASK_DIRECTIVE_SEPARATOR_CHARS:
         return None
     return TASK_DIRECTIVE_TOKEN + rest
+
+
+def task_directive_fields(line: str) -> list[tuple[str, str]] | None:
+    """Return a directive line's fields, or None when it asks for no task.
+
+    The single authority on whether a line asks for a task. It accepts the
+    list, heading, and emphasis decoration a writer naturally puts in front of
+    a directive, and it demands the fields inline creation demands. Every
+    reader shares it, so a capture card cannot appear for a line the
+    supervisor ignored, nor go missing for a line it captured.
+    """
+    normalized = _task_batch_line_from_directive(line)
+    if normalized is None:
+        return None
+    payload = normalized[len(TASK_DIRECTIVE_TOKEN) :].lstrip(
+        _TASK_DIRECTIVE_SEPARATOR_CHARS
+    )
+    fields = _task_directive_field_pairs(payload)
+    keys = {key for key, _value in fields}
+    if not all(key in keys for key in TASK_DIRECTIVE_REQUIRED_FIELDS):
+        return None
+    return fields
+
+
+def _task_directive_field_pairs(payload: str) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    for part in payload.split("|"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = " ".join(key.strip().split())
+        value = " ".join(value.strip().split())
+        if key and value:
+            fields.append((key, value))
+    return fields
 
 
 def _control_line_marker_start(text: str, token_pos: int) -> int | None:
