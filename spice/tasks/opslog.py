@@ -15,6 +15,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from spice.errors import SpiceError
@@ -45,6 +46,7 @@ CONTRACT_PROPERTIES = frozenset(
 
 VALUE_PREVIEW_CHARS = 60
 REQUIRED_OPERATIONS_COLUMNS = frozenset({"id", "uuid", "data"})
+_OPERATION_TIMESTAMP = "json_extract(data, '$.Update.timestamp')"
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,40 @@ def unsupported_schema_error(path: Path, detail: str) -> SpiceError:
         "Taskwarrior 3 TaskChampion storage with operations columns "
         "id, uuid, data is required"
     )
+
+
+def latest_operation_epoch() -> float | None:
+    """Epoch seconds of the newest operation the log holds, or None for no answer.
+
+    This is what "the task authority last recorded something" means, and it is
+    deliberately not the store's modification time. Taskwarrior rewrites the
+    database on every read, so a bare export or `spice task list` that changed
+    nothing still moves every timestamp the filesystem keeps; only the log's own
+    contents distinguish a read from a write.
+
+    Newest is taken by operations id rather than by comparing the recorded
+    timestamps, because id is the order the task plane committed in and the
+    stamps are text whose fractional digits need not all be the same width.
+    Operations carrying no stamp — the UndoPoint that separates transactions —
+    are skipped rather than ending the search, so an empty log and a log whose
+    tail is a separator both answer None.
+
+    None is also the answer for a stamp this cannot turn into an instant. A
+    zoneless one is refused rather than read as local time: a freshness a
+    reader compares against now is worth omitting instead of guessing by hours.
+    """
+    with connect() as log:
+        row = log.connection.execute(
+            f"SELECT {_OPERATION_TIMESTAMP} FROM operations "
+            f"WHERE {_OPERATION_TIMESTAMP} IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    try:
+        recorded = datetime.fromisoformat(str(row[0]))
+    except ValueError:
+        return None
+    return None if recorded.tzinfo is None else recorded.timestamp()
 
 
 def task_version(uuid: str) -> int:
