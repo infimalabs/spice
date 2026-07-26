@@ -213,6 +213,15 @@ class TokenUsage:
 
 
 @dataclass(slots=True, frozen=True)
+class ContextUsageFields:
+    """Dialect-decoded usage fields before reader provenance is attached."""
+
+    last: TokenUsage
+    cumulative: TokenUsage | None
+    model_context_window: int | None
+
+
+@dataclass(slots=True, frozen=True)
 class ContextUsage:
     """Last-turn and cumulative token usage plus the provider context window."""
 
