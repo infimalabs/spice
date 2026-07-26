@@ -148,7 +148,12 @@ function submissionSmokeLaneMessage(
   };
 }
 
-function submissionSmokeLanePayload(targetId, messages, processStatus) {
+function submissionSmokeLanePayload(
+  targetId,
+  messages,
+  processStatus,
+  pendingKeys = [],
+) {
   const latest = messages[messages.length - 1];
   const complete = latest.kind === "final" || latest.kind === "reply";
   return {
@@ -158,7 +163,11 @@ function submissionSmokeLanePayload(targetId, messages, processStatus) {
       pendingInbox: {
         authority: "inbox",
         order: { epoch: "", revision: latest.index },
-        value: { count: 0, label: "0", keys: [] },
+        value: {
+          count: pendingKeys.length,
+          label: String(pendingKeys.length),
+          keys: pendingKeys,
+        },
       },
       activity: {
         authority: "transcript",
@@ -301,7 +310,13 @@ async function submissionSmokePushSubmission(state, lane, submission) {
   };
 }
 
-async function submissionSmokePushPayload(state, lane, messages, processStatus) {
+async function submissionSmokePushPayload(
+  state,
+  lane,
+  messages,
+  processStatus,
+  pendingKeys = [],
+) {
   const startedAt = performance.now();
   await handleLiveBusMessage(
     JSON.stringify({
@@ -313,6 +328,7 @@ async function submissionSmokePushPayload(state, lane, messages, processStatus) 
         lane.targetId,
         messages,
         processStatus,
+        pendingKeys,
       ),
     }),
   );
@@ -424,6 +440,20 @@ async function runSubmissionIdleScenario(state) {
   const lane = state.idle;
   const key = state.keys.get(lane.targetId);
   const accepted = await submissionSmokeSend(state, lane, "idle lane request");
+  const reasonless = await submissionSmokePushPayload(
+    state,
+    lane,
+    [
+      submissionSmokeLaneMessage(
+        "idle-reasonless-nack-message",
+        1,
+        "assistant",
+        "NACK " + key + ":",
+      ),
+    ],
+    "idle",
+    [key],
+  );
   const acceptedLifecycle = lane.submissionLifecycleByKey.get(key);
   const receivedEvent = submissionSmokeReceivedLifecycle(
     key,
@@ -442,7 +472,7 @@ async function runSubmissionIdleScenario(state) {
   );
   const completed = await submissionSmokePushPayload(state, lane, [reply], "idle");
   const replay = await submissionSmokePushSubmission(state, lane, receivedEvent);
-  return { accepted, completed, received, replay };
+  return { accepted, completed, reasonless, received, replay };
 }
 
 async function runSubmissionLifecycleSmokePage() {
@@ -500,6 +530,15 @@ function assertSubmissionLifecycleResult(result) {
     throw new Error("running completion disposition mismatch");
   if (result.idle.completed.snapshot.disposition !== "refused")
     throw new Error("idle completion disposition mismatch");
+  if (
+    result.idle.reasonless.snapshot.stage !== "accepted" ||
+    result.idle.reasonless.snapshot.disposition !== "" ||
+    result.idle.reasonless.snapshot.pendingCount !== 1
+  )
+    throw new Error(
+      "reasonless NACK advanced pending submission: " +
+        JSON.stringify(result.idle.reasonless),
+    );
 }
 
 function assertSubmissionHeaderIsClean(
