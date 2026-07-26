@@ -5,12 +5,22 @@ mounted `spice release` command. Lane branches are allowed; the release command
 pushes the prepared release commit to `origin/main`.
 
 ```sh
+spice release check           # run the release gates only; bumps nothing
 spice release range           # preview latest-release-tag..HEAD before prepare
 spice release prepare minor   # bump, validate, commit, stop before publish
 spice release notes > /tmp/spice-release-notes.md
 spice release publish --notes-file /tmp/spice-release-notes.md
 spice release minor           # one-pass bump, validate, commit, publish
 ```
+
+`spice release check` answers "would this tree pass a release?" without
+answering it destructively. It runs the same gate sequence a real release runs,
+against the version already in the tree, and then stops: nothing is bumped,
+committed, tagged, pushed, or published. It is the only mutation-free way to get
+that answer. `prepare` is not the safe rehearsal its name suggests, because it
+bumps the version and commits the bump before it stops. `check` and the release
+path share one gate body on purpose: a separate verification path would drift
+until it certified something the release does not actually run.
 
 Release validation runs every scratch-safe served-UI Playwright scenario from
 `tests/browser/release_smoke_manifest.js` using the repository's pinned

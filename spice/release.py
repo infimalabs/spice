@@ -55,10 +55,22 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         prog=prog,
         description=(
             "Prepare, publish, and summarize spice releases from a clean "
-            "synchronized worktree."
+            "synchronized worktree. check, notes, and range only read the "
+            "tree: they never bump, commit, tag, push, or publish. minor, "
+            "patch, prepare, publish, and github all mutate -- prepare bumps "
+            "the version and commits it, so it is not a rehearsal."
         ),
     )
     actions = parser.add_subparsers(dest="release_action", required=True)
+
+    check = actions.add_parser(
+        "check",
+        help=(
+            "Run the release gates against the current version and stop; "
+            "mutates nothing."
+        ),
+    )
+    check.set_defaults(func=handle_release, release_mode="check")
 
     for bump in BUMP_CHOICES:
         one_pass = actions.add_parser(
@@ -214,15 +226,22 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         print(output, end="" if output.endswith("\n") else "\n")
         return 0
 
+    if mode == "check":
+        version = current_version()
+        run_release_gates(root, version)
+        print(
+            f"release gates passed for {version}; nothing was bumped, "
+            "committed, tagged, pushed, or published"
+        )
+        return 0
+
     if mode == "publish":
         version = current_version()
         release_commit = release_commit_for_target(
             version, getattr(args, "release_commit", None)
         )
         ensure_publish_release_commit_is_head(release_commit)
-        clean_build_artifacts(root)
-        run_constitution_gate()
-        run_artifact_gate(version)
+        run_release_gates(root, version)
         publish_release(
             version, getattr(args, "notes_file", None), release_commit=release_commit
         )
@@ -282,6 +301,19 @@ def ensure_notes_file(path: Path | None) -> None:
         return
     if not path.is_file():
         raise SpiceError(f"release notes file not found: {path}")
+
+
+def run_release_gates(root: Path, version: str) -> None:
+    """Every gate a release passes before it is allowed to change anything.
+
+    `check` stops here; `publish` continues into publish_release. Sharing one
+    body is what makes the check honest: a verification path maintained
+    alongside the release path would eventually prove something the release
+    does not actually run.
+    """
+    clean_build_artifacts(root)
+    run_constitution_gate()
+    run_artifact_gate(version)
 
 
 def run_constitution_gate() -> None:
