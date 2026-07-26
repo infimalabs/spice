@@ -49,6 +49,14 @@ WIRE_ALIASES = {
     # Split on the `ok` literal it is a type error until the reader narrows on
     # the outcome, which is what ties the field to the answer carrying it.
     "TeamCommandResponse": union(ref("TeamCommandApplied"), ref("TeamCommandRefused")),
+    # The same tie for an ensure, split on whether an agent is now running
+    # rather than on `ok` -- a skip answers ok true and starts nothing. Held as
+    # one object, the thread id of a launch was readable off a refusal that
+    # parked an inbox item instead, which is how a lane could bind itself to a
+    # process no answer ever claimed to have started.
+    "AgentEnsurePayload": union(
+        ref("AgentEnsureLaunched"), ref("AgentEnsureUnstarted")
+    ),
 }
 
 WIRE_OBJECTS_BY_NAME = {schema.name: schema for schema in WIRE_OBJECTS}
@@ -102,7 +110,7 @@ BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
 # they carry the same driver-supplied facts under the same type, and listing one
 # alone left the other rendering the identical property undocumented.
 OPAQUE_JSON_ALLOWLIST = {
-    "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+    "AgentEnsureUnstarted.restartRefusal": "driver-specific launch refusal facts",
     "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
     "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
 }
@@ -422,7 +430,7 @@ def render_app_types_js() -> str:
 
 
 def _jsdoc_type(value_type: WireType) -> str:
-    if value_type.kind in {"string", "boolean", "number"}:
+    if value_type.kind in {"string", "boolean", "number", "undefined"}:
         return value_type.kind
     if value_type.kind == "integer":
         return "number"

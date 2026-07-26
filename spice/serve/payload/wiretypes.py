@@ -6,7 +6,7 @@ JSDoc renderer in wire.py share one algebra without importing each other.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +41,24 @@ INTEGER = _primitive("integer")
 NUMBER = _primitive("number")
 BOOLEAN = _primitive("boolean")
 JSON_VALUE = _primitive("json")
+
+# A field one arm of a union declares only to say it never carries it. Optional
+# and typed `undefined`, it costs nothing on the wire -- the producer omits it,
+# and validation rejects it if present -- while giving the browser the property
+# it needs to narrow on. Without it a reader cannot even mention the field: a
+# name missing from one arm is an error on the union rather than a question the
+# reader is allowed to ask.
+ABSENT = _primitive("undefined")
+
+
+def absent(fields: Iterable[str]) -> dict[str, WireType]:
+    """Deny every one of ``fields``, so an arm is written from the other's list.
+
+    Passing the sibling's own field map is what keeps the two in step: a field
+    added to one arm is denied by the other in the same edit, rather than
+    quietly becoming readable on both.
+    """
+    return dict.fromkeys(fields, ABSENT)
 
 
 def ref(name: str) -> WireType:

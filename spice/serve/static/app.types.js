@@ -32,6 +32,10 @@
  */
 
 /**
+ * @typedef {(AgentEnsureLaunched|AgentEnsureUnstarted)} AgentEnsurePayload
+ */
+
+/**
  * @typedef {Object} MessageAttachment
  * @property {string} name
  * @property {string} contentType
@@ -338,30 +342,57 @@
  */
 
 /**
- * @typedef {Object} AgentEnsurePayload
- * @property {boolean=} ok
- * @property {string=} provider
+ * @typedef {Object} AgentEnsureLaunched
+ * @property {true} ok
+ * @property {string} threadId
  * @property {string=} action
+ * @property {string=} trigger
+ * @property {string=} taskHandle
+ * @property {string=} provider
  * @property {string=} status
  * @property {number=} pid
  * @property {number=} processGroupId
- * @property {string=} threadId
  * @property {string=} serviceTier
  * @property {string=} readyAt
  * @property {string=} startupFailure
  * @property {string=} prompt
  * @property {string=} logPath
- * @property {string=} failure
- * @property {string=} error
+ * @property {undefined=} reason
+ * @property {undefined=} retryAfterSeconds
+ * @property {undefined=} claimReleased
+ * @property {undefined=} failure
+ * @property {undefined=} error
+ * @property {undefined=} restartRefusal
+ * @property {undefined=} deadletteredInboxKeys
+ * @property {undefined=} deadletteredInboxKey
+ * @property {undefined=} deadletterRequeueCommand
+ */
+
+/**
+ * @typedef {Object} AgentEnsureUnstarted
+ * @property {boolean=} ok
+ * @property {string=} action
  * @property {string=} trigger
+ * @property {string=} taskHandle
  * @property {string=} reason
  * @property {number=} retryAfterSeconds
- * @property {string=} taskHandle
  * @property {boolean=} claimReleased
+ * @property {string=} failure
+ * @property {string=} error
  * @property {RestartRefusal=} restartRefusal - driver-specific launch refusal facts
  * @property {Array.<string>=} deadletteredInboxKeys
  * @property {string=} deadletteredInboxKey
  * @property {string=} deadletterRequeueCommand
+ * @property {undefined=} threadId
+ * @property {undefined=} provider
+ * @property {undefined=} status
+ * @property {undefined=} pid
+ * @property {undefined=} processGroupId
+ * @property {undefined=} serviceTier
+ * @property {undefined=} readyAt
+ * @property {undefined=} startupFailure
+ * @property {undefined=} prompt
+ * @property {undefined=} logPath
  */
 
 /**

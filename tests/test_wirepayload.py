@@ -260,6 +260,30 @@ def test_checkjs_lane_rejects_undefined_written_into_a_wire_required_field(tmp_p
     assert _checkjs_probe(tmp_path / "undef", UNDEFINED_WIRE_FIELD_PROBE) != 0
 
 
+# An ensure that started nothing has no thread to report, so asking it for one
+# has to fail in the browser's own checker rather than read as undefined. The
+# mirrored probe reads the same field off a launch, which is the answer that
+# does have it -- together they say the field belongs to the outcome carrying
+# it, not to every ensure answer alike.
+ENSURE_THREAD_OFF_REFUSAL_PROBE = """/** @type {AgentEnsurePayload} */
+const ensure = { ok: false, error: "restart refused" };
+/** @type {string} */
+const threadId = ensure.threadId;
+"""
+ENSURE_THREAD_OFF_LAUNCH_PROBE = """/** @type {AgentEnsurePayload} */
+const ensure = { ok: true, threadId: "thread-a" };
+/** @type {string} */
+const threadId = ensure.threadId;
+"""
+
+
+def test_checkjs_lane_rejects_a_thread_read_off_an_ensure_that_started_nothing(
+    tmp_path,
+):
+    assert _checkjs_probe(tmp_path / "launch", ENSURE_THREAD_OFF_LAUNCH_PROBE) == 0
+    assert _checkjs_probe(tmp_path / "refusal", ENSURE_THREAD_OFF_REFUSAL_PROBE) != 0
+
+
 def _reaches_opaque_json(value_type: wiretypes.WireType, seen: frozenset[str]) -> bool:
     """Whether a declared type bottoms out in the opaque json primitive.
 
@@ -295,7 +319,7 @@ def test_named_opaque_json_fields_have_the_exact_intentional_allowlist():
     # schema actually does, so a field that becomes opaque without being named
     # fails here rather than reaching the browser as an undescribed hole.
     assert wire.OPAQUE_JSON_ALLOWLIST == {
-        "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+        "AgentEnsureUnstarted.restartRefusal": ("driver-specific launch refusal facts"),
         "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
         "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
     }
@@ -402,6 +426,34 @@ def test_lane_chrome_patch_accepts_independently_ordered_values_and_clears():
         clear = valid_wire_payload(schema_name, value=None)
         patch = {"targetId": "target-fixture", name: clear}
         assert wire.validate_wire_payload("LaneChromePayload", patch) == patch
+
+
+def test_ensure_answers_carry_only_the_facts_their_own_outcome_has():
+    # Each of the four shapes the ensure paths actually answer with, checked
+    # against the split contract: nothing asked, a skip that declined to start,
+    # a refusal that could not, and a start that did.
+    for answer in (
+        {},
+        {
+            "ok": True,
+            "action": "skipped",
+            "trigger": "available-work",
+            "reason": "idle",
+        },
+        {"ok": False, "error": "restart refused", "failure": "restart-refused"},
+        {"ok": True, "threadId": "thread-a", "pid": 41, "logPath": "/tmp/agent.log"},
+    ):
+        assert wire.validate_wire_payload("AgentEnsurePayload", answer) == answer
+
+    # The server side of the same rule: an answer that started nothing may not
+    # name a thread or a process, and a start has no refusal to explain.
+    for crossing in (
+        {"ok": False, "error": "restart refused", "threadId": "thread-a"},
+        {"ok": False, "error": "restart refused", "pid": 41},
+        {"ok": True, "threadId": "thread-a", "error": "restart refused"},
+    ):
+        with pytest.raises(SpiceError, match="must be undefined"):
+            wire.validate_wire_payload("AgentEnsurePayload", crossing)
 
 
 def test_lane_chrome_patch_rejects_cross_authority_and_global_ordering():
