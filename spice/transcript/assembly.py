@@ -13,7 +13,6 @@ does not know the historical canonical-dictionary seam.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -43,7 +42,6 @@ __all__ = [
     "ClassifiedSpan",
     "DirectiveKind",
     "SpanKind",
-    "strip_directive_lines",
 ]
 
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
@@ -79,6 +77,7 @@ class SpanKind(StrEnum):
     IMAGE = "image"
     FINAL_ANSWER = "final_answer"
     COMPACTION = "compaction"
+    FAILURE = "failure"
 
 
 class DirectiveKind(StrEnum):
@@ -101,6 +100,8 @@ class ClassifiedSpan:
     text: str = ""
     keys: tuple[str, ...] = ()
     directive_kind: DirectiveKind | None = None
+    response_index: int | None = None
+    response_kind: SpanKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +110,19 @@ class AssembledMessage:
 
     at: Provenance
     spans: tuple[ClassifiedSpan, ...]
+
+    @property
+    def assistant_text_events(self) -> tuple[AssistantText, ...]:
+        """Each assistant text fact backing these spans, once and in order."""
+        events: list[AssistantText] = []
+        seen: set[int] = set()
+        for span in self.spans:
+            event = span.event
+            if not isinstance(event, AssistantText) or id(event) in seen:
+                continue
+            seen.add(id(event))
+            events.append(event)
+        return tuple(events)
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,17 +188,6 @@ class AssembledMessageReducer:
         return (message,)
 
 
-def strip_directive_lines(
-    text: str,
-    *,
-    kinds: Collection[DirectiveKind] = _ALL_DIRECTIVE_KINDS,
-) -> str:
-    """Remove selected task/app control lines through the classifier's parser."""
-    masked, directives = _mask_directives(text, frozenset(kinds))
-    visible = [line for line in masked.splitlines() if line not in directives]
-    return "\n".join(visible).strip()
-
-
 def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
     if isinstance(event, AssistantText):
         return _assistant_text_spans(event)
@@ -223,6 +226,15 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
                 event=event,
             ),
         )
+    if isinstance(event, FailureSignal):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.FAILURE,
+                at=event.at,
+                event=event,
+                text=event.kind,
+            ),
+        )
     if isinstance(
         event,
         (
@@ -230,7 +242,6 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
             UserMessage,
             TurnBoundary,
             ContextUsage,
-            FailureSignal,
             Unknown,
         ),
     ):
@@ -252,19 +263,31 @@ def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
             directives=directives,
         )
     )
-    for response in responses:
+    for response_index, response in enumerate(responses):
         kind = (
             SpanKind.NACK
             if response.disposition == ACK_DISPOSITION_REFUSED
             else SpanKind.ACK
         )
+        response_spans = _segment_spans(
+            response.content,
+            event,
+            kind=kind,
+            directives=directives,
+            keys=response.keys,
+            response_index=response_index,
+        )
         spans.extend(
-            _segment_spans(
-                response.content,
-                event,
-                kind=kind,
-                directives=directives,
-                keys=response.keys,
+            response_spans
+            or (
+                ClassifiedSpan(
+                    kind=kind,
+                    at=event.at,
+                    event=event,
+                    keys=response.keys,
+                    response_index=response_index,
+                    response_kind=kind,
+                ),
             )
         )
     return tuple(spans)
@@ -277,6 +300,7 @@ def _segment_spans(
     kind: SpanKind,
     directives: dict[str, _Directive],
     keys: tuple[str, ...] = (),
+    response_index: int | None = None,
 ) -> tuple[ClassifiedSpan, ...]:
     spans: list[ClassifiedSpan] = []
     pending: list[str] = []
@@ -292,6 +316,8 @@ def _segment_spans(
                     event=event,
                     text=text,
                     keys=keys,
+                    response_index=response_index,
+                    response_kind=kind if response_index is not None else None,
                 )
             )
 
@@ -309,6 +335,8 @@ def _segment_spans(
                 text=directive.text,
                 keys=keys,
                 directive_kind=directive.kind,
+                response_index=response_index,
+                response_kind=kind if response_index is not None else None,
             )
         )
     flush_pending()

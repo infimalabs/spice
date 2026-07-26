@@ -15,7 +15,6 @@ from spice.transcript.assembly import (
     AssembledMessageReducer,
     DirectiveKind,
     SpanKind,
-    strip_directive_lines,
 )
 from spice.transcript.events import (
     AssistantText,
@@ -195,6 +194,7 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
         SpanKind.IMAGE,
         SpanKind.COMPACTION,
         SpanKind.TOOL,
+        SpanKind.FAILURE,
     ]
     with pytest.raises(TypeError, match="typed TranscriptEvent"):
         AssembledMessageReducer().push(
@@ -203,36 +203,27 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "kinds", "expected"),
-    [
-        (
-            (
-                'shipped\n::git-commit{"sha":"abc"}\n'
-                '::Git-commit{"sha":"visible"}\ncontinuing'
-            ),
-            {DirectiveKind.APP},
-            'shipped\n::Git-commit{"sha":"visible"}\ncontinuing',
-        ),
-        (
-            (
-                "captured\n"
-                "TASK title=Follow up | project=session.transcript "
-                "| acceptance=Tracked\n"
-                "TASK title=Missing project\n"
-                "continuing"
-            ),
-            {DirectiveKind.TASK},
-            "captured\nTASK title=Missing project\ncontinuing",
-        ),
-    ],
-    ids=["former-app-stripper", "former-task-stripper"],
+    ("header", "expected_kind"),
+    (
+        (f"ACK {ACK_KEY}:", SpanKind.ACK),
+        (f"NACK {NACK_KEY}:", SpanKind.NACK),
+    ),
 )
-def test_shared_directive_stripper_matches_recorded_outputs(
-    text: str,
-    kinds: set[DirectiveKind],
-    expected: str,
+def test_bodyless_keyed_response_keeps_its_reducer_classification(
+    header: str,
+    expected_kind: SpanKind,
 ) -> None:
-    assert strip_directive_lines(text, kinds=kinds) == expected
+    event = AssistantText(at=_at(14), text=header, final=False)
+
+    (message,) = _assemble((event,))
+
+    (span,) = message.spans
+    assert span.kind is expected_kind
+    assert span.keys == ((ACK_KEY,) if expected_kind is SpanKind.ACK else (NACK_KEY,))
+    assert span.text == ""
+    assert span.response_index == 0
+    assert span.response_kind is expected_kind
+    assert message.assistant_text_events == (event,)
 
 
 def _at(line: int) -> Provenance:
