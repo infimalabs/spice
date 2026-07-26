@@ -13,6 +13,7 @@ from spice.serve import agentapi, app, lifecycle, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
+from spice.serve.lifecycle import start_lifecycle_reconciler
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.serve.workroutes import (
     work_tree_send_response_payload,
@@ -274,6 +275,13 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
         members=[f"target:{target.id}"],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
+    # The send's own launch is the subject here, so the explicit decision runs for
+    # real against the ensure stub below; the fixture only holds automatic wakes.
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        agentapi.ensure_agent_for_pending_inbox,
+    )
 
     def fake_ensure(ensured_target, **kwargs):
         return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
@@ -375,6 +383,8 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
+    # Active-mode Serve owns the reconciler every lane decision is submitted to.
+    start_lifecycle_reconciler(state)
     return state
 
 

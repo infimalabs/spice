@@ -9,13 +9,14 @@ Nothing here persists or copies a lane snapshot.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event, Lock, Thread
 from time import monotonic
-from typing import Any, Callable, Iterator, Protocol, TypeAlias
+from typing import Any, Callable, Protocol, TypeAlias
 
 from spice.serve.payload.identity import (
     record_started_renewal_from_ensure,
@@ -28,6 +29,13 @@ from spice.serve.worktree.target import WorktreeTarget
 
 LIFECYCLE_RECONCILER_JOIN_SECONDS = 3.0
 LIFECYCLE_RECONCILER_THREAD_PREFIX = "spice-serve-lifecycle"
+# The one explicit intent kind: an operator send asking this lane to be awake.
+LIFECYCLE_INTENT_SEND = "send"
+# A queued decision is one ensure against a lane that is already publishing its
+# item, and waiting on it is what lets a send reply with the launch it caused.
+# The bound only has to outlast that decision, never long enough to hide a stuck
+# one.
+LIFECYCLE_DECISION_WAIT_SECONDS = 30.0
 
 
 class LifecycleWakeSource(StrEnum):
@@ -74,6 +82,8 @@ class ExplicitLifecycleIntent:
     target_id: str
     intent_id: str
     kind: str
+    fast_mode: bool = False
+    force_new: bool = False
 
     def __post_init__(self) -> None:
         _require_identity("target_id", self.target_id)
@@ -93,6 +103,20 @@ LifecycleInput: TypeAlias = AutomaticLifecycleWake | ExplicitLifecycleIntent
 
 
 @dataclass(frozen=True, slots=True)
+class LifecycleDecision:
+    """The compact result of one authoritative lane evaluation.
+
+    Automatic wakes and explicit intents both resolve to this record: they differ
+    in what may act, not in what a decision is.
+    """
+
+    thread_id: str
+    predecessor_actor: str
+    renewal_intent: bool
+    agent_ensure: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
 class LifecycleOutcome:
     """The latest compact observable result for one target."""
 
@@ -102,16 +126,10 @@ class LifecycleOutcome:
     status: LifecycleOutcomeStatus
     detail: str = ""
     retry_after_seconds: float | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AutomaticLifecycleDecision:
-    """The compact result of one authoritative automatic lane evaluation."""
-
-    thread_id: str
-    predecessor_actor: str
-    renewal_intent: bool
-    agent_ensure: dict[str, Any] | None
+    # The route that submitted an intent needs the decision itself, not just its
+    # rendered detail: the send response reports agentEnsure, the ensured thread,
+    # and renewal intent straight off this record.
+    decision: LifecycleDecision | None = None
 
 
 LifecycleHandler: TypeAlias = Callable[
@@ -126,6 +144,15 @@ class ExplicitPendingInboxEnsure(Protocol):
     def __call__(
         self, *, fast_mode: bool = False, force_new: bool = False
     ) -> dict[str, Any] | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _TargetObservation:
+    """The lane identity facts every decision and every payload starts from."""
+
+    thread_id: str
+    predecessor_actor: str
+    renewal_intent: bool
 
 
 @dataclass(slots=True)
@@ -173,32 +200,86 @@ def ensure_agent_for_available_work(
     return ensure(target, **kwargs)
 
 
+@contextmanager
+def pending_inbox_launch_lock() -> Iterator[None]:
+    """Hold the pending-inbox launch guard without creating an import cycle."""
+    from spice.serve.agentapi import pending_inbox_launch_lock as guard
+
+    with guard():
+        yield
+
+
 class LifecycleDecisionAuthority:
-    """Own automatic lifecycle policy and its target-local attempt bookkeeping."""
+    """Own lifecycle policy and its target-local attempt bookkeeping."""
 
     def __init__(self, state: Any) -> None:
         self._state = state
         self._lock = Lock()
         self._target_locks: dict[str, Lock] = {}
         self._attempt_cache: dict[str, float] = {}
+        self._explicit_grants: dict[str, int] = {}
+
+    def reserve_explicit_grant(self, target_id: str) -> None:
+        """Reserve the next launch attempt on ``target_id`` for an explicit intent.
+
+        The publishing route holds the pending-inbox launch guard across both its
+        publication and this reservation, so no automatic decision can observe the
+        new item before the grant exists. That is what lets the route hand the
+        decision to the reconciler and release the guard before awaiting it:
+        whichever thread wins the lock next, an automatic evaluation declines
+        rather than spending the attempt this send is owed.
+        """
+        with self._lock:
+            outstanding = self._explicit_grants.get(target_id, 0)
+            self._explicit_grants[target_id] = outstanding + 1
 
     def handle(
         self,
         value: LifecycleInput,
-        cancelled: Event,
+        _cancelled: Event,
     ) -> LifecycleOutcome:
-        """Evaluate automatic wakes; later slices migrate explicit intents."""
-        if not isinstance(value, AutomaticLifecycleWake):
-            return _observe_input(value, cancelled)
+        """Decide one reconciler input against current lane facts."""
         target = self._target(value.target_id)
-        decision = self.evaluate_target(target)
+        decision = (
+            self.decide_explicit_send(target, value)
+            if isinstance(value, ExplicitLifecycleIntent)
+            else self.evaluate_target(target)
+        )
         return LifecycleOutcome(
             target_id=value.target_id,
             input_identity=value.input_identity,
             input_kind=value.input_kind,
             status=LifecycleOutcomeStatus.OBSERVED,
-            detail=_automatic_decision_detail(decision),
-            retry_after_seconds=_automatic_retry_after_seconds(decision),
+            detail=_decision_detail(decision),
+            retry_after_seconds=_decision_retry_after_seconds(decision),
+            decision=decision,
+        )
+
+    def decide_explicit_send(
+        self,
+        target: WorktreeTarget,
+        intent: ExplicitLifecycleIntent,
+    ) -> LifecycleDecision:
+        """Spend one reserved explicit grant on ``target``.
+
+        The grant is released once the attempt is made -- including when it
+        fails -- because a reservation that outlived its decision would mute
+        automatic decisions for the lane it was meant to protect.
+        """
+        try:
+            with self.explicit_pending_inbox(target) as ensure_pending:
+                agent_ensure = ensure_pending(
+                    fast_mode=intent.fast_mode,
+                    force_new=intent.force_new,
+                )
+                observed = self._observe_target_locked(target, thread_id=None)
+        finally:
+            self._release_explicit_grant(target.id)
+        return LifecycleDecision(
+            thread_id=observed.thread_id,
+            predecessor_actor=observed.predecessor_actor,
+            renewal_intent=observed.renewal_intent,
+            agent_ensure=agent_ensure,
         )
 
     def evaluate_target(
@@ -206,7 +287,7 @@ class LifecycleDecisionAuthority:
         target: WorktreeTarget,
         *,
         thread_id: str | None = None,
-    ) -> AutomaticLifecycleDecision:
+    ) -> LifecycleDecision:
         """Run the one pending-inbox-first automatic decision for ``target``."""
         target_lock = self._target_lock(target.id)
         with target_lock:
@@ -216,7 +297,7 @@ class LifecycleDecisionAuthority:
     def explicit_pending_inbox(
         self, target: WorktreeTarget
     ) -> Iterator[ExplicitPendingInboxEnsure]:
-        """Serialize publication and its one unthrottled explicit launch grant."""
+        """Serialize a decision and its one unthrottled explicit launch grant."""
         target_lock = self._target_lock(target.id)
         with target_lock:
             active = True
@@ -245,12 +326,12 @@ class LifecycleDecisionAuthority:
             finally:
                 active = False
 
-    def _evaluate_target_locked(
+    def _observe_target_locked(
         self,
         target: WorktreeTarget,
         *,
         thread_id: str | None,
-    ) -> AutomaticLifecycleDecision:
+    ) -> _TargetObservation:
         bound_thread_id = (
             resolve_thread_id_for_target(self._state, target) or ""
             if thread_id is None
@@ -262,11 +343,69 @@ class LifecycleDecisionAuthority:
             target,
             bound_thread_id,
         )
-        renewal_intent = bool(
-            bound_thread_id
-            and predecessor_actor
-            and store.agent_renewal_active(predecessor_actor)
+        return _TargetObservation(
+            thread_id=bound_thread_id,
+            predecessor_actor=predecessor_actor,
+            renewal_intent=bool(
+                bound_thread_id
+                and predecessor_actor
+                and store.agent_renewal_active(predecessor_actor)
+            ),
         )
+
+    def _release_explicit_grant(self, target_id: str) -> None:
+        with self._lock:
+            outstanding = self._explicit_grants.get(target_id, 0) - 1
+            if outstanding > 0:
+                self._explicit_grants[target_id] = outstanding
+            else:
+                self._explicit_grants.pop(target_id, None)
+
+    def _explicit_grant_outstanding(self, target_id: str) -> bool:
+        with self._lock:
+            return target_id in self._explicit_grants
+
+    def _evaluate_target_locked(
+        self,
+        target: WorktreeTarget,
+        *,
+        thread_id: str | None,
+    ) -> LifecycleDecision:
+        observed = self._observe_target_locked(target, thread_id=thread_id)
+        bound_thread_id = observed.thread_id
+        predecessor_actor = observed.predecessor_actor
+        renewal_intent = observed.renewal_intent
+        store = self._state.team_store
+        # Read the reservation under the same guard the launch itself takes, and
+        # nothing else: a decision that checked before entering would be inside
+        # the publication-to-reservation gap it is supposed to respect.
+        with pending_inbox_launch_lock():
+            if self._explicit_grant_outstanding(target.id):
+                # An operator send published its item and reserved the attempt it
+                # is owed. Spending it here is what would dead-letter that
+                # steering against the very refusal the grant exists to bypass.
+                return LifecycleDecision(
+                    thread_id=bound_thread_id,
+                    predecessor_actor=predecessor_actor,
+                    renewal_intent=renewal_intent,
+                    agent_ensure=None,
+                )
+            return self._decide_automatic_locked(
+                target,
+                observed=observed,
+                store=store,
+            )
+
+    def _decide_automatic_locked(
+        self,
+        target: WorktreeTarget,
+        *,
+        observed: _TargetObservation,
+        store: Any,
+    ) -> LifecycleDecision:
+        bound_thread_id = observed.thread_id
+        predecessor_actor = observed.predecessor_actor
+        renewal_intent = observed.renewal_intent
         if renewal_intent:
             serve_agent_identity_payload(
                 target,
@@ -293,7 +432,7 @@ class LifecycleDecisionAuthority:
             predecessor_agent_id=predecessor_actor,
             agent_ensure=agent_ensure,
         )
-        return AutomaticLifecycleDecision(
+        return LifecycleDecision(
             thread_id=ensured_thread_id or bound_thread_id,
             predecessor_actor=predecessor_actor,
             renewal_intent=renewal_intent,
@@ -328,12 +467,55 @@ def lifecycle_decision_authority(state: Any) -> LifecycleDecisionAuthority:
     return authority
 
 
+def submit_explicit_send_intent(
+    state: Any,
+    target: WorktreeTarget,
+    intent_id: str,
+    *,
+    fast_mode: bool = False,
+    force_new: bool = False,
+) -> Future[LifecycleOutcome]:
+    """Reserve this send's launch attempt and queue the decision that spends it.
+
+    Callers hold the pending-inbox launch guard across their publication and this
+    call, so the reservation is in place before any automatic decision can reach
+    the item. Submitting is only an enqueue: the caller releases the guard and
+    then awaits, which is what keeps the decision's own guard acquisition from
+    closing on a lock the awaiting thread still holds.
+    """
+    lifecycle_decision_authority(state).reserve_explicit_grant(target.id)
+    return state.submit_lifecycle_intent(
+        ExplicitLifecycleIntent(
+            target_id=target.id,
+            intent_id=intent_id,
+            kind=LIFECYCLE_INTENT_SEND,
+            fast_mode=fast_mode,
+            force_new=force_new,
+        )
+    )
+
+
+def submit_inbox_wake(
+    state: Any,
+    target: WorktreeTarget,
+    source_identity: str,
+) -> Future[LifecycleOutcome]:
+    """Queue the automatic decision a durable inbox publication makes relevant."""
+    return state.submit_lifecycle_wake(
+        AutomaticLifecycleWake(
+            target_id=target.id,
+            source=LifecycleWakeSource.INBOX,
+            source_identity=source_identity,
+        )
+    )
+
+
 def evaluate_automatic_lifecycle(
     state: Any,
     target: WorktreeTarget,
     *,
     thread_id: str | None = None,
-) -> AutomaticLifecycleDecision:
+) -> LifecycleDecision:
     """Transitional direct entry point shared by inventory and message callers."""
     return lifecycle_decision_authority(state).evaluate_target(
         target,
@@ -341,7 +523,16 @@ def evaluate_automatic_lifecycle(
     )
 
 
-def _automatic_decision_detail(decision: AutomaticLifecycleDecision) -> str:
+def await_lane_lifecycle(
+    state: Any,
+    target: WorktreeTarget,
+) -> LifecycleDecision | None:
+    """Report the decision behind ``target``'s queued lifecycle work, once run."""
+    outcome = state.await_lifecycle_outcome(target.id)
+    return outcome.decision if outcome is not None else None
+
+
+def _decision_detail(decision: LifecycleDecision) -> str:
     agent_ensure = decision.agent_ensure
     if agent_ensure is None:
         return "no-action"
@@ -352,8 +543,8 @@ def _automatic_decision_detail(decision: AutomaticLifecycleDecision) -> str:
     return ":".join(part for part in parts if part) or "agent-ensure"
 
 
-def _automatic_retry_after_seconds(
-    decision: AutomaticLifecycleDecision,
+def _decision_retry_after_seconds(
+    decision: LifecycleDecision,
 ) -> float | None:
     agent_ensure = decision.agent_ensure
     if agent_ensure is None:
@@ -380,6 +571,7 @@ class LifecycleReconciler:
             Future[LifecycleOutcome],
         ] = {}
         self._latest_outcomes: dict[str, LifecycleOutcome] = {}
+        self._settled: dict[str, Event] = {}
 
     def start(self) -> None:
         with self._lock:
@@ -416,6 +608,24 @@ class LifecycleReconciler:
         with self._lock:
             return self._latest_outcomes.get(target_id)
 
+    def await_target(
+        self,
+        target_id: str,
+        timeout: float = LIFECYCLE_DECISION_WAIT_SECONDS,
+    ) -> LifecycleOutcome | None:
+        """Wait out the work already queued for ``target_id`` and report the last.
+
+        A caller that publishes into a lane and then renders it needs the queued
+        decisions to have run: rendering first shows the lane exactly as it was
+        before the publication being reported, which for a send that starts a
+        lane is an idle lane with no thread.
+        """
+        with self._lock:
+            settled = self._settled.get(target_id)
+        if settled is not None:
+            settled.wait(timeout)
+        return self.latest_outcome(target_id)
+
     def cancel(self) -> None:
         with self._lock:
             if not self._started or self._closing:
@@ -451,6 +661,7 @@ class LifecycleReconciler:
     def _enqueue_locked(self, item: _QueuedInput) -> None:
         target_id = item.value.target_id
         self._queues.setdefault(target_id, deque()).append(item)
+        self._settled.setdefault(target_id, Event()).clear()
         if target_id in self._workers:
             return
         worker = Thread(
@@ -469,6 +680,12 @@ class LifecycleReconciler:
                 if not queue:
                     self._queues.pop(target_id, None)
                     self._workers.pop(target_id, None)
+                    # Release waiters from inside the lock that guards the queue
+                    # they are waiting on, so a wake enqueued in this instant
+                    # clears the event again rather than losing to this set.
+                    settled = self._settled.get(target_id)
+                    if settled is not None:
+                        settled.set()
                     return
                 item = queue.popleft()
             if not item.future.set_running_or_notify_cancel():
