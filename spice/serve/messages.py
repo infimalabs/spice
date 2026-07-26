@@ -372,11 +372,8 @@ def _read_window(
         end_offset=end_offset,
         max_bytes=REVERSE_WINDOW_BYTES,
     )
-    presenter = MessagePresenter()
-    scanned = presenter.project(
-        read.events,
-        worktree_id=worktree_id,
-    )
+    presenter = MessagePresenter.paging()
+    scanned = presenter.project(read.events, worktree_id=worktree_id)
     visible_count = sum(not message.kind.startswith("presence:") for message in scanned)
     scan_start = read.access_start_offset
     while visible_count < limit and scan_start > 0:
@@ -389,10 +386,7 @@ def _read_window(
         if older.access_start_offset >= scan_start:
             break
         if older.events:
-            projected = presenter.project(
-                older.events,
-                worktree_id=worktree_id,
-            )
+            projected = presenter.project(older.events, worktree_id=worktree_id)
             scanned[0:0] = projected
             visible_count += sum(
                 not message.kind.startswith("presence:") for message in projected
