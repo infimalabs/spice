@@ -273,6 +273,10 @@ class TeamIdentityStoreMixin:
         """
         actor_id = _normalized_id(actor_id, "actor_id")
         with self.connect() as connection:
+            # Preserve and replace are one atomic write decision: a renewal
+            # writer cannot land after this read and be erased by the merged
+            # full-row upsert below.
+            connection.execute("BEGIN IMMEDIATE")
             row = self._agent_identity_row_locked(connection, actor_id)
             current = (
                 agent_identity_from_row(row)
