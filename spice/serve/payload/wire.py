@@ -43,10 +43,11 @@ WIRE_ALIASES = {
     # The two shapes a team command actually answers with: applied carries the
     # revision and snapshot it produced, refused carries the reason it did not.
     # Held as one object with every field optional, a reader could take the
-    # revision off a refusal that never had one, and the checkJs lane could not
-    # say otherwise -- it runs with strictNullChecks off, so undefined satisfies
-    # a required number. Split on the `ok` literal, that read is a type error
-    # until the reader narrows, which is the enforcement the flag cannot give.
+    # revision off a refusal that never had one. The checkJs lane now runs with
+    # strictNullChecks on, but that only makes such a read admit undefined
+    # first: it cannot say the revision belongs to a command that was applied.
+    # Split on the `ok` literal it is a type error until the reader narrows on
+    # the outcome, which is what ties the field to the answer carrying it.
     "TeamCommandResponse": union(ref("TeamCommandApplied"), ref("TeamCommandRefused")),
 }
 
