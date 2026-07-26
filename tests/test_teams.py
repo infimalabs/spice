@@ -651,6 +651,14 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     assert store.agent_renewal_active("thread:agent-a") is False
     assert disabled_member["renewalIntent"]["requested"] is False
     assert disabled_member["renewalIntent"]["state"] == ""
+    identity = store.agent_identity_for_actor("thread:agent-a")
+    assert identity is not None
+    assert (
+        identity.renewal_state,
+        identity.renewal_ancestor_thread_id,
+        identity.renewal_successor_thread_id,
+        identity.renewal_revision,
+    ) == ("", "", "", 0)
 
 
 def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
