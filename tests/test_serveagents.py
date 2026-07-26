@@ -62,6 +62,15 @@ SETTLE_COUNTDOWN_TOLERANCE_SECONDS = 1.0
 # already settled, so its burst dispatches at once and the test exercises the
 # claim/start path rather than the settle wait.
 SETTLED_WAIT_SECONDS = 30.0
+# The race below parks a publication mid-flight on purpose. Each ordered step is
+# waited on with the same short bound -- long enough that a loaded machine still
+# reaches the next moment, short enough that a genuine deadlock fails the test
+# rather than hanging it.
+EXPLICIT_SEND_STEP_SECONDS = 5.0
+RECONCILER_JOIN_SECONDS = 5.0
+# The parked publication only has to outlive the assertions made while the race
+# is open; this bound is the escape hatch for a test that stops early.
+EXPLICIT_SEND_RELEASE_SECONDS = 15.0
 
 
 def _retry_gate():
@@ -1185,6 +1194,83 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
     assert len(outcomes) == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD + 1
 
 
+class _ExplicitSendRace:
+    """The observable moments of one explicit send racing a background wake.
+
+    Held apart from the narrative below because the race is the subject:
+    publication pauses on demand, every launch attempt is recorded with the inbox
+    it saw, and the launch boundary reports when a decision other than the
+    publishing route's own reaches it.
+    """
+
+    def __init__(self, repo, target) -> None:
+        self.repo = repo
+        self.target = target
+        self.published = threading.Event()
+        self.release_direct_send = threading.Event()
+        self.background_at_launch_lock = threading.Event()
+        self.background_finished = threading.Event()
+        self.agent_started = threading.Event()
+        self.attempts: list[bool] = []
+        self.attempt_pending_counts: list[int] = []
+        self.direct_result: dict[str, object] = {}
+
+    def install(self, monkeypatch) -> None:
+        real_submit = workroutes.submit_steering_message
+        real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
+        race = self
+
+        class ObservedPendingInboxLaunchLock:
+            def __enter__(self):
+                if threading.current_thread().name.startswith(
+                    serve_lifecycle.LIFECYCLE_RECONCILER_THREAD_PREFIX
+                ):
+                    race.background_at_launch_lock.set()
+                return real_launch_lock.__enter__()
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return real_launch_lock.__exit__(exc_type, exc_value, traceback)
+
+        def pause_after_publication(**kwargs):
+            sent = real_submit(**kwargs)
+            race.published.set()
+            race.release_direct_send.wait(timeout=EXPLICIT_SEND_RELEASE_SECONDS)
+            return sent
+
+        def status_after_explicit_start(*_args, **_kwargs):
+            return SimpleNamespace(running=race.agent_started.is_set())
+
+        monkeypatch.setattr(
+            workroutes, "submit_steering_message", pause_after_publication
+        )
+        monkeypatch.setattr(agentapi, "agent_status", status_after_explicit_start)
+        monkeypatch.setattr(agentapi, "agent_ensure_response_payload", self.ensure)
+        monkeypatch.setattr(
+            agentapi,
+            "_PENDING_INBOX_LAUNCH_LOCK",
+            ObservedPendingInboxLaunchLock(),
+        )
+
+    def ensure(self, ensured_target, **kwargs):
+        """Refuse every automatic restart and honor the one explicit grant."""
+        assert ensured_target == self.target
+        automatic = bool(kwargs["automatic"])
+        self.attempts.append(automatic)
+        self.attempt_pending_counts.append(pending_inbox_count(self.repo))
+        if automatic:
+            return {
+                "ok": False,
+                "failure": lifecycle.AGENT_FAILURE_RESTART_REFUSED,
+                "restartRefusal": {"reason": "rapid-death"},
+            }, HTTPStatus.TOO_MANY_REQUESTS
+        self.agent_started.set()
+        return {
+            "ok": True,
+            "action": "start",
+            "threadId": THREAD_A,
+        }, HTTPStatus.OK
+
+
 def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     tmp_path, monkeypatch
 ):
@@ -1193,68 +1279,13 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
-    published = threading.Event()
-    release_direct_send = threading.Event()
-    background_at_launch_lock = threading.Event()
-    background_finished = threading.Event()
-    agent_started = threading.Event()
-    direct_result: dict[str, object] = {}
-    attempts: list[bool] = []
-    real_submit = workroutes.submit_steering_message
-    real_launch_lock = agentapi._PENDING_INBOX_LAUNCH_LOCK
-
-    class ObservedPendingInboxLaunchLock:
-        def __enter__(self):
-            if threading.current_thread().name.startswith(
-                serve_lifecycle.LIFECYCLE_RECONCILER_THREAD_PREFIX
-            ):
-                background_at_launch_lock.set()
-            return real_launch_lock.__enter__()
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return real_launch_lock.__exit__(exc_type, exc_value, traceback)
-
-    def pause_after_publication(**kwargs):
-        sent = real_submit(**kwargs)
-        published.set()
-        release_direct_send.wait(timeout=15.0)
-        return sent
-
-    def status_after_explicit_start(*_args, **_kwargs):
-        return SimpleNamespace(running=agent_started.is_set())
-
-    def ensure_with_active_refusal(ensured_target, **kwargs):
-        assert ensured_target == target
-        automatic = bool(kwargs["automatic"])
-        attempts.append(automatic)
-        if automatic:
-            return {
-                "ok": False,
-                "failure": lifecycle.AGENT_FAILURE_RESTART_REFUSED,
-                "restartRefusal": {"reason": "rapid-death"},
-            }, HTTPStatus.TOO_MANY_REQUESTS
-        agent_started.set()
-        return {
-            "ok": True,
-            "action": "start",
-            "threadId": THREAD_A,
-        }, HTTPStatus.OK
-
-    monkeypatch.setattr(workroutes, "submit_steering_message", pause_after_publication)
-    monkeypatch.setattr(agentapi, "agent_status", status_after_explicit_start)
-    monkeypatch.setattr(
-        agentapi, "agent_ensure_response_payload", ensure_with_active_refusal
-    )
-    monkeypatch.setattr(
-        agentapi,
-        "_PENDING_INBOX_LAUNCH_LOCK",
-        ObservedPendingInboxLaunchLock(),
-    )
-    reconciler = serve_lifecycle.start_lifecycle_reconciler(state)
+    race = _ExplicitSendRace(repo, target)
+    race.install(monkeypatch)
+    reconciler = state.lifecycle_reconciler
     assert reconciler is not None
 
     def send_directly() -> None:
-        direct_result["response"] = work_tree_send_response_payload(
+        race.direct_result["response"] = work_tree_send_response_payload(
             state, target, {"text": "use my explicit restart grant"}
         )
 
@@ -1269,34 +1300,43 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
                 ),
             )
         )
-        background_finished.set()
+        race.background_finished.set()
 
     direct_thread = threading.Thread(target=send_directly, daemon=True)
     direct_thread.start()
-    assert published.wait(timeout=5.0) is True
+    assert race.published.wait(timeout=EXPLICIT_SEND_STEP_SECONDS) is True
     background_thread = threading.Thread(
         target=evaluate_in_background,
         name="background-launch-evaluation",
         daemon=True,
     )
     background_thread.start()
-    # The watcher cannot reach even the pending-inbox launch guard: the
-    # authority's target lock covers publication through the explicit grant.
-    assert background_at_launch_lock.wait(timeout=0.1) is False
-    assert background_finished.is_set() is False
-    release_direct_send.set()
-    direct_thread.join(timeout=5.0)
-    background_thread.join(timeout=5.0)
+    # The watcher's decision is at the real launch boundary, blocked behind the
+    # route's pre-publication acquisition, and its own evaluation has not
+    # finished. Releasing the route publishes and reserves this send's grant as
+    # one step, so the decision that wins the guard next reads a reservation only
+    # the send's own intent may spend.
+    assert (
+        race.background_at_launch_lock.wait(timeout=EXPLICIT_SEND_STEP_SECONDS) is True
+    )
+    assert race.background_finished.is_set() is False
+    race.release_direct_send.set()
+    direct_thread.join(timeout=EXPLICIT_SEND_STEP_SECONDS)
+    background_thread.join(timeout=EXPLICIT_SEND_STEP_SECONDS)
 
-    response, status = direct_result["response"]
+    response, status = race.direct_result["response"]
     assert status == HTTPStatus.OK
     assert response["agentEnsure"]["action"] == "start"
-    assert attempts[0] is False
-    assert agent_started.is_set() is True
-    assert background_at_launch_lock.is_set() is True
-    assert background_finished.is_set() is True
+    # Exactly one launch decision, it is the send's own, and it ran against an
+    # inbox that already holds the item -- publication precedes the attempt that
+    # the item justifies, never the other way around.
+    assert race.attempts == [False]
+    assert race.attempt_pending_counts == [1]
+    assert race.agent_started.is_set() is True
+    assert race.background_at_launch_lock.is_set() is True
+    assert race.background_finished.is_set() is True
     reconciler.cancel()
-    assert reconciler.join(timeout=1.0) is True
+    assert reconciler.join(timeout=RECONCILER_JOIN_SECONDS) is True
     assert [inbox_item_key(item.name) for item in collect_inbox_items(repo)] == [
         response["key"]
     ]

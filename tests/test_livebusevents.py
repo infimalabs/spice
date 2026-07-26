@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, current_thread
 from types import SimpleNamespace
 from typing import Any
 
@@ -27,10 +27,15 @@ from spice.serve import (
     messages as message_reader,
 )
 from spice.serve.app import ServeState
+from spice.serve.lifecycle import (
+    LIFECYCLE_RECONCILER_THREAD_PREFIX,
+    start_lifecycle_reconciler,
+)
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.payload import identity, lane, message
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.team.store import ServeTeamStore
+from spice.serve.workroutes import work_tree_send_accepted_response_payload
 from spice.serve.worktree import inventory
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config as task_config
@@ -47,6 +52,11 @@ from tests.test_livebus import (
     _write_inbox_item_from_subprocess,
 )
 from tests.test_wirefixtures import valid_lane_payload, valid_live_bus_callback_payloads
+
+# A deliberately blocked ensure only has to outlive the assertions made while it
+# is parked; the release bound is the escape hatch for a test that stops early.
+BLOCKED_ENSURE_ENTRY_SECONDS = 5.0
+BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
 
 
 def _single_change_wait(path: Path, ready: Event, changed: Event):
@@ -667,6 +677,100 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
         ]
     finally:
         followup_continue.set()
+        session._teardown()
+
+
+def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
+    state.cached_targets = [target]
+    # Active-mode Serve owns the reconciler every lane decision is submitted to.
+    start_lifecycle_reconciler(state)
+    _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
+    ensure_calls: list[dict[str, object]] = []
+    ensure_threads: list[str] = []
+    ensure_entered = Event()
+    release_ensure = Event()
+
+    def fake_ensure(ensured_target, **kwargs):
+        ensure_calls.append({"target": ensured_target, **kwargs})
+        ensure_threads.append(current_thread().name)
+        ensure_entered.set()
+        release_ensure.wait(timeout=BLOCKED_ENSURE_RELEASE_SECONDS)
+        return {"ok": True, "threadId": THREAD_ID}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+    connection = _Connection()
+    session = LiveBusSession(
+        connection,
+        LiveBusCallbacks(
+            resolve_target=lambda selector: target if selector == target.id else None,
+            **valid_live_bus_callback_payloads(
+                send_payload=lambda bus_target, payload: (
+                    work_tree_send_accepted_response_payload(state, bus_target, payload)
+                )
+            ),
+            thread_id=lambda _target: THREAD_ID,
+            transcript_resolution=lambda _thread_id: None,
+            lane_watch_paths=lambda *_args: (),
+            lane_signature=lambda *_args: (),
+            send_followup_payload=lambda bus_target, _payload: (
+                message.send_followup_messages_payload(state, bus_target, limit=5)
+            ),
+        ),
+    )
+
+    try:
+        session._handle_lane_send(
+            {
+                "type": "lane.send",
+                "requestId": "send-1",
+                "targetId": "lane",
+                "payload": {"text": "wake this lane"},
+            }
+        )
+
+        ack = _wait_for_reply(connection, request_id="send-1")
+        # The lane start this send scheduled is still parked inside the ensure,
+        # so the acknowledgement is proof the route never waits for it.
+        assert ensure_entered.wait(timeout=BLOCKED_ENSURE_ENTRY_SECONDS) is True
+        assert ack["type"] == "lane.sendResult"
+        assert ack["result"]["ok"] is True
+        assert ack["result"]["agentEnsure"] == {}
+        assert ack["result"]["pendingInboxCount"] == 1
+        release_ensure.set()
+
+        followup = _wait_for_send_followup(connection)
+        # One decision for the send, and a follow-up that reports it: the render
+        # reads the outcome instead of starting the lane a second time. The
+        # thread names the owner -- this lane start came from the reconciler the
+        # send submitted to, not from whoever rendered the lane next.
+        assert ensure_calls == [
+            {
+                "target": target,
+                "fast_mode": False,
+                "force_new": False,
+                "automatic": True,
+            }
+        ]
+        assert ensure_threads == [f"{LIFECYCLE_RECONCILER_THREAD_PREFIX}-{target.id}"]
+        assert followup["type"] == "lane.payload"
+        assert followup["targetId"] == target.id
+        assert followup["payload"]["agentEnsure"]["threadId"] == THREAD_ID
+        assert followup["payload"]["targetIdentity"]["thread"] == {
+            "state": "bound",
+            "threadId": THREAD_ID,
+        }
+    finally:
+        release_ensure.set()
         session._teardown()
 
 

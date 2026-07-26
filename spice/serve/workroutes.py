@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from concurrent.futures import Future
+from contextlib import contextmanager
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any
@@ -14,11 +17,16 @@ from spice.mail.ackstate import (
     record_directive_publications,
 )
 from spice.serve.payload import identity
-from spice.serve.agentapi import sent_steering_payload, sent_steering_response_payload
+from spice.serve.agentapi import (
+    pending_inbox_launch_lock,
+    sent_steering_payload,
+    sent_steering_response_payload,
+)
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.lifecycle import (
-    ExplicitPendingInboxEnsure,
-    lifecycle_decision_authority,
+    LifecycleOutcome,
+    submit_explicit_send_intent,
+    submit_inbox_wake,
 )
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
@@ -72,18 +80,9 @@ def work_tree_send_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    authority = lifecycle_decision_authority(state)
-    # The authority keeps the target lock across publication and yields the sole
-    # explicit launch grant, so a watcher cannot enter the
-    # publication-to-ensure gap.
-    with authority.explicit_pending_inbox(target) as ensure_pending:
-        response, status = _work_tree_send_response_payload(
-            state,
-            target,
-            payload,
-            ensure_agent_before_reply=True,
-            ensure_pending=ensure_pending,
-        )
+    response, status = _work_tree_send_response_payload(
+        state, target, payload, ensure_agent_before_reply=True
+    )
     return (
         validate_emitter_payload(
             "workroutes.work_tree_send_response_payload", response
@@ -97,15 +96,9 @@ def work_tree_send_accepted_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    authority = lifecycle_decision_authority(state)
-    with authority.explicit_pending_inbox(target) as ensure_pending:
-        response, status = _work_tree_send_response_payload(
-            state,
-            target,
-            payload,
-            ensure_agent_before_reply=False,
-            ensure_pending=ensure_pending,
-        )
+    response, status = _work_tree_send_response_payload(
+        state, target, payload, ensure_agent_before_reply=False
+    )
     return (
         validate_emitter_payload(
             "workroutes.work_tree_send_accepted_response_payload", response
@@ -120,7 +113,6 @@ def _work_tree_send_response_payload(
     payload: dict[str, Any],
     *,
     ensure_agent_before_reply: bool,
-    ensure_pending: ExplicitPendingInboxEnsure,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     request, error_response = _validate_work_tree_send_request(payload)
     if error_response is not None:
@@ -144,20 +136,39 @@ def _work_tree_send_response_payload(
             predecessor=predecessor,
             predecessor_actor=predecessor_actor,
         )
+    grants_explicit_launch = ensure_agent_before_reply or force_new
     try:
-        sent = submit_steering_message(
-            text=text,
-            priority=None,
-            stop=False,
-            no_say=request.no_say,
-            attachments=request.attachments,
-            controls=drive_drain_queue_controls(request.drive_agent),
-            target_repo_root=target.repo_root,
-            # The synchronous route starts the lane itself and grants the
-            # explicit-send restart exception. Only the accepted/asynchronous
-            # route needs the background watcher to own that decision.
-            wake_server=not ensure_agent_before_reply and not force_new,
-        )
+        with _publication_guard(grants_explicit_launch):
+            sent = submit_steering_message(
+                text=text,
+                priority=None,
+                stop=False,
+                no_say=request.no_say,
+                attachments=request.attachments,
+                controls=drive_drain_queue_controls(request.drive_agent),
+                target_repo_root=target.repo_root,
+                # The synchronous route answers with the launch it caused, so it
+                # has nothing to tell watchers that its own reply does not carry.
+                # The accepted route replies first and leaves the lane's new
+                # pending item to be observed like any other.
+                wake_server=not grants_explicit_launch,
+            )
+            grant = (
+                submit_explicit_send_intent(
+                    state,
+                    target,
+                    sent.key,
+                    fast_mode=bool(state.team_store.global_fast_mode_enabled()),
+                    force_new=force_new,
+                )
+                if grants_explicit_launch
+                else None
+            )
+        if grant is None:
+            # The accepted route owes this send a lane start it will not wait
+            # for: queue the decision here rather than leaving it to whoever
+            # renders the lane next, and let the follow-up report its outcome.
+            submit_inbox_wake(state, target, sent.key)
     except (RuntimeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}, steering_submit_error_status(exc)
     response_payload = _work_tree_send_result_payload(
@@ -168,10 +179,26 @@ def _work_tree_send_response_payload(
         renew_intent=renew_intent,
         predecessor=predecessor,
         predecessor_actor=predecessor_actor,
-        ensure_agent_before_reply=ensure_agent_before_reply,
-        ensure_pending=ensure_pending,
+        grant=grant,
     )
     return response_payload, HTTPStatus.OK
+
+
+@contextmanager
+def _publication_guard(grants_explicit_launch: bool) -> Iterator[None]:
+    """Hold the launch guard exactly while a send owes itself a launch attempt.
+
+    A send that reserves an explicit grant must publish and reserve as one step,
+    or a background decision already inside the guard consumes the item in
+    between. A send that hands its lane to the background watcher has no grant to
+    protect, and taking a server-wide lock to reply fast would be the opposite of
+    what that route is for.
+    """
+    if not grants_explicit_launch:
+        yield
+        return
+    with pending_inbox_launch_lock():
+        yield
 
 
 def _work_tree_send_renewal_active(
@@ -219,10 +246,9 @@ def _work_tree_send_result_payload(
     renew_intent: bool,
     predecessor: str,
     predecessor_actor: str,
-    ensure_agent_before_reply: bool,
-    ensure_pending: ExplicitPendingInboxEnsure,
+    grant: Future[LifecycleOutcome] | None,
 ) -> dict[str, Any]:
-    if not ensure_agent_before_reply and not force_new:
+    if grant is None:
         response_payload = sent_steering_payload(
             sent,
             target=target,
@@ -231,16 +257,13 @@ def _work_tree_send_result_payload(
         send_actor = identity.team_actor_for_target(
             state.team_store, target, predecessor
         )
-        if not force_new:
-            _record_directive_publication(state, target, sent, send_actor=send_actor)
+        _record_directive_publication(state, target, sent, send_actor=send_actor)
         return response_payload
 
     response_payload = sent_steering_response_payload(
         sent,
         target=target,
-        ensure_pending=ensure_pending,
-        fast_mode=bool(state.team_store.global_fast_mode_enabled()),
-        force_new=force_new,
+        grant=grant,
     )
     agent_ensure = response_payload.get("agentEnsure")
     ensured_thread_id = _work_tree_send_ensured_thread_id(
