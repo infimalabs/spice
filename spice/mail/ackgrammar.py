@@ -49,6 +49,11 @@ _ACK_HEADER_FILLER_WORDS = frozenset({"inbox", "key", "keys"})
 _ACK_HEADER_WRAPPER_CHARS = " \t\r\n`\"'[],()*_"
 _ACK_KEY_CLOSER_CHARS = "`\"'])*_"
 _ACK_BODY_SPACE_CHARS = " \t\r\n"
+# The separator's own padding is what sits between it and the body on the same
+# line. Reaching onto the next line to find the body would eat that line's
+# indentation, and four spaces there is the difference between a directive
+# being shown and a directive being issued.
+_ACK_HEADER_INLINE_SPACE_CHARS = " \t"
 _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
 # Markdown emphasis delimiters. Claude routinely wraps the header in bold
 # (`**ACK <key>:** ...`); a uniform run of these immediately before the token
@@ -192,6 +197,7 @@ def split_keyed_response(
                     text[header_end:body_end],
                     drop_task_directives=drop_task_directives,
                     wrapper=body_wrapper,
+                    after_header=True,
                 ),
                 disposition=disposition,
             )
@@ -224,6 +230,7 @@ def _split_keyed_message(
                     text[header_end:body_end],
                     drop_task_directives=drop_task_directives,
                     wrapper=body_wrapper,
+                    after_header=True,
                 ),
             )
         )
@@ -491,11 +498,14 @@ def _consume_ack_header_separator(
 ) -> tuple[int, bool]:
     """Skip an immediate ACK separator after the key list, when present."""
     index = header_end
-    while index < line_end and text[index] in _ACK_KEY_CLOSER_CHARS + " \t":
+    closers = _ACK_KEY_CLOSER_CHARS + _ACK_HEADER_INLINE_SPACE_CHARS
+    while index < line_end and text[index] in closers:
         index += 1
     if index < line_end and text[index] in _ACK_HEADER_SEPARATOR_CHARS:
         body_start = index + 1
-        while body_start < line_end and text[body_start] in _ACK_BODY_SPACE_CHARS:
+        while (
+            body_start < line_end and text[body_start] in _ACK_HEADER_INLINE_SPACE_CHARS
+        ):
             body_start += 1
         return body_start, True
     return header_end, False
@@ -524,18 +534,48 @@ def _ack_key_shape_end(text: str, start: int, limit: int) -> int | None:
 
 
 def _clean_segment_content(
-    body: str, *, drop_task_directives: bool = False, wrapper: str = ""
+    body: str,
+    *,
+    drop_task_directives: bool = False,
+    wrapper: str = "",
+    after_header: bool = False,
 ) -> str:
-    lines = [
+    lines = body.splitlines()
+    if lines and after_header:
+        # This segment continues the marker line, so its first line is the
+        # remainder of that line: the space after the colon belongs to the
+        # marker, not to the content, and is not indentation.
+        lines[0] = lines[0].lstrip()
+    kept = [
         line
-        for line in body.splitlines()
-        if not _is_app_directive_line(line)
-        and (not drop_task_directives or not _is_task_directive_line(line))
+        for line, suppressed in iter_control_lines("\n".join(lines))
+        if suppressed
+        or (
+            not _is_app_directive_line(line)
+            and (not drop_task_directives or not _is_task_directive_line(line))
+        )
     ]
-    cleaned = "\n".join(lines).strip()
+    cleaned = trim_blank_lines("\n".join(kept))
     if wrapper and cleaned.endswith(wrapper):
         cleaned = cleaned[: -len(wrapper)].rstrip()
     return cleaned
+
+
+def trim_blank_lines(text: str) -> str:
+    """Drop the blank lines around a segment without flattening the first one.
+
+    Stripping the segment whole would take the indentation off its first
+    content line, and four spaces there is the difference between code being
+    shown and a directive being issued. Suppression is decided by reading that
+    indentation, so every reader that trims a segment has to trim it this way
+    or the ones downstream will read a displayed directive as a real one.
+    """
+    lines = text.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines).rstrip()
 
 
 def _is_app_directive_line(line: str) -> bool:

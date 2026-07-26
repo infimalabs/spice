@@ -238,6 +238,20 @@ def test_split_keyed_response_without_markers_returns_only_preamble():
     assert responses == []
 
 
+@pytest.mark.parametrize("padding", [" ", "    ", "\t"])
+def test_a_body_continuing_the_header_line_opens_flush(padding):
+    # Segments keep the indentation of their own lines, because four spaces is
+    # what tells a shown directive from an issued one. The run between the
+    # header and a body that continues the same line is the marker's padding,
+    # though: that line's indentation was spent before `ACK`, so this run is
+    # separator width and the body still opens flush.
+    text = f"ACK {KEY_A}{padding}carried the change through."
+    preamble, responses = split_keyed_response(text)
+
+    assert preamble == ""
+    assert [r.content for r in responses] == ["carried the change through."]
+
+
 def test_bold_wrapped_ack_header_leaves_no_stray_markers():
     # Claude routinely bolds the header: `**ACK k:** body`. The wrapper must be
     # fully consumed — no stray `**` in the preamble or the segment body.

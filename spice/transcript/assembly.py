@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
-from spice.mail.ackgrammar import iter_control_lines, split_keyed_response
+from spice.mail.ackgrammar import (
+    iter_control_lines,
+    split_keyed_response,
+    trim_blank_lines,
+)
 from spice.transcript.events import (
     AssistantText,
     CommandExecution,
@@ -317,7 +321,7 @@ def _segment_spans(
     pending: list[str] = []
 
     def flush_pending() -> None:
-        text = "\n".join(pending).strip()
+        text = trim_blank_lines("\n".join(pending))
         pending.clear()
         if text:
             spans.append(

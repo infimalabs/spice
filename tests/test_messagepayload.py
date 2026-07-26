@@ -688,6 +688,100 @@ def test_a_directive_the_supervisor_suppresses_renders_no_card(shape, tmp_path):
     assert _TASK_DIRECTIVE in payload["display_text"]
 
 
+_OPENING_DIRECTIVE_SEGMENTS = {
+    "preamble": "    {directive}\n\nNothing was captured.",
+    "ack-body": f"ACK {_ACK_KEY}:\n" + "    {directive}\n\nNothing was captured.",
+    "nack-body": f"NACK {_NACK_KEY}:\n" + "    {directive}\n\nNo capture happened.",
+}
+
+
+@pytest.mark.parametrize("position", sorted(_OPENING_DIRECTIVE_SEGMENTS))
+def test_a_directive_opening_its_segment_indented_renders_no_card(position, tmp_path):
+    """Indentation is read where the segment starts, not only after it.
+
+    Every reader that trimmed a segment stripped it whole, which took the
+    indentation off its first content line and left a bare directive for the
+    next reader to believe. The shape only reached production from the opening
+    position, because a directive further in kept a preceding line to anchor
+    its indentation, so that is the position under test here: the same example
+    is written first in a preamble, in an ACK body, and in a NACK body.
+    """
+    text = _OPENING_DIRECTIVE_SEGMENTS[position].format(directive=_TASK_DIRECTIVE)
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert extract_task_batch_lines_from_text(text) == []
+    assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
+    assert _TASK_DIRECTIVE in payload["display_text"]
+
+
+def test_an_ack_body_on_the_header_line_still_drops_the_separator_space(tmp_path):
+    """Keeping indentation must not mean keeping the marker's own padding.
+
+    The space after `ACK <key>:` belongs to the marker, so the body that
+    continues that line still opens flush. Reading it any other way would make
+    every ordinary ACK present with a leading space, which is what stripping
+    the segment whole used to hide.
+    """
+    text = f"ACK {_ACK_KEY}: Acknowledged the ask\nand did the work."
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert payload["ack_keys"] == [_ACK_KEY]
+    assert payload["display_text"] == "Acknowledged the ask\nand did the work."
+
+
+def test_a_fenced_app_directive_survives_into_displayed_prose(tmp_path):
+    """A shown app directive is prose, and deleting it empties its own fence.
+
+    App-directive lines are dropped from prose rather than rewritten, so
+    filtering one that suppression had already excused left the fence around
+    it standing with nothing inside.
+    """
+    text = f"The commit line looks like:\n```\n{_APP_DIRECTIVE}\n```\nThat is all."
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert _APP_DIRECTIVE in payload["display_text"]
+    assert payload["display_text"].endswith("That is all.")
+
+
 @pytest.mark.parametrize(
     ("text", "expected", "expected_dispositions"),
     [

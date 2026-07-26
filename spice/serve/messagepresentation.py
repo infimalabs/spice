@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from spice.mail.ackarchive import nack_response_is_honored
+from spice.mail.ackgrammar import trim_blank_lines
 from spice.mail.feedback import supervisor_feedback_notices
 from spice.serve.images import image_markdown, view_image_markdown
 from spice.serve.markdown import render_message_html
@@ -166,7 +167,7 @@ class _TextGroup:
 
     @property
     def body(self) -> str:
-        return "\n".join(self.lines).strip()
+        return trim_blank_lines("\n".join(self.lines))
 
     @property
     def spoken(self) -> str:
