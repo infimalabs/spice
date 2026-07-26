@@ -19,7 +19,10 @@ from spice.serve.lifecycle import (
     LifecycleOutcomeStatus,
     LifecycleReconciler,
     LifecycleWakeSource,
+    lifecycle_decision_authority,
     start_lifecycle_reconciler,
+    submit_explicit_send_intent,
+    submit_inbox_wake,
 )
 
 RECONCILER_RETRY_AFTER_SECONDS = 17.5
@@ -195,6 +198,115 @@ def test_explicit_grant_and_automatic_decision_share_the_target_lock(
     assert retry_due(target_a.id, 5.0) is True
     assert retry_due(target_a.id, 5.0) is False
     assert retry_due(target_b.id, 5.0) is True
+
+
+def _grant_release_lane(monkeypatch, *, ensure_calls: list[dict[str, object]]):
+    """One lane whose automatic decision reaches a recorded pending-inbox ensure.
+
+    The lane starts undiscoverable so an explicit intent for it fails where the
+    reservation is already outstanding, and becomes discoverable again the way a
+    pruned worktree or a recovered discovery does.
+    """
+    target = SimpleNamespace(id="lane-a", repo_root="/lane-a")
+    discoverable: list[object] = []
+    store = SimpleNamespace(
+        agent_renewal_active=lambda _actor: False,
+        global_fast_mode_enabled=lambda: False,
+    )
+    state = SimpleNamespace(
+        observer_mode=False,
+        lifecycle_reconciler=None,
+        lifecycle_decision_authority=None,
+        team_store=store,
+        worktree_targets=lambda: list(discoverable),
+    )
+
+    def ensure_pending(_target, **kwargs):
+        ensure_calls.append(kwargs)
+        return {"ok": True, "trigger": "pending-inbox", "threadId": "successor"}
+
+    monkeypatch.setattr(
+        lifecycle, "resolve_thread_id_for_target", lambda *_args: "predecessor"
+    )
+    monkeypatch.setattr(
+        lifecycle, "team_actor_for_target", lambda *_args: "thread:predecessor"
+    )
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(lifecycle, "team_facts_for_target", lambda *_args: {})
+    monkeypatch.setattr(
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda _store, **_kwargs: "successor",
+    )
+    reconciler = start_lifecycle_reconciler(state)
+    assert reconciler is not None
+    # ServeState hands both submissions to the reconciler it owns; the fake
+    # stands in for exactly that, so the submit helpers under test run whole.
+    state.submit_lifecycle_intent = reconciler.submit_intent
+    state.submit_lifecycle_wake = reconciler.submit_automatic
+    return SimpleNamespace(
+        state=state,
+        target=target,
+        discoverable=discoverable,
+        reconciler=reconciler,
+    )
+
+
+def test_a_failed_explicit_intent_gives_back_the_grant_it_reserved(
+    monkeypatch,
+) -> None:
+    """A lane pruned before its decision runs still returns its reservation."""
+    ensure_calls: list[dict[str, object]] = []
+    lane = _grant_release_lane(monkeypatch, ensure_calls=ensure_calls)
+    try:
+        failed = submit_explicit_send_intent(
+            lane.state, lane.target, "1kGwGJq0"
+        ).result(timeout=1.0)
+        lane.discoverable.append(lane.target)
+        later = submit_inbox_wake(lane.state, lane.target, "inbox-revision-9").result(
+            timeout=1.0
+        )
+    finally:
+        lane.reconciler.cancel()
+        assert lane.reconciler.join(timeout=1.0) is True
+
+    assert failed.status is LifecycleOutcomeStatus.FAILED
+    assert failed.detail == "unknown lifecycle target: lane-a"
+    # The lane is back and its next automatic decision reaches its own ensure:
+    # a grant that outlived its intent would decline this and every one after it.
+    assert later.status is LifecycleOutcomeStatus.OBSERVED
+    assert later.detail == "pending-inbox"
+    retry_due = ensure_calls[0]["retry_due"]
+    assert callable(retry_due)
+    assert ensure_calls == [
+        {"retry_due": retry_due, "fast_mode": False, "force_new": False}
+    ]
+
+
+def test_a_failed_intent_releases_only_the_grant_it_reserved(monkeypatch) -> None:
+    """One send's failure cannot spend the grant another send is still owed."""
+    ensure_calls: list[dict[str, object]] = []
+    lane = _grant_release_lane(monkeypatch, ensure_calls=ensure_calls)
+    # A second send has published and holds the launch attempt it reserved; only
+    # the first send's intent fails.
+    lifecycle_decision_authority(lane.state).reserve_explicit_grant(lane.target.id)
+    try:
+        failed = submit_explicit_send_intent(
+            lane.state, lane.target, "1kGwGJq0"
+        ).result(timeout=1.0)
+        lane.discoverable.append(lane.target)
+        later = submit_inbox_wake(lane.state, lane.target, "inbox-revision-9").result(
+            timeout=1.0
+        )
+    finally:
+        lane.reconciler.cancel()
+        assert lane.reconciler.join(timeout=1.0) is True
+
+    assert failed.status is LifecycleOutcomeStatus.FAILED
+    # The surviving reservation still holds the lane for the send that owns it.
+    assert later.status is LifecycleOutcomeStatus.OBSERVED
+    assert later.detail == "no-action"
+    assert ensure_calls == []
 
 
 def test_duplicate_automatic_wakes_coalesce_but_explicit_intents_remain_distinct() -> (
