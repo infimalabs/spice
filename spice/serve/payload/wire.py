@@ -487,21 +487,36 @@ WIRE_OBJECTS = (
     # sort "10" below "9". tests/fixtures/lane_store_chrome.js holds the
     # conformance sweep that keeps the reducer honest about this.
     #
-    # What producers here owe it in is a count of microseconds. The task board
-    # counts from the instant its durable store was written, minted by
-    # spice.tasks.config.task_event_generation: a store is only ever created
-    # after every store it replaces, so the count rises across a restart and
-    # across a store deleted and remade, which is the one moment a revision
-    # counted within it can restart lower. Activity counts the transcript
-    # instant it carries rather than spelling it out, because a stamp written
-    # at one offset sorts ahead of a later stamp written at another. Both are
-    # microseconds because both authorities use the same durable time vocabulary.
+    # What producers here owe it in is a count of microseconds. Each generation
+    # is the instant a store was written, and a store is only ever created after
+    # every store it replaces, so the count rises across a restart and across a
+    # store deleted and remade -- the one moment a revision counted within it can
+    # restart lower. The task board is dated by two stores at once: its rows and
+    # catalog advance the task-store generation minted by
+    # spice.tasks.config.task_event_generation, while the revision it publishes is
+    # this team's, counted in the team store. Neither generation carries it alone,
+    # because either store can be remade while the other stands, so
+    # payload.chrome.lane_chrome_generations joins both into one epoch -- the
+    # board's generation first, the team's behind it. The comparator reads that as
+    # the tuple it looks like: the leading generation decides and the one behind
+    # it breaks ties, and since both only rise, so does the pair. An authority
+    # with nothing to report still holds its place there, so a silent leading
+    # generation is never read as the one behind it, and only when every authority
+    # is silent is there no epoch at all. Activity counts the transcript instant
+    # it carries rather than spelling it out, because a stamp written at one
+    # offset sorts ahead of a later stamp written at another.
+    # teamConfig and renewal share the team store's generation, stamped into its
+    # global settings when it is created, because both count inside that store and
+    # both restart together when it is remade. Every generation here is counted in
+    # microseconds so that a reader meeting more than one meets one kind of token
+    # rather than one encoding per authority.
     # The reducer never converts a digit run to a JavaScript number: it compares
     # normalized digit length and then lexical value, exactly matching Python's
     # unbounded integer order beyond Number.MAX_SAFE_INTEGER.
-    # payload.chrome.lane_chrome_generation admits only a count, so a hash
-    # identity cannot become an epoch -- it would arrive as an order the reducer
-    # cannot fault and then mis-order silently behind it.
+    # payload.chrome.lane_chrome_generation admits only a count, and every
+    # generation in a join passes through it, so a hash identity cannot become
+    # an epoch -- it would arrive as an order the reducer cannot fault and then
+    # mis-order silently behind it.
     _object(
         "LaneChromeFacetOrder",
         {"epoch": STRING, "revision": INTEGER},

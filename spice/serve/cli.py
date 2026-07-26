@@ -23,10 +23,17 @@ from spice.serve.diagnostics import (
     render_team_diagnostics,
     team_diagnostics_payload,
 )
+from spice.serve.metrics import rebuild_transcript_metrics
 from spice.serve.observer import (
     OBSERVER_PRIMARY_PRECEDENCE,
     detect_observer_primary,
 )
+from spice.serve.team.projection import (
+    AGENT_ACTIVITY,
+    PROJECTION_FAMILIES,
+    PROJECTION_FAMILIES_BY_NAME,
+)
+from spice.serve.team.store import ServeTeamStore
 
 
 def configure_serve_parser(subparsers: Any) -> None:
@@ -110,6 +117,25 @@ def configure_serve_parser(subparsers: Any) -> None:
         help="Emit machine-readable diagnostics JSON.",
     )
     teams.set_defaults(func=run_serve_team_diagnostics)
+
+    reset_projections = actions.add_parser(
+        "reset-projections",
+        help=(
+            "Rebuild Serve projections from native facts and atomically publish "
+            "the completed generation."
+        ),
+        recovery_examples=(
+            "spice serve reset-projections",
+            "spice serve reset-projections agentActivity",
+        ),
+    )
+    reset_projections.add_argument(
+        "families",
+        nargs="*",
+        metavar="FAMILY",
+        help="Family names to empty. Default: every registered family.",
+    )
+    reset_projections.set_defaults(func=run_serve_reset_projections)
 
     browser_artifact = actions.add_parser(
         "browser-artifact-path",
@@ -225,6 +251,42 @@ def run_serve_team_diagnostics(args: Any) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(render_team_diagnostics(payload))
+    return 0
+
+
+def run_serve_reset_projections(args: Any) -> int:
+    """Rebuild selected families and report the build each reader now sees.
+
+    Population happens in an isolated projection file. Readers keep the prior
+    complete generation until the replacement is ready and one transaction
+    publishes it, so interruption cannot expose a partial replay.
+    """
+    apply_serve_backends(args)
+    return _reset_projection_families(ServeTeamStore(), args.families)
+
+
+def _reset_projection_families(store: ServeTeamStore, families: list[str]) -> int:
+    requested = tuple(dict.fromkeys(families)) or tuple(
+        family.name for family in PROJECTION_FAMILIES
+    )
+    unknown = sorted(set(requested) - set(PROJECTION_FAMILIES_BY_NAME))
+    if unknown:
+        known = ", ".join(sorted(PROJECTION_FAMILIES_BY_NAME))
+        raise SpiceError(
+            f"unknown Serve projection family {', '.join(unknown)}; known: {known}"
+        )
+    for family_name in requested:
+        if family_name != AGENT_ACTIVITY.name:
+            raise SpiceError(f"no projection rebuilder registered for {family_name}")
+        state = rebuild_transcript_metrics(store)
+        counts = " ".join(
+            f"{table}={count}" for table, count in sorted(state.row_counts.items())
+        )
+        print(
+            f"serve projections rebuilt {state.family.name} "
+            f"generation={state.generation} {counts} "
+            f"status={state.status} rebuild={state.family.rebuild}"
+        )
     return 0
 
 

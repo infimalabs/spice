@@ -1,9 +1,19 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from spice.cli.parser import build_parser
 from spice.serve.cli import run_serve_team_diagnostics
 from spice.serve.diagnostics import render_team_diagnostics, team_diagnostics_payload
+from spice.serve.team.projection import (
+    AGENT_ACTIVITY,
+    PROJECTION_SCHEMA_VERSION,
+    PROJECTION_STATUS_INCOMPATIBLE,
+    PROJECTION_STATUS_STALE,
+    ServeProjectionStore,
+    rebuild_projection_family,
+)
 from spice.serve.team.store import (
     TEAM_DATABASE_FILENAME,
     ServeTeamStore,
@@ -82,6 +92,23 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     assert "taskdrain team=team-main lifetime=Drive applies=yes" in text
     assert f"renewal {AGENT_A} state=pending team={TEAM_ID}" in text
     assert "successor_thread=- slot=0" in text
+    metric_families = {row["family"]: row for row in payload["metricFamilies"]}
+    assert set(metric_families) == {
+        "agentActivity",
+        "directiveLifecycle",
+        "taskLifecycle",
+        "teamAttribution",
+    }
+    assert metric_families["agentActivity"]["projectionGeneration"] == 1
+    assert metric_families["agentActivity"]["status"] == "ready"
+    assert metric_families["directiveLifecycle"]["projectionGeneration"] is None
+    assert metric_families["taskLifecycle"]["storageClass"] == "canonical authority"
+    assert metric_families["teamAttribution"]["cursor"] == (
+        f"global team revision {renewal.revision}"
+    )
+    assert "metric families:" in text
+    assert "agentActivity owner=" in text
+    assert "directiveLifecycle owner=" in text
 
 
 def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
@@ -226,3 +253,82 @@ def test_serve_teams_parser_dispatches_json_subcommand(tmp_path):
     assert args.func is run_serve_team_diagnostics
     assert args.task_backend == str(backend)
     assert args.json_output is True
+
+
+def test_serve_reset_projections_rebuilds_and_reports_the_new_build(tmp_path, capsys):
+    backend = tmp_path / "task-backend"
+    args = build_parser().parse_args(
+        ["serve", "--task-backend", str(backend), "reset-projections"]
+    )
+    task_config.set_backend(str(backend))
+    try:
+        ServeTeamStore().record_agent_metric_delta(
+            AGENT_A, tool_calls=1, message_timestamps=[1000.0]
+        )
+        before = _projection_row_counts()
+    finally:
+        task_config.set_backend(None)
+
+    try:
+        result = args.func(args)
+        text = capsys.readouterr().out
+        after = _projection_row_counts()
+    finally:
+        task_config.set_backend(None)
+
+    assert result == EXIT_OK
+    assert before["agent_metrics"] == 1
+    assert after == dict.fromkeys(before, 0)
+    assert "serve projections rebuilt agentActivity generation=2" in text
+    assert "status=ready" in text
+    assert AGENT_ACTIVITY.rebuild in text
+
+
+def test_projection_failure_diagnostics_keep_the_stale_generation_and_recovery(
+    tmp_path,
+):
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.record_agent_metric_delta(AGENT_A, tool_calls=1, message_timestamps=[1000.0])
+
+    def fail(_stage):
+        raise RuntimeError("rebuild fixture stopped")
+
+    with pytest.raises(RuntimeError, match="rebuild fixture stopped"):
+        rebuild_projection_family(store.projections, AGENT_ACTIVITY.name, fail)
+
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+    projection = payload["projections"][0]
+    activity = payload["metricFamilies"][0]
+
+    assert projection["status"] == activity["status"] == PROJECTION_STATUS_STALE
+    assert projection["servable"] is True
+    assert "rebuild fixture stopped" in projection["detail"]
+    assert projection["recoveryAction"] == AGENT_ACTIVITY.recovery_action
+    assert f"status={PROJECTION_STATUS_STALE}" in text
+    assert f"recovery={AGENT_ACTIVITY.recovery_action}" in text
+
+
+def test_incompatible_projection_diagnostics_report_explicit_unavailability(
+    tmp_path,
+):
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.record_agent_metric_delta(AGENT_A, tool_calls=1, message_timestamps=[1000.0])
+    with store.projections.connect() as projection:
+        projection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION + 1}")
+    ServeProjectionStore._initialized_files.pop(store.projections.path, None)
+
+    payload = team_diagnostics_payload(store=store)
+    projection = payload["projections"][0]
+
+    assert projection["status"] == PROJECTION_STATUS_INCOMPATIBLE
+    assert projection["servable"] is False
+    assert "schema version" in projection["detail"]
+    assert projection["recoveryAction"] == AGENT_ACTIVITY.recovery_action
+
+
+def _projection_row_counts() -> dict[str, int]:
+    states = ServeTeamStore().projections.family_states()
+    return {
+        table: count for state in states for table, count in state.row_counts.items()
+    }

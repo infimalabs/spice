@@ -1,13 +1,13 @@
 # Serve Team Metric Attribution
 
-Status: implemented contract, 2026-07-18.
+Status: implemented contract, 2026-07-26.
 
 This is the canonical decision record for how serve attributes lane metrics
 across teams and agents. The decisions below are implemented and locked by the
 current schema, query paths, and focused tests.
 
-The durability and migration boundary for the co-resident team authority and
-observation projections is defined separately in
+The durability and migration boundary between team authority and the physically
+separate observation projection store is defined in
 `serve-team-observation-authority.md`.
 
 ## Historical Problem
@@ -45,9 +45,11 @@ the source of every symptom above.
 
 ## Decisions (locked)
 
-**D1 — Single source of truth.** Per-agent, time-bucketed counters
+**D1 — Single materialized activity store.** Per-agent, time-bucketed counters
 (`agent_metrics` and `agent_metric_buckets`, keyed by immutable source actor id)
-are the only durable metric store. Every other number is a projection.
+are the only materialized activity store. They are disposable projections of
+typed transcript facts; every other activity number is a query projection over
+them.
 
 **D2 — Delete the team counter store.** `team_agent_metrics` and
 `team_agent_metric_buckets` are removed entirely, along with all code that
@@ -99,9 +101,10 @@ merits only, never for metric reasons.
 **D9 — Renewal lineage is a read model.** Per-agent facts retain the actor that
 produced them. A `renewalStarted` event links predecessor to successor, and the
 LINEAGE-CUMULATIVE lens recursively folds source actors at query time. Renewal
-never updates, merges, or deletes historical fact rows. Replay checkpoints may
-be copied forward so a successor does not reread a predecessor transcript, but
-the predecessor checkpoint remains and is not fact attribution.
+never updates, merges, or deletes historical fact rows. A successor resumes a
+predecessor transcript at the furthest point its lineage reached, derived from
+lineage at read time rather than copied forward into a checkpoint row, and that
+inheritance is a resume point rather than fact attribution.
 
 ## Views & projections
 
@@ -110,10 +113,11 @@ timestamped, actor+team-tagged facts: canonical steering/ACK lifecycle rows,
 activity buckets (messages/tool_calls), task-lifecycle events
 (claim/phase/complete/drain), and membership events from the team event log.
 Directive sends and dispositions live only in repository-owned
-`spiceacks.sqlite3`; Serve folds those rows directly and owns neither a
-`directives` copy nor `directive_totals`. `agent_metrics` remains a transitional
-materialized activity total, not a second directive truth. New views add folds
-over native facts plus the team event log, not mutable directive aggregates.
+`spiceacks.sqlite3`; Serve folds those rows directly and owns no compatibility
+copy or mutable aggregate. `agent_metrics` is a materialized activity total in
+the rebuildable projection store, not a second directive truth. New views add
+folds over native facts plus the team event log, not mutable directive
+aggregates.
 
 **D11 — Explicit lenses, one default.** Lane default = LINEAGE-CUMULATIVE: D9
 event folding means the lane shows total work achieved by that lineage across
@@ -135,11 +139,11 @@ signals derive from a task-lifecycle fact series, not from message-activity
 counters. Message and tool-call activity can explain agent effort; task-flow
 facts explain work movement. The source is the task plane's own append-only
 mutation history, folded at read time into semantic transitions (`claim`,
-`phaseAdvance`, `review`, `complete`, `drain`). The `task_events` mirror this
-decision originally specified is removed: it was justified by the premise that
-the task plane keeps only current state plus a small timestamp set, and that
-premise was wrong. TaskChampion records every task mutation as a per-property
-operation in an append-only log, which carries the full reassignment,
+`phaseAdvance`, `review`, `complete`, `drain`). The retired Serve mirror was
+justified by the premise that the task plane keeps only current state plus a
+small timestamp set, and that premise was wrong. TaskChampion records every
+task mutation as a per-property operation in an append-only log, which carries
+the full reassignment,
 phase-advance, review, and drain history stable range queries need. Folding
 that log is also what makes a retried or multi-property write one transition:
 a movement exists where lifecycle state moved, not where a command ran.
@@ -200,10 +204,13 @@ foreclose it.
 ## Implementation Evidence
 
 - `spice/serve/team/schema.py` stores immutable membership timestamps,
-  explicit positions, per-agent facts, task events, and renewal facts.
-- `spice/serve/team/store.py` derives source-actor, lineage-cumulative,
-  per-session, and team-at-event-time views from immutable agent facts plus
-  renewal/alias and membership event state.
+  explicit positions, team authority events, renewal state, and identities.
+- `spice/serve/team/metrics.py` derives source-actor, lineage-cumulative,
+  per-session, and team-at-event-time views from disposable per-agent activity
+  plus immutable renewal/alias and membership events; it derives task flow
+  directly from TaskChampion operations.
+- `spice/serve/directivestats.py` derives directive metrics directly from
+  canonical ACK-history rows.
 - Lane payloads consume those projections; moving an agent changes the current
   membership lens, while renewal links immutable source sessions at read time.
 - Team metric unit/property tests and real browser smokes pin attribution,

@@ -84,6 +84,13 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
         "effectiveTaskFilters": lanes.effective_filter_projects_for_team(team),
         "lifetime": team.config.lifetime,
         "renewalIntent": renewal_intent_for_actor(store, actor),
+        # Every revision above is counted inside this store, so all of them
+        # restart from zero in a store that was deleted and remade, and the
+        # facets this store alone orders are dated by the instant it was
+        # created. Every producer of those facets reads its facts here, which
+        # is what keeps them all naming one generation instead of each
+        # deciding whether a lane's chrome carries one.
+        "storeGeneration": store.store_generation(),
     }
 
 

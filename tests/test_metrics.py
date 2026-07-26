@@ -8,15 +8,20 @@ from datetime import UTC, datetime
 import pytest
 
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.metrics import record_transcript_metrics_for_agent
-from spice.serve.team import metrics as team_metrics
-from spice.serve.team.schema import (
-    TEAM_AUTHORITY_SCHEMA,
-    TEAM_AUTHORITY_SCHEMA_VERSION,
-    TEAM_PROJECTION_SCHEMA,
+from spice.serve.metrics import (
+    rebuild_transcript_metrics,
+    record_transcript_metrics_for_agent,
 )
-from spice.serve.team.store import ServeTeamStore
+from spice.serve.team import metrics as team_metrics
+from spice.serve.team.metrics import AgentMetricCheckpoint
+from spice.serve.team.projection import (
+    PROJECTION_DATABASE_FILENAME,
+    PROJECTION_SCHEMA,
+    PROJECTION_SCHEMA_VERSION,
+)
+from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.sqliteconnection import sqlite_connection
+from spice.transcript.reader import TranscriptFileIdentity
 from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
@@ -41,6 +46,11 @@ CREATE TABLE agent_metric_cursors (
     PRIMARY KEY (agent_id, source_path)
 );
 """
+
+
+def _transcript_identity(path) -> TranscriptFileIdentity:
+    stat = path.stat()
+    return TranscriptFileIdentity(device=stat.st_dev, inode=stat.st_ino)
 
 
 def _write_rollout(path, entries):
@@ -201,7 +211,7 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
 
     now = datetime(2026, 6, 10, 12, 1, 1, tzinfo=UTC).timestamp()
     summary = store.lane_metric_summary("thread:successor", bucket_count=12, now=now)
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         cursor_rows = connection.execute(
             "SELECT agent_id, source_path, offset FROM agent_metric_cursors "
             "ORDER BY source_path"
@@ -210,16 +220,23 @@ def test_transcript_metric_cursors_are_inherited_without_moving_source_checkpoin
     assert summary.acked == 2
     assert summary.tool_calls == 2
     assert sum(summary.sparkline) == 4
+    # The successor asked for the predecessor's file and was told to resume at
+    # the end of what the predecessor already read, which is why its ACK and
+    # tool call above are counted once rather than twice.
+    assert store.agent_metric_checkpoint(
+        "thread:successor", str(predecessor_rollout)
+    ) == AgentMetricCheckpoint(
+        source_path=str(predecessor_rollout),
+        offset=predecessor_rollout.stat().st_size,
+        file_identity=_transcript_identity(predecessor_rollout),
+    )
+    # That resume point is derived from lineage, not copied: the only physical
+    # checkpoints are the ones each actor wrote from bytes it read itself.
     assert [
         (row["agent_id"], row["source_path"], row["offset"]) for row in cursor_rows
     ] == [
         (
             "thread:predecessor",
-            str(predecessor_rollout),
-            predecessor_rollout.stat().st_size,
-        ),
-        (
-            "thread:successor",
             str(predecessor_rollout),
             predecessor_rollout.stat().st_size,
         ),
@@ -362,7 +379,7 @@ def test_replaced_transcript_restarts_from_its_first_byte(tmp_path):
 
     now = datetime(2026, 6, 10, 12, 1, 2, tzinfo=UTC).timestamp()
     summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         checkpoint = connection.execute(
             "SELECT offset, source_inode FROM agent_metric_cursors "
             "WHERE agent_id = ? AND source_path = ?",
@@ -442,7 +459,7 @@ def _clean_replay_summary(tmp_path, transcript, *, now):
 
 
 def _projection_row_counts(store):
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         return {
             table: int(
                 connection.execute(f"SELECT COUNT(*) AS rows FROM {table}").fetchone()[
@@ -507,7 +524,7 @@ def test_deleted_checkpoint_rows_reset_the_counts_they_can_no_longer_account_for
         store, agent_id="agent-a", transcript_path=transcript
     )
 
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         connection.execute("DELETE FROM agent_metric_cursors")
     record_transcript_metrics_for_agent(
         store, agent_id="agent-a", transcript_path=transcript
@@ -535,7 +552,7 @@ def test_a_second_source_adds_to_the_lane_instead_of_clearing_it(tmp_path):
         store, agent_id="agent-a", transcript_path=second
     )
     after_second = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         cursor_paths = [
             str(row["source_path"])
             for row in connection.execute(
@@ -562,7 +579,7 @@ def test_a_lost_checkpoint_resets_only_the_source_it_covered(tmp_path):
     record_transcript_metrics_for_agent(store, agent_id="agent-a", transcript_path=kept)
     record_transcript_metrics_for_agent(store, agent_id="agent-a", transcript_path=lost)
 
-    with store.connect() as connection:
+    with store.projections.connect() as connection:
         connection.execute(
             "DELETE FROM agent_metric_cursors WHERE source_path = ?", (str(lost),)
         )
@@ -580,9 +597,8 @@ def test_a_drifted_checkpoint_shape_replays_its_whole_family(tmp_path):
     path = tmp_path / "drifted.sqlite3"
     transcript = tmp_path / "rollout.jsonl"
     now = _activity_transcript(transcript)
-    with sqlite_connection(path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.executescript(TEAM_PROJECTION_SCHEMA)
+    with sqlite_connection(path.with_name(PROJECTION_DATABASE_FILENAME)) as connection:
+        connection.executescript(PROJECTION_SCHEMA)
         connection.execute("DROP TABLE agent_metric_cursors")
         connection.executescript(LEGACY_CURSOR_SCHEMA)
         connection.execute(
@@ -595,12 +611,13 @@ def test_a_drifted_checkpoint_shape_replays_its_whole_family(tmp_path):
             "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, 300)",
             ("agent-a", str(transcript), transcript.stat().st_size),
         )
-        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
+        connection.execute(f"PRAGMA user_version = {PROJECTION_SCHEMA_VERSION}")
 
     store = ServeTeamStore(path=path)
     surviving = _projection_row_counts(store)
-    record_transcript_metrics_for_agent(
-        store, agent_id="agent-a", transcript_path=transcript
+    rebuild_transcript_metrics(
+        store,
+        sources=(("agent-a", transcript),),
     )
 
     # The checkpoint shape changed, so its aggregates went with it: a surviving
@@ -629,13 +646,46 @@ def test_metric_projections_replay_equivalently_after_deletion(tmp_path):
     now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
     ingested = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
 
-    with store.connect() as connection:
-        for table in METRIC_PROJECTION_TABLES:
-            connection.execute(f"DELETE FROM {table}")
+    rebuilt = rebuild_transcript_metrics(store)
+
+    # Buckets, lifetime totals, and cursors are rebuilt in isolation. Only the
+    # complete replay becomes generation 2, so no empty or partial build is
+    # presented between the two equivalent answers.
+    assert rebuilt.generation == 2
+    assert rebuilt.status == "ready"
+    assert store.lane_metric_summary("agent-a", bucket_count=12, now=now) == ingested
+
+
+def test_metric_rebuild_preserves_the_published_retention_boundary(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(
+        team_id="team-retention",
+        members=["agent-a"],
+        config=TeamConfig(shell_settings={"metrics": {"historyRetentionDays": 1}}),
+    )
+    transcript = tmp_path / "rollout-retention.jsonl"
+    _write_rollout(
+        transcript,
+        [
+            _assistant_entry("2026-06-08T12:00:00.000000Z", "outside horizon"),
+            _tool_call_entry("2026-06-08T12:00:01.000000Z", "function_call"),
+            _assistant_entry("2026-06-10T11:59:00.000000Z", "inside horizon"),
+            _tool_call_entry("2026-06-10T11:59:01.000000Z", "function_call"),
+        ],
+    )
     record_transcript_metrics_for_agent(
         store, agent_id="agent-a", transcript_path=transcript
     )
+    now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC).timestamp()
+    store.prune_metric_history(now=now)
+    before = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+    before_state = store.projections.family_states()[0]
 
-    # Buckets, lifetime totals, and cursors are projections: dropping their rows
-    # and replaying the same facts lands on the same answers.
-    assert store.lane_metric_summary("agent-a", bucket_count=12, now=now) == ingested
+    rebuilt = rebuild_transcript_metrics(store)
+    after = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    assert before.tool_calls == 2
+    assert sum(before.sparkline) == 2
+    assert after == before
+    assert before_state.retention_floor == now - 24 * 60 * 60
+    assert rebuilt.retention_floor == before_state.retention_floor

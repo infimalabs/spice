@@ -8,19 +8,13 @@ from dataclasses import dataclass
 import pytest
 
 from spice.errors import SpiceError
-from spice.sqliteconnection import sqlite_connection
 from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
 )
 from spice.serve.team.lifecycle import team_task_transitions
 from spice.serve.team.metrics import AgentMetricCheckpoint
-from spice.serve.team.schema import (
-    LEGACY_TEAM_SCHEMA_FINGERPRINT,
-    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
-    TEAM_AUTHORITY_SCHEMA,
-    TEAM_PROJECTION_SCHEMA,
-)
+from spice.serve.team.projection import AGENT_ACTIVITY
 from spice.serve.team.store import ObservationAttributionMode, ServeTeamStore
 from spice.transcript.reader import TranscriptFileIdentity
 
@@ -92,20 +86,16 @@ def _record_session_facts(
 def _actor_observation_rows(
     store: ServeTeamStore, actor_id: str
 ) -> dict[str, tuple[tuple[object, ...], ...]]:
-    with store.connect() as connection:
+    with store.projections.connect() as projection:
         return {
             table: tuple(
                 tuple(row)
-                for row in connection.execute(
+                for row in projection.execute(
                     f'SELECT rowid, * FROM "{table}" WHERE agent_id = ? ORDER BY rowid',
                     (actor_id,),
                 ).fetchall()
             )
-            for table in (
-                "agent_metrics",
-                "agent_metric_buckets",
-                "agent_metric_cursors",
-            )
+            for table in AGENT_ACTIVITY.tables
         }
 
 
@@ -450,19 +440,22 @@ def test_pre_transition_reassigned_rows_require_named_projection_rebuild(
         )
 
 
-def test_legacy_aggregate_without_timestamp_provenance_is_marked_for_rebuild(
-    tmp_path,
-):
-    path = tmp_path / "legacy-lineage.sqlite3"
+def test_aggregate_dated_before_its_actor_existed_requires_rebuild(tmp_path):
+    """A lifetime aggregate is dated only by `updated_at`, and that still counts.
+
+    Buckets carry their own start times, so a misattributed series is caught by
+    them. A lifetime counter carries none, which leaves the row's own update
+    time as the single fact placing it before the successor's lineage edge.
+    """
+    path = tmp_path / "misattributed.sqlite3"
     predecessor = "thread:predecessor"
     successor = "thread:successor"
     payload = json.dumps(
         {"predecessor": predecessor, "successor": successor},
         separators=(",", ":"),
     )
-    with sqlite_connection(path) as connection:
-        connection.executescript(TEAM_AUTHORITY_SCHEMA)
-        connection.executescript(TEAM_PROJECTION_SCHEMA)
+    store = ServeTeamStore(path=path)
+    with store.connect() as connection:
         connection.execute(
             "INSERT INTO events (revision, ts, kind, team_id, payload) "
             "VALUES (1, 120, 'renewalStarted', 'team-a', ?)",
@@ -479,14 +472,13 @@ def test_legacy_aggregate_without_timestamp_provenance_is_marked_for_rebuild(
             "VALUES ('team-a', ?, 120, 0)",
             (successor,),
         )
-        connection.execute(
+    with store.projections.connect() as projection:
+        projection.execute(
             "INSERT INTO agent_metrics "
             "(agent_id, team_id, tool_calls, updated_at) "
-            "VALUES (?, 'team-a', 9, 300)",
+            "VALUES (?, 'team-a', 9, 60)",
             (successor,),
         )
-        connection.execute(f"PRAGMA user_version = {LEGACY_TEAM_SCHEMA_FINGERPRINT}")
-    store = ServeTeamStore(path=path)
 
     with pytest.raises(SpiceError, match="rebuild Serve observation projections"):
         store.lane_metric_summary(
@@ -495,8 +487,3 @@ def test_legacy_aggregate_without_timestamp_provenance_is_marked_for_rebuild(
             now=360,
             attribution=ObservationAttributionMode.SOURCE_ACTOR,
         )
-    with store.connect() as connection:
-        status = connection.execute(
-            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
-        ).fetchone()["status"]
-    assert status == OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED

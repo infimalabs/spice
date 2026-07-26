@@ -383,6 +383,11 @@ assert(
 // reach for gets swept here: each generation in turn must supersede the one
 // before it while restarting its revisions, and no generation left behind may
 // reclaim the facet however high its revisions later climb.
+// The joined row is what a facet dated by more than one authority sends: the
+// leading generation decides and the one behind it breaks ties, an authority
+// with nothing to report holds its place rather than dropping out, and a
+// leading generation that rises carries the facet however far the one behind
+// it restarted back.
 const EPOCH_ENCODINGS = [
   ["decimal counter", ["2", "9", "10", "100"]],
   [
@@ -390,6 +395,7 @@ const EPOCH_ENCODINGS = [
     ["2026-07-25T21:00:00Z", "2026-07-25T21:30:00Z", "2026-07-26T01:00:00Z"],
   ],
   ["prefixed label", ["gen-2", "gen-9", "gen-10"]],
+  ["joined generations", ["9-", "9-9", "9-10", "10-2", "100-2"]],
 ];
 const SWEEP_REVISION = 0;
 const SWEEP_LAPSED_REVISION = 99;

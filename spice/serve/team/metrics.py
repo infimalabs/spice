@@ -44,10 +44,10 @@ from spice.serve.team.membership import (
     event_payload,
     membership_intervals_from_events,
 )
+from spice.serve.team.projection import AGENT_ACTIVITY, ServeProjectionStore
 from spice.serve.team.schema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
-    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
 )
 from spice.tasks.transitions import ACTIVE_KINDS, DRAINING_KINDS, TaskTransitionKind
 from spice.transcript.reader import TranscriptFileIdentity
@@ -124,11 +124,13 @@ class _ActiveTaskClaim:
 class _TeamMetricStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
+    projections: ServeProjectionStore
+
     def current_team_for_agent(self, agent_id: str) -> str | None: ...
 
     def _record_agent_metric_delta_locked(
         self,
-        connection: sqlite3.Connection,
+        projection: sqlite3.Connection,
         agent_id: str,
         *,
         team_id: str,
@@ -142,6 +144,7 @@ class _TeamMetricStore(Protocol):
     def _agent_lane_metric_summary_locked(
         self,
         connection: sqlite3.Connection,
+        projection: sqlite3.Connection,
         agent_ids: tuple[str, ...],
         *,
         bucket_count: int,
@@ -157,6 +160,10 @@ class _TeamMetricStore(Protocol):
         *,
         start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals: ...
+
+    def _prune_metric_history_locked(
+        self, connection: sqlite3.Connection, *, now: float
+    ) -> None: ...
 
 
 class TeamMetricStoreMixin:
@@ -222,14 +229,14 @@ class TeamMetricStoreMixin:
         # one source reverses only its own contribution. Activity counted
         # outside a transcript pass has no source to replay from.
         source_path = "" if checkpoint is None else checkpoint.source_path
-        with self.connect() as connection:
+        with self.projections._write(AGENT_ACTIVITY) as projection:
             if checkpoint is not None:
                 _reset_unaccountable_metrics_locked(
-                    connection, agent_id, source_path=source_path
+                    projection, agent_id, source_path=source_path
                 )
             if counted:
                 self._record_agent_metric_delta_locked(
-                    connection,
+                    projection,
                     agent_id,
                     team_id=team_id,
                     source_path=source_path,
@@ -240,19 +247,29 @@ class TeamMetricStoreMixin:
                 )
             if checkpoint is not None:
                 _record_agent_metric_cursor_locked(
-                    connection, agent_id, checkpoint=checkpoint, now=now
+                    projection, agent_id, checkpoint=checkpoint, now=now
                 )
 
     def agent_metric_checkpoint(
         self: _TeamMetricStore, agent_id: str, source_path: str
     ) -> AgentMetricCheckpoint:
+        """Where this agent resumes one source, inheriting from whoever read it first.
+
+        An agent that has read the source before answers from its own cursor. An
+        agent that has not falls back to the furthest point any actor in its
+        lineage reached, because a successor keeps reading the predecessor's
+        file and must not ingest those bytes a second time. The inheritance is
+        derived from authority lineage on every read rather than copied into the
+        projection at renewal time: a copy would be a projection write inside an
+        authority transaction, and the two no longer share one.
+        """
         agent_id = _normalized_id(agent_id, "agent_id")
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT offset, source_device, source_inode FROM agent_metric_cursors "
-                "WHERE agent_id = ? AND source_path = ?",
-                (agent_id, source_path),
-            ).fetchone()
+        with self.projections.read(AGENT_ACTIVITY) as projection:
+            row = _agent_metric_cursor_row(projection, (agent_id,), source_path)
+            if row is None:
+                with self.connect() as connection:
+                    lineage = _lineage_actor_ids_locked(connection, (agent_id,))
+                row = _agent_metric_cursor_row(projection, lineage, source_path)
         if row is None:
             return AgentMetricCheckpoint(
                 source_path=source_path, offset=0, file_identity=None
@@ -267,34 +284,19 @@ class TeamMetricStoreMixin:
         with self.connect() as connection:
             return _metric_history_retention_seconds_locked(connection)
 
-    def _inherit_agent_metric_cursors_locked(
-        self,
-        connection: sqlite3.Connection,
-        old_agent_id: str,
-        new_agent_id: str,
+    def prune_metric_history(
+        self: _TeamMetricStore, *, now: float | None = None
     ) -> None:
-        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
-        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
-        if old_agent_id == new_agent_id:
-            return
-        # A successor inherits the predecessor's resume point for a source it
-        # keeps reading, identity included: the file it resumes is the same file,
-        # so an inherited checkpoint must not read as a replacement.
-        connection.execute(
-            "INSERT INTO agent_metric_cursors "
-            "(agent_id, source_path, offset, source_device, source_inode, "
-            "updated_at) "
-            "SELECT ?, source_path, offset, source_device, source_inode, updated_at "
-            "FROM agent_metric_cursors WHERE agent_id = ? "
-            "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
-            "offset = max(agent_metric_cursors.offset, excluded.offset), "
-            "source_device = CASE WHEN excluded.offset > agent_metric_cursors.offset "
-            "THEN excluded.source_device ELSE agent_metric_cursors.source_device END, "
-            "source_inode = CASE WHEN excluded.offset > agent_metric_cursors.offset "
-            "THEN excluded.source_inode ELSE agent_metric_cursors.source_inode END, "
-            "updated_at = max(agent_metric_cursors.updated_at, excluded.updated_at)",
-            (new_agent_id, old_agent_id),
-        )
+        """Apply the authority-configured retention horizon to activity buckets.
+
+        Rebuilders call this against their isolated projection before publish.
+        Keeping the operation public prevents recovery code from reaching into
+        the store's locked implementation while preserving the same retention
+        rule used by the ordinary team snapshot pass.
+        """
+        prune_time = time.time() if now is None else max(0.0, float(now))
+        with self.connect() as connection:
+            self._prune_metric_history_locked(connection, now=prune_time)
 
     def lane_metric_summary(
         self: _TeamMetricStore,
@@ -313,7 +315,10 @@ class TeamMetricStoreMixin:
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
         summary_time = time.time() if now is None else max(0.0, float(now))
-        with self.connect() as connection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             # Derive the lane summary from CURRENT membership: the metric is the
             # aggregate of the team's current members' per-agent counters, so work
             # follows the agent across moves rather than staying bolted to a team.
@@ -331,7 +336,7 @@ class TeamMetricStoreMixin:
             else:
                 member_ids = (agent_id,)
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
-                _require_source_attribution_locked(connection, member_ids)
+                _require_source_attribution_locked(connection, projection, member_ids)
                 query_agent_ids = member_ids
                 start_time_by_agent = None
             elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
@@ -349,6 +354,7 @@ class TeamMetricStoreMixin:
                 )
             summary = self._agent_lane_metric_summary_locked(
                 connection,
+                projection,
                 query_agent_ids,
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
@@ -382,7 +388,10 @@ class TeamMetricStoreMixin:
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
         summary_time = time.time() if now is None else max(0.0, float(now))
-        with self.connect() as connection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             intervals = [
                 interval
                 for interval in membership_intervals_from_events(
@@ -393,10 +402,11 @@ class TeamMetricStoreMixin:
             agent_ids = historical_agent_ids(intervals)
             _require_source_attribution_locked(
                 connection,
+                projection,
                 _lineage_related_actor_ids_locked(connection, agent_ids),
             )
             buckets = historical_metric_buckets(
-                _agent_message_bucket_rows_locked(connection, agent_ids), intervals
+                _agent_message_bucket_rows_locked(projection, agent_ids), intervals
             )
         return TeamHistoricalMetricSummary(
             team_id=team_id,
@@ -434,9 +444,14 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         floor = metric_bucket_start(start, bucket_seconds)
         ceiling = metric_bucket_start(end, bucket_seconds)
-        with self.connect() as connection:
+        with (
+            self.connect() as connection,
+            self.projections.read(AGENT_ACTIVITY) as projection,
+        ):
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
-                _require_source_attribution_locked(connection, requested_ids)
+                _require_source_attribution_locked(
+                    connection, projection, requested_ids
+                )
                 ids = requested_ids
                 start_times: Mapping[str, float] = {}
             elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
@@ -451,7 +466,7 @@ class TeamMetricStoreMixin:
                     "team_historical_metric_summary"
                 )
             placeholders = ",".join("?" for _ in ids)
-            rows = connection.execute(
+            rows = projection.execute(
                 "SELECT agent_id, bucket_start, messages "
                 "FROM agent_metric_buckets "
                 f"WHERE agent_id IN ({placeholders}) "
@@ -496,7 +511,6 @@ class TeamMetricStoreMixin:
         end_time = max(start_time, float(end))
         with self.connect() as connection:
             if attribution is ObservationAttributionMode.SOURCE_ACTOR:
-                _require_source_attribution_locked(connection, requested_agents)
                 agents = requested_agents
             elif attribution is ObservationAttributionMode.LINEAGE_CUMULATIVE:
                 agents = _lineage_actor_ids_locked(connection, requested_agents)
@@ -616,8 +630,9 @@ class TeamMetricStoreMixin:
                 agent_ids=agents,
                 team_ids=teams,
             )
+        with self.projections.read(AGENT_ACTIVITY) as projection:
             activity_by_agent = _activity_bucket_times_by_agent_locked(
-                connection, claims
+                projection, claims
             )
         return tuple(
             _task_stall_state(
@@ -689,15 +704,26 @@ class TeamMetricStoreMixin:
         # so there is nothing here to age out. Directive lifecycle retention
         # belongs to its canonical steering/ACK store and is never mutated by a
         # team snapshot prune.
+        #
+        # The horizon is an authority setting and the rows are a projection, so
+        # the read and the delete are two transactions. Ageing out counts the
+        # projection can rebuild is exactly the work that may fail alone.
         retention_seconds = _metric_history_retention_seconds_locked(connection)
         floor = int(now) - retention_seconds
-        connection.execute(
-            "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
-        )
+        with self.projections._write(AGENT_ACTIVITY) as projection:
+            projection.execute(
+                "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
+            )
+            projection.execute(
+                "UPDATE projection_status SET retention_floor = "
+                "CASE WHEN retention_floor IS NULL OR retention_floor < ? "
+                "THEN ? ELSE retention_floor END WHERE family = ?",
+                (floor, floor, AGENT_ACTIVITY.name),
+            )
 
     def _record_agent_metric_delta_locked(
         self,
-        connection: sqlite3.Connection,
+        projection: sqlite3.Connection,
         agent_id: str,
         *,
         team_id: str,
@@ -707,7 +733,7 @@ class TeamMetricStoreMixin:
         tool_call_buckets: Counter[int],
         now: float,
     ) -> None:
-        connection.execute(
+        projection.execute(
             "INSERT INTO agent_metrics "
             "(agent_id, team_id, source_path, tool_calls, updated_at) "
             "VALUES (?, ?, ?, ?, ?) "
@@ -718,7 +744,7 @@ class TeamMetricStoreMixin:
         )
         bucket_starts = sorted(set(message_buckets) | set(tool_call_buckets))
         for bucket_start in bucket_starts:
-            connection.execute(
+            projection.execute(
                 "INSERT INTO agent_metric_buckets "
                 "(agent_id, team_id, source_path, bucket_start, messages, tool_calls) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
@@ -739,6 +765,7 @@ class TeamMetricStoreMixin:
     def _agent_lane_metric_summary_locked(
         self: _TeamMetricStore,
         connection: sqlite3.Connection,
+        projection: sqlite3.Connection,
         agent_ids: tuple[str, ...],
         *,
         bucket_count: int,
@@ -754,7 +781,7 @@ class TeamMetricStoreMixin:
         directives = self._directive_totals_for_agents_locked(
             connection, agent_ids, start_time_by_agent=start_times
         )
-        lifetime_tool_calls = _lifetime_tool_calls_locked(connection, agent_ids)
+        lifetime_tool_calls = _lifetime_tool_calls_locked(projection, agent_ids)
         # Only buckets inside the sparkline window contribute, so bound the read
         # there instead of scanning the agent's whole (unbounded) bucket history
         # on every render. Mirror metric_sparkline's window start exactly.
@@ -762,7 +789,7 @@ class TeamMetricStoreMixin:
             (bucket_count - 1) * bucket_seconds
         )
         message_buckets, window_tool_calls = _lane_activity_buckets_locked(
-            connection,
+            projection,
             agent_ids,
             window_floor=window_floor,
             start_time_by_agent=start_times,
@@ -777,6 +804,28 @@ class TeamMetricStoreMixin:
             bucket_seconds=bucket_seconds,
             now=now,
         )
+
+
+def _agent_metric_cursor_row(
+    projection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+    source_path: str,
+) -> sqlite3.Row | None:
+    """The furthest checkpoint any of these actors holds for one source.
+
+    Furthest wins because the actors read the same bytes of the same file: a
+    shorter offset would replay bytes another actor already counted. The row is
+    returned whole, so the offset arrives with the device and inode it counts
+    against and a replaced file is still recognized as a replacement.
+    """
+    if not agent_ids:
+        return None
+    return projection.execute(
+        "SELECT offset, source_device, source_inode FROM agent_metric_cursors "
+        f"WHERE agent_id IN ({_placeholders(agent_ids)}) AND source_path = ? "
+        "ORDER BY offset DESC LIMIT 1",
+        (*agent_ids, source_path),
+    ).fetchone()
 
 
 def _record_agent_metric_cursor_locked(
@@ -1168,22 +1217,23 @@ def _lineage_related_actor_ids_locked(
 
 def _require_source_attribution_locked(
     connection: sqlite3.Connection,
+    projection: sqlite3.Connection,
     actor_ids: tuple[str, ...],
 ) -> None:
-    state = connection.execute(
-        "SELECT status FROM observation_attribution_state WHERE singleton = 1"
-    ).fetchone()
-    if (
-        state is not None
-        and str(state["status"]) == OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
-    ):
-        raise SpiceError(OBSERVATION_SOURCE_REBUILD_REQUIRED)
+    """Refuse to read observations that were credited to an actor after the fact.
+
+    A successor is credited with activity timestamped before its own lineage
+    edge only if something rewrote the actor of an older row. Nothing does that
+    now, so the check is a standing proof rather than a migration guard: the
+    lineage edge comes from team authority and the suspect rows from the
+    projection, and a projection that fails this is rebuilt from its source.
+    """
     _, _, successor_starts = _lineage_edges_locked(connection)
     for actor_id in actor_ids:
         start = successor_starts.get(actor_id)
         if start is None:
             continue
-        row = connection.execute(
+        row = projection.execute(
             "SELECT 1 FROM agent_metric_buckets "
             "WHERE agent_id = ? AND bucket_start < ? "
             "UNION ALL SELECT 1 FROM agent_metrics "

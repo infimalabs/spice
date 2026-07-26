@@ -41,12 +41,10 @@ ACK_DISPOSITIONS = frozenset(
 )
 DIRECTIVE_PROVENANCE_ARCHIVE_ONLY = "archiveOnly"
 DIRECTIVE_PROVENANCE_PUBLISHED = "published"
-DIRECTIVE_PROVENANCE_MIGRATED_SERVE = "migratedServe"
 DIRECTIVE_PROVENANCES = frozenset(
     {
         DIRECTIVE_PROVENANCE_ARCHIVE_ONLY,
         DIRECTIVE_PROVENANCE_PUBLISHED,
-        DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
     }
 )
 
@@ -66,8 +64,7 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   sent_at REAL,
   published_text TEXT NOT NULL DEFAULT '',
   acknowledged_at REAL,
-  provenance TEXT NOT NULL DEFAULT 'archiveOnly',
-  legacy_metric_json TEXT NOT NULL DEFAULT ''
+  provenance TEXT NOT NULL DEFAULT 'archiveOnly'
 );
 """
 ACK_STATE_INDEX_SQL = """
@@ -82,8 +79,7 @@ FROM acked_inbox_items
 DIRECTIVE_HISTORY_RECORD_SELECT_SQL = """
 SELECT key, inbox_name, text, attachments_json, lineage_json,
        ack_text, ack_content, disposition, archived_at, target_actor,
-       team_id, sent_at, published_text, acknowledged_at, provenance,
-       legacy_metric_json
+       team_id, sent_at, published_text, acknowledged_at, provenance
 FROM acked_inbox_items
 """
 
@@ -152,7 +148,6 @@ class DirectiveHistoryRecord:
     ack_text: str
     ack_content: str
     provenance: str
-    legacy_metric: dict[str, Any]
 
 
 def ack_state_database_path(repo_root: str | Path) -> Path:
@@ -306,163 +301,6 @@ def prepare_directive_history_database(path: str | Path) -> None:
         _ensure_schema_once(database_path)
 
 
-def migrate_serve_directive_history(
-    path: str | Path,
-    directive_rows: Iterable[Any],
-    total_rows: Iterable[Any],
-) -> None:
-    """Move the retired Serve directive projection into canonical ACK history.
-
-    Legacy running totals must equal the still-present keyed rows. A mismatch
-    means pruning already discarded directive identities, so there is no
-    lossless automatic migration; the diagnostic tells the operator to replay
-    native steering/ACK facts instead of silently inventing keys.
-    """
-    directives = tuple(directive_rows)
-    totals = tuple(total_rows)
-    _validate_legacy_directive_totals(directives, totals)
-    if not directives:
-        return
-    database_path = Path(path)
-    _ensure_schema_once(database_path)
-    with sqlite_connection(
-        database_path,
-        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
-        wal=True,
-    ) as connection:
-        for row in directives:
-            _migrate_serve_directive_locked(connection, row)
-
-
-def _validate_legacy_directive_totals(
-    directives: tuple[Any, ...], totals: tuple[Any, ...]
-) -> None:
-    derived: dict[tuple[str, str], tuple[int, int]] = {}
-    for row in directives:
-        identity = (str(row["agent_id"]), str(row["team_id"]))
-        sends, acked = derived.get(identity, (0, 0))
-        derived[identity] = (sends + 1, acked + int(bool(row["acked"])))
-    stored = {
-        (str(row["agent_id"]), str(row["team_id"])): (
-            int(row["sends"]),
-            int(row["acked"]),
-        )
-        for row in totals
-        if int(row["sends"]) or int(row["acked"])
-    }
-    if derived == stored:
-        return
-    raise SpiceError(
-        "cannot migrate legacy Serve directive metrics losslessly: "
-        "directive_totals do not equal the remaining keyed directive rows "
-        "(historical rows may have been pruned). Restore/replay canonical "
-        "steering and ACK facts, then retry; legacy tables were left unchanged"
-    )
-
-
-def _migrate_serve_directive_locked(connection: sqlite3.Connection, row: Any) -> None:
-    key = str(row["directive_key"])
-    target_actor = str(row["agent_id"])
-    team_id = str(row["team_id"])
-    sent_at = float(row["sent_at"])
-    legacy_acked = bool(row["acked"])
-    legacy_acked_at = float(row["acked_at"]) if row["acked_at"] is not None else None
-    legacy_metric = json.dumps(
-        {
-            "directive_key": key,
-            "agent_id": target_actor,
-            "team_id": team_id,
-            "sent_at": sent_at,
-            "acked": int(legacy_acked),
-            "acked_at": legacy_acked_at,
-        },
-        sort_keys=True,
-    )
-    existing = connection.execute(
-        DIRECTIVE_HISTORY_RECORD_SELECT_SQL + " WHERE key = ?", (key,)
-    ).fetchone()
-    if existing is None:
-        if legacy_acked:
-            raise SpiceError(
-                f"cannot migrate acknowledged legacy directive {key!r}: no "
-                "durable ACK archive contains its disposition and auditable "
-                "content. Restore/replay the ACK history, then retry; legacy "
-                "tables were left unchanged"
-            )
-        connection.execute(
-            """
-            INSERT INTO acked_inbox_items
-              (key, inbox_name, text, attachments_json, lineage_json, ack_text,
-               ack_content, disposition, archived_at, target_actor, team_id,
-               sent_at, published_text, acknowledged_at, provenance,
-               legacy_metric_json)
-            VALUES (?, ?, '', '[]', '{}', '', '', ?, 0, ?, ?, ?, '', NULL, ?, ?)
-            """,
-            (
-                key,
-                f"{key}.txt",
-                ACK_DISPOSITION_PENDING,
-                target_actor,
-                team_id,
-                sent_at,
-                DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
-                legacy_metric,
-            ),
-        )
-        return
-    record = _directive_history_record(existing)
-    if record.target_actor:
-        existing_provenance = (record.target_actor, record.team_id, record.sent_at)
-        proposed_provenance = (target_actor, team_id, sent_at)
-        if existing_provenance != proposed_provenance:
-            raise SpiceError(
-                f"cannot migrate legacy directive {key!r}: canonical and Serve "
-                "publication provenance collide "
-                f"({existing_provenance!r} != {proposed_provenance!r}); "
-                "both stores were left unchanged"
-            )
-    if legacy_acked and record.disposition != ACK_DISPOSITION_ACKED:
-        raise SpiceError(
-            f"cannot migrate legacy directive {key!r}: Serve records it as "
-            f"acknowledged but canonical ACK history is {record.disposition!r}; "
-            "both stores were left unchanged"
-        )
-    if legacy_acked and not (record.ack_text.strip() or record.ack_content.strip()):
-        raise SpiceError(
-            f"cannot migrate acknowledged legacy directive {key!r}: its ACK "
-            "archive has no auditable response content. Restore/replay the ACK "
-            "history, then retry; legacy tables were left unchanged"
-        )
-    if record.legacy_metric and record.legacy_metric != json.loads(legacy_metric):
-        raise SpiceError(
-            f"cannot migrate legacy directive {key!r}: an earlier cutover "
-            "record contains different legacy metric values; both stores were "
-            "left unchanged"
-        )
-    if not record.target_actor:
-        connection.execute(
-            """
-            UPDATE acked_inbox_items
-            SET target_actor = ?, team_id = ?, sent_at = ?, provenance = ?,
-                legacy_metric_json = ?
-            WHERE key = ?
-            """,
-            (
-                target_actor,
-                team_id,
-                sent_at,
-                DIRECTIVE_PROVENANCE_MIGRATED_SERVE,
-                legacy_metric,
-                key,
-            ),
-        )
-    elif not record.legacy_metric:
-        connection.execute(
-            "UPDATE acked_inbox_items SET legacy_metric_json = ? WHERE key = ?",
-            (legacy_metric, key),
-        )
-
-
 def _ensure_schema_once(path: Path) -> None:
     """Create or migrate the schema at most once per database path per process.
 
@@ -515,7 +353,6 @@ def _directive_history_record(row: tuple[Any, ...]) -> DirectiveHistoryRecord:
         sent_at=float(row[11]) if row[11] is not None else None,
         published_text=str(row[12]),
         provenance=str(row[14]),
-        legacy_metric=_decode_lineage_json(str(row[15])),
     )
     if record.target_actor and (not record.team_id or record.sent_at is None):
         raise SpiceError(
@@ -559,9 +396,8 @@ def _record_publication_locked(
             INSERT INTO acked_inbox_items
               (key, inbox_name, text, attachments_json, lineage_json, ack_text,
                ack_content, disposition, archived_at, target_actor, team_id,
-               sent_at, published_text, acknowledged_at, provenance,
-               legacy_metric_json)
-            VALUES (?, ?, ?, ?, ?, '', '', ?, 0, ?, ?, ?, ?, NULL, ?, '')
+               sent_at, published_text, acknowledged_at, provenance)
+            VALUES (?, ?, ?, ?, ?, '', '', ?, 0, ?, ?, ?, ?, NULL, ?)
             """,
             (
                 key,
@@ -695,9 +531,8 @@ def _insert_archive_only_ack_locked(
         INSERT INTO acked_inbox_items
           (key, inbox_name, text, attachments_json, lineage_json, ack_text,
            ack_content, disposition, archived_at, target_actor, team_id,
-           sent_at, published_text, acknowledged_at, provenance,
-           legacy_metric_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', NULL, ?, ?, ?, '')
+           sent_at, published_text, acknowledged_at, provenance)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', NULL, ?, ?, ?)
         """,
         (
             key,
@@ -932,12 +767,6 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         "provenance",
         "ALTER TABLE acked_inbox_items "
         "ADD COLUMN provenance TEXT NOT NULL DEFAULT 'archiveOnly'",
-    )
-    _ensure_column(
-        connection,
-        "legacy_metric_json",
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN legacy_metric_json TEXT NOT NULL DEFAULT ''",
     )
     connection.execute(
         "UPDATE acked_inbox_items SET published_text = text WHERE published_text = ''"

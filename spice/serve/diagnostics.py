@@ -6,9 +6,11 @@ import json
 import sqlite3
 from typing import Any, Iterable
 
+from spice.mail.ackstate import directive_history_records_from_database
 from spice.serve.team.store import ServeTeamStore, TeamState
 from spice.tasks import config as task_config
 from spice.tasks import lanes
+from spice.tasks.opslog import operations_db_path
 
 
 def team_diagnostics_payload(store: ServeTeamStore | None = None) -> dict[str, Any]:
@@ -19,8 +21,17 @@ def team_diagnostics_payload(store: ServeTeamStore | None = None) -> dict[str, A
         teams = _team_rows(connection)
         members = _member_rows(connection)
         renewals = _renewal_rows(connection)
+    projections = _projection_rows(team_store)
     return {
         "storePath": str(team_store.path),
+        "projectionStorePath": str(team_store.projections.path),
+        "projections": projections,
+        "metricFamilies": _metric_family_rows(
+            team_store,
+            projections=projections,
+            events=events,
+            global_revision=snapshot.global_revision,
+        ),
         "globalRevision": snapshot.global_revision,
         "events": events,
         "teams": [team.to_payload() for team in snapshot.teams],
@@ -42,8 +53,12 @@ def render_team_diagnostics(
     lines = [
         f"serve teams store={data['storePath']} "
         f"globalRevision={data['globalRevision']}",
-        "events:",
+        f"projections store={data['projectionStorePath']}",
     ]
+    lines.extend(_render_projections(data["projections"]))
+    lines.append("metric families:")
+    lines.extend(_render_metric_families(data["metricFamilies"]))
+    lines.append("events:")
     lines.extend(_render_events(data["events"]))
     lines.append("teams:")
     lines.extend(_render_teams(data["teamRecords"]))
@@ -56,6 +71,171 @@ def render_team_diagnostics(
     lines.append("renewals:")
     lines.extend(_render_renewals(data["renewals"]))
     return "\n".join(lines)
+
+
+def _projection_rows(team_store: ServeTeamStore) -> list[dict[str, Any]]:
+    """What each rebuildable family currently holds, and which build it is.
+
+    Read from the projection database alone. An operator diagnosing a bad
+    rebuild needs the generation and row counts beside the registration that
+    says where the family comes from and what refills it.
+    """
+    return [
+        {
+            "family": state.family.name,
+            "generation": state.generation,
+            "updatedAt": state.updated_at,
+            "rowCounts": state.row_counts,
+            "status": state.status,
+            "servable": state.servable,
+            "lastSuccessfulRebuild": state.last_successful_rebuild,
+            "freshness": state.freshness,
+            "retentionFloor": state.retention_floor,
+            "detail": state.detail,
+            "recoveryAction": state.recovery_action,
+            "source": state.family.source,
+            "cursor": state.family.cursor,
+            "horizon": state.family.horizon,
+            "rebuild": state.family.rebuild,
+            "beyondHorizon": state.family.beyond_horizon,
+        }
+        for state in team_store.projections.family_states()
+    ]
+
+
+def _render_projections(rows: Iterable[dict[str, Any]]) -> list[str]:
+    lines = []
+    for row in rows:
+        counts = " ".join(
+            f"{table}={count}" for table, count in sorted(row["rowCounts"].items())
+        )
+        lines.append(
+            f"  {row['family']} generation={row['generation']} "
+            f"status={row['status']} servable={'yes' if row['servable'] else 'no'} "
+            f"freshness={row['freshness'] or '-'} "
+            f"retention_floor={row['retentionFloor'] or '-'} "
+            f"last_successful_rebuild={row['lastSuccessfulRebuild'] or '-'} "
+            f"{counts} rebuild={row['rebuild']} "
+            f"recovery={row['recoveryAction']} "
+            f"detail={row['detail'] or '-'}"
+        )
+    return lines or ["  (none)"]
+
+
+def _metric_family_rows(
+    team_store: ServeTeamStore,
+    *,
+    projections: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    global_revision: int,
+) -> list[dict[str, Any]]:
+    """Canonical owner and recovery contract for every supported metric family."""
+    activity = next(row for row in projections if row["family"] == "agentActivity")
+    directive_records = directive_history_records_from_database(
+        team_store.directive_state_path
+    )
+    directive_freshness = max(
+        (
+            timestamp
+            for record in directive_records
+            for timestamp in (record.sent_at, record.acknowledged_at)
+            if timestamp is not None
+        ),
+        default=None,
+    )
+    task_path = operations_db_path()
+    try:
+        task_freshness = task_path.stat().st_mtime
+    except OSError:
+        task_freshness = None
+    authority_freshness = max(
+        (float(event["timestamp"]) for event in events),
+        default=None,
+    )
+    return [
+        {
+            "family": "agentActivity",
+            "canonicalSource": activity["source"],
+            "owner": str(team_store.projections.path),
+            "storageClass": "disposable projection",
+            "projectionGeneration": activity["generation"],
+            "cursor": activity["cursor"],
+            "horizon": activity["horizon"],
+            "freshness": activity["freshness"],
+            "lastSuccessfulRebuild": activity["lastSuccessfulRebuild"],
+            "status": activity["status"],
+            "detail": activity["detail"],
+            "recoveryAction": activity["recoveryAction"],
+        },
+        {
+            "family": "directiveLifecycle",
+            "canonicalSource": (
+                "directive publications and ACK dispositions in spiceacks.sqlite3"
+            ),
+            "owner": str(team_store.directive_state_path),
+            "storageClass": "canonical authority",
+            "projectionGeneration": None,
+            "cursor": "directive key plus publication/acknowledgement timestamps",
+            "horizon": "the canonical directive history retained by the ACK plane",
+            "freshness": directive_freshness,
+            "lastSuccessfulRebuild": None,
+            "status": "canonical",
+            "detail": "",
+            "recoveryAction": (
+                "restore spiceacks.sqlite3 from backup; this family is not rebuildable"
+            ),
+        },
+        {
+            "family": "taskLifecycle",
+            "canonicalSource": (
+                "TaskChampion operations folded by spice.tasks.transitions"
+            ),
+            "owner": str(task_path),
+            "storageClass": "canonical authority",
+            "projectionGeneration": None,
+            "cursor": "TaskChampion transaction operation id",
+            "horizon": "the permanent TaskChampion operations log",
+            "freshness": task_freshness,
+            "lastSuccessfulRebuild": None,
+            "status": "canonical",
+            "detail": "",
+            "recoveryAction": (
+                "run `spice task doctor`; restore the task backend from backup "
+                "if its authority is damaged"
+            ),
+        },
+        {
+            "family": "teamAttribution",
+            "canonicalSource": (
+                "immutable membership and renewal events in spiceteams.sqlite3"
+            ),
+            "owner": str(team_store.path),
+            "storageClass": "canonical authority",
+            "projectionGeneration": None,
+            "cursor": f"global team revision {global_revision}",
+            "horizon": "the permanent team event log",
+            "freshness": authority_freshness,
+            "lastSuccessfulRebuild": None,
+            "status": "canonical",
+            "detail": "",
+            "recoveryAction": (
+                "restore spiceteams.sqlite3 from backup; this family is not rebuildable"
+            ),
+        },
+    ]
+
+
+def _render_metric_families(rows: Iterable[dict[str, Any]]) -> list[str]:
+    return [
+        f"  {row['family']} owner={row['owner']} class={row['storageClass']} "
+        f"generation={row['projectionGeneration'] or '-'} "
+        f"status={row['status']} freshness={row['freshness'] or '-'} "
+        f"last_successful_rebuild={row['lastSuccessfulRebuild'] or '-'} "
+        f"cursor={row['cursor']} horizon={row['horizon']} "
+        f"source={row['canonicalSource']} recovery={row['recoveryAction']} "
+        f"detail={row['detail'] or '-'}"
+        for row in rows
+    ] or ["  (none)"]
 
 
 def _event_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:

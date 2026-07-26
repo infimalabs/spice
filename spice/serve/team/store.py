@@ -25,7 +25,6 @@ from spice.errors import SpiceError
 from spice.mail.ackstate import (
     ACK_STATE_DATABASE_FILENAME,
     ack_state_database_path,
-    migrate_serve_directive_history,
     prepare_directive_history_database,
 )
 from spice.sqliteconnection import sqlite_connection
@@ -61,6 +60,12 @@ from spice.serve.team.metrics import (
     TaskStallState as TaskStallState,
     TeamMetricStoreMixin,
 )
+from spice.serve.team.projection import (
+    PROJECTION_DATABASE_FILENAME as PROJECTION_DATABASE_FILENAME,
+    ProjectionUnavailableError,
+    ServeProjectionStore,
+    projection_database_path,
+)
 from spice.serve.team.models import (
     GlobalSettings,
     TeamAgentIdentity as TeamAgentIdentity,
@@ -78,9 +83,6 @@ from spice.serve.team.renewals import (
 )
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
-    LEGACY_TEAM_SCHEMA_FINGERPRINT,
-    OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED,
-    OBSERVATION_ATTRIBUTION_SAFE,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
@@ -90,9 +92,6 @@ from spice.serve.team.schema import (
     TEAM_AUTHORITY_SCHEMA_VERSION,
     TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
-    TEAM_PROJECTION_FAMILIES,
-    TEAM_PROJECTION_SCHEMA,
-    TEAM_PROJECTION_TABLES,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
@@ -109,6 +108,8 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
 PRUNE_EVENT_TEAM_ID = "__system__"
 GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
+GLOBAL_STORE_GENERATION_KEY = "store_generation"
+_NANOSECONDS_PER_MICROSECOND = 1000
 
 
 def _schema_statements(script: str) -> tuple[str, ...]:
@@ -132,52 +133,6 @@ def _execute_schema_script(connection: sqlite3.Connection, script: str) -> None:
     # transaction remains the sole atomic boundary.
     for statement in _schema_statements(script):
         connection.execute(statement)
-
-
-def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
-    return tuple(
-        str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')
-    )
-
-
-def _canonical_projection_columns() -> dict[str, tuple[str, ...]]:
-    """The columns each projection table has when built from the current DDL."""
-    probe = sqlite3.connect(":memory:")
-    try:
-        _execute_schema_script(probe, TEAM_PROJECTION_SCHEMA)
-        return {table: _table_columns(probe, table) for table in TEAM_PROJECTION_TABLES}
-    finally:
-        probe.close()
-
-
-def _projection_drop_families() -> tuple[frozenset[str], ...]:
-    """Every projection table grouped with the tables it must be replayed with."""
-    grouped = frozenset[str]().union(*TEAM_PROJECTION_FAMILIES)
-    return TEAM_PROJECTION_FAMILIES + tuple(
-        frozenset({table}) for table in sorted(TEAM_PROJECTION_TABLES - grouped)
-    )
-
-
-def _drop_drifted_projections_locked(connection: sqlite3.Connection) -> None:
-    """Discard projection tables whose shape no longer matches the current DDL.
-
-    A projection is derived state, so a shape change costs a replay rather than
-    a migration ladder: the drifted table is dropped and recreated empty by the
-    schema script that follows. A drifted table takes its whole family with it,
-    because half a replayed family reads as fact the surviving half contradicts.
-    Authority tables never reach here -- they carry versioned migrations and are
-    validated against their canonical shape.
-    """
-    drifted = {
-        table
-        for table, columns in _canonical_projection_columns().items()
-        if (live := _table_columns(connection, table)) and live != columns
-    }
-    for family in _projection_drop_families():
-        if drifted.isdisjoint(family):
-            continue
-        for table in sorted(family):
-            connection.execute(f'DROP TABLE IF EXISTS "{table}"')
 
 
 def _authority_table_shape(
@@ -234,6 +189,12 @@ def _default_directive_state_path(team_path: Path | None) -> Path:
     return ack_state_database_path(task_config.repo_root())
 
 
+def _default_projection_path(team_path: Path | None) -> Path:
+    if team_path is not None:
+        return Path(team_path).with_name(PROJECTION_DATABASE_FILENAME)
+    return projection_database_path()
+
+
 class ServeTeamStore(
     TeamIdentityStoreMixin,
     TeamRenewalStoreMixin,
@@ -244,8 +205,9 @@ class ServeTeamStore(
 ):
     # Schema is checked once per database path per process. Running even
     # idempotent DDL on every connect takes an exclusive lock and serializes
-    # readers. Authority changes are forward migrations; projection DDL may
-    # evolve independently without changing the authority version.
+    # readers. Authority changes are forward migrations, and this file holds
+    # nothing else: rebuildable projections carry their own database, version,
+    # and schema, so their DDL never opens this connection.
     _init_lock = Lock()
     _initialized_paths: set[Path] = set()
 
@@ -254,12 +216,22 @@ class ServeTeamStore(
         path: Path | None = None,
         *,
         directive_state_path: Path | None = None,
+        projection_path: Path | None = None,
     ) -> None:
         self.path = path or team_database_path()
         self.directive_state_path = (
             directive_state_path
             if directive_state_path is not None
             else _default_directive_state_path(path)
+        )
+        # A store of its own, opened on its own connection, rather than an
+        # `ATTACH` on this one: a projection that is missing, empty, drifted, or
+        # corrupt must not be able to fail an authority read, and an attached
+        # database shares the authority connection's fate.
+        self.projections = ServeProjectionStore(
+            projection_path
+            if projection_path is not None
+            else _default_projection_path(path)
         )
         self._task_event_wake_connection_ids: set[int] = set()
 
@@ -298,10 +270,8 @@ class ServeTeamStore(
             ]
             for script in migration_scripts:
                 _execute_schema_script(connection, script)
-            self._migrate_legacy_directive_projection_locked(connection)
-            _drop_drifted_projections_locked(connection)
-            _execute_schema_script(connection, TEAM_PROJECTION_SCHEMA)
-            self._initialize_observation_attribution_state_locked(connection)
+            if source_version == 0:
+                self._write_store_generation_locked(connection)
             self._validate_authority_schema_locked(
                 connection, TEAM_AUTHORITY_SCHEMA_VERSION
             )
@@ -311,86 +281,49 @@ class ServeTeamStore(
             connection.rollback()
             raise
 
-    def _migrate_legacy_directive_projection_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' "
-                "AND name IN ('directives', 'directive_totals')"
-            )
-        }
-        if not tables:
-            return
-        if tables != {"directives", "directive_totals"}:
-            raise SpiceError(
-                "legacy Serve directive projection is incomplete: expected both "
-                "directives and directive_totals. Restore both tables or replay "
-                "canonical steering/ACK facts; no legacy table was removed"
-            )
-        raw_directive_rows = connection.execute(
-            "SELECT directive_key, agent_id, team_id, sent_at, acked, acked_at "
-            "FROM directives ORDER BY sent_at, directive_key"
-        ).fetchall()
-        directive_rows = [
-            {
-                "directive_key": row[0],
-                "agent_id": row[1],
-                "team_id": row[2],
-                "sent_at": row[3],
-                "acked": row[4],
-                "acked_at": row[5],
-            }
-            for row in raw_directive_rows
-        ]
-        raw_total_rows = connection.execute(
-            "SELECT agent_id, team_id, sends, acked FROM directive_totals "
-            "ORDER BY agent_id, team_id"
-        ).fetchall()
-        total_rows = [
-            {
-                "agent_id": row[0],
-                "team_id": row[1],
-                "sends": row[2],
-                "acked": row[3],
-            }
-            for row in raw_total_rows
-        ]
-        migrate_serve_directive_history(
-            self.directive_state_path, directive_rows, total_rows
-        )
-        connection.execute("DROP TABLE directives")
-        connection.execute("DROP TABLE directive_totals")
+    def _write_store_generation_locked(self, connection: sqlite3.Connection) -> None:
+        """Date this store the instant it is created, and only then.
 
-    def _initialize_observation_attribution_state_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        existing = connection.execute(
-            "SELECT status FROM observation_attribution_state WHERE singleton = 1"
-        ).fetchone()
-        if existing is not None:
-            return
-        observation_row = connection.execute(
-            "SELECT 1 FROM agent_metrics "
-            "UNION ALL SELECT 1 FROM agent_metric_buckets LIMIT 1"
-        ).fetchone()
-        status = (
-            OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED
-            if observation_row is not None
-            else OBSERVATION_ATTRIBUTION_SAFE
-        )
+        Every counter this store keeps -- a team's event revision, an agent's
+        renewal revision -- restarts from zero in a store that was deleted and
+        remade, so a reader keeping the highest revision it has seen would
+        refuse the rebuilt store until it counted back past where the replaced
+        one stopped. The generation is what carries a reader across that: a
+        store is only ever created after every store it replaces, so this
+        instant rises exactly where those revisions restart.
+
+        Only a store being created writes one. A store that already existed is
+        left with no generation at all, which is what it truthfully has and
+        which orders below every minted one -- correctly, because that store
+        does predate them all. Its own remake mints one and rises above it.
+        Migration reaches authority rows for no other reason, and dating a
+        store by when it was upgraded would be the wrong instant anyway.
+
+        It is counted in microseconds because that is what every generation
+        this repo mints is counted in, so a reader that meets more than one of
+        them meets one kind of token rather than one encoding per authority.
+        """
         connection.execute(
-            "INSERT INTO observation_attribution_state (singleton, status) "
-            "VALUES (1, ?)",
-            (status,),
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, 0)",
+            (
+                GLOBAL_STORE_GENERATION_KEY,
+                str(time.time_ns() // _NANOSECONDS_PER_MICROSECOND),
+                time.time(),
+            ),
         )
+
+    def store_generation(self) -> str:
+        """Return the instant this store was created, as its readers order it."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM global_settings WHERE key = ?",
+                (GLOBAL_STORE_GENERATION_KEY,),
+            ).fetchone()
+        return str(row["value"]) if row is not None else ""
 
     def _authority_source_version_locked(self, connection: sqlite3.Connection) -> int:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if stored == LEGACY_TEAM_SCHEMA_FINGERPRINT:
-            self._validate_authority_schema_locked(connection, 1)
-            return 1
         if stored == 0:
             tables = {
                 str(row[0])
@@ -768,7 +701,14 @@ class ServeTeamStore(
 
     def _team_snapshot_locked(self, connection: sqlite3.Connection) -> TeamSnapshot:
         self._prune_zero_activity_closed_teams_locked(connection)
-        self._prune_metric_history_locked(connection, now=time.time())
+        try:
+            self._prune_metric_history_locked(connection, now=time.time())
+        except ProjectionUnavailableError:
+            # Projection maintenance may be unavailable during an isolated
+            # rebuild or after an incompatible/corrupt projection was
+            # discarded. Authority remains readable in that state; projection
+            # diagnostics carry the exact recovery action.
+            pass
         self._ensure_open_team_locked(connection)
         revision_row = connection.execute(
             "SELECT MAX(revision) AS r FROM events"

@@ -21,14 +21,8 @@ TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 # Directive retention belongs to the canonical steering/ACK plane.
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
-OBSERVATION_ATTRIBUTION_SAFE = "immutable"
-OBSERVATION_ATTRIBUTION_REBUILD_REQUIRED = "rebuildRequired"
 
 TEAM_AUTHORITY_SCHEMA_VERSION = 1
-# Databases written before authority versions used this CRC32 value for the
-# exact schema below. It is recognized only as a one-time source version; new
-# databases and every successful upgrade are stamped with the explicit version.
-LEGACY_TEAM_SCHEMA_FINGERPRINT = 783663365
 
 TEAM_AUTHORITY_TABLES = frozenset(
     {
@@ -123,71 +117,10 @@ CREATE TABLE IF NOT EXISTS agent_identities (
 );
 """
 
-TEAM_PROJECTION_TABLES = frozenset(
-    {
-        "agent_metrics",
-        "agent_metric_buckets",
-        "agent_metric_cursors",
-        "observation_attribution_state",
-    }
-)
-
-# Lane activity and the checkpoint recording how far it was built are two halves
-# of one fact, so they are dropped and replayed as a unit. Dropping one half
-# alone leaves the survivor unaccountable: surviving aggregates would be counted
-# again by a replay from the first byte, and a surviving checkpoint would hold
-# the replay back from aggregates that no longer exist. Tables outside a listed
-# family are their own family.
-TEAM_PROJECTION_FAMILIES = (
-    frozenset({"agent_metrics", "agent_metric_buckets", "agent_metric_cursors"}),
-)
-
-TEAM_PROJECTION_SCHEMA = """
--- Counted activity carries the source that produced it, so losing one
--- source's checkpoint reverses that source's contribution and leaves every
--- other source -- still covered by its own checkpoint -- standing. Activity
--- counted outside a transcript pass has no source to replay from and holds
--- the empty path. Lane reads sum across sources.
-CREATE TABLE IF NOT EXISTS agent_metrics (
-    agent_id TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    source_path TEXT NOT NULL DEFAULT '',
-    tool_calls INTEGER NOT NULL DEFAULT 0,
-    updated_at REAL NOT NULL,
-    PRIMARY KEY (agent_id, team_id, source_path)
-);
-CREATE TABLE IF NOT EXISTS agent_metric_buckets (
-    agent_id TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    source_path TEXT NOT NULL DEFAULT '',
-    bucket_start INTEGER NOT NULL,
-    messages INTEGER NOT NULL DEFAULT 0,
-    tool_calls INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, team_id, source_path, bucket_start)
-);
--- A resume checkpoint carries the source's filesystem identity beside its byte
--- offset: a replaced transcript reuses the path, and only device/inode separate
--- a resumable append from a new file whose bytes start over.
-CREATE TABLE IF NOT EXISTS agent_metric_cursors (
-    agent_id TEXT NOT NULL,
-    source_path TEXT NOT NULL,
-    offset INTEGER NOT NULL,
-    source_device INTEGER,
-    source_inode INTEGER,
-    updated_at REAL NOT NULL,
-    PRIMARY KEY (agent_id, source_path)
-);
-CREATE TABLE IF NOT EXISTS observation_attribution_state (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    status TEXT NOT NULL CHECK (status IN ('immutable', 'rebuildRequired'))
-);
-CREATE INDEX IF NOT EXISTS agent_metric_buckets_by_start
-    ON agent_metric_buckets (bucket_start);
-"""
-
 # Authority migrations are append-only and keyed by their destination version.
-# A future authority change adds the next integer and its forward migration;
-# projection-only changes do not bump this version.
+# A future authority change adds the next integer and its forward migration.
+# Rebuildable projections live in their own database (spice.serve.team
+# .projection) and cannot reach this version, this file, or this connection.
 TEAM_AUTHORITY_MIGRATIONS = {
     1: TEAM_AUTHORITY_SCHEMA,
 }
