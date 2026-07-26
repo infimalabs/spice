@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, overload
 
 from spice import defaults
-from spice.agent.claudetranscript import claude_line_events, project_claude_events
-from spice.agent.codextranscript import codex_line_events, normalize_codex_line
+from spice.agent.claudetranscript import claude_line_events
+from spice.agent.codextranscript import codex_line_events
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -49,6 +49,7 @@ from spice.transcript.events import (
     LineStamper,
     TokenUsage,
     TranscriptEvent,
+    WorkingDirectory,
 )
 from spice.process.tool import run_tool_command
 from spice.sqliteconnection import sqlite_connection
@@ -211,18 +212,6 @@ class AgentDriver:
         """
         return f"[$spice]({skill_path})"
 
-    def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Map a raw transcript line into the canonical event shape.
-
-        Every transcript consumer — the serve message stream, the forensic
-        turn folder, the ACK/maxim extractor — speaks one vocabulary:
-        `{"type": "response_item"|"event_msg"|"compacted", "timestamp", "payload"}`
-        with a Codex-shaped payload. The built-in transcript already *is* that
-        shape, so the default normalizer is identity; a driver whose CLI writes
-        a different schema translates it here, once, for every consumer.
-        """
-        return raw
-
     def transcript_line_events(
         self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
     ) -> list[TranscriptEvent]:
@@ -258,6 +247,9 @@ class AgentDriver:
             ordinal=len(events),
         )
         decoded = list(events)
+        cwd = raw.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            decoded.append(WorkingDirectory(at=stamper.stamp(), path=cwd))
         context = self.context_snapshot_fields(raw)
         if context is not None:
             decoded.append(
@@ -488,9 +480,6 @@ CODEX_SESSION_TURN_ID_ENV = "CODEX_SESSION_TURN_ID"
 
 
 class CodexDriver(AgentDriver):
-    def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any]:
-        return normalize_codex_line(raw)
-
     def current_turn_id(self, env: Mapping[str, str]) -> str | None:
         value = env.get(CODEX_TURN_ID_ENV) or env.get(CODEX_SESSION_TURN_ID_ENV) or ""
         return value.strip() or None
@@ -919,9 +908,6 @@ class ClaudeDriver(AgentDriver):
         command.append(system_prompt)
         return command
 
-    def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        return project_claude_events(claude_line_events(raw), raw.get("timestamp"))
-
     def transcript_line_events(
         self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
     ) -> list[TranscriptEvent]:
@@ -992,6 +978,9 @@ class ClaudeDriver(AgentDriver):
         return {"kind": kind} if kind else None
 
 
+CLAUDE_TRANSCRIPT_CWD_WINDOW_BYTES = 64 * 1024
+
+
 def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
     """Whether Claude transcript `path` was recorded in `repo_root`'s cwd.
 
@@ -1014,25 +1003,20 @@ def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
 def _claude_transcript_cwd(path: Path) -> str:
     """The cwd Claude recorded for a transcript, or '' when none is present.
 
-    Reads only up to the first line carrying a `cwd` field (the session's first
-    user/system record), so it never scans the whole transcript.
+    Claude stamps cwd on the first user/system record. Read one bounded head
+    window through the shared typed engine, rather than maintaining a private
+    JSONL scanner in the driver.
     """
-    try:
-        with path.open(encoding="utf-8") as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    record = json.loads(stripped)
-                except json.JSONDecodeError:
-                    continue
-                cwd = record.get("cwd") if isinstance(record, dict) else None
-                if isinstance(cwd, str) and cwd:
-                    return cwd
-    except OSError:
-        return ""
-    return ""
+    from spice.transcript.reader import TranscriptEventReader
+
+    read = TranscriptEventReader(path, CLAUDE_DRIVER).read(
+        "bounded",
+        end_offset=CLAUDE_TRANSCRIPT_CWD_WINDOW_BYTES,
+    )
+    return next(
+        (event.path for event in read.events if isinstance(event, WorkingDirectory)),
+        "",
+    )
 
 
 def rewrite_claude_eval_envelope_command(

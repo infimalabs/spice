@@ -263,30 +263,6 @@ def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
-def test_claude_user_event_carries_prompt_id_as_turn_boundary():
-    event = CLAUDE_DRIVER.normalize_transcript_line(
-        {
-            "type": "user",
-            "timestamp": "2026-01-01T00:00:00Z",
-            "promptId": "prompt-xyz",
-            "message": {"content": "operator prompt"},
-        }
-    )
-    assert event is not None
-    assert event["payload"]["prompt_id"] == "prompt-xyz"
-
-    # Tool-result `user` lines are not prompts, so they carry no turn id.
-    tool_result = CLAUDE_DRIVER.normalize_transcript_line(
-        {
-            "type": "user",
-            "timestamp": "2026-01-01T00:00:01Z",
-            "promptId": "prompt-xyz",
-            "message": {"content": [{"type": "tool_result", "content": "ok"}]},
-        }
-    )
-    assert tool_result is None or "prompt_id" not in tool_result.get("payload", {})
-
-
 def test_claude_driver_classifies_out_of_credits_output():
     assert (
         CLAUDE_DRIVER.process_failure_kind(
@@ -505,143 +481,6 @@ def test_claude_thread_with_unknown_cwd_is_unresumable_but_not_foreign(
     assert verdict == (False, False)
 
 
-def test_claude_normalizes_assistant_text_into_final_message():
-    raw = {
-        "type": "assistant",
-        "timestamp": "2026-06-14T00:30:00.000Z",
-        "message": {
-            "role": "assistant",
-            "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": "READY"}],
-        },
-    }
-    event = CLAUDE_DRIVER.normalize_transcript_line(raw)
-    assert event["type"] == "response_item"
-    assert event["timestamp"] == "2026-06-14T00:30:00.000Z"
-    payload = event["payload"]
-    assert payload["role"] == "assistant"
-    assert payload["phase"] == "final_answer"
-    assert payload["content"][0]["text"] == "READY"
-
-
-def test_claude_normalizes_assistant_text_after_thinking_block():
-    raw = {
-        "type": "assistant",
-        "timestamp": "2026-06-14T00:30:00.000Z",
-        "message": {
-            "role": "assistant",
-            "stop_reason": "end_turn",
-            "content": [
-                {"type": "thinking", "thinking": "working"},
-                {"type": "text", "text": "ACK 1k5MHYgN: done."},
-            ],
-        },
-    }
-
-    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
-
-    assert payload["type"] == "message"
-    assert payload["role"] == "assistant"
-    assert payload["phase"] == "final_answer"
-    assert payload["content"][0]["text"] == "ACK 1k5MHYgN: done."
-
-
-def test_claude_normalizes_tool_use_into_function_call():
-    raw = {
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "stop_reason": "tool_use",
-            "content": [
-                {"type": "thinking", "thinking": "choosing command"},
-                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
-            ],
-        },
-    }
-    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
-    assert payload["type"] == "function_call"
-    assert payload["name"] == "Bash"
-    assert '"command": "ls"' in payload["arguments"]
-
-
-def test_claude_maps_todowrite_into_update_plan():
-    raw = {
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "name": "TodoWrite",
-                    "input": {
-                        "todos": [
-                            {"content": "map code", "status": "in_progress"},
-                            {"content": "write tests", "status": "pending"},
-                        ]
-                    },
-                }
-            ],
-        },
-    }
-    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
-    assert payload["name"] == "update_plan"
-    assert '"step": "map code"' in payload["arguments"]
-    assert '"status": "in_progress"' in payload["arguments"]
-
-
-def test_claude_normalizes_thinking_and_tool_result_as_presence():
-    thinking = {
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "thinking", "thinking": "deliberating"}],
-        },
-    }
-    result = {
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{"type": "tool_result", "content": "done"}],
-        },
-    }
-    assert (
-        CLAUDE_DRIVER.normalize_transcript_line(thinking)["payload"]["type"]
-        == "reasoning"
-    )
-    assert (
-        CLAUDE_DRIVER.normalize_transcript_line(result)["payload"]["type"]
-        == "function_call_output"
-    )
-
-
-def test_claude_normalizes_tool_result_image_into_output_item():
-    raw = {
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "content": [
-                        {"type": "text", "text": "shot"},
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": "QUJD",
-                            },
-                        },
-                    ],
-                }
-            ],
-        },
-    }
-    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
-    assert payload["type"] == "function_call_output"
-    assert payload["output"][0]["image_url"]["url"] == "data:image/png;base64,QUJD"
-
-
 def test_claude_json_stdout_scanner_captures_assistant_prose():
     from spice.agent.watchdog import JsonStdoutScanner
 
@@ -759,38 +598,6 @@ def test_claude_json_stdout_scanner_text_resets_starvation_streak():
     assert starvations == [TEXT_STARVATION_THRESHOLD]
 
 
-def test_claude_normalizes_the_in_flight_compaction_status_lines():
-    # Verbatim from a resume that compacted a 57.6MB transcript: the CLI
-    # narrates the compaction on bare status lines, and the boundary event the
-    # supervisor used to watch for never arrives while it is still running.
-    started = {
-        "type": "system",
-        "subtype": "status",
-        "status": "compacting",
-        "timestamp": "t",
-    }
-    settled = {
-        "type": "system",
-        "subtype": "status",
-        "status": None,
-        "compact_result": "failed",
-        "compact_error": "aborted",
-        "timestamp": "t",
-    }
-    requesting = {"type": "system", "subtype": "status", "status": "requesting"}
-    assert CLAUDE_DRIVER.normalize_transcript_line(started) == {
-        "type": "compacting",
-        "timestamp": "t",
-        "payload": {"active": True},
-    }
-    assert CLAUDE_DRIVER.normalize_transcript_line(settled) == {
-        "type": "compacting",
-        "timestamp": "t",
-        "payload": {"active": False},
-    }
-    assert CLAUDE_DRIVER.normalize_transcript_line(requesting) is None
-
-
 def test_claude_json_stdout_scanner_reports_compaction_apart_from_activity():
     from spice.agent.watchdog import JsonStdoutScanner
 
@@ -835,15 +642,6 @@ def test_claude_json_stdout_scanner_settles_compaction_on_a_boundary():
     scanner.process_line('{"type":"system","subtype":"compact_boundary"}')
     scanner.close()
     assert observed == ["compacted", "compacting:False"]
-
-
-def test_claude_normalizes_compaction_and_skips_app_records():
-    boundary = {"type": "system", "subtype": "compact_boundary", "timestamp": "t"}
-    assert CLAUDE_DRIVER.normalize_transcript_line(boundary)["type"] == "compacted"
-    assert CLAUDE_DRIVER.normalize_transcript_line({"type": "summary"})["type"] == (
-        "compacted"
-    )
-    assert CLAUDE_DRIVER.normalize_transcript_line({"type": "queue-operation"}) is None
 
 
 def test_claude_context_fields_sum_prompt_and_fit_window():

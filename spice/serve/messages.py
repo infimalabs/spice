@@ -351,14 +351,21 @@ def _read_appended_window(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
+    if cursor.window is None or cursor.window_limit != limit:
+        return _read_window(
+            transcript_path,
+            limit=limit,
+            end_offset=None,
+            cursor=cursor,
+            worktree_id=worktree_id,
+            driver=driver,
+        )
     file_size = transcript_size(transcript_path)
     file_identity = transcript_file_identity(transcript_path)
     if file_size is None or file_identity is None:
         return []
     if (
-        cursor.window is None
-        or cursor.window_limit != limit
-        or file_size < cursor.offset
+        file_size < cursor.offset
         or file_size < cursor.window_size
         or (cursor.file_identity is not None and cursor.file_identity != file_identity)
     ):
@@ -435,19 +442,19 @@ def _read_window(
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
     """Newest-first window ending at `end_offset` (or EOF), tail-scanned."""
-    file_size = transcript_size(transcript_path)
     file_identity = transcript_file_identity(transcript_path)
-    if file_size is None or file_identity is None:
+    if file_identity is None:
         return []
-    if (
-        end_offset is None
-        and cursor is not None
-        and cursor.window is not None
-        and cursor.window_size == file_size
-        and cursor.window_limit == limit
-        and cursor.file_identity == file_identity
-    ):
-        return list(cursor.window)
+    if end_offset is None and cursor is not None and cursor.window is not None:
+        file_size = transcript_size(transcript_path)
+        if file_size is None:
+            return []
+        if (
+            cursor.window_size == file_size
+            and cursor.window_limit == limit
+            and cursor.file_identity == file_identity
+        ):
+            return list(cursor.window)
     reader = _reader(transcript_path, driver)
     read = reader.read(
         "reverse",
@@ -498,10 +505,10 @@ def _read_window(
         kept = _drop_trailing_view_image_call(kept)
     result = list(reversed(kept))
     if cursor is not None and end_offset is None:
-        cursor.offset = file_size
+        cursor.offset = read.file_size
         cursor.last_key = kept[-1].key if kept else None
         cursor.window = result
-        cursor.window_size = file_size
+        cursor.window_size = read.file_size
         cursor.window_limit = limit
         cursor.file_identity = read.file_identity
     return result

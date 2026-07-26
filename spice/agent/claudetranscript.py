@@ -5,13 +5,9 @@ cares about — prose, reasoning, tool calls, tool results, images, compaction
 boundaries — arrives as blocks inside those lines. This module is the only place
 that knows that shape. It decodes a line into the plane-neutral vocabulary in
 `spice.transcript.events`, losslessly: a line carrying prose *and* a tool call
-yields both, in source order.
-
-`project_claude_events` is the compatibility half. The dict seam every consumer
-still reads can carry at most one item per line, so the projection applies the
-historical collapse (text over tool call over image over reasoning) on the way
-out. The collapse lives here and nowhere else, and it deletes with the seam once
-consumers read typed events directly.
+yields both, in source order. No canonical-dictionary compatibility projection
+survives above or beside this adapter; every production consumer reads the
+lossless typed facts.
 """
 
 from __future__ import annotations
@@ -35,10 +31,6 @@ from spice.transcript.events import (
 )
 
 
-def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "response_item", "timestamp": timestamp, "payload": payload}
-
-
 def _claude_content_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
     content = message.get("content")
     if not isinstance(content, list):
@@ -52,8 +44,7 @@ def claude_line_events(
     """Decode one Claude transcript line into every event it carries, in order.
 
     Lossless by construction: an assistant line carrying prose, a tool call, and
-    reasoning yields all three, where the canonical dict below can only carry the
-    winner of a fixed priority.
+    reasoning yields all three.
     """
     timestamp = raw.get("timestamp")
     stamper = LineStamper(
@@ -196,100 +187,6 @@ def _select_assistant_image_payload(
     return events
 
 
-def project_claude_events(
-    events: list[TranscriptEvent], timestamp: Any
-) -> dict[str, Any] | None:
-    """Fold typed events back into the one canonical dict the seam still promises.
-
-    The projection is where the historical collapse now lives, and only here:
-    decode keeps every block, and this picks the single item the dict can carry
-    (text over tool call over image over reasoning). It deletes with the seam
-    once every consumer reads typed events directly.
-    """
-    for event in events:
-        if isinstance(event, Compaction):
-            if event.boundary:
-                return {"type": "compacted", "timestamp": timestamp, "payload": {}}
-            return {
-                "type": "compacting",
-                "timestamp": timestamp,
-                "payload": {"active": event.active},
-            }
-        if isinstance(event, UserMessage):
-            payload: dict[str, Any] = {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "text", "text": event.text}],
-            }
-            if event.prompt_id:
-                payload["prompt_id"] = event.prompt_id
-            return _claude_response_item(timestamp, payload)
-        if isinstance(event, ToolOutput):
-            return _claude_response_item(
-                timestamp,
-                {
-                    "type": "function_call_output",
-                    "output": [
-                        _claude_image_item(image.url)
-                        for image in events
-                        if isinstance(image, Image)
-                    ],
-                },
-            )
-    return _project_claude_assistant(events, timestamp)
-
-
-def _project_claude_assistant(
-    events: list[TranscriptEvent], timestamp: Any
-) -> dict[str, Any] | None:
-    texts = [
-        event.text
-        for event in events
-        if isinstance(event, AssistantText) and event.text.strip()
-    ]
-    joined = "\n\n".join(texts).strip()
-    if joined:
-        payload: dict[str, Any] = {
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": joined}],
-        }
-        if any(event.final for event in events if isinstance(event, AssistantText)):
-            payload["phase"] = "final_answer"
-        return _claude_response_item(timestamp, payload)
-    reasoning: Reasoning | None = None
-    for event in events:
-        if isinstance(event, ToolCall):
-            return _claude_response_item(
-                timestamp,
-                {
-                    "type": "function_call",
-                    "name": event.name,
-                    "arguments": event.arguments,
-                },
-            )
-        if isinstance(event, Image):
-            return _claude_response_item(
-                timestamp,
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [_claude_image_item(event.url)],
-                },
-            )
-        if isinstance(event, Reasoning) and reasoning is None:
-            reasoning = event
-    if reasoning is not None:
-        return _claude_response_item(
-            timestamp,
-            {
-                "type": "reasoning",
-                "summary": [{"type": "summary_text", "text": reasoning.summary}],
-            },
-        )
-    return None
-
-
 def _claude_image_url(block: dict[str, Any]) -> str | None:
     """Resolved image URL from a Claude image block, or None if unreadable.
 
@@ -308,10 +205,6 @@ def _claude_image_url(block: dict[str, Any]) -> str | None:
     if not isinstance(media_type, str) or not isinstance(data, str):
         return None
     return f"data:{media_type};base64,{data}"
-
-
-def _claude_image_item(url: str) -> dict[str, Any]:
-    return {"type": "image", "image_url": {"url": url}}
 
 
 def _claude_tool_call_payload(block: dict[str, Any]) -> dict[str, Any]:

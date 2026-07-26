@@ -40,8 +40,6 @@ from spice.sessions.records import (
     CompactionRecord,
     TurnRecord,
     collect_commit_records,
-    collect_compactions,
-    collect_turns,
 )
 from spice.tasks import identity
 from spice.transcript.timestamps import parse_timestamp
@@ -461,8 +459,9 @@ def build_briefing_payload(
             list(file_tuple), count=DEFAULT_HORIZON_COMPACTIONS, end=end
         )
     effective_start = _effective_start(start, horizon.start)
-    all_turns = collect_turns(list(file_tuple), start=effective_start)
-    all_compactions = collect_compactions(list(file_tuple), start=effective_start)
+    all_turns, all_compactions = records.collect_turns_and_compactions(
+        list(file_tuple), start=effective_start
+    )
     recency_floor = _recency_floor(
         end=end,
         turns=all_turns,

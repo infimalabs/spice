@@ -34,6 +34,7 @@ from spice.transcript.events import (
     Unknown,
     UserMessage,
     WebSearch,
+    WorkingDirectory,
 )
 
 __all__ = [
@@ -55,6 +56,7 @@ _EVENT_TYPES = (
     ToolCall,
     ToolOutput,
     CommandExecution,
+    WorkingDirectory,
     Image,
     UserMessage,
     TurnBoundary,
@@ -241,6 +243,7 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
             UserMessage,
             TurnBoundary,
             ContextUsage,
+            WorkingDirectory,
             Unknown,
         ),
     ):

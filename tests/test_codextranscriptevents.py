@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from spice.agent.codextranscript import codex_line_events, project_codex_events
+from spice.agent.codextranscript import codex_line_events
 from spice.agent.driver import CODEX_DRIVER
 from spice.transcript.events import (
     AssistantText,
@@ -36,7 +36,7 @@ def _response_item(payload: dict) -> dict:
     return {"timestamp": TIMESTAMP, "type": "response_item", "payload": payload}
 
 
-CANONICAL_LINES = {
+DIALECT_LINES = {
     "message": _response_item(
         {
             "type": "message",
@@ -131,14 +131,12 @@ CANONICAL_LINES = {
 }
 
 
-@pytest.mark.parametrize(("family", "raw"), CANONICAL_LINES.items())
-def test_every_dispatched_family_has_an_exact_typed_projection(
+@pytest.mark.parametrize(("family", "raw"), DIALECT_LINES.items())
+def test_every_dispatched_family_has_located_typed_facts(
     family: str, raw: dict
 ) -> None:
     events = codex_line_events(raw, source=SOURCE, line=LINE)
     assert events, family
-    assert project_codex_events(events, raw["timestamp"]) == raw
-    assert CODEX_DRIVER.normalize_transcript_line(raw) == raw
     assert all(event.at.source == SOURCE for event in events)
     assert all(event.at.line == LINE for event in events)
     assert [event.at.ordinal for event in events] == list(range(len(events)))
@@ -156,7 +154,7 @@ def test_dispatched_families_decode_to_their_semantic_event_kinds() -> None:
         "web_search_call": [WebSearch],
         "compacted": [Compaction],
     }
-    for family, raw in CANONICAL_LINES.items():
+    for family, raw in DIALECT_LINES.items():
         assert [type(event) for event in codex_line_events(raw)] == expected[family]
 
 
@@ -212,8 +210,6 @@ def test_event_messages_decode_turn_user_and_command_facts() -> None:
     ) == ("spice task status", "/repo", 0, "completed", TURN_ID)
     assert isinstance(completed_event, TurnBoundary)
     assert (completed_event.kind, completed_event.turn_id) == ("completed", None)
-    for raw in (started, user, command, completed):
-        assert CODEX_DRIVER.normalize_transcript_line(raw) == raw
 
 
 def test_user_message_text_and_image_keep_source_order_and_role() -> None:
@@ -237,10 +233,9 @@ def test_user_message_text_and_image_keep_source_order_and_role() -> None:
     assert [type(event) for event in events] == [UserMessage, Image]
     assert events[0].role == "user"
     assert events[1].role == "user"
-    assert project_codex_events(events, TIMESTAMP) == raw
 
 
-def test_plain_string_tool_output_projects_exactly() -> None:
+def test_plain_string_tool_output_keeps_its_scalar_shape() -> None:
     raw = _response_item(
         {
             "type": "function_call_output",
@@ -251,10 +246,9 @@ def test_plain_string_tool_output_projects_exactly() -> None:
     events = codex_line_events(raw)
     assert [type(event) for event in events] == [ToolOutput]
     assert events[0].output_is_list is False
-    assert project_codex_events(events, TIMESTAMP) == raw
 
 
-def test_real_shape_custom_tool_output_projects_without_driver_identity() -> None:
+def test_real_shape_custom_tool_output_decodes_without_driver_identity() -> None:
     raw = _response_item(
         {
             "type": "custom_tool_call_output",
@@ -277,11 +271,10 @@ def test_real_shape_custom_tool_output_projects_without_driver_identity() -> Non
         "spice/agent/lifecycle.py\n",
     ]
     assert all(event.tool_output_type == "custom_tool_call_output" for event in outputs)
-    assert project_codex_events(events, TIMESTAMP) == raw
 
 
 def test_custom_tool_output_images_carry_the_projection_discriminator() -> None:
-    events = codex_line_events(CANONICAL_LINES["custom_tool_call_output"])
+    events = codex_line_events(DIALECT_LINES["custom_tool_call_output"])
     assert [type(event) for event in events] == [ToolOutput, Image]
     output, image = events
     assert isinstance(output, ToolOutput)
@@ -289,13 +282,9 @@ def test_custom_tool_output_images_carry_the_projection_discriminator() -> None:
     assert output.tool_output_type == "custom_tool_call_output"
     assert image.tool_output_type == "custom_tool_call_output"
     assert image.payload_index == 1
-    assert (
-        project_codex_events(events, TIMESTAMP)
-        == CANONICAL_LINES["custom_tool_call_output"]
-    )
 
 
-def test_image_only_custom_tool_output_projects_its_exact_family() -> None:
+def test_image_only_custom_tool_output_keeps_its_exact_family() -> None:
     raw = _response_item(
         {
             "type": "custom_tool_call_output",
@@ -309,7 +298,6 @@ def test_image_only_custom_tool_output_projects_its_exact_family() -> None:
     assert isinstance(image, Image)
     assert image.tool_output_type == "custom_tool_call_output"
     assert image.payload_index == 0
-    assert project_codex_events(events, TIMESTAMP) == raw
 
 
 def test_empty_reasoning_summary_remains_an_exact_reasoning_event() -> None:
@@ -325,7 +313,6 @@ def test_empty_reasoning_summary_remains_an_exact_reasoning_event() -> None:
     events = codex_line_events(raw)
     assert [type(event) for event in events] == [Reasoning]
     assert events[0].summary_type is None
-    assert project_codex_events(events, TIMESTAMP) == raw
 
 
 @pytest.mark.parametrize(
@@ -339,16 +326,23 @@ def test_empty_reasoning_summary_remains_an_exact_reasoning_event() -> None:
         },
     ],
 )
-def test_web_search_action_variants_project_exactly(action: dict) -> None:
+def test_web_search_action_variants_decode_exact_fields(action: dict) -> None:
     raw = _response_item(
         {"type": "web_search_call", "status": "completed", "action": action}
     )
-    assert project_codex_events(codex_line_events(raw), TIMESTAMP) == raw
+    event = codex_line_events(raw)[0]
+    assert isinstance(event, WebSearch)
+    assert event.action_type == action["type"]
+    assert event.url == action["url"]
+    assert event.pattern == action.get("pattern")
 
 
-def test_status_only_web_search_projects_without_inventing_an_action() -> None:
+def test_status_only_web_search_decodes_without_inventing_an_action() -> None:
     raw = _response_item({"type": "web_search_call", "status": "completed"})
-    assert project_codex_events(codex_line_events(raw), TIMESTAMP) == raw
+    event = codex_line_events(raw)[0]
+    assert isinstance(event, WebSearch)
+    assert event.status == "completed"
+    assert event.action_type is None
 
 
 def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
@@ -394,9 +388,6 @@ def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
     assert fields.last == usage.last
     assert fields.cumulative == usage.cumulative
     assert fields.model_context_window == MODEL_CONTEXT_WINDOW
-    # The extra rate-limit fact cannot be projected from ContextUsage, so the
-    # exactness gate preserves the original line rather than partially rewriting it.
-    assert CODEX_DRIVER.normalize_transcript_line(raw) is raw
 
 
 @pytest.mark.parametrize(
@@ -438,10 +429,8 @@ def test_codex_event_messages_cross_as_typed_session_facts(
     assert events[0].at.timestamp == TIMESTAMP
 
 
-def test_unrecognized_response_item_survives_as_unknown_and_identity() -> None:
+def test_unrecognized_response_item_survives_as_unknown() -> None:
     raw = _response_item({"type": "future_provider_item", "fact": 7})
     events = codex_line_events(raw)
     assert [type(event) for event in events] == [Unknown]
     assert events[0].raw_type == "future_provider_item"
-    assert project_codex_events(events, TIMESTAMP) is None
-    assert CODEX_DRIVER.normalize_transcript_line(raw) is raw

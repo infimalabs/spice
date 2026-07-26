@@ -234,7 +234,10 @@ paths = [
     "spice/tasks/config.py",
     "spice/tasks/identity.py",
     "spice/tasks/tw.py",
+    "spice/transcript/decode.py",
     "spice/transcript/events.py",
+    "spice/transcript/reader.py",
+    "spice/transcript/timestamps.py",
 ]
 
 # Low-value words this repo rejects, merged over the built-in defaults
