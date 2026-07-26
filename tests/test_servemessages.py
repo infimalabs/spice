@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 from spice.agent.driver import (
@@ -21,6 +23,7 @@ from spice.serve.messages import (
     read_assistant_messages,
     resolve_thread_transcript,
 )
+from spice.transcript import reader as transcript_reader
 
 THREAD = "11111111222233334444555555555555"
 TIMESTAMP = "2026-06-20T04:45:00.000000Z"
@@ -218,6 +221,102 @@ def test_append_only_read_with_after_reports_cross_boundary_image_pair_removal(
     assert [item.source_kind for item in delta] == ["tool_output_image"]
     assert cursor.removed_keys == [initial[0].key]
     assert [item.key for item in cursor.window or []] == [item.key for item in expected]
+
+
+def test_gzip_reader_preserves_timestamp_offset_cursors_and_paging(tmp_path) -> None:
+    transcript = tmp_path / "rollout.jsonl.gz"
+    first = {
+        "timestamp": TIMESTAMP,
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "first ☃"}],
+        },
+    }
+    second_timestamp = "2026-06-20T04:46:00.000000Z"
+    second = {
+        "timestamp": second_timestamp,
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "second"}],
+        },
+    }
+    first_raw = (
+        json.dumps(first, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode()
+    malformed = b"{malformed\n"
+    second_offset = len(first_raw) + len(malformed)
+    with gzip.open(transcript, "wb") as handle:
+        handle.write(first_raw)
+        handle.write(malformed)
+        handle.write((json.dumps(second, separators=(",", ":")) + "\n").encode())
+
+    items = read_assistant_messages(transcript, limit=5, driver=CODEX_DRIVER)
+
+    assert [item.display_text for item in items] == ["second", "first ☃"]
+    assert [item.key for item in items] == [
+        f"{second_timestamp}#{second_offset}",
+        f"{TIMESTAMP}#0",
+    ]
+    assert [
+        item.display_text
+        for item in read_assistant_messages(
+            transcript,
+            limit=5,
+            before=items[0].key,
+            driver=CODEX_DRIVER,
+        )
+    ] == ["first ☃"]
+    assert [
+        item.display_text
+        for item in read_assistant_messages(
+            transcript,
+            limit=5,
+            after=items[1].key,
+            driver=CODEX_DRIVER,
+        )
+    ] == ["second"]
+
+
+def test_sparse_reverse_chunks_parse_each_accessed_record_once(
+    tmp_path, monkeypatch
+) -> None:
+    transcript = tmp_path / "rollout.jsonl"
+    _append_codex_message(transcript, TIMESTAMP, "first")
+    _append_codex_payload(
+        transcript,
+        "2026-06-20T04:45:00.500000Z",
+        {"type": "ignored-long-line", "blob": "x" * 900},
+    )
+    for index in range(12):
+        _append_codex_payload(
+            transcript,
+            f"2026-06-20T04:45:{index + 1:02d}.000000Z",
+            {"type": f"ignored-{index}", "value": index},
+        )
+    _append_codex_message(
+        transcript,
+        "2026-06-20T04:46:00.000000Z",
+        "last",
+    )
+    original = transcript_reader._parse_json_object
+    parses: Counter[str] = Counter()
+
+    def count_parse(raw: str):
+        parses[raw] += 1
+        return original(raw)
+
+    monkeypatch.setattr(message_reader, "REVERSE_WINDOW_BYTES", 256)
+    monkeypatch.setattr(transcript_reader, "_parse_json_object", count_parse)
+
+    items = read_assistant_messages(transcript, limit=2, driver=CODEX_DRIVER)
+
+    assert [item.display_text for item in items] == ["last", "first"]
+    assert parses
+    assert set(parses.values()) == {1}
 
 
 def _repo(path: Path) -> Path:
