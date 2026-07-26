@@ -520,6 +520,62 @@ def test_deleted_checkpoint_rows_reset_the_counts_they_can_no_longer_account_for
     ) == _clean_replay_summary(tmp_path, transcript, now=now)
 
 
+def test_a_second_source_adds_to_the_lane_instead_of_clearing_it(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    first = tmp_path / "lane-a.jsonl"
+    second = tmp_path / "lane-b.jsonl"
+    now = _activity_transcript(first)
+    _activity_transcript(second)
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=first
+    )
+    after_first = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=second
+    )
+    after_second = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+    with store.connect() as connection:
+        cursor_paths = [
+            str(row["source_path"])
+            for row in connection.execute(
+                "SELECT source_path FROM agent_metric_cursors WHERE agent_id = ? "
+                "ORDER BY source_path",
+                ("agent-a",),
+            )
+        ]
+
+    # One agent reading a second transcript is one lane doing more work, not a
+    # replay of the first: each source carries its own checkpoint, so the second
+    # pass sums with the first and both resume points survive.
+    assert (after_first.tool_calls, sum(after_first.sparkline)) == (1, 3)
+    assert (after_second.tool_calls, sum(after_second.sparkline)) == (2, 6)
+    assert cursor_paths == [str(first), str(second)]
+
+
+def test_a_lost_checkpoint_resets_only_the_source_it_covered(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    kept = tmp_path / "lane-a.jsonl"
+    lost = tmp_path / "lane-b.jsonl"
+    now = _activity_transcript(kept)
+    _activity_transcript(lost)
+    record_transcript_metrics_for_agent(store, agent_id="agent-a", transcript_path=kept)
+    record_transcript_metrics_for_agent(store, agent_id="agent-a", transcript_path=lost)
+
+    with store.connect() as connection:
+        connection.execute(
+            "DELETE FROM agent_metric_cursors WHERE source_path = ?", (str(lost),)
+        )
+    record_transcript_metrics_for_agent(store, agent_id="agent-a", transcript_path=lost)
+
+    after_replay = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+    # Only the replayed source is about to be counted again, so only its counts
+    # are cleared; the source still holding its checkpoint keeps everything it
+    # contributed, because nothing is going to produce those facts a second time.
+    assert (after_replay.tool_calls, sum(after_replay.sparkline)) == (2, 6)
+
+
 def test_a_drifted_checkpoint_shape_replays_its_whole_family(tmp_path):
     path = tmp_path / "drifted.sqlite3"
     transcript = tmp_path / "rollout.jsonl"

@@ -144,20 +144,27 @@ TEAM_PROJECTION_FAMILIES = (
 )
 
 TEAM_PROJECTION_SCHEMA = """
+-- Counted activity carries the source that produced it, so losing one
+-- source's checkpoint reverses that source's contribution and leaves every
+-- other source -- still covered by its own checkpoint -- standing. Activity
+-- counted outside a transcript pass has no source to replay from and holds
+-- the empty path. Lane reads sum across sources.
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT NOT NULL,
     team_id TEXT NOT NULL,
+    source_path TEXT NOT NULL DEFAULT '',
     tool_calls INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL,
-    PRIMARY KEY (agent_id, team_id)
+    PRIMARY KEY (agent_id, team_id, source_path)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_buckets (
     agent_id TEXT NOT NULL,
     team_id TEXT NOT NULL,
+    source_path TEXT NOT NULL DEFAULT '',
     bucket_start INTEGER NOT NULL,
     messages INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, team_id, bucket_start)
+    PRIMARY KEY (agent_id, team_id, source_path, bucket_start)
 );
 -- A resume checkpoint carries the source's filesystem identity beside its byte
 -- offset: a replaced transcript reuses the path, and only device/inode separate
