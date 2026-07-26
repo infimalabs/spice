@@ -613,7 +613,7 @@ def _assistant_message(
     worktree_id: str | None = None,
 ) -> AssistantMessage:
     # Read the message whole before splitting it: a segment body opens where
-    # its header was cut away, which is context recognition cannot recover.
+    # its header was cut away, and that is context recognition cannot recover.
     captured = captured_directive_lines(text)
     preamble = "\n\n".join(
         group.body for group in groups if group.kind is SpanKind.PROSE and group.body

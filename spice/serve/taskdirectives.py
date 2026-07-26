@@ -76,6 +76,11 @@ def captured_directive_lines(text: str) -> frozenset[str]:
     ACK/NACK header was cut away, so a marker that sat mid-header is left
     opening the line. Reading the undivided message once answers that, and
     the display consults the answer while rendering the pieces.
+
+    The answer is keyed by directive content rather than by position, so two
+    textually identical directives in one message cannot be told apart: a
+    phantom occurrence borrows the admission a real one earned. Telling them
+    apart needs the line positions the split discards.
     """
     return frozenset(extract_task_batch_lines_from_text(text))
 
