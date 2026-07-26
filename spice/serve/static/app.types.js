@@ -961,8 +961,8 @@
 
 /**
  * @typedef {Object} ServeInitialGlobalSettings
- * @property {boolean=} fastMode
- * @property {boolean=} observerMode
+ * @property {boolean} fastMode
+ * @property {boolean} observerMode
  */
 
 /** @type {ServeBranding} */
