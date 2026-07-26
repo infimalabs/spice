@@ -1,0 +1,377 @@
+"""Incremental assembly of typed transcript facts into semantic message spans.
+
+This is the policy-free middle of the transcript stack.  Driver adapters and
+the public reader produce typed events; this module groups adjacent facts from
+one source locus and classifies their assistant-facing meaning.  Consumers
+remain responsible for presentation, paging, turn folding, starvation policy,
+and every other interpretation above these factual spans.
+
+The public reducer accepts only the closed :class:`TranscriptEvent` union.  It
+does not know the historical canonical-dictionary seam.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Collection
+from dataclasses import dataclass
+from enum import StrEnum
+
+from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
+from spice.mail.ackgrammar import split_keyed_response
+from spice.transcript.events import (
+    AssistantText,
+    Compaction,
+    ContextUsage,
+    Image,
+    Provenance,
+    Reasoning,
+    ToolCall,
+    ToolOutput,
+    TranscriptEvent,
+    Unknown,
+    UserMessage,
+    WebSearch,
+)
+
+__all__ = [
+    "AssembledMessage",
+    "AssembledMessageReducer",
+    "ClassifiedSpan",
+    "DirectiveKind",
+    "SpanKind",
+    "strip_directive_lines",
+]
+
+_APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
+_TASK_DIRECTIVE_TOKEN = "TASK"
+_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
+_TASK_DIRECTIVE_REQUIRED_FIELDS = frozenset({"title", "project"})
+_EVENT_TYPES = (
+    AssistantText,
+    Reasoning,
+    ToolCall,
+    ToolOutput,
+    Image,
+    UserMessage,
+    Compaction,
+    WebSearch,
+    ContextUsage,
+    Unknown,
+)
+
+
+class SpanKind(StrEnum):
+    """The factual assistant-message meanings consumers can project."""
+
+    PROSE = "prose"
+    ACK = "ack"
+    NACK = "nack"
+    DIRECTIVE = "directive"
+    TOOL = "tool"
+    REASONING = "reasoning"
+    IMAGE = "image"
+    FINAL_ANSWER = "final_answer"
+    COMPACTION = "compaction"
+
+
+class DirectiveKind(StrEnum):
+    """Control-line families removed from assistant-visible prose."""
+
+    TASK = "task"
+    APP = "app"
+
+
+_ALL_DIRECTIVE_KINDS = frozenset(DirectiveKind)
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedSpan:
+    """One ordered semantic span backed by its original typed event."""
+
+    kind: SpanKind
+    at: Provenance
+    event: TranscriptEvent
+    text: str = ""
+    keys: tuple[str, ...] = ()
+    directive_kind: DirectiveKind | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AssembledMessage:
+    """All classified assistant facts emitted at one transcript locus."""
+
+    at: Provenance
+    spans: tuple[ClassifiedSpan, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Directive:
+    kind: DirectiveKind
+    text: str
+
+
+MessageLocus = tuple[str, int, str | None, int | None, str | None]
+
+
+class AssembledMessageReducer:
+    """Incrementally fold a typed event stream into assembled messages."""
+
+    def __init__(self) -> None:
+        self._locus: MessageLocus | None = None
+        self._at: Provenance | None = None
+        self._spans: list[ClassifiedSpan] = []
+        self._final_event: AssistantText | None = None
+
+    def push(self, event: TranscriptEvent) -> tuple[AssembledMessage, ...]:
+        """Accept one typed fact and emit a completed prior-locus message."""
+        _require_typed_event(event)
+        locus = _message_locus(event.at)
+        emitted: tuple[AssembledMessage, ...] = ()
+        if self._locus is not None and locus != self._locus:
+            emitted = self._flush()
+
+        spans = _event_spans(event)
+        final_event = (
+            event if isinstance(event, AssistantText) and event.final else None
+        )
+        if spans or final_event is not None:
+            if self._locus is None:
+                self._locus = locus
+                self._at = event.at
+            self._spans.extend(spans)
+            if final_event is not None:
+                self._final_event = final_event
+        return emitted
+
+    def finish(self) -> tuple[AssembledMessage, ...]:
+        """Emit the final pending message and reset the reducer."""
+        return self._flush()
+
+    def _flush(self) -> tuple[AssembledMessage, ...]:
+        if self._locus is None or self._at is None:
+            return ()
+        spans = list(self._spans)
+        if self._final_event is not None:
+            spans.append(
+                ClassifiedSpan(
+                    kind=SpanKind.FINAL_ANSWER,
+                    at=self._final_event.at,
+                    event=self._final_event,
+                )
+            )
+        message = AssembledMessage(at=self._at, spans=tuple(spans))
+        self._locus = None
+        self._at = None
+        self._spans = []
+        self._final_event = None
+        return (message,)
+
+
+def strip_directive_lines(
+    text: str,
+    *,
+    kinds: Collection[DirectiveKind] = _ALL_DIRECTIVE_KINDS,
+) -> str:
+    """Remove selected task/app control lines through the classifier's parser."""
+    masked, directives = _mask_directives(text, frozenset(kinds))
+    visible = [line for line in masked.splitlines() if line not in directives]
+    return "\n".join(visible).strip()
+
+
+def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
+    if isinstance(event, AssistantText):
+        return _assistant_text_spans(event)
+    if isinstance(event, (ToolCall, ToolOutput, WebSearch)):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.TOOL,
+                at=event.at,
+                event=event,
+                text=_tool_text(event),
+            ),
+        )
+    if isinstance(event, Reasoning):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.REASONING,
+                at=event.at,
+                event=event,
+                text=event.summary,
+            ),
+        )
+    if isinstance(event, Image):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.IMAGE,
+                at=event.at,
+                event=event,
+                text=event.url,
+            ),
+        )
+    if isinstance(event, Compaction):
+        return (
+            ClassifiedSpan(
+                kind=SpanKind.COMPACTION,
+                at=event.at,
+                event=event,
+            ),
+        )
+    if isinstance(event, (UserMessage, ContextUsage, Unknown)):
+        return ()
+    raise TypeError(f"unsupported transcript event: {type(event).__name__}")
+
+
+def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
+    masked, directives = _mask_directives(event.text, _ALL_DIRECTIVE_KINDS)
+    preamble, responses = split_keyed_response(
+        masked,
+        drop_task_directives=False,
+    )
+    spans = list(
+        _segment_spans(
+            preamble,
+            event,
+            kind=SpanKind.PROSE,
+            directives=directives,
+        )
+    )
+    for response in responses:
+        kind = (
+            SpanKind.NACK
+            if response.disposition == ACK_DISPOSITION_REFUSED
+            else SpanKind.ACK
+        )
+        spans.extend(
+            _segment_spans(
+                response.content,
+                event,
+                kind=kind,
+                directives=directives,
+                keys=response.keys,
+            )
+        )
+    return tuple(spans)
+
+
+def _segment_spans(
+    content: str,
+    event: AssistantText,
+    *,
+    kind: SpanKind,
+    directives: dict[str, _Directive],
+    keys: tuple[str, ...] = (),
+) -> tuple[ClassifiedSpan, ...]:
+    spans: list[ClassifiedSpan] = []
+    pending: list[str] = []
+
+    def flush_pending() -> None:
+        text = "\n".join(pending).strip()
+        pending.clear()
+        if text:
+            spans.append(
+                ClassifiedSpan(
+                    kind=kind,
+                    at=event.at,
+                    event=event,
+                    text=text,
+                    keys=keys,
+                )
+            )
+
+    for line in content.splitlines():
+        directive = directives.get(line)
+        if directive is None:
+            pending.append(line)
+            continue
+        flush_pending()
+        spans.append(
+            ClassifiedSpan(
+                kind=SpanKind.DIRECTIVE,
+                at=event.at,
+                event=event,
+                text=directive.text,
+                keys=keys,
+                directive_kind=directive.kind,
+            )
+        )
+    flush_pending()
+    return tuple(spans)
+
+
+def _mask_directives(
+    text: str,
+    kinds: frozenset[DirectiveKind],
+) -> tuple[str, dict[str, _Directive]]:
+    marker_prefix = "\0spice-directive:"
+    while marker_prefix in text:
+        marker_prefix = f"\0{marker_prefix}"
+    masked: list[str] = []
+    directives: dict[str, _Directive] = {}
+    for line in text.splitlines():
+        directive_kind = _directive_kind(line)
+        if directive_kind is None or directive_kind not in kinds:
+            masked.append(line)
+            continue
+        marker = f"{marker_prefix}{len(directives)}\0"
+        directives[marker] = _Directive(
+            kind=directive_kind,
+            text=line.strip(),
+        )
+        masked.append(marker)
+    return "\n".join(masked), directives
+
+
+def _directive_kind(line: str) -> DirectiveKind | None:
+    if _APP_DIRECTIVE_LINE_RE.match(line) is not None:
+        return DirectiveKind.APP
+    if _is_task_directive_line(line):
+        return DirectiveKind.TASK
+    return None
+
+
+def _is_task_directive_line(line: str) -> bool:
+    stripped = line.strip()
+    token_end = len(_TASK_DIRECTIVE_TOKEN)
+    if not stripped.startswith(_TASK_DIRECTIVE_TOKEN):
+        return False
+    if (
+        len(stripped) > token_end
+        and stripped[token_end] not in _TASK_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        return False
+    payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
+    keys = {
+        key.strip()
+        for part in payload.split("|")
+        if "=" in part
+        for key, value in [part.split("=", 1)]
+        if key.strip() and value.strip()
+    }
+    return _TASK_DIRECTIVE_REQUIRED_FIELDS.issubset(keys)
+
+
+def _tool_text(event: ToolCall | ToolOutput | WebSearch) -> str:
+    if isinstance(event, ToolCall):
+        return event.name
+    if isinstance(event, ToolOutput):
+        return event.content
+    return event.query or event.url or event.pattern or event.action_type or ""
+
+
+def _message_locus(at: Provenance) -> MessageLocus:
+    return (
+        at.source,
+        at.line,
+        at.timestamp,
+        at.offset,
+        at.source_actor,
+    )
+
+
+def _require_typed_event(event: TranscriptEvent) -> None:
+    if not isinstance(event, _EVENT_TYPES):
+        raise TypeError(
+            "assembled-message reducer requires a typed TranscriptEvent, "
+            f"got {type(event).__name__}"
+        )
