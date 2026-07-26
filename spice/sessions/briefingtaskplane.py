@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
+from spice.sessions.util import clip
 
 if TYPE_CHECKING:
     from spice.sessions.briefing import (
@@ -70,12 +71,6 @@ def _candidate(
         key=key,
         project=project,
     )
-
-
-def _clip(text: str | None, limit: int) -> str:
-    from spice.sessions.briefing import clip
-
-    return clip(text, limit)
 
 
 def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
@@ -219,7 +214,7 @@ def _task_claim_candidate(
         text=(
             f"claim {handle} phase={_task_field(row, 'phase') or '-'} "
             f"project={_task_field(row, 'project') or '-'} "
-            f"acceptance={_clip(_task_field(row, 'acceptance'), TASK_PLANE_PREVIEW_CHARS)}"
+            f"acceptance={clip(_task_field(row, 'acceptance'), TASK_PLANE_PREVIEW_CHARS)}"
         ),
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
@@ -254,7 +249,7 @@ def _task_queue_candidate(
         timestamp=timestamp,
         text=(
             f"{state} {handle} urgency={urgency:.2f} "
-            f"{_clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
+            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
         ),
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key(state, urgency, timestamp),
@@ -271,7 +266,7 @@ def _task_completed_candidate(
         timestamp=timestamp,
         text=(
             f"completed {handle} validation="
-            f"{_clip(_task_field(row, 'validation'), TASK_PLANE_PREVIEW_CHARS)}"
+            f"{clip(_task_field(row, 'validation'), TASK_PLANE_PREVIEW_CHARS)}"
         ),
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("completed", timestamp=timestamp),
@@ -289,7 +284,7 @@ def _task_oops_candidate(
         timestamp=timestamp,
         text=(
             f"oops {handle}{overflow} "
-            f"{_clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
+            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
         ),
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("oops", _task_urgency(row), timestamp),

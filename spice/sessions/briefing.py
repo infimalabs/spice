@@ -41,6 +41,7 @@ from spice.sessions.records import (
     TurnRecord,
     collect_commit_records,
 )
+from spice.sessions.util import clip
 from spice.tasks import identity
 from spice.transcript.timestamps import parse_timestamp
 
@@ -48,7 +49,6 @@ STEERING_ROW_LIMIT = 6
 STEERING_TEXT_PREVIEW_CHARS = 200
 STEERING_RESPONSE_PREVIEW_CHARS = 120
 FINAL_ROW_LIMIT = 4
-PREVIEW_CHARS = 200
 RECENT_COMMITS_LIMIT = 5
 COMMIT_PREVIEW_CHARS = 120
 SWEEP_WINDOW_ASKS = 3
@@ -160,15 +160,6 @@ class ResolvedHorizon:
     @property
     def selected_compactions(self) -> int:
         return len(self.selected_boundaries)
-
-
-def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
-    if not text:
-        return "-"
-    flat = " ".join(text.split())
-    if len(flat) <= limit:
-        return flat
-    return flat[: limit - 1].rstrip() + "…"
 
 
 def sort_rehydration_candidates(

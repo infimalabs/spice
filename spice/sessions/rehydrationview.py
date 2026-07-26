@@ -14,10 +14,10 @@ from spice.sessions.briefing import (
     WORKING_SET_LIMIT,
     RehydrationCandidate,
     SweepWindowPayload,
-    clip,
     sort_rehydration_candidates,
 )
 from spice.sessions.records import TurnRecord
+from spice.sessions.util import clip
 
 
 def task_plane_lines(candidates: list[RehydrationCandidate]) -> list[str]:

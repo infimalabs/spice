@@ -21,7 +21,6 @@ from spice.sessions import slices as session_slices
 from spice.sessions.briefing import (
     DEFAULT_BRIEFING_MAX_BYTES,
     DEFAULT_BRIEFING_MAX_LINES,
-    clip,
     render_briefing,
     render_sweep,
 )
@@ -30,7 +29,7 @@ from spice.sessions.deadline import (
     run_with_rehydration_deadline,
 )
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
-from spice.sessions.util import format_int
+from spice.sessions.util import clip, format_int
 from spice.transcript.timestamps import normalize_timestamp
 
 DEFAULT_SWEEP_WINDOWS = 3
