@@ -91,6 +91,7 @@ from spice.serve.team.schema import (
     TEAM_AUTHORITY_TABLES,
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_ID_HEX_CHARS as TEAM_ID_HEX_CHARS,
+    TEAM_PROJECTION_FAMILIES,
     TEAM_PROJECTION_SCHEMA,
     TEAM_PROJECTION_TABLES,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
@@ -157,18 +158,34 @@ def _canonical_projection_columns() -> dict[str, tuple[str, ...]]:
         probe.close()
 
 
+def _projection_drop_families() -> tuple[frozenset[str], ...]:
+    """Every projection table grouped with the tables it must be replayed with."""
+    grouped = frozenset[str]().union(*TEAM_PROJECTION_FAMILIES)
+    return TEAM_PROJECTION_FAMILIES + tuple(
+        frozenset({table}) for table in sorted(TEAM_PROJECTION_TABLES - grouped)
+    )
+
+
 def _drop_drifted_projections_locked(connection: sqlite3.Connection) -> None:
     """Discard projection tables whose shape no longer matches the current DDL.
 
     A projection is derived state, so a shape change costs a replay rather than
     a migration ladder: the drifted table is dropped and recreated empty by the
-    schema script that follows. Authority tables never reach here -- they carry
-    versioned migrations and are validated against their canonical shape.
+    schema script that follows. A drifted table takes its whole family with it,
+    because half a replayed family reads as fact the surviving half contradicts.
+    Authority tables never reach here -- they carry versioned migrations and are
+    validated against their canonical shape.
     """
-    for table, columns in _canonical_projection_columns().items():
-        live = _table_columns(connection, table)
-        if live and live != columns:
-            connection.execute(f'DROP TABLE "{table}"')
+    drifted = {
+        table
+        for table, columns in _canonical_projection_columns().items()
+        if (live := _table_columns(connection, table)) and live != columns
+    }
+    for family in _projection_drop_families():
+        if drifted.isdisjoint(family):
+            continue
+        for table in sorted(family):
+            connection.execute(f'DROP TABLE IF EXISTS "{table}"')
 
 
 def _authority_table_shape(

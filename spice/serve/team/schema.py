@@ -133,6 +133,16 @@ TEAM_PROJECTION_TABLES = frozenset(
     }
 )
 
+# Lane activity and the checkpoint recording how far it was built are two halves
+# of one fact, so they are dropped and replayed as a unit. Dropping one half
+# alone leaves the survivor unaccountable: surviving aggregates would be counted
+# again by a replay from the first byte, and a surviving checkpoint would hold
+# the replay back from aggregates that no longer exist. Tables outside a listed
+# family are their own family.
+TEAM_PROJECTION_FAMILIES = (
+    frozenset({"agent_metrics", "agent_metric_buckets", "agent_metric_cursors"}),
+)
+
 TEAM_PROJECTION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT NOT NULL,
