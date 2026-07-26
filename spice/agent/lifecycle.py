@@ -171,16 +171,21 @@ class AgentEnsureResult:
     unhonored_launch_knobs: tuple[str, ...] = ()
 
 
-def _requested_launch_knobs(*, personality: str, fast_mode: bool) -> tuple[str, ...]:
+def _requested_launch_knobs(
+    *, personality: str | None, resolved_personality: str, fast_mode: bool
+) -> tuple[str, ...]:
     """The launch knobs this call actually asks for, past the shipped defaults.
 
-    A model and an effort always resolve to something, so neither is an ask.
-    Personality resolves to a documented default, so only a value departing
-    from it is one, and fast mode is off until somebody turns it on. Reporting
-    a knob nobody chose would make every launch on every driver noisy.
+    A model and an effort always resolve to something, so neither is an ask. An
+    explicit personality argument is an ask whatever its value — naming the
+    shipped default still buys nothing on a driver without the seam, which is
+    the surprise worth reporting — while a configured personality is an ask only
+    where it departs from that default, so an untouched config does not make
+    every launch on every driver noisy. Fast mode is off until somebody turns
+    it on.
     """
     requested = []
-    if personality and personality != DEFAULT_AGENT_PERSONALITY:
+    if personality or resolved_personality != DEFAULT_AGENT_PERSONALITY:
         requested.append(PERSONALITY_LAUNCH_KNOB)
     if fast_mode:
         requested.append(FAST_MODE_LAUNCH_KNOB)
@@ -310,7 +315,11 @@ def _prepare_launch(
     resolved_personality = personality or configured_agent_personality(repo_root)
     honors = driver.honored_launch_knobs
     unhonored = driver.unhonored_launch_knobs(
-        _requested_launch_knobs(personality=resolved_personality, fast_mode=fast_mode)
+        _requested_launch_knobs(
+            personality=personality,
+            resolved_personality=resolved_personality,
+            fast_mode=fast_mode,
+        )
     )
     launch_personality = (
         resolved_personality if PERSONALITY_LAUNCH_KNOB in honors else ""
