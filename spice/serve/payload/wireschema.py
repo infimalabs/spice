@@ -16,6 +16,7 @@ from spice.serve.payload.wiretypes import (
     NUMBERS,
     STRING,
     STRINGS,
+    absent,
     array,
     literal,
     record,
@@ -60,6 +61,40 @@ LANE_CHROME_EXCLUDED_FIELDS = frozenset(
         "dom",
     }
 )
+
+
+# The three groups an ensure answer is assembled from. Splitting the answer in
+# two means each arm has to say what the other one holds, and naming the groups
+# once is what keeps that symmetric: a field added here lands on one arm and is
+# denied on the other in the same edit. Stamps ride whichever answer came back,
+# so both arms carry them. The process facts are what only a running agent has,
+# and stay optional the way AgentStatusPayload leaves the same facts optional --
+# the thread is what makes an answer a launch, and a reader that wants the pid
+# still has to ask whether there is one. The excuses say why there is no agent,
+# down to the inbox items parked because none could be started.
+AGENT_ENSURE_STAMPS = {"action": STRING, "trigger": STRING, "taskHandle": STRING}
+AGENT_ENSURE_PROCESS_FACTS = {
+    "provider": STRING,
+    "status": STRING,
+    "pid": INTEGER,
+    "processGroupId": INTEGER,
+    "serviceTier": STRING,
+    "readyAt": STRING,
+    "startupFailure": STRING,
+    "prompt": STRING,
+    "logPath": STRING,
+}
+AGENT_ENSURE_EXCUSES = {
+    "reason": STRING,
+    "retryAfterSeconds": NUMBER,
+    "claimReleased": BOOLEAN,
+    "failure": STRING,
+    "error": STRING,
+    "restartRefusal": ref("RestartRefusal"),
+    "deadletteredInboxKeys": STRINGS,
+    "deadletteredInboxKey": STRING,
+    "deadletterRequeueCommand": STRING,
+}
 
 
 WIRE_OBJECTS = (
@@ -333,33 +368,27 @@ WIRE_OBJECTS = (
             "sparkline": NUMBERS,
         },
     ),
+    # An ensure either put an agent there or it did not. `ok` does not separate
+    # the two: a skip answers ok true having started nothing (see
+    # agentapi._available_work_skip), so the seam is the thread. A launch is the
+    # only answer that can name one, and naming it is what entitles the answer to
+    # the rest of the process facts -- the pid, the log to read, the tier it runs
+    # under. Every other answer explains itself instead, with a reason, an error,
+    # or the refusal the driver returned.
     wire_object(
-        "AgentEnsurePayload",
-        optional={
-            "ok": BOOLEAN,
-            "provider": STRING,
-            "action": STRING,
-            "status": STRING,
-            "pid": INTEGER,
-            "processGroupId": INTEGER,
-            "threadId": STRING,
-            "serviceTier": STRING,
-            "readyAt": STRING,
-            "startupFailure": STRING,
-            "prompt": STRING,
-            "logPath": STRING,
-            "failure": STRING,
-            "error": STRING,
-            "trigger": STRING,
-            "reason": STRING,
-            "retryAfterSeconds": NUMBER,
-            "taskHandle": STRING,
-            "claimReleased": BOOLEAN,
-            "restartRefusal": ref("RestartRefusal"),
-            "deadletteredInboxKeys": STRINGS,
-            "deadletteredInboxKey": STRING,
-            "deadletterRequeueCommand": STRING,
-        },
+        "AgentEnsureLaunched",
+        {"ok": literal(True), "threadId": STRING},
+        AGENT_ENSURE_STAMPS | AGENT_ENSURE_PROCESS_FACTS | absent(AGENT_ENSURE_EXCUSES),
+    ),
+    # No agent was started: the empty answer from a caller that never asked, a
+    # skip that declined to, or a refusal that could not. Each says why instead,
+    # and none of them has a process to name.
+    wire_object(
+        "AgentEnsureUnstarted",
+        optional={"ok": BOOLEAN}
+        | AGENT_ENSURE_STAMPS
+        | AGENT_ENSURE_EXCUSES
+        | absent(("threadId", *AGENT_ENSURE_PROCESS_FACTS)),
     ),
     wire_object(
         "AgentStatusPayload",
