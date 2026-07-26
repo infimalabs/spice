@@ -16,6 +16,8 @@ const SIX_HOUR_BUCKET_SECONDS = 900;
 const MIN_METRICS_CHART_HEIGHT_PX = 96;
 const MIN_METRICS_GRID_WIDTH_PX = 520;
 const MAX_METRICS_PLOT_SIDE_GAP_PX = 12;
+const SERIES_RECOVERY_REFRESH_MS = 1100;
+const SERIES_RECOVERY_SETTLE_MS = 1300;
 
 async function run() {
   return withServePage(
@@ -32,8 +34,12 @@ async function run() {
         rangeSeconds: SIX_HOUR_RANGE_SECONDS,
       });
       const after = await page.evaluate(readUpdatedMetricsSmokePage);
+      const recovery = await page.evaluate(runMetricSeriesRecoverySmoke, {
+        refreshMs: SERIES_RECOVERY_REFRESH_MS,
+        settleMs: SERIES_RECOVERY_SETTLE_MS,
+      });
       await page.evaluate(cleanupMetricsSmokePage);
-      const result = { before, after };
+      const result = { before, after, recovery };
       assertMetrics(result);
       return { ...result, url: server.url };
     },
@@ -87,6 +93,7 @@ async function setupMetricsSmokePage() {
     work: claimed + active,
   }));
   liveBusRequest = (type, fields) => {
+    if (type === "metrics.summary") return Promise.resolve({ result: {} });
     metricSeriesCalls.push({ type, fields });
     if (fields.query.metric === "distribution")
       return Promise.resolve({
@@ -169,15 +176,83 @@ function makeMetricsSmokeLane(
   toolCalls,
   sparkline,
 ) {
+  const targetId = "target-" + Math.random().toString(16).slice(2);
   return {
-    targetId: "target-" + Math.random().toString(16).slice(2),
+    targetId,
     targetThreadId: "",
+    selectedView: "metrics",
+    laneMetricsRequestKey: targetId,
     metricsPanelEl: panel,
     metricsGridEl: grid,
     metricsSummaryEl: summary,
     laneMetrics: { acked, sends, toolCalls, sparkline },
     serverReachable: true,
   };
+}
+
+async function runMetricSeriesRecoverySmoke(config) {
+  const panel = makeMetricsSmokePanel("series recovery");
+  lanesEl.append(panel.panel);
+  const lane = makeMetricsSmokeLane(
+    panel.panel,
+    panel.grid,
+    panel.summary,
+    0,
+    0,
+    0,
+    [],
+  );
+  lane.selectedView = "compose";
+  const calls = [];
+  const previousLiveBusRequest = liveBusRequest;
+  liveBusRequest = (type, fields) => {
+    if (type === "metrics.summary") return Promise.resolve({ result: {} });
+    calls.push({ type, fields });
+    return Promise.resolve({
+      result: {
+        points:
+          calls.length === 1
+            ? []
+            : [
+                { bucketStart: 60, value: 1 },
+                { bucketStart: 120, value: 2 },
+              ],
+      },
+    });
+  };
+  try {
+    renderLaneMetricsPane(lane);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (calls.length)
+      throw new Error("hidden metrics pane queried a series before it was watched");
+
+    const previousRefreshDelay = laneMetricSeriesRefreshDelay;
+    laneMetricSeriesRefreshDelay = () => config.refreshMs;
+    try {
+      lane.selectedView = "metrics";
+      renderLaneMetricsPane(lane);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const initiallyEmpty = Boolean(
+        lane.metricsGridEl.querySelector(".lane-metric-series-empty"),
+      );
+      await new Promise((resolve) => setTimeout(resolve, config.settleMs));
+      return {
+        initiallyEmpty,
+        queryCount: calls.length,
+        recoveredSvg: Boolean(
+          lane.metricsGridEl.querySelector(".lane-metric-series-svg"),
+        ),
+        queryEnds: calls.map((call) => call.fields.query.end),
+      };
+    } finally {
+      laneMetricSeriesRefreshDelay = previousRefreshDelay;
+    }
+  } finally {
+    if (lane.metricSeriesRefreshTimer)
+      clearTimeout(lane.metricSeriesRefreshTimer);
+    liveBusRequest = previousLiveBusRequest;
+    panel.panel.remove();
+  }
 }
 
 function readInitialMetricsSmokePage() {
@@ -352,18 +427,30 @@ function readDistributionSmokeLines(grid) {
 
 function cleanupMetricsSmokePage() {
   const { source, dest } = window.__spiceMetricsSmoke;
+  if (source.metricSeriesRefreshTimer)
+    clearTimeout(source.metricSeriesRefreshTimer);
+  if (dest.metricSeriesRefreshTimer)
+    clearTimeout(dest.metricSeriesRefreshTimer);
   source.metricsPanelEl.remove();
   dest.metricsPanelEl.remove();
   delete window.__spiceMetricsSmoke;
 }
 
 function assertMetrics(result) {
-  const { before, after } = result;
+  const { before, after, recovery } = result;
   if (before.sourceStatus !== "live")
     throw new Error("expected live status, got " + before.sourceStatus);
   if (!before.seriesSvg) throw new Error("expected metric series SVG to render");
   if (!before.firstMetricQuery || before.firstMetricQuery.metric !== "activity")
     throw new Error("expected initial activity metric query");
+  if (!recovery.initiallyEmpty)
+    throw new Error("series recovery fixture did not begin empty");
+  if (!recovery.recoveredSvg)
+    throw new Error("empty metric series did not refresh into an SVG");
+  if (recovery.queryCount < 2)
+    throw new Error("watched metric series was not queried again");
+  if (new Set(recovery.queryEnds).size < 2)
+    throw new Error("metric series refresh did not advance the query window");
   const expectedSourceOrder = [
     "series-chart:svg",
     "series-controls",

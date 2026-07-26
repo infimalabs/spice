@@ -659,10 +659,19 @@ class LiveBusSession(LiveBusMutationMixin):
             wait(pending, timeout=timeout)
 
     def _handle_lane_configure(self, message: dict[str, Any]) -> None:
-        target = self._require_target(message)
-        if target is None:
-            return
-        subscription = self.subscriptions.get(target.id)
+        target_id = str(message.get("targetId") or "")
+        subscription = self.subscriptions.get(target_id)
+        # A configure follows lanes.subscribe for every live lane, so the
+        # subscription already carries the resolved target. Re-running global
+        # target discovery here serializes every focus update ahead of later
+        # socket frames, including an on-demand metrics query. Keep discovery
+        # only for the exceptional unsubscribed case, where it still owns the
+        # existing "work tree not found" response.
+        if subscription is None:
+            target = self._require_target(message)
+            if target is None:
+                return
+            subscription = self.subscriptions.get(target.id)
         if subscription is not None:
             with subscription.lock:
                 subscription.query = dict(message.get("query") or {})
