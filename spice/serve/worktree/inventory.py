@@ -59,7 +59,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
 def _work_tree_payload(
     state: Any,
     target: WorktreeTarget,
-    inventory: dict[str, Any],
+    inventory: dict[str, Any] | None,
     task_board: OpenTaskBoardProjection,
 ) -> dict[str, Any]:
     lifecycle = project_lifecycle(
