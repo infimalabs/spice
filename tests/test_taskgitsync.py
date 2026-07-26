@@ -12,6 +12,7 @@ import pytest
 from spice.errors import SpiceError
 from spice.process import git
 from spice.process.groups import ProcessDeadlineExceeded
+from spice.agent import lifecyclebinding
 from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_reposcaffolding import init_committed_repo as _init_repo
 from tests.test_reposcaffolding import run as _run
@@ -854,6 +855,84 @@ def test_fast_forward_if_safe_reports_updated_then_current(tmp_path):
     assert boundaries.fast_forward_if_safe(repo).notes == ["current"]
 
 
+@pytest.mark.parametrize(
+    "advance",
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
+    ids=["claim", "launch"],
+)
+def test_head_advance_refreshes_generated_skill_from_advanced_tree(tmp_path, advance):
+    repo, target, expected = _repo_with_stale_generated_skill(tmp_path)
+
+    result = advance(repo)
+
+    assert result.notes == ["updated working tree to the current baseline"]
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        expected
+    )
+    assert target.read_bytes() == expected
+
+
+@pytest.mark.parametrize(
+    ("advance", "expected_notes"),
+    [
+        (boundaries.prepare_for_claim, []),
+        (boundaries.fast_forward_if_safe, ["current"]),
+    ],
+    ids=["claim", "launch"],
+)
+def test_current_boundaries_do_not_rematerialize_generated_skill(
+    tmp_path, monkeypatch, advance, expected_notes
+):
+    repo = _repo_with_upstream(tmp_path)
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"generated sentinel\n")
+    (repo / ".gitignore").write_text(".agents/\n", encoding="utf-8")
+    _run(repo, "git", "add", ".gitignore")
+    _run(repo, "git", "commit", "-m", "ignore generated assets")
+    _run(repo, "git", "push", "origin", "main")
+
+    def fail_if_refreshed(repo_root):
+        raise AssertionError("a no-op boundary rematerialized the generated skill")
+
+    monkeypatch.setattr(
+        boundaries, "_refresh_generated_skill_after_advance", fail_if_refreshed
+    )
+
+    assert advance(repo).notes == expected_notes
+    assert target.read_bytes() == b"generated sentinel\n"
+
+
+@pytest.mark.parametrize(
+    "advance",
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
+    ids=["claim", "launch"],
+)
+def test_head_advance_reports_generated_skill_refresh_failure(
+    tmp_path, monkeypatch, advance
+):
+    repo, target, expected = _repo_with_stale_generated_skill(tmp_path)
+    stale = target.read_bytes()
+
+    monkeypatch.setattr(
+        lifecyclebinding,
+        "materialize_worktree_skill",
+        lambda repo_root, *, packaged_path=None: target,
+    )
+
+    result = advance(repo)
+
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        expected
+    )
+    assert target.read_bytes() == stale
+    assert result.notes == [
+        "updated working tree to the current baseline",
+        "generated skill refresh failed: .agents/skills/spice/SKILL.md "
+        "does not match its packaged source",
+    ]
+
+
 def test_fast_forward_if_safe_fast_forwards_then_skips_divergence(tmp_path):
     # The pre-supervisor-launch autoupdate (start_agent) and activation share
     # this one safe advance. It must behave like `git merge --ff-only --quiet
@@ -968,12 +1047,27 @@ def test_prepare_for_claim_refuses_an_unclean_baseline_update(tmp_path, monkeypa
     )
 
 
-def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path):
+def test_fast_forward_if_safe_reports_skipped_dirty(tmp_path, monkeypatch):
     repo = _repo_with_upstream(tmp_path)
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"generated sentinel\n")
+    (repo / ".gitignore").write_text(".agents/\n", encoding="utf-8")
+    _run(repo, "git", "add", ".gitignore")
+    _run(repo, "git", "commit", "-m", "ignore generated assets")
+    _run(repo, "git", "push", "origin", "main")
     (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
     _run(repo, "git", "add", "dirty.txt")
 
+    def fail_if_refreshed(repo_root):
+        raise AssertionError("a skipped boundary rematerialized the generated skill")
+
+    monkeypatch.setattr(
+        boundaries, "_refresh_generated_skill_after_advance", fail_if_refreshed
+    )
+
     assert boundaries.fast_forward_if_safe(repo).notes == ["skipped:dirty"]
+    assert target.read_bytes() == b"generated sentinel\n"
 
 
 def test_fast_forward_if_safe_reports_skipped_ahead(tmp_path):
@@ -1051,6 +1145,38 @@ def _advance_upstream(tmp_path: Path) -> None:
     _run(peer, "git", "add", "baseline.txt")
     _run(peer, "git", "commit", "-m", "baseline work")
     _run(peer, "git", "push", "origin", "main")
+
+
+def _repo_with_stale_generated_skill(
+    tmp_path: Path,
+) -> tuple[Path, Path, bytes]:
+    repo = _repo_with_upstream(tmp_path)
+    packaged = repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
+    packaged.parent.mkdir(parents=True)
+    packaged.write_bytes(b"old packaged skill\n")
+    (repo / ".gitignore").write_text(".agents/\n", encoding="utf-8")
+    _run(repo, "git", "add", ".gitignore", packaged.as_posix())
+    _run(repo, "git", "commit", "-m", "seed packaged skill")
+    _run(repo, "git", "push", "origin", "main")
+
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(packaged.read_bytes())
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(tmp_path / "remote.git"), str(peer))
+    _configure_git_identity(peer)
+    expected = b"new packaged skill from advanced tree\n"
+    (peer / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).write_bytes(expected)
+    _run(
+        peer,
+        "git",
+        "add",
+        boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH.as_posix(),
+    )
+    _run(peer, "git", "commit", "-m", "advance packaged skill")
+    _run(peer, "git", "push", "origin", "main")
+    return repo, target, expected
 
 
 def _configure_git_identity(repo: Path) -> None:

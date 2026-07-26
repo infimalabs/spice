@@ -49,6 +49,7 @@ from spice.tasks.git import merging, plumbing
 # N-agent completion storm to drain ahead of this push, small enough that a
 # genuinely wedged remote fails fast.
 PUBLISH_RACE_RETRY_LIMIT = 5
+CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH = Path("spice") / "agent" / "SKILL.md"
 
 
 class MergeConflict(SpiceError):
@@ -127,6 +128,41 @@ def _is_merge_with_first_parent(repo_root: Path, commit: str, parent: str) -> bo
 
 def _worktree_dirty(repo_root: Path) -> bool:
     return plumbing.read(repo_root, "status", "--porcelain") != ""
+
+
+def _refresh_generated_skill_after_advance(repo_root: Path) -> str | None:
+    """Rematerialize the ignored worktree skill from the newly advanced tree.
+
+    A Spice source checkout owns the packaged skill that just arrived through
+    the fast-forward. Other repositories keep using the installed package's
+    source. Materialization intentionally preserves a tracked worktree skill;
+    ignored copies must match byte-for-byte or the sync reports the failure.
+    """
+    from spice.agent import lifecyclebinding
+
+    checkout_source = repo_root / CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
+    packaged = (
+        checkout_source
+        if checkout_source.is_file()
+        else lifecyclebinding.packaged_skill_path()
+    )
+    try:
+        target = lifecyclebinding.materialize_worktree_skill(
+            repo_root, packaged_path=packaged
+        )
+        if lifecyclebinding.git_tracks_relative_path(
+            repo_root, lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+        ):
+            return None
+        if target is None or target.read_bytes() != packaged.read_bytes():
+            return (
+                "generated skill refresh failed: "
+                f"{lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH.as_posix()} "
+                "does not match its packaged source"
+            )
+    except OSError as exc:
+        return f"generated skill refresh failed: {exc}"
+    return None
 
 
 def _ahead_behind(repo_root: Path, baseline: str) -> tuple[int, int]:
@@ -208,6 +244,10 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     after = plumbing.read(root, "rev-parse", "HEAD")
     blocked = plumbing.purge_stale_bytecode(root, before, after)
     notes = ["updated working tree to the current baseline"] if after != before else []
+    if after != before:
+        refresh_note = _refresh_generated_skill_after_advance(root)
+        if refresh_note is not None:
+            notes.append(refresh_note)
     if blocked:
         notes.append(plumbing.bytecode_cleanup_note(blocked))
     return SyncResult(notes=notes)
@@ -258,6 +298,10 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     notes = [
         "updated working tree to the current baseline" if after != before else "current"
     ]
+    if after != before:
+        refresh_note = _refresh_generated_skill_after_advance(root)
+        if refresh_note is not None:
+            notes.append(refresh_note)
     if blocked:
         notes.append(plumbing.bytecode_cleanup_note(blocked))
     return SyncResult(notes=notes)
