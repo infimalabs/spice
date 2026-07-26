@@ -28,7 +28,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi, app as serve_app, web as serve_web
+from spice.serve import agentapi, app as serve_app, lifecycle, web as serve_web
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import (
     team_command_response_payload,
@@ -538,7 +538,7 @@ def test_team_snapshot_payload_preserves_typed_agent_identity_facts(tmp_path):
     assert isinstance(facts["updatedAt"], float)
 
 
-def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
+def test_inbox_wake_starts_stopped_agent_then_message_reads_are_inert(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -558,16 +558,19 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-inbox-revision").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert payload["pendingInboxCount"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert ensure_calls == [
         {"target": target, "fast_mode": False, "force_new": False, "automatic": True}
     ]
 
 
-def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeypatch):
+def test_inbox_wakes_read_global_fast_mode_for_two_lanes(tmp_path, monkeypatch):
     root_a = tmp_path / "lane-a"
     root_b = tmp_path / "lane-b"
     root_a.mkdir()
@@ -610,6 +613,8 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
             "fastMode": True,
         },
     )
+    lifecycle.submit_inbox_wake(state, target_a, "test-fast-inbox-a").result()
+    lifecycle.submit_inbox_wake(state, target_b, "test-fast-inbox-b").result()
     payload_a = message.messages_payload_for_worktree(state, target_a, limit=5)
     payload_b = message.messages_payload_for_worktree(state, target_b, limit=5)
 
@@ -634,7 +639,9 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
     ]
 
 
-def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
+def test_reconciler_deadletters_credit_failure_then_message_reads_are_inert(
+    tmp_path, monkeypatch
+):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
@@ -658,9 +665,12 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-credit-inbox").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "1jN54zJK"
     assert (
         payload["agentEnsure"]["deadletterRequeueCommand"]
@@ -679,7 +689,9 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     ]
 
 
-def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkeypatch):
+def test_reconciler_deadletters_generic_failure_then_message_reads_are_inert(
+    tmp_path, monkeypatch
+):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
@@ -702,9 +714,12 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-failure-inbox").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert "failure" not in payload["agentEnsure"]

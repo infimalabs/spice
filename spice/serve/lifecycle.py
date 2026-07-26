@@ -20,9 +20,10 @@ from typing import Any, Callable, Protocol, TypeAlias
 
 from spice.errors import SpiceError
 from spice.serve.payload.identity import (
+    projected_team_actor_for_target,
     record_started_renewal_from_ensure,
+    record_serve_agent_identity,
     resolve_thread_id_for_target,
-    serve_agent_identity_payload,
     team_actor_for_target,
     team_facts_for_target,
 )
@@ -110,6 +111,16 @@ class LifecycleDecision:
     Automatic wakes and explicit intents both resolve to this record: they differ
     in what may act, not in what a decision is.
     """
+
+    thread_id: str
+    predecessor_actor: str
+    renewal_intent: bool
+    agent_ensure: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleProjection:
+    """Current durable lane facts plus the reconciler's observable result."""
 
     thread_id: str
     predecessor_actor: str
@@ -421,11 +432,11 @@ class LifecycleDecisionAuthority:
         predecessor_actor = observed.predecessor_actor
         renewal_intent = observed.renewal_intent
         if renewal_intent:
-            serve_agent_identity_payload(
+            record_serve_agent_identity(
+                store,
                 target,
                 bound_thread_id,
                 actor_id=predecessor_actor,
-                store=store,
             )
         fast_mode = bool(store.global_fast_mode_enabled())
         ensure_kwargs: dict[str, Any] = {
@@ -564,16 +575,66 @@ def submit_inbox_wake(
     )
 
 
-def evaluate_automatic_lifecycle(
+def project_lifecycle(
     state: Any,
     target: WorktreeTarget,
     *,
     thread_id: str | None = None,
-) -> LifecycleDecision:
-    """Transitional direct entry point shared by inventory and message callers."""
-    return lifecycle_decision_authority(state).evaluate_target(
+    decision: LifecycleDecision | None = None,
+    latest_outcome: bool = True,
+    prefer_outcome_thread: bool = False,
+) -> LifecycleProjection:
+    """Project one lane without evaluating or otherwise actuating lifecycle.
+
+    Normal inventory and message reads use the latest settled reconciler
+    decision only for its observable ensure result. A send follow-up supplies
+    the exact decision it queued and opts out of the latest-outcome lookup so a
+    timeout cannot accidentally report an older decision.
+    """
+    resolved_thread_id = (
+        resolve_thread_id_for_target(state, target) or ""
+        if thread_id is None
+        else thread_id
+    )
+    selected = decision
+    if selected is None and latest_outcome:
+        reconciler = getattr(state, "lifecycle_reconciler", None)
+        outcome = (
+            LifecycleReconciler.latest_outcome(reconciler, target.id)
+            if reconciler is not None
+            else None
+        )
+        selected = outcome.decision if outcome is not None else None
+    if (
+        selected is not None
+        and selected.thread_id
+        and (decision is not None or prefer_outcome_thread)
+    ):
+        resolved_thread_id = selected.thread_id
+    actor = projected_team_actor_for_target(
+        state.team_store,
         target,
-        thread_id=thread_id,
+        resolved_thread_id,
+    )
+    predecessor_actor = (
+        selected.predecessor_actor
+        if selected is not None and selected.predecessor_actor
+        else actor
+    )
+    renewal_intent = (
+        selected.renewal_intent
+        if selected is not None
+        else bool(
+            resolved_thread_id
+            and actor
+            and state.team_store.agent_renewal_active(actor)
+        )
+    )
+    return LifecycleProjection(
+        thread_id=resolved_thread_id,
+        predecessor_actor=predecessor_actor,
+        renewal_intent=renewal_intent,
+        agent_ensure=selected.agent_ensure if selected is not None else None,
     )
 
 

@@ -13,8 +13,9 @@ from spice.transcript.events import (
     CommandExecution,
     ToolCall,
     ToolOutput,
-    TurnLifecycle,
+    TurnBoundary,
 )
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp
 
 EXEC_EXIT_RE = re.compile(r"Process exited with code (-?\d+)")
@@ -60,39 +61,47 @@ def _collect_command_records_for_file(path: Path) -> list[CommandRecord]:
     records: list[CommandRecord] = []
     calls: dict[str, CommandRecord] = {}
     current_turn_id: str | None = None
-    for event in session_records.iter_events(path):
+    driver = session_records.driver_for_transcript(path)
+    read = TranscriptEventReader(path, driver, source_actor=None).read("forward")
+    for event in read.events:
         ts = normalize_timestamp(event.at.timestamp) or ""
-        if isinstance(event, TurnLifecycle):
-            if event.state == "started":
+        if isinstance(event, TurnBoundary):
+            if event.kind == "started":
                 current_turn_id = event.turn_id
-            elif event.state == "completed":
+            elif event.kind == "completed":
                 current_turn_id = None
             continue
         if isinstance(event, CommandExecution):
-            if not ts:
-                continue
-            records.append(
-                CommandRecord(
-                    source_file=str(path),
-                    ts=ts,
-                    turn_id=event.turn_id,
-                    cwd=event.cwd,
-                    command=event.command,
-                    exit_code=event.exit_code,
-                    status=event.status,
-                )
-            )
+            if ts:
+                records.append(_command_record_from_execution(path, ts, event))
             continue
-        if isinstance(event, ToolCall) and event.name in COMMAND_TOOL_NAMES:
-            _append_tool_call_command_record(
+        if isinstance(event, ToolCall):
+            _append_function_call_command_record(
                 records, calls, path, ts, event, current_turn_id
             )
-        elif isinstance(event, ToolOutput):
-            _update_tool_call_command_record(calls, event)
+            continue
+        if isinstance(event, ToolOutput):
+            _update_function_call_command_record(calls, event)
     return records
 
 
-def _append_tool_call_command_record(
+def _command_record_from_execution(
+    path: Path,
+    ts: str,
+    event: CommandExecution,
+) -> CommandRecord:
+    return CommandRecord(
+        source_file=str(path),
+        ts=ts,
+        turn_id=event.turn_id,
+        cwd=event.cwd,
+        command=event.command,
+        exit_code=event.exit_code,
+        status=event.status,
+    )
+
+
+def _append_function_call_command_record(
     records: list[CommandRecord],
     calls: dict[str, CommandRecord],
     path: Path,
@@ -100,7 +109,7 @@ def _append_tool_call_command_record(
     event: ToolCall,
     current_turn_id: str | None,
 ) -> None:
-    if not ts:
+    if not ts or event.name not in COMMAND_TOOL_NAMES:
         return
     arguments = _load_json(event.arguments)
     if not isinstance(arguments, dict):
@@ -119,7 +128,7 @@ def _append_tool_call_command_record(
         calls[event.call_id] = record
 
 
-def _update_tool_call_command_record(
+def _update_function_call_command_record(
     calls: dict[str, CommandRecord], event: ToolOutput
 ) -> None:
     if not event.call_id:

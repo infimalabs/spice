@@ -772,6 +772,9 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
             "state": "bound",
             "threadId": THREAD_ID,
         }
+        repeated = message.send_followup_messages_payload(state, target, limit=5)
+        assert repeated["agentEnsure"] == followup["payload"]["agentEnsure"]
+        assert len(ensure_calls) == 1
     finally:
         release_ensure.set()
         session._teardown()

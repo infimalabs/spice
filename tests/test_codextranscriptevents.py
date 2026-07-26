@@ -15,7 +15,7 @@ from spice.transcript.events import (
     Reasoning,
     ToolCall,
     ToolOutput,
-    TurnLifecycle,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -158,6 +158,62 @@ def test_dispatched_families_decode_to_their_semantic_event_kinds() -> None:
     }
     for family, raw in CANONICAL_LINES.items():
         assert [type(event) for event in codex_line_events(raw)] == expected[family]
+
+
+def test_event_messages_decode_turn_user_and_command_facts() -> None:
+    started = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {"type": "task_started", "turn_id": TURN_ID},
+    }
+    user = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {
+            "type": "user_message",
+            "turn_id": TURN_ID,
+            "message": "inspect the reader",
+        },
+    }
+    command = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {
+            "type": "exec_command_end",
+            "turn_id": TURN_ID,
+            "cwd": "/repo",
+            "command": ["spice", "task", "status"],
+            "exit_code": "0",
+            "status": "completed",
+        },
+    }
+    completed = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {"type": "task_complete"},
+    }
+
+    started_event = codex_line_events(started)[0]
+    user_event = codex_line_events(user)[0]
+    command_event = codex_line_events(command)[0]
+    completed_event = codex_line_events(completed)[0]
+
+    assert isinstance(started_event, TurnBoundary)
+    assert (started_event.kind, started_event.turn_id) == ("started", TURN_ID)
+    assert isinstance(user_event, UserMessage)
+    assert (user_event.text, user_event.turn_id) == ("inspect the reader", TURN_ID)
+    assert isinstance(command_event, CommandExecution)
+    assert (
+        command_event.command,
+        command_event.cwd,
+        command_event.exit_code,
+        command_event.status,
+        command_event.turn_id,
+    ) == ("spice task status", "/repo", 0, "completed", TURN_ID)
+    assert isinstance(completed_event, TurnBoundary)
+    assert (completed_event.kind, completed_event.turn_id) == ("completed", None)
+    for raw in (started, user, command, completed):
+        assert CODEX_DRIVER.normalize_transcript_line(raw) == raw
 
 
 def test_user_message_text_and_image_keep_source_order_and_role() -> None:
@@ -344,16 +400,16 @@ def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
 @pytest.mark.parametrize(
     ("payload", "event_type"),
     [
-        ({"type": "task_started", "turn_id": TURN_ID}, TurnLifecycle),
+        ({"type": "task_started", "turn_id": TURN_ID}, TurnBoundary),
         (
             {
                 "type": "task_complete",
                 "turn_id": TURN_ID,
                 "last_agent_message": "settled",
             },
-            TurnLifecycle,
+            TurnBoundary,
         ),
-        ({"type": "error", "turn_id": TURN_ID}, TurnLifecycle),
+        ({"type": "error", "turn_id": TURN_ID}, TurnBoundary),
         (
             {
                 "type": "exec_command_end",

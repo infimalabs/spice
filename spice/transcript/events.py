@@ -36,7 +36,7 @@ from typing import Literal
 # reader engine, which iterates files and knows both.
 UNLOCATED_SOURCE = "<unlocated>"
 ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
-TurnLifecycleState = Literal["started", "completed", "error"]
+TurnBoundaryKind = Literal["started", "completed", "error"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -131,6 +131,18 @@ class ToolOutput:
 
 
 @dataclass(slots=True, frozen=True)
+class CommandExecution:
+    """A command execution reported directly by the transcript provider."""
+
+    at: Provenance
+    command: str
+    cwd: str | None
+    exit_code: int | None
+    status: str | None
+    turn_id: str | None
+
+
+@dataclass(slots=True, frozen=True)
 class Image:
     """An image block, carried as the resolved URL consumers render.
 
@@ -172,6 +184,16 @@ class UserMessage:
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
     ) = None
     transcript_kind: Literal["response_item", "event_msg", "user"] = "response_item"
+
+
+@dataclass(slots=True, frozen=True)
+class TurnBoundary:
+    """A provider-reported turn start, completion, or in-turn error."""
+
+    at: Provenance
+    kind: TurnBoundaryKind
+    turn_id: str | None
+    last_assistant_message: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -234,28 +256,6 @@ class ContextUsage:
 
 
 @dataclass(slots=True, frozen=True)
-class TurnLifecycle:
-    """A provider-reported turn start, completion, or in-turn error."""
-
-    at: Provenance
-    state: TurnLifecycleState
-    turn_id: str | None
-    last_assistant_message: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class CommandExecution:
-    """One provider-reported completed shell command."""
-
-    at: Provenance
-    turn_id: str | None
-    cwd: str | None
-    command: str
-    exit_code: int | None
-    status: str | None
-
-
-@dataclass(slots=True, frozen=True)
 class Unknown:
     """A line or block the decoder could not type, kept rather than dropped.
 
@@ -274,13 +274,13 @@ TranscriptEvent = (
     | Reasoning
     | ToolCall
     | ToolOutput
+    | CommandExecution
     | Image
     | UserMessage
+    | TurnBoundary
     | Compaction
     | WebSearch
     | ContextUsage
-    | TurnLifecycle
-    | CommandExecution
     | Unknown
 )
 

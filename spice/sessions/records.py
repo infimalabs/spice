@@ -36,7 +36,7 @@ from spice.transcript.events import (
     ToolCall,
     ToolOutput,
     TranscriptEvent,
-    TurnLifecycle,
+    TurnBoundary,
     UserMessage as TranscriptUserMessage,
     WebSearch,
 )
@@ -225,8 +225,8 @@ def collect_turns_from_events(
     current: TurnRecord | None = None
     for event in events:
         ts = normalize_timestamp(event.at.timestamp) or ""
-        if isinstance(event, TurnLifecycle):
-            current = _apply_turn_lifecycle(turns, current, path, ts, event)
+        if isinstance(event, TurnBoundary):
+            current = _apply_turn_boundary(turns, current, path, ts, event)
             continue
         if isinstance(event, Compaction):
             if not event.boundary:
@@ -275,14 +275,14 @@ def collect_turns_from_events(
     return turns
 
 
-def _apply_turn_lifecycle(
+def _apply_turn_boundary(
     turns: list[TurnRecord],
     current: TurnRecord | None,
     path: Path,
     ts: str,
-    event: TurnLifecycle,
+    event: TurnBoundary,
 ) -> TurnRecord | None:
-    if event.state == "started":
+    if event.kind == "started":
         turn = TurnRecord(
             source_file=str(path),
             start_ts=ts,
@@ -290,7 +290,7 @@ def _apply_turn_lifecycle(
         )
         turns.append(turn)
         return turn
-    if event.state == "completed":
+    if event.kind == "completed":
         if current is not None:
             current.completed = True
             current.end_ts = ts
@@ -300,7 +300,7 @@ def _apply_turn_lifecycle(
                     current.final_answers.append(last)
                     current.ordered_messages.append(("final", last))
         return None
-    if event.state == "error":
+    if event.kind == "error":
         if current is not None:
             current.error_count += 1
             current.last_activity_ts = ts

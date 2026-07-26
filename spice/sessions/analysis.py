@@ -10,11 +10,8 @@ from typing import Any, Iterable
 from spice.sessions import records
 from spice.sessions.records import TurnRecord
 from spice.sessions.util import format_float
-from spice.transcript.events import (
-    AssistantText,
-    TurnLifecycle,
-    UserMessage as TranscriptUserMessage,
-)
+from spice.transcript.events import AssistantText, TurnBoundary, UserMessage
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp, parse_timestamp
 
 QUESTION_WORDS = ("what", "why", "how", "can", "is", "are", "should", "could", "would")
@@ -85,48 +82,61 @@ def collect_messages(files: list[Path]) -> list[MessageRecord]:
 def _collect_messages_from_file(path: Path) -> list[MessageRecord]:
     rows: list[MessageRecord] = []
     current_turn_id: str | None = None
-    for event in records.iter_events(path):
+    driver = records.driver_for_transcript(path)
+    read = TranscriptEventReader(path, driver, source_actor=None).read("forward")
+    for event in read.events:
         ts = normalize_timestamp(event.at.timestamp)
         if not ts:
             continue
-        if isinstance(event, TurnLifecycle) and event.state == "started":
-            current_turn_id = event.turn_id
+        if isinstance(event, TurnBoundary):
+            if event.kind == "started":
+                current_turn_id = event.turn_id
+            elif event.kind == "completed":
+                current_turn_id = None
             continue
-        if isinstance(event, TurnLifecycle) and event.state == "completed":
-            current_turn_id = None
-            continue
-        record = _message_from_event(path, ts, current_turn_id, event)
+        if isinstance(event, UserMessage) and event.role == "user":
+            record = _typed_message(
+                path,
+                ts,
+                current_turn_id,
+                side="user",
+                phase="prompt",
+                text=event.text,
+            )
+        elif isinstance(event, AssistantText):
+            record = _typed_message(
+                path,
+                ts,
+                current_turn_id,
+                side="assistant",
+                phase=event.phase or ("final_answer" if event.final else "commentary"),
+                text=event.text,
+            )
+        else:
+            record = None
         if record is not None:
             rows.append(record)
     return rows
 
 
-def _message_from_event(
+def _typed_message(
     path: Path,
     ts: str,
     turn_id: str | None,
-    event: object,
+    *,
+    side: str,
+    phase: str,
+    text: str,
 ) -> MessageRecord | None:
-    if isinstance(event, TranscriptUserMessage):
-        if event.role != "user" or not event.text:
-            return None
-        return _message_record(
-            path,
-            ts,
-            turn_id,
-            side="user",
-            phase="prompt",
-            text=event.text,
-        )
-    if not isinstance(event, AssistantText) or not event.text:
+    if not text:
         return None
     return _message_record(
         path,
         ts,
         turn_id,
-        side="assistant",
-        phase=event.phase or ("final_answer" if event.final else "commentary"),
-        text=event.text,
+        side=side,
+        phase=phase,
+        text=text,
     )
 
 

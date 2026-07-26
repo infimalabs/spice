@@ -3,17 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
-
-
-def first_text(content: Any) -> str | None:
-    """Pull the first text block out of a transcript message content list."""
-    if not isinstance(content, list):
-        return None
-    for item in content:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            return item["text"]
-    return None
+from typing import Iterable
 
 
 def format_int(value: int | None) -> str:

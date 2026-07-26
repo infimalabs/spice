@@ -38,11 +38,12 @@ from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
-from spice.serve.lifecycle import LifecycleDecision, await_lane_lifecycle
-from spice.serve.worktree.inventory import (
-    _work_tree_renewal_intent,
-    ensure_work_tree_agent,
+from spice.serve.lifecycle import (
+    LifecycleDecision,
+    await_lane_lifecycle,
+    project_lifecycle,
 )
+from spice.serve.worktree.inventory import _work_tree_renewal_intent
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import claimstate
 from spice.tasks import config as task_config
@@ -51,6 +52,7 @@ from spice.transcript.timestamps import parse_timestamp
 
 
 TASK_CARD_SOURCE_KIND = "cli_task_created"
+_LATEST_LIFECYCLE_DECISION = object()
 
 
 def target_activity_items(
@@ -436,24 +438,25 @@ def _resolve_messages_thread(
     *,
     expected_thread_id: str | None,
     decision: LifecycleDecision | None = None,
+    latest_outcome: bool = True,
 ) -> _ResolvedMessagesThread:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
-    # A render scheduled by a decision reports that decision; making a second one
-    # here would spend a launch attempt on the lane the first one just started.
-    if decision is None:
-        decision = ensure_work_tree_agent(state, target, thread_id)
-    thread_id = decision.thread_id
-    predecessor_actor = decision.predecessor_actor
-    renew_intent = decision.renewal_intent
-    agent_ensure = decision.agent_ensure
+    lifecycle = project_lifecycle(
+        state,
+        target,
+        thread_id=thread_id,
+        decision=decision,
+        latest_outcome=latest_outcome,
+        prefer_outcome_thread=not explicit_thread_id,
+    )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     return _ResolvedMessagesThread(
-        thread_id=thread_id,
-        predecessor_actor=predecessor_actor,
-        renew_intent=renew_intent,
-        agent_ensure=agent_ensure,
+        thread_id=lifecycle.thread_id,
+        predecessor_actor=lifecycle.predecessor_actor,
+        renew_intent=lifecycle.renewal_intent,
+        agent_ensure=lifecycle.agent_ensure,
         pending_identity=pending_identity,
         pending=pending,
     )
@@ -529,10 +532,15 @@ def messages_payload_for_worktree(
     expected_thread_id: str | None = None,
     append_only: bool = False,
     client_id: str | None = None,
-    decision: LifecycleDecision | None = None,
+    decision: LifecycleDecision | None | object = _LATEST_LIFECYCLE_DECISION,
 ) -> dict[str, Any]:
+    selected_decision = decision if isinstance(decision, LifecycleDecision) else None
     resolved = _resolve_messages_thread(
-        state, target, expected_thread_id=expected_thread_id, decision=decision
+        state,
+        target,
+        expected_thread_id=expected_thread_id,
+        decision=selected_decision,
+        latest_outcome=decision is _LATEST_LIFECYCLE_DECISION,
     )
     task_board = open_task_board_projection()
     messages = _read_thread_messages(

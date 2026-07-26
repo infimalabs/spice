@@ -31,7 +31,7 @@ from spice.transcript.events import (
     ToolOutput,
     ToolOutputType,
     TranscriptEvent,
-    TurnLifecycle,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -91,28 +91,31 @@ def _codex_event_message_events(
 ) -> list[TranscriptEvent]:
     payload_type = payload.get("type")
     turn_id = _optional_str(payload.get("turn_id"))
+    if payload_type == "token_count":
+        # AgentDriver attaches the dialect-decoded ContextUsage fact.
+        return []
     if payload_type == "task_started":
         return [
-            TurnLifecycle(
+            TurnBoundary(
                 at=stamper.stamp(),
-                state="started",
+                kind="started",
                 turn_id=turn_id,
             )
         ]
     if payload_type == "task_complete":
         return [
-            TurnLifecycle(
+            TurnBoundary(
                 at=stamper.stamp(),
-                state="completed",
+                kind="completed",
                 turn_id=turn_id,
                 last_assistant_message=_optional_str(payload.get("last_agent_message")),
             )
         ]
     if payload_type == "error":
         return [
-            TurnLifecycle(
+            TurnBoundary(
                 at=stamper.stamp(),
-                state="error",
+                kind="error",
                 turn_id=turn_id,
             )
         ]
@@ -120,11 +123,11 @@ def _codex_event_message_events(
         return [
             CommandExecution(
                 at=stamper.stamp(),
-                turn_id=turn_id,
+                command=_command_value(payload.get("command") or payload.get("cmd")),
                 cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
-                command=_render_command(payload.get("command") or payload.get("cmd")),
-                exit_code=_command_exit_code(payload.get("exit_code")),
+                exit_code=_command_int(payload.get("exit_code")),
                 status=_optional_str(payload.get("status")) or "completed",
+                turn_id=turn_id,
             )
         ]
     if payload_type == "user_message":
@@ -135,6 +138,7 @@ def _codex_event_message_events(
                     at=stamper.stamp(),
                     text=message,
                     prompt_id=None,
+                    phase="prompt",
                     turn_id=turn_id,
                     transcript_kind="event_msg",
                 )
@@ -637,26 +641,23 @@ def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _optional_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def _command_value(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return value if isinstance(value, str) else "-"
 
 
-def _command_exit_code(value: Any) -> int | None:
-    direct = _optional_int(value)
-    if direct is not None:
-        return direct
+def _command_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
     if isinstance(value, str):
         try:
             return int(value)
         except ValueError:
             return None
     return None
-
-
-def _render_command(value: Any) -> str:
-    if isinstance(value, list):
-        return " ".join(str(part) for part in value)
-    return value if isinstance(value, str) else "-"
 
 
 def _response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
