@@ -26,17 +26,19 @@ from typing import Any
 
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
+from spice.transcript.assembly import (
+    AssembledMessage,
+    AssembledMessageReducer,
+    SpanKind,
+)
 from spice.transcript.events import (
     AssistantText,
-    CommandExecution,
     Compaction,
     ContextUsage,
-    Image,
-    Reasoning,
     ToolCall,
-    ToolOutput,
     TranscriptEvent,
     TurnBoundary,
+    Unknown,
     UserMessage as TranscriptUserMessage,
     WebSearch,
 )
@@ -220,22 +222,17 @@ def _collect_turns_for_file(path: Path, *, start: str | None) -> list[TurnRecord
 def collect_turns_from_events(
     path: Path, events: Iterable[TranscriptEvent]
 ) -> list[TurnRecord]:
-    """Fold one already-decoded typed stream into forensic turns."""
+    """Fold reducer-classified transcript messages into forensic turns."""
     turns: list[TurnRecord] = []
     current: TurnRecord | None = None
-    for event in events:
+    for fact in _reduced_session_facts(events):
+        if isinstance(fact, AssembledMessage):
+            current = _apply_assembled_turn_message(turns, current, path, fact)
+            continue
+        event = fact
         ts = normalize_timestamp(event.at.timestamp) or ""
         if isinstance(event, TurnBoundary):
             current = _apply_turn_boundary(turns, current, path, ts, event)
-            continue
-        if isinstance(event, Compaction):
-            if not event.boundary:
-                continue
-            if current is not None:
-                current.compaction_count += 1
-                current.last_activity_ts = ts
-            continue
-        if isinstance(event, (ContextUsage, CommandExecution)):
             continue
         if (
             isinstance(event, TranscriptUserMessage)
@@ -251,28 +248,124 @@ def collect_turns_from_events(
         if prompt_id and (current is None or current.turn_id != prompt_id):
             current = TurnRecord(source_file=str(path), start_ts=ts, turn_id=prompt_id)
             turns.append(current)
-        elif current is None and (
-            isinstance(
-                event,
-                (
-                    AssistantText,
-                    Image,
-                    Reasoning,
-                    ToolCall,
-                    ToolOutput,
-                    WebSearch,
-                ),
-            )
-            or (
-                isinstance(event, TranscriptUserMessage)
-                and event.transcript_kind != "event_msg"
-            )
-        ):
+        elif current is None and isinstance(event, TranscriptUserMessage):
             current = TurnRecord(source_file=str(path), start_ts=ts)
             turns.append(current)
         if current is not None:
-            _apply_turn_fact(current, ts, event)
+            current.last_activity_ts = ts
+            if isinstance(event, TranscriptUserMessage):
+                _append_user_message(current, event)
     return turns
+
+
+def _reduced_session_facts(
+    events: Iterable[TranscriptEvent],
+) -> Iterator[AssembledMessage | TurnBoundary | TranscriptUserMessage | Unknown]:
+    """Keep local control facts ordered around reducer-owned message facts."""
+    reducer = AssembledMessageReducer()
+    for event in events:
+        yield from reducer.push(event)
+        if isinstance(event, (TurnBoundary, TranscriptUserMessage, Unknown)):
+            # These facts carry session-local folding policy rather than an
+            # assistant-facing span. Flush first so a same-locus assistant fact
+            # remains before the control fact that followed it in source order.
+            yield from reducer.finish()
+            yield event
+    yield from reducer.finish()
+
+
+_ASSISTANT_TEXT_SPANS = frozenset(
+    {
+        SpanKind.PROSE,
+        SpanKind.ACK,
+        SpanKind.NACK,
+        SpanKind.DIRECTIVE,
+        SpanKind.FINAL_ANSWER,
+    }
+)
+
+
+def _classified_message_events(
+    message: AssembledMessage,
+) -> list[tuple[TranscriptEvent, frozenset[SpanKind]]]:
+    """Return each reducer-backed event once with all of its classifications."""
+    ordered: list[tuple[TranscriptEvent, set[SpanKind]]] = []
+    event_indexes: dict[int, int] = {}
+    for span in message.spans:
+        event_key = id(span.event)
+        index = event_indexes.get(event_key)
+        if index is None:
+            event_indexes[event_key] = len(ordered)
+            ordered.append((span.event, {span.kind}))
+        else:
+            ordered[index][1].add(span.kind)
+    return [(event, frozenset(kinds)) for event, kinds in ordered]
+
+
+def _apply_assembled_turn_message(
+    turns: list[TurnRecord],
+    current: TurnRecord | None,
+    path: Path,
+    message: AssembledMessage,
+) -> TurnRecord | None:
+    for event, kinds in _classified_message_events(message):
+        ts = normalize_timestamp(event.at.timestamp) or ""
+        if SpanKind.COMPACTION in kinds:
+            if isinstance(event, Compaction) and event.boundary and current is not None:
+                current.compaction_count += 1
+                current.last_activity_ts = ts
+            continue
+        if current is None:
+            current = TurnRecord(source_file=str(path), start_ts=ts)
+            turns.append(current)
+        current.last_activity_ts = ts
+        if kinds & _ASSISTANT_TEXT_SPANS:
+            _append_assistant_text(current, event, kinds)
+        elif SpanKind.TOOL in kinds:
+            _apply_tool_span(current, event)
+    return current
+
+
+def _append_user_message(current: TurnRecord, event: TranscriptUserMessage) -> None:
+    if event.text and event.role == "user":
+        current.user_messages.append(
+            UserMessage(
+                text=event.text,
+                shape=classify_user_message(event.text),
+            )
+        )
+        current.ordered_messages.append(("user", event.text))
+
+
+def _append_assistant_text(
+    current: TurnRecord,
+    event: TranscriptEvent,
+    kinds: frozenset[SpanKind],
+) -> None:
+    if not isinstance(event, AssistantText):
+        raise TypeError(
+            f"assistant text span backed by {type(event).__name__}, expected AssistantText"
+        )
+    if SpanKind.FINAL_ANSWER in kinds:
+        current.final_answers.append(event.text)
+        current.ordered_messages.append(("final", event.text))
+    else:
+        current.assistant_commentary.append(event.text)
+        current.ordered_messages.append(("assistant", event.text))
+
+
+def _apply_tool_span(current: TurnRecord, event: TranscriptEvent) -> None:
+    if isinstance(event, ToolCall):
+        name = event.name or "tool"
+        current.tool_calls[name] += 1
+        if name in ("shell", "local_shell", "exec_command", "container.exec"):
+            current.command_count += 1
+        if name == "apply_patch":
+            current.patch_count += 1
+            for touched in _patch_paths(event.arguments):
+                current.touched_files[touched] += 1
+    elif isinstance(event, WebSearch):
+        current.web_search_count += 1
 
 
 def _apply_turn_boundary(
@@ -305,40 +398,6 @@ def _apply_turn_boundary(
             current.error_count += 1
             current.last_activity_ts = ts
     return current
-
-
-def _apply_turn_fact(current: TurnRecord, ts: str, event: TranscriptEvent) -> None:
-    current.last_activity_ts = ts
-    if isinstance(event, TranscriptUserMessage):
-        if event.text and event.role == "user" and event.transcript_kind != "event_msg":
-            current.user_messages.append(
-                UserMessage(
-                    text=event.text,
-                    shape=classify_user_message(event.text),
-                )
-            )
-            current.ordered_messages.append(("user", event.text))
-        return
-    if isinstance(event, AssistantText):
-        if event.final or event.phase == "final_answer":
-            current.final_answers.append(event.text)
-            current.ordered_messages.append(("final", event.text))
-        else:
-            current.assistant_commentary.append(event.text)
-            current.ordered_messages.append(("assistant", event.text))
-        return
-    if isinstance(event, ToolCall):
-        name = event.name or "tool"
-        current.tool_calls[name] += 1
-        if name in ("shell", "local_shell", "exec_command", "container.exec"):
-            current.command_count += 1
-        if name == "apply_patch":
-            current.patch_count += 1
-            for touched in _patch_paths(event.arguments):
-                current.touched_files[touched] += 1
-        return
-    if isinstance(event, WebSearch):
-        current.web_search_count += 1
 
 
 _PATCH_PATH_RE = re.compile(
@@ -383,19 +442,24 @@ def collect_compactions_from_events(
     records: list[CompactionRecord] = []
     last_assistant: str | None = None
     pending: CompactionRecord | None = None
-    for event in events:
-        ts = normalize_timestamp(event.at.timestamp) or ""
-        if isinstance(event, Compaction) and event.boundary:
-            pending = CompactionRecord(
-                source_file=str(path),
-                ts=ts,
-                last_assistant_before_text=last_assistant,
-            )
-            records.append(pending)
+    for fact in _reduced_session_facts(events):
+        if isinstance(fact, AssembledMessage):
+            for event, kinds in _classified_message_events(fact):
+                ts = normalize_timestamp(event.at.timestamp) or ""
+                if SpanKind.COMPACTION in kinds:
+                    if isinstance(event, Compaction) and event.boundary:
+                        pending = CompactionRecord(
+                            source_file=str(path),
+                            ts=ts,
+                            last_assistant_before_text=last_assistant,
+                        )
+                        records.append(pending)
+                elif kinds & _ASSISTANT_TEXT_SPANS:
+                    if isinstance(event, AssistantText) and event.text:
+                        last_assistant = event.text
             continue
-        if isinstance(event, AssistantText) and event.text:
-            last_assistant = event.text
-        elif (
+        event = fact
+        if (
             isinstance(event, TranscriptUserMessage)
             and event.role == "user"
             and event.text

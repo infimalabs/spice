@@ -41,10 +41,6 @@ class CompactionWindowSelection:
     requested_count: int
     selected_boundaries: tuple[str, ...]
 
-    @property
-    def selected_count(self) -> int:
-        return len(self.selected_boundaries)
-
 
 def select_compaction_windows_from_files(
     files: Sequence[Path],
