@@ -1368,6 +1368,21 @@ def test_static_speech_session_title_leads_with_agent_identity():
     assert result.returncode == 0
 
 
+def test_static_speech_playback_uses_the_served_audio_content_type():
+    # The backend picks the format and declares it on the /say response: mp4
+    # from macOS say, wav from the documented espeak-ng preset. The fixture
+    # drives playSpeech under both and reads the type off the constructed clip.
+    script = Path(__file__).with_name("fixtures") / "speech_playback_content_type.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.audio.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
 def test_static_speech_sync_updates_now_playing_message_accent():
     css = _serve_css_text()
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")

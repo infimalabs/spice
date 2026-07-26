@@ -131,7 +131,11 @@ const context = {
     requests.push(text);
     if (text === "first") firstRequestedResolve();
     if (text === "second") secondRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -238,7 +242,11 @@ const context = {
     requests.push(text);
     if (requests.length === 1) firstRequestedResolve();
     if (text === finalText) finalRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -352,7 +360,11 @@ const context = {
     const text = JSON.parse(options.body).text;
     requests.push(text);
     if (text === "Last final paragraph.") tailRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -436,7 +448,11 @@ const context = {
   document: { querySelectorAll: () => [] },
   fetch: async (url, options) => {
     requests.push(JSON.parse(options.body).text);
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -548,7 +564,11 @@ async function runPage(messages) {
     document: { querySelectorAll: () => [] },
     fetch: async (url, options) => {
       requests.push(JSON.parse(options.body).text);
-      return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+      return {
+        ok: true,
+        headers: { get: () => "audio/mp4" },
+        arrayBuffer: async () => new ArrayBuffer(1),
+      };
     },
     browserStorage: () => storage,
     isPresenceMessage: () => false,
@@ -656,7 +676,11 @@ const context = {
     const text = JSON.parse(options.body).text;
     requests.push(text);
     if (text === "active") firstRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -745,7 +769,11 @@ const context = {
     const text = JSON.parse(options.body).text;
     requests.push(text);
     if (text === "active") firstRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
@@ -839,7 +867,11 @@ const context = {
     const text = JSON.parse(options.body).text;
     requests.push(text);
     if (text === "active") firstRequestedResolve();
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: (lane) => lane.speechMode,
@@ -931,7 +963,11 @@ const context = {
     revokeObjectURL: () => {},
   },
   document: { querySelectorAll: () => [] },
-  fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) }),
+  fetch: async () => ({
+    ok: true,
+    headers: { get: () => "audio/mp4" },
+    arrayBuffer: async () => new ArrayBuffer(1),
+  }),
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
   laneGroupHost: (lane) => lane,

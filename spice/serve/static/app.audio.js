@@ -531,7 +531,11 @@ async function playSpeech(lane, text) {
     });
     if (!response.ok) return;
     const buffer = await response.arrayBuffer();
-    await playAudioBuffer(buffer);
+    // The backend chooses the audio format -- macOS say renders mp4, the
+    // documented espeak-ng preset renders wav -- and declares it on the
+    // response. Playing it back under any other name would leave the clip
+    // depending on the browser sniffing its way past our own mislabel.
+    await playAudioBuffer(buffer, response.headers.get("Content-Type") || "");
   } catch (error) {
     return;
   }
@@ -548,14 +552,18 @@ function stopActivePlayback() {
   }
 }
 
-/** @returns {Promise<void>} */
-function playAudioBuffer(buffer) {
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string} contentType - the media type the server served the clip as
+ * @returns {Promise<void>}
+ */
+function playAudioBuffer(buffer, contentType) {
   return new Promise((resolve) => {
     // Claim ownership before creating the clip: any in-flight clip is stopped,
     // and the bumped token supersedes any of its still-pending play() requests.
     const generation = (playbackGeneration += 1);
     stopActivePlayback();
-    const blob = new Blob([buffer], { type: "audio/mp4" });
+    const blob = new Blob([buffer], { type: contentType });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     activePlaybackAudio = audio;

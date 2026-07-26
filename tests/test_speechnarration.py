@@ -52,7 +52,11 @@ const context = {
   document: { querySelectorAll: () => [] },
   fetch: async (url, options) => {
     spoken.push(JSON.parse(options.body).text);
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    return {
+      ok: true,
+      headers: { get: () => "audio/mp4" },
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
   },
   isPresenceMessage: () => false,
   laneEffectiveSpeechMode: () => "speak",
