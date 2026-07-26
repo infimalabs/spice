@@ -21,12 +21,11 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
 from typing import Any, Iterable
 
 from spice.errors import SpiceError
 from spice.paths import shared_state_path
-from spice.sqliteconnection import sqlite_connection
+from spice.sqliteconnection import ensure_sqlite_schema_once, sqlite_connection
 
 ACK_STATE_DATABASE_FILENAME = "spiceacks.sqlite3"
 # Mirrors the default task backend's `data` subdirectory. Unlike task/team
@@ -82,17 +81,6 @@ SELECT key, inbox_name, text, attachments_json, lineage_json,
        team_id, sent_at, published_text, acknowledged_at, provenance
 FROM acked_inbox_items
 """
-
-# Schema is initialized once per database path per process. Running the full
-# DDL sweep (CREATE + PRAGMA table_info + ALTER) on every write took a write
-# lock each time; under concurrent lanes that serialized all access -- reads
-# included. In the default rollback journal a reader's SHARED lock and that
-# write lock are mutually exclusive on a promotion SQLite refuses to retry, so
-# `busy_timeout` could not wait it out and the ACK commit raised "database is
-# locked". Initializing once and opening WAL (mirroring ServeTeamStore) lets a
-# reader and the single writer proceed together.
-_SCHEMA_INIT_LOCK = Lock()
-_INITIALIZED_PATHS: set[Path] = set()
 
 
 @dataclass(frozen=True)
@@ -302,25 +290,12 @@ def prepare_directive_history_database(path: str | Path) -> None:
 
 
 def _ensure_schema_once(path: Path) -> None:
-    """Create or migrate the schema at most once per database path per process.
-
-    Guarded by a lock and a per-path record so the DDL never re-runs on the hot
-    write path, and the initializing connection opens WAL so the journal mode
-    persists for every later reader and writer. Mirrors ServeTeamStore.
-    """
-    if path in _INITIALIZED_PATHS:
-        return
-    with _SCHEMA_INIT_LOCK:
-        if path in _INITIALIZED_PATHS:
-            return
-        with sqlite_connection(
-            path,
-            busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
-            wal=True,
-            ensure_parent=True,
-        ) as connection:
-            _ensure_schema(connection)
-        _INITIALIZED_PATHS.add(path)
+    """Create or migrate the ACK schema at most once per path per process."""
+    ensure_sqlite_schema_once(
+        path,
+        busy_timeout_ms=ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+        initialize=_ensure_schema,
+    )
 
 
 def _ack_state_record(row: tuple[Any, ...]) -> AckStateRecord:

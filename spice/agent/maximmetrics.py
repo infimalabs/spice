@@ -6,12 +6,11 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
 from typing import Iterable
 
 from spice.errors import SpiceError
 from spice.paths import shared_state_path
-from spice.sqliteconnection import sqlite_connection
+from spice.sqliteconnection import ensure_sqlite_schema_once, sqlite_connection
 
 MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
@@ -62,18 +61,6 @@ MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS maxim_metric_events_fire_recency_idx
   ON maxim_metric_events(event_type, occurred_at, id);
 """
-
-# Schema is initialized once per database path per process. The full DDL sweep
-# (CREATE TABLE + CREATE INDEX x3) previously ran on every connection -- reads
-# included -- taking a write lock each time. Under the concurrent lanes that
-# append maxim events forever, that serialized every access on the un-retryable
-# RESERVED->EXCLUSIVE promotion the default rollback journal refuses to wait
-# out, so a per-command working-state read could raise "database is locked".
-# Initializing once and opening WAL (mirroring ServeTeamStore and the ack-state
-# store) lets a reader observe committed rows while the single writer holds the
-# write lock.
-_SCHEMA_INIT_LOCK = Lock()
-_INITIALIZED_PATHS: set[Path] = set()
 
 
 @dataclass(frozen=True)
@@ -330,26 +317,12 @@ def maxim_recurrence_counts(
 
 
 def _ensure_schema_once(path: Path) -> None:
-    """Create the schema at most once per database path per process.
-
-    Guarded by a lock and a per-path record so the DDL never re-runs on the hot
-    read or write path, and the initializing connection opens WAL so the journal
-    mode persists for every later reader and writer. Mirrors ServeTeamStore and
-    the ack-state store.
-    """
-    if path in _INITIALIZED_PATHS:
-        return
-    with _SCHEMA_INIT_LOCK:
-        if path in _INITIALIZED_PATHS:
-            return
-        with sqlite_connection(
-            path,
-            busy_timeout_ms=MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS,
-            wal=True,
-            ensure_parent=True,
-        ) as connection:
-            _ensure_schema(connection)
-        _INITIALIZED_PATHS.add(path)
+    """Create the maxim-metrics schema at most once per path per process."""
+    ensure_sqlite_schema_once(
+        path,
+        busy_timeout_ms=MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS,
+        initialize=_ensure_schema,
+    )
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
