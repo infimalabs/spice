@@ -31,6 +31,7 @@ from typing import Any, Callable, Mapping, overload
 
 from spice import defaults
 from spice.agent.claudetranscript import claude_line_events, project_claude_events
+from spice.agent.codextranscript import codex_line_events, normalize_codex_line
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -40,6 +41,7 @@ from spice.extensions import (
 )
 from spice.paths import atomic_write_json
 from spice.process.groups import ProcessDeadlineExceeded
+from spice.transcript.events import UNLOCATED_SOURCE, TranscriptEvent
 from spice.process.tool import run_tool_command
 from spice.sqliteconnection import sqlite_connection
 
@@ -61,6 +63,27 @@ class PostToolHookCapability:
 
 @dataclass(frozen=True)
 class AgentDriver:
+    """One agent CLI's dialect, and the only place its shape is known.
+
+    Transcript hooks and the escape hatch. Four hooks carry dialect knowledge
+    across the substrate seam: `transcript_line_events` decodes a raw line into
+    typed events, `line_may_carry_assistant_text` prefilters lines before that
+    parse, `context_snapshot_fields` reads per-turn token usage, and
+    `stream_failure_fields` types a terminal stdout failure. Everything above
+    the seam consumes typed events and never inspects a dialect's raw shape.
+
+    A hook is the escape hatch for a genuinely dialect-local signal, and the bar
+    is deliberately high: the fact must exist in one dialect's wire format and
+    have no plane-neutral spelling. Prefer growing the closed vocabulary in
+    `spice.transcript.events` with an explicit typed field, which every consumer
+    then reads once; reach for a hook only when the fact cannot survive that
+    crossing — a usage counter one CLI reports and another does not, or a
+    substring only one dialect's line contains. A hook returns a plane-neutral
+    answer (a bool, a field bag, typed events) and never an untyped payload bag,
+    so adding a dialect stays confined to its own adapter, its registration, and
+    its fixtures in the shared conformance suite.
+    """
+
     name: str
     default_bin: str
     bin_env: str
@@ -192,6 +215,31 @@ class AgentDriver:
         a different schema translates it here, once, for every consumer.
         """
         return raw
+
+    def transcript_line_events(
+        self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
+    ) -> list[TranscriptEvent]:
+        """Decode one raw line of this dialect into the typed event vocabulary.
+
+        This is the dialect half of the substrate seam: the driver knows its own
+        JSON shape and nothing above it does. One line yields zero, one, or many
+        events in source order, so a line carrying prose plus a tool call crosses
+        losslessly. The built-in dialect is Codex; a driver whose CLI writes a
+        different schema points this at its own adapter, which is the whole of
+        what a new dialect owes the substrate.
+        """
+        return codex_line_events(raw, source=source, line=line)
+
+    def line_may_carry_assistant_text(self, line: str) -> bool:
+        """Could this unparsed line carry assistant prose? Cheap and permissive.
+
+        A prefilter, not a decision: an overwhelming majority of transcript lines
+        are tool calls and results that a substring test rejects without a JSON
+        parse, and the substrate calls this before parsing on the paths that only
+        want prose. False negatives silently lose prose, so a dialect that cannot
+        answer cheaply should return True and let the decoder decide.
+        """
+        return '"message"' in line and '"role":"assistant"' in line
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         """Per-turn token usage for phase-effort accounting, or None otherwise.
@@ -393,6 +441,9 @@ CODEX_SESSION_TURN_ID_ENV = "CODEX_SESSION_TURN_ID"
 
 
 class CodexDriver(AgentDriver):
+    def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any]:
+        return normalize_codex_line(raw)
+
     def current_turn_id(self, env: Mapping[str, str]) -> str | None:
         value = env.get(CODEX_TURN_ID_ENV) or env.get(CODEX_SESSION_TURN_ID_ENV) or ""
         return value.strip() or None
@@ -823,6 +874,16 @@ class ClaudeDriver(AgentDriver):
 
     def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         return project_claude_events(claude_line_events(raw), raw.get("timestamp"))
+
+    def transcript_line_events(
+        self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
+    ) -> list[TranscriptEvent]:
+        return claude_line_events(raw, source=source, line=line)
+
+    def line_may_carry_assistant_text(self, line: str) -> bool:
+        # Claude wraps the message in a typed envelope, so the outer discriminant
+        # is the cheap one; the inner role repeats on lines this must not admit.
+        return '"message"' in line and '"type":"assistant"' in line
 
     def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         if raw.get("type") != "assistant":

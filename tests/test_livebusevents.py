@@ -27,7 +27,10 @@ from spice.serve import (
     messages as message_reader,
 )
 from spice.serve.app import ServeState
-from spice.serve.lifecycle import LIFECYCLE_RECONCILER_THREAD_PREFIX
+from spice.serve.lifecycle import (
+    LIFECYCLE_RECONCILER_THREAD_PREFIX,
+    start_lifecycle_reconciler,
+)
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.payload import identity, lane, message
 from spice.serve.pending import pending_inbox_identity_payload
@@ -689,6 +692,8 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
         team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
     )
     state.cached_targets = [target]
+    # Active-mode Serve owns the reconciler every lane decision is submitted to.
+    start_lifecycle_reconciler(state)
     _patch_agent_status(monkeypatch, _agent_status(running=False, pid=0))
     ensure_calls: list[dict[str, object]] = []
     ensure_threads: list[str] = []

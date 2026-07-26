@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.mail.inbox import pending_operator_inbox_items, write_inbox_item
-from spice.serve import launch, lifecycle, livebuswatch
+
+from spice.mail.inbox import write_inbox_item
+from spice.serve import launch, livebuswatch
+from spice.serve.lifecycle import (
+    AutomaticLifecycleWake,
+    LifecycleOutcome,
+    LifecycleOutcomeStatus,
+    LifecycleWakeSource,
+)
 from spice.serve.worktree.target import WorktreeTarget
 
 # Spelled out here rather than read from the scheduler: reading the production
-# constant would keep these bounds green at any interval, and three minutes is
-# the property under test. The remainder is what the countdown has left one
-# minute into a candidate's wait.
-LONE_TASK_ESCAPE_SECONDS = 3.0 * 60.0
+# constant would keep this bound green at any interval.
 ESCAPE_REMAINING_AFTER_ONE_MINUTE = 2.0 * 60.0
 # A deadline already behind us: the lane declining it has been waiting past its
 # escape, so the only thing left to decide is how soon to act.
 ESCAPE_ALREADY_EXPIRED_SECONDS = -20.0
+REPEATED_RETRY_CYCLES = 4
+TIMER_SOURCE_IDENTITY_HEX_LENGTH = 16
 
 
 def _target(name: str, tmp_path: Path) -> WorktreeTarget:
@@ -27,12 +34,25 @@ def _target(name: str, tmp_path: Path) -> WorktreeTarget:
     return WorktreeTarget(id=name, repo_root=repo, name=name, branch="main")
 
 
-def _state(targets: list[WorktreeTarget]) -> SimpleNamespace:
-    return SimpleNamespace(
+def _state(
+    targets: list[WorktreeTarget],
+    *,
+    reconcile=None,
+) -> SimpleNamespace:
+    state = SimpleNamespace(
         observer_mode=False,
         worktree_targets=lambda: list(targets),
-        team_store=SimpleNamespace(global_fast_mode_enabled=lambda: False),
+        submitted_wakes=[],
     )
+
+    def submit(wake):
+        state.submitted_wakes.append(wake)
+        future = Future()
+        future.set_result(reconcile(wake) if reconcile else _outcome(wake))
+        return future
+
+    state.submit_lifecycle_wake = submit
+    return state
 
 
 def _events_file(tmp_path: Path) -> Path:
@@ -41,50 +61,21 @@ def _events_file(tmp_path: Path) -> Path:
     return events
 
 
-def _patch_lanes(
-    monkeypatch,
-    lifetimes: dict[str, str],
-    ensured: list[tuple],
+def _outcome(
+    wake: AutomaticLifecycleWake,
     *,
-    declined: dict | None = None,
-) -> None:
-    monkeypatch.setattr(
-        launch,
-        "resolve_thread_id_for_target",
-        lambda _state, target: f"thread-{target.id}",
+    retry_after_seconds: float | None = None,
+    status: LifecycleOutcomeStatus = LifecycleOutcomeStatus.OBSERVED,
+    detail: str = "",
+) -> LifecycleOutcome:
+    return LifecycleOutcome(
+        target_id=wake.target_id,
+        input_identity=f"{wake.source.value}:{wake.source_identity}",
+        input_kind=f"automatic:{wake.source.value}",
+        status=status,
+        detail=detail,
+        retry_after_seconds=retry_after_seconds,
     )
-    monkeypatch.setattr(
-        lifecycle,
-        "team_actor_for_target",
-        lambda _store, _target, _thread: "",
-    )
-    monkeypatch.setattr(
-        lifecycle,
-        "ensure_agent_for_pending_inbox",
-        lambda _target, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        lifecycle,
-        "team_facts_for_target",
-        lambda _store, target, _thread: {"lifetime": lifetimes[target.id]},
-    )
-
-    def ensure(target, **kwargs):
-        ensured.append((target.id, kwargs["thread_id"]))
-        return declined
-
-    monkeypatch.setattr(lifecycle, "ensure_agent_for_available_work", ensure)
-
-
-def _capacity_decline(retry_after_seconds: float) -> dict:
-    """The refusal a lane returns while its oldest candidate is still waiting."""
-    return {
-        "ok": True,
-        "action": "skipped",
-        "trigger": "available-work",
-        "reason": "capacity",
-        "retryAfterSeconds": retry_after_seconds,
-    }
 
 
 def test_observer_mode_runs_no_available_work_watch():
@@ -94,173 +85,266 @@ def test_observer_mode_runs_no_available_work_watch():
     assert watch is None
 
 
-def test_evaluate_offers_work_to_drain_lanes_only(tmp_path, monkeypatch):
-    """A lane whose team drains the board is the only lane this may start."""
-    drain = _target("drain", tmp_path)
-    burst = _target("burst", tmp_path)
-    ensured: list[tuple] = []
-    _patch_lanes(monkeypatch, {"drain": "Drain", "burst": "Burst"}, ensured)
-    watch = launch.AvailableWorkWatch(
-        _state([drain, burst]), events_path=_events_file(tmp_path)
+def test_evaluate_publishes_compact_wakes_and_waits_for_outcomes(tmp_path):
+    state = _state([])
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    wakes = (
+        AutomaticLifecycleWake("lane-a", LifecycleWakeSource.TASK, "task-1"),
+        AutomaticLifecycleWake("lane-b", LifecycleWakeSource.INBOX, "inbox-2"),
     )
 
-    remaining = watch.evaluate()
+    outcomes = watch.evaluate(wakes)
 
-    assert ensured == [("drain", "thread-drain")]
-    # No lane declined for capacity, so nothing is waiting on an age to arrive
-    # and the next look is a whole interval out.
-    assert remaining == LONE_TASK_ESCAPE_SECONDS
+    assert state.submitted_wakes == list(wakes)
+    assert [outcome.target_id for outcome in outcomes] == ["lane-a", "lane-b"]
+    assert watch.next_timer_timeout() is None
 
 
-def test_evaluate_shortens_its_bound_to_the_oldest_candidates_escape(
-    tmp_path, monkeypatch
+def test_evaluate_schedules_one_timer_from_the_reconciler_outcome(
+    tmp_path,
+    monkeypatch,
 ):
-    """The next wake lands when the oldest candidate reaches three minutes.
-
-    The lane that declined already read its rows under the claim lock, so the
-    countdown rides back out with the refusal rather than costing this thread a
-    second look at the same board.
-    """
-    drain = _target("drain", tmp_path)
-    ensured: list[tuple] = []
-    _patch_lanes(
-        monkeypatch,
-        {"drain": "Drain"},
-        ensured,
-        declined=_capacity_decline(ESCAPE_REMAINING_AFTER_ONE_MINUTE),
+    now = [100.0]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    state = _state(
+        [],
+        reconcile=lambda wake: _outcome(
+            wake,
+            retry_after_seconds=ESCAPE_REMAINING_AFTER_ONE_MINUTE,
+        ),
     )
-    watch = launch.AvailableWorkWatch(
-        _state([drain]), events_path=_events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    wake = AutomaticLifecycleWake(
+        "lane-a",
+        LifecycleWakeSource.TASK,
+        "task-1",
     )
 
-    remaining = watch.evaluate()
+    watch.evaluate((wake,))
 
-    assert remaining == ESCAPE_REMAINING_AFTER_ONE_MINUTE
+    assert watch.next_timer_timeout() == ESCAPE_REMAINING_AFTER_ONE_MINUTE
+    now[0] += ESCAPE_REMAINING_AFTER_ONE_MINUTE
+    timer_wakes = watch.due_timer_wakes()
+    assert len(timer_wakes) == 1
+    assert timer_wakes[0].target_id == "lane-a"
+    assert timer_wakes[0].source is LifecycleWakeSource.TIMER
+    assert watch.next_timer_timeout() is None
 
 
-def test_evaluate_keeps_a_floor_under_an_expired_escape(tmp_path, monkeypatch):
-    """A candidate already past its escape still leaves room to act on it."""
-    drain = _target("drain", tmp_path)
-    ensured: list[tuple] = []
-    _patch_lanes(
-        monkeypatch,
-        {"drain": "Drain"},
-        ensured,
-        declined=_capacity_decline(ESCAPE_ALREADY_EXPIRED_SECONDS),
+def test_repeated_retry_timers_keep_fixed_size_independent_identities(
+    tmp_path,
+    monkeypatch,
+):
+    now = [100.0]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    state = _state(
+        [],
+        reconcile=lambda wake: _outcome(
+            wake,
+            retry_after_seconds=ESCAPE_REMAINING_AFTER_ONE_MINUTE,
+        ),
     )
-    watch = launch.AvailableWorkWatch(
-        _state([drain]), events_path=_events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    wake = AutomaticLifecycleWake(
+        "lane-a",
+        LifecycleWakeSource.TASK,
+        "task-1",
+    )
+    timer_identities: list[str] = []
+
+    for _cycle in range(REPEATED_RETRY_CYCLES):
+        watch.evaluate((wake,))
+        now[0] += ESCAPE_REMAINING_AFTER_ONE_MINUTE
+        wake = watch.due_timer_wakes()[0]
+        timer_identities.append(wake.source_identity)
+
+    assert all(
+        len(identity) == TIMER_SOURCE_IDENTITY_HEX_LENGTH
+        for identity in timer_identities
+    )
+    assert len(set(timer_identities)) == REPEATED_RETRY_CYCLES
+    assert all(
+        ":" not in identity and "@" not in identity for identity in timer_identities
     )
 
-    remaining = watch.evaluate()
 
-    assert remaining == launch.AVAILABLE_WORK_WATCH_MIN_SECONDS
+def test_evaluate_keeps_a_floor_under_an_expired_deadline(
+    tmp_path,
+    monkeypatch,
+):
+    now = [100.0]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    state = _state(
+        [],
+        reconcile=lambda wake: _outcome(
+            wake,
+            retry_after_seconds=ESCAPE_ALREADY_EXPIRED_SECONDS,
+        ),
+    )
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+
+    watch.evaluate(
+        (
+            AutomaticLifecycleWake(
+                "lane-a",
+                LifecycleWakeSource.TASK,
+                "task-1",
+            ),
+        )
+    )
+
+    assert watch.next_timer_timeout() == launch.AVAILABLE_WORK_WATCH_MIN_SECONDS
+
+
+def test_removing_a_target_cancels_its_pending_timer(tmp_path, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    target = _target("lane-a", tmp_path)
+    state = _state(
+        [target],
+        reconcile=lambda wake: _outcome(
+            wake,
+            retry_after_seconds=ESCAPE_REMAINING_AFTER_ONE_MINUTE,
+        ),
+    )
+    watch = launch.AvailableWorkWatch(state, events_path=_events_file(tmp_path))
+    wake = AutomaticLifecycleWake(
+        target.id,
+        LifecycleWakeSource.TASK,
+        "task-1",
+    )
+    watch.evaluate((wake,))
+    assert watch.next_timer_timeout() == ESCAPE_REMAINING_AFTER_ONE_MINUTE
+
+    watch.observe_events([])
+
+    assert watch.next_timer_timeout() is None
 
 
 def test_watch_looks_again_when_its_deadline_arrives_with_no_board_change(
     tmp_path, monkeypatch
 ):
     """The lone-task escape needs no second task and no client refresh."""
-    watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
-    looked_twice = threading.Event()
-    looks: list[int] = []
+    target = _target("timer-lane", tmp_path)
+    timer_observed = threading.Event()
+    sources: list[LifecycleWakeSource] = []
 
-    def evaluate() -> float:
-        looks.append(len(looks))
-        if len(looks) >= 2:
-            looked_twice.set()
-        # A deadline just out of reach of the first wait; nothing will be
-        # written to the event token for the rest of this test.
-        return 0.05
+    def reconcile(wake):
+        sources.append(wake.source)
+        if wake.source is LifecycleWakeSource.TIMER:
+            timer_observed.set()
+            return _outcome(wake)
+        return _outcome(wake, retry_after_seconds=0.05)
 
-    monkeypatch.setattr(watch, "evaluate", evaluate)
+    monkeypatch.setattr(launch, "AVAILABLE_WORK_WATCH_MIN_SECONDS", 0.01)
+    watch = launch.AvailableWorkWatch(
+        _state([target], reconcile=reconcile),
+        events_path=_events_file(tmp_path),
+    )
     watch.start()
     try:
-        assert looked_twice.wait(timeout=15.0) is True
+        assert timer_observed.wait(timeout=15.0) is True
     finally:
         watch.cancel()
         watch.join()
 
-    assert len(looks) >= 2
+    assert sources == [LifecycleWakeSource.TASK, LifecycleWakeSource.TIMER]
 
 
-def test_watch_looks_again_when_the_task_board_changes(tmp_path, monkeypatch):
+def test_watch_looks_again_when_the_task_board_changes(tmp_path):
     """A task entering the board wakes the decision without waiting out a deadline."""
     events = _events_file(tmp_path)
-    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
-    looked_twice = threading.Event()
-    looks: list[int] = []
+    target = _target("task-lane", tmp_path)
+    initial_wake = threading.Event()
+    second_wake = threading.Event()
+    wakes: list[AutomaticLifecycleWake] = []
 
-    def evaluate() -> float:
-        looks.append(len(looks))
-        if len(looks) >= 2:
-            looked_twice.set()
-        # Far past this test: only a board change can produce a second look.
-        return 3600.0
+    def reconcile(wake):
+        wakes.append(wake)
+        if len(wakes) == 1:
+            initial_wake.set()
+        if len(wakes) >= 2:
+            second_wake.set()
+        return _outcome(wake)
 
-    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch = launch.AvailableWorkWatch(
+        _state([target], reconcile=reconcile),
+        events_path=events,
+    )
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True
+        assert initial_wake.wait(timeout=15.0) is True
         events.write_text("1 task\n", encoding="utf-8")
-        assert looked_twice.wait(timeout=15.0) is True
+        assert second_wake.wait(timeout=15.0) is True
     finally:
         watch.cancel()
         watch.join()
 
-    assert len(looks) >= 2
+    assert [(wake.source, wake.source_identity) for wake in wakes] == [
+        (LifecycleWakeSource.TASK, "0"),
+        (LifecycleWakeSource.TASK, "1"),
+    ]
 
 
-def test_watch_looks_again_when_pending_inbox_is_published(tmp_path, monkeypatch):
+def test_watch_looks_again_when_pending_inbox_is_published(tmp_path):
     """A non-HTTP publish starts an off lane without an inventory request."""
     target = _target("off-lane", tmp_path)
-    _patch_lanes(monkeypatch, {target.id: "Burst"}, [])
+    initial_wake = threading.Event()
+    inbox_wake = threading.Event()
+    wakes: list[AutomaticLifecycleWake] = []
+
+    def reconcile(wake):
+        wakes.append(wake)
+        if len(wakes) == 1:
+            initial_wake.set()
+        if wake.source is LifecycleWakeSource.INBOX:
+            inbox_wake.set()
+        return _outcome(wake)
+
     watch = launch.AvailableWorkWatch(
-        _state([target]), events_path=_events_file(tmp_path)
+        _state([target], reconcile=reconcile),
+        events_path=_events_file(tmp_path),
     )
-    launch_attempted = threading.Event()
-    checks: list[int] = []
 
-    def ensure_pending(_target, **_kwargs):
-        checks.append(len(checks))
-        if pending_operator_inbox_items(target.repo_root):
-            launch_attempted.set()
-            return {}
-        return None
-
-    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True
+        assert initial_wake.wait(timeout=15.0) is True
         write_inbox_item(target.repo_root, "operator.txt", "start this lane")
-        assert launch_attempted.wait(timeout=2.0) is True
+        assert inbox_wake.wait(timeout=2.0) is True
     finally:
         watch.cancel()
         watch.join()
 
-    assert len(checks) >= 2
+    assert wakes[0].source is LifecycleWakeSource.TASK
+    assert wakes[-1].source is LifecycleWakeSource.INBOX
+    assert wakes[-1].source_identity != "0"
 
 
 def test_watch_preserves_a_task_event_written_during_scheduler_evaluation(
-    tmp_path, monkeypatch
+    tmp_path,
 ):
     """Native registration stays live while the scheduler reads the board."""
     events = _events_file(tmp_path)
-    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
+    target = _target("task-lane", tmp_path)
     looked_twice = threading.Event()
-    looks: list[int] = []
+    wakes: list[AutomaticLifecycleWake] = []
 
-    def evaluate() -> float:
-        looks.append(len(looks))
-        if len(looks) == 1:
+    def reconcile(wake):
+        wakes.append(wake)
+        if len(wakes) == 1:
             # This is the old observe-before-arm gap: evaluation has begun,
             # but the subsequent wait has not.
             events.write_text("1 changed-during-evaluation\n", encoding="utf-8")
-        if len(looks) >= 2:
+        if len(wakes) >= 2:
             looked_twice.set()
-        return 3600.0
+        return _outcome(wake)
 
-    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch = launch.AvailableWorkWatch(
+        _state([target], reconcile=reconcile),
+        events_path=events,
+    )
     watch.start()
     try:
         assert looked_twice.wait(timeout=15.0) is True
@@ -268,16 +352,16 @@ def test_watch_preserves_a_task_event_written_during_scheduler_evaluation(
         watch.cancel()
         watch.join()
 
-    assert len(looks) >= 2
+    assert [wake.source_identity for wake in wakes] == ["0", "1"]
 
 
 def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch):
     """The non-kqueue backend uses one native iterator across evaluations."""
     events = _events_file(tmp_path)
-    watch = launch.AvailableWorkWatch(_state([]), events_path=events)
+    target = _target("task-lane", tmp_path)
     looked_twice = threading.Event()
     native_calls: list[dict] = []
-    looks: list[int] = []
+    wakes: list[AutomaticLifecycleWake] = []
 
     def native_watch(*paths, **options):
         native_calls.append({"paths": paths, **options})
@@ -285,13 +369,13 @@ def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch)
         yield {(1, str(events))}  # the write made by the first evaluation
         options["stop_event"].wait(timeout=15.0)
 
-    def evaluate() -> float:
-        looks.append(len(looks))
-        if len(looks) == 1:
+    def reconcile(wake):
+        wakes.append(wake)
+        if len(wakes) == 1:
             events.write_text("1 watchfiles-evaluation\n", encoding="utf-8")
-        if len(looks) >= 2:
+        if len(wakes) >= 2:
             looked_twice.set()
-        return 3600.0
+        return _outcome(wake)
 
     monkeypatch.setattr(livebuswatch, "_HAVE_KQUEUE", False)
     monkeypatch.setattr(
@@ -301,7 +385,10 @@ def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch)
             SimpleNamespace(watch=native_watch) if name == "watchfiles" else None
         ),
     )
-    monkeypatch.setattr(watch, "evaluate", evaluate)
+    watch = launch.AvailableWorkWatch(
+        _state([target], reconcile=reconcile),
+        events_path=events,
+    )
     watch.start()
     try:
         assert looked_twice.wait(timeout=15.0) is True
@@ -310,13 +397,108 @@ def test_watchfiles_stays_armed_while_scheduler_evaluates(tmp_path, monkeypatch)
         watch.join()
 
     assert len(native_calls) == 1
-    assert len(looks) >= 2
+    assert [wake.source_identity for wake in wakes] == ["0", "1"]
 
 
-def test_cancel_ends_the_watch(tmp_path, monkeypatch):
+def test_event_identities_collapse_duplicate_bursts_and_prefer_inbox(
+    tmp_path,
+):
+    target = _target("lane-a", tmp_path)
+    events = _events_file(tmp_path)
+    watch = launch.AvailableWorkWatch(
+        _state([target]),
+        events_path=events,
+    )
+    initial_wakes = watch.observe_events([target])
+
+    assert len(initial_wakes) == 1
+    assert watch.observe_events([target]) == ()
+
+    events.write_text("1 task\n", encoding="utf-8")
+    write_inbox_item(target.repo_root, "operator.txt", "wake this lane")
+    changed_wakes = watch.observe_events([target])
+
+    assert len(changed_wakes) == 1
+    assert changed_wakes[0].source is LifecycleWakeSource.INBOX
+    assert watch.observe_events([target]) == ()
+
+
+def test_reconfiguration_arms_new_inbox_before_evaluating_its_identity(
+    tmp_path,
+):
+    events = _events_file(tmp_path)
+    targets: list[WorktreeTarget] = []
+    inbox_wake = threading.Event()
+    pre_discovery_refresh = threading.Event()
+    wakes: list[AutomaticLifecycleWake] = []
+
+    def reconcile(wake):
+        wakes.append(wake)
+        if wake.source is LifecycleWakeSource.INBOX:
+            inbox_wake.set()
+        return _outcome(wake)
+
+    state = _state(targets, reconcile=reconcile)
+    target_reads = 0
+
+    def worktree_targets():
+        nonlocal target_reads
+        target_reads += 1
+        if target_reads == 2:
+            pre_discovery_refresh.set()
+        return [] if target_reads <= 2 else list(targets)
+
+    state.worktree_targets = worktree_targets
+    watch = launch.AvailableWorkWatch(state, events_path=events)
+    watch.start()
+    try:
+        assert watch.armed.wait(timeout=15.0) is True
+        assert pre_discovery_refresh.wait(timeout=15.0) is True
+        discovered = _target("new-lane", tmp_path)
+        targets.append(discovered)
+        # This publication lands before the watch loop discovers and arms the
+        # new lane path. The task event wakes the old registration; the first
+        # post-arm snapshot must still preserve the inbox identity.
+        write_inbox_item(
+            discovered.repo_root,
+            "operator.txt",
+            "published before lane registration",
+        )
+        events.write_text("1 task\n", encoding="utf-8")
+        assert inbox_wake.wait(timeout=15.0) is True
+    finally:
+        watch.cancel()
+        watch.join()
+
+    assert len(wakes) == 1
+    assert wakes[0].target_id == "new-lane"
+    assert wakes[0].source is LifecycleWakeSource.INBOX
+
+
+def test_reconciler_failure_is_visible_on_the_watcher(tmp_path):
+    target = _target("failed-lane", tmp_path)
+    state = _state(
+        [target],
+        reconcile=lambda wake: _outcome(
+            wake,
+            status=LifecycleOutcomeStatus.FAILED,
+            detail="launch failed visibly",
+        ),
+    )
+    watch = launch.AvailableWorkWatch(
+        state,
+        events_path=_events_file(tmp_path),
+    )
+
+    watch.start()
+    watch.join()
+
+    assert "launch failed visibly" in watch.error
+
+
+def test_cancel_ends_the_watch(tmp_path):
     """Serve shutdown reclaims the thread out of its blocking wait."""
     watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
-    monkeypatch.setattr(watch, "evaluate", lambda: 3600.0)
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True
@@ -330,11 +512,9 @@ def test_cancel_ends_the_watch(tmp_path, monkeypatch):
 
 def test_available_work_watch_leak_guard_joins_the_owning_test_thread(
     tmp_path,
-    monkeypatch,
     _available_work_watch_leak_guard,
 ):
     watch = launch.AvailableWorkWatch(_state([]), events_path=_events_file(tmp_path))
-    monkeypatch.setattr(watch, "evaluate", lambda: 3600.0)
     watch.start()
     assert watch.armed.wait(timeout=15.0) is True
 

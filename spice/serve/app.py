@@ -230,6 +230,10 @@ class ServeState:
         reconciler = self._require_lifecycle_reconciler()
         return LifecycleReconciler.latest_outcome(reconciler, target_id)
 
+    def await_lifecycle_outcome(self, target_id: str) -> LifecycleOutcome | None:
+        reconciler = self._require_lifecycle_reconciler()
+        return LifecycleReconciler.await_target(reconciler, target_id)
+
     def _require_lifecycle_reconciler(self) -> LifecycleReconciler:
         if self.lifecycle_reconciler is None:
             raise RuntimeError("lifecycle reconciliation is unavailable")

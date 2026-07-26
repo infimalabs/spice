@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event, Lock, Thread
 from time import monotonic
-from typing import Any, Callable, TypeAlias
+from typing import Any, Callable, Protocol, TypeAlias
 
 from spice.serve.payload.identity import (
     record_started_renewal_from_ensure,
@@ -39,11 +39,12 @@ LIFECYCLE_DECISION_WAIT_SECONDS = 30.0
 
 
 class LifecycleWakeSource(StrEnum):
-    """Durable fact families that can make an automatic decision relevant."""
+    """Compact signals that can make an automatic decision relevant."""
 
     TASK = "task"
     TEAM = "team"
     INBOX = "inbox"
+    TIMER = "timer"
 
 
 class LifecycleOutcomeStatus(StrEnum):
@@ -124,6 +125,7 @@ class LifecycleOutcome:
     input_kind: str
     status: LifecycleOutcomeStatus
     detail: str = ""
+    retry_after_seconds: float | None = None
     # The route that submitted an intent needs the decision itself, not just its
     # rendered detail: the send response reports agentEnsure, the ensured thread,
     # and renewal intent straight off this record.
@@ -134,6 +136,14 @@ LifecycleHandler: TypeAlias = Callable[
     [LifecycleInput, Event],
     LifecycleOutcome,
 ]
+
+
+class ExplicitPendingInboxEnsure(Protocol):
+    """The one explicit pending-inbox launch grant yielded by the authority."""
+
+    def __call__(
+        self, *, fast_mode: bool = False, force_new: bool = False
+    ) -> dict[str, Any] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,11 +219,6 @@ class LifecycleDecisionAuthority:
         self._attempt_cache: dict[str, float] = {}
         self._explicit_grants: dict[str, int] = {}
 
-    @property
-    def attempt_cache(self) -> dict[str, float]:
-        """Expose the one cache during the explicit-send migration."""
-        return self._attempt_cache
-
     def reserve_explicit_grant(self, target_id: str) -> None:
         """Reserve the next launch attempt on ``target_id`` for an explicit intent.
 
@@ -246,6 +251,7 @@ class LifecycleDecisionAuthority:
             input_kind=value.input_kind,
             status=LifecycleOutcomeStatus.OBSERVED,
             detail=_decision_detail(decision),
+            retry_after_seconds=_decision_retry_after_seconds(decision),
             decision=decision,
         )
 
@@ -260,19 +266,11 @@ class LifecycleDecisionAuthority:
         fails -- because a reservation that outlived its decision would mute
         automatic decisions for the lane it was meant to protect.
         """
-        target_lock = self._target_lock(target.id)
         try:
-            with target_lock:
-                agent_ensure = ensure_agent_for_pending_inbox(
-                    target,
-                    attempt_cache=self._attempt_cache,
-                    retry_seconds=0.0,
+            with self.explicit_pending_inbox(target) as ensure_pending:
+                agent_ensure = ensure_pending(
                     fast_mode=intent.fast_mode,
                     force_new=intent.force_new,
-                    # A fresh operator send is an explicit action: it grants
-                    # exactly one launch attempt even while automatic restarts
-                    # are refused.
-                    automatic=False,
                 )
                 observed = self._observe_target_locked(target, thread_id=None)
         finally:
@@ -294,6 +292,39 @@ class LifecycleDecisionAuthority:
         target_lock = self._target_lock(target.id)
         with target_lock:
             return self._evaluate_target_locked(target, thread_id=thread_id)
+
+    @contextmanager
+    def explicit_pending_inbox(
+        self, target: WorktreeTarget
+    ) -> Iterator[ExplicitPendingInboxEnsure]:
+        """Serialize a decision and its one unthrottled explicit launch grant."""
+        target_lock = self._target_lock(target.id)
+        with target_lock:
+            active = True
+            used = False
+
+            def ensure(
+                *, fast_mode: bool = False, force_new: bool = False
+            ) -> dict[str, Any] | None:
+                nonlocal used
+                if not active:
+                    raise RuntimeError("explicit pending-inbox grant is out of scope")
+                if used:
+                    raise RuntimeError("explicit pending-inbox grant already used")
+                used = True
+                return ensure_agent_for_pending_inbox(
+                    target,
+                    retry_due=self._attempt_due,
+                    retry_seconds=0.0,
+                    fast_mode=fast_mode,
+                    force_new=force_new,
+                    automatic=False,
+                )
+
+            try:
+                yield ensure
+            finally:
+                active = False
 
     def _observe_target_locked(
         self,
@@ -384,7 +415,7 @@ class LifecycleDecisionAuthority:
             )
         fast_mode = bool(store.global_fast_mode_enabled())
         ensure_kwargs: dict[str, Any] = {
-            "attempt_cache": self._attempt_cache,
+            "retry_due": self._attempt_due,
             "fast_mode": fast_mode,
             "force_new": renewal_intent,
         }
@@ -408,6 +439,14 @@ class LifecycleDecisionAuthority:
             agent_ensure=agent_ensure,
         )
 
+    def _attempt_due(self, target_id: str, retry_seconds: float) -> bool:
+        now = monotonic()
+        last_attempt = self._attempt_cache.get(target_id)
+        if last_attempt is not None and now - last_attempt < retry_seconds:
+            return False
+        self._attempt_cache[target_id] = now
+        return True
+
     def _target_lock(self, target_id: str) -> Lock:
         with self._lock:
             return self._target_locks.setdefault(target_id, Lock())
@@ -428,22 +467,6 @@ def lifecycle_decision_authority(state: Any) -> LifecycleDecisionAuthority:
     return authority
 
 
-def lifecycle_reconciler(state: Any) -> LifecycleReconciler:
-    """Return the one reconciler attached to Serve state, starting it if absent.
-
-    Serve starts it at composition, so this only constructs one where nothing
-    did. That matters more than it looks: the alternative is a second, quieter
-    path on which routes decide lane starts by themselves, and a decision that
-    runs somewhere other than here is exactly what this boundary exists to end.
-    """
-    reconciler = getattr(state, "lifecycle_reconciler", None)
-    if reconciler is None:
-        reconciler = LifecycleReconciler(lifecycle_decision_authority(state).handle)
-        reconciler.start()
-        state.lifecycle_reconciler = reconciler
-    return reconciler
-
-
 def submit_explicit_send_intent(
     state: Any,
     target: WorktreeTarget,
@@ -461,7 +484,7 @@ def submit_explicit_send_intent(
     closing on a lock the awaiting thread still holds.
     """
     lifecycle_decision_authority(state).reserve_explicit_grant(target.id)
-    return lifecycle_reconciler(state).submit_intent(
+    return state.submit_lifecycle_intent(
         ExplicitLifecycleIntent(
             target_id=target.id,
             intent_id=intent_id,
@@ -478,7 +501,7 @@ def submit_inbox_wake(
     source_identity: str,
 ) -> Future[LifecycleOutcome]:
     """Queue the automatic decision a durable inbox publication makes relevant."""
-    return lifecycle_reconciler(state).submit_automatic(
+    return state.submit_lifecycle_wake(
         AutomaticLifecycleWake(
             target_id=target.id,
             source=LifecycleWakeSource.INBOX,
@@ -505,7 +528,7 @@ def await_lane_lifecycle(
     target: WorktreeTarget,
 ) -> LifecycleDecision | None:
     """Report the decision behind ``target``'s queued lifecycle work, once run."""
-    outcome = lifecycle_reconciler(state).await_target(target.id)
+    outcome = state.await_lifecycle_outcome(target.id)
     return outcome.decision if outcome is not None else None
 
 
@@ -518,6 +541,18 @@ def _decision_detail(decision: LifecycleDecision) -> str:
         for field in ("trigger", "action", "reason", "failure")
     ]
     return ":".join(part for part in parts if part) or "agent-ensure"
+
+
+def _decision_retry_after_seconds(
+    decision: LifecycleDecision,
+) -> float | None:
+    agent_ensure = decision.agent_ensure
+    if agent_ensure is None:
+        return None
+    value = agent_ensure.get("retryAfterSeconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 class LifecycleReconciler:

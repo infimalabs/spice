@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import get_args
 
 import pytest
 
@@ -11,14 +12,18 @@ from spice.agent.driver import CLAUDE_DRIVER
 from spice.transcript.events import (
     AssistantText,
     Compaction,
+    ContextUsage,
     Image,
     LineStamper,
     Provenance,
     Reasoning,
+    TokenUsage,
     ToolCall,
     ToolOutput,
+    TranscriptEvent,
     Unknown,
     UserMessage,
+    WebSearch,
 )
 
 SOURCE = "/transcripts/session.jsonl"
@@ -48,6 +53,20 @@ def _one_of_every_kind(at: Provenance) -> list[object]:
         Image(at=at, url=PNG_URL),
         UserMessage(at=at, text="drain the board", prompt_id="prompt-7"),
         Compaction(at=at, active=True, boundary=False),
+        WebSearch(at=at, status="completed", action_type="search", query="spice"),
+        ContextUsage(
+            at=at,
+            last=TokenUsage(
+                input_tokens=7,
+                cached_input_tokens=3,
+                cache_write_input_tokens=0,
+                output_tokens=2,
+                reasoning_output_tokens=1,
+                total_tokens=9,
+            ),
+            cumulative=None,
+            model_context_window=258_400,
+        ),
         Unknown(at=at, reason="malformed json", raw_type=None),
     ]
 
@@ -65,7 +84,9 @@ def _assistant_line(*blocks: dict, stop_reason: str | None = None) -> dict:
 
 def test_every_event_kind_carries_full_provenance() -> None:
     at = _provenance(FIRST_LINE, ordinal=0)
-    for event in _one_of_every_kind(at):
+    events = _one_of_every_kind(at)
+    assert {type(event) for event in events} == set(get_args(TranscriptEvent))
+    for event in events:
         assert event.at.source == SOURCE
         assert event.at.line == FIRST_LINE
         assert event.at.ordinal == 0

@@ -15,7 +15,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import RLock
 from typing import Any
 
 from spice.agent.driver import (
@@ -46,10 +45,23 @@ from spice.serve.taskdirectives import (
     _task_directive_html,
     _task_directive_summary,
 )
+from spice.transcript.reader import (
+    REVERSE_WINDOW_BYTES,
+    TranscriptCursor,
+    TranscriptLine,
+    cursor_offset,
+    dispatch_records,
+    locked_cursor,
+    offset_after_line,
+    read_bounded,
+    read_forward,
+    read_line,
+    read_reverse_window,
+    render_cursor,
+    transcript_size,
+)
 
 IMAGE_REFERENCE_RE = re.compile(r"!\[[^\]]*\]\((?:<[^>]*>|[^)]*)\)")
-TAIL_SCAN_CHUNK_BYTES = 1024 * 1024
-TAIL_SCAN_MAX_BYTES = 8 * 1024 * 1024
 
 ACTIVE_ASSISTANT_SECONDS = 60
 ACTIVEISH_ASSISTANT_SECONDS = 5 * 60
@@ -142,10 +154,7 @@ class AssistantMessage:
 
 
 @dataclass
-class RolloutCursor:
-    offset: int = 0
-    last_key: str | None = None
-    lock: RLock = field(default_factory=RLock, repr=False)
+class RolloutCursor(TranscriptCursor):
     # Append-only transcripts: the initial no-`before` read seeds this cache;
     # same-size reads reuse it, and watcher growth reads extend it from
     # `offset` instead of rescanning the transcript tail.
@@ -238,7 +247,7 @@ def read_assistant_messages(
     bounded = max(1, min(limit, MAX_MESSAGE_LIMIT))
     owner_driver = driver or driver_for_transcript(transcript_path)
     if cursor is not None:
-        with cursor.lock:
+        with locked_cursor(cursor):
             cursor.removed_keys = []
             return _read_locked(
                 transcript_path,
@@ -269,28 +278,16 @@ def read_metric_messages_from_offset(
     worktree_id: str | None = None,
 ) -> tuple[list[AssistantMessage], int]:
     """Read metric-relevant transcript records from a byte offset to EOF."""
-    messages: list[AssistantMessage] = []
     driver = driver_for_transcript(transcript_path)
-    file_size = transcript_path.stat().st_size
-    if file_size < start_offset:
-        start_offset = 0
-    call_previews: dict[str, str] = {}
-    with transcript_path.open(encoding="utf-8", errors="replace") as handle:
-        handle.seek(start_offset)
-        while True:
-            line_offset = handle.tell()
-            line = handle.readline()
-            if not line:
-                return messages, handle.tell()
-            message = _build_message(
-                line_offset,
-                line,
-                driver=driver,
-                worktree_id=worktree_id,
-                call_previews=call_previews,
-            )
-            if message is not None:
-                messages.append(message)
+    read = read_forward(transcript_path, start_offset=start_offset)
+    return (
+        _messages_from_records(
+            read.records,
+            driver=driver,
+            worktree_id=worktree_id,
+        ),
+        read.end_offset,
+    )
 
 
 def _read_locked(
@@ -305,7 +302,7 @@ def _read_locked(
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
     if before is not None:
-        end_offset = _key_offset(before)
+        end_offset = cursor_offset(before)
         if end_offset is None:
             return []
         return _read_window(
@@ -338,11 +335,11 @@ def _read_locked(
             driver=driver,
         )
     if after is not None:
-        after_offset = _key_offset(after)
+        after_offset = cursor_offset(after)
         if after_offset is not None:
             return _read_from_offset(
                 transcript_path,
-                start_offset=_offset_after_line(transcript_path, after_offset),
+                start_offset=offset_after_line(transcript_path, after_offset),
                 limit=limit,
                 cursor=cursor,
                 worktree_id=worktree_id,
@@ -356,16 +353,6 @@ def _read_locked(
         worktree_id=worktree_id,
         driver=driver,
     )
-
-
-def _offset_after_line(transcript_path: Path, line_offset: int) -> int:
-    try:
-        with transcript_path.open("rb") as handle:
-            handle.seek(line_offset)
-            handle.readline()
-            return handle.tell()
-    except OSError:
-        return line_offset
 
 
 def _read_from_offset(
@@ -402,9 +389,8 @@ def _read_appended_window(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
-    try:
-        file_size = transcript_path.stat().st_size
-    except OSError:
+    file_size = transcript_size(transcript_path)
+    if file_size is None:
         return []
     if (
         cursor.window is None
@@ -460,27 +446,15 @@ def _read_chronological_from_offset(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> tuple[list[AssistantMessage], int]:
-    file_size = transcript_path.stat().st_size
-    if file_size < start_offset:
-        start_offset = 0
-    messages: list[AssistantMessage] = []
-    call_previews: dict[str, str] = {}
-    with transcript_path.open(encoding="utf-8", errors="replace") as handle:
-        handle.seek(start_offset)
-        while True:
-            line_offset = handle.tell()
-            line = handle.readline()
-            if not line:
-                return messages, handle.tell()
-            message = _build_message(
-                line_offset,
-                line,
-                driver=driver,
-                worktree_id=worktree_id,
-                call_previews=call_previews,
-            )
-            if message is not None:
-                messages.append(message)
+    read = read_forward(transcript_path, start_offset=start_offset)
+    return (
+        _messages_from_records(
+            read.records,
+            driver=driver,
+            worktree_id=worktree_id,
+        ),
+        read.end_offset,
+    )
 
 
 def _read_window(
@@ -493,90 +467,87 @@ def _read_window(
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
     """Newest-first window ending at `end_offset` (or EOF), tail-scanned."""
-    try:
-        file_size = transcript_path.stat().st_size
-        if (
-            end_offset is None
-            and cursor is not None
-            and cursor.window is not None
-            and cursor.window_size == file_size
-            and cursor.window_limit == limit
-        ):
-            return list(cursor.window)
-        scan_end = file_size if end_offset is None else min(end_offset, file_size)
-        start = max(0, scan_end - TAIL_SCAN_MAX_BYTES)
-        newest: list[AssistantMessage] = []
-        presence: list[AssistantMessage] = []
-        while True:
-            newest, presence = _scan_span(
-                transcript_path,
-                start=start,
-                end=scan_end,
-                limit=limit,
-                worktree_id=worktree_id,
-                driver=driver,
-            )
-            if len(newest) >= limit or start == 0:
-                break
-            start = max(0, start - TAIL_SCAN_MAX_BYTES)
-        kept = list(newest)
-        if end_offset is None:
-            kept.extend(presence)
-        kept.sort(key=lambda message: message.index)
-        kept = _collapse_view_image_pairs(kept)
-        if end_offset is not None and _line_has_tool_output_image(
-            transcript_path, end_offset, driver=driver
-        ):
-            kept = _drop_trailing_view_image_call(kept)
-        result = list(reversed(kept))
-        if cursor is not None and end_offset is None:
-            cursor.offset = file_size
-            cursor.last_key = kept[-1].key if kept else None
-            cursor.window = result
-            cursor.window_size = file_size
-            cursor.window_limit = limit
-        return result
-    except OSError:
+    file_size = transcript_size(transcript_path)
+    if file_size is None:
         return []
+    if (
+        end_offset is None
+        and cursor is not None
+        and cursor.window is not None
+        and cursor.window_size == file_size
+        and cursor.window_limit == limit
+    ):
+        return list(cursor.window)
+    read = read_reverse_window(
+        transcript_path,
+        end_offset=end_offset,
+        max_bytes=REVERSE_WINDOW_BYTES,
+    )
+    records = list(read.records)
+    scan_start = read.access_start_offset
+    while True:
+        scanned = _messages_from_records(
+            tuple(records),
+            driver=driver,
+            worktree_id=worktree_id,
+        )
+        visible = [
+            message for message in scanned if not message.kind.startswith("presence:")
+        ]
+        if len(visible) >= limit or scan_start == 0:
+            break
+        older = read_bounded(
+            transcript_path,
+            start_offset=max(0, scan_start - REVERSE_WINDOW_BYTES),
+            end_offset=scan_start,
+            align_partial_start=True,
+        )
+        if older.access_start_offset >= scan_start:
+            break
+        if older.records:
+            records[0:0] = older.records
+        scan_start = older.access_start_offset
+    presence = [message for message in scanned if message.kind.startswith("presence:")]
+    kept = list(visible[-limit:])
+    if end_offset is None:
+        kept.extend(_kept_presence_messages(presence))
+    kept.sort(key=lambda message: message.index)
+    kept = _collapse_view_image_pairs(kept)
+    if end_offset is not None and _line_has_tool_output_image(
+        transcript_path, end_offset, driver=driver
+    ):
+        kept = _drop_trailing_view_image_call(kept)
+    result = list(reversed(kept))
+    if cursor is not None and end_offset is None:
+        cursor.offset = file_size
+        cursor.last_key = kept[-1].key if kept else None
+        cursor.window = result
+        cursor.window_size = file_size
+        cursor.window_limit = limit
+    return result
 
 
-def _scan_span(
-    transcript_path: Path,
+def _messages_from_records(
+    records: tuple[TranscriptLine, ...],
     *,
-    start: int,
-    end: int,
-    limit: int,
-    worktree_id: str | None,
     driver: AgentDriver,
-) -> tuple[list[AssistantMessage], list[AssistantMessage]]:
-    visible: list[AssistantMessage] = []
-    presence: list[AssistantMessage] = []
+    worktree_id: str | None,
+) -> list[AssistantMessage]:
+    messages: list[AssistantMessage] = []
     call_previews: dict[str, str] = {}
-    with transcript_path.open(encoding="utf-8", errors="replace") as handle:
-        handle.seek(start)
-        if start:
-            handle.readline()  # skip the partial line at the chunk boundary
-        while True:
-            line_offset = handle.tell()
-            if line_offset >= end:
-                break
-            line = handle.readline()
-            if not line:
-                break
-            message = _build_message(
-                line_offset,
-                line,
-                driver=driver,
-                worktree_id=worktree_id,
-                call_previews=call_previews,
-            )
-            if message is None:
-                continue
-            if message.kind.startswith("presence:"):
-                presence.append(message)
-                continue
-            visible.append(message)
-    return visible[-limit:], _kept_presence_messages(presence)
+
+    def consume(record: TranscriptLine) -> None:
+        message = _build_message(
+            record,
+            driver=driver,
+            worktree_id=worktree_id,
+            call_previews=call_previews,
+        )
+        if message is not None:
+            messages.append(message)
+
+    dispatch_records(records, consume)
+    return messages
 
 
 def _collapse_view_image_pairs(
@@ -612,13 +583,8 @@ def _line_has_tool_output_image(
     transcript_path: Path, offset: int, *, driver: AgentDriver
 ) -> bool:
     """The paging boundary line pairs with a trailing `view_image` call."""
-    try:
-        with transcript_path.open(encoding="utf-8", errors="replace") as handle:
-            handle.seek(offset)
-            line = handle.readline()
-    except OSError:
-        return False
-    loaded = _load_json_line(line)
+    record = read_line(transcript_path, offset)
+    loaded = record.parsed if record is not None else None
     if loaded is None:
         return False
     event = driver.normalize_transcript_line(loaded)
@@ -698,21 +664,21 @@ def activity_status(messages: list[AssistantMessage]) -> str:
 
 
 def _build_message(
-    offset: int,
-    line: str,
+    record: TranscriptLine,
     *,
     driver: AgentDriver,
     worktree_id: str | None = None,
     call_previews: dict[str, str] | None = None,
 ) -> AssistantMessage | None:
-    loaded = _load_json_line(line)
+    loaded = record.parsed
     if loaded is None:
         return None
     event = driver.normalize_transcript_line(loaded)
     if event is None:
         return None
+    offset = record.offset
     timestamp = str(event.get("timestamp") or "")
-    key = f"{timestamp}#{offset}" if timestamp else str(offset)
+    key = render_cursor(timestamp, offset)
     if event.get("type") == "compacted":
         return _simple_message(
             key, offset, timestamp, kind="compaction", text="Context compacted"
@@ -720,7 +686,7 @@ def _build_message(
     if event.get("type") != "response_item":
         return None
     payload = event.get("payload") or {}
-    text = extract_assistant_text(line, driver)
+    text = extract_assistant_text(record.raw, driver)
     source_kind = "assistant_text"
     if text is None:
         text = assistant_image_markdown(
@@ -967,15 +933,6 @@ def reply_card_message(
         source_kind=source_kind,
         worktree_id=worktree_id,
     )
-
-
-def _key_offset(key: str) -> int | None:
-    raw = key.rsplit("#", 1)[-1]
-    try:
-        offset = int(raw)
-    except ValueError:
-        return None
-    return offset if offset >= 0 else None
 
 
 def _plan_items(payload: dict[str, Any]) -> list[dict[str, str]] | None:
@@ -1303,14 +1260,6 @@ def _preview_for_web_search(payload: dict[str, Any]) -> str:
     if isinstance(query, str) and query.strip():
         return f"search: {query}"
     return ""
-
-
-def _load_json_line(line: str) -> dict[str, Any] | None:
-    try:
-        loaded = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return loaded if isinstance(loaded, dict) else None
 
 
 def parse_timestamp(raw: str) -> datetime | None:
