@@ -19,6 +19,7 @@ from spice.mail.inbox import inbox_dir
 from spice.serve import livebus
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
+from spice.serve.payload import lane
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.websocket import EncodedTextFrame
 from tests.test_wirefixtures import (
@@ -651,8 +652,10 @@ def _callbacks(
         pending_identity = pending_inbox_identity_payload(target.repo_root)
         return {
             "messages": [],
-            **pending_identity,
-            "statusLine": pending_identity,
+            "chrome": lane.lane_chrome_payload(
+                target_id=target.id,
+                pending_identity=pending_identity,
+            ),
         }
 
     raw_messages_payload = messages_payload or default_messages_payload

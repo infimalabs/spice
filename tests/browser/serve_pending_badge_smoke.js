@@ -85,7 +85,6 @@ function setupPendingSmokePage(config) {
     lane.targetId,
     0,
     [],
-    "rev-initial",
     config.initialVersion,
   ).statusLine;
   lane.latestPayload = { statusLine: lane.lastRenderedStatusLine };
@@ -174,7 +173,6 @@ async function applyPendingAckSmokePage(config) {
         lane.targetId,
         0,
         [],
-        "rev-ack",
         config.ackVersion,
       ),
       source: "watch",
@@ -234,15 +232,10 @@ function pendingSmokeChrome(targetId, count, keys, version) {
   };
 }
 
-function pendingSmokePayload(targetId, count, keys, revision, version) {
+function pendingSmokePayload(targetId, count, keys, version) {
   return {
     chrome: pendingSmokeChrome(targetId, count, keys, version),
-    statusLine: {
-      pendingInboxCount: count,
-      pendingInboxKeys: keys,
-      pendingInboxRevision: revision,
-      pendingInboxVersion: version,
-    },
+    statusLine: {},
   };
 }
 

@@ -20,7 +20,6 @@ from spice.serve.payload.identity import (
     _binding_status,
     team_actor_for_target,
 )
-from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.taskboard import OpenTaskBoardProjection, open_task_board_projection
 from spice.serve.team.history import ObservationAttributionMode
 from spice.serve.worktree.target import WorktreeTarget
@@ -51,26 +50,16 @@ def status_line_payload(
     *,
     items: list[message_reader.AssistantMessage],
     error: str | None,
-    pending_count: int | None = None,
-    pending_identity: dict[str, Any] | None = None,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
-    pending = pending_identity or pending_inbox_identity_payload(target.repo_root)
-    if pending_count is not None:
-        pending = {
-            **pending,
-            "pendingInboxCount": pending_count,
-            "pendingInboxLabel": str(pending_count),
-        }
     return _status_line_payload_from_status(
         status=status,
         thread_id=status.thread_id,
         binding_error=binding_error,
         items=items,
         error=error,
-        pending_identity=pending,
         active_claims=task_board,
     )
 
@@ -97,7 +86,6 @@ def _status_line_payload_from_status(
     binding_error: str,
     items: list[message_reader.AssistantMessage],
     error: str | None,
-    pending_identity: dict[str, Any],
     active_claims: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
     thread_id = thread_id or ""
@@ -113,12 +101,10 @@ def _status_line_payload_from_status(
         "bindingError": binding_error,
         "rolloutStatus": "error" if binding_error or error else "ok",
         "activityStatus": message_reader.activity_status(items),
-        "lastAssistantAt": latest_status.timestamp if latest_status else "",
         "latestActivityKind": latest_activity_kind,
         "latestMessagePreview": latest.preview if latest else "",
         "latestActivityPreview": (latest_activity.preview if latest_activity else ""),
         "preview": latest_status.preview if latest_status else "",
-        **pending_identity,
         "agentProcessStatus": status.process_status,
         "agentVisualStatus": _agent_visual_status(
             status.process_status, latest_activity_kind
@@ -126,6 +112,11 @@ def _status_line_payload_from_status(
         "claimedTask": _claimed_task_payload(thread_id, claims=active_claims),
         "error": binding_error or error or "",
     }
+
+
+def lane_activity_at(items: list[message_reader.AssistantMessage]) -> str:
+    """Return the transcript instant that dates the activity chrome facet."""
+    return items[0].timestamp if items else ""
 
 
 def _agent_visual_status(process_status: str, latest_activity_kind: str) -> str:

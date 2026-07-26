@@ -7,18 +7,7 @@ const { threadActorId } = require("./payload_factory");
 
 const execFileAsync = promisify(execFile);
 
-function pendingIdentity(count = 0) {
-  return {
-    pendingInboxCount: count,
-    pendingInboxLabel: String(count),
-    pendingInboxKeys: [],
-    pendingInboxRevision: "smoke-pending-" + count,
-    pendingInboxVersion: 1,
-  };
-}
-
 function mismatchPayload(targetId) {
-  const pending = pendingIdentity(0);
   return {
     targetIdentity: {
       targetId,
@@ -76,11 +65,7 @@ function mismatchPayload(targetId) {
         ],
       },
     },
-    taskFilters: [],
-    laneFilterVersion: "",
-    teamIdentity: { state: "none" },
-    ...pending,
-    statusLine: { ...pending, agentProcessStatus: "running" },
+    statusLine: { agentProcessStatus: "running" },
   };
 }
 

@@ -82,9 +82,21 @@ function laneChromeTeamId(subject) {
 }
 
 /**
+ * Browser-only status projection. Transport StatusLine owns structural agent
+ * status; pending and transcript recency are overlaid from canonical chrome.
+ *
+ * @typedef {StatusLine & {
+ *   pendingInboxCount: number,
+ *   pendingInboxLabel: string,
+ *   pendingInboxKeys: !Array<string>,
+ *   lastAssistantAt: string
+ * }} LaneStatusPresentation
+ */
+
+/**
  * @param {Object} lane
  * @param {StatusLine} statusLine
- * @returns {StatusLine}
+ * @returns {LaneStatusPresentation}
  */
 function laneChromeStatusLine(lane, statusLine = {}) {
   const pending = laneChromePendingInbox(lane);
@@ -95,9 +107,7 @@ function laneChromeStatusLine(lane, statusLine = {}) {
     pendingInboxCount: Math.max(0, Number(pending.count) || 0),
     pendingInboxLabel: String(pending.label || pending.count || 0),
     pendingInboxKeys: Array.isArray(pending.keys) ? pending.keys : [],
-    lastAssistantAt:
-      String(activity.lastAssistantAt || "") ||
-      String(statusLine.lastAssistantAt || ""),
+    lastAssistantAt: String(activity.lastAssistantAt || ""),
     agentProcessStatus:
       String(lifecycle.processStatus || "") ||
       String(statusLine.agentProcessStatus || ""),
@@ -210,14 +220,12 @@ function renderLanePayloadPresentation(lane, payload) {
     );
   }
   const host = laneGroupHost(lane);
-  if (identityChanged) {
+  if (identityChanged || payload.statusLine) {
     syncComposerShards(
       host,
       laneIsFusedHost(host) ? laneGroupMemberLanes(host) : [host],
     );
     syncComposerPlaceholders(host);
-  }
-  if (identityChanged || payload.statusLine) {
     syncFusedLaneLights(host);
     syncFusedLaneStatusLine(host);
   }

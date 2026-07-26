@@ -38,6 +38,10 @@ ACTOR_A = f"thread:{THREAD_A}"
 ACTOR_B = f"thread:{THREAD_B}"
 
 
+def _chrome_value(payload, facet):
+    return payload["chrome"][facet]["value"]
+
+
 @pytest.mark.parametrize(
     "send_response",
     (work_tree_send_response_payload, work_tree_send_accepted_response_payload),
@@ -77,14 +81,13 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     body = inbox_request_body(collect_inbox_items(repo)[0].text)
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"]["threadId"] == THREAD_B
-    assert payload["renewalIntent"]["requested"] is False
-    assert payload["renewalIntent"]["state"] == "started"
-    assert payload["renewalIntent"]["successorThreadId"] == THREAD_B
-    assert payload["renewalIntent"]["teamSlot"] == 0
-    assert payload["renewalIntent"]["predecessorIdentity"]["actualModel"] == (
-        "gpt-test"
-    )
-    assert payload["renewalIntent"]["successorIdentity"]["desiredModel"] == ("gpt-next")
+    renewal = _chrome_value(payload, "renewal")["renewalIntent"]
+    assert renewal["requested"] is False
+    assert renewal["state"] == "started"
+    assert renewal["successorThreadId"] == THREAD_B
+    assert renewal["teamSlot"] == 0
+    assert renewal["predecessorIdentity"]["actualModel"] == "gpt-test"
+    assert renewal["successorIdentity"]["desiredModel"] == "gpt-next"
     assert renewal_rehydration_text(THREAD_A) in body
     assert ensure_calls == [
         {
@@ -165,10 +168,12 @@ def test_inbox_wake_force_news_pending_renewal_then_inventory_projects_it(
         "state": "bound",
         "threadId": THREAD_B,
     }
-    assert work_tree["teamIdentity"]["teamId"] == created.team_id
-    assert work_tree["teamIdentity"]["teamRevision"] > created.revision
-    assert work_tree["renewalIntent"]["successorThreadId"] == THREAD_B
-    assert work_tree["renewalIntent"]["teamSlot"] == 0
+    team_identity = _chrome_value(work_tree, "teamConfig")["teamIdentity"]
+    renewal = _chrome_value(work_tree, "renewal")["renewalIntent"]
+    assert team_identity["teamId"] == created.team_id
+    assert team_identity["teamRevision"] > created.revision
+    assert renewal["successorThreadId"] == THREAD_B
+    assert renewal["teamSlot"] == 0
     assert ensure_calls == [
         {
             "target": target,
@@ -244,11 +249,13 @@ def test_inbox_wake_force_news_pending_renewal_then_messages_project_it(
         "state": "bound",
         "threadId": THREAD_B,
     }
-    assert result["teamIdentity"]["teamId"] == created.team_id
-    assert result["teamIdentity"]["teamRevision"] > created.revision
+    team_identity = _chrome_value(result, "teamConfig")["teamIdentity"]
+    renewal = _chrome_value(result, "renewal")["renewalIntent"]
+    assert team_identity["teamId"] == created.team_id
+    assert team_identity["teamRevision"] > created.revision
     assert result["agentEnsure"]["threadId"] == THREAD_B
-    assert result["renewalIntent"]["successorThreadId"] == THREAD_B
-    assert result["renewalIntent"]["teamSlot"] == 0
+    assert renewal["successorThreadId"] == THREAD_B
+    assert renewal["teamSlot"] == 0
     assert message_threads == [THREAD_B]
     assert ensure_calls == [
         {
@@ -404,8 +411,8 @@ def test_repeated_sends_during_one_handoff_stamp_the_pending_renewal_once(
     assert renewal is not None
     assert renewal.state == "pending"
     assert renewal.ancestor_thread_id == THREAD_A
-    assert first["renewalIntent"]["state"] == "pending"
-    assert second["renewalIntent"]["state"] == "pending"
+    assert _chrome_value(first, "renewal")["renewalIntent"]["state"] == "pending"
+    assert _chrome_value(second, "renewal")["renewalIntent"]["state"] == "pending"
 
 
 def _repo(tmp_path: Path) -> Path:

@@ -46,12 +46,6 @@ INITIAL_BUS_MESSAGE_LIMIT = 25
 # to overlap (per-client rollout cursors, locked team store); the bound keeps
 # one browser from monopolizing transcript parsing when it opens many lanes.
 LIVE_BUS_PAYLOAD_WORKERS = 8
-PENDING_LANE_PAYLOAD_KEYS = (
-    "pendingInboxCount",
-    "pendingInboxKeys",
-    "pendingInboxRevision",
-    "pendingInboxVersion",
-)
 
 
 LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
@@ -979,18 +973,15 @@ def _pending_lane_payload(target: Any) -> dict[str, Any]:
     pending_identity = pending_inbox_identity_payload(
         getattr(target, "repo_root", None)
     )
-    payload = {
-        key: pending_identity[key]
-        for key in PENDING_LANE_PAYLOAD_KEYS
-        if key in pending_identity
-    }
     # A pending-only change saw the inbox and nothing else, so the frame names
     # exactly one facet. Whatever the client holds for team configuration, the
     # task board, or activity is left standing rather than restated from a pass
     # that never looked at them.
-    payload["chrome"] = lane_chrome_payload(
-        target_id=target.id, pending_identity=pending_identity
-    )
+    payload = {
+        "chrome": lane_chrome_payload(
+            target_id=target.id, pending_identity=pending_identity
+        )
+    }
     return validate_wire_payload("PendingLanePayload", payload)
 
 

@@ -123,11 +123,10 @@ def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     assert status == HTTPStatus.OK
     assert payload["ok"] is True
     assert payload["requestText"] == "inspect this failure"
-    assert payload["pendingInboxCount"] == 0
-    assert payload["pendingInboxLabel"] == "0"
-    assert payload["pendingInboxKeys"] == []
-    assert payload["pendingInboxRevision"]
-    assert payload["pendingInboxVersion"] > 0
+    pending = payload["chrome"]["pendingInbox"]
+    assert pending["authority"] == "inbox"
+    assert pending["order"]["revision"] > 0
+    assert pending["value"] == {"count": 0, "label": "0", "keys": []}
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert payload["agentEnsure"]["deadletteredInboxKey"]
@@ -1162,7 +1161,6 @@ def test_pending_inbox_ensure_stops_launching_after_rapid_death_storm(
         "1kDw6qsY",
         "1kDw6qsZ",
     ]
-    assert refused["pendingInboxCount"] == 0
     assert payloads[4:] == [None, None]
     assert pending_inbox_count(repo) == 0
     # Deadletter listings read newest-first, like the archive preview.

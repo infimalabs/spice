@@ -59,6 +59,23 @@ BLOCKED_ENSURE_ENTRY_SECONDS = 5.0
 BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
 
 
+def _pending_lane_chrome(
+    target_id: str = "lane",
+    *,
+    count: int = 1,
+) -> dict[str, Any]:
+    """Build the canonical inbox facet through the production assembler."""
+    return lane.lane_chrome_payload(
+        target_id=target_id,
+        pending_identity={
+            "pendingInboxCount": count,
+            "pendingInboxLabel": str(count),
+            "pendingInboxKeys": ["inbox-key"] if count else [],
+            "pendingInboxVersion": 1,
+        },
+    )
+
+
 def _single_change_wait(path: Path, ready: Event, changed: Event):
     """Deliver one latched test change exactly once, then park until stopped."""
     delivered = False
@@ -295,17 +312,20 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
             transcript, limit=5, driver=CODEX_DRIVER
         )
         pending = pending_inbox_identity_payload(repo)
-        return {
-            "messages": [item.to_payload() for item in items],
-            **pending,
-            "statusLine": lane.status_line_payload(
+        return valid_lane_payload(
+            messages=[item.to_payload() for item in items],
+            statusLine=lane.status_line_payload(
                 SimpleNamespace(),
                 target,
                 items=items,
                 error=None,
-                pending_identity=pending,
             ),
-        }
+            chrome=lane.lane_chrome_payload(
+                target_id=target.id,
+                pending_identity=pending,
+                last_assistant_at=lane.lane_activity_at(items),
+            ),
+        )
 
     monkeypatch.setattr(
         livebus,
@@ -353,7 +373,7 @@ def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch)
         assert status_line["latestActivityPreview"] == "Confirmed fixed."
         assert status_line["agentProcessStatus"] == "running"
         assert status_line["agentVisualStatus"] == "idle"
-        assert status_line["pendingInboxCount"] == 0
+        assert pushed["payload"]["chrome"]["pendingInbox"]["value"]["count"] == 0
     finally:
         change_written.set()
         session._teardown()
@@ -388,11 +408,13 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         if message_payload_calls > 1:
             raise AssertionError("inbox-only change must not read messages payload")
         pending_identity = pending_inbox_identity_payload(target.repo_root)
-        return {
-            "messages": [],
-            **pending_identity,
-            "statusLine": pending_identity,
-        }
+        return valid_lane_payload(
+            messages=[],
+            chrome=lane.lane_chrome_payload(
+                target_id=target.id,
+                pending_identity=pending_identity,
+            ),
+        )
 
     session = LiveBusSession(
         connection,
@@ -406,7 +428,10 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
     try:
         _subscribe_lane(session, target.id, limit=5)
         assert (
-            _wait_for_reply(connection)["lanes"][0]["payload"]["pendingInboxCount"] == 0
+            _wait_for_reply(connection)["lanes"][0]["payload"]["chrome"][
+                "pendingInbox"
+            ]["value"]["count"]
+            == 0
         )
         assert watcher_ready.wait(timeout=1.0)
 
@@ -415,26 +440,14 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
 
         pushed = _wait_for_watch_push(connection)
         assert pushed["type"] == "lane.pending"
-        assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["pendingInboxKeys"] == ["1jN54zJK"]
-        assert pushed["payload"]["pendingInboxRevision"]
-        assert pushed["payload"]["pendingInboxVersion"] > 0
-        assert set(pushed["payload"]) == {
-            "pendingInboxCount",
-            "pendingInboxKeys",
-            "pendingInboxRevision",
-            "pendingInboxVersion",
-            "chrome",
-        }
+        assert set(pushed["payload"]) == {"chrome"}
         chrome = pushed["payload"]["chrome"]
         assert set(chrome) == {"targetId", "pendingInbox"}
         assert chrome["targetId"] == target.id
         assert chrome["pendingInbox"]["authority"] == "inbox"
+        assert chrome["pendingInbox"]["value"]["count"] == 1
         assert chrome["pendingInbox"]["value"]["keys"] == ["1jN54zJK"]
-        assert (
-            chrome["pendingInbox"]["order"]["revision"]
-            == (pushed["payload"]["pendingInboxVersion"])
-        )
+        assert chrome["pendingInbox"]["order"]["revision"] > 0
         assert message_payload_calls == 1
         assert transcript.read_text(encoding="utf-8") == ""
     finally:
@@ -553,7 +566,10 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     try:
         _subscribe_lane(session, target.id, limit=5)
         assert (
-            _wait_for_reply(connection)["lanes"][0]["payload"]["pendingInboxCount"] == 0
+            _wait_for_reply(connection)["lanes"][0]["payload"]["chrome"][
+                "pendingInbox"
+            ]["value"]["count"]
+            == 0
         )
         assert watcher_ready.wait(timeout=1.0)
 
@@ -562,8 +578,11 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
 
         pushed = _wait_for_watch_push(connection)
         assert pushed["type"] == "lane.pending"
-        assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["pendingInboxKeys"] == ["1jN54zJK"]
+        assert set(pushed["payload"]) == {"chrome"}
+        assert pushed["payload"]["chrome"]["pendingInbox"]["value"]["count"] == 1
+        assert pushed["payload"]["chrome"]["pendingInbox"]["value"]["keys"] == [
+            "1jN54zJK"
+        ]
         assert "agentEnsure" not in pushed["payload"]
         assert ensure_calls == []
     finally:
@@ -639,7 +658,7 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
         followup_continue.wait(timeout=1.0)
         return valid_lane_payload(
             messages=[],
-            statusLine={"pendingInboxCount": 1},
+            chrome=_pending_lane_chrome(),
         )
 
     session = LiveBusSession(
@@ -681,7 +700,7 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
             "source": "send",
             "payload": valid_lane_payload(
                 messages=[],
-                statusLine={"pendingInboxCount": 1},
+                chrome=_pending_lane_chrome(),
             ),
         }
         assert calls == [
@@ -759,7 +778,7 @@ def test_lane_send_acks_before_its_blocked_lifecycle_decision_and_follows_up(
         assert ack["type"] == "lane.sendResult"
         assert ack["result"]["ok"] is True
         assert ack["result"]["agentEnsure"] == {}
-        assert ack["result"]["pendingInboxCount"] == 1
+        assert ack["result"]["chrome"]["pendingInbox"]["value"]["count"] == 1
         release_ensure.set()
 
         followup = _wait_for_send_followup(connection)

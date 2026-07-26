@@ -2,9 +2,8 @@
 
 // One wire-shape authority for the serve browser smokes.
 //
-// serve streams a verbose target-identity trio (targetIdentity /
-// serveAgentIdentity / teamIdentity + pending-inbox + statusLine) and a team
-// snapshot to the browser. Restated inline, that shape drifts smoke-to-smoke;
+// serve streams presentation identity beside one canonical, faceted chrome
+// envelope and a team snapshot. Restated inline, that shape drifts smoke-to-smoke;
 // centralised here, a smoke declares only its ids, topology, and intentional
 // deviations (via a deep-merge override hook).
 //
@@ -53,20 +52,29 @@ function withOverrides(base, overrides) {
   return merged;
 }
 
-// The pending-inbox quartet, shared verbatim by the top-level target payload
-// and its statusLine echo.
-function pendingInbox(revision) {
+function chromeFacet(authority, revision, value, epoch) {
   return {
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: revision,
-    pendingInboxVersion: 1,
+    authority: authority,
+    order: {
+      epoch: epoch === undefined ? "" : String(epoch),
+      revision: revision,
+    },
+    value: value,
   };
+}
+
+function pendingInbox(revision) {
+  return chromeFacet(
+    "inbox",
+    revision,
+    { count: 0, label: "0", keys: [] },
+  );
 }
 
 // A bound single-agent target payload as serve streams it to the browser.
 // `options`: { id, threadId=id, teamId, teamRevision=1, configRevision=teamRevision,
-//   worktreeName=id, branch=id, lifetime="Drive", pendingPrefix="pending-" }.
+//   worktreeName=id, branch=id, lifetime="Drive", pendingRevision=1,
+//   taskBoardEpoch=1 }.
 // `overrides` deep-merges over the canonical shape for intentional deviations.
 function targetPayload(options, overrides) {
   const opts = options || {};
@@ -79,9 +87,16 @@ function targetPayload(options, overrides) {
     opts.worktreeName === undefined ? id : opts.worktreeName;
   const branch = opts.branch === undefined ? id : opts.branch;
   const lifetime = opts.lifetime === undefined ? "Drive" : opts.lifetime;
-  const pendingPrefix =
-    opts.pendingPrefix === undefined ? "pending-" : opts.pendingPrefix;
-  const pending = pendingInbox(pendingPrefix + id);
+  const pendingRevision =
+    opts.pendingRevision === undefined ? 1 : opts.pendingRevision;
+  const taskBoardEpoch =
+    opts.taskBoardEpoch === undefined ? 1 : opts.taskBoardEpoch;
+  const teamIdentity = {
+    state: "member",
+    teamId: opts.teamId,
+    teamRevision: teamRevision,
+    configRevision: configRevision,
+  };
   const base = {
     id: id,
     name: id,
@@ -99,20 +114,38 @@ function targetPayload(options, overrides) {
       target: { id: id },
       thread: { state: "bound", threadId: threadId },
     },
-    teamIdentity: {
-      state: "member",
-      teamId: opts.teamId,
-      teamRevision: teamRevision,
-      configRevision: configRevision,
+    statusLine: {},
+    chrome: {
+      targetId: id,
+      teamConfig: chromeFacet(
+        "team-store",
+        teamRevision,
+        { teamIdentity: teamIdentity },
+      ),
+      pendingInbox: pendingInbox(pendingRevision),
+      taskBoard: chromeFacet(
+        "task-board",
+        teamRevision,
+        {
+          taskFilters: [],
+          taskFilterEntries: [],
+          effectiveTaskFilters: [],
+          taskFilterInventory: {
+            revision: String(taskBoardEpoch),
+            filters: [],
+            primaryStems: [],
+            openTaskCount: 0,
+          },
+          privateTaskCount: 0,
+        },
+        taskBoardEpoch,
+      ),
+      renewal: chromeFacet(
+        "team-store",
+        teamRevision,
+        { lifetime: lifetime, renewalIntent: {} },
+      ),
     },
-    taskFilters: [],
-    laneFilterVersion: "",
-    lifetime: lifetime,
-    pendingInboxCount: pending.pendingInboxCount,
-    pendingInboxKeys: pending.pendingInboxKeys.slice(),
-    pendingInboxRevision: pending.pendingInboxRevision,
-    pendingInboxVersion: pending.pendingInboxVersion,
-    statusLine: pendingInbox(pending.pendingInboxRevision),
   };
   return withOverrides(base, overrides);
 }
@@ -164,6 +197,7 @@ function teamSnapshot(options, overrides) {
 const FACTORY_HELPERS = [
   isPlainObject,
   withOverrides,
+  chromeFacet,
   pendingInbox,
   targetActorId,
   threadActorId,
@@ -172,12 +206,13 @@ const FACTORY_HELPERS = [
   teamSnapshot,
 ];
 
-// The subset published on `window.spicePayloads` (and exported for Node);
-// `isPlainObject` / `pendingInbox` stay private helpers behind them.
+// The subset published on `window.spicePayloads` (and exported for Node).
 const FACTORY_PUBLIC = [
   targetActorId,
   threadActorId,
   withOverrides,
+  chromeFacet,
+  pendingInbox,
   targetPayload,
   teamPayload,
   teamSnapshot,
@@ -201,6 +236,8 @@ module.exports = {
   targetActorId,
   threadActorId,
   withOverrides,
+  chromeFacet,
+  pendingInbox,
   targetPayload,
   teamPayload,
   teamSnapshot,

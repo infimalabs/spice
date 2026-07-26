@@ -13,7 +13,7 @@ async function run() {
       });
       return await page.evaluate(
         async ({ alpha, beta, snapshot }) => {
-          laneStore.replaceTargets([alpha, beta]);
+          applyTargetsPayload({ workTrees: [alpha, beta] });
           applyTeamSnapshotPayload(snapshot, { force: true });
           const host = laneStore.lanesSnapshot().find(
             (lane) => !isShadowLane(lane) && laneGroupMemberTargetIds(lane).length === 2,

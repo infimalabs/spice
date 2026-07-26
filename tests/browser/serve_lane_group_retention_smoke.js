@@ -94,7 +94,7 @@ async function buildFusedBoard(page, args) {
     ({ targets, settledTeam, messagesByTargetId, readBoardStateText }) => {
       const readBoardState = eval("(" + readBoardStateText + ")");
       window.__readBoardState = readBoardState;
-      laneStore.replaceTargets(targets);
+      applyTargetsPayload({ workTrees: targets });
       applyTeamSnapshotPayload(
         window.spicePayloads.teamSnapshot({ revision: 1, teams: [settledTeam] }),
         { force: true },

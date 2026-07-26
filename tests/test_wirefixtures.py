@@ -187,7 +187,7 @@ LIVE_BUS_FRAME_FIXTURES = {
     ),
     "lane.pending": valid_wire_payload(
         "LanePendingFrame",
-        payload=valid_wire_payload("PendingLanePayload", pendingInboxCount=1),
+        payload=valid_wire_payload("PendingLanePayload"),
     ),
     "lane.submission": valid_wire_payload(
         "LaneSubmissionFrame",

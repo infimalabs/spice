@@ -283,9 +283,8 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     payload = inventory.work_trees_payload(_InventoryState(target))
 
     work_tree = payload["workTrees"][0]
-    assert work_tree["lastAssistantAt"] == latest
     assert work_tree["serveAgentIdentity"]["actorId"] == "thread:agent-a"
-    assert work_tree["statusLine"]["lastAssistantAt"] == latest
+    assert work_tree["chrome"]["activity"]["value"]["lastAssistantAt"] == latest
     assert work_tree["statusLine"]["preview"] == "thinking"
     assert calls == [
         {
@@ -486,13 +485,12 @@ def test_work_trees_payload_keeps_every_task_facet_on_one_selected_revision(
     payload = inventory.work_trees_payload(_InventoryState(target))
 
     work_tree = payload["workTrees"][0]
-    task_filter = payload["taskFilterInventory"]
+    task_filter = work_tree["chrome"]["taskBoard"]["value"]["taskFilterInventory"]
     pressure = work_tree["laneInfo"]["reviewPressure"]
     assert selected == [BEFORE_GENERATION]
     assert fallback_calls == []
     assert task_filter["revision"] == BEFORE_GENERATION
     assert [item["name"] for item in task_filter["filters"]] == ["serve.before"]
-    assert work_tree["taskFilterInventory"] == task_filter
     assert work_tree["statusLine"]["claimedTask"] == {
         "handle": "claim-before",
         "phase": "todo",
@@ -551,8 +549,14 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
 
     degraded_tree = degraded["workTrees"][0]
     healthy_tree = healthy["workTrees"][0]
-    assert degraded["taskFilterInventory"]["revision"] == STABLE_GENERATION
-    assert degraded["taskFilterInventory"]["filters"] == []
+    degraded_inventory = degraded_tree["chrome"]["taskBoard"]["value"][
+        "taskFilterInventory"
+    ]
+    healthy_inventory = healthy_tree["chrome"]["taskBoard"]["value"][
+        "taskFilterInventory"
+    ]
+    assert degraded_inventory["revision"] == STABLE_GENERATION
+    assert degraded_inventory["filters"] == []
     assert degraded_tree["statusLine"]["claimedTask"] == {}
     assert degraded_tree["statusLine"]["latestActivityKind"] == ""
     assert degraded_tree["laneInfo"]["reviewPressure"] == {
@@ -560,8 +564,8 @@ def test_work_trees_payload_recovers_all_task_facets_after_same_revision_failure
         "openFollowupCount": 0,
         "items": [],
     }
-    assert healthy["taskFilterInventory"]["revision"] == STABLE_GENERATION
-    assert [item["name"] for item in healthy["taskFilterInventory"]["filters"]] == [
+    assert healthy_inventory["revision"] == STABLE_GENERATION
+    assert [item["name"] for item in healthy_inventory["filters"]] == [
         "serve.recovered"
     ]
     assert healthy_tree["statusLine"]["claimedTask"]["handle"] == "claim-recovered"
@@ -814,7 +818,7 @@ def test_work_trees_payload_indexes_shared_task_cards_for_each_lane(
     task_activity = [
         {
             "kind": tree["statusLine"]["latestActivityKind"],
-            "timestamp": tree["statusLine"]["lastAssistantAt"],
+            "timestamp": tree["chrome"]["activity"]["value"]["lastAssistantAt"],
             "preview": tree["statusLine"]["preview"],
         }
         for tree in payload["workTrees"]
@@ -869,20 +873,13 @@ def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monke
     )
     monkeypatch.setattr(lane, "agent_status", lambda _repo: status)
     monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
-    monkeypatch.setattr(
-        lane,
-        "pending_inbox_identity_payload",
-        lambda _repo: _pending_identity(),
-    )
-
-    _, inventory_active = inventory._work_tree_status_payloads(
+    _, inventory_active, _ = inventory._work_tree_status_payloads(
         _State(),
         target,
         thread_id=thread_id,
         binding_status="bound",
         binding_error="",
         status=status,
-        pending_identity=_pending_identity(),
     )
     subscription_active = lane.status_line_payload(
         _State(), target, items=[], error=None
@@ -893,14 +890,13 @@ def test_inventory_and_lane_status_share_claimed_task_resolution(tmp_path, monke
     assert resolver_calls == [thread_id, thread_id]
 
     resolved_task = {}
-    _, inventory_released = inventory._work_tree_status_payloads(
+    _, inventory_released, _ = inventory._work_tree_status_payloads(
         _State(),
         target,
         thread_id=thread_id,
         binding_status="bound",
         binding_error="",
         status=status,
-        pending_identity=_pending_identity(),
     )
     subscription_released = lane.status_line_payload(
         _State(), target, items=[], error=None

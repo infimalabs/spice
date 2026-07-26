@@ -15,7 +15,8 @@ function refreshTargetPayload(lane, config, version) {
       threadId: config.teamId + "-thread",
       teamId: config.teamId,
       branch: config.branch,
-      pendingPrefix: "composer-refresh-pending-",
+      pendingRevision: version,
+      taskBoardEpoch: version,
     },
     {
       targetIdentity: {
@@ -26,9 +27,15 @@ function refreshTargetPayload(lane, config, version) {
         agentProcessStatus: "running",
         agentVisualStatus: "running",
         claimedTask: refreshClaimedTask(config),
-        lastAssistantAt: new Date().toISOString(),
         latestActivityKind: "assistant",
-        pendingInboxVersion: version,
+      },
+      chrome: {
+        activity: window.spicePayloads.chromeFacet(
+          "transcript",
+          0,
+          { lastAssistantAt: new Date().toISOString() },
+          version,
+        ),
       },
     },
   );
@@ -42,12 +49,17 @@ function refreshLanePayload(config, task, version) {
       agentProcessStatus: "running",
       agentVisualStatus: "running",
       claimedTask: task,
-      lastAssistantAt: new Date().toISOString(),
       latestActivityKind: "assistant",
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "composer-refresh-subscribe-" + config.teamId,
-      pendingInboxVersion: version,
+    },
+    chrome: {
+      targetId: config.teamId,
+      pendingInbox: window.spicePayloads.pendingInbox(version),
+      activity: window.spicePayloads.chromeFacet(
+        "transcript",
+        0,
+        { lastAssistantAt: new Date().toISOString() },
+        version,
+      ),
     },
   };
 }

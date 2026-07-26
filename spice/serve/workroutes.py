@@ -255,7 +255,6 @@ def _work_tree_send_result_payload(
         response_payload = sent_steering_payload(
             sent,
             target=target,
-            pending_identity=pending_identity,
         )
         send_actor = identity.team_actor_for_target(
             state.team_store, target, predecessor
@@ -275,7 +274,6 @@ def _work_tree_send_result_payload(
         sent,
         target=target,
         decision=decision,
-        pending_identity=pending_identity,
     )
     agent_ensure = response_payload.get("agentEnsure")
     # The reconciler already settled which thread this send belongs to, renewal
@@ -298,28 +296,24 @@ def _work_tree_send_result_payload(
     )
     if send_actor and not deadlettered:
         _record_directive_publication(state, target, sent, send_actor=send_actor)
-    renewal_agent_id = predecessor_actor if renew_intent else send_actor
     renewal_facts: dict[str, Any] = {}
-    if renewal_agent_id:
+    renewal_intent_payload: dict[str, Any] = {}
+    if send_actor:
         # The lifetime and the renewal request are one team-store observation of
-        # the actor this send leaves the lane with. An actor outside any team
-        # still has a renewal state to report, but no lifetime to pair it with,
-        # so the facet stays unnamed rather than carrying half of itself.
-        renewal_facts = identity.team_facts_for_actor(
-            state.team_store, renewal_agent_id
+        # the team this send leaves the lane with. A completed renewal moves the
+        # slot to the successor while its immutable lineage remains keyed by the
+        # predecessor, so those two records must be read from their actual
+        # owners and joined only at this facet boundary.
+        renewal_facts = identity.team_facts_for_actor(state.team_store, send_actor)
+        renewal_intent_payload = identity.renewal_intent_for_actor(
+            state.team_store,
+            predecessor_actor if renew_intent else send_actor,
         )
-        # That pass already resolved this actor's renewal state, so the flat
-        # field reads the same answer rather than asking the store a second
-        # time and reporting two instants of one lane in one reply. Only a
-        # teamless actor, whose facts come back empty, needs its own read.
-        response_payload["renewalIntent"] = renewal_facts.get(
-            "renewalIntent"
-        ) or identity.renewal_intent_for_actor(state.team_store, renewal_agent_id)
     response_payload["chrome"] = lane_chrome_payload(
         target_id=target.id,
         pending_identity=pending_identity,
         team_facts=renewal_facts or None,
-        renewal_intent=renewal_facts.get("renewalIntent"),
+        renewal_intent=renewal_intent_payload or None,
     )
     route_thread_id = send_agent_id or predecessor
     route_actor = identity.team_actor_for_target(
@@ -458,13 +452,7 @@ def _work_tree_route_payload(
             target,
             thread_id,
         ),
-        "teamIdentity": team_identity,
         "memberAgents": [actor] if actor else [],
-        "taskFilters": facts.get("taskFilters", []),
-        "effectiveTaskFilters": facts.get("effectiveTaskFilters", []),
-        "taskFilterEntries": facts.get("taskFilterEntries", []),
-        "laneFilterVersion": "",
-        "lifetime": facts.get("lifetime", ""),
         # A route reply reports the team configuration it just settled and
         # nothing else: it read no inbox and no transcript, so those facets stay
         # unnamed and the client keeps what it already holds for them.
@@ -472,6 +460,7 @@ def _work_tree_route_payload(
             target_id=target.id,
             team_identity=team_identity,
             team_facts=facts,
+            renewal_intent=facts.get("renewalIntent"),
             task_filter_inventory=open_task_board_projection().task_filter_inventory,
         ),
     }

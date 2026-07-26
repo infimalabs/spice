@@ -79,6 +79,10 @@ BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
 PARKED_DECISION_WAIT_SECONDS = 0.5
 
 
+def _chrome_value(payload: dict[str, Any], facet: str) -> dict[str, Any]:
+    return payload["chrome"][facet]["value"]
+
+
 def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     target = _target(repo)
@@ -159,11 +163,13 @@ def test_work_tree_send_accepted_response_schedules_ensure_without_waiting(
         # inside the ensure below: this route reports the publication, never the
         # lane start.
         assert payload["agentEnsure"] == {}
-        assert payload["pendingInboxCount"] == 1
-        assert payload["pendingInboxLabel"] == "1"
-        assert payload["pendingInboxKeys"] == [payload["key"]]
-        assert payload["pendingInboxRevision"]
-        assert payload["pendingInboxVersion"] > 0
+        pending = payload["chrome"]["pendingInbox"]
+        assert pending["value"] == {
+            "count": 1,
+            "label": "1",
+            "keys": [payload["key"]],
+        }
+        assert pending["order"]["revision"] > 0
         assert inbox_event_path(repo).read_text(encoding="utf-8").endswith(" inbox\n")
         assert inbox_request_body(items[0].text) == (
             "> > quoted context\n> > with newline\n\nwake this lane"
@@ -272,14 +278,13 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     assert payload["requestHtml"] == "<p>wrap this up</p>"
     assert payload["attachments"][0]["name"] == "paste.png"
     assert RENEWAL_HANDOFF_REQUEST_SUFFIX in inbox_request_body(item.text)
-    assert payload["renewalIntent"]["requested"] is False
-    assert payload["renewalIntent"]["state"] == "pending"
-    assert payload["renewalIntent"]["successorThreadId"] == ""
-    assert payload["renewalIntent"]["teamSlot"] == 0
-    assert payload["renewalIntent"]["predecessorIdentity"]["actualModel"] == (
-        "gpt-test"
-    )
-    assert payload["renewalIntent"]["successorIdentity"]["desiredModel"] == ("gpt-next")
+    intent = _chrome_value(payload, "renewal")["renewalIntent"]
+    assert intent["requested"] is False
+    assert intent["state"] == "pending"
+    assert intent["successorThreadId"] == ""
+    assert intent["teamSlot"] == 0
+    assert intent["predecessorIdentity"]["actualModel"] == "gpt-test"
+    assert intent["successorIdentity"]["desiredModel"] == "gpt-next"
     assert renewal["state"] == "pending"
     assert renewal["ancestor_thread_id"] == THREAD_A
     assert renewal["successor_agent_id"] == ""
@@ -318,12 +323,13 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     body = inbox_request_body(collect_inbox_items(repo)[0].text)
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"]["threadId"] == THREAD_B
-    assert payload["renewalIntent"]["requested"] is False
-    assert payload["renewalIntent"]["state"] == "started"
-    assert payload["renewalIntent"]["successorThreadId"] == THREAD_B
-    assert payload["renewalIntent"]["teamSlot"] == 0
-    assert payload["renewalIntent"]["successorIdentity"]["actorId"] == ACTOR_B
-    assert payload["renewalIntent"]["successorIdentity"]["threadId"] == THREAD_B
+    intent = _chrome_value(payload, "renewal")["renewalIntent"]
+    assert intent["requested"] is False
+    assert intent["state"] == "started"
+    assert intent["successorThreadId"] == THREAD_B
+    assert intent["teamSlot"] == 0
+    assert intent["successorIdentity"]["actorId"] == ACTOR_B
+    assert intent["successorIdentity"]["threadId"] == THREAD_B
     assert renewal_rehydration_text(THREAD_A) in body
     assert ensure_calls == [
         {
@@ -357,9 +363,15 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
     team_id = state.team_store.current_team_for_agent(ACTOR_A)
     assert status == HTTPStatus.OK
     assert payload["route"]["actor"] == ACTOR_A
-    assert payload["route"]["teamIdentity"]["teamId"] == team_id
-    assert payload["route"]["taskFilters"] == ["serve", "task.review"]
-    assert payload["route"]["lifetime"] == "Drive"
+    assert (
+        _chrome_value(payload["route"], "teamConfig")["teamIdentity"]["teamId"]
+        == team_id
+    )
+    assert _chrome_value(payload["route"], "taskBoard")["taskFilters"] == [
+        "serve",
+        "task.review",
+    ]
+    assert _chrome_value(payload["route"], "renewal")["lifetime"] == "Drive"
     assert payload["route"]["memberAgents"] == [ACTOR_A]
 
 
@@ -562,7 +574,7 @@ def test_inbox_wake_starts_stopped_agent_then_message_reads_are_inert(
     payload = message.messages_payload_for_worktree(state, target, limit=5)
     repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
-    assert payload["pendingInboxCount"] == 1
+    assert _chrome_value(payload, "pendingInbox")["count"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
     assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert ensure_calls == [
@@ -676,13 +688,11 @@ def test_reconciler_deadletters_credit_failure_then_message_reads_are_inert(
         payload["agentEnsure"]["deadletterRequeueCommand"]
         == "spice agent requeue-deadletter 1jN54zJK"
     )
-    assert payload["pendingInboxCount"] == 0
-    assert payload["statusLine"]["pendingInboxCount"] == 0
-    assert payload["statusLine"]["pendingInboxLabel"] == "0"
-    assert payload["pendingInboxKeys"] == []
-    assert payload["statusLine"]["pendingInboxKeys"] == []
-    assert payload["agentEnsure"]["pendingInboxCount"] == 0
-    assert payload["agentEnsure"]["pendingInboxKeys"] == []
+    assert _chrome_value(payload, "pendingInbox") == {
+        "count": 0,
+        "label": "0",
+        "keys": [],
+    }
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "1jN54zJK.txt"
@@ -728,14 +738,11 @@ def test_reconciler_deadletters_generic_failure_then_message_reads_are_inert(
         payload["agentEnsure"]["deadletterRequeueCommand"]
         == "spice agent requeue-deadletter 1jN54zJL"
     )
-    assert payload["agentEnsure"]["pendingInboxCount"] == 0
-    assert payload["agentEnsure"]["pendingInboxLabel"] == "0"
-    assert payload["agentEnsure"]["pendingInboxKeys"] == []
-    assert payload["pendingInboxCount"] == 0
-    assert payload["statusLine"]["pendingInboxCount"] == 0
-    assert payload["statusLine"]["pendingInboxLabel"] == "0"
-    assert payload["pendingInboxKeys"] == []
-    assert payload["statusLine"]["pendingInboxKeys"] == []
+    assert _chrome_value(payload, "pendingInbox") == {
+        "count": 0,
+        "label": "0",
+        "keys": [],
+    }
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "1jN54zJL.txt"

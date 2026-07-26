@@ -37,7 +37,7 @@ function message(key, minutesAgo, threadId) {
 async function measureSoloAlpha(page, { alpha, soloTeam, soloMessage, alphaMessage }) {
   return page.evaluate(
     ({ alpha, soloTeam, soloMessage, alphaMessage }) => {
-      laneStore.replaceTargets([alpha]);
+      applyTargetsPayload({ workTrees: [alpha] });
       applyTeamSnapshotPayload(
         window.spicePayloads.teamSnapshot({ revision: 1, teams: [soloTeam] }),
         { force: true },
@@ -68,7 +68,7 @@ async function measureSoloAlpha(page, { alpha, soloTeam, soloMessage, alphaMessa
 async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMessages }) {
   return page.evaluate(
     ({ alpha, beta, fusedTeam, betaMessages }) => {
-      laneStore.replaceTargets([alpha, beta]);
+      applyTargetsPayload({ workTrees: [alpha, beta] });
       applyTeamSnapshotPayload(
         window.spicePayloads.teamSnapshot({ revision: 2, teams: [fusedTeam] }),
         { force: true },
@@ -107,7 +107,7 @@ async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMes
 async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
   return page.evaluate(
     ({ alpha, survivorTeam }) => {
-      laneStore.replaceTargets([alpha]);
+      applyTargetsPayload({ workTrees: [alpha] });
       applyTeamSnapshotPayload(
         window.spicePayloads.teamSnapshot({ revision: 3, teams: [survivorTeam] }),
         { force: true },

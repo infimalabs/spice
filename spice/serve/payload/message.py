@@ -31,6 +31,7 @@ from spice.serve.payload.identity import (
 )
 from spice.serve.payload.lane import (
     _lane_info_payload,
+    lane_activity_at,
     lane_chrome_payload,
     lane_metrics_payload,
     status_line_payload,
@@ -422,7 +423,6 @@ class _ResolvedMessagesThread:
     renew_intent: bool
     agent_ensure: dict[str, Any] | None
     pending_identity: dict[str, Any]
-    pending: int
 
 
 @dataclass(frozen=True)
@@ -452,14 +452,12 @@ def _resolve_messages_thread(
         prefer_outcome_thread=not explicit_thread_id,
     )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
     return _ResolvedMessagesThread(
         thread_id=lifecycle.thread_id,
         predecessor_actor=lifecycle.predecessor_actor,
         renew_intent=lifecycle.renewal_intent,
         agent_ensure=lifecycle.agent_ensure,
         pending_identity=pending_identity,
-        pending=pending,
     )
 
 
@@ -562,7 +560,6 @@ def messages_payload_for_worktree(
         predecessor_actor=resolved.predecessor_actor,
         renew_intent=resolved.renew_intent,
         agent_ensure=resolved.agent_ensure,
-        pending=resolved.pending,
         pending_identity=resolved.pending_identity,
         items=messages.items,
         removed_keys=messages.removed_keys,
@@ -595,7 +592,6 @@ def _messages_worktree_payload(
     predecessor_actor: str,
     renew_intent: bool,
     agent_ensure: dict[str, Any] | None,
-    pending: int,
     pending_identity: dict[str, Any],
     items: list[message_reader.AssistantMessage],
     removed_keys: list[str],
@@ -629,8 +625,6 @@ def _messages_worktree_payload(
         target,
         items=items,
         error=error,
-        pending_count=pending,
-        pending_identity=pending_identity,
         task_board=task_board,
     )
     payload = {
@@ -643,14 +637,6 @@ def _messages_worktree_payload(
             binding_error=binding_error,
         ),
         "serveAgentIdentity": serve_identity,
-        "taskFilters": team_facts.get("taskFilters", []),
-        "taskFilterEntries": team_facts.get("taskFilterEntries", []),
-        "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
-        "laneFilterVersion": "",
-        "teamIdentity": team_identity,
-        "lifetime": team_facts.get("lifetime", ""),
-        "renewalIntent": renewal_intent,
-        "taskFilterInventory": task_board.task_filter_inventory,
         "laneInfo": _lane_info_payload(
             target,
             serve_identity,
@@ -658,7 +644,6 @@ def _messages_worktree_payload(
         ),
         "agentProcessStatus": status.process_status,
         "error": error or "",
-        **pending_identity,
         "agentEnsure": agent_ensure or {},
         "statusLine": status_line,
         "chrome": lane_chrome_payload(
@@ -668,7 +653,7 @@ def _messages_worktree_payload(
             renewal_intent=renewal_intent,
             task_filter_inventory=task_board.task_filter_inventory,
             pending_identity=pending_identity,
-            last_assistant_at=status_line["lastAssistantAt"],
+            last_assistant_at=lane_activity_at(items),
         ),
     }
     if removed_keys:

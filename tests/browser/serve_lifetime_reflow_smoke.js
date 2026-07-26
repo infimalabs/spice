@@ -41,7 +41,7 @@ async function run() {
               { force: true },
             );
 
-          laneStore.replaceTargets([alpha, delta, beta]);
+          applyTargetsPayload({ workTrees: [alpha, delta, beta] });
           apply(
             team("team-a", ["alpha", "delta"], "Drive", 1),
             team("team-b", ["beta"], "Drive", 1),

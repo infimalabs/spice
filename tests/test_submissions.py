@@ -28,6 +28,7 @@ from spice.mail.replies import (
 )
 from spice.serve import livebus, messages as message_reader, submissions
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
+from spice.serve.payload import lane
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
 from spice.serve.websocket import EncodedTextFrame
@@ -139,10 +140,17 @@ def test_submission_lifecycle_follows_real_watcher_events(
             connection,
             lambda frame: (
                 frame.get("type") == "lane.pending"
-                and key in frame.get("payload", {}).get("pendingInboxKeys", [])
+                and key
+                in (
+                    frame.get("payload", {})
+                    .get("chrome", {})
+                    .get("pendingInbox", {})
+                    .get("value", {})
+                    .get("keys", [])
+                )
             ),
         )
-        assert pending["payload"]["pendingInboxCount"] == 1
+        assert pending["payload"]["chrome"]["pendingInbox"]["value"]["count"] == 1
 
         if lane_state == "running":
             ack_text = f"ACK {key}: received and working"
@@ -268,8 +276,11 @@ def _submission_callbacks(
         pending = pending_inbox_identity_payload(target.repo_root)
         return valid_lane_payload(
             messages=[item.to_payload() for item in items],
-            **pending,
-            statusLine=pending,
+            chrome=lane.lane_chrome_payload(
+                target_id=target.id,
+                pending_identity=pending,
+                last_assistant_at=lane.lane_activity_at(items),
+            ),
         )
 
     def send_payload(
@@ -282,11 +293,15 @@ def _submission_callbacks(
                 body=str(payload.get("text") or ""), priority=None, stop=False
             ),
         )
+        pending = pending_inbox_identity_payload(target.repo_root)
         return {
             "ok": True,
             "key": inbox_item_key(path.name),
             "path": str(path),
-            **pending_inbox_identity_payload(target.repo_root),
+            "chrome": lane.lane_chrome_payload(
+                target_id=target.id,
+                pending_identity=pending,
+            ),
         }, HTTPStatus.OK
 
     def signature(

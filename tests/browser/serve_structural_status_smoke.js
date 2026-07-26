@@ -165,15 +165,6 @@ async function runStructuralStatusSmokePage() {
     lane.shardTextareas.get(lane.targetId) || lane.element.querySelector("textarea");
   if (!textarea) throw new Error("structural status smoke has no composer textarea");
 
-  function pendingIdentity(version) {
-    return {
-      pendingInboxCount: 0,
-      pendingInboxKeys: [],
-      pendingInboxRevision: "structural-status-" + version,
-      pendingInboxVersion: version,
-    };
-  }
-
   function statusPayload({
     activityStatus = "active",
     claimedTask = {},
@@ -182,10 +173,8 @@ async function runStructuralStatusSmokePage() {
     preview,
     timestamp,
   }) {
-    const pending = pendingIdentity(index);
     const visualStatus = kind === "final" ? "idle" : "running";
     return {
-      ...pending,
       messages: [
         {
           ack_count: 0,
@@ -200,13 +189,32 @@ async function runStructuralStatusSmokePage() {
           timestamp,
         },
       ],
+      chrome: {
+        targetId: lane.targetId,
+        pendingInbox: {
+          authority: "inbox",
+          order: { epoch: "", revision: index },
+          value: { count: 0, label: "0", keys: [] },
+        },
+        activity: {
+          authority: "transcript",
+          order: { epoch: "9000000000000000000" + index, revision: 0 },
+          value: { lastAssistantAt: timestamp },
+        },
+        lifecycle: {
+          authority: "lifecycle-reconciler",
+          order: { epoch: "", revision: index },
+          value: {
+            processStatus: "running",
+            visualStatus,
+          },
+        },
+      },
       statusLine: {
-        ...pending,
         activityStatus,
         agentProcessStatus: "running",
         agentVisualStatus: visualStatus,
         claimedTask,
-        lastAssistantAt: timestamp,
         latestActivityKind: kind,
         latestActivityPreview: preview,
         preview,

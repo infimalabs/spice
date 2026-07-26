@@ -6,6 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -139,12 +140,16 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
 
     work_tree = result["workTrees"][0]
     assert work_tree["targetIdentity"]["thread"] == {"state": "unbound"}
-    assert work_tree["teamIdentity"]["teamId"] == created.team_id
-    assert work_tree["lifetime"] == "Drain"
-    assert work_tree["taskFilters"] == ["serve.ui"]
+    assert _chrome_value(work_tree, "teamConfig")["teamIdentity"]["teamId"] == (
+        created.team_id
+    )
+    assert _chrome_value(work_tree, "renewal")["lifetime"] == "Drain"
+    assert _chrome_value(work_tree, "taskBoard")["taskFilters"] == ["serve.ui"]
     # Drain dissolves the boundary: the UI-facing effective set is every
     # assignable stem, even though the durable pin is only serve.ui.
-    assert work_tree["effectiveTaskFilters"] == sorted(config.assignable_stems())
+    assert _chrome_value(work_tree, "taskBoard")["effectiveTaskFilters"] == sorted(
+        config.assignable_stems()
+    )
     assert [
         member.agent_id
         for member in state.team_store.team_state(created.team_id).members
@@ -167,10 +172,14 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     signature = app.lane_signature_for_target(state, target, "", None)
 
     assert result["targetIdentity"]["thread"] == {"state": "unbound"}
-    assert result["teamIdentity"]["teamId"] == created.team_id
-    assert result["lifetime"] == "Drain"
-    assert result["taskFilters"] == ["serve.ui"]
-    assert result["effectiveTaskFilters"] == sorted(config.assignable_stems())
+    assert _chrome_value(result, "teamConfig")["teamIdentity"]["teamId"] == (
+        created.team_id
+    )
+    assert _chrome_value(result, "renewal")["lifetime"] == "Drain"
+    assert _chrome_value(result, "taskBoard")["taskFilters"] == ["serve.ui"]
+    assert _chrome_value(result, "taskBoard")["effectiveTaskFilters"] == sorted(
+        config.assignable_stems()
+    )
     assert signature.other[0] == created.team_id
 
 
@@ -198,9 +207,12 @@ def test_lifecycle_wake_rewrites_placeholder_membership_and_renewal_atomically(
         "state": "bound",
         "threadId": THREAD_A,
     }
-    assert work_tree["teamIdentity"]["teamId"] == created.team_id
-    assert work_tree["renewalIntent"]["agentId"] == ACTOR_A
-    assert work_tree["renewalIntent"]["requested"] is True
+    assert _chrome_value(work_tree, "teamConfig")["teamIdentity"]["teamId"] == (
+        created.team_id
+    )
+    renewal = _chrome_value(work_tree, "renewal")["renewalIntent"]
+    assert renewal["agentId"] == ACTOR_A
+    assert renewal["requested"] is True
     assert [member.agent_id for member in members] == [ACTOR_A]
     assert [member.agent_id for member in snapshot_members] == [ACTOR_A]
     renewal = snapshot_members[0].renewal
@@ -297,8 +309,14 @@ def test_automatic_first_start_converges_identity_and_membership_once(
     assert inventory_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
     assert message_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
     assert history_payload["targetIdentity"]["thread"]["threadId"] == THREAD_A
-    assert inventory_payload["teamIdentity"]["teamId"] == created.team_id
-    assert message_payload["teamIdentity"]["teamId"] == created.team_id
+    assert (
+        _chrome_value(inventory_payload, "teamConfig")["teamIdentity"]["teamId"]
+        == created.team_id
+    )
+    assert (
+        _chrome_value(message_payload, "teamConfig")["teamIdentity"]["teamId"]
+        == created.team_id
+    )
 
 
 def test_inventory_message_and_history_builders_are_pure_lifecycle_projections(
@@ -390,12 +408,14 @@ def test_inventory_message_and_history_builders_are_pure_lifecycle_projections(
     assert [lane["agentEnsure"] for lane in lanes] == [{}, {}]
     assert [payload["agentEnsure"] for payload in messages] == [{}, {}]
     assert history["agentEnsure"] == {}
-    assert all(lane["lifetime"] == "Drain" for lane in lanes)
-    assert all(lane["pendingInboxCount"] == 1 for lane in lanes)
-    assert all(payload["pendingInboxCount"] == 1 for payload in messages)
+    assert all(_chrome_value(lane, "renewal")["lifetime"] == "Drain" for lane in lanes)
+    assert all(_chrome_value(lane, "pendingInbox")["count"] == 1 for lane in lanes)
     assert all(
-        lane["renewalIntent"]["agentId"] == ACTOR_A
-        and lane["renewalIntent"]["requested"] is True
+        _chrome_value(payload, "pendingInbox")["count"] == 1 for payload in messages
+    )
+    assert all(
+        _chrome_value(lane, "renewal")["renewalIntent"]["agentId"] == ACTOR_A
+        and _chrome_value(lane, "renewal")["renewalIntent"]["requested"] is True
         for lane in lanes
     )
     assert [
@@ -419,7 +439,9 @@ def test_unstarted_target_ignores_stale_cached_thread_when_already_imported(
     work_tree = result["workTrees"][0]
     members = state.team_store.team_state(created.team_id).members
     assert work_tree["targetIdentity"]["thread"] == {"state": "unbound"}
-    assert work_tree["teamIdentity"]["teamId"] == created.team_id
+    assert _chrome_value(work_tree, "teamConfig")["teamIdentity"]["teamId"] == (
+        created.team_id
+    )
     assert [member.agent_id for member in members] == [ACTOR_A, f"target:{target.id}"]
     assert state.cached_thread_ids == {}
 
@@ -447,8 +469,10 @@ def test_task_drain_uses_unstarted_target_actor_without_binding_thread(
     assert status == HTTPStatus.OK
     assert result["route"]["actor"] == target_actor
     assert result["route"]["targetIdentity"]["thread"] == {"state": "unbound"}
-    assert result["route"]["teamIdentity"]["teamId"] == team_id
-    assert result["route"]["taskFilters"] == ["serve.ui"]
+    assert _chrome_value(result["route"], "teamConfig")["teamIdentity"]["teamId"] == (
+        team_id
+    )
+    assert _chrome_value(result["route"], "taskBoard")["taskFilters"] == ["serve.ui"]
     assert [
         member.agent_id for member in state.team_store.team_state(team_id).members
     ] == [target_actor]
@@ -497,9 +521,12 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
         "state": "bound",
         "threadId": THREAD_A,
     }
-    assert result["route"]["teamIdentity"]["teamId"] == created.team_id
-    assert result["route"]["taskFilters"] == ["serve.ui"]
-    assert result["route"]["lifetime"] == "Drain"
+    assert (
+        _chrome_value(result["route"], "teamConfig")["teamIdentity"]["teamId"]
+        == created.team_id
+    )
+    assert _chrome_value(result["route"], "taskBoard")["taskFilters"] == ["serve.ui"]
+    assert _chrome_value(result["route"], "renewal")["lifetime"] == "Drain"
     assert [member.agent_id for member in members] == [ACTOR_A]
 
 
@@ -608,6 +635,10 @@ def _record_target_identity(state: ServeState, target: WorktreeTarget) -> None:
         desired_effort="high",
         transcript_owner="",
     )
+
+
+def _chrome_value(payload: dict[str, Any], facet: str) -> dict[str, Any]:
+    return payload["chrome"][facet]["value"]
 
 
 def _pending_identity() -> dict[str, object]:

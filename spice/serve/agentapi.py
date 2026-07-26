@@ -32,7 +32,6 @@ from spice.mail.inbox import (
 from spice.process.git import git_read
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
-from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.lifecycle import (
     LIFECYCLE_DECISION_WAIT_SECONDS,
     LifecycleDecision,
@@ -159,8 +158,6 @@ def sent_steering_payload(
     *,
     target: WorktreeTarget | None,
     agent_ensure_override: dict[str, Any] | None = None,
-    pending_count: int | None = None,
-    pending_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "ok": True,
@@ -179,11 +176,6 @@ def sent_steering_payload(
         ),
         "agentEnsure": agent_ensure_override or {},
     }
-    if pending_identity is not None:
-        payload.update(pending_identity)
-    elif pending_count is not None:
-        payload["pendingInboxCount"] = pending_count
-        payload["pendingInboxLabel"] = str(pending_count)
     return payload
 
 
@@ -213,15 +205,12 @@ def sent_steering_response_payload(
     *,
     target: WorktreeTarget,
     decision: LifecycleDecision | None,
-    pending_identity: dict[str, Any],
 ) -> dict[str, Any]:
     agent_ensure = decision.agent_ensure if decision is not None else None
     return sent_steering_payload(
         sent,
         target=target,
         agent_ensure_override=agent_ensure or {},
-        pending_count=int(pending_identity["pendingInboxCount"]),
-        pending_identity=pending_identity,
     )
 
 
@@ -457,7 +446,6 @@ def deadletter_refused_ensure_payload(
         payload["deadletterRequeueCommand"] = (
             f"spice agent requeue-deadletter {parked[0]}"
         )
-        payload.update(pending_inbox_identity_payload(target.repo_root))
     return payload
 
 
@@ -474,7 +462,6 @@ def deadletter_failed_agent_ensure_payload(
         payload["deadletterRequeueCommand"] = (
             f"spice agent requeue-deadletter {deadlettered}"
         )
-        payload.update(pending_inbox_identity_payload(target.repo_root))
     return payload
 
 

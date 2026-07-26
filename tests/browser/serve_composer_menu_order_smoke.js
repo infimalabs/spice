@@ -25,7 +25,7 @@ async function run() {
       const result = await page.evaluate(() => {
         const targetId = "composer-menu-order-agent";
         const lane = { targetId, closed: false };
-        const member = { targetId, renewalIntent: {} };
+        const member = { targetId };
         laneStore.registerLane(lane);
 
         const band = document.createElement("div");

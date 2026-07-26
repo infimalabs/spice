@@ -24,18 +24,85 @@ from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Every envelope that carries a lane-chrome facet, named beside the producer-only
-# fields that facet superseded. A field is listed here only because the consumer
-# census found no non-chrome reader for it; a field the browser still reads for
-# its own reasons -- laneFilterVersion, privateTaskCount, lastAssistantAt -- stays
-# declared and is absent from these tuples. The two empty tuples are envelopes
-# that gained a facet without ever having hand-built one.
+# Every envelope that carries lane chrome, named beside the deleted flat fields
+# whose values now live only in the canonical facet record. This is the
+# executable tombstone for the superseded superset shape: adding one of these
+# names back to any carrier fails this census before a browser can gain a second
+# authority.
 LANE_CHROME_ENVELOPE_SUPERSESSIONS = {
-    "LanePayload": ("targetWorktreeName", "targetBranch"),
-    "PendingLanePayload": (),
-    "WorkTreePayload": ("pendingLabel", "targetWorktreeName", "targetBranch"),
-    "WorkTreeRoute": ("laneName",),
-    "WorkTreeSendResult": (),
+    "LaneChromeSourcePayload": (
+        "taskFilters",
+        "taskFilterEntries",
+        "effectiveTaskFilters",
+        "laneFilterVersion",
+        "taskFilterInventory",
+        "privateTaskCount",
+        "teamIdentity",
+        "lifetime",
+        "renewalIntent",
+    ),
+    "LanePayload": (
+        "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
+        "pendingInboxVersion",
+        "taskFilters",
+        "taskFilterEntries",
+        "effectiveTaskFilters",
+        "laneFilterVersion",
+        "teamIdentity",
+        "lifetime",
+        "renewalIntent",
+        "taskFilterInventory",
+        "targetWorktreeName",
+        "targetBranch",
+    ),
+    "PendingLanePayload": (
+        "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
+        "pendingInboxVersion",
+    ),
+    "WorkTreePayload": (
+        "pendingCount",
+        "privateTaskCount",
+        "taskFilters",
+        "taskFilterEntries",
+        "effectiveTaskFilters",
+        "laneFilterVersion",
+        "teamIdentity",
+        "lifetime",
+        "renewalIntent",
+        "taskFilterInventory",
+        "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
+        "pendingInboxVersion",
+        "lastAssistantAt",
+        "pendingLabel",
+        "targetWorktreeName",
+        "targetBranch",
+    ),
+    "WorkTreeRoute": (
+        "teamIdentity",
+        "taskFilters",
+        "effectiveTaskFilters",
+        "taskFilterEntries",
+        "laneFilterVersion",
+        "lifetime",
+        "laneName",
+    ),
+    "WorkTreeSendResult": (
+        "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
+        "pendingInboxVersion",
+        "renewalIntent",
+    ),
 }
 
 
@@ -133,6 +200,9 @@ def test_lane_chrome_contract_names_the_exact_independent_authorities():
         "renewal": "LaneChromeRenewalFacet",
         "activity": "LaneChromeActivityFacet",
     }
+    assert {
+        field.name for field in wire.WIRE_OBJECTS_BY_NAME["LaneChromePayload"].fields
+    } == {"targetId", *wire.LANE_CHROME_FACET_AUTHORITIES}
 
 
 def test_lane_chrome_value_fields_have_one_explicit_facet_home():

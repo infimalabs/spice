@@ -148,25 +148,41 @@ function submissionSmokeLaneMessage(
   };
 }
 
-function submissionSmokeLanePayload(messages, processStatus) {
+function submissionSmokeLanePayload(targetId, messages, processStatus) {
   const latest = messages[messages.length - 1];
-  const pending = {
-    pendingInboxCount: 0,
-    pendingInboxKeys: [],
-    pendingInboxRevision: "submission-smoke-" + latest.index,
-    pendingInboxVersion: latest.index,
-  };
   const complete = latest.kind === "final" || latest.kind === "reply";
   return {
-    ...pending,
     messages,
+    chrome: {
+      targetId,
+      pendingInbox: {
+        authority: "inbox",
+        order: { epoch: "", revision: latest.index },
+        value: { count: 0, label: "0", keys: [] },
+      },
+      activity: {
+        authority: "transcript",
+        order: {
+          epoch: "9000000000000000000" + latest.index,
+          revision: 0,
+        },
+        value: { lastAssistantAt: latest.timestamp },
+      },
+      lifecycle: {
+        authority: "lifecycle-reconciler",
+        order: { epoch: "", revision: latest.index },
+        value: {
+          processStatus,
+          visualStatus:
+            processStatus === "running" && !complete ? "running" : "idle",
+        },
+      },
+    },
     statusLine: {
-      ...pending,
       activityStatus: complete ? "inactive" : "active",
       agentProcessStatus: processStatus,
       agentVisualStatus:
         processStatus === "running" && !complete ? "running" : "idle",
-      lastAssistantAt: latest.timestamp,
       latestActivityKind: latest.kind,
       latestActivityPreview: latest.display_text,
       preview: latest.display_text,
@@ -293,7 +309,11 @@ async function submissionSmokePushPayload(state, lane, messages, processStatus) 
       targetId: lane.targetId,
       source: "watch",
       subscriptionGeneration: lane.liveBusSubscriptionGeneration,
-      payload: submissionSmokeLanePayload(messages, processStatus),
+      payload: submissionSmokeLanePayload(
+        lane.targetId,
+        messages,
+        processStatus,
+      ),
     }),
   );
   return {
@@ -336,10 +356,14 @@ function setupSubmissionLifecycleSmokePage() {
         ok: true,
         agentEnsure: { ok: true },
         key,
-        pendingInboxCount: 1,
-        pendingInboxKeys: [key],
-        pendingInboxRevision: "submission-accepted-" + key,
-        pendingInboxVersion: 1,
+        chrome: {
+          targetId: fields.targetId,
+          pendingInbox: {
+            authority: "inbox",
+            order: { epoch: "", revision: 1 },
+            value: { count: 1, label: "1", keys: [key] },
+          },
+        },
         requestText: (fields.payload || {}).text || "",
         submission: submissionSmokeAcceptedLifecycle(key),
       },
