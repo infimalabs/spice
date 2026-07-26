@@ -170,11 +170,46 @@ def test_generated_app_types_are_the_exact_schema_render():
     assert actual == wire.render_app_types_js()
 
 
+def _reaches_opaque_json(value_type: wire.WireType, seen: frozenset[str]) -> bool:
+    """Whether a declared type bottoms out in the opaque json primitive.
+
+    Aliases are followed the way validation follows them, so opacity reached one
+    hop away -- a record of JsonValue wearing a name -- counts the same as the
+    primitive written inline. Object references are not followed: an opaque field
+    inside a referenced object is named by that object's own key, not by every
+    field pointing at it. ``seen`` makes a self-naming alias terminate here.
+    """
+    if value_type.kind == "json":
+        return True
+    if value_type.kind == "reference":
+        if value_type.name in seen or value_type.name not in wire.WIRE_ALIASES:
+            return False
+        return _reaches_opaque_json(
+            wire.WIRE_ALIASES[value_type.name], seen | {value_type.name}
+        )
+    return any(_reaches_opaque_json(item, seen) for item in value_type.items)
+
+
+def _opaque_json_fields() -> set[str]:
+    """Every field the schema itself leaves opaque, as `Schema.field` keys."""
+    return {
+        f"{schema.name}.{field.name}"
+        for schema in wire.WIRE_OBJECTS
+        for field in schema.fields
+        if _reaches_opaque_json(field.value_type, frozenset())
+    }
+
+
 def test_named_opaque_json_fields_have_the_exact_intentional_allowlist():
+    # The dict pins what was intended, prose included. The set pins what the
+    # schema actually does, so a field that becomes opaque without being named
+    # fails here rather than reaching the browser as an undescribed hole.
     assert wire.OPAQUE_JSON_ALLOWLIST == {
         "AgentEnsurePayload.restartRefusal": "driver-specific launch refusal facts",
+        "AgentStatusPayload.restartRefusal": "driver-specific launch refusal facts",
         "TeamConfigPayload.shellSettings": "user-defined team shell preferences",
     }
+    assert _opaque_json_fields() == set(wire.OPAQUE_JSON_ALLOWLIST)
 
 
 def test_browser_only_frame_registry_names_the_append_variant():
