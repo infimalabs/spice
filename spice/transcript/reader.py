@@ -118,56 +118,40 @@ def transcript_file_identity(path: Path) -> TranscriptFileIdentity | None:
 def read_forward(
     path: Path,
     *,
-    start_offset: int = 0,
-    cursor: TranscriptCursor | None = None,
+    cursor: TranscriptCursor,
 ) -> TranscriptRead:
-    """Read from an exact resume offset to EOF.
+    """Read from the cursor's exact resume offset to EOF.
 
     A truncated source resets the resume offset to zero, matching the existing
-    append-only cursor contract.  Supplying ``cursor`` additionally detects a
-    replaced source by filesystem identity, uses its offset instead of
-    ``start_offset``, and advances both pieces of state after a successful read.
+    append-only contract.  Filesystem identity detects a replaced source
+    independently of size.  Successful reads advance both pieces of state.
     """
-    if cursor is not None:
-        with locked_cursor(cursor):
-            read = _read_forward(
-                path,
-                start_offset=cursor.offset,
-                expected_identity=cursor.file_identity,
-            )
-            if read.error is None:
-                cursor.offset = read.end_offset
-                cursor.file_identity = read.file_identity
-            return read
-    return _read_forward(path, start_offset=start_offset)
-
-
-def _read_forward(
-    path: Path,
-    *,
-    start_offset: int,
-    expected_identity: TranscriptFileIdentity | None = None,
-) -> TranscriptRead:
-    try:
-        with _open_binary(path) as handle:
-            file_identity = _handle_identity(handle)
-            file_size = _handle_size(handle)
-            start = max(start_offset, 0)
-            source_replaced = (
-                expected_identity is not None and file_identity != expected_identity
-            )
-            if source_replaced or start > file_size:
-                start = 0
-            return _read_open_range(
-                handle,
-                start=start,
-                end=file_size,
-                file_size=file_size,
-                file_identity=file_identity,
-                align_partial_start=False,
-            )
-    except OSError as exc:
-        return _failed_read(exc)
+    with locked_cursor(cursor):
+        try:
+            with _open_binary(path) as handle:
+                file_identity = _handle_identity(handle)
+                file_size = _handle_size(handle)
+                start = max(cursor.offset, 0)
+                source_replaced = (
+                    cursor.file_identity is not None
+                    and file_identity != cursor.file_identity
+                )
+                if source_replaced or start > file_size:
+                    start = 0
+                read = _read_open_range(
+                    handle,
+                    start=start,
+                    end=file_size,
+                    file_size=file_size,
+                    file_identity=file_identity,
+                    align_partial_start=False,
+                )
+        except OSError as exc:
+            read = _failed_read(exc)
+        else:
+            cursor.offset = read.end_offset
+            cursor.file_identity = read.file_identity
+        return read
 
 
 def read_bounded(
