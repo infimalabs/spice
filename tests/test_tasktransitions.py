@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
-import subprocess
 import time
 from collections import Counter
 from datetime import datetime
@@ -15,12 +14,14 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import claimstate, config, create, identity, ops, opslog, transitions
+from spice.tasks import claimstate, create, identity, ops, opslog, transitions
 from spice.tasks.transitions import (
     DRAINING_KINDS,
     TaskTransitionKind,
     task_transitions,
 )
+from tests.test_reposcaffolding import make_task_repo_fixture
+from tests.test_reposcaffolding import run as _run
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -44,18 +45,7 @@ MIRROR_EVENTS = (
 )
 
 
-@pytest.fixture
-def task_repo(tmp_path, monkeypatch):
-    repo = _init_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
-    config.set_backend(str(backend))
-    try:
-        yield repo
-    finally:
-        config.set_backend(None)
+task_repo = make_task_repo_fixture(lambda path: _init_repo(path), actor=ACTOR_A)
 
 
 def test_real_lifecycle_commands_each_derive_one_transition(task_repo, monkeypatch):
@@ -349,7 +339,3 @@ def _init_repo(path: Path) -> Path:
     _run(path, "git", "add", "README.md")
     _run(path, "git", "commit", "-m", "init")
     return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -9,10 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from spice.process import git
 from spice.errors import SpiceError
+from spice.process import git
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.tasks.git import boundaries, merging, plumbing
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
+from tests.test_reposcaffolding import run as _run
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -1051,16 +1053,6 @@ def _advance_upstream(tmp_path: Path) -> None:
     _run(peer, "git", "push", "origin", "main")
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _configure_git_identity(path)
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
@@ -1110,7 +1102,3 @@ def _merge_head_missing(repo: Path) -> bool:
 
 def _git(repo: Path, *args: str) -> str:
     return _run(repo, "git", *args).stdout.strip()
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

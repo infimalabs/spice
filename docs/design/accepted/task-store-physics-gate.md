@@ -11,17 +11,17 @@ gate is reviewed.
 The revision-owned Serve projection removed the dominant read-side movement:
 at a stable task revision, one lane payload now launches no Taskwarrior
 process, performs no full-board export, and serializes no task-board bytes.
-The write path still persists four representations and still has
-cross-representation failure windows, but its authoritative TaskChampion row
-mutation is already atomic. The remaining witness and lifecycle copies are
-event-rate costs and projection-consistency risks, not per-payload board
-movement. Those residual costs do not presently outweigh a 23-consumer,
-mixed-version migration of the live coordination plane.
+The write path still persists three representations and still has a
+cross-representation failure window, but its authoritative TaskChampion row
+mutation is already atomic. The remaining witness copy is an event-rate cost
+and a recovery-consistency risk, not per-payload board movement. Those residual
+costs do not presently outweigh a 23-consumer, mixed-version migration of the
+live coordination plane.
 
 This is a recommendation about the full substrate replacement, not a claim
-that the write path is finished. Targeted work may still make the claim witness
-and lifecycle facts derived from one native mutation stream, and should be
-preferred before reopening the store migration.
+that the write path is finished. Lifecycle facts have since taken that route;
+targeted work may still derive the claim witness from the same native mutation
+stream, and should be preferred before reopening the store migration.
 
 ## Read-Side Measurement
 
@@ -140,15 +140,18 @@ an observation fact series.
 The `task_events` fact series has since been deleted: Serve derives every
 lifecycle movement by folding the TaskChampion operations log this probe
 already measured, so the write side no longer makes a secondary Serve write and
-one of the four representations above is gone. The measurement stands as taken;
-the pending remeasure is where these counts are re-derived.
+one of the four representations above is gone. The measurement stands as taken:
+these tables record what the probe observed, and re-deriving the counts against
+the current write path takes a fresh probe rather than an edit to them.
 
 ## Stop/Go Balance
 
 ### What still argues for an owned store
 
-- Four semantic representations span TaskChampion current state and operation
-  history, a per-worktree JSON witness, and ServeTeamStore lifecycle facts.
+- Three semantic representations span TaskChampion current state, its operation
+  history, and a per-worktree JSON witness. Lifecycle observation is no longer
+  among them: Serve folds it from the operations log rather than persisting a
+  fact series of its own.
 - No transaction can commit or roll back those technologies together.
 - The external binary, generated taskrc, schema overrides, subprocess
   deadlines, and repair paths remain product and maintenance weight.
@@ -160,12 +163,16 @@ the pending remeasure is where these counts are re-derived.
 - The read-side reason has materially changed: warm stable-revision payloads
   pay zero processes, exports, and board bytes instead of four full exports.
 - The two authoritative task transitions measured here are already atomic
-  inside TaskChampion. The residual split concerns witness recovery and
-  lifecycle observation rather than two competing allocation owners.
+  inside TaskChampion. The residual split is witness recovery alone, not two
+  competing allocation owners, because lifecycle observation is now derived
+  from the operations log instead of written beside it.
 - The behavior ledger pins 23 consumer modules and 30 command fragments. A
   replacement must also preserve READY/ACTIVE derivation, urgency, annotations,
   dependencies, dates, handles, operation history, fleet quiescence, and
   stale-version fail-closed behavior across 1,450 live rows.
+- Deleting the Serve lifecycle fact series already collected part of the prize
+  this migration was meant to win: one fewer technology on the write path, with
+  the same observations still available.
 - Retiring Taskwarrior changes stated product doctrine and concentrates risk in
   a one-time migration. The read win reduces the ongoing benefit available to
   repay that risk.
@@ -173,6 +180,6 @@ the pending remeasure is where these counts are re-derived.
 The current stop/go result is therefore **NO-GO for the full STORE substrate
 build**. Reopen only if a residual claim race escapes the existing atomic row
 and compare-and-swap boundary, Taskwarrior becomes a material distribution or
-reliability blocker, or targeted derivation of witness/lifecycle facts from one
+reliability blocker, or targeted derivation of the claim witness from one
 native transition stream proves insufficient. Any reopened case must use the
 new zero-export warm baseline, not the superseded four-export cost.

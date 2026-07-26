@@ -21,18 +21,18 @@ from spice.transcript.timestamps import parse_timestamp
 from tests.test_messagepayload import (
     IMAGE_DATA_URL,
     _EmptyOpenTaskBoard,
-    _State,
-    _Status,
-    _Target,
     _identity_status,
-    _init_repo,
     _message,
     _message_read,
     _pending_identity,
     _record_identity,
+    _State,
+    _Status,
     _stub_messages_payload,
+    _Target,
     _task_board,
 )
+from tests.test_reposcaffolding import init_existing_repo as _init_repo
 
 
 @pytest.fixture(autouse=True)

@@ -1,22 +1,22 @@
 """Agent CLI surface, steering readout, import, and reply contracts."""
 
 import argparse
-from datetime import UTC, datetime
 import io
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from spice.agent import driver as agent_driver
 from spice.agent import cli as agent_cli
+from spice.agent import driver as agent_driver
 from spice.agent import (
     lifecycle,
     watchdog,
@@ -39,11 +39,10 @@ from spice.mail.ackstate import (
     ack_state_records,
 )
 from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
-
 from spice.mail.steeringkey import steering_token
 from spice.tasks import alloc, create, identity
 from spice.tasks import config as task_config
-
+from tests.test_reposcaffolding import init_identified_repo as _init_git_repo
 
 WORKING_STATE_ELAPSED_SECONDS = 90
 WORKING_STATE_REMAINING_SECONDS = 601
@@ -829,15 +828,6 @@ def test_working_state_claim_lease_warnings_cross_thresholds_and_repeat(tmp_path
             "run spice task reclaim CLAIMS-00000001."
         ),
     ]
-
-
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "spice@example.test"], cwd=path, check=True
-    )
-    subprocess.run(["git", "config", "user.name", "Spice Tests"], cwd=path, check=True)
 
 
 def test_agent_import_parses_uuid_and_lists_in_help():

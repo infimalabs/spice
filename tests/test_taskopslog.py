@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,6 +12,7 @@ import pytest
 from spice.agent import lifecycle, watchdog
 from spice.agent.driver import DRIVER
 from spice.tasks import claimstate, config, create, identity, ops, opslog, render, tw
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -294,18 +294,3 @@ def _claimed_task(*, priority: str) -> str:
     )
     ops.claim(handle)
     return handle
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

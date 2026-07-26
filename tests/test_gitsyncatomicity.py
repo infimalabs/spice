@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 
 from spice.tasks.git import boundaries, merging
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
+from tests.test_reposcaffolding import run as _run
 
 GIT_CONFLICT_EXIT_CODE = 1
 GIT_FATAL_EXIT_CODE = 128
@@ -241,16 +243,6 @@ def _advance_upstream(tmp_path: Path) -> None:
     _run(peer, "git", "push", "origin", "main")
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _configure_git_identity(path)
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
@@ -275,10 +267,6 @@ def _reference_transaction_hook_path(repo: Path) -> Path:
 
 def _git(repo: Path, *args: str) -> str:
     return _run(repo, "git", *args).stdout.strip()
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def _run_unchecked(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
-from pathlib import Path
 
 import pytest
 
 from spice.errors import SpiceError
 from spice.paths import git_common_dir
-from spice.serve.team.store import team_database_path
 from spice.serve.team.schema import TEAM_DATABASE_FILENAME
+from spice.serve.team.store import team_database_path
 from spice.tasks import config, render, tw
+from tests.test_reposcaffolding import init_empty_repo as _init_repo
 
 
 def test_ensure_task_event_file_preserves_existing_event(tmp_path):
@@ -419,15 +418,3 @@ def test_ordinary_backend_data_location_semantics_match_taskrc(tmp_path, monkeyp
         assert f"data.location={located}" == data_line
     finally:
         config.set_backend(None)
-
-
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    subprocess.run(
-        ["git", "init", "-b", "main"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return path

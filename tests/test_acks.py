@@ -7,6 +7,8 @@ import subprocess
 from contextlib import contextmanager
 from threading import Barrier, Event, Thread
 
+import pytest
+
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail import ackstate
@@ -372,6 +374,36 @@ def test_decorated_ack_and_task_headers_agree_in_one_message():
     ]
 
 
+@pytest.mark.parametrize(
+    "decoration",
+    (
+        "{}",
+        "**{}**",
+        "- {}",
+        "+ {}",
+        "* {}",
+        "1. {}",
+        "- [ ] {}",
+        "### {}",
+        "- **{}**",
+    ),
+)
+def test_line_leading_control_decorations_agree_for_ack_nack_and_task(decoration):
+    ack = decoration.format(f"ACK {KEY_A}: accepted")
+    nack = decoration.format(f"NACK {KEY_B}: declined")
+    task = decoration.format(
+        "TASK title=Captured | project=task.unit | acceptance=Tracked"
+    )
+
+    assert list(extract_ack_keys_from_text(ack)) == [KEY_A]
+    assert [segment.keys for segment in extract_nack_segments_from_text(nack)] == [
+        (KEY_B,)
+    ]
+    assert extract_task_batch_lines_from_text(task) == [
+        "TASK title=Captured | project=task.unit | acceptance=Tracked"
+    ]
+
+
 def test_decoration_stripping_leaves_prose_and_payloads_intact():
     text = (
         "**TASKS** are tracked on the board.\n"
@@ -417,14 +449,17 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
             CREATE TABLE acked_inbox_items (
               key TEXT PRIMARY KEY,
               inbox_name TEXT NOT NULL,
+              text TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
               archived_at REAL NOT NULL
             )
             """
         )
         connection.execute(
             """
-            INSERT INTO acked_inbox_items (key, inbox_name, archived_at)
-            VALUES (?, ?, ?)
+            INSERT INTO acked_inbox_items
+              (key, inbox_name, text, attachments_json, archived_at)
+            VALUES (?, ?, '', '[]', ?)
             """,
             (KEY_A, f"{KEY_A}.txt", 100.0),
         )
@@ -731,7 +766,7 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     database_path = ack_state_database_path(tmp_path)
     holder = sqlite3.connect(database_path)
     holder.execute("BEGIN IMMEDIATE")
-    insert_started = Event()
+    write_started = Event()
     finished = Event()
     real_connection = ackstate.sqlite_connection
     configured_timeouts: list[int | None] = []
@@ -743,10 +778,8 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
         with real_connection(*args, **kwargs) as connection:
             connection.set_trace_callback(
                 lambda statement: (
-                    insert_started.set()
-                    if statement.lstrip()
-                    .upper()
-                    .startswith("INSERT INTO ACKED_INBOX_ITEMS")
+                    write_started.set()
+                    if statement.lstrip().upper().startswith("BEGIN IMMEDIATE")
                     else None
                 )
             )
@@ -764,7 +797,7 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     worker = Thread(target=archive_header)
     worker.start()
     try:
-        assert insert_started.wait(timeout=2.0) is True
+        assert write_started.wait(timeout=2.0) is True
         assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
     finally:
         holder.commit()

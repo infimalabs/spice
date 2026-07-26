@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.paths import set_state_backend
 from spice.serve.cli import run_serve_team_diagnostics
 from spice.serve.diagnostics import render_team_diagnostics, team_diagnostics_payload
 from spice.serve.team.projection import (
@@ -230,11 +231,13 @@ def test_team_diagnostics_reports_drain_as_computed_effective_scope(tmp_path):
 def test_serve_teams_cli_json_uses_task_backend(tmp_path, capsys):
     backend = tmp_path / "task-backend"
     args = SimpleNamespace(task_backend=str(backend), json_output=True)
+    set_state_backend(str(tmp_path / "managed-state"))
     try:
         result = run_serve_team_diagnostics(args)
         data = json.loads(capsys.readouterr().out)
     finally:
         task_config.set_backend(None)
+        set_state_backend(None)
 
     assert result == EXIT_OK
     assert data["storePath"] == str(backend / "data" / TEAM_DATABASE_FILENAME)
@@ -260,6 +263,7 @@ def test_serve_reset_projections_rebuilds_and_reports_the_new_build(tmp_path, ca
     args = build_parser().parse_args(
         ["serve", "--task-backend", str(backend), "reset-projections"]
     )
+    set_state_backend(str(tmp_path / "managed-state"))
     task_config.set_backend(str(backend))
     try:
         ServeTeamStore().record_agent_metric_delta(
@@ -268,13 +272,16 @@ def test_serve_reset_projections_rebuilds_and_reports_the_new_build(tmp_path, ca
         before = _projection_row_counts()
     finally:
         task_config.set_backend(None)
+        set_state_backend(None)
 
+    set_state_backend(str(tmp_path / "managed-state"))
     try:
         result = args.func(args)
         text = capsys.readouterr().out
         after = _projection_row_counts()
     finally:
         task_config.set_backend(None)
+        set_state_backend(None)
 
     assert result == EXIT_OK
     assert before["agent_metrics"] == 1
@@ -305,6 +312,14 @@ def test_projection_failure_diagnostics_keep_the_stale_generation_and_recovery(
     assert projection["servable"] is True
     assert "rebuild fixture stopped" in projection["detail"]
     assert projection["recoveryAction"] == AGENT_ACTIVITY.recovery_action
+    # A bad rebuild is meant to be diagnosable without the design record, so
+    # every registered answer travels beside the failure detail. Wiring is what
+    # this proves: a dropped key or a crossed field, not the prose itself.
+    assert projection["source"] == AGENT_ACTIVITY.source
+    assert projection["cursor"] == AGENT_ACTIVITY.cursor
+    assert projection["horizon"] == AGENT_ACTIVITY.horizon
+    assert projection["rebuild"] == AGENT_ACTIVITY.rebuild
+    assert projection["beyondHorizon"] == AGENT_ACTIVITY.beyond_horizon
     assert f"status={PROJECTION_STATUS_STALE}" in text
     assert f"recovery={AGENT_ACTIVITY.recovery_action}" in text
 

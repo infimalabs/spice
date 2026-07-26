@@ -84,12 +84,12 @@ Opening a database follows one atomic sequence:
 6. Roll back the entire transaction on any exception.
 
 Fresh empty databases migrate from version `0`. A populated database that
-reports version `0`, a retired fingerprint, an unsupported version, an
-or a partial/changed authority table shape fails without mutation. Tables
-outside the named authority set are outside its schema contract and are never
-queried, migrated, or dropped. There is no compatibility alias and no
-destructive recovery branch. Every caller must arrive on an explicitly
-supported integer version and exact authority shape.
+reports version `0`, a retired fingerprint, an unsupported version, or a
+partial/changed authority table shape fails without mutation. Tables outside
+the named authority set are outside its schema contract and are never queried,
+migrated, or dropped. There is no compatibility alias and no destructive
+recovery branch. Every caller must arrive on an explicitly supported integer
+version and exact authority shape.
 
 ## Writer-Version Rule
 
@@ -200,7 +200,7 @@ Focused migration and terminal parity tests prove:
 - a warm process-local initialization cache still rejects a subsequently newer
   writer version before yielding the connection;
 - emptying, corrupting, and deleting the projection file outright each leave
-  authority contents and version unchanged; and
+  authority contents and version unchanged;
 - drifted or partial authority shapes fail without destructive rebuilding or a
   partial open;
 - static source audits find no retired task mirror writer, directive aggregate

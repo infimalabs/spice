@@ -3,17 +3,15 @@
 import argparse
 import gzip
 import json
-import subprocess
 
 import pytest
 
 from spice.cli.parser import build_parser
-from spice.sqliteconnection import sqlite_connection
+from spice.errors import SpiceError
+from spice.sessions import records
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
-from spice.sessions import records
-from spice.transcript.timestamps import normalize_timestamp
-from spice.errors import SpiceError
+from spice.sqliteconnection import sqlite_connection
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -25,6 +23,10 @@ from spice.tasks.identity import (
     key_for,
     mint_incepted,
     render_handle,
+)
+from spice.transcript.timestamps import normalize_timestamp
+from tests.test_reposcaffolding import (
+    init_committed_repo as _init_git_repo,
 )
 from tests.test_sessionfixtures import (
     SUPERVISED_FIXTURES,
@@ -830,21 +832,6 @@ def _write_claude_thread_transcript(path) -> None:
 
 def _section_headers(output: str) -> list[str]:
     return [line for line in output.splitlines() if line and not line.startswith(" ")]
-
-
-def _init_git_repo(path) -> None:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd, *args: str) -> None:
-    subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def test_collect_turns_derives_claude_turns_from_prompt_id(tmp_path, monkeypatch):

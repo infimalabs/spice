@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,8 @@ from spice.agent.driver import DRIVER
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.tasks import alloc, config, create, identity, ops
+from tests.test_reposcaffolding import init_committed_repo as _init_repo
+from tests.test_reposcaffolding import run as _run
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -69,20 +70,6 @@ def test_drain_phase_boundary_sees_configured_assignable_stem(task_repo, monkeyp
     assert review["project"] == "paintball.docs"
 
 
-def _init_repo(path: Path) -> Path:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _configure_git_identity(path)
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
-
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

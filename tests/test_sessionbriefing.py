@@ -3,7 +3,6 @@
 import json
 import os
 import shutil
-import subprocess
 import time
 from datetime import datetime
 from types import SimpleNamespace
@@ -25,12 +24,15 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.sessions import briefing as briefing_module
-from spice.sessions import briefingpressure
+from spice.sessions import briefingpressure, learnings, records
 from spice.sessions import rehydrationview as rehydration_view
 from spice.sessions.briefing import render_briefing
-from spice.sessions import learnings, records
 from spice.tasks import config as task_config
-from spice.tasks import create, identity as task_identity, ops
+from spice.tasks import create, ops
+from spice.tasks import identity as task_identity
+from tests.test_reposcaffolding import (
+    init_committed_repo as _init_git_repo,
+)
 from tests.test_sessionfixtures import (
     SUPERVISED_FIXTURES,
     transcript_driver_for_fixture,
@@ -969,18 +971,3 @@ def _section_lines(output: str, header: str) -> list[str]:
 
 def _section_headers(output: str) -> list[str]:
     return [line for line in output.splitlines() if line and not line.startswith(" ")]
-
-
-def _init_git_repo(path) -> None:
-    path.mkdir()
-    _run(path, "git", "init", "-b", "main")
-    _run(path, "git", "config", "user.email", "spice@example.test")
-    _run(path, "git", "config", "user.name", "Spice Tests")
-    (path / "README.md").write_text("initial\n", encoding="utf-8")
-    _run(path, "git", "add", "README.md")
-    _run(path, "git", "commit", "-m", "initial")
-    return path
-
-
-def _run(cwd, *args: str) -> None:
-    subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

@@ -33,7 +33,7 @@ Every family registers, in code, six things:
 1. **source** — the canonical native facts it is derived from;
 2. **cursor** — what records how far the last build got;
 3. **horizon** — how far back that source can still be replayed;
-4. **rebuild** — the entry point that refills it; and
+4. **rebuild** — the entry point that refills it;
 5. **beyond horizon** — what the family can still say when the source no longer
    reaches back far enough; and
 6. **recovery action** — the exact operator command that starts a replacement
@@ -41,7 +41,8 @@ Every family registers, in code, six things:
 
 A table with no answer to those six does not belong in this store. The
 registration is executable, not prose in a document: a test resolves every
-dotted `spice.` symbol named in it, so a rebuild entry point that is renamed or
+dotted `spice.` symbol named in it and parses each recovery action with the real
+command line, so a rebuild entry point or recovery command that is renamed or
 deleted fails the suite rather than rotting into a false claim.
 
 One family is registered today.
@@ -54,14 +55,15 @@ counts against, so a replaced transcript reusing a path is recognized as a
 replacement rather than resumed into. Its horizon is the transcript files still
 on disk; per-bucket counts are pruned at the metric history retention horizon
 and lifetime counters are not. It is refilled by
-`spice.serve.metrics.rebuild_transcript_metrics`. Recovery resolves sources in
-one documented order: the exact checkpoint manifest of a servable generation,
-then authority identities whose recorded transcript owner can still discover
-their recorded thread. Each selected source is replayed from its first byte
-through the typed transcript reader. Beyond the horizon it rebuilds from the
-transcript bytes that remain: activity whose source file is gone does not come
-back, and the rebuilt family says so by starting at the earliest bucket the
-surviving sources produce.
+`spice.serve.metrics.rebuild_transcript_metrics`. Beyond the horizon it rebuilds
+from the transcript bytes that remain: activity whose source file is gone does
+not come back, and the rebuilt family says so by starting at the earliest bucket
+the surviving sources produce. Its recovery action is the exact command
+`spice serve reset-projections agentActivity`, which resolves sources in one
+documented order — the exact checkpoint manifest of a servable generation, then
+authority identities whose recorded transcript owner can still discover their
+recorded thread — and replays each selected source from its first byte through
+the typed transcript reader.
 
 ## Publication, Rebuild, and Reset
 
@@ -89,10 +91,14 @@ Retrying the recovery command stages another complete replacement.
 `spice serve reset-projections` performs the isolated rebuild despite its
 historical command name.
 
-`spice serve diagnostics` reports the projection store path and, per family,
-its generation, status, servability, cursor, horizon, source freshness,
-retention floor, last successful rebuild, row counts, failure detail, and exact
-recovery action.
+`spice serve teams` prints the projection store path and, per family, its
+generation, status, servability, source freshness, retention floor, last
+successful rebuild, row counts, failure detail, rebuild entry point, and exact
+recovery action. Its `--json` form carries those fields plus the update time and
+the four registered answers too long to render on one line — source, cursor,
+horizon, and beyond horizon — so a terminal keeps one line per family while the
+machine-readable payload answers all six. An operator reading a bad rebuild
+learns what refills the family and the exact command to run either way.
 
 ## No Migration Ladder
 
@@ -153,7 +159,7 @@ authority-configured floor.
 ## Constraints
 
 - Not an event warehouse. Families are added when a specific read needs one,
-  each with its five registered answers.
+  each with its six registered answers.
 - No durable native fact is copied in without a demonstrated query-cost need.
   Deleting this database leaves every logical source fact intact.
 - No dual-read path may silently choose between this store and another.
@@ -164,11 +170,14 @@ authority-configured floor.
 ## Validation
 
 Executable proofs in `tests/test_serveprojection.py`,
-`tests/test_serveprojectionparity.py`, and `tests/test_teamschema.py` establish
-that:
+`tests/test_serveprojectionparity.py`, `tests/test_servediagnostics.py`, and
+`tests/test_teamschema.py` establish that:
 
-- every registered family answers all six questions and every `spice.` symbol
-  its registration names resolves;
+- every registered family answers all six questions, every `spice.` symbol its
+  registration names resolves, and its recovery action still parses to the
+  command that rebuilds exactly that family;
+- a family left stale by a failed rebuild reports all six answers beside its
+  failure detail, so the diagnosis needs nothing from this document;
 - the schema builds exactly the registered family tables plus bookkeeping, so no
   table exists that nobody registered;
 - a successful isolated rebuild serves the prior generation until one atomic
@@ -185,7 +194,7 @@ that:
 - a corrupt projection file is recreated as explicitly incompatible;
 - a file deleted under a live store is rebuilt for that store's next diagnostics
   read and next recorded delta, with authority byte-identical throughout, while
-  repeated reads of an unchanged file sync it exactly once; and
+  repeated reads of an unchanged file sync it exactly once;
 - a drifted family is dropped whole, rebuilt from current DDL, and republished
   as a new generation while the authority file is untouched;
 - a representative history containing directives/ACKs, activity, task

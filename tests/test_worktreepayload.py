@@ -1,21 +1,20 @@
 """Lane metrics: sparkline buckets, uptime, and counter assembly."""
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
 from pathlib import Path
-import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
+from spice.serve import messages as message_reader
 from spice.serve.messagepresentation import AssistantMessage
-from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.payload.chrome import LANE_CHROME_GENERATION_JOIN
 from spice.serve.team.store import ServeTeamStore
+from spice.serve.worktree import inventory
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
@@ -189,10 +188,6 @@ def _pending_identity(count: int = 0) -> dict[str, object]:
         "pendingInboxRevision": f"test-revision-{count}",
         "pendingInboxVersion": 100 + count,
     }
-
-
-def _init_repo(path: Path) -> None:
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
 def _identity_status(
