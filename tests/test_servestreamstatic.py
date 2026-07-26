@@ -198,15 +198,17 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         in app_panes
     )
     assert "tasks · stem" in app_panes
+    # A chip is a classed label span then a classed count span, in that order.
+    # Both the subscription chip and the private-queue chip build that pair
+    # through one helper, so the structure is asserted where it is now fixed.
     assert (
-        "chip.innerHTML =\n"
-        "    '<span class=\"lane-filter-chip-label\"></span>' +\n"
-        "    '<span class=\"lane-filter-chip-count\"></span>';" in app_panes
+        'const chipLabel = serveSpanWithClass("lane-filter-chip-label");' in app_panes
     )
     assert (
-        'chip.querySelector(".lane-filter-chip-count").textContent = String(count);'
-        in app_panes
+        'const chipCount = serveSpanWithClass("lane-filter-chip-count");' in app_panes
     )
+    assert "chipCount.textContent = String(count);" in app_panes
+    assert "chip.append(chipLabel, chipCount);" in app_panes
     assert "countEl.textContent = String(count);" in app_panes
     assert "button.append(countEl);" in app_panes
     assert chip_rule == (
