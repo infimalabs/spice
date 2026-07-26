@@ -9,9 +9,9 @@ exactly once and hands the result here, so nothing above this crossing holds a
 raw transcript line or parses one a second time.
 
 Dialect knowledge reaches here only through `AgentDriver` hooks, never through a
-substring a consumer wrote. That is the whole point of the seam: `mail/watch`
-once carried both dialects' raw JSON shapes in one prefilter, so a third driver
-would have silently produced no ACK text until someone remembered to widen it.
+substring a consumer wrote. That is the whole point of the seam: consumers once
+carried both dialects' raw JSON shapes in their own prefilters, so a third
+driver would have silently produced no prose until someone widened every copy.
 """
 
 from __future__ import annotations

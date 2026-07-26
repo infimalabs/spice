@@ -5,54 +5,70 @@ import json
 
 from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER
 from spice.serve.images import (
-    assistant_image_markdown,
+    image_markdown,
     markdown_image_reference,
     rollout_image_from_offset,
-    tool_output_image_markdown,
     view_image_markdown,
     worktree_file_image_url,
 )
 from spice.serve.markdown import render_message_html
 from spice.serve.messages import read_assistant_messages
+from spice.transcript.events import Image, Provenance, ToolCall
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepixels"
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")
+AT = Provenance(source="rollout.jsonl", line=0, ordinal=0, timestamp=None)
 
 
 def _tool_output_payload() -> dict:
     return {
         "type": "function_call_output",
-        "output": [{"type": "input_image", "image_url": {"url": PNG_DATA_URL}}],
+        "output": [{"type": "input_image", "image_url": PNG_DATA_URL}],
     }
 
 
 def test_view_image_call_becomes_image_markdown():
-    payload = {
-        "type": "function_call",
-        "name": "view_image",
-        "arguments": json.dumps({"path": "shots/login screen.png"}),
-    }
-    assert view_image_markdown(payload) == "![view_image](shots/login%20screen.png)"
+    call = ToolCall(
+        at=AT,
+        call_id="call-1",
+        name="view_image",
+        arguments=json.dumps({"path": "shots/login screen.png"}),
+    )
+    assert view_image_markdown(call) == "![view_image](shots/login%20screen.png)"
 
 
 def test_tool_output_embedded_image_routes_through_api():
-    markdown = tool_output_image_markdown(
-        _tool_output_payload(), worktree_id="wt", source_offset=17
+    image = Image(
+        at=AT,
+        url=PNG_DATA_URL,
+        content_type="input_image",
+        tool_output_type="function_call_output",
     )
+    markdown = image_markdown([image], worktree_id="wt", source_offset=17)
     assert (
         markdown == "![input_image](/api/work/trees/wt/messages/image?offset=17&item=0)"
     )
 
 
 def test_assistant_message_image_content_becomes_markdown():
-    payload = {
-        "type": "message",
-        "role": "assistant",
-        "content": [{"type": "input_image", "image_url": PNG_DATA_URL}],
-    }
-    markdown = assistant_image_markdown(payload, worktree_id="wt", source_offset=3)
+    image = Image(at=AT, url=PNG_DATA_URL, content_type="input_image", role="assistant")
+    markdown = image_markdown([image], worktree_id="wt", source_offset=3)
     assert (
         markdown == "![input_image](/api/work/trees/wt/messages/image?offset=3&item=0)"
+    )
+
+
+def test_each_image_on_a_line_keeps_its_own_item_index():
+    """The embedded URL addresses a picture by its place among typed images."""
+    second = "data:image/gif;base64," + base64.b64encode(b"gif").decode("ascii")
+    images = [
+        Image(at=AT, url=PNG_DATA_URL, content_type="input_image"),
+        Image(at=AT, url=second, content_type="input_image"),
+    ]
+    markdown = image_markdown(images, worktree_id="wt", source_offset=9)
+    assert markdown == (
+        "![input_image](/api/work/trees/wt/messages/image?offset=9&item=0)\n\n"
+        "![input_image](/api/work/trees/wt/messages/image?offset=9&item=1)"
     )
 
 

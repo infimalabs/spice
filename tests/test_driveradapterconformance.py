@@ -1,11 +1,10 @@
 """One contract every driver adapter answers, exercised through the substrate.
 
 These tests never import a dialect decoder. They hold a driver and a raw line and
-go through `spice.transcript.decode` and the reader engine that consumes the line
-hint, which is the whole of what a consumer above the seam ever touches. What
-they pin is therefore the contract itself rather than either adapter's
-internals: what the cheap line hint must admit, what a decode must never drop,
-and how provenance rides through.
+go through `spice.transcript.decode` and the reader engine above it, which is the
+whole of what a consumer above the seam ever touches. What they pin is therefore
+the contract itself rather than either adapter's internals: what a decode must
+never drop, what it must stay silent about, and how provenance rides through.
 
 Adding a third driver means adding its adapter, registering it, and adding one
 `DriverFixture` entry below with a transcript fixture file. Nothing else in this
@@ -30,13 +29,7 @@ from spice.transcript.events import (
     TranscriptEvent,
     Unknown,
 )
-from spice.transcript.reader import (
-    TranscriptCursor,
-    TranscriptEventReader,
-    TranscriptLine,
-    read_forward,
-    record_assistant_text,
-)
+from spice.transcript.reader import TranscriptEventReader
 
 FIXTURES = Path(__file__).parent / "fixtures" / "session"
 
@@ -53,8 +46,8 @@ class DriverFixture:
     """One dialect's samples of the shapes the contract is stated over.
 
     `quiet_line` is a real line from the same transcript that carries no
-    assistant prose and that the hint is expected to reject outright, which is
-    what keeps a hint from passing the suite by answering True to everything.
+    assistant prose, which is what keeps an adapter from passing the prose
+    contract by reading every line as prose.
     """
 
     transcript: str
@@ -123,9 +116,13 @@ def _decode(
     return decode_parsed_line(json.loads(line), driver, source=source, line=number)
 
 
-def _record(line: str) -> TranscriptLine:
-    """The record the reader engine would carry for one fixture line."""
-    return TranscriptLine(raw=line, offset=0, parsed=json.loads(line))
+def _prose(line: str, driver: AgentDriver) -> list[str]:
+    """Every assistant text one fixture line decodes into, in source order."""
+    return [
+        event.text
+        for event in _decode(line, driver)
+        if isinstance(event, AssistantText)
+    ]
 
 
 DRIVERS = pytest.mark.parametrize(
@@ -136,102 +133,37 @@ DRIVERS = pytest.mark.parametrize(
 @DRIVERS
 def test_substrate_decodes_the_dialects_assistant_prose(driver: AgentDriver) -> None:
     fixture = _fixture(driver)
-    texts = record_assistant_text(_record(fixture.prose_line), driver)
-    assert [text.text for text in texts] == [fixture.prose]
-
-
-@DRIVERS
-def test_hint_separates_prose_lines_from_quiet_lines(driver: AgentDriver) -> None:
-    fixture = _fixture(driver)
-    hints = (
-        driver.line_may_carry_assistant_text(fixture.prose_line),
-        driver.line_may_carry_assistant_text(fixture.quiet_line),
-    )
-    assert hints == (True, False)
+    assert _prose(fixture.prose_line, driver) == [fixture.prose]
 
 
 @DRIVERS
 def test_quiet_line_carries_no_assistant_prose(driver: AgentDriver) -> None:
     fixture = _fixture(driver)
-    assert record_assistant_text(_record(fixture.quiet_line), driver) == ()
+    assert _prose(fixture.quiet_line, driver) == []
 
 
 @DRIVERS
-def test_hint_admits_every_line_the_decoder_reads_as_prose(
+def test_the_reader_engine_delivers_the_prose_the_decoder_reads(
     driver: AgentDriver,
 ) -> None:
-    """The prefilter may over-admit; a line it rejects is never parsed again.
+    """A whole real transcript reaches a consumer as the same prose, in order.
 
-    A hint that misses one real prose line silently stops delivering that text
-    forever, so this walks a whole real transcript rather than a sample.
+    The line-by-line decode contract above is stated over single fixture lines;
+    this walks the engine path a consumer actually holds and demands the two
+    agree across every line of a recorded transcript, so a dialect cannot pass
+    the contract on samples while losing text at volume.
     """
-    lines = _transcript_lines(driver)
-    prose_lines = [
-        line
-        for line in lines
-        if any(isinstance(event, AssistantText) for event in _decode(line, driver))
-    ]
-    missed = [
-        line
-        for line in prose_lines
-        if driver.line_may_carry_assistant_text(line) is False
-    ]
-    assert missed == []
-    assert len(prose_lines) >= 1
-
-
-@DRIVERS
-def test_the_hint_never_changes_the_prose_the_engine_delivers(
-    driver: AgentDriver,
-) -> None:
-    """The optimization is invisible: same facts, same order, whole transcript.
-
-    The hint exists to skip work, so what makes it safe is that skipping that
-    work subtracts nothing. Every `AssistantText` the unfiltered typed stream
-    carries comes back from the engine path that consults the hint first,
-    stamped identically, across a real transcript of both kinds of line.
-    """
-    path = FIXTURES / _fixture(driver).transcript
-    stream = TranscriptEventReader(path, driver, source_actor=None).read("forward")
-    unfiltered = [event for event in stream.events if isinstance(event, AssistantText)]
-    hinted = [
-        text
-        for record in read_forward(path, cursor=TranscriptCursor()).records
-        for text in record_assistant_text(record, driver, source=str(path))
-    ]
-    assert hinted == unfiltered
-    assert len(unfiltered) >= 1
-
-
-@DRIVERS
-def test_a_record_the_hint_rejects_never_reaches_the_decoder(
-    driver: AgentDriver, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The prefilter has to actually prefilter, not merely agree with the decode.
-
-    Equivalence would hold just as well if the engine ignored the hint and
-    decoded everything, so this pins the saving itself: the skipped decode is
-    the entire reason the dialect declares the hook.
-    """
-    decoded: list[int] = []
-    decode = type(driver).transcript_line_events
-
-    def counting(
-        self: AgentDriver,
-        raw: dict[str, object],
-        *,
-        source: str = UNLOCATED_SOURCE,
-        line: int = 0,
-    ) -> list[TranscriptEvent]:
-        decoded.append(line)
-        return decode(self, raw, source=source, line=line)
-
-    monkeypatch.setattr(type(driver), "transcript_line_events", counting)
     fixture = _fixture(driver)
-    quiet = record_assistant_text(_record(fixture.quiet_line), driver)
-    assert (quiet, decoded) == ((), [])
-    prose = record_assistant_text(_record(fixture.prose_line), driver)
-    assert ([text.text for text in prose], decoded) == ([fixture.prose], [0])
+    path = FIXTURES / fixture.transcript
+    stream = TranscriptEventReader(path, driver, source_actor=None).read("forward")
+    delivered = [
+        event.text for event in stream.events if isinstance(event, AssistantText)
+    ]
+    decoded = [
+        text for line in _transcript_lines(driver) for text in _prose(line, driver)
+    ]
+    assert delivered == decoded
+    assert len(delivered) >= 1
 
 
 @DRIVERS

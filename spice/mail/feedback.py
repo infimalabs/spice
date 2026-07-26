@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 SUPERVISOR_FEEDBACK_FIELD = "feedback"
+SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,40 @@ def parse_supervisor_feedback_line(line: str) -> SupervisorFeedback | None:
             return None
         fields[clean_key] = value
     return SupervisorFeedback(kind=kind, fields=fields)
+
+
+def supervisor_feedback_notices(text: str) -> list[SupervisorFeedback]:
+    """Parse every notice the supervisor appended under its heading in `text`.
+
+    The supervisor writes its notices as an indented block beneath a
+    `Supervisor Feedback` heading inside otherwise arbitrary tool output, so a
+    block ends at the first blank line, the first unindented line, or the next
+    heading. Reading that framing belongs with the line grammar it frames, not
+    with whichever consumer happens to render the notices.
+    """
+    notices: list[SupervisorFeedback] = []
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != SUPERVISOR_FEEDBACK_HEADING:
+            index += 1
+            continue
+        index += 1
+        while index < len(lines):
+            line = lines[index]
+            stripped = line.strip()
+            if stripped == SUPERVISOR_FEEDBACK_HEADING:
+                break
+            if not stripped:
+                index += 1
+                break
+            if line == stripped:
+                break
+            feedback = parse_supervisor_feedback_line(stripped)
+            if feedback is not None:
+                notices.append(feedback)
+            index += 1
+    return notices
 
 
 def _feedback_field_value(value: object) -> str:

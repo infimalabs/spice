@@ -13,11 +13,10 @@ does not know the historical canonical-dictionary seam.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
-from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
+from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ACK_DISPOSITION_REFUSED
 from spice.mail.ackgrammar import split_keyed_response
 from spice.transcript.events import (
     AssistantText,
@@ -42,7 +41,7 @@ __all__ = [
     "ClassifiedSpan",
     "DirectiveKind",
     "SpanKind",
-    "strip_directive_lines",
+    "span_disposition",
 ]
 
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
@@ -84,9 +83,6 @@ class DirectiveKind(StrEnum):
 
     TASK = "task"
     APP = "app"
-
-
-_ALL_DIRECTIVE_KINDS = frozenset(DirectiveKind)
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,15 +168,14 @@ class AssembledMessageReducer:
         return (message,)
 
 
-def strip_directive_lines(
-    text: str,
-    *,
-    kinds: Collection[DirectiveKind] = _ALL_DIRECTIVE_KINDS,
-) -> str:
-    """Remove selected task/app control lines through the classifier's parser."""
-    masked, directives = _mask_directives(text, frozenset(kinds))
-    visible = [line for line in masked.splitlines() if line not in directives]
-    return "\n".join(visible).strip()
+def span_disposition(kind: SpanKind) -> str:
+    """The ACK-state disposition a keyed span's polarity already decided.
+
+    Classification happens once, here, when the span is built; consumers that
+    put the polarity on a wire ask for its name rather than re-reading the
+    header or comparing kinds themselves.
+    """
+    return ACK_DISPOSITION_REFUSED if kind is SpanKind.NACK else ACK_DISPOSITION_ACKED
 
 
 def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
@@ -230,7 +225,7 @@ def _event_spans(event: TranscriptEvent) -> tuple[ClassifiedSpan, ...]:
 
 
 def _assistant_text_spans(event: AssistantText) -> tuple[ClassifiedSpan, ...]:
-    masked, directives = _mask_directives(event.text, _ALL_DIRECTIVE_KINDS)
+    masked, directives = _mask_directives(event.text)
     preamble, responses = split_keyed_response(
         masked,
         drop_task_directives=False,
@@ -306,10 +301,7 @@ def _segment_spans(
     return tuple(spans)
 
 
-def _mask_directives(
-    text: str,
-    kinds: frozenset[DirectiveKind],
-) -> tuple[str, dict[str, _Directive]]:
+def _mask_directives(text: str) -> tuple[str, dict[str, _Directive]]:
     marker_prefix = "\0spice-directive:"
     while marker_prefix in text:
         marker_prefix = f"\0{marker_prefix}"
@@ -317,7 +309,7 @@ def _mask_directives(
     directives: dict[str, _Directive] = {}
     for line in text.splitlines():
         directive_kind = _directive_kind(line)
-        if directive_kind is None or directive_kind not in kinds:
+        if directive_kind is None:
             masked.append(line)
             continue
         marker = f"{marker_prefix}{len(directives)}\0"
