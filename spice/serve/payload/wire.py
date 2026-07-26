@@ -1033,11 +1033,11 @@ WIRE_OBJECTS = (
     ),
     _object(
         "ServeBranding",
-        optional={"name": STRING, "defaultLifetime": STRING, "version": STRING},
+        required={"name": STRING, "defaultLifetime": STRING, "version": STRING},
     ),
     _object(
         "ServeInitialGlobalSettings",
-        optional={"fastMode": BOOLEAN, "observerMode": BOOLEAN},
+        required={"fastMode": BOOLEAN, "observerMode": BOOLEAN},
     ),
 )
 
@@ -1105,6 +1105,8 @@ BROWSER_PAYLOAD_EMITTER_SCHEMAS = {
     "payload.message._messages_worktree_payload": "LanePayload",
     "payload.metric.metric_series_payload": "MetricSeriesPayload",
     "submissions.SubmissionLifecycle.event_payload": "SubmissionLifecycle",
+    "web.branding_payload": "ServeBranding",
+    "web.initial_global_settings_payload": "ServeInitialGlobalSettings",
     "workroutes.work_tree_send_accepted_response_payload": "WorkTreeSendResult",
     "workroutes.work_tree_send_response_payload": "WorkTreeSendResult",
     "workroutes.work_tree_task_drain_response_payload": "TaskDrainResult",

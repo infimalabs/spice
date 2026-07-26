@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -16,10 +17,12 @@ from spice.serve import (
     livebusmutation,
     observer,
     submissions,
+    web,
     workroutes,
 )
 from spice.serve.payload import chrome, message, metric, wire
 from spice.serve.worktree import inventory
+from spice.version import runtime_version
 from tests.test_wirefixtures import LIVE_BUS_FRAME_FIXTURES, valid_wire_payload
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +118,7 @@ def test_browser_payload_emitters_match_the_exact_schema_registry():
         message,
         metric,
         submissions,
+        web,
         workroutes,
         inventory,
     )
@@ -133,6 +137,57 @@ def test_browser_payload_emitters_match_the_exact_schema_registry():
     )
 
     assert actual == sorted(wire.BROWSER_PAYLOAD_EMITTER_SCHEMAS)
+
+
+def _index_page_global_text(page: str, name: str) -> str:
+    """The script text a page global is assigned, as the browser receives it."""
+    marker = f"<script>const {name} = "
+    start = page.index(marker) + len(marker)
+    return page[start : page.index(";</script>", start)]
+
+
+def test_index_page_globals_parse_back_into_payloads_their_emitters_accept():
+    # The emit path validates each object before it is serialized, so only the
+    # rendered text can show what actually reaches the browser. The brand carries
+    # the `</` pair that would otherwise close the script element early, and both
+    # JSON and JS read the escaped `<\/` back as those same two characters -- so
+    # the payload the page delivers is still one its emitter accepts.
+    page = web.render_index_html(
+        branding=web.ServeBranding(name="spice</script>", default_lifetime="Drive"),
+        initial_global_settings={"fastMode": True, "observerMode": True},
+    )
+    texts = {
+        "web.branding_payload": _index_page_global_text(page, "spiceServeBranding"),
+        "web.initial_global_settings_payload": _index_page_global_text(
+            page, "spiceServeInitialGlobalSettings"
+        ),
+    }
+
+    assert texts == {
+        "web.branding_payload": (
+            '{"name": "spice<\\/script>", "defaultLifetime": "Drive", '
+            f'"version": "{runtime_version()}"}}'
+        ),
+        "web.initial_global_settings_payload": (
+            '{"fastMode": true, "observerMode": true}'
+        ),
+    }
+    payloads = {emitter: json.loads(text) for emitter, text in texts.items()}
+    assert payloads == {
+        "web.branding_payload": {
+            "name": "spice</script>",
+            "defaultLifetime": "Drive",
+            "version": runtime_version(),
+        },
+        "web.initial_global_settings_payload": {
+            "fastMode": True,
+            "observerMode": True,
+        },
+    }
+    assert {
+        emitter: wire.validate_emitter_payload(emitter, payload)
+        for emitter, payload in payloads.items()
+    } == payloads
 
 
 def test_live_bus_outbound_discriminants_match_the_exact_frame_registry():
