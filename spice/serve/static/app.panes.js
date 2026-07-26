@@ -184,11 +184,7 @@ function laneFilterChip(lane, filter) {
   chip.title = pinned
     ? "Select pinned lane filter for removal: " + filter
     : "Auto subscription (lifetime-managed): " + filter;
-  chip.innerHTML =
-    '<span class="lane-filter-chip-label"></span>' +
-    '<span class="lane-filter-chip-count"></span>';
-  chip.querySelector(".lane-filter-chip-label").textContent = filter;
-  chip.querySelector(".lane-filter-chip-count").textContent = String(count);
+  appendLaneFilterChipCopy(chip, filter, count);
   chip.addEventListener("click", () => {
     if (!pinned) return;
     if (selected) lane.selectedFilterRemovals.delete(filter);
@@ -218,12 +214,18 @@ function laneFilterPrivateChip(queue) {
   const chip = document.createElement("span");
   chip.className = "lane-filter-chip lane-filter-chip--private";
   chip.title = queue.label + " private queue";
-  chip.innerHTML =
-    '<span class="lane-filter-chip-label"></span>' +
-    '<span class="lane-filter-chip-count"></span>';
-  chip.querySelector(".lane-filter-chip-label").textContent = queue.label;
-  chip.querySelector(".lane-filter-chip-count").textContent = String(queue.count);
+  appendLaneFilterChipCopy(chip, queue.label, queue.count);
   return chip;
+}
+
+// Both chips carry the same label-then-count pair, so they build it the same
+// way instead of each parsing its own copy of the markup.
+function appendLaneFilterChipCopy(chip, label, count) {
+  const chipLabel = serveSpanWithClass("lane-filter-chip-label");
+  chipLabel.textContent = label;
+  const chipCount = serveSpanWithClass("lane-filter-chip-count");
+  chipCount.textContent = String(count);
+  chip.append(chipLabel, chipCount);
 }
 
 function syncLaneFilterAssignOverlay(lane, assignedFilters) {
@@ -485,13 +487,11 @@ function laneFilterPickerActionNodes(lane, assignedFilters, query, syncResults) 
     button.type = "button";
     button.className = "lane-filter-picker-action";
     button.classList.toggle("lane-filter-picker-action--selected", selected);
-    button.innerHTML =
-      '<span class="lane-filter-picker-action-label"></span>' +
-      '<span class="lane-filter-picker-action-detail"></span>';
-    button.querySelector(".lane-filter-picker-action-label").textContent =
-      action.label;
-    button.querySelector(".lane-filter-picker-action-detail").textContent =
-      action.detail;
+    const actionLabel = serveSpanWithClass("lane-filter-picker-action-label");
+    actionLabel.textContent = action.label;
+    const actionDetail = serveSpanWithClass("lane-filter-picker-action-detail");
+    actionDetail.textContent = action.detail;
+    button.append(actionLabel, actionDetail);
     button.addEventListener("click", () =>
       toggleLaneFilterPendingAssignment(lane, action.filter, syncResults),
     );
@@ -922,6 +922,12 @@ function laneMetricSeriesControls(model, existing = null) {
   return cell;
 }
 
+/**
+ * @param {string} name
+ * @param {*} selectedValue
+ * @param {Array<*>} options
+ * @param {HTMLElement | null} [container] reused cell to find an existing select in
+ */
 function laneMetricSeriesSelect(name, selectedValue, options, container = null) {
   let select = laneMetricSeriesSelectForName(container, name);
   if (!select) {
@@ -1129,13 +1135,17 @@ function laneInfoCell(label, value, span) {
     ? "lane-info-cell lane-info-cell--wide"
     : "lane-info-cell";
   button.title = "Copy " + label + ": " + value;
-  button.innerHTML =
-    '<span class="lane-info-key"></span><span class="lane-info-value"></span>' +
-    '<span class="lane-info-copy" aria-hidden="true">⧉</span>';
-  button.querySelector(".lane-info-key").textContent = label;
-  button.querySelector(".lane-info-value").textContent = value;
+  const infoKey = serveSpanWithClass("lane-info-key");
+  infoKey.textContent = label;
+  const infoValue = serveSpanWithClass("lane-info-value");
+  infoValue.textContent = value;
+  const copyEl = serveSpanWithClass("lane-info-copy");
+  copyEl.setAttribute("aria-hidden", "true");
+  copyEl.textContent = "⧉";
+  button.append(infoKey, infoValue, copyEl);
+  // The affordance the click reports through is the one built here, so the
+  // handler holds it directly instead of querying the button back for it.
   button.addEventListener("click", () => {
-    const copyEl = button.querySelector(".lane-info-copy");
     writeClipboardText(value).then((copied) => {
       copyEl.textContent = copied ? "copied" : "copy failed";
       setTimeout(() => {

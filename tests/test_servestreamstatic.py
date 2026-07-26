@@ -51,15 +51,14 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "function filterPillModels()" in app_lanes
     assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
     assert "function taskFilterStemPillModel(stem)" in app_lanes
-    assert (
-        "pill.innerHTML =\n"
-        "      '<span class=\"filter-pill-label\"></span>' +\n"
-        "      '<span class=\"filter-pill-count\"></span>';" in app_lanes
-    )
-    assert (
-        'pill.querySelector(".filter-pill-count").textContent ='
-        "\n      taskFilterStemPillCountText(model);" in app_lanes
-    )
+    # A pill is a classed label span followed by a classed count span, in that
+    # order, with the count text coming from the shared stem formatter. The
+    # spans are built rather than parsed from markup, so the order is asserted
+    # through the append that fixes it.
+    assert 'const pillLabel = serveSpanWithClass("filter-pill-label");' in app_lanes
+    assert 'const pillCount = serveSpanWithClass("filter-pill-count");' in app_lanes
+    assert "pillCount.textContent = taskFilterStemPillCountText(model);" in app_lanes
+    assert "pill.append(pillLabel, pillCount);" in app_lanes
     # Hidden stems (never handed out) collapse to a single open count; public
     # stems and the private agent channel keep the full ready/in-flight/
     # unavailable triple so the pill footprint stays fixed instead of jittering
@@ -199,15 +198,17 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         in app_panes
     )
     assert "tasks · stem" in app_panes
+    # A chip is a classed label span then a classed count span, in that order.
+    # Both the subscription chip and the private-queue chip build that pair
+    # through one helper, so the structure is asserted where it is now fixed.
     assert (
-        "chip.innerHTML =\n"
-        "    '<span class=\"lane-filter-chip-label\"></span>' +\n"
-        "    '<span class=\"lane-filter-chip-count\"></span>';" in app_panes
+        'const chipLabel = serveSpanWithClass("lane-filter-chip-label");' in app_panes
     )
     assert (
-        'chip.querySelector(".lane-filter-chip-count").textContent = String(count);'
-        in app_panes
+        'const chipCount = serveSpanWithClass("lane-filter-chip-count");' in app_panes
     )
+    assert "chipCount.textContent = String(count);" in app_panes
+    assert "chip.append(chipLabel, chipCount);" in app_panes
     assert "countEl.textContent = String(count);" in app_panes
     assert "button.append(countEl);" in app_panes
     assert chip_rule == (

@@ -759,6 +759,19 @@ function composerQuoteDraftsForTarget(lane, targetId) {
   return lane.quoteDrafts.get(targetId) || [];
 }
 
+// beforeMenu and trailingControl are element slots. Their defaults are an empty
+// array and null, which is all an inferred signature can see, so every caller
+// that passed an actual element was assigning into never[] or null. The
+// annotation states the contract the callers already relied on; it does not
+// widen anything the function accepted.
+/**
+ * @param {{
+ *   className: string,
+ *   title: string,
+ *   beforeMenu?: HTMLElement[],
+ *   trailingControl?: HTMLElement | null,
+ * }} options
+ */
 function composerBandHeader({
   className,
   title,
@@ -843,12 +856,11 @@ function toggleComposerBandMenu(trigger, actions) {
     if (hasPressed) button.setAttribute("aria-checked", String(action.pressed));
     button.disabled = Boolean(action.disabled);
     if (action.detail) button.title = action.detail;
-    button.innerHTML =
-      '<span class="spice-menu-action-label"></span>' +
-      '<span class="spice-menu-action-detail"></span>';
-    button.querySelector(".spice-menu-action-label").textContent = action.label;
-    button.querySelector(".spice-menu-action-detail").textContent =
-      action.detail || "";
+    const actionLabel = serveSpanWithClass("spice-menu-action-label");
+    actionLabel.textContent = action.label;
+    const actionDetail = serveSpanWithClass("spice-menu-action-detail");
+    actionDetail.textContent = action.detail || "";
+    button.append(actionLabel, actionDetail);
     button.addEventListener("click", () => {
       if (!action.keepOpen) closeComposerBandMenu(band);
       const previousPressed = hasPressed

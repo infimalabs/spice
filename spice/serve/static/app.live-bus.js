@@ -5,11 +5,15 @@
 // coalesce per microtask tick into one lanes.subscribe frame whose payloads
 // apply state-first, then each fused host renders exactly once.
 
+/** @type {WebSocket | null} */
 let liveBusSocket = null;
+/** @type {Promise<WebSocket> | null} */
 let liveBusOpenPromise = null;
 let liveBusRequestSequence = 0;
 const liveBusPendingRequests = new Map();
+/** @type {number | null} */
 let liveBusHeartbeatTimer = null;
+/** @type {number | null} */
 let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
@@ -35,11 +39,15 @@ function liveBusIsOpen() {
   return Boolean(liveBusSocket && liveBusSocket.readyState === WebSocket.OPEN);
 }
 
+// Every caller awaits this for a socket to send on, so it resolves to a socket
+// or rejects -- it never hands back an absent one. Reading the current socket
+// into a local is what lets that be true for the two reuse paths as well.
 function connectLiveBus() {
-  if (liveBusIsOpen()) return Promise.resolve(liveBusSocket);
+  const current = liveBusSocket;
+  if (current && liveBusIsOpen()) return Promise.resolve(current);
   if (
-    liveBusSocket &&
-    liveBusSocket.readyState === WebSocket.CONNECTING &&
+    current &&
+    current.readyState === WebSocket.CONNECTING &&
     liveBusOpenPromise
   )
     return liveBusOpenPromise;
@@ -96,13 +104,15 @@ function noteLiveBusInbound() {
 function startLiveBusHeartbeat() {
   stopLiveBusHeartbeat();
   liveBusHeartbeatTimer = setInterval(() => {
-    if (!liveBusIsOpen()) return;
+    const socket = liveBusSocket;
+    if (!socket || !liveBusIsOpen()) return;
     liveBusRequest("bus.ping").catch(() => {});
     if (Date.now() - liveBusLastInboundAt > liveBusLivenessTimeoutMs) {
       // A stale half-open socket never fires close on its own; provoke it so
-      // the normal close path drives the reconnect.
+      // the normal close path drives the reconnect. Provoke the socket this
+      // tick actually checked, not whatever liveBusSocket holds by then.
       try {
-        liveBusSocket.close();
+        socket.close();
       } catch (error) {
         scheduleLiveBusReconnect();
       }
@@ -141,6 +151,11 @@ function rejectLiveBusRequests(reason) {
   liveBusPendingRequests.clear();
 }
 
+/**
+ * @param {string} type
+ * @param {Object=} fields
+ * @param {LaneSubmitLatencyProbe | null} [timing]
+ */
 async function liveBusRequest(type, fields = {}, timing = null) {
   const requestId = "bus-" + ++liveBusRequestSequence;
   if (timing) {

@@ -74,6 +74,7 @@ const laneTemplate =
   '  <div class="history-sentinel" data-history-sentinel aria-hidden="true"></div>' +
   "</div>";
 
+/** @type {((event: PointerEvent) => void) | null} */
 let composerBandMenuDismissHandler = null;
 
 function laneDriverIdentityFields(emptyTeam, targetIdentity, serveAgentIdentity) {
@@ -150,10 +151,17 @@ function populateLaneModeRail(rail) {
     button.dataset.laneViewButton = view;
     button.setAttribute("role", "tab");
     button.title = view;
-    button.innerHTML =
-      '<span class="lane-mode-word"></span>' +
-      '<span class="lane-mode-badge" data-lane-view-badge hidden></span>';
-    button.querySelector(".lane-mode-word").textContent = view;
+    // Built rather than parsed from markup: the word span is written and then
+    // read back only to be filled in, and that read is what could answer null.
+    // Holding the node the loop just made cannot.
+    const word = document.createElement("span");
+    word.className = "lane-mode-word";
+    word.textContent = view;
+    const badge = document.createElement("span");
+    badge.className = "lane-mode-badge";
+    badge.dataset.laneViewBadge = "";
+    badge.hidden = true;
+    button.append(word, badge);
     rail.append(button);
   }
 }

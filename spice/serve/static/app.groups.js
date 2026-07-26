@@ -10,8 +10,88 @@ const laneLightPipSizePx = 9;
 const laneLightRowGapPx = 4;
 const laneLightColumnGapPx = 5;
 const laneLightColumnCapacity = 2;
+/**
+ * A lane as the lane store hands it back. The store is a plain runtime map
+ * today, so this says exactly that and no more; the drags below carry lane
+ * records from pointerdown to drop, they never invent lane fields.
+ * @typedef {ReturnType<typeof laneStore.laneForId>} LaneRecord
+ */
+
+/**
+ * The lane reorder/fuse drag: live from pointerdown on a lane's drag handle
+ * until the drop or cancel, null the rest of the time. dropSide names which
+ * gutter the pointer is in -- "left"/"right" fuse, "swap" reorders.
+ * @typedef {{
+ *   lane: LaneRecord,
+ *   handle: HTMLElement,
+ *   pointerId: number,
+ *   startX: number,
+ *   startY: number,
+ *   dragging: boolean,
+ *   dropTarget: LaneRecord | null,
+ *   dropSide: "left" | "right" | "swap" | null,
+ *   pointerCleanup: (() => void) | null,
+ *   pointerCaptureFailed: boolean,
+ *   dragGhost: HTMLElement | null,
+ *   ghostOffsetX: number,
+ *   ghostOffsetY: number,
+ * }} LaneDragState
+ */
+
+/**
+ * Where a lifted composer would land. The tag decides what the drop commits:
+ * a reorder swaps two shards inside one team, a move re-parents the composer
+ * onto another team's host.
+ * @typedef {{ kind: "reorder", host: LaneRecord, orderedTargetIds: string[] }} ComposerReorderDrop
+ * @typedef {{ kind: "move", lane: LaneRecord }} ComposerMoveDrop
+ */
+
+/**
+ * The shard geometry a reorder preview is painted against, measured once when
+ * the drag crosses the threshold so the preview never chases reflowed rects.
+ * @typedef {{
+ *   host: LaneRecord,
+ *   shardsEl: HTMLElement,
+ *   shardsRect: DOMRect,
+ *   visualShards: Array<{
+ *     element: HTMLElement,
+ *     targetId: string,
+ *     left: number,
+ *     right: number,
+ *     width: number,
+ *   }>,
+ *   currentLogicalIds: string[],
+ * }} ComposerReorderSnapshot
+ */
+
+/**
+ * The lifted-composer drag, live from pointerdown on a band handle until the
+ * drop or cancel. The two cleanups are the document-listener removers for the
+ * pointer and mouse paths, held so either can be torn down on its own.
+ * @typedef {{
+ *   host: LaneRecord,
+ *   targetId: string,
+ *   pointerId: number,
+ *   startX: number,
+ *   startY: number,
+ *   dragging: boolean,
+ *   dropTarget: ComposerReorderDrop | ComposerMoveDrop | null,
+ *   sourceBand: HTMLElement | null,
+ *   sourceShard: HTMLElement | null,
+ *   dragGhost: HTMLElement | null,
+ *   ghostOffsetX: number,
+ *   ghostOffsetY: number,
+ *   pointerCleanup: (() => void) | null,
+ *   mouseCleanup: (() => void) | null,
+ *   reorder: ComposerReorderSnapshot | null,
+ * }} ComposerMoveDragState
+ */
+
+/** @type {LaneDragState | null} */
 let laneDragState = null;
+/** @type {ComposerMoveDragState | null} */
 let composerMoveDragState = null;
+/** @type {((event: PointerEvent) => void) | null} */
 let laneTeamMenuDismissHandler = null;
 
 // Topology (standalone/host/member roles, stable host selection, member
@@ -264,6 +344,7 @@ function syncLaneTeamMenuButton(lane) {
   lane.teamMenuButtonEl.setAttribute("aria-label", "Team actions");
 }
 
+/** @param {Event | null} [event] */
 function toggleLaneTeamMenu(lane, event = null) {
   if (event) event.stopPropagation();
   const host = laneGroupHost(lane);
@@ -381,12 +462,11 @@ function renderLaneTeamMenuAction(host, action) {
   button.className = "lane-team-menu-action spice-menu-action";
   button.setAttribute("role", "menuitem");
   button.disabled = Boolean(action.disabled);
-  button.innerHTML =
-    '<span class="spice-menu-action-label"></span>' +
-    '<span class="spice-menu-action-detail"></span>';
-  button.querySelector(".spice-menu-action-label").textContent = action.label;
-  button.querySelector(".spice-menu-action-detail").textContent =
-    action.detail || "";
+  const actionLabel = serveSpanWithClass("spice-menu-action-label");
+  actionLabel.textContent = action.label;
+  const actionDetail = serveSpanWithClass("spice-menu-action-detail");
+  actionDetail.textContent = action.detail || "";
+  button.append(actionLabel, actionDetail);
   button.addEventListener("click", () => {
     closeLaneTeamMenu(host);
     action.onClick();
@@ -620,16 +700,19 @@ function wireComposerMoveDrag(host, handle, targetId) {
     handle.setPointerCapture(event.pointerId);
   });
   handle.addEventListener("pointermove", (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    updateComposerMoveDragFromEvent(composerMoveDragState, event, handle);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    updateComposerMoveDragFromEvent(state, event, handle);
   });
   handle.addEventListener("pointerup", (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    finishComposerMoveDrag(composerMoveDragState);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    finishComposerMoveDrag(state);
   });
   handle.addEventListener("pointercancel", (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    clearComposerMoveDrag(composerMoveDragState);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    clearComposerMoveDrag(state);
   });
   handle.addEventListener("mousedown", (event) => {
     if (composerMoveDragState) return;
@@ -645,7 +728,8 @@ function beginComposerMoveDrag(host, targetId, event, handle) {
   const sourceBand = handle.closest(".composer-band");
   const sourceShard = sourceBand?.closest(".composer-shard") || null;
   const rect = (sourceShard || sourceBand)?.getBoundingClientRect() || null;
-  composerMoveDragState = {
+  /** @type {ComposerMoveDragState} */
+  const state = {
     host,
     targetId,
     pointerId: event.pointerId,
@@ -660,23 +744,28 @@ function beginComposerMoveDrag(host, targetId, event, handle) {
     ghostOffsetY: rect ? event.clientY - rect.top : 0,
     pointerCleanup: null,
     mouseCleanup: null,
+    reorder: null,
   };
+  composerMoveDragState = state;
   sourceBand?.classList.add("composer-band--drag-ready");
-  return composerMoveDragState;
+  return state;
 }
 
 function wireComposerMovePointerDocumentEvents(handle) {
   const onMove = (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    updateComposerMoveDragFromEvent(composerMoveDragState, event, handle);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    updateComposerMoveDragFromEvent(state, event, handle);
   };
   const onUp = (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    finishComposerMoveDrag(composerMoveDragState);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    finishComposerMoveDrag(state);
   };
   const onCancel = (event) => {
-    if (!composerMoveDragMatches(event)) return;
-    clearComposerMoveDrag(composerMoveDragState);
+    const state = composerMoveDragForEvent(event);
+    if (!state) return;
+    clearComposerMoveDrag(state);
   };
   document.addEventListener("pointermove", onMove);
   document.addEventListener("pointerup", onUp);
@@ -722,10 +811,14 @@ function updateComposerMoveDragFromEvent(state, event, handle) {
   event.preventDefault();
 }
 
-function composerMoveDragMatches(event) {
-  return (
-    composerMoveDragState && composerMoveDragState.pointerId === event.pointerId
-  );
+// Handing back the drag the event belongs to, rather than a bare boolean, is
+// what lets each handler act on the drag it just matched. The boolean shape
+// tested module state and then read module state a second time, which is only
+// sound for as long as nothing in between can clear it.
+function composerMoveDragForEvent(event) {
+  const state = composerMoveDragState;
+  if (!state || state.pointerId !== event.pointerId) return null;
+  return state;
 }
 
 function updateComposerMoveDragTarget(state, clientX, clientY) {
@@ -1059,7 +1152,8 @@ function wireLaneDrag(lane) {
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
     clearLaneDrag(laneDragState);
-    laneDragState = {
+    /** @type {LaneDragState} */
+    const state = {
       lane,
       handle,
       pointerId: event.pointerId,
@@ -1074,11 +1168,12 @@ function wireLaneDrag(lane) {
       ghostOffsetX: event.clientX - lane.element.getBoundingClientRect().left,
       ghostOffsetY: event.clientY - lane.element.getBoundingClientRect().top,
     };
-    laneDragState.pointerCleanup = wireLaneDragPointerDocumentEvents();
+    laneDragState = state;
+    state.pointerCleanup = wireLaneDragPointerDocumentEvents();
     try {
       handle.setPointerCapture(event.pointerId);
     } catch (error) {
-      laneDragState.pointerCaptureFailed = true;
+      state.pointerCaptureFailed = true;
     }
   });
   handle.addEventListener("pointermove", (event) => {
@@ -1092,8 +1187,11 @@ function wireLaneDrag(lane) {
   });
 }
 
-function laneDragMatches(event) {
-  return laneDragState && laneDragState.pointerId === event.pointerId;
+// Same shape as composerMoveDragForEvent: the caller gets the drag it matched.
+function laneDragForEvent(event) {
+  const state = laneDragState;
+  if (!state || state.pointerId !== event.pointerId) return null;
+  return state;
 }
 
 function wireLaneDragPointerDocumentEvents() {
@@ -1117,8 +1215,8 @@ function wireLaneDragPointerDocumentEvents() {
 }
 
 function updateLaneDragFromEvent(event) {
-  if (!laneDragMatches(event)) return;
-  const state = laneDragState;
+  const state = laneDragForEvent(event);
+  if (!state) return;
   if (!state.dragging) {
     const dx = event.clientX - state.startX;
     const dy = event.clientY - state.startY;
@@ -1134,15 +1232,17 @@ function updateLaneDragFromEvent(event) {
 }
 
 function finishLaneDragFromEvent(event) {
-  if (!laneDragMatches(event)) return;
-  finishLaneDrag(laneDragState, event.clientX, event.clientY);
+  const state = laneDragForEvent(event);
+  if (!state) return;
+  finishLaneDrag(state, event.clientX, event.clientY);
   event.preventDefault();
 }
 
 function cancelLaneDragFromEvent(event) {
-  if (!laneDragMatches(event)) return;
-  const suppressClick = Boolean(laneDragState.dragging);
-  clearLaneDrag(laneDragState);
+  const state = laneDragForEvent(event);
+  if (!state) return;
+  const suppressClick = Boolean(state.dragging);
+  clearLaneDrag(state);
   if (suppressClick) suppressNextLaneDragClick();
   event.preventDefault();
 }

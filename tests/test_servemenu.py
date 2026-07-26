@@ -350,11 +350,14 @@ def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
     assert "laneViewGlyphs" not in app_shell
     assert "lane-mode-glyph" not in app_shell
     assert "lane-mode-glyph" not in css
-    assert (
-        "'<span class=\"lane-mode-word\"></span>' +\n"
-        "      '<span class=\"lane-mode-badge\" data-lane-view-badge hidden></span>'"
-        in app_shell
-    )
+    # The rail builds these two spans rather than parsing them from markup, so
+    # the invariant is asserted against the nodes it makes: a word span that
+    # carries the view's own text, and a badge span the badge selectors find.
+    assert 'word.className = "lane-mode-word"' in app_shell
+    assert "word.textContent = view" in app_shell
+    assert 'badge.className = "lane-mode-badge"' in app_shell
+    assert 'badge.dataset.laneViewBadge = ""' in app_shell
+    assert "badge.hidden = true" in app_shell
     assert ".lane-mode-word { display: none; }" not in css
     assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in badge_rule
     assert (
@@ -693,7 +696,7 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert "spiceMenuTargetDragState = state;" in app_menu
     assert "state.dragGhost = createSpiceMenuTargetDragGhost(state.button);" in app_menu
     assert "updateSpiceMenuTargetDragGhost(state, event);" in app_menu
-    assert "function spiceMenuTargetDragMatches(state, event, targetId)" in app_menu
+    assert "function spiceMenuTargetDragForEvent(event, targetId)" in app_menu
     assert "function wireSpiceMenuTargetPointerDocumentEvents(target)" in app_menu
     assert "function updateSpiceMenuTargetDragFromEvent(event, target" in app_menu
     assert "function finishSpiceMenuTargetDragFromEvent(event, target)" in app_menu

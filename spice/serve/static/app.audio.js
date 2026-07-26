@@ -10,8 +10,24 @@ const speechPlayIconSvg =
 const speechStopIconSvg =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>';
 
+/**
+ * The utterance the queue is sounding right now: the lane it came from, the
+ * lane it plays into, the message it belongs to, and -- once a clip exists --
+ * the element sounding it plus the callback that settles that clip. audio and
+ * finish are seeded null at construction and nulled again when the clip
+ * settles, so the session carries one shape for its whole life.
+ * @typedef {{
+ *   lane: LaneRecord,
+ *   targetLane: LaneRecord,
+ *   messageKey: string,
+ *   audio: HTMLAudioElement | null,
+ *   finish: (() => void) | null,
+ * }} SpeechSession
+ */
+
 const speechQueue = [];
 let speechBusy = false;
+/** @type {SpeechSession | null} */
 let currentSpeech = null;
 // Bumped by every hard reset (stop, manual play, external pause). Each queued
 // entry records the epoch it was enqueued under; the drain abandons any entry
@@ -21,6 +37,7 @@ let speechEpoch = 0;
 // Single-owner playback: at most one audio element may sound at a time. The
 // active element is hard-stopped before any new clip starts, and the token
 // lets a late-resolving play() that has since been superseded stop itself.
+/** @type {HTMLAudioElement | null} */
 let activePlaybackAudio = null;
 let playbackGeneration = 0;
 // Elements we pause deliberately (supersession or stop). Their 'pause' event is
@@ -40,6 +57,10 @@ const automaticSpeechCursorStorageLimit = 500;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
 let speechMediaSessionHandlersInstalled = false;
+// agent key -> newest spoken message timestamp, in epoch milliseconds. Both
+// writers admit only finite numbers, so a present entry is a real cursor and
+// "is there a cursor" is the only question a reader has to ask.
+/** @type {Map<string, number> | null} */
 let automaticSpeechCursors = null;
 
 function queueSpeechForMessages(lane, messages) {
@@ -80,7 +101,7 @@ function messageIsBehindAutomaticSpeechCursor(lane, item, timestamp) {
   if (!agentKey) return false;
   const cursors = automaticSpeechCursorMap();
   const latest = cursors.get(agentKey);
-  return Number.isFinite(latest) && timestamp < latest;
+  return latest !== undefined && timestamp < latest;
 }
 
 function recordAutomaticSpeechCursor(lane, item, timestamp) {
@@ -89,7 +110,7 @@ function recordAutomaticSpeechCursor(lane, item, timestamp) {
   if (!agentKey) return;
   const cursors = automaticSpeechCursorMap();
   const latest = cursors.get(agentKey);
-  if (!Number.isFinite(latest) || timestamp > latest) {
+  if (latest === undefined || timestamp > latest) {
     cursors.set(agentKey, timestamp);
     persistAutomaticSpeechCursors(cursors);
   }
@@ -505,6 +526,8 @@ async function drainSpeechQueue() {
         lane: entry.lane,
         targetLane: entry.targetLane,
         messageKey: entry.messageKey,
+        audio: null,
+        finish: null,
       };
       syncSpeechButtons();
       for (const text of entry.texts) {
