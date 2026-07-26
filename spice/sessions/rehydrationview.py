@@ -9,13 +9,13 @@ from spice.sessions.briefing import (
     STEERING_RESPONSE_PREVIEW_CHARS,
     STEERING_ROW_LIMIT,
     STEERING_TEXT_PREVIEW_CHARS,
-    TASK_PLANE_PREVIEW_CHARS,
     TASK_PLANE_ROW_LIMIT,
     WORKING_SET_LIMIT,
     RehydrationCandidate,
     SweepWindowPayload,
     sort_rehydration_candidates,
 )
+from spice.sessions.briefingtaskplane import TASK_PLANE_PREVIEW_CHARS
 from spice.sessions.records import TurnRecord
 from spice.sessions.util import clip
 
