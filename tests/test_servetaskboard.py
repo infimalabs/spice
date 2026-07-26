@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import os
 import threading
 import weakref
 from collections.abc import Mapping
@@ -20,6 +21,7 @@ from spice.serve.payload import lane, message
 from spice.serve.worktree import inventory as worktree_inventory
 from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config as task_config, create
+from spice.tasks.opslog import OPERATIONS_DB_FILENAME
 from tests.test_servehelpers import (
     THREAD_A,
     _patch_agent_status,
@@ -246,6 +248,50 @@ def _clear_task_board_observations():
     with taskboard._task_board_condition:
         taskboard._task_board_observations.clear()
         taskboard._task_board_builds.clear()
+
+
+# The export the store is swapped under, and the total once the discarded
+# candidate has been rebuilt against the store that replaced it.
+FIRST_EXPORT = 1
+RETRIED_EXPORTS = 2
+
+
+def _real_backend(root: Path, *titles: str) -> Path:
+    """Materialize a real Taskwarrior backend and seed it with real tasks.
+
+    The store these tests care about is created by Taskwarrior itself, not by
+    materialization, so the export at the end is what guarantees a valid
+    TaskChampion database exists on disk even when no task was added.
+    """
+    taskrc = task_config.materialize_task_backend(root)
+    for title in titles:
+        taskboard.tw.run(["add", title], taskrc=taskrc)
+    taskboard.tw.export(["status.any:"], taskrc=taskrc)
+    return taskrc
+
+
+def _store_path(root: Path) -> Path:
+    return task_config.data_dir(root) / OPERATIONS_DB_FILENAME
+
+
+def _replace_store(source_root: Path, target_root: Path) -> None:
+    """Rename one real store over another, as an atomic swap under a live path.
+
+    Any write-ahead log beside the target belongs to the store being displaced,
+    so it goes with it; leaving it would let SQLite recover the replaced store's
+    pages into the replacement.
+    """
+    for suffix in ("-wal", "-shm"):
+        sidecar = _store_path(target_root).with_name(
+            _store_path(target_root).name + suffix
+        )
+        if sidecar.exists():
+            sidecar.unlink()
+    os.replace(_store_path(source_root), _store_path(target_root))
+
+
+def _descriptions(observation) -> list[str]:
+    return sorted(str(row["description"]) for row in observation.rows)
 
 
 def _stub_backend(monkeypatch, revision):
@@ -1247,3 +1293,135 @@ def test_task_mutation_advances_the_board_a_team_wake_reuses(tmp_path, monkeypat
     )
     assert task_config.task_event_revision(backend) == task_revision
     assert _task_derived_slice(woken) == _task_derived_slice(mutated)
+
+
+def test_an_unchanged_real_store_is_reused_without_a_second_export(tmp_path):
+    root = tmp_path / "backend"
+    _real_backend(root, "kept task")
+
+    first = taskboard.current_task_board_observation(backend_root=root)
+    second = taskboard.current_task_board_observation(backend_root=root)
+
+    assert first is second
+    assert first.store_identity
+    assert _descriptions(first) == ["kept task"]
+
+
+def test_replacing_the_store_at_an_equal_revision_rebuilds_the_board(tmp_path):
+    """The wake file is untouched, so only the store itself says anything moved."""
+    root = tmp_path / "backend"
+    _real_backend(root, "original task")
+    first = taskboard.current_task_board_observation(backend_root=root)
+    revision = task_config.task_event_revision(root)
+
+    replacement = tmp_path / "replacement"
+    _real_backend(replacement, "replacement task")
+    _replace_store(replacement, root)
+    second = taskboard.current_task_board_observation(backend_root=root)
+
+    assert task_config.task_event_revision(root) == revision
+    assert second.store_identity != first.store_identity
+    assert _descriptions(first) == ["original task"]
+    assert _descriptions(second) == ["replacement task"]
+
+
+def test_deleting_and_recreating_the_store_rebuilds_the_board(tmp_path):
+    root = tmp_path / "backend"
+    taskrc = _real_backend(root, "original task")
+    first = taskboard.current_task_board_observation(backend_root=root)
+    revision = task_config.task_event_revision(root)
+
+    _store_path(root).unlink()
+    taskboard.tw.export(["status.any:"], taskrc=taskrc)
+    second = taskboard.current_task_board_observation(backend_root=root)
+
+    assert task_config.task_event_revision(root) == revision
+    assert second.store_identity != first.store_identity
+    assert _descriptions(first) == ["original task"]
+    assert second.rows == ()
+
+
+def test_a_store_replaced_during_the_export_is_discarded_and_retried(
+    monkeypatch, tmp_path
+):
+    """Rows read across a swap belong to no one store, so the candidate is dropped."""
+    root = tmp_path / "backend"
+    _real_backend(root, "original task")
+    replacement = tmp_path / "replacement"
+    _real_backend(replacement, "replacement task")
+
+    real_export = taskboard.tw.export
+    exported: list[int] = []
+
+    def export(filters, *, taskrc):
+        rows = real_export(filters, taskrc=taskrc)
+        exported.append(len(rows))
+        if len(exported) == FIRST_EXPORT:
+            _replace_store(replacement, root)
+        return rows
+
+    monkeypatch.setattr(taskboard.tw, "export", export)
+    observation = taskboard.current_task_board_observation(backend_root=root)
+
+    assert len(exported) == RETRIED_EXPORTS
+    assert _descriptions(observation) == ["replacement task"]
+
+
+def test_separate_real_backends_keep_separate_store_observations(tmp_path):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    _real_backend(first_root, "first task")
+    _real_backend(second_root, "second task")
+
+    first = taskboard.current_task_board_observation(backend_root=first_root)
+    second = taskboard.current_task_board_observation(backend_root=second_root)
+    first_again = taskboard.current_task_board_observation(backend_root=first_root)
+
+    assert first is first_again
+    assert first.store_identity != second.store_identity
+    assert _descriptions(first) == ["first task"]
+    assert _descriptions(second) == ["second task"]
+
+
+def test_a_team_event_reuses_the_real_store_observation(tmp_path):
+    root = tmp_path / "backend"
+    _real_backend(root, "kept task")
+    first = taskboard.current_task_board_observation(backend_root=root)
+    revision = task_config.task_event_revision(root)
+
+    task_config.mark_task_backend_changed("team", root=root)
+    second = taskboard.current_task_board_observation(backend_root=root)
+
+    assert task_config.task_event_revision(root) == revision
+    assert first is second
+    assert _descriptions(second) == ["kept task"]
+
+
+def test_the_first_board_read_settles_on_the_store_its_own_export_created(
+    monkeypatch, tmp_path
+):
+    """Nothing was there to go stale, so one export settles the first board.
+
+    The store does not exist until an export creates it, so the identity before
+    the first export is the empty witness and the identity after it is real.
+    Reading that as a store swapped mid-build would discard a candidate that is
+    perfectly coherent and pay for a second export on every cold start.
+    """
+    root = tmp_path / "backend"
+    task_config.materialize_task_backend(root)
+    real_export = taskboard.tw.export
+    exported: list[int] = []
+
+    def export(filters, *, taskrc):
+        rows = real_export(filters, taskrc=taskrc)
+        exported.append(len(rows))
+        return rows
+
+    monkeypatch.setattr(taskboard.tw, "export", export)
+    observation = taskboard.current_task_board_observation(backend_root=root)
+    reused = taskboard.current_task_board_observation(backend_root=root)
+
+    assert exported == [0]
+    assert _store_path(root).is_file()
+    assert observation.store_identity
+    assert observation is reused
