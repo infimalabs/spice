@@ -8,12 +8,14 @@ from spice.agent.codextranscript import codex_line_events, project_codex_events
 from spice.agent.driver import CODEX_DRIVER
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
     Reasoning,
     ToolCall,
     ToolOutput,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -158,6 +160,62 @@ def test_dispatched_families_decode_to_their_semantic_event_kinds() -> None:
         assert [type(event) for event in codex_line_events(raw)] == expected[family]
 
 
+def test_event_messages_decode_turn_user_and_command_facts() -> None:
+    started = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {"type": "task_started", "turn_id": TURN_ID},
+    }
+    user = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {
+            "type": "user_message",
+            "turn_id": TURN_ID,
+            "message": "inspect the reader",
+        },
+    }
+    command = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {
+            "type": "exec_command_end",
+            "turn_id": TURN_ID,
+            "cwd": "/repo",
+            "command": ["spice", "task", "status"],
+            "exit_code": "0",
+            "status": "completed",
+        },
+    }
+    completed = {
+        "timestamp": TIMESTAMP,
+        "type": "event_msg",
+        "payload": {"type": "task_complete"},
+    }
+
+    started_event = codex_line_events(started)[0]
+    user_event = codex_line_events(user)[0]
+    command_event = codex_line_events(command)[0]
+    completed_event = codex_line_events(completed)[0]
+
+    assert isinstance(started_event, TurnBoundary)
+    assert (started_event.kind, started_event.turn_id) == ("started", TURN_ID)
+    assert isinstance(user_event, UserMessage)
+    assert (user_event.text, user_event.turn_id) == ("inspect the reader", TURN_ID)
+    assert isinstance(command_event, CommandExecution)
+    assert (
+        command_event.command,
+        command_event.cwd,
+        command_event.exit_code,
+        command_event.status,
+        command_event.turn_id,
+    ) == ("spice task status", "/repo", 0, "completed", TURN_ID)
+    assert isinstance(completed_event, TurnBoundary)
+    assert (completed_event.kind, completed_event.turn_id) == ("completed", None)
+    for raw in (started, user, command, completed):
+        assert CODEX_DRIVER.normalize_transcript_line(raw) == raw
+
+
 def test_user_message_text_and_image_keep_source_order_and_role() -> None:
     raw = _response_item(
         {
@@ -291,7 +349,7 @@ def test_status_only_web_search_projects_without_inventing_an_action() -> None:
     assert project_codex_events(codex_line_events(raw), TIMESTAMP) == raw
 
 
-def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -> None:
+def test_context_usage_is_typed_by_the_driver_usage_hook() -> None:
     last = {
         "input_tokens": 20_401,
         "cached_input_tokens": 300,
@@ -321,7 +379,7 @@ def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -
             "rate_limits": {"primary": {"used_percent": 7.0}},
         },
     }
-    events = codex_line_events(raw, source=SOURCE, line=LINE)
+    events = CODEX_DRIVER.transcript_line_events(raw, source=SOURCE, line=LINE)
     assert [type(event) for event in events] == [ContextUsage]
     usage = events[0]
     assert usage.last.total_tokens == LAST_TOTAL_TOKENS
@@ -329,19 +387,53 @@ def test_context_usage_is_typed_while_meter_fields_keep_the_raw_side_channel() -
     assert usage.cumulative.total_tokens == CUMULATIVE_TOTAL_TOKENS
     assert usage.model_context_window == MODEL_CONTEXT_WINDOW
 
-    # Accounting consumers intentionally retain the raw driver side channel.
-    assert CODEX_DRIVER.context_snapshot_fields(raw) == {
-        "input_tokens": 20_401,
-        "cached_input_tokens": 300,
-        "output_tokens": 177,
-        "reasoning_output_tokens": 73,
-        "total_tokens": LAST_TOTAL_TOKENS,
-        "model_context_window": MODEL_CONTEXT_WINDOW,
-        "cumulative_total_tokens": CUMULATIVE_TOTAL_TOKENS,
-    }
+    fields = CODEX_DRIVER.context_snapshot_fields(raw)
+    assert fields is not None
+    assert fields.last == usage.last
+    assert fields.cumulative == usage.cumulative
+    assert fields.model_context_window == MODEL_CONTEXT_WINDOW
     # The extra rate-limit fact cannot be projected from ContextUsage, so the
     # exactness gate preserves the original line rather than partially rewriting it.
     assert CODEX_DRIVER.normalize_transcript_line(raw) is raw
+
+
+@pytest.mark.parametrize(
+    ("payload", "event_type"),
+    [
+        ({"type": "task_started", "turn_id": TURN_ID}, TurnBoundary),
+        (
+            {
+                "type": "task_complete",
+                "turn_id": TURN_ID,
+                "last_agent_message": "settled",
+            },
+            TurnBoundary,
+        ),
+        ({"type": "error", "turn_id": TURN_ID}, TurnBoundary),
+        (
+            {
+                "type": "exec_command_end",
+                "turn_id": TURN_ID,
+                "cwd": "/repo",
+                "command": ["spice", "task", "status"],
+                "exit_code": "0",
+                "status": "completed",
+            },
+            CommandExecution,
+        ),
+    ],
+)
+def test_codex_event_messages_cross_as_typed_session_facts(
+    payload: dict, event_type: type
+) -> None:
+    raw = {"timestamp": TIMESTAMP, "type": "event_msg", "payload": payload}
+
+    events = codex_line_events(raw, source=SOURCE, line=LINE)
+
+    assert [type(event) for event in events] == [event_type]
+    assert events[0].at.source == SOURCE
+    assert events[0].at.line == LINE
+    assert events[0].at.timestamp == TIMESTAMP
 
 
 def test_unrecognized_response_item_survives_as_unknown_and_identity() -> None:

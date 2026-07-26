@@ -7,11 +7,10 @@ input dictionary exactly. ``normalize_codex_line`` enforces that equality
 before returning the projection. An unfamiliar extension therefore retains the
 existing identity behavior instead of being partially rewritten.
 
-Context usage is decoded into a typed event here, closing the event vocabulary.
-Meter and effort deliberately continue reading ``context_snapshot_fields`` from
-the raw object: their side channel is cumulative accounting rather than the
-canonical response-item stream, and moving those consumers is a separate seam
-migration.
+Context usage joins this vocabulary through ``AgentDriver.context_snapshot_fields``
+instead: that hook is the sole dialect-local usage decoder, and the driver
+attaches its typed fact alongside the adapter events before consumers see the
+line.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from typing import Any, Literal
 from spice.transcript.events import (
     UNLOCATED_SOURCE,
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -31,6 +31,7 @@ from spice.transcript.events import (
     ToolOutput,
     ToolOutputType,
     TranscriptEvent,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -57,8 +58,8 @@ def codex_line_events(
     if not isinstance(payload, dict):
         return []
     payload_type = payload.get("type")
-    if outer_type == "event_msg" and payload_type == "token_count":
-        return _codex_context_usage_events(stamper, payload)
+    if outer_type == "event_msg":
+        return _codex_event_message_events(stamper, payload)
     if outer_type != "response_item":
         return []
     if payload_type == "message":
@@ -83,6 +84,66 @@ def codex_line_events(
             raw_type=payload_type if isinstance(payload_type, str) else None,
         )
     ]
+
+
+def _codex_event_message_events(
+    stamper: LineStamper, payload: dict[str, Any]
+) -> list[TranscriptEvent]:
+    payload_type = payload.get("type")
+    turn_id = _optional_str(payload.get("turn_id"))
+    if payload_type == "token_count":
+        # AgentDriver attaches the dialect-decoded ContextUsage fact.
+        return []
+    if payload_type == "task_started":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="started",
+                turn_id=turn_id,
+            )
+        ]
+    if payload_type == "task_complete":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="completed",
+                turn_id=turn_id,
+                last_assistant_message=_optional_str(payload.get("last_agent_message")),
+            )
+        ]
+    if payload_type == "error":
+        return [
+            TurnBoundary(
+                at=stamper.stamp(),
+                kind="error",
+                turn_id=turn_id,
+            )
+        ]
+    if payload_type == "exec_command_end":
+        return [
+            CommandExecution(
+                at=stamper.stamp(),
+                command=_command_value(payload.get("command") or payload.get("cmd")),
+                cwd=_optional_str(payload.get("cwd") or payload.get("workdir")),
+                exit_code=_command_int(payload.get("exit_code")),
+                status=_optional_str(payload.get("status")) or "completed",
+                turn_id=turn_id,
+            )
+        ]
+    if payload_type == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str) and message:
+            return [
+                UserMessage(
+                    at=stamper.stamp(),
+                    text=message,
+                    prompt_id=None,
+                    phase="prompt",
+                    turn_id=turn_id,
+                    transcript_kind="event_msg",
+                )
+            ]
+    return []
 
 
 def normalize_codex_line(raw: dict[str, Any]) -> dict[str, Any]:
@@ -386,25 +447,6 @@ def _codex_web_search_events(
     ]
 
 
-def _codex_context_usage_events(
-    stamper: LineStamper, payload: dict[str, Any]
-) -> list[TranscriptEvent]:
-    info = payload.get("info")
-    if not isinstance(info, dict):
-        return [_unknown(stamper, "malformed Codex context usage", "token_count")]
-    last = _token_usage(info.get("last_token_usage"))
-    if last is None:
-        return [_unknown(stamper, "malformed last-token usage", "token_count")]
-    return [
-        ContextUsage(
-            at=stamper.stamp(),
-            last=last,
-            cumulative=_token_usage(info.get("total_token_usage")),
-            model_context_window=_optional_int(info.get("model_context_window")),
-        )
-    ]
-
-
 def _project_message(events: list[TranscriptEvent]) -> dict[str, Any]:
     first = events[0]
     role = (
@@ -562,19 +604,6 @@ def _project_token_usage(usage: TokenUsage) -> dict[str, int]:
     }
 
 
-def _token_usage(value: Any) -> TokenUsage | None:
-    if not isinstance(value, dict):
-        return None
-    return TokenUsage(
-        input_tokens=_int(value.get("input_tokens")),
-        cached_input_tokens=_int(value.get("cached_input_tokens")),
-        cache_write_input_tokens=_int(value.get("cache_write_input_tokens")),
-        output_tokens=_int(value.get("output_tokens")),
-        reasoning_output_tokens=_int(value.get("reasoning_output_tokens")),
-        total_tokens=_int(value.get("total_tokens")),
-    )
-
-
 def _turn_metadata(
     payload: dict[str, Any],
 ) -> tuple[str | None, TurnMetadataKey | None]:
@@ -627,12 +656,23 @@ def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _optional_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def _command_value(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return value if isinstance(value, str) else "-"
 
 
-def _int(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+def _command_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:

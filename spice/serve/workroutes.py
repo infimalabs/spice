@@ -11,20 +11,20 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
-from spice.errors import SpiceError
 from spice.mail.ackstate import (
     DirectivePublicationWrite,
     record_directive_publications,
 )
 from spice.serve.payload import identity
 from spice.serve.agentapi import (
-    pending_inbox_launch_lock,
+    explicit_send_decision,
     sent_steering_payload,
     sent_steering_response_payload,
 )
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.lifecycle import (
     LifecycleOutcome,
+    explicit_send_publication,
     submit_explicit_send_intent,
     submit_inbox_wake,
 )
@@ -138,7 +138,7 @@ def _work_tree_send_response_payload(
         )
     grants_explicit_launch = ensure_agent_before_reply or force_new
     try:
-        with _publication_guard(grants_explicit_launch):
+        with _publication_guard(state, target, grants_explicit_launch):
             sent = submit_steering_message(
                 text=text,
                 priority=None,
@@ -175,7 +175,6 @@ def _work_tree_send_response_payload(
         state,
         target,
         sent,
-        force_new=force_new,
         renew_intent=renew_intent,
         predecessor=predecessor,
         predecessor_actor=predecessor_actor,
@@ -185,19 +184,22 @@ def _work_tree_send_response_payload(
 
 
 @contextmanager
-def _publication_guard(grants_explicit_launch: bool) -> Iterator[None]:
-    """Hold the launch guard exactly while a send owes itself a launch attempt.
+def _publication_guard(
+    state: Any,
+    target: WorktreeTarget,
+    grants_explicit_launch: bool,
+) -> Iterator[None]:
+    """Hold the target guard exactly while a send reserves its launch attempt.
 
     A send that reserves an explicit grant must publish and reserve as one step,
     or a background decision already inside the guard consumes the item in
     between. A send that hands its lane to the background watcher has no grant to
-    protect, and taking a server-wide lock to reply fast would be the opposite of
-    what that route is for.
+    protect. Sibling targets never enter this lane's guard.
     """
     if not grants_explicit_launch:
         yield
         return
-    with pending_inbox_launch_lock():
+    with explicit_send_publication(state, target):
         yield
 
 
@@ -218,21 +220,17 @@ def _work_tree_renewal_request_text(
     predecessor_actor: str,
 ) -> tuple[str, bool]:
     status = agent_status(target.repo_root)
-    identity.serve_agent_identity_payload(
+    identity.record_serve_agent_identity(
+        state.team_store,
         target,
         predecessor,
         actor_id=predecessor_actor,
-        store=state.team_store,
     )
     if status.running:
         # Renew never yanks a running agent; the message asks for a clean
-        # handoff and the successor starts on the next send.
-        try:
-            state.team_store.record_pending_renewal(
-                agent_id=predecessor_actor, ancestor_thread_id=predecessor
-            )
-        except SpiceError:
-            pass  # renewal bookkeeping requires a team; steering still lands
+        # handoff and the successor starts on the next send. Choosing the text
+        # is all this does -- the reconciler settles the renewal itself once it
+        # sees whether the attempt produced a successor.
         return renewal_handoff_request_text(text), False
     return renewal_steering_text(text, previous_thread_id=predecessor), True
 
@@ -242,7 +240,6 @@ def _work_tree_send_result_payload(
     target: WorktreeTarget,
     sent: Any,
     *,
-    force_new: bool,
     renew_intent: bool,
     predecessor: str,
     predecessor_actor: str,
@@ -260,21 +257,22 @@ def _work_tree_send_result_payload(
         _record_directive_publication(state, target, sent, send_actor=send_actor)
         return response_payload
 
+    decision = explicit_send_decision(grant)
     response_payload = sent_steering_response_payload(
         sent,
         target=target,
-        grant=grant,
+        decision=decision,
     )
     agent_ensure = response_payload.get("agentEnsure")
-    ensured_thread_id = _work_tree_send_ensured_thread_id(
-        state,
-        agent_ensure=agent_ensure,
-        renew_intent=renew_intent,
-        force_new=force_new,
-        predecessor_actor=predecessor_actor,
-    )
+    # The reconciler already settled which thread this send belongs to, renewal
+    # included. Reading it here keeps the reply a report of that decision. A
+    # decision that never arrives is a lane that did not start, not a send that
+    # did not land, so the publication is still attributed to the lane's own
+    # binding.
     send_agent_id = (
-        ensured_thread_id or identity.resolve_thread_id_for_target(state, target) or ""
+        decision.thread_id
+        if decision is not None
+        else identity.resolve_thread_id_for_target(state, target) or ""
     )
     send_actor = ""
     if send_agent_id:
@@ -335,24 +333,6 @@ def _record_directive_publication(
             )
         ],
     )
-
-
-def _work_tree_send_ensured_thread_id(
-    state: Any,
-    *,
-    agent_ensure: Any,
-    renew_intent: bool,
-    force_new: bool,
-    predecessor_actor: str,
-) -> str:
-    agent_ensure_payload = agent_ensure if isinstance(agent_ensure, dict) else None
-    if renew_intent and force_new:
-        return identity.record_started_renewal_from_ensure(
-            state.team_store,
-            predecessor_agent_id=predecessor_actor,
-            agent_ensure=agent_ensure_payload,
-        )
-    return identity.agent_ensure_thread_id(agent_ensure_payload)
 
 
 def _apply_lifetime_to_team(
@@ -440,10 +420,10 @@ def _work_tree_route_payload(
     return {
         "actor": actor,
         "targetIdentity": identity.target_identity_payload(target, thread_id),
-        "serveAgentIdentity": identity.serve_agent_identity_payload(
+        "serveAgentIdentity": identity.record_serve_agent_identity(
+            state.team_store,
             target,
             thread_id,
-            store=state.team_store,
         ),
         "teamIdentity": identity.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],

@@ -23,11 +23,11 @@ ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 @pytest.fixture(autouse=True)
 def _active_rtk(monkeypatch: pytest.MonkeyPatch) -> None:
+    health = RtkHealth("rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4")
     monkeypatch.setattr(
-        "spice.agent.rtkhealth.probe_rtk_health",
-        lambda _repo: RtkHealth(
-            "rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4"
-        ),
+        agent_cli,
+        "_activation_rtk_health",
+        lambda _repo: (health, health.activation_status_line()),
     )
 
 
@@ -47,35 +47,40 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
 ) -> None:
     events: list[str] = []
 
-    def probe(_repo: Path) -> RtkHealth:
+    def probe(_repo: Path) -> tuple[RtkHealth, str]:
         events.append("rtk-probe")
-        return health
+        return health, health.activation_status_line()
 
-    monkeypatch.setattr("spice.agent.rtkhealth.probe_rtk_health", probe)
+    monkeypatch.setattr(agent_cli, "_activation_rtk_health", probe)
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_thread",
+        agent_cli,
+        "_bind_activation_thread",
         lambda _repo: events.append("bind") or SimpleNamespace(thread_id="actor-a"),
     )
     monkeypatch.setattr(
-        "spice.hooks.install.install_hooks_for_repo",
+        agent_cli,
+        "_install_activation_hooks",
         lambda _repo: events.append("hooks") or ["hook-row"],
     )
     monkeypatch.setattr(
-        "spice.agent.lifecycle.materialize_worktree_skill",
+        agent_cli,
+        "_materialize_activation_skill",
         lambda _repo: events.append("skill") or tmp_path / ".agents/skills/spice.md",
     )
     monkeypatch.setattr(
-        "spice.tasks.git.boundaries.fast_forward_if_safe",
+        agent_cli,
+        "_refresh_activation_baseline",
         lambda _repo: events.append("baseline") or SimpleNamespace(notes=["current"]),
     )
     monkeypatch.setattr(
-        "spice.tasks.claimstate.renew_claim",
+        agent_cli,
+        "_renew_activation_claim",
         lambda *, actor=None: (
             events.append(f"renew:{actor}")
             or claimstate.ClaimRenewalResult(False, "no_active_claim")
         ),
     )
-    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
     packet = agent_cli.render_activation_packet(tmp_path)
     status_line = next(
@@ -113,22 +118,23 @@ def test_activation_packet_names_a_skipped_launch_refresh(
     condition: str,
 ) -> None:
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_thread",
+        agent_cli,
+        "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
-        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
-    )
-    monkeypatch.setattr(
-        "spice.tasks.git.boundaries.fast_forward_if_safe",
+        agent_cli,
+        "_refresh_activation_baseline",
         lambda _repo: SimpleNamespace(notes=[f"skipped:{condition}"]),
     )
     monkeypatch.setattr(
-        "spice.tasks.claimstate.renew_claim",
+        agent_cli,
+        "_renew_activation_claim",
         lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
-    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
     packet = agent_cli.render_activation_packet(tmp_path)
 
@@ -227,18 +233,18 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
     seen: dict[str, str | None] = {}
 
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_thread",
+        agent_cli,
+        "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
-        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
-    )
-    monkeypatch.setattr(
-        "spice.tasks.git.boundaries.fast_forward_if_safe",
+        agent_cli,
+        "_refresh_activation_baseline",
         lambda _repo: SimpleNamespace(notes=["current"]),
     )
-    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
     def fake_renew_claim(*, actor=None):
         seen["actor"] = actor
@@ -249,7 +255,7 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
             claim_until="2026-07-09T06:00:00.000000Z",
         )
 
-    monkeypatch.setattr("spice.tasks.claimstate.renew_claim", fake_renew_claim)
+    monkeypatch.setattr(agent_cli, "_renew_activation_claim", fake_renew_claim)
 
     packet = agent_cli.render_activation_packet(tmp_path)
 
@@ -287,17 +293,16 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         _advance_upstream(tmp_path)
 
         monkeypatch.setattr(
-            "spice.agent.lifecycle.bind_ambient_agent_thread",
+            agent_cli,
+            "_bind_activation_thread",
             lambda _repo: SimpleNamespace(thread_id=ACTOR),
         )
+        monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
         monkeypatch.setattr(
-            "spice.hooks.install.install_hooks_for_repo", lambda _repo: []
+            agent_cli, "_materialize_activation_skill", lambda _repo: None
         )
         monkeypatch.setattr(
-            "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
-        )
-        monkeypatch.setattr(
-            "spice.mail.steeringkey.steering_token", lambda _repo: "tok"
+            agent_cli, "_activation_steering_token", lambda _repo: "tok"
         )
 
         packet = agent_cli.render_activation_packet(repo)
@@ -315,20 +320,21 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
 
 def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_thread",
+        agent_cli,
+        "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
-        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
-    )
-    monkeypatch.setattr(
-        "spice.tasks.git.boundaries.fast_forward_if_safe",
+        agent_cli,
+        "_refresh_activation_baseline",
         lambda _repo: SimpleNamespace(notes=["current"]),
     )
-    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
     monkeypatch.setattr(
-        "spice.tasks.claimstate.renew_claim",
+        agent_cli,
+        "_renew_activation_claim",
         lambda *, actor=None: claimstate.ClaimRenewalResult(
             False, "backend_error", detail="backend offline"
         ),
@@ -372,21 +378,21 @@ def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
         tw.run([identity.uuid_of(claimed), "modify", "claim_lease_seconds:unreadable"])
 
         monkeypatch.setattr(
-            "spice.agent.lifecycle.bind_ambient_agent_thread",
+            agent_cli,
+            "_bind_activation_thread",
             lambda _repo: SimpleNamespace(thread_id=ACTOR),
         )
+        monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
         monkeypatch.setattr(
-            "spice.hooks.install.install_hooks_for_repo", lambda _repo: []
+            agent_cli, "_materialize_activation_skill", lambda _repo: None
         )
         monkeypatch.setattr(
-            "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
-        )
-        monkeypatch.setattr(
-            "spice.tasks.git.boundaries.fast_forward_if_safe",
+            agent_cli,
+            "_refresh_activation_baseline",
             lambda _repo: SimpleNamespace(notes=["current"]),
         )
         monkeypatch.setattr(
-            "spice.mail.steeringkey.steering_token", lambda _repo: "tok"
+            agent_cli, "_activation_steering_token", lambda _repo: "tok"
         )
 
         packet = agent_cli.render_activation_packet(repo)

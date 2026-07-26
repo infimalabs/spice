@@ -8,6 +8,11 @@ from typing import Sequence
 
 from spice.sessions import records as session_records
 from spice.sessions.records import CompactionRecord, TurnRecord
+from spice.transcript.assembly import (
+    AssembledMessage,
+    AssembledMessageReducer,
+    SpanKind,
+)
 from spice.transcript.events import Compaction
 from spice.transcript.reader import REVERSE_WINDOW_BYTES, TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp
@@ -35,10 +40,6 @@ class CompactionWindowSelection:
     basis: str
     requested_count: int
     selected_boundaries: tuple[str, ...]
-
-    @property
-    def selected_count(self) -> int:
-        return len(self.selected_boundaries)
 
 
 def select_compaction_windows_from_files(
@@ -86,13 +87,19 @@ def _latest_compaction_boundaries_for_file(
             end_offset=end_offset,
             max_bytes=REVERSE_WINDOW_BYTES,
         )
-        chunk_compactions: list[Compaction] = []
-
-        def collect_compaction(event: object) -> None:
-            if isinstance(event, Compaction) and event.boundary:
-                chunk_compactions.append(event)
-
-        read.dispatch(collect_compaction)
+        reducer = AssembledMessageReducer()
+        assembled: list[AssembledMessage] = []
+        for event in read.events:
+            assembled.extend(reducer.push(event))
+        assembled.extend(reducer.finish())
+        chunk_compactions = [
+            span.event
+            for message in assembled
+            for span in message.spans
+            if span.kind is SpanKind.COMPACTION
+            and isinstance(span.event, Compaction)
+            and span.event.boundary
+        ]
         for event in reversed(chunk_compactions):
             ts = normalize_timestamp(event.at.timestamp)
             if not ts or (end and ts > end):

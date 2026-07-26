@@ -1,0 +1,10 @@
+{"timestamp":"2026-07-26T03:01:00.000Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-07-26T03:01:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"replay the parity corpus"}]}}
+{"timestamp":"2026-07-26T03:01:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"reading the corpus\nTASK title=Pin parity | project=session.transcript\nACK 1jN54zgX: replaying both interpreters\n::git-commit{\"sha\":\"parity\"}\nNACK 1jN552dN: refused the stale corpus"},{"type":"output_image","image_url":"data:image/png;base64,aVZCT1J3MEtHZ289","detail":"high"}]}}
+{"timestamp":"2026-07-26T03:01:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"spice task status\"}","call_id":"call-parity"}}
+{"timestamp":"2026-07-26T03:01:04.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-parity","output":"claim TRANSCR-1kGssHlx"}}
+{"timestamp":"2026-07-26T03:01:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"no prose on this turn"}],"content":null}}
+{"timestamp":"2026-07-26T03:01:06.000Z","type":"compacted","payload":{}}
+{"timestamp":"2026-07-26T03:01:07.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"corpus replayed"}]}}
+{"timestamp":"2026-07-26T03:01:08.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"truncated
+{"timestamp":"2026-07-26T03:01:09.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"still being flushed

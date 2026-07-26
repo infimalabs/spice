@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.sessions.records import iter_events
+from spice.sessions import records as session_records
+from spice.transcript.events import (
+    CommandExecution,
+    ToolCall,
+    ToolOutput,
+    TurnBoundary,
+)
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp
 
 EXEC_EXIT_RE = re.compile(r"Process exited with code (-?\d+)")
@@ -54,73 +61,44 @@ def _collect_command_records_for_file(path: Path) -> list[CommandRecord]:
     records: list[CommandRecord] = []
     calls: dict[str, CommandRecord] = {}
     current_turn_id: str | None = None
-    for obj in iter_events(path):
-        ts = normalize_timestamp(obj.get("timestamp")) or ""
-        payload = obj.get("payload") or {}
-        record_type = obj.get("type")
-        if record_type == "event_msg":
-            current_turn_id = _apply_event_message_record(
-                records, path, ts, payload, current_turn_id
+    driver = session_records.driver_for_transcript(path)
+    read = TranscriptEventReader(path, driver, source_actor=None).read("forward")
+    for event in read.events:
+        ts = normalize_timestamp(event.at.timestamp) or ""
+        if isinstance(event, TurnBoundary):
+            if event.kind == "started":
+                current_turn_id = event.turn_id
+            elif event.kind == "completed":
+                current_turn_id = None
+            continue
+        if isinstance(event, CommandExecution):
+            if ts:
+                records.append(_command_record_from_execution(path, ts, event))
+            continue
+        if isinstance(event, ToolCall):
+            _append_function_call_command_record(
+                records, calls, path, ts, event, current_turn_id
             )
             continue
-        if record_type != "response_item":
-            continue
-        _apply_response_item_record(records, calls, path, ts, payload, current_turn_id)
+        if isinstance(event, ToolOutput):
+            _update_function_call_command_record(calls, event)
     return records
 
 
-def _apply_event_message_record(
-    records: list[CommandRecord],
+def _command_record_from_execution(
     path: Path,
     ts: str,
-    payload: dict[str, Any],
-    current_turn_id: str | None,
-) -> str | None:
-    inner = payload.get("type")
-    if inner == "task_started":
-        return (
-            payload.get("turn_id") if isinstance(payload.get("turn_id"), str) else None
-        )
-    if inner == "task_complete":
-        return None
-    if inner == "exec_command_end" and ts:
-        records.append(_command_record_from_event_payload(str(path), ts, payload))
-    return current_turn_id
-
-
-def _command_record_from_event_payload(
-    source_file: str, ts: str, payload: dict[str, Any]
+    event: CommandExecution,
 ) -> CommandRecord:
     return CommandRecord(
-        source_file=source_file,
+        source_file=str(path),
         ts=ts,
-        turn_id=_string_or_none(payload.get("turn_id")),
-        cwd=_string_or_none(payload.get("cwd") or payload.get("workdir")),
-        command=_render_command_value(payload.get("command") or payload.get("cmd")),
-        exit_code=_coerce_command_int(payload.get("exit_code")),
-        status=_string_or_none(payload.get("status")) or "completed",
+        turn_id=event.turn_id,
+        cwd=event.cwd,
+        command=event.command,
+        exit_code=event.exit_code,
+        status=event.status,
     )
-
-
-def _apply_response_item_record(
-    records: list[CommandRecord],
-    calls: dict[str, CommandRecord],
-    path: Path,
-    ts: str,
-    payload: dict[str, Any],
-    current_turn_id: str | None,
-) -> None:
-    payload_type = payload.get("type")
-    if (
-        payload_type in ("function_call", "custom_tool_call")
-        and payload.get("name") in COMMAND_TOOL_NAMES
-    ):
-        _append_function_call_command_record(
-            records, calls, path, ts, payload, current_turn_id
-        )
-        return
-    if payload_type in ("function_call_output", "custom_tool_call_output"):
-        _update_function_call_command_record(calls, payload)
 
 
 def _append_function_call_command_record(
@@ -128,41 +106,39 @@ def _append_function_call_command_record(
     calls: dict[str, CommandRecord],
     path: Path,
     ts: str,
-    payload: dict[str, Any],
+    event: ToolCall,
     current_turn_id: str | None,
 ) -> None:
-    if not ts:
+    if not ts or event.name not in COMMAND_TOOL_NAMES:
         return
-    arguments = _load_json(payload.get("arguments"))
+    arguments = _load_json(event.arguments)
     if not isinstance(arguments, dict):
         arguments = {}
     record = CommandRecord(
         source_file=str(path),
         ts=ts,
-        turn_id=_string_or_none(payload.get("turn_id")) or current_turn_id,
+        turn_id=event.turn_id or current_turn_id,
         cwd=_string_or_none(arguments.get("workdir") or arguments.get("cwd")),
         command=_command_from_arguments(arguments),
         exit_code=None,
         status="called",
     )
     records.append(record)
-    call_id = payload.get("call_id")
-    if call_id:
-        calls[str(call_id)] = record
+    if event.call_id:
+        calls[event.call_id] = record
 
 
 def _update_function_call_command_record(
-    calls: dict[str, CommandRecord], payload: dict[str, Any]
+    calls: dict[str, CommandRecord], event: ToolOutput
 ) -> None:
-    call_id = payload.get("call_id")
-    if not call_id:
+    if not event.call_id:
         return
-    record = calls.get(str(call_id))
+    record = calls.get(event.call_id)
     if record is None:
         return
-    output = _render_command_value(payload.get("output"))
+    output = event.content
     if match := EXEC_EXIT_RE.search(output):
-        record.exit_code = _coerce_command_int(match.group(1))
+        record.exit_code = int(match.group(1))
         record.status = "completed"
         return
     if "Process running with session ID" in output:
@@ -193,19 +169,6 @@ def _load_json(value: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return None
-
-
-def _coerce_command_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
 
 
 def _string_or_none(value: Any) -> str | None:

@@ -134,6 +134,7 @@ def _claude_user_events(
                 prompt_id=prompt_id
                 if isinstance(prompt_id, str) and prompt_id
                 else None,
+                transcript_kind="user",
             )
         ]
     if isinstance(content, list):

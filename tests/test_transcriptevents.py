@@ -11,6 +11,7 @@ from spice.agent.claudetranscript import claude_line_events
 from spice.agent.driver import CLAUDE_DRIVER
 from spice.transcript.events import (
     AssistantText,
+    CommandExecution,
     Compaction,
     ContextUsage,
     Image,
@@ -22,6 +23,7 @@ from spice.transcript.events import (
     ToolCall,
     ToolOutput,
     TranscriptEvent,
+    TurnBoundary,
     Unknown,
     UserMessage,
     WebSearch,
@@ -57,8 +59,17 @@ def _one_of_every_kind(at: Provenance) -> list[object]:
             failed=False,
             tool_output_type="function_call_output",
         ),
+        CommandExecution(
+            at=at,
+            command="git status",
+            cwd="/repo",
+            exit_code=0,
+            status="completed",
+            turn_id="turn-1",
+        ),
         Image(at=at, url=PNG_URL),
         UserMessage(at=at, text="drain the board", prompt_id="prompt-7"),
+        TurnBoundary(at=at, kind="started", turn_id="turn-1"),
         Compaction(at=at, active=True, boundary=False),
         WebSearch(at=at, status="completed", action_type="search", query="spice"),
         ContextUsage(

@@ -20,7 +20,7 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, workroutes
+from spice.serve import agentapi, lifecycle, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
@@ -105,7 +105,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
-def test_target_refresh_force_news_pending_renewal_into_original_team(
+def test_inbox_wake_force_news_pending_renewal_then_inventory_projects_it(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -157,6 +157,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         ),
     )
 
+    lifecycle.submit_inbox_wake(state, target, "test-renewal-inventory").result()
     result = inventory.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
@@ -180,7 +181,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
-def test_messages_refresh_force_news_pending_renewal_into_original_team(
+def test_inbox_wake_force_news_pending_renewal_then_messages_project_it(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -236,9 +237,8 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         fake_messages,
     )
 
-    result = message.messages_payload_for_worktree(
-        state, target, limit=5, expected_thread_id=THREAD_A
-    )
+    lifecycle.submit_inbox_wake(state, target, "test-renewal-messages").result()
+    result = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert result["targetIdentity"]["thread"] == {
         "state": "bound",
@@ -304,6 +304,110 @@ def test_successor_bind_completes_requested_renewal_before_fresh_steering(
     assert len(renewal_started_events) == 1
 
 
+def test_duplicate_wakes_start_one_successor_and_move_the_team_once(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target)
+    state.team_store.record_pending_renewal(
+        agent_id=ACTOR_A, ancestor_thread_id=THREAD_A
+    )
+    write_inbox_item(
+        repo,
+        "1jN54zJK.txt",
+        compose_inbox_text(body="external renewal steering", priority=None, stop=False),
+    )
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    monkeypatch.setattr(
+        agentapi,
+        "agent_ensure_response_payload",
+        lambda _target, **_kwargs: ({"ok": True, "threadId": THREAD_B}, HTTPStatus.OK),
+    )
+    _stub_board_projection(monkeypatch, inventory)
+    _stub_board_projection(monkeypatch, message)
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: message.message_reader.AssistantMessageRead(
+            items=[],
+            error=None,
+            transcript=None,
+        ),
+    )
+
+    # A board refresh, a message refresh, and an operator send all reach the same
+    # lane while one renewal is outstanding.
+    inventory.work_trees_payload(state)
+    message.messages_payload_for_worktree(state, target, limit=5)
+    payload, status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "steering after the handoff"},
+    )
+
+    renewal = state.team_store.renewal_state_for_agent(ACTOR_A)
+    with state.team_store.connect() as connection:
+        started_events = connection.execute(
+            "SELECT payload FROM events WHERE kind = 'renewalStarted'"
+        ).fetchall()
+        members = connection.execute(
+            "SELECT agent_id FROM memberships ORDER BY agent_id"
+        ).fetchall()
+    assert status == HTTPStatus.OK
+    assert len(started_events) == 1
+    assert [str(row["agent_id"]) for row in members] == [ACTOR_B]
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
+    assert renewal is not None
+    assert renewal.state == "started"
+    assert renewal.successor_thread_id == THREAD_B
+    assert renewal.team_slot == 0
+    # The renewal closed on the first wake, so the send that followed is plain
+    # steering routed to the successor that already holds the slot.
+    assert payload["route"]["actor"] == ACTOR_B
+
+
+def test_repeated_sends_during_one_handoff_stamp_the_pending_renewal_once(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target)
+    state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+
+    # A running predecessor is asked to hand off, then steered again before it
+    # has answered: the second ask rides the renewal the first one settled.
+    first, first_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "first handoff ask"},
+    )
+    second, second_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "second handoff ask"},
+    )
+
+    renewal = state.team_store.renewal_state_for_agent(ACTOR_A)
+    with state.team_store.connect() as connection:
+        pending_events = connection.execute(
+            "SELECT payload FROM events WHERE kind = 'renewalPending'"
+        ).fetchall()
+    assert (first_status, second_status) == (HTTPStatus.OK, HTTPStatus.OK)
+    assert len(pending_events) == 1
+    assert renewal is not None
+    assert renewal.state == "pending"
+    assert renewal.ancestor_thread_id == THREAD_A
+    assert first["renewalIntent"]["state"] == "pending"
+    assert second["renewalIntent"]["state"] == "pending"
+
+
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
@@ -339,6 +443,21 @@ def _record_identity(state: ServeState, target: WorktreeTarget) -> None:
         desired_model="gpt-next",
         desired_effort="high",
         transcript_owner="codex",
+    )
+
+
+def _stub_board_projection(monkeypatch, module) -> None:
+    monkeypatch.setattr(
+        module,
+        "open_task_board_projection",
+        lambda: SimpleNamespace(
+            task_filter_inventory={},
+            active_claim=lambda _actor: None,
+            task_card_rows=lambda _actor: (),
+            completed_review_rows=lambda _actors: (),
+            open_review_followup_count=lambda _uuid: 0,
+            drained_task_count=lambda _actor: 0,
+        ),
     )
 
 

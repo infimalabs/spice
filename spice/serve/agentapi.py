@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from collections.abc import Iterator
 from concurrent.futures import CancelledError, Future
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Callable, Sequence, TypeAlias
@@ -37,6 +35,7 @@ from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.lifecycle import (
     LIFECYCLE_DECISION_WAIT_SECONDS,
+    LifecycleDecision,
     LifecycleOutcome,
 )
 from spice.serve.payload.wire import validate_emitter_payload
@@ -65,18 +64,7 @@ AVAILABLE_WORK_SETTLE_SECONDS = 3.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
-# Serialize the actuator itself across callers. The lifecycle authority owns
-# the wider target-local publication-through-decision scope and enters this
-# guard only after taking that target lock.
-_PENDING_INBOX_LAUNCH_LOCK = threading.RLock()
 _RetryDue: TypeAlias = Callable[[str, float], bool]
-
-
-@contextmanager
-def pending_inbox_launch_lock() -> Iterator[None]:
-    """Serialize actual pending-inbox launch decisions."""
-    with _PENDING_INBOX_LAUNCH_LOCK:
-        yield
 
 
 def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
@@ -199,30 +187,34 @@ def sent_steering_payload(
     return payload
 
 
-def explicit_send_agent_ensure(
+def explicit_send_decision(
     grant: Future[LifecycleOutcome],
-) -> dict[str, Any] | None:
+) -> LifecycleDecision | None:
     """Await the reconciler decision this send reserved its launch attempt for.
 
     The inbox item is already durable when this runs, so a decision that never
     arrives is a lane that did not start -- not a send that did not land. Report
     the send either way and let the lane's own signals start it.
+
+    The whole decision comes back, not just its launch: the reply reports the
+    ensured thread and renewal state the reconciler settled, and re-deriving
+    those from the payload would be a second opinion on a fact that already has
+    an authority.
     """
     try:
         outcome = grant.result(timeout=LIFECYCLE_DECISION_WAIT_SECONDS)
     except (TimeoutError, CancelledError):
         return None
-    decision = outcome.decision
-    return decision.agent_ensure if decision is not None else None
+    return outcome.decision
 
 
 def sent_steering_response_payload(
     sent: SentSteeringMessage,
     *,
     target: WorktreeTarget,
-    grant: Future[LifecycleOutcome],
+    decision: LifecycleDecision | None,
 ) -> dict[str, Any]:
-    agent_ensure = explicit_send_agent_ensure(grant)
+    agent_ensure = decision.agent_ensure if decision is not None else None
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     return sent_steering_payload(
@@ -246,28 +238,10 @@ def ensure_agent_for_pending_inbox(
     """Start an idle agent when its inbox has pending steering.
 
     Inbox steering must never sit unheard: a send to an off lane brings the lane's
-    agent up (or its renewed successor, under `force_new`).
+    agent up (or its renewed successor, under `force_new`). Production calls are
+    owned and target-serialized by ``LifecycleDecisionAuthority``; this low-level
+    function deliberately owns no second coordination policy.
     """
-    with pending_inbox_launch_lock():
-        return _ensure_agent_for_pending_inbox_locked(
-            target,
-            retry_due=retry_due,
-            retry_seconds=retry_seconds,
-            fast_mode=fast_mode,
-            force_new=force_new,
-            automatic=automatic,
-        )
-
-
-def _ensure_agent_for_pending_inbox_locked(
-    target: WorktreeTarget,
-    *,
-    retry_due: _RetryDue | None,
-    retry_seconds: float,
-    fast_mode: bool,
-    force_new: bool,
-    automatic: bool,
-) -> dict[str, Any] | None:
     operator_items = pending_operator_inbox_items(target.repo_root)
     pending_count = len(operator_items)
     if pending_count <= 0:

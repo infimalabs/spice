@@ -13,8 +13,14 @@ import pytest
 
 from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, AgentDriver
 from spice.transcript import reader
-from spice.transcript.decode import decode_line
-from spice.transcript.events import AssistantText, Reasoning, ToolCall, Unknown
+from spice.transcript.decode import decode_parsed_line
+from spice.transcript.events import (
+    AssistantText,
+    ContextUsage,
+    Reasoning,
+    ToolCall,
+    Unknown,
+)
 from spice.transcript.reader import (
     TranscriptCursor,
     TranscriptEventReader,
@@ -34,6 +40,14 @@ TIMESTAMP = "2026-07-26T01:15:00.000Z"
 UPDATED_CURSOR_OFFSET = 11
 SOURCE_ACTOR = "thread:reader-contract"
 SESSION_FIXTURES = Path(__file__).parent / "fixtures" / "session"
+CLAUDE_INPUT_TOKENS = 100
+CLAUDE_CACHE_READ_TOKENS = 200
+CLAUDE_CACHE_CREATE_TOKENS = 30
+CLAUDE_OUTPUT_TOKENS = 20
+CLAUDE_CACHED_INPUT_TOKENS = CLAUDE_CACHE_READ_TOKENS + CLAUDE_CACHE_CREATE_TOKENS
+CLAUDE_TOTAL_TOKENS = (
+    CLAUDE_INPUT_TOKENS + CLAUDE_CACHED_INPUT_TOKENS + CLAUDE_OUTPUT_TOKENS
+)
 
 
 def _raw(payload: dict) -> bytes:
@@ -231,8 +245,8 @@ def test_public_reader_decodes_each_driver_fixture_into_located_typed_events(
             ),
         )
         for offset, raw in zip(offsets, raw_lines, strict=True)
-        for event in decode_line(
-            raw.decode(),
+        for event in decode_parsed_line(
+            json.loads(raw.decode()),
             driver,
             source=str(path),
             line=offset,
@@ -287,6 +301,46 @@ def test_public_reader_keeps_every_event_on_one_multiblock_claude_line(
     assert {event.at.line for event in read.events} == {0}
     assert {event.at.source_actor for event in read.events} == {SOURCE_ACTOR}
     assert {event.at.timestamp for event in read.events} == {TIMESTAMP}
+
+
+def test_public_reader_attaches_claude_context_usage_after_message_blocks(
+    tmp_path,
+) -> None:
+    path = tmp_path / "claude.jsonl"
+    path.write_bytes(
+        _raw(
+            {
+                "type": "assistant",
+                "timestamp": TIMESTAMP,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "measured"}],
+                    "usage": {
+                        "input_tokens": CLAUDE_INPUT_TOKENS,
+                        "cache_read_input_tokens": CLAUDE_CACHE_READ_TOKENS,
+                        "cache_creation_input_tokens": CLAUDE_CACHE_CREATE_TOKENS,
+                        "output_tokens": CLAUDE_OUTPUT_TOKENS,
+                    },
+                },
+            }
+        )
+    )
+
+    read = TranscriptEventReader(path, CLAUDE_DRIVER, SOURCE_ACTOR).read("forward")
+
+    assert [type(event) for event in read.events] == [AssistantText, ContextUsage]
+    usage = read.events[1]
+    assert isinstance(usage, ContextUsage)
+    assert usage.last.input_tokens == CLAUDE_INPUT_TOKENS
+    assert usage.last.cached_input_tokens == CLAUDE_CACHED_INPUT_TOKENS
+    assert usage.last.output_tokens == CLAUDE_OUTPUT_TOKENS
+    assert usage.last.total_tokens == CLAUDE_TOTAL_TOKENS
+    assert usage.cumulative == usage.last
+    assert usage.model_context_window == CLAUDE_DRIVER.default_context_window
+    assert usage.at.source == str(path)
+    assert usage.at.offset == 0
+    assert usage.at.source_actor == SOURCE_ACTOR
+    assert usage.at.ordinal == 1
 
 
 def test_public_reader_preserves_malformed_lines_as_located_unknowns(tmp_path) -> None:
@@ -349,6 +403,62 @@ def test_typed_access_modes_preserve_overlaps_and_cursor_resume(tmp_path) -> Non
     )
 
 
+def test_typed_since_mode_pages_to_timestamp_with_source_line_context(
+    tmp_path,
+) -> None:
+    lines = [
+        _raw(
+            {
+                "timestamp": f"2026-07-26T01:15:0{index}.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"line {index}"}],
+                },
+            }
+        )
+        for index in range(5)
+    ]
+    path = tmp_path / "codex.jsonl"
+    path.write_bytes(b"".join(lines))
+
+    read = TranscriptEventReader(path, CODEX_DRIVER).read(
+        "since",
+        start_timestamp="2026-07-26T01:15:03Z",
+        context_lines_before_start=1,
+        max_bytes=64,
+    )
+
+    assert [
+        event.text for event in read.events if isinstance(event, AssistantText)
+    ] == ["line 2", "line 3", "line 4"]
+
+
+def test_public_typed_reader_reads_gzip_through_the_same_entry_point(tmp_path) -> None:
+    line = _raw(
+        {
+            "timestamp": TIMESTAMP,
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "compressed fact"}],
+            },
+        }
+    )
+    path = tmp_path / "codex.jsonl.gz"
+    _write_transcript(path, line, compressed=True)
+
+    read = TranscriptEventReader(path, CODEX_DRIVER).read("forward")
+
+    assert len(read.events) == 1
+    assert isinstance(read.events[0], AssistantText)
+    assert read.events[0].text == "compressed fact"
+    assert read.events[0].at.offset == 0
+    assert read.end_offset == len(line)
+
+
 def test_one_typed_read_parses_and_decodes_once_before_many_projections(
     tmp_path, monkeypatch
 ) -> None:
@@ -402,7 +512,7 @@ def test_one_typed_read_parses_and_decodes_once_before_many_projections(
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
-def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
+def test_garbled_mid_file_is_a_counted_skip_and_a_partial_tail_is_held(
     tmp_path: Path, *, compressed: bool
 ) -> None:
     before = _raw({"timestamp": TIMESTAMP, "value": "before"})
@@ -420,13 +530,53 @@ def test_garbled_mid_file_and_truncated_final_record_are_counted_skips(
         "before",
         None,
         "after",
-        None,
     ]
-    assert sum(record.parsed is None for record in read.records) == 2
+    assert sum(record.parsed is None for record in read.records) == 1
     assert "\ufffd" in read.records[1].raw
-    assert read.records[-1].raw == truncated.decode()
-    assert read.end_offset == read.file_size == len(payload)
+    assert read.end_offset == len(payload) - len(truncated)
+    assert read.file_size == len(payload)
     assert read_forward(transcript, cursor=cursor).records == ()
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
+def test_a_record_flushed_in_two_writes_is_read_once_when_it_completes(
+    tmp_path: Path, *, compressed: bool
+) -> None:
+    settled = _raw({"timestamp": TIMESTAMP, "value": "settled"})
+    split = _raw({"timestamp": TIMESTAMP, "value": "split"})
+    flushed, marker, pending = split.partition(b'"value"')
+    transcript = _transcript_path(tmp_path, compressed=compressed)
+    _write_transcript(transcript, settled + flushed, compressed=compressed)
+
+    cursor = TranscriptCursor()
+    first = read_forward(transcript, cursor=cursor)
+    _append_transcript(transcript, marker + pending, compressed=compressed)
+    second = read_forward(transcript, cursor=cursor)
+    third = read_forward(transcript, cursor=cursor)
+
+    delivered = (*first.records, *second.records, *third.records)
+    assert [record.raw for record in delivered] == [settled.decode(), split.decode()]
+    assert [record.offset for record in delivered] == [0, len(settled)]
+    assert first.end_offset == len(settled)
+    assert second.end_offset == second.file_size == len(settled + split)
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])
+def test_bounded_and_reverse_reads_still_deliver_a_partial_tail(
+    tmp_path: Path, *, compressed: bool
+) -> None:
+    complete = _raw({"timestamp": TIMESTAMP, "value": "complete"})
+    truncated = b'{"timestamp":"unterminated"'
+    payload = complete + truncated
+    transcript = _transcript_path(tmp_path, compressed=compressed)
+    _write_transcript(transcript, payload, compressed=compressed)
+
+    bounded = read_bounded(transcript, start_offset=0, end_offset=len(payload))
+    reverse = read_reverse_window(transcript)
+
+    assert bounded.records[-1].raw == truncated.decode()
+    assert reverse.records[-1].raw == truncated.decode()
+    assert bounded.end_offset == reverse.end_offset == len(payload)
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])

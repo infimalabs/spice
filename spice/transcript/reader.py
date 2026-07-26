@@ -4,10 +4,11 @@ The transcript remains the sole stored truth.  This module only owns access to
 that truth: opening plain or gzip files, byte-offset seeks, bounded and reverse
 windows, cursor offsets, malformed-line handling, and one internal parsed
 line-record handoff to the driver-backed decoder. Public reads expose only the
-resulting typed event stream. Consumer-specific projection stays above it.
+resulting typed event stream -- a whole access pass, or the prose a single
+record carries. Consumer-specific projection stays above it.
 
 Access is the whole contract, so any JSONL a driver can decode reads through
-here — a supervised launch log is the same dialect echoed to stdout, and it
+here -- a supervised launch log is the same dialect echoed to stdout, and it
 earns the same gzip, malformed-line, and offset handling for free rather than
 growing a second private loop.
 """
@@ -25,8 +26,9 @@ from threading import RLock
 from typing import Any, BinaryIO, Literal
 
 from spice.agent.driver import AgentDriver
-from spice.transcript.decode import _decode_parsed_line
-from spice.transcript.events import TranscriptEvent
+from spice.transcript.decode import decode_parsed_line
+from spice.transcript.events import UNLOCATED_SOURCE, AssistantText, TranscriptEvent
+from spice.transcript.timestamps import normalize_timestamp
 
 REVERSE_WINDOW_BYTES = 8 * 1024 * 1024
 BinaryTranscript = BinaryIO | gzip.GzipFile
@@ -39,6 +41,7 @@ __all__ = [
     "cursor_offset",
     "locked_cursor",
     "offset_after_line",
+    "record_assistant_text",
     "render_cursor",
     "transcript_size",
 ]
@@ -101,15 +104,17 @@ class TranscriptEventReader:
 
     path: Path
     driver: AgentDriver
-    source_actor: str | None
+    source_actor: str | None = None
 
     def read(
         self,
-        mode: Literal["forward", "bounded", "reverse"],
+        mode: Literal["forward", "bounded", "reverse", "since"],
         *,
         cursor: TranscriptCursor | None = None,
         start_offset: int = 0,
         end_offset: int | None = None,
+        start_timestamp: str | None = None,
+        context_lines_before_start: int = 0,
         align_partial_start: bool = False,
         max_bytes: int = REVERSE_WINDOW_BYTES,
     ) -> TranscriptEventRead:
@@ -118,7 +123,9 @@ class TranscriptEventReader:
         ``forward`` resumes through the one cursor identity contract and runs
         to EOF. ``bounded`` covers ``start_offset`` through the required
         ``end_offset``. ``reverse`` reads the byte window ending before
-        ``end_offset`` (or EOF).
+        ``end_offset`` (or EOF). ``since`` returns the timestamp tail plus the
+        requested number of source lines immediately before it, using the same
+        reverse-window engine without exposing raw records.
         """
         if mode == "forward":
             if start_offset:
@@ -142,6 +149,15 @@ class TranscriptEventReader:
                 end_offset=end_offset,
                 max_bytes=max_bytes,
             )
+        elif mode == "since":
+            if not start_timestamp:
+                raise ValueError("since transcript reads require start_timestamp")
+            raw_read = _read_since_timestamp(
+                self.path,
+                start_timestamp=start_timestamp,
+                context_lines_before_start=context_lines_before_start,
+                max_bytes=max_bytes,
+            )
         else:
             raise ValueError(f"unsupported transcript read mode: {mode}")
         return self._decode(raw_read)
@@ -151,7 +167,7 @@ class TranscriptEventReader:
         events: list[TranscriptEvent] = []
         for record in read.records:
             events.extend(
-                _decode_parsed_line(
+                decode_parsed_line(
                     record.parsed,
                     self.driver,
                     source=source,
@@ -190,6 +206,36 @@ def dispatch_records(
 
 
 EventConsumer = Callable[[TranscriptEvent], None]
+
+
+def record_assistant_text(
+    record: TranscriptLine,
+    driver: AgentDriver,
+    *,
+    source: str = UNLOCATED_SOURCE,
+    source_actor: str | None = None,
+) -> tuple[AssistantText, ...]:
+    """The typed prose one already-read record carries, in source order.
+
+    The driver's line hint runs first, so the overwhelming majority of records --
+    tool calls and their results -- cost a substring search instead of a decode.
+    The hint is permissive by contract, so a record it admits still has to
+    survive the crossing. Skipping it changes nothing but the work: a record the
+    hint rejects carries no prose for the decoder to find either.
+
+    Consumers above the engine ask for facts, never for the line the hint reads.
+    """
+    if not driver.line_may_carry_assistant_text(record.raw):
+        return ()
+    events = decode_parsed_line(
+        record.parsed,
+        driver,
+        source=source,
+        line=record.offset,
+        offset=record.offset,
+        source_actor=source_actor,
+    )
+    return tuple(event for event in events if isinstance(event, AssistantText))
 
 
 @contextmanager
@@ -238,11 +284,16 @@ def read_forward(
     *,
     cursor: TranscriptCursor,
 ) -> TranscriptRead:
-    """Read from the cursor's exact resume offset to EOF.
+    """Read from the cursor's exact resume offset to the last complete line.
 
     A truncated source resets the resume offset to zero, matching the existing
     append-only contract.  Filesystem identity detects a replaced source
     independently of size.  Successful reads advance both pieces of state.
+
+    An unterminated final line is held back rather than delivered: a live
+    transcript can flush one record in several writes, and resuming past the
+    prefix would split that record into fragments no consumer ever reassembles.
+    The cursor stops at its offset so the completed line is read exactly once.
     """
     with locked_cursor(cursor):
         try:
@@ -263,6 +314,7 @@ def read_forward(
                     file_size=file_size,
                     file_identity=file_identity,
                     align_partial_start=False,
+                    hold_partial_end=True,
                 )
         except OSError as exc:
             read = _failed_read(exc)
@@ -325,6 +377,65 @@ def read_reverse_window(
         return _failed_read(exc)
 
 
+def _read_since_timestamp(
+    path: Path,
+    *,
+    start_timestamp: str,
+    context_lines_before_start: int,
+    max_bytes: int,
+) -> TranscriptRead:
+    """Select a timestamp tail by paging the one internal reverse reader."""
+    threshold = normalize_timestamp(start_timestamp) or start_timestamp
+    context_limit = max(0, context_lines_before_start)
+    selected_descending: list[TranscriptLine] = []
+    context_count = 0
+    end_offset: int | None = None
+    earliest_access = 0
+    file_size = 0
+    file_identity: TranscriptFileIdentity | None = None
+    while True:
+        read = read_reverse_window(
+            path,
+            end_offset=end_offset,
+            max_bytes=max_bytes,
+        )
+        if read.error is not None:
+            return read
+        earliest_access = read.access_start_offset
+        file_size = read.file_size
+        file_identity = read.file_identity
+        stop = False
+        for record in reversed(read.records):
+            timestamp = _record_timestamp(record)
+            if timestamp and timestamp < threshold:
+                if context_count >= context_limit:
+                    stop = True
+                    break
+                context_count += 1
+            selected_descending.append(record)
+        if stop or read.access_start_offset <= 0:
+            break
+        if end_offset is not None and read.access_start_offset >= end_offset:
+            break
+        end_offset = read.access_start_offset
+    records = tuple(reversed(selected_descending))
+    start_offset = records[0].offset if records else file_size
+    return TranscriptRead(
+        records=records,
+        access_start_offset=earliest_access,
+        start_offset=start_offset,
+        end_offset=file_size,
+        file_size=file_size,
+        file_identity=file_identity,
+    )
+
+
+def _record_timestamp(record: TranscriptLine) -> str | None:
+    if record.parsed is None:
+        return None
+    return normalize_timestamp(record.parsed.get("timestamp"))
+
+
 def read_line(path: Path, offset: int) -> TranscriptLine | None:
     """Read and parse the line beginning at an exact cursor offset."""
     try:
@@ -380,6 +491,7 @@ def _read_open_range(
     file_size: int,
     file_identity: TranscriptFileIdentity,
     align_partial_start: bool,
+    hold_partial_end: bool = False,
 ) -> TranscriptRead:
     handle.seek(start)
     if align_partial_start and not _is_line_boundary(handle, start):
@@ -392,6 +504,13 @@ def _read_open_range(
             break
         raw = handle.readline()
         if not raw:
+            break
+        if hold_partial_end and not raw.endswith(b"\n"):
+            # A writer mid-flush leaves its last line unterminated. Resuming
+            # after that prefix would decode it as garbage and then decode the
+            # rest of the same line as more garbage, so the complete record
+            # would never be seen. Leave it for the pass that finds it whole.
+            handle.seek(offset)
             break
         records.append(_line_record(offset, raw))
     return TranscriptRead(

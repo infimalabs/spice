@@ -43,8 +43,12 @@ from spice.paths import atomic_write_json
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.transcript.events import (
     UNLOCATED_SOURCE,
+    ContextUsage,
+    ContextUsageFields,
+    LineStamper,
     Provenance,
     StreamFailure,
+    TokenUsage,
     TranscriptEvent,
 )
 from spice.process.tool import run_tool_command
@@ -233,7 +237,40 @@ class AgentDriver:
         different schema points this at its own adapter, which is the whole of
         what a new dialect owes the substrate.
         """
-        return codex_line_events(raw, source=source, line=line)
+        return self._with_context_usage(
+            raw,
+            codex_line_events(raw, source=source, line=line),
+            source=source,
+            line=line,
+        )
+
+    def _with_context_usage(
+        self,
+        raw: dict[str, Any],
+        events: list[TranscriptEvent],
+        *,
+        source: str,
+        line: int,
+    ) -> list[TranscriptEvent]:
+        fields = self.context_snapshot_fields(raw)
+        if fields is None:
+            return events
+        timestamp = raw.get("timestamp")
+        stamper = LineStamper(
+            source=source,
+            line=line,
+            timestamp=timestamp if isinstance(timestamp, str) else None,
+            ordinal=len(events),
+        )
+        return [
+            *events,
+            ContextUsage(
+                at=stamper.stamp(),
+                last=fields.last,
+                cumulative=fields.cumulative,
+                model_context_window=fields.model_context_window,
+            ),
+        ]
 
     def line_may_carry_assistant_text(self, line: str) -> bool:
         """Could this unparsed line carry assistant prose? Cheap and permissive.
@@ -246,32 +283,20 @@ class AgentDriver:
         """
         return '"message"' in line and '"role":"assistant"' in line
 
-    def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Per-turn token usage for phase-effort accounting, or None otherwise.
-
-        Returns the `ActiveContextSnapshot` field bag (every key but
-        `source_file`/`ts`). The built-in driver reads Codex `token_count`
-        events; a driver whose CLI reports usage on each assistant message
-        overrides this. None means "this line carries no usage snapshot."
-        """
+    def context_snapshot_fields(self, raw: dict[str, Any]) -> ContextUsageFields | None:
+        """Decode this dialect's per-turn usage fields, or None otherwise."""
         payload = raw.get("payload") or {}
         if payload.get("type") != "token_count":
             return None
         info = payload.get("info") or {}
-        last = info.get("last_token_usage") or {}
-        total = _as_int(last.get("total_tokens"), None)
-        if total is None:
+        last = _context_token_usage(info.get("last_token_usage"))
+        if last is None:
             return None
-        cumulative = info.get("total_token_usage") or {}
-        return {
-            "input_tokens": _as_int(last.get("input_tokens")),
-            "cached_input_tokens": _as_int(last.get("cached_input_tokens")),
-            "output_tokens": _as_int(last.get("output_tokens")),
-            "reasoning_output_tokens": _as_int(last.get("reasoning_output_tokens")),
-            "total_tokens": total,
-            "model_context_window": _as_int(info.get("model_context_window"), None),
-            "cumulative_total_tokens": _as_int(cumulative.get("total_tokens")),
-        }
+        return ContextUsageFields(
+            last=last,
+            cumulative=_context_token_usage(info.get("total_token_usage")),
+            model_context_window=_as_int(info.get("model_context_window"), None),
+        )
 
     def process_failure_kind(self, *, exit_code: int, output: str) -> str:
         del exit_code
@@ -419,6 +444,22 @@ def _as_int(value: Any, default: int | None = 0) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return default
+
+
+def _context_token_usage(value: Any) -> TokenUsage | None:
+    if not isinstance(value, dict):
+        return None
+    total_tokens = _as_int(value.get("total_tokens"), None)
+    if total_tokens is None:
+        return None
+    return TokenUsage(
+        input_tokens=_as_int(value.get("input_tokens")),
+        cached_input_tokens=_as_int(value.get("cached_input_tokens")),
+        cache_write_input_tokens=_as_int(value.get("cache_write_input_tokens")),
+        output_tokens=_as_int(value.get("output_tokens")),
+        reasoning_output_tokens=_as_int(value.get("reasoning_output_tokens")),
+        total_tokens=total_tokens,
+    )
 
 
 ROLLOUT_THREAD_ID_RE = re.compile(
@@ -870,7 +911,12 @@ class ClaudeDriver(AgentDriver):
     def transcript_line_events(
         self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
     ) -> list[TranscriptEvent]:
-        events = claude_line_events(raw, source=source, line=line)
+        events = self._with_context_usage(
+            raw,
+            claude_line_events(raw, source=source, line=line),
+            source=source,
+            line=line,
+        )
         failure = self._stream_failure_event(
             raw, source=source, line=line, ordinal=len(events)
         )
@@ -916,7 +962,7 @@ class ClaudeDriver(AgentDriver):
         # is the cheap one; the inner role repeats on lines this must not admit.
         return '"message"' in line and '"type":"assistant"' in line
 
-    def context_snapshot_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+    def context_snapshot_fields(self, raw: dict[str, Any]) -> ContextUsageFields | None:
         if raw.get("type") != "assistant":
             return None
         message = raw.get("message")
@@ -932,18 +978,22 @@ class ClaudeDriver(AgentDriver):
         total = input_tokens + cache_read + cache_creation + output_tokens
         if total <= 0:
             return None
-        return {
-            "input_tokens": input_tokens,
-            "cached_input_tokens": cache_read + cache_creation,
-            "output_tokens": output_tokens,
-            "reasoning_output_tokens": 0,
-            "total_tokens": total,
+        last = TokenUsage(
+            input_tokens=input_tokens,
+            cached_input_tokens=cache_read + cache_creation,
+            cache_write_input_tokens=0,
+            output_tokens=output_tokens,
+            reasoning_output_tokens=0,
+            total_tokens=total,
+        )
+        return ContextUsageFields(
+            last=last,
+            cumulative=last,
             # Always meter against the standard tier so context pressure builds
             # and the agent compacts near 200K — matching other agents and not
             # drifting up to a larger (1M) API context.
-            "model_context_window": self.default_context_window or None,
-            "cumulative_total_tokens": total,
-        }
+            model_context_window=self.default_context_window or None,
+        )
 
 
 def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:

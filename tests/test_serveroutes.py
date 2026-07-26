@@ -12,6 +12,10 @@ from spice.agent.renewal import (
     RENEWAL_HANDOFF_REQUEST_SUFFIX,
     renewal_rehydration_text,
 )
+from spice.mail.ackstate import (
+    ack_state_database_path,
+    directive_history_records_from_database,
+)
 from spice.mail.inbox import (
     INBOX_CONTROL_DRAIN_QUEUE,
     collect_deadlettered_inbox_items,
@@ -24,7 +28,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi, app as serve_app, web as serve_web
+from spice.serve import agentapi, app as serve_app, lifecycle, web as serve_web
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import (
     team_command_response_payload,
@@ -70,6 +74,9 @@ from tests.test_servehelpers import (
 # the release bound is the failure escape hatch for a test that stops early.
 BLOCKED_ENSURE_ENTRY_SECONDS = 5.0
 BLOCKED_ENSURE_RELEASE_SECONDS = 15.0
+# Short enough that a parked decision is reported as absent while the test still
+# holds the launch, long enough not to race a decision that does arrive.
+PARKED_DECISION_WAIT_SECONDS = 0.5
 
 
 def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkeypatch):
@@ -173,6 +180,50 @@ def test_work_tree_send_accepted_response_schedules_ensure_without_waiting(
                 "automatic": True,
             }
         ]
+    finally:
+        release_ensure.set()
+
+
+def test_send_attributes_its_publication_when_no_decision_arrives(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target, ACTOR_A, THREAD_A)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    release_ensure = threading.Event()
+
+    def fake_ensure(_target, **_kwargs):
+        release_ensure.wait(timeout=BLOCKED_ENSURE_RELEASE_SECONDS)
+        return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+    monkeypatch.setattr(
+        agentapi,
+        "LIFECYCLE_DECISION_WAIT_SECONDS",
+        PARKED_DECISION_WAIT_SECONDS,
+    )
+
+    try:
+        payload, status = work_tree_send_response_payload(
+            state,
+            target,
+            {"text": "steer this lane"},
+        )
+
+        directive = directive_history_records_from_database(
+            ack_state_database_path(repo)
+        )[0]
+        assert status == HTTPStatus.OK
+        assert payload["ok"] is True
+        # The decision is still parked inside the launch, so the reply reports
+        # the durable publication against the lane it landed in rather than
+        # dropping its attribution with the decision.
+        assert payload["agentEnsure"] == {}
+        assert payload["route"]["actor"] == ACTOR_A
+        assert (directive.target_actor, directive.team_id) == (ACTOR_A, created.team_id)
     finally:
         release_ensure.set()
 
@@ -487,7 +538,7 @@ def test_team_snapshot_payload_preserves_typed_agent_identity_facts(tmp_path):
     assert isinstance(facts["updatedAt"], float)
 
 
-def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
+def test_inbox_wake_starts_stopped_agent_then_message_reads_are_inert(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
@@ -507,16 +558,19 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-inbox-revision").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert payload["pendingInboxCount"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert ensure_calls == [
         {"target": target, "fast_mode": False, "force_new": False, "automatic": True}
     ]
 
 
-def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeypatch):
+def test_inbox_wakes_read_global_fast_mode_for_two_lanes(tmp_path, monkeypatch):
     root_a = tmp_path / "lane-a"
     root_b = tmp_path / "lane-b"
     root_a.mkdir()
@@ -559,6 +613,8 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
             "fastMode": True,
         },
     )
+    lifecycle.submit_inbox_wake(state, target_a, "test-fast-inbox-a").result()
+    lifecycle.submit_inbox_wake(state, target_b, "test-fast-inbox-b").result()
     payload_a = message.messages_payload_for_worktree(state, target_a, limit=5)
     payload_b = message.messages_payload_for_worktree(state, target_b, limit=5)
 
@@ -583,7 +639,9 @@ def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeyp
     ]
 
 
-def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
+def test_reconciler_deadletters_credit_failure_then_message_reads_are_inert(
+    tmp_path, monkeypatch
+):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
@@ -607,9 +665,12 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-credit-inbox").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "1jN54zJK"
     assert (
         payload["agentEnsure"]["deadletterRequeueCommand"]
@@ -628,7 +689,9 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     ]
 
 
-def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkeypatch):
+def test_reconciler_deadletters_generic_failure_then_message_reads_are_inert(
+    tmp_path, monkeypatch
+):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
@@ -651,9 +714,12 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
+    lifecycle.submit_inbox_wake(state, target, "test-failure-inbox").result()
     payload = message.messages_payload_for_worktree(state, target, limit=5)
+    repeated = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
+    assert repeated["agentEnsure"] == payload["agentEnsure"]
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert "failure" not in payload["agentEnsure"]

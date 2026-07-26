@@ -16,12 +16,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event, Lock, Thread
 from time import monotonic
-from typing import Any, Callable, Protocol, TypeAlias
+from typing import Any, Callable, TypeAlias
 
+from spice.errors import SpiceError
 from spice.serve.payload.identity import (
+    projected_team_actor_for_target,
     record_started_renewal_from_ensure,
+    record_serve_agent_identity,
     resolve_thread_id_for_target,
-    serve_agent_identity_payload,
+    target_bound_actor,
     team_actor_for_target,
     team_facts_for_target,
 )
@@ -117,6 +120,16 @@ class LifecycleDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class LifecycleProjection:
+    """Current durable lane facts plus the reconciler's observable result."""
+
+    thread_id: str
+    predecessor_actor: str
+    renewal_intent: bool
+    agent_ensure: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
 class LifecycleOutcome:
     """The latest compact observable result for one target."""
 
@@ -136,14 +149,6 @@ LifecycleHandler: TypeAlias = Callable[
     [LifecycleInput, Event],
     LifecycleOutcome,
 ]
-
-
-class ExplicitPendingInboxEnsure(Protocol):
-    """The one explicit pending-inbox launch grant yielded by the authority."""
-
-    def __call__(
-        self, *, fast_mode: bool = False, force_new: bool = False
-    ) -> dict[str, Any] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,36 +205,42 @@ def ensure_agent_for_available_work(
     return ensure(target, **kwargs)
 
 
-@contextmanager
-def pending_inbox_launch_lock() -> Iterator[None]:
-    """Hold the pending-inbox launch guard without creating an import cycle."""
-    from spice.serve.agentapi import pending_inbox_launch_lock as guard
-
-    with guard():
-        yield
-
-
 class LifecycleDecisionAuthority:
-    """Own lifecycle policy and its target-local attempt bookkeeping."""
+    """The sole production owner of Serve lifecycle decisions and actuation.
+
+    The reconciler already gives each target a FIFO worker. The target locks
+    retained here have one additional job: a synchronous route publishes outside
+    that worker, so its publication and explicit reservation must exclude an
+    automatic decision for the same target. They never coordinate sibling lanes.
+
+    ``_coordination_lock`` protects only the lock registry and reservation
+    counters; it is never held across discovery, durable I/O, or launch. The
+    attempt cache is read only under its target lock and records the last actual
+    attempt, preserving retry throttling without becoming a second policy owner.
+    """
 
     def __init__(self, state: Any) -> None:
         self._state = state
-        self._lock = Lock()
+        self._coordination_lock = Lock()
         self._target_locks: dict[str, Lock] = {}
         self._attempt_cache: dict[str, float] = {}
         self._explicit_grants: dict[str, int] = {}
 
+    @contextmanager
+    def explicit_publication(self, target_id: str) -> Iterator[None]:
+        """Exclude same-target decisions while a route publishes and reserves."""
+        with self._target_lock(target_id):
+            yield
+
     def reserve_explicit_grant(self, target_id: str) -> None:
         """Reserve the next launch attempt on ``target_id`` for an explicit intent.
 
-        The publishing route holds the pending-inbox launch guard across both its
-        publication and this reservation, so no automatic decision can observe the
-        new item before the grant exists. That is what lets the route hand the
-        decision to the reconciler and release the guard before awaiting it:
-        whichever thread wins the lock next, an automatic evaluation declines
-        rather than spending the attempt this send is owed.
+        The publishing route holds this authority's target-scoped publication
+        guard across both its publication and this reservation, so no automatic
+        decision for this lane can observe the new item before the grant exists.
+        A sibling lane remains entirely independent.
         """
-        with self._lock:
+        with self._coordination_lock:
             outstanding = self._explicit_grants.get(target_id, 0)
             self._explicit_grants[target_id] = outstanding + 1
 
@@ -239,11 +250,12 @@ class LifecycleDecisionAuthority:
         _cancelled: Event,
     ) -> LifecycleOutcome:
         """Decide one reconciler input against current lane facts."""
-        decision = (
-            self._spend_reserved_grant(value)
-            if isinstance(value, ExplicitLifecycleIntent)
-            else self.evaluate_target(self._target(value.target_id))
-        )
+        if isinstance(value, ExplicitLifecycleIntent):
+            decision = self._spend_reserved_grant(value)
+        else:
+            target = self._target(value.target_id)
+            with self._target_lock(target.id):
+                decision = self._evaluate_target_locked(target)
         return LifecycleOutcome(
             target_id=value.target_id,
             input_identity=value.input_identity,
@@ -268,76 +280,49 @@ class LifecycleDecisionAuthority:
         """
         try:
             target = self._target(intent.target_id)
-            with self.explicit_pending_inbox(target) as ensure_pending:
-                agent_ensure = ensure_pending(
+        except Exception:
+            self._release_explicit_grant(intent.target_id)
+            raise
+        with self._target_lock(target.id):
+            try:
+                # Observe before the launch, not after. A force-new renewal
+                # rebinds the lane to the successor, so a later read would name
+                # the successor as its own predecessor and close the lineage on
+                # itself.
+                observed = self._observe_target_locked(target)
+                agent_ensure = ensure_agent_for_pending_inbox(
+                    target,
+                    retry_due=self._attempt_due,
+                    retry_seconds=0.0,
                     fast_mode=intent.fast_mode,
                     force_new=intent.force_new,
+                    automatic=False,
                 )
-                observed = self._observe_target_locked(target, thread_id=None)
-        finally:
-            self._release_explicit_grant(intent.target_id)
+                ensured_thread_id = self._converge_renewal_locked(
+                    observed=observed,
+                    agent_ensure=agent_ensure,
+                    # A send that does not force a successor is the one that
+                    # carried the handoff request, so it is the send whose
+                    # renewal settles as pending.
+                    handoff_asked=not intent.force_new,
+                )
+            finally:
+                # Release before the target lock: a later queued decision may
+                # acquire that lock immediately and must not mistake a spent
+                # grant for a reservation that still owns the inbox item.
+                self._release_explicit_grant(intent.target_id)
         return LifecycleDecision(
-            thread_id=observed.thread_id,
+            thread_id=ensured_thread_id or observed.thread_id,
             predecessor_actor=observed.predecessor_actor,
             renewal_intent=observed.renewal_intent,
             agent_ensure=agent_ensure,
         )
 
-    def evaluate_target(
-        self,
-        target: WorktreeTarget,
-        *,
-        thread_id: str | None = None,
-    ) -> LifecycleDecision:
-        """Run the one pending-inbox-first automatic decision for ``target``."""
-        target_lock = self._target_lock(target.id)
-        with target_lock:
-            return self._evaluate_target_locked(target, thread_id=thread_id)
-
-    @contextmanager
-    def explicit_pending_inbox(
-        self, target: WorktreeTarget
-    ) -> Iterator[ExplicitPendingInboxEnsure]:
-        """Serialize a decision and its one unthrottled explicit launch grant."""
-        target_lock = self._target_lock(target.id)
-        with target_lock:
-            active = True
-            used = False
-
-            def ensure(
-                *, fast_mode: bool = False, force_new: bool = False
-            ) -> dict[str, Any] | None:
-                nonlocal used
-                if not active:
-                    raise RuntimeError("explicit pending-inbox grant is out of scope")
-                if used:
-                    raise RuntimeError("explicit pending-inbox grant already used")
-                used = True
-                return ensure_agent_for_pending_inbox(
-                    target,
-                    retry_due=self._attempt_due,
-                    retry_seconds=0.0,
-                    fast_mode=fast_mode,
-                    force_new=force_new,
-                    automatic=False,
-                )
-
-            try:
-                yield ensure
-            finally:
-                active = False
-
     def _observe_target_locked(
         self,
         target: WorktreeTarget,
-        *,
-        thread_id: str | None,
     ) -> _TargetObservation:
-        bound_thread_id = (
-            resolve_thread_id_for_target(self._state, target) or ""
-            if thread_id is None
-            else thread_id
-        )
+        bound_thread_id = resolve_thread_id_for_target(self._state, target) or ""
         store = self._state.team_store
         predecessor_actor = team_actor_for_target(
             store,
@@ -355,7 +340,7 @@ class LifecycleDecisionAuthority:
         )
 
     def _release_explicit_grant(self, target_id: str) -> None:
-        with self._lock:
+        with self._coordination_lock:
             outstanding = self._explicit_grants.get(target_id, 0) - 1
             if outstanding > 0:
                 self._explicit_grants[target_id] = outstanding
@@ -363,39 +348,34 @@ class LifecycleDecisionAuthority:
                 self._explicit_grants.pop(target_id, None)
 
     def _explicit_grant_outstanding(self, target_id: str) -> bool:
-        with self._lock:
+        with self._coordination_lock:
             return target_id in self._explicit_grants
 
     def _evaluate_target_locked(
         self,
         target: WorktreeTarget,
-        *,
-        thread_id: str | None,
     ) -> LifecycleDecision:
-        observed = self._observe_target_locked(target, thread_id=thread_id)
+        observed = self._observe_target_locked(target)
         bound_thread_id = observed.thread_id
         predecessor_actor = observed.predecessor_actor
         renewal_intent = observed.renewal_intent
         store = self._state.team_store
-        # Read the reservation under the same guard the launch itself takes, and
-        # nothing else: a decision that checked before entering would be inside
-        # the publication-to-reservation gap it is supposed to respect.
-        with pending_inbox_launch_lock():
-            if self._explicit_grant_outstanding(target.id):
-                # An operator send published its item and reserved the attempt it
-                # is owed. Spending it here is what would dead-letter that
-                # steering against the very refusal the grant exists to bypass.
-                return LifecycleDecision(
-                    thread_id=bound_thread_id,
-                    predecessor_actor=predecessor_actor,
-                    renewal_intent=renewal_intent,
-                    agent_ensure=None,
-                )
-            return self._decide_automatic_locked(
-                target,
-                observed=observed,
-                store=store,
+        if self._explicit_grant_outstanding(target.id):
+            # An operator send published its item and reserved the attempt it is
+            # owed. Spending it here is what would dead-letter that steering
+            # against the refusal the grant exists to bypass. The target lock
+            # closes the publication-to-reservation gap for this lane only.
+            return LifecycleDecision(
+                thread_id=bound_thread_id,
+                predecessor_actor=predecessor_actor,
+                renewal_intent=renewal_intent,
+                agent_ensure=None,
             )
+        return self._decide_automatic_locked(
+            target,
+            observed=observed,
+            store=store,
+        )
 
     def _decide_automatic_locked(
         self,
@@ -408,11 +388,11 @@ class LifecycleDecisionAuthority:
         predecessor_actor = observed.predecessor_actor
         renewal_intent = observed.renewal_intent
         if renewal_intent:
-            serve_agent_identity_payload(
+            record_serve_agent_identity(
+                store,
                 target,
                 bound_thread_id,
                 actor_id=predecessor_actor,
-                store=store,
             )
         fast_mode = bool(store.global_fast_mode_enabled())
         ensure_kwargs: dict[str, Any] = {
@@ -428,17 +408,78 @@ class LifecycleDecisionAuthority:
                 thread_id=bound_thread_id,
                 **ensure_kwargs,
             )
-        ensured_thread_id = record_started_renewal_from_ensure(
-            store,
-            predecessor_agent_id=predecessor_actor,
-            agent_ensure=agent_ensure,
+        ensured_thread_id = self._converge_renewal_locked(
+            observed=observed, agent_ensure=agent_ensure
         )
+        decision_thread_id = ensured_thread_id or bound_thread_id
+        self._converge_automatic_identity_locked(target, decision_thread_id)
         return LifecycleDecision(
-            thread_id=ensured_thread_id or bound_thread_id,
+            thread_id=decision_thread_id,
             predecessor_actor=predecessor_actor,
             renewal_intent=renewal_intent,
             agent_ensure=agent_ensure,
         )
+
+    def _converge_automatic_identity_locked(
+        self,
+        target: WorktreeTarget,
+        thread_id: str,
+    ) -> None:
+        """Persist the real actor an automatic observation or launch resolved."""
+        if not thread_id:
+            return
+        store = self._state.team_store
+        actor = target_bound_actor(target, thread_id)
+        if projected_team_actor_for_target(store, target, thread_id) != actor:
+            actor = team_actor_for_target(store, target, thread_id)
+        record_serve_agent_identity(
+            store,
+            target,
+            thread_id,
+            actor_id=actor,
+        )
+
+    def _converge_renewal_locked(
+        self,
+        *,
+        observed: _TargetObservation,
+        agent_ensure: dict[str, Any] | None,
+        handoff_asked: bool = False,
+    ) -> str:
+        """Settle one active renewal against what the launch attempt just did.
+
+        This is the only place a renewal fact is written. Both decision paths
+        reach it, so a send, an inbox wake, and a task wake all converge on the
+        same durable row rather than each carrying their own bookkeeping; the
+        store's own transactions make repeats idempotent.
+
+        A successor thread means the renewal started, and the store transfers
+        the team slot and lineage with it. A renewal only turns pending when the
+        send carrying the handoff request produced no successor: that request is
+        what the predecessor answers, so an automatic wake -- which delivers no
+        such text -- leaves the request standing for the next send.
+        """
+        store = self._state.team_store
+        ensured_thread_id = record_started_renewal_from_ensure(
+            store,
+            predecessor_agent_id=observed.predecessor_actor,
+            agent_ensure=agent_ensure,
+        )
+        if ensured_thread_id or not handoff_asked or not observed.renewal_intent:
+            return ensured_thread_id
+        # Only a still-requested renewal converges to pending. Reading the
+        # request rather than the broader active state is what keeps a lane that
+        # is sent to repeatedly during a handoff from restamping the same fact.
+        if not store.agent_renewal_requested(observed.predecessor_actor):
+            return ensured_thread_id
+        try:
+            store.record_pending_renewal(
+                agent_id=observed.predecessor_actor,
+                ancestor_thread_id=observed.thread_id,
+            )
+        except SpiceError:
+            pass  # renewal bookkeeping requires a team; steering still lands
+        return ensured_thread_id
 
     def _attempt_due(self, target_id: str, retry_seconds: float) -> bool:
         now = monotonic()
@@ -449,7 +490,7 @@ class LifecycleDecisionAuthority:
         return True
 
     def _target_lock(self, target_id: str) -> Lock:
-        with self._lock:
+        with self._coordination_lock:
             return self._target_locks.setdefault(target_id, Lock())
 
     def _target(self, target_id: str) -> WorktreeTarget:
@@ -468,6 +509,16 @@ def lifecycle_decision_authority(state: Any) -> LifecycleDecisionAuthority:
     return authority
 
 
+@contextmanager
+def explicit_send_publication(
+    state: Any,
+    target: WorktreeTarget,
+) -> Iterator[None]:
+    """Make one send's publication and grant reservation target-atomic."""
+    with lifecycle_decision_authority(state).explicit_publication(target.id):
+        yield
+
+
 def submit_explicit_send_intent(
     state: Any,
     target: WorktreeTarget,
@@ -478,22 +529,28 @@ def submit_explicit_send_intent(
 ) -> Future[LifecycleOutcome]:
     """Reserve this send's launch attempt and queue the decision that spends it.
 
-    Callers hold the pending-inbox launch guard across their publication and this
-    call, so the reservation is in place before any automatic decision can reach
-    the item. Submitting is only an enqueue: the caller releases the guard and
-    then awaits, which is what keeps the decision's own guard acquisition from
-    closing on a lock the awaiting thread still holds.
+    Callers hold the authority's target-scoped publication guard across their
+    publication and this call, so the reservation is in place before any
+    automatic decision for the lane can reach the item. Submitting is only an
+    enqueue: the caller releases the guard and then awaits the real Future.
     """
-    lifecycle_decision_authority(state).reserve_explicit_grant(target.id)
-    return state.submit_lifecycle_intent(
-        ExplicitLifecycleIntent(
-            target_id=target.id,
-            intent_id=intent_id,
-            kind=LIFECYCLE_INTENT_SEND,
-            fast_mode=fast_mode,
-            force_new=force_new,
+    authority = lifecycle_decision_authority(state)
+    authority.reserve_explicit_grant(target.id)
+    try:
+        return state.submit_lifecycle_intent(
+            ExplicitLifecycleIntent(
+                target_id=target.id,
+                intent_id=intent_id,
+                kind=LIFECYCLE_INTENT_SEND,
+                fast_mode=fast_mode,
+                force_new=force_new,
+            )
         )
-    )
+    except Exception:
+        # A reconciler shutting down can reject the enqueue after publication.
+        # No Future exists to release this reservation, so return it here.
+        authority._release_explicit_grant(target.id)
+        raise
 
 
 def submit_inbox_wake(
@@ -511,16 +568,66 @@ def submit_inbox_wake(
     )
 
 
-def evaluate_automatic_lifecycle(
+def project_lifecycle(
     state: Any,
     target: WorktreeTarget,
     *,
     thread_id: str | None = None,
-) -> LifecycleDecision:
-    """Transitional direct entry point shared by inventory and message callers."""
-    return lifecycle_decision_authority(state).evaluate_target(
+    decision: LifecycleDecision | None = None,
+    latest_outcome: bool = True,
+    prefer_outcome_thread: bool = False,
+) -> LifecycleProjection:
+    """Project one lane without evaluating or otherwise actuating lifecycle.
+
+    Normal inventory and message reads use the latest settled reconciler
+    decision only for its observable ensure result. A send follow-up supplies
+    the exact decision it queued and opts out of the latest-outcome lookup so a
+    timeout cannot accidentally report an older decision.
+    """
+    resolved_thread_id = (
+        resolve_thread_id_for_target(state, target) or ""
+        if thread_id is None
+        else thread_id
+    )
+    selected = decision
+    if selected is None and latest_outcome:
+        reconciler = getattr(state, "lifecycle_reconciler", None)
+        outcome = (
+            LifecycleReconciler.latest_outcome(reconciler, target.id)
+            if reconciler is not None
+            else None
+        )
+        selected = outcome.decision if outcome is not None else None
+    if (
+        selected is not None
+        and selected.thread_id
+        and (decision is not None or prefer_outcome_thread)
+    ):
+        resolved_thread_id = selected.thread_id
+    actor = projected_team_actor_for_target(
+        state.team_store,
         target,
-        thread_id=thread_id,
+        resolved_thread_id,
+    )
+    predecessor_actor = (
+        selected.predecessor_actor
+        if selected is not None and selected.predecessor_actor
+        else actor
+    )
+    renewal_intent = (
+        selected.renewal_intent
+        if selected is not None
+        else bool(
+            resolved_thread_id
+            and actor
+            and state.team_store.agent_renewal_active(actor)
+        )
+    )
+    return LifecycleProjection(
+        thread_id=resolved_thread_id,
+        predecessor_actor=predecessor_actor,
+        renewal_intent=renewal_intent,
+        agent_ensure=selected.agent_ensure if selected is not None else None,
     )
 
 

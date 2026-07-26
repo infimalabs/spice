@@ -659,7 +659,7 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
     activities: list[str] = []
     scanner = JsonStdoutScanner(
         captured.append,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: compactions.append(1),
         on_activity=lambda: activities.append("activity"),
     )
@@ -678,6 +678,34 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
     assert activities == ["activity", "activity"]
 
 
+def test_claude_json_stdout_scanner_counts_an_image_turn_as_activity():
+    """A turn that produces only an image is still the lane producing output.
+
+    The startup deadline waits on the agent's first fact; a screenshot is one
+    of the agent's, where a reasoning summary or returning tool output is the
+    harness speaking about it.
+    """
+    from spice.agent.watchdog import JsonStdoutScanner
+
+    observed: list[str] = []
+    scanner = JsonStdoutScanner(
+        lambda text: observed.append(f"message:{text}"),
+        CLAUDE_DRIVER,
+        on_activity=lambda: observed.append("activity"),
+    )
+    scanner.process_line(
+        '{"type":"assistant","message":{"role":"assistant","content":'
+        '[{"type":"image","source":{"type":"base64","media_type":"image/png",'
+        '"data":"QUJD"}}]}}'
+    )
+    scanner.process_line(
+        '{"type":"user","message":{"role":"user","content":'
+        '[{"type":"tool_result","tool_use_id":"t","content":"back"}]}}'
+    )
+    scanner.close()
+    assert observed == ["activity"]
+
+
 def test_claude_json_stdout_scanner_flags_text_starvation_once_per_streak():
     from spice.agent.watchdog import TEXT_STARVATION_THRESHOLD, JsonStdoutScanner
 
@@ -685,7 +713,7 @@ def test_claude_json_stdout_scanner_flags_text_starvation_once_per_streak():
     starvations: list[int] = []
     scanner = JsonStdoutScanner(
         captured.append,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: None,
         on_text_starvation=starvations.append,
     )
@@ -717,7 +745,7 @@ def test_claude_json_stdout_scanner_text_resets_starvation_streak():
     starvations: list[int] = []
     scanner = JsonStdoutScanner(
         lambda _text: None,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: None,
         on_text_starvation=starvations.append,
     )
@@ -778,7 +806,7 @@ def test_claude_json_stdout_scanner_reports_compaction_apart_from_activity():
     observed: list[str] = []
     scanner = JsonStdoutScanner(
         lambda text: observed.append(f"message:{text}"),
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: observed.append("compacted"),
         on_activity=lambda: observed.append("activity"),
         on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
@@ -809,7 +837,7 @@ def test_claude_json_stdout_scanner_settles_compaction_on_a_boundary():
     observed: list[str] = []
     scanner = JsonStdoutScanner(
         lambda _text: None,
-        CLAUDE_DRIVER.normalize_transcript_line,
+        CLAUDE_DRIVER,
         on_compaction=lambda: observed.append("compacted"),
         on_compaction_active=lambda active: observed.append(f"compacting:{active}"),
     )
@@ -842,9 +870,10 @@ def test_claude_context_fields_sum_prompt_and_fit_window():
         },
     }
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
-    assert fields["total_tokens"] == fresh + cache_read + cache_create + output
-    assert fields["cached_input_tokens"] == cache_read + cache_create
-    assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
+    assert fields is not None
+    assert fields.last.total_tokens == fresh + cache_read + cache_create + output
+    assert fields.last.cached_input_tokens == cache_read + cache_create
+    assert fields.model_context_window == CLAUDE_DRIVER.default_context_window
 
 
 def test_claude_context_window_stays_at_standard_tier_when_overflowing():
@@ -862,10 +891,11 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
         },
     }
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
-    assert fields["total_tokens"] == cache_read + output
+    assert fields is not None
+    assert fields.last.total_tokens == cache_read + output
     # Overflow no longer promotes to the 1M tier; it stays pinned at 200K so
     # pressure reads past 100% and drives compaction.
-    assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
+    assert fields.model_context_window == CLAUDE_DRIVER.default_context_window
 
 
 def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():

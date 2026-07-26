@@ -306,12 +306,18 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
 
     store = ServeTeamStore(tmp_path / "teams.sqlite")
 
-    payload = identity.serve_agent_identity_payload(
+    payload = identity.record_serve_agent_identity(
+        store,
         target,
         transcript_owner="claude",
-        store=store,
     )
     stored = store.agent_identity_for_actor("thread:thread-a")
+    repeated_payload = identity.record_serve_agent_identity(
+        store,
+        target,
+        transcript_owner="claude",
+    )
+    repeated = store.agent_identity_for_actor("thread:thread-a")
 
     assert payload["actorId"] == "thread:thread-a"
     assert payload["thread"] == {"state": "bound", "threadId": "thread-a"}
@@ -328,6 +334,9 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
         "source": "agent state",
     }
     assert stored is not None
+    assert repeated is not None
+    assert repeated_payload == payload
+    assert repeated.updated_at == stored.updated_at
     assert stored.actor_id == "thread:thread-a"
     assert stored.target_id == "wt"
     assert stored.thread_id == "thread-a"

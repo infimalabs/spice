@@ -11,6 +11,7 @@ command settles "is this worktree healthy?".
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from spice.paths import require_repo_root
@@ -35,22 +36,34 @@ def configure_doctor_parser(subparsers: Any) -> None:
     doctor.set_defaults(func=handle_doctor)
 
 
-def handle_doctor(args: argparse.Namespace) -> int:
-    from spice.hooks.doctor import run_doctor as run_environment_doctor
+def _environment_doctor_result(repo_root: Path, *, fix: bool) -> tuple[str, bool]:
+    from spice.hooks.doctor import run_doctor
+
+    report = run_doctor(repo_root, fix=fix)
+    return report.render(), report.failed
+
+
+def _render_task_doctor_report() -> tuple[str, list[str]]:
     from spice.tasks.render import render_doctor_report
 
+    return render_doctor_report()
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
     repo_root = require_repo_root()
 
-    environment = run_environment_doctor(repo_root, fix=bool(args.fix))
-    task_text, task_problems = render_doctor_report()
+    environment_text, environment_failed = _environment_doctor_result(
+        repo_root, fix=bool(args.fix)
+    )
+    task_text, task_problems = _render_task_doctor_report()
 
-    print(environment.render())
+    print(environment_text)
     print()
     print("spice task doctor")
     for line in task_text.splitlines():
         print(f"  {line}")
 
-    failed = environment.failed or bool(task_problems)
+    failed = environment_failed or bool(task_problems)
     print()
     print(f"doctor {'FAIL' if failed else 'ok'}")
     return 1 if failed else 0
