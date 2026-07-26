@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 import textwrap
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -26,9 +26,21 @@ from typing import Any
 
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
-from spice.sessions.jsonl import iter_jsonl_lines, iter_jsonl_lines_reverse
-from spice.sessions.util import int_or_zero
-from spice.transcript.decode import first_text
+from spice.transcript.events import (
+    AssistantText,
+    CommandExecution,
+    Compaction,
+    ContextUsage,
+    Image,
+    Reasoning,
+    ToolCall,
+    ToolOutput,
+    TranscriptEvent,
+    TurnBoundary,
+    UserMessage as TranscriptUserMessage,
+    WebSearch,
+)
+from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -178,50 +190,19 @@ def iter_events(
     *,
     start: str | None = None,
     context_lines_before_start: int = 0,
-) -> Iterator[dict[str, Any]]:
+) -> Iterator[TranscriptEvent]:
     driver = driver_for_transcript(path)
-    for line in _iter_jsonl_lines_from_start(
-        path, start, context_lines_before_start=context_lines_before_start
-    ):
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        event = driver.normalize_transcript_line(obj)
-        if event is not None:
-            yield event
-
-
-def _iter_jsonl_lines_from_start(
-    path: Path, start: str | None, *, context_lines_before_start: int = 0
-) -> Iterator[str]:
-    if not start:
-        yield from iter_jsonl_lines(path)
-        return
-    lines: list[str] = []
-    context_count = 0
-    for line in iter_jsonl_lines_reverse(path):
-        ts = _line_timestamp(line)
-        if ts and ts < start:
-            if context_count >= context_lines_before_start:
-                break
-            lines.append(line)
-            context_count += 1
-            continue
-        lines.append(line)
-    yield from reversed(lines)
-
-
-def _line_timestamp(line: str) -> str | None:
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(obj, dict):
-        return None
-    return normalize_timestamp(obj.get("timestamp"))
+    reader = TranscriptEventReader(path, driver)
+    read = (
+        reader.read(
+            "since",
+            start_timestamp=start,
+            context_lines_before_start=context_lines_before_start,
+        )
+        if start
+        else reader.read("forward")
+    )
+    yield from read.events
 
 
 def collect_turns(files: list[Path], *, start: str | None = None) -> list[TurnRecord]:
@@ -233,111 +214,130 @@ def collect_turns(files: list[Path], *, start: str | None = None) -> list[TurnRe
 
 
 def _collect_turns_for_file(path: Path, *, start: str | None) -> list[TurnRecord]:
+    return collect_turns_from_events(path, iter_events(path, start=start))
+
+
+def collect_turns_from_events(
+    path: Path, events: Iterable[TranscriptEvent]
+) -> list[TurnRecord]:
+    """Fold one already-decoded typed stream into forensic turns."""
     turns: list[TurnRecord] = []
     current: TurnRecord | None = None
-    for obj in iter_events(path, start=start):
-        ts = normalize_timestamp(obj.get("timestamp")) or ""
-        payload = obj.get("payload") or {}
-        record_type = obj.get("type")
-        if record_type == "event_msg":
-            current = _apply_turn_event(turns, current, path, ts, payload)
+    for event in events:
+        ts = normalize_timestamp(event.at.timestamp) or ""
+        if isinstance(event, TurnBoundary):
+            current = _apply_turn_boundary(turns, current, path, ts, event)
             continue
-        if record_type == "compacted":
+        if isinstance(event, Compaction):
+            if not event.boundary:
+                continue
             if current is not None:
                 current.compaction_count += 1
                 current.last_activity_ts = ts
             continue
-        if record_type != "response_item":
+        if isinstance(event, (ContextUsage, CommandExecution)):
             continue
-        # Codex marks turn boundaries with task_started events; Claude has none,
-        # so a real user prompt (carrying Claude's per-turn `prompt_id`) opens
-        # the turn instead. Events without a prompt_id append to the current one.
-        prompt_id = payload.get("prompt_id")
         if (
-            prompt_id
-            and payload.get("type") == "message"
-            and payload.get("role") == "user"
-            and (current is None or current.turn_id != prompt_id)
+            isinstance(event, TranscriptUserMessage)
+            and event.transcript_kind == "event_msg"
         ):
+            continue
+        prompt_id = (
+            event.prompt_id
+            if isinstance(event, TranscriptUserMessage)
+            and event.transcript_kind != "event_msg"
+            else None
+        )
+        if prompt_id and (current is None or current.turn_id != prompt_id):
             current = TurnRecord(source_file=str(path), start_ts=ts, turn_id=prompt_id)
             turns.append(current)
-        elif current is None:
+        elif current is None and (
+            isinstance(
+                event,
+                (
+                    AssistantText,
+                    Image,
+                    Reasoning,
+                    ToolCall,
+                    ToolOutput,
+                    WebSearch,
+                ),
+            )
+            or (
+                isinstance(event, TranscriptUserMessage)
+                and event.transcript_kind != "event_msg"
+            )
+        ):
             current = TurnRecord(source_file=str(path), start_ts=ts)
             turns.append(current)
-        _apply_response_item(current, ts, payload)
+        if current is not None:
+            _apply_turn_fact(current, ts, event)
     return turns
 
 
-def _apply_turn_event(
+def _apply_turn_boundary(
     turns: list[TurnRecord],
     current: TurnRecord | None,
     path: Path,
     ts: str,
-    payload: dict[str, Any],
+    event: TurnBoundary,
 ) -> TurnRecord | None:
-    inner = payload.get("type")
-    if inner == "task_started":
+    if event.kind == "started":
         turn = TurnRecord(
             source_file=str(path),
             start_ts=ts,
-            turn_id=(
-                payload.get("turn_id")
-                if isinstance(payload.get("turn_id"), str)
-                else None
-            ),
+            turn_id=event.turn_id,
         )
         turns.append(turn)
         return turn
-    if inner == "task_complete":
+    if event.kind == "completed":
         if current is not None:
             current.completed = True
             current.end_ts = ts
-            last = payload.get("last_agent_message")
-            if isinstance(last, str) and last.strip():
+            last = event.last_assistant_message
+            if last and last.strip():
                 if not current.final_answers or current.final_answers[-1] != last:
                     current.final_answers.append(last)
                     current.ordered_messages.append(("final", last))
         return None
-    if inner == "error":
+    if event.kind == "error":
         if current is not None:
             current.error_count += 1
             current.last_activity_ts = ts
     return current
 
 
-def _apply_response_item(current: TurnRecord, ts: str, payload: dict[str, Any]) -> None:
-    inner = payload.get("type")
+def _apply_turn_fact(current: TurnRecord, ts: str, event: TranscriptEvent) -> None:
     current.last_activity_ts = ts
-    if inner == "message":
-        text = first_text(payload.get("content")) or ""
-        if not text:
-            return
-        role = payload.get("role")
-        if role == "user":
+    if isinstance(event, TranscriptUserMessage):
+        if event.text and event.role == "user" and event.transcript_kind != "event_msg":
             current.user_messages.append(
-                UserMessage(text=text, shape=classify_user_message(text))
+                UserMessage(
+                    text=event.text,
+                    shape=classify_user_message(event.text),
+                )
             )
-            current.ordered_messages.append(("user", text))
-            return
-        if role == "assistant":
-            if payload.get("phase") == "final_answer":
-                current.final_answers.append(text)
-                current.ordered_messages.append(("final", text))
-            else:
-                current.assistant_commentary.append(text)
-                current.ordered_messages.append(("assistant", text))
+            current.ordered_messages.append(("user", event.text))
         return
-    if inner in ("function_call", "custom_tool_call"):
-        name = str(payload.get("name") or "tool")
+    if isinstance(event, AssistantText):
+        if event.final or event.phase == "final_answer":
+            current.final_answers.append(event.text)
+            current.ordered_messages.append(("final", event.text))
+        else:
+            current.assistant_commentary.append(event.text)
+            current.ordered_messages.append(("assistant", event.text))
+        return
+    if isinstance(event, ToolCall):
+        name = event.name or "tool"
         current.tool_calls[name] += 1
         if name in ("shell", "local_shell", "exec_command", "container.exec"):
             current.command_count += 1
         if name == "apply_patch":
             current.patch_count += 1
-            for touched in _patch_paths(payload.get("arguments")):
+            for touched in _patch_paths(event.arguments):
                 current.touched_files[touched] += 1
         return
-    if inner == "web_search_call":
+    if isinstance(event, WebSearch):
         current.web_search_count += 1
 
 
@@ -370,36 +370,46 @@ def collect_compactions(
 ) -> list[CompactionRecord]:
     records: list[CompactionRecord] = []
     for path in files:
-        last_assistant: str | None = None
-        pending: CompactionRecord | None = None
-        for obj in iter_events(path, start=start, context_lines_before_start=20):
-            ts = normalize_timestamp(obj.get("timestamp")) or ""
-            payload = obj.get("payload") or {}
-            if obj.get("type") == "compacted":
-                pending = CompactionRecord(
-                    source_file=str(path),
-                    ts=ts,
-                    last_assistant_before_text=last_assistant,
-                )
-                records.append(pending)
-                continue
-            if obj.get("type") != "response_item" or payload.get("type") != "message":
-                continue
-            text = first_text(payload.get("content")) or ""
-            if not text:
-                continue
-            if payload.get("role") == "assistant":
-                last_assistant = text
-            elif payload.get("role") == "user" and pending is not None:
-                shape = classify_user_message(text)
-                if shape is MessageShape.COMPACTION_SUMMARY:
-                    if pending.summary_after_text is None:
-                        pending.summary_after_text = text
-                        pending.intent_text = parse_compaction_summary_intent(text)
-                elif shape is MessageShape.HUMAN:
-                    pending.first_user_after_text = text
-                    pending = None
+        events = iter_events(path, start=start, context_lines_before_start=20)
+        records.extend(collect_compactions_from_events(path, events))
     records.sort(key=lambda record: (record.ts, record.source_file))
+    return records
+
+
+def collect_compactions_from_events(
+    path: Path, events: Iterable[TranscriptEvent]
+) -> list[CompactionRecord]:
+    """Fold one already-decoded typed stream into compaction records."""
+    records: list[CompactionRecord] = []
+    last_assistant: str | None = None
+    pending: CompactionRecord | None = None
+    for event in events:
+        ts = normalize_timestamp(event.at.timestamp) or ""
+        if isinstance(event, Compaction) and event.boundary:
+            pending = CompactionRecord(
+                source_file=str(path),
+                ts=ts,
+                last_assistant_before_text=last_assistant,
+            )
+            records.append(pending)
+            continue
+        if isinstance(event, AssistantText) and event.text:
+            last_assistant = event.text
+        elif (
+            isinstance(event, TranscriptUserMessage)
+            and event.role == "user"
+            and event.text
+            and event.transcript_kind != "event_msg"
+            and pending is not None
+        ):
+            shape = classify_user_message(event.text)
+            if shape is MessageShape.COMPACTION_SUMMARY:
+                if pending.summary_after_text is None:
+                    pending.summary_after_text = event.text
+                    pending.intent_text = parse_compaction_summary_intent(event.text)
+            elif shape is MessageShape.HUMAN:
+                pending.first_user_after_text = event.text
+                pending = None
     return records
 
 
@@ -407,23 +417,17 @@ def collect_token_usage(files: list[Path]) -> list[TokenUsage]:
     usages: list[TokenUsage] = []
     for path in files:
         usage = TokenUsage(label=str(path))
-        for obj in iter_events(path):
-            payload = obj.get("payload") or {}
-            if payload.get("type") != "token_count":
+        for event in iter_events(path):
+            if not isinstance(event, ContextUsage):
                 continue
-            info = payload.get("info") or {}
-            last = info.get("last_token_usage") or {}
-            if not last:
-                continue
-            ts = normalize_timestamp(obj.get("timestamp"))
+            last = event.last
+            ts = normalize_timestamp(event.at.timestamp)
             usage.snapshot_count += 1
-            usage.input_tokens += int_or_zero(last.get("input_tokens"))
-            usage.cached_input_tokens += int_or_zero(last.get("cached_input_tokens"))
-            usage.output_tokens += int_or_zero(last.get("output_tokens"))
-            usage.reasoning_output_tokens += int_or_zero(
-                last.get("reasoning_output_tokens")
-            )
-            usage.total_tokens += int_or_zero(last.get("total_tokens"))
+            usage.input_tokens += last.input_tokens
+            usage.cached_input_tokens += last.cached_input_tokens
+            usage.output_tokens += last.output_tokens
+            usage.reasoning_output_tokens += last.reasoning_output_tokens
+            usage.total_tokens += last.total_tokens
             if ts:
                 usage.first_snapshot_ts = usage.first_snapshot_ts or ts
                 usage.last_snapshot_ts = ts
