@@ -169,7 +169,7 @@ spice task next
 Serve writes replayable observation materializations to
 `spiceprojections.sqlite3` in the task backend. This database is disposable:
 it is safe to delete at the cost of replaying the surviving native transcript
-facts. Run `spice serve reset-projections` to rebuild every registered family
+facts. Run `spice serve rebuild-projections` to rebuild every registered family
 and atomically publish the completed generation; pass `agentActivity` to
 rebuild only that family.
 
