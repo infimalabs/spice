@@ -35,6 +35,7 @@ from typing import Literal
 # path carry this source rather than a fabricated path; real loci arrive with the
 # reader engine, which iterates files and knows both.
 UNLOCATED_SOURCE = "<unlocated>"
+ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -112,6 +113,7 @@ class ToolOutput:
     item_id: str | None = None
     content_type: str | None = None
     output_is_list: bool = False
+    tool_output_type: ToolOutputType = "function_call_output"
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
@@ -133,6 +135,7 @@ class Image:
     role: str | None = None
     item_id: str | None = None
     call_id: str | None = None
+    tool_output_type: ToolOutputType | None = None
     turn_id: str | None = None
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
