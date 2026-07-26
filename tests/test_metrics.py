@@ -5,9 +5,18 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.metrics import record_transcript_metrics_for_agent
+from spice.serve.team import metrics as team_metrics
+from spice.serve.team.schema import (
+    TEAM_AUTHORITY_SCHEMA,
+    TEAM_AUTHORITY_SCHEMA_VERSION,
+    TEAM_PROJECTION_SCHEMA,
+)
 from spice.serve.team.store import ServeTeamStore
+from spice.sqliteconnection import sqlite_connection
 from tests.test_directivefacthelpers import (
     complete_directive_fact,
     publish_directive_fact,
@@ -22,6 +31,16 @@ METRIC_PROJECTION_TABLES = (
     "agent_metric_buckets",
     "agent_metric_cursors",
 )
+# The checkpoint shape shipped before a resume point carried source identity.
+LEGACY_CURSOR_SCHEMA = """
+CREATE TABLE agent_metric_cursors (
+    agent_id TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    offset INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, source_path)
+);
+"""
 
 
 def _write_rollout(path, entries):
@@ -411,6 +430,130 @@ def test_malformed_line_stays_uncounted_without_blocking_later_facts(tmp_path):
     # carries on to the lines behind it.
     assert summary.tool_calls == 1
     assert sum(summary.sparkline) == 2
+
+
+def _clean_replay_summary(tmp_path, transcript, *, now):
+    """What one uninterrupted ingestion of the same transcript answers."""
+    clean = ServeTeamStore(path=tmp_path / "clean-replay.sqlite3")
+    record_transcript_metrics_for_agent(
+        clean, agent_id="agent-a", transcript_path=transcript
+    )
+    return clean.lane_metric_summary("agent-a", bucket_count=12, now=now)
+
+
+def _projection_row_counts(store):
+    with store.connect() as connection:
+        return {
+            table: int(
+                connection.execute(f"SELECT COUNT(*) AS rows FROM {table}").fetchone()[
+                    "rows"
+                ]
+            )
+            for table in METRIC_PROJECTION_TABLES
+        }
+
+
+def _activity_transcript(path):
+    _write_rollout(
+        path,
+        [
+            _assistant_entry("2026-06-10T12:00:00.000000Z", "starting"),
+            _tool_call_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+            _reasoning_entry("2026-06-10T12:00:02.000000Z", "weighing options"),
+        ],
+    )
+    return datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
+
+
+def test_a_pass_that_dies_before_its_checkpoint_leaves_nothing_behind(
+    tmp_path, monkeypatch
+):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    now = _activity_transcript(transcript)
+
+    def die_after_the_facts(*args, **kwargs):
+        raise RuntimeError("process lost between the facts and their checkpoint")
+
+    monkeypatch.setattr(
+        team_metrics, "_record_agent_metric_cursor_locked", die_after_the_facts
+    )
+    with pytest.raises(RuntimeError):
+        record_transcript_metrics_for_agent(
+            store, agent_id="agent-a", transcript_path=transcript
+        )
+    monkeypatch.undo()
+    abandoned = _projection_row_counts(store)
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    # The delta reached the same transaction as the checkpoint that never
+    # landed, so the restart reads those bytes for the first time, not again.
+    assert abandoned == dict.fromkeys(METRIC_PROJECTION_TABLES, 0)
+    assert store.lane_metric_summary(
+        "agent-a", bucket_count=12, now=now
+    ) == _clean_replay_summary(tmp_path, transcript, now=now)
+
+
+def test_deleted_checkpoint_rows_reset_the_counts_they_can_no_longer_account_for(
+    tmp_path,
+):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    transcript = tmp_path / "rollout.jsonl"
+    now = _activity_transcript(transcript)
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    with store.connect() as connection:
+        connection.execute("DELETE FROM agent_metric_cursors")
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    # Counts standing beside a lost checkpoint are exactly what the replay from
+    # the first byte is about to produce, so they are cleared instead of doubled.
+    assert store.lane_metric_summary(
+        "agent-a", bucket_count=12, now=now
+    ) == _clean_replay_summary(tmp_path, transcript, now=now)
+
+
+def test_a_drifted_checkpoint_shape_replays_its_whole_family(tmp_path):
+    path = tmp_path / "drifted.sqlite3"
+    transcript = tmp_path / "rollout.jsonl"
+    now = _activity_transcript(transcript)
+    with sqlite_connection(path) as connection:
+        connection.executescript(TEAM_AUTHORITY_SCHEMA)
+        connection.executescript(TEAM_PROJECTION_SCHEMA)
+        connection.execute("DROP TABLE agent_metric_cursors")
+        connection.executescript(LEGACY_CURSOR_SCHEMA)
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, team_id, tool_calls, updated_at) "
+            "VALUES ('agent-a', 'agent-a', 1, 300)"
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_cursors "
+            "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, 300)",
+            ("agent-a", str(transcript), transcript.stat().st_size),
+        )
+        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
+
+    store = ServeTeamStore(path=path)
+    surviving = _projection_row_counts(store)
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=transcript
+    )
+
+    # The checkpoint shape changed, so its aggregates went with it: a surviving
+    # count would be replayed onto, and a surviving checkpoint would hold the
+    # replay back from counts that no longer exist.
+    assert surviving == dict.fromkeys(METRIC_PROJECTION_TABLES, 0)
+    assert store.lane_metric_summary(
+        "agent-a", bucket_count=12, now=now
+    ) == _clean_replay_summary(tmp_path, transcript, now=now)
 
 
 def test_metric_projections_replay_equivalently_after_deletion(tmp_path):
