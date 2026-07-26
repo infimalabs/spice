@@ -10,7 +10,9 @@ from threading import Event, Thread
 
 import pytest
 
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
+from spice.serve.cli import run_serve_reset_projections
 from spice.serve.diagnostics import team_diagnostics_payload
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.projection import (
@@ -115,7 +117,7 @@ def _populate_activity(
 
 
 def test_every_family_registers_a_replay_contract_that_resolves():
-    """Registration answers all five questions, and its code references are real."""
+    """Registration answers all six questions, and its code references are real."""
     for family in PROJECTION_FAMILIES:
         registration = (
             family.source,
@@ -123,6 +125,7 @@ def test_every_family_registers_a_replay_contract_that_resolves():
             family.horizon,
             family.rebuild,
             family.beyond_horizon,
+            family.recovery_action,
         )
         assert family.tables
         assert all(field.strip() for field in registration)
@@ -134,6 +137,14 @@ def test_every_family_registers_a_replay_contract_that_resolves():
         assert named, f"{family.name} names no spice symbol to replay from"
         for dotted in sorted(named):
             assert _resolve(dotted) is not None
+        # The recovery action is the one answer carrying no dotted symbol, so
+        # parsing it with the real CLI is what keeps it from rotting into prose
+        # exactly when an operator needs it: on an unavailable family.
+        command = family.recovery_action.split()
+        assert command[0] == "spice"
+        recovery = build_parser().parse_args(command[1:])
+        assert recovery.func is run_serve_reset_projections
+        assert recovery.families == [family.name]
 
 
 def test_the_schema_builds_exactly_the_registered_families():
