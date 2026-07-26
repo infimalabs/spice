@@ -40,7 +40,7 @@ from spice.serve.team.identity import (
     agent_identity_from_row,
     select_agent_identity_rows,
 )
-from spice.serve.team.memberstore import (
+from spice.serve.team.rosterstore import (
     MAX_TEAM_MEMBERS as MAX_TEAM_MEMBERS,
     TeamMemberStoreMixin,
 )

@@ -485,12 +485,7 @@ def _thread_transcript_usage(files: Iterable[str | Path]) -> _ThreadTranscriptUs
     turns: list[records.TurnRecord] = []
     renewals: list[str] = []
     for path in existing:
-        driver = driver_for_transcript(path)
-        events = (
-            TranscriptEventReader(path, driver, source_actor=None)
-            .read("forward")
-            .events
-        )
+        events = _read_transcript_events(path)
         snapshots.extend(_active_context_snapshots(events))
         turns.extend(records.collect_turns_from_events(path, events))
         renewals.extend(
@@ -505,6 +500,12 @@ def _thread_transcript_usage(files: Iterable[str | Path]) -> _ThreadTranscriptUs
         turns=tuple(sorted(turns, key=lambda item: (item.start_ts, item.source_file))),
         renewals=tuple(sorted(renewals)),
     )
+
+
+def _read_transcript_events(path: Path) -> tuple[TranscriptEvent, ...]:
+    """Decode one source once for every effort projection derived from it."""
+    driver = driver_for_transcript(path)
+    return TranscriptEventReader(path, driver, source_actor=None).read("forward").events
 
 
 def _phase_effort_usage(

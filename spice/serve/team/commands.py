@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spice.errors import SpiceError
+from spice.serve.team.ids import normalized_id
 
 
 @dataclass(frozen=True)
@@ -168,8 +169,6 @@ class TeamCommandService:
 
 
 def _required(payload: dict[str, Any], key: str) -> str:
-    from spice.serve.team.ids import normalized_id
-
     return normalized_id(str(payload.get(key) or ""), key)
 
 
