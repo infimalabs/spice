@@ -36,7 +36,7 @@ from typing import Literal
 # reader engine, which iterates files and knows both.
 UNLOCATED_SOURCE = "<unlocated>"
 ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
-TurnBoundaryKind = Literal["started", "completed"]
+TurnBoundaryKind = Literal["started", "completed", "error"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -183,15 +183,17 @@ class UserMessage:
     turn_metadata_key: (
         Literal["internal_chat_message_metadata_passthrough", "metadata"] | None
     ) = None
+    transcript_kind: Literal["response_item", "event_msg", "user"] = "response_item"
 
 
 @dataclass(slots=True, frozen=True)
 class TurnBoundary:
-    """A provider-reported start or completion boundary for one turn."""
+    """A provider-reported turn start, completion, or in-turn error."""
 
     at: Provenance
     kind: TurnBoundaryKind
     turn_id: str | None
+    last_assistant_message: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

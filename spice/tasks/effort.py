@@ -18,7 +18,7 @@ from spice.sessions.meter import (
 )
 from spice.sessions.slices import turn_activity_ts
 from spice.tasks import claimstate, identity
-from spice.transcript.events import ContextUsage
+from spice.transcript.events import ContextUsage, TranscriptEvent
 from spice.transcript.reader import TranscriptEventReader
 from spice.transcript.timestamps import parse_timestamp
 
@@ -481,13 +481,29 @@ def _thread_transcript_usage(files: Iterable[str | Path]) -> _ThreadTranscriptUs
     existing = tuple(path for path in paths if path.is_file())
     if not existing:
         return _ThreadTranscriptUsage((), (), (), ())
+    snapshots: list[ActiveContextSnapshot] = []
+    turns: list[records.TurnRecord] = []
+    renewals: list[str] = []
+    for path in existing:
+        driver = driver_for_transcript(path)
+        events = (
+            TranscriptEventReader(path, driver, source_actor=None)
+            .read("forward")
+            .events
+        )
+        snapshots.extend(_active_context_snapshots(events))
+        turns.extend(records.collect_turns_from_events(path, events))
+        renewals.extend(
+            record.ts
+            for record in records.collect_compactions_from_events(path, events)
+        )
     return _ThreadTranscriptUsage(
         source_files=tuple(str(path) for path in existing),
-        snapshots=_active_context_snapshots(existing),
-        turns=tuple(records.collect_turns(list(existing))),
-        renewals=tuple(
-            record.ts for record in records.collect_compactions(list(existing))
+        snapshots=tuple(
+            sorted(snapshots, key=lambda item: (item.ts, item.source_file))
         ),
+        turns=tuple(sorted(turns, key=lambda item: (item.start_ts, item.source_file))),
+        renewals=tuple(sorted(renewals)),
     )
 
 
@@ -537,18 +553,15 @@ def _usage_partial_markers(
 
 
 def _active_context_snapshots(
-    paths: tuple[Path, ...],
+    events: Iterable[TranscriptEvent],
 ) -> tuple[ActiveContextSnapshot, ...]:
     snapshots: list[ActiveContextSnapshot] = []
-    for path in paths:
-        driver = driver_for_transcript(path)
-        read = TranscriptEventReader(path, driver, source_actor=None).read("forward")
-        for event in read.events:
-            if not isinstance(event, ContextUsage):
-                continue
-            snapshot = active_context_snapshot_from_event(event)
-            if snapshot is not None:
-                snapshots.append(snapshot)
+    for event in events:
+        if not isinstance(event, ContextUsage):
+            continue
+        snapshot = active_context_snapshot_from_event(event)
+        if snapshot is not None:
+            snapshots.append(snapshot)
     return tuple(sorted(snapshots, key=lambda item: (item.ts, item.source_file)))
 
 
