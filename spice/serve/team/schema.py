@@ -22,7 +22,7 @@ TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 
-TEAM_AUTHORITY_SCHEMA_VERSION = 1
+TEAM_AUTHORITY_SCHEMA_VERSION = 2
 
 TEAM_AUTHORITY_TABLES = frozenset(
     {
@@ -37,7 +37,27 @@ TEAM_AUTHORITY_TABLES = frozenset(
     }
 )
 
-TEAM_AUTHORITY_SCHEMA = """
+# Authority migrations are append-only and keyed by their destination version.
+# A version's canonical shape is whatever applying migrations 1..N produces, so
+# no second statement of a shape exists anywhere to drift from the migration
+# that builds it. That drift is not hypothetical: version 1 was minted with an
+# `actual_service_tier` column and later lost it in place, because the shape
+# contract was an alias for the writer's current DDL rather than a record of
+# what version 1 built. One version then described two shapes, every store
+# stamped 1 became unidentifiable, and a shared authority database was edited by
+# hand to get the fleet moving again.
+#
+# So an entry here is history, not source: it is the text that already ran
+# against databases in the field, and editing one silently changes what an
+# already-stamped version means. A future authority change adds the next
+# integer and its own forward migration instead.
+# `tests/test_teamschema.py` pins each version's derived shape to a digest, so
+# editing an entry below fails rather than rewriting the past.
+#
+# Rebuildable projections live in their own database (spice.serve.team
+# .projection) and cannot reach this version, this file, or this connection.
+TEAM_AUTHORITY_MIGRATIONS = {
+    1: """
 CREATE TABLE IF NOT EXISTS events (
     revision INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -104,6 +124,7 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     actual_driver TEXT NOT NULL DEFAULT '',
     actual_model TEXT NOT NULL DEFAULT '',
     actual_effort TEXT NOT NULL DEFAULT '',
+    actual_service_tier TEXT NOT NULL DEFAULT '',
     desired_driver TEXT NOT NULL DEFAULT '',
     desired_model TEXT NOT NULL DEFAULT '',
     desired_effort TEXT NOT NULL DEFAULT '',
@@ -114,19 +135,11 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     renewal_revision INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL
 );
-"""
-
-# Authority migrations are append-only and keyed by their destination version.
-# A future authority change adds the next integer and its forward migration.
-# Rebuildable projections live in their own database (spice.serve.team
-# .projection) and cannot reach this version, this file, or this connection.
-TEAM_AUTHORITY_MIGRATIONS = {
-    1: TEAM_AUTHORITY_SCHEMA,
-}
-
-# Canonical shapes let the opener validate a source database before any
-# migration acquires a write transaction. Preserve an entry when adding a
-# later version so every supported source remains independently recognizable.
-TEAM_AUTHORITY_SCHEMAS = {
-    1: TEAM_AUTHORITY_SCHEMA,
+""",
+    # The authority half of DRIVERS-1kH6Kq6J: no driver could populate a service
+    # tier, so the launch seam stopped carrying one and the column that recorded
+    # it goes with it. Dropping it here rather than in the definition above is
+    # what lets a database already stamped 1 arrive at this shape by being
+    # opened, instead of by someone editing it.
+    2: "ALTER TABLE agent_identities DROP COLUMN actual_service_tier;",
 }

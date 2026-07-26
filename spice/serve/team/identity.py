@@ -141,7 +141,7 @@ class TeamIdentityStoreMixin:
     ) -> TeamAgentIdentity:
         """Write the requested identity, replacing every column of the row.
 
-        The upsert sets all sixteen columns from the request, so this states
+        The upsert sets all fifteen columns from the request, so this states
         the whole row rather than the part of it a caller happens to care
         about. A request built from a subset of the fields therefore erases
         the rest instead of leaving them alone, which is silent -- the write
