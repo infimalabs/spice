@@ -518,17 +518,20 @@ WIRE_OBJECTS = (
     # sort "10" below "9". tests/fixtures/lane_store_chrome.js holds the
     # conformance sweep that keeps the reducer honest about this.
     #
-    # An authority that dates its own generation counts it from the instant its
-    # durable store was written -- for the task board, that count is minted by
-    # spice.tasks.config.task_event_generation. A store is only ever created
+    # What producers here owe it in is a count of microseconds. The task board
+    # counts from the instant its durable store was written, minted by
+    # spice.tasks.config.task_event_generation: a store is only ever created
     # after every store it replaces, so the count rises across a restart and
     # across a store deleted and remade, which is the one moment a revision
-    # counted within it can restart lower. It is minted in microseconds because
-    # the reducer orders digit runs as doubles: a nanosecond count is already
-    # past the range a double holds exactly, where two distinct instants
-    # compare equal. payload.chrome.lane_chrome_generation admits only a count,
-    # so a hash identity cannot become an epoch -- it would arrive as an order
-    # the reducer cannot fault and then mis-order silently behind it.
+    # counted within it can restart lower. Activity counts the transcript
+    # instant it carries rather than spelling it out, because a stamp written
+    # at one offset sorts ahead of a later stamp written at another. Both are
+    # microseconds because the reducer orders digit runs as doubles: a
+    # nanosecond count is already past the range a double holds exactly, where
+    # two distinct instants compare equal. payload.chrome.lane_chrome_generation
+    # admits only a count, so a hash identity cannot become an epoch -- it would
+    # arrive as an order the reducer cannot fault and then mis-order silently
+    # behind it.
     _object(
         "LaneChromeFacetOrder",
         {"epoch": STRING, "revision": INTEGER},

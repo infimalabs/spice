@@ -241,6 +241,52 @@ def test_a_hash_identity_never_reaches_the_board_facet_as_an_epoch():
         )
 
 
+def _real_activity_chrome(last_assistant_at: str) -> dict:
+    """Build activity chrome the way a lane pass does, off a transcript stamp."""
+    return lane.lane_chrome_payload(
+        target_id="wt", last_assistant_at=last_assistant_at
+    )["activity"]
+
+
+def test_a_hash_identity_never_reaches_the_activity_facet_as_an_epoch():
+    # The other epoch-carrying facet reaches for a transcript instant, so the
+    # same digest wired here is the same mistake. A transcript's malformed line
+    # must not end the pass, so this one is refused into no generation at all
+    # rather than raised, and the browser is never handed an order that moves at
+    # random. The instant beside it is still reported: what the facet describes
+    # is unchanged, only the authority's claim to have dated it is withheld.
+    digest = hashlib.blake2s(b"lane-chrome", digest_size=16).hexdigest()
+
+    refused = _real_activity_chrome(digest)
+    dated = _real_activity_chrome("2026-07-26T05:49:43.256080Z")
+
+    assert refused["order"]["epoch"] == ""
+    assert refused["value"]["lastAssistantAt"] == digest
+    assert dated["order"]["epoch"].isdigit()
+
+
+def test_the_activity_generation_orders_stamps_across_a_written_offset():
+    # 07:49:43+02:00 is 05:49:43Z, a second before the stamp below it, yet it
+    # sorts after as text -- so an authority whose driver writes a local offset
+    # would pin the facet and refuse everything that followed. Counting the
+    # instant is what makes the later one land.
+    earlier = _real_activity_chrome("2026-07-26T07:49:43+02:00")
+    later = _real_activity_chrome("2026-07-26T05:49:44Z")
+
+    observed = LaneChromeObservation(
+        "activity", LaneChromeOrder(epoch=later["order"]["epoch"]), later["value"]
+    )
+    landed = assemble_lane_chrome(
+        "wt",
+        [observed],
+        published={"activity": LaneChromeOrder(epoch=earlier["order"]["epoch"])},
+    )
+
+    assert earlier["value"]["lastAssistantAt"] > later["value"]["lastAssistantAt"]
+    assert int(later["order"]["epoch"]) > int(earlier["order"]["epoch"])
+    assert landed.changed == ("activity",)
+
+
 def test_the_observer_lane_answers_in_the_producer_contract(tmp_path):
     session = _observer_session(tmp_path)
 
