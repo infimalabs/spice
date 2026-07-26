@@ -22,6 +22,10 @@ from spice.serve import audio
 
 ESPEAK_TEST_SAMPLE_RATE = 8000
 LONG_MESSAGE_FLOOR_SECONDS = 60.0
+# Rate multipliers a listener can pick in the UI, either side of unscaled.
+SLOW_RATE_MULTIPLIER = 0.5
+FAST_RATE_MULTIPLIER = 2.0
+CONFIGURED_WORDS_PER_MINUTE = 200
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,75 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
     assert seen["args"] == ["tts-engine", "--wav"]
     assert seen["input"] == b"see docs"
     assert seen["phase"] == "serve-speech-external"
+
+
+def test_external_speech_rate_reaches_the_command_through_its_named_slot(
+    tmp_path, monkeypatch
+):
+    # Spice cannot know which flag an arbitrary engine spells its rate with, so
+    # the command names the spot. `--voice={en}` is there to prove substitution
+    # replaces one named token rather than running a format pass over the argv.
+    edit.set_scope_section(
+        tmp_path,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine --voice={en} -s {words_per_minute}",
+            values.SAY_CONTENT_TYPE_KEY: "audio/wav",
+            values.SAY_WORDS_PER_MINUTE_KEY: CONFIGURED_WORDS_PER_MINUTE,
+        },
+    )
+    seen: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
+
+    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+
+    for rate in (
+        SLOW_RATE_MULTIPLIER,
+        audio.DEFAULT_SAY_RATE_MULTIPLIER,
+        FAST_RATE_MULTIPLIER,
+    ):
+        audio.render_speech_audio("hello", repo_root=tmp_path, rate_multiplier=rate)
+
+    assert seen == [
+        ["tts-engine", "--voice={en}", "-s", "100"],
+        ["tts-engine", "--voice={en}", "-s", "200"],
+        ["tts-engine", "--voice={en}", "-s", "400"],
+    ]
+
+
+def test_external_speech_command_without_a_slot_keeps_its_own_engine_rate(
+    tmp_path, monkeypatch
+):
+    # The documented contract for a command that names no slot: spice writes no
+    # rate into it, so the engine's own rate stands whatever the listener picks.
+    edit.set_scope_section(
+        tmp_path,
+        layers.WORKTREE_SOURCE,
+        values.SAY_KEY,
+        {
+            values.SAY_BACKEND_KEY: "external",
+            values.SAY_COMMAND_KEY: "tts-engine --wav",
+            values.SAY_CONTENT_TYPE_KEY: "audio/wav",
+            values.SAY_WORDS_PER_MINUTE_KEY: CONFIGURED_WORDS_PER_MINUTE,
+        },
+    )
+    seen: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
+
+    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+
+    for rate in (SLOW_RATE_MULTIPLIER, FAST_RATE_MULTIPLIER):
+        audio.render_speech_audio("hello", repo_root=tmp_path, rate_multiplier=rate)
+
+    assert seen == [["tts-engine", "--wav"], ["tts-engine", "--wav"]]
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
@@ -245,6 +318,8 @@ def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):
         "from pathlib import Path\n"
         "text = sys.stdin.buffer.read()\n"
         "Path('espeak-ng.stdin').write_bytes(text)\n"
+        "with Path('espeak-ng.argv').open('a') as record:\n"
+        "    record.write(' '.join(sys.argv[1:]) + '\\n')\n"
         "with wave.open(sys.stdout.buffer, 'wb') as output:\n"
         "    output.setnchannels(1)\n"
         "    output.setsampwidth(2)\n"
@@ -265,22 +340,30 @@ def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):
                 "--backend",
                 "external",
                 "--command",
-                "espeak-ng --stdout",
+                "espeak-ng --stdout -s {words_per_minute}",
                 "--content-type",
                 "audio/wav",
             ]
         )
     )
-    rendered = audio.render_speech_audio(
-        "see [Linux docs](https://example.test)/today",
-        repo_root=tmp_path,
-    )
+    for rate in (SLOW_RATE_MULTIPLIER, audio.DEFAULT_SAY_RATE_MULTIPLIER):
+        rendered = audio.render_speech_audio(
+            "see [Linux docs](https://example.test)/today",
+            repo_root=tmp_path,
+            rate_multiplier=rate,
+        )
 
     assert result == 0
     assert capsys.readouterr().out == (
-        "say backend=external command=espeak-ng --stdout content_type=audio/wav\n"
+        "say backend=external command=espeak-ng --stdout -s {words_per_minute} "
+        "content_type=audio/wav\n"
     )
     assert (tmp_path / "espeak-ng.stdin").read_bytes() == b"see Linux docs today"
+    # The listener's rate reaches the engine through the slot the documented
+    # recipe names, scaled from the default words-per-minute base.
+    assert (tmp_path / "espeak-ng.argv").read_text(encoding="utf-8") == (
+        "--stdout -s 88\n--stdout -s 175\n"
+    )
     assert rendered.content_type == "audio/wav"
     with wave.open(io.BytesIO(rendered.data), "rb") as wav_file:
         assert wav_file.getnchannels() == 1
@@ -302,7 +385,21 @@ def test_espeak_ng_linux_preset_is_documented():
     assert "command -v espeak-ng" in reference
     assert "espeak-ng --version" in reference
     assert (
-        'spice config say --backend external --command "espeak-ng --stdout" '
-        "--content-type audio/wav" in reference
+        "spice config say --backend external --command "
+        '"espeak-ng --stdout -s {words_per_minute}" --content-type audio/wav'
+        in reference
     )
     assert "returned on stdout as `audio/wav`" in reference
+    # Read the rate contract as prose rather than as laid-out lines, so
+    # rewrapping the paragraph cannot fail a test about what it promises.
+    prose = " ".join(reference.split())
+    assert (
+        "every `{words_per_minute}` token in the command is replaced with "
+        "`say.words_per_minute` scaled by the rate the listener picked in the UI"
+        in prose
+    )
+    assert "Substitution replaces that one token and nothing else" in prose
+    assert (
+        "A command naming no slot renders at whatever rate its own engine "
+        "defaults to" in prose
+    )

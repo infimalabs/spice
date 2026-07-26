@@ -300,6 +300,15 @@ def _rtk_config_error(
     return contextualize_config_error(repo_root, error, *path)
 
 
+def scale_say_words_per_minute(base: int, rate_multiplier: float) -> int:
+    """The words-per-minute one rate multiplier resolves to, for any backend.
+
+    Both speech backends scale the same configured base, so a listener changing
+    the rate hears the same proportion whichever engine renders the clip.
+    """
+    return max(1, int(base * rate_multiplier + 0.5))
+
+
 def say_command_args(
     repo_root: Path | None = None, *, rate_multiplier: float = 1.0
 ) -> list[str]:
@@ -315,7 +324,7 @@ def say_command_args(
     if words_per_minute is None and rate_multiplier != 1.0:
         words_per_minute = DEFAULT_SAY_WORDS_PER_MINUTE
     if words_per_minute is not None:
-        effective = max(1, int(words_per_minute * rate_multiplier + 0.5))
+        effective = scale_say_words_per_minute(words_per_minute, rate_multiplier)
         args.extend(["-r", str(effective)])
     return args
 

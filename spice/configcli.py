@@ -39,14 +39,21 @@ def configure_config_parser(subparsers: Any) -> None:
     )
     say.add_argument(
         "--command",
-        help="External speech command that reads text on stdin and writes audio to stdout.",
+        help=(
+            "External speech command that reads text on stdin and writes audio "
+            "to stdout; a {words_per_minute} token in it receives the rate."
+        ),
     )
     say.add_argument(
         "--content-type",
         help="Content-Type for external backend audio, such as audio/wav.",
     )
     say.add_argument("--voice", help="macOS `say` voice name.")
-    say.add_argument("--words-per-minute", type=int)
+    say.add_argument(
+        "--words-per-minute",
+        type=int,
+        help="Speech rate the UI multiplier scales, for either backend.",
+    )
     _add_scope_argument(say)
     say.add_argument("--clear", action="store_true")
     say.set_defaults(func=handle_config)

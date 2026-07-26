@@ -177,16 +177,26 @@ espeak-ng --version
 ```
 
 Other Linux distributions should install the package named `espeak-ng` with
-their system package manager. Configure its stdout WAV mode and matching audio
-content type exactly as follows:
+their system package manager. Configure its stdout WAV mode, matching audio
+content type, and rate slot exactly as follows:
 
 ```sh
-spice config say --backend external --command "espeak-ng --stdout" --content-type audio/wav
+spice config say --backend external --command "espeak-ng --stdout -s {words_per_minute}" --content-type audio/wav
 ```
 
 `spice serve` sends prepared speech text to the command on stdin and serves the
-WAV bytes returned on stdout as `audio/wav`. Verify the same executable path
-independently with:
+WAV bytes returned on stdout as `audio/wav`.
+
+Spice does not know which flag an arbitrary engine spells its rate with, so an
+external command names the spot itself: every `{words_per_minute}` token in the
+command is replaced with `say.words_per_minute` scaled by the rate the listener
+picked in the UI. Substitution replaces that one token and nothing else, so a
+command carrying unrelated braces reaches the engine verbatim. A command naming
+no slot renders at whatever rate its own engine defaults to, and the UI rate
+control then has nothing to act on. Only the macOS `say` backend receives
+`say.voice`, which spice writes into the argv it builds itself.
+
+Verify the same executable path independently with:
 
 ```sh
 printf 'spice speech check' | espeak-ng --stdout > /tmp/spice-speech-check.wav

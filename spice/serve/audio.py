@@ -15,6 +15,10 @@ from spice.process.groups import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"
+# Where an external speech command declares that spice should write the rate it
+# resolved. macOS `say` takes its rate through argv spice builds itself; every
+# other engine spells the flag its own way, so the command points at the spot.
+SAY_RATE_SLOT = "{words_per_minute}"
 DEFAULT_SAY_RATE_MULTIPLIER = 1.0
 MIN_SAY_RATE_MULTIPLIER = 0.5
 MAX_SAY_RATE_MULTIPLIER = 2.0
@@ -74,6 +78,7 @@ class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
     content_type: str = values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
     timeout: float = values.DEFAULT_SAY_TIMEOUT_SECONDS
+    words_per_minute: int = values.DEFAULT_SAY_WORDS_PER_MINUTE
 
     def render(
         self,
@@ -84,7 +89,7 @@ class ExternalCommandSpeechBackend:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
         result = run_bounded_process_group(
-            list(self.command),
+            self._rated_command(rate_multiplier),
             input_data=prepare_say_text(text).encode("utf-8"),
             timeout_seconds=self.timeout,
             phase="serve-speech-external",
@@ -99,6 +104,21 @@ class ExternalCommandSpeechBackend:
         if not result.stdout:
             raise RuntimeError("external speech backend produced no audio")
         return SpeechAudio(result.stdout, self.content_type)
+
+    def _rated_command(self, rate_multiplier: float) -> list[str]:
+        """The configured command with its rate slot filled, where it names one.
+
+        Spice cannot hand an arbitrary engine a rate implicitly, because it does
+        not know which flag that engine spells the rate with. So the command
+        names the slot and spice substitutes the number, and a command that
+        names no slot renders at its engine's own rate. Substitution replaces
+        one exact token rather than running a format pass, so a command carrying
+        unrelated braces still reaches the engine verbatim.
+        """
+        resolved = str(
+            values.scale_say_words_per_minute(self.words_per_minute, rate_multiplier)
+        )
+        return [word.replace(SAY_RATE_SLOT, resolved) for word in self.command]
 
 
 def prepare_say_text(text: str) -> str:
@@ -159,10 +179,16 @@ def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
     backend = values.configured_say_backend(repo_root)
     if backend == "external":
         command = _external_speech_command(repo_root)
+        configured = values.configured_say_words_per_minute(repo_root)
         return ExternalCommandSpeechBackend(
             command=command,
             content_type=values.configured_say_content_type(repo_root),
             timeout=values.configured_say_timeout(repo_root),
+            words_per_minute=(
+                values.DEFAULT_SAY_WORDS_PER_MINUTE
+                if configured is None
+                else configured
+            ),
         )
     return MacOSSayBackend(repo_root)
 
