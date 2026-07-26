@@ -1044,6 +1044,14 @@ WIRE_ALIASES = {
     "RestartRefusal": _record(_ref("JsonValue")),
     "LaneWirePayload": _union(_ref("LanePayload"), _ref("LaneErrorPayload")),
     "RoutedResult": _union(_ref("TaskDrainResult"), _ref("WorkTreeSendResult")),
+    # What the browser reducer holds once it has read a facet out of a payload
+    # but before it knows which one. Derived from the facet map so the union
+    # cannot name a facet the payload does not carry, and so the reducer is
+    # checked against every facet's common shape -- authority, order, value --
+    # rather than against whichever one a reader happened to have in mind.
+    "LaneChromeFacet": _union(
+        *(_ref(name) for name in LANE_CHROME_FACET_SCHEMAS.values())
+    ),
 }
 
 WIRE_OBJECTS_BY_NAME = {schema.name: schema for schema in WIRE_OBJECTS}
