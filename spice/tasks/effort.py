@@ -18,8 +18,8 @@ from spice.sessions.meter import (
     active_context_snapshot_from_object,
 )
 from spice.sessions.slices import turn_activity_ts
-from spice.transcript.timestamps import parse_timestamp
 from spice.tasks import claimstate, identity
+from spice.transcript.timestamps import parse_timestamp
 
 PARTIAL_MISSING_START = "missing_start"
 PARTIAL_MISSING_END = "missing_end"
