@@ -980,6 +980,23 @@ def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     assert "contract names outright" in message
 
 
+def test_builtin_migration_maxims_target_accumulated_paths_not_forward_steps():
+    bags = maxims.packaged_maxim_bags()
+
+    for name in ("backwards-compat", "legacy"):
+        message = bags[name].message.casefold()
+        assert "one forward migration of durable data" in message
+        assert "untested or invisible alternate path" in message
+        assert "executable arms accumulated per release" in message
+        assert "owning release" in message
+
+    assert all(
+        "migrat" not in trigger.casefold()
+        for bag in bags.values()
+        for trigger in bag.words
+    )
+
+
 def test_dual_judge_maxim_corpus_recall_and_false_positive_rate():
     score = _score_labeled_maxim_corpus(_LABELED_MAXIM_CORPUS)
 
