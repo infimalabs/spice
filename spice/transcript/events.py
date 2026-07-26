@@ -40,12 +40,21 @@ ToolOutputType = Literal["function_call_output", "custom_tool_call_output"]
 
 @dataclass(slots=True, frozen=True)
 class Provenance:
-    """Where one event came from: which line, and where within that line."""
+    """Where one event came from: which line, actor, and position within it.
+
+    Reader-backed events carry ``offset`` and ``source_actor``. Direct adapter
+    calls leave them unset because no file or owning actor is available at that
+    layer. The reader uses the source line's byte offset as ``line`` too: that
+    is the stable line locus shared by forward, reverse-window, and resumed
+    access without an otherwise-unbounded prefix scan to count newlines.
+    """
 
     source: str
     line: int
     ordinal: int
     timestamp: str | None
+    offset: int | None = None
+    source_actor: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

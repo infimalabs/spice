@@ -14,6 +14,7 @@ would have silently produced no ACK text until someone remembered to widen it.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from spice.agent.driver import AgentDriver
@@ -38,17 +39,50 @@ def decode_line(
     A line that is not a JSON object decodes to a single `Unknown` rather than
     to nothing, so an unreadable fragment stays a visible fact.
     """
-    obj = _loads(raw_line)
+    return _decode_parsed_line(
+        _loads(raw_line),
+        driver,
+        source=source,
+        line=line,
+        offset=None,
+        source_actor=None,
+    )
+
+
+def _decode_parsed_line(
+    obj: dict[str, Any] | None,
+    driver: AgentDriver,
+    *,
+    source: str,
+    line: int,
+    offset: int | None,
+    source_actor: str | None,
+) -> list[TranscriptEvent]:
+    """Decode the reader's one parsed object without parsing its line again."""
     if obj is None:
         stamper = LineStamper(source=source, line=line, timestamp=None)
-        return [
+        events: list[TranscriptEvent] = [
             Unknown(
                 at=stamper.stamp(),
                 reason="line is not a JSON object",
                 raw_type=None,
             )
         ]
-    return driver.transcript_line_events(obj, source=source, line=line)
+    else:
+        events = driver.transcript_line_events(obj, source=source, line=line)
+    if offset is None and source_actor is None:
+        return events
+    return [
+        replace(
+            event,
+            at=replace(
+                event.at,
+                offset=offset,
+                source_actor=source_actor,
+            ),
+        )
+        for event in events
+    ]
 
 
 def decode_assistant_text(
