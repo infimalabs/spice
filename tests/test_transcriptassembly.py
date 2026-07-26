@@ -207,6 +207,7 @@ def test_closed_event_set_is_handled_without_dictionary_input() -> None:
         SpanKind.IMAGE,
         SpanKind.COMPACTION,
         SpanKind.TOOL,
+        SpanKind.FAILURE,
     ]
     with pytest.raises(TypeError, match="typed TranscriptEvent"):
         AssembledMessageReducer().push(
@@ -265,6 +266,28 @@ def test_a_line_the_grammar_rejects_stays_prose(
         for span in spans
         if span.kind is SpanKind.PROSE and span.directive_kind is None
     ] == prose
+
+
+@pytest.mark.parametrize(
+    ("header", "expected_kind"),
+    (
+        (f"ACK {ACK_KEY}:", SpanKind.ACK),
+        (f"NACK {NACK_KEY}:", SpanKind.NACK),
+    ),
+)
+def test_bodyless_keyed_response_keeps_its_reducer_classification(
+    header: str,
+    expected_kind: SpanKind,
+) -> None:
+    event = AssistantText(at=_at(14), text=header, final=False)
+
+    (message,) = _assemble((event,))
+
+    (span,) = message.spans
+    assert span.kind is expected_kind
+    assert span.keys == ((ACK_KEY,) if expected_kind is SpanKind.ACK else (NACK_KEY,))
+    assert span.text == ""
+    assert span.response_index == 0
 
 
 def _at(line: int) -> Provenance:
