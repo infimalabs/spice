@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.mail.ackarchive import summarize_nack_archival
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
@@ -553,6 +554,34 @@ def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path)
     assert payload["preamble_html"] == ""
     assert [seg["disposition"] for seg in payload["ack_segments"]] == ["refused"]
     assert "Cannot comply with that." in payload["ack_segments"][0]["html"]
+
+
+def test_assistant_message_payload_does_not_honor_a_reasonless_nack(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = "NACK 1k4YggTX:"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    summary = summarize_nack_archival(None, text)
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+
+    assert summary.refused == []
+    assert summary.reasonless == ["1k4YggTX"]
+    assert payload["ack_count"] == 0
+    assert payload["ack_keys"] == []
+    assert payload["nack_count"] == 0
+    assert payload["nack_keys"] == []
+    assert [segment["disposition"] for segment in payload["ack_segments"]] == []
 
 
 _ACK_KEY = "1k4YggTX"

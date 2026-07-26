@@ -1007,6 +1007,23 @@ def test_reasonless_nack_does_not_retire_pending_item(tmp_path):
     assert collect_refused_inbox_items(tmp_path) == []
 
 
+def test_bodyless_ack_still_retires_pending_item(tmp_path):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    write_inbox_item(
+        tmp_path,
+        name,
+        compose_inbox_text(body="bodyless ACK is enough", priority=None, stop=False),
+    )
+
+    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A}:")
+
+    assert summary.archived == [KEY_A]
+    assert summary.already_acked == []
+    assert summary.unmatched == []
+    assert pending_inbox_count(tmp_path) == 0
+
+
 def test_reasonless_nack_before_ack_does_not_refuse(tmp_path):
     _init_repo(tmp_path)
     name = f"{KEY_A}.txt"
