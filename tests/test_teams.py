@@ -1323,6 +1323,22 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
     assert member.agent_facts["desiredEffort"] == "xhigh"
 
 
+def test_partial_identity_merge_reads_inside_write_transaction(tmp_path, monkeypatch):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    observed_transactions: list[bool] = []
+    original = store._agent_identity_row_locked
+
+    def observe_transaction(connection, actor_id):
+        observed_transactions.append(connection.in_transaction)
+        return original(connection, actor_id)
+
+    monkeypatch.setattr(store, "_agent_identity_row_locked", observe_transaction)
+
+    store.record_agent_identity(actor_id="thread:agent-a", actual_driver="codex")
+
+    assert observed_transactions == [True]
+
+
 def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
