@@ -56,8 +56,15 @@ class ContractMutation:
 
 
 @dataclass(frozen=True)
+class OperationsLogIdentity:
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True)
 class OperationsLog:
     path: Path
+    identity: OperationsLogIdentity
     connection: sqlite3.Connection
 
 
@@ -78,10 +85,13 @@ def connect() -> Iterator[OperationsLog]:
     Every read of this log opens through here, so an unreadable database, a
     missing table, a missing column, and a SQL failure mid-read all surface as
     the same named unsupported-schema error rather than as an empty result.
+    Device and inode are verified across connection setup so caches can tell
+    ordinary appends from an atomic same-path database replacement.
     """
     path = operations_db_path()
     if not path.is_file():
         raise unsupported_schema_error(path, "database file is missing")
+    identity = _operations_log_identity(path)
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(operations_db_uri(path), uri=True)
@@ -101,12 +111,24 @@ def connect() -> Iterator[OperationsLog]:
             raise unsupported_schema_error(
                 path, f"operations table is missing columns: {', '.join(missing)}"
             )
-        yield OperationsLog(path=path, connection=connection)
+        if _operations_log_identity(path) != identity:
+            raise unsupported_schema_error(path, "database file changed while opening")
+        yield OperationsLog(path=path, identity=identity, connection=connection)
     except sqlite3.Error as exc:
         raise unsupported_schema_error(path, f"SQLite read failed: {exc}") from exc
     finally:
         if connection is not None:
             connection.close()
+
+
+def _operations_log_identity(path: Path) -> OperationsLogIdentity:
+    try:
+        status = path.stat()
+    except OSError as exc:
+        raise unsupported_schema_error(
+            path, f"database file identity is unavailable: {exc}"
+        ) from exc
+    return OperationsLogIdentity(device=status.st_dev, inode=status.st_ino)
 
 
 def unsupported_schema_error(path: Path, detail: str) -> SpiceError:

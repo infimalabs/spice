@@ -8,6 +8,7 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve import messages as message_reader
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload.chrome import (
     LaneChromeObservation,
     LaneChromeOrder,
@@ -48,7 +49,7 @@ def status_line_payload(
     state: Any,
     target: WorktreeTarget,
     *,
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     error: str | None,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
@@ -84,7 +85,7 @@ def _status_line_payload_from_status(
     status: Any,
     thread_id: str,
     binding_error: str,
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     error: str | None,
     active_claims: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
@@ -114,7 +115,7 @@ def _status_line_payload_from_status(
     }
 
 
-def lane_activity_at(items: list[message_reader.AssistantMessage]) -> str:
+def lane_activity_at(items: list[AssistantMessage]) -> str:
     """Return the transcript instant that dates the activity chrome facet."""
     return items[0].timestamp if items else ""
 
@@ -477,7 +478,7 @@ def lane_metrics_payload(
     target: WorktreeTarget,
     *,
     thread_id: str,
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
     status: Any,
     task_board: OpenTaskBoardProjection | None = None,
 ) -> dict[str, Any]:
@@ -501,9 +502,7 @@ def lane_metrics_payload(
     }
 
 
-def agent_uptime_seconds(
-    status: Any, items: list[message_reader.AssistantMessage]
-) -> int:
+def agent_uptime_seconds(status: Any, items: list[AssistantMessage]) -> int:
     if not status.running or not status.started_at:
         return 0
     started = parse_timestamp(status.started_at)
@@ -514,14 +513,14 @@ def agent_uptime_seconds(
 
 
 def _latest_message_timestamp(
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
 ) -> datetime | None:
     timestamps = _message_timestamps(items)
     return max(timestamps) if timestamps else None
 
 
 def _message_timestamps(
-    items: list[message_reader.AssistantMessage],
+    items: list[AssistantMessage],
 ) -> list[datetime]:
     return [
         parsed

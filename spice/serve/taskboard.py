@@ -50,11 +50,21 @@ class TaskBoardObservation:
 
 @dataclass(frozen=True, slots=True)
 class OpenTaskBoardProjection:
-    """Task indexes and the open-task payload over one observation."""
+    """Task indexes and the open-task payload over one observation.
+
+    Every index answers empty over a failed observation, because a caller
+    reading one of them is asking what this pass saw and the answer is nothing.
+    The inventory is the exception: it is published to a browser that orders it
+    by the task revision it carries, and a board nobody could read carries the
+    live one. Stamped that way an empty inventory reads as the newest truth
+    about the board, and the recovered inventory that follows it at the same
+    revision is refused as a redelivery. So a failed observation has no
+    inventory at all, and a publisher with nothing to publish names no facet.
+    """
 
     backend_identity: str
     revision: str
-    task_filter_inventory: dict[str, Any]
+    task_filter_inventory: dict[str, Any] | None
     _active_claims: Mapping[str, Mapping[str, Any]]
     _task_cards_by_origin: Mapping[str, tuple[Mapping[str, Any], ...]]
     _completed_reviews_by_author: Mapping[str, tuple[Mapping[str, Any], ...]]
@@ -417,18 +427,21 @@ def _drained_task_count_index(
 def _build_open_task_board_projection(
     observation: TaskBoardObservation,
 ) -> OpenTaskBoardProjection:
-    catalog = task_config.task_project_validation_catalog()
     open_rows, ready, waiting, blocked = _open_task_states(observation.rows)
     return OpenTaskBoardProjection(
         backend_identity=observation.backend_identity,
         revision=observation.revision,
-        task_filter_inventory=_task_filter_inventory(
-            observation,
-            open_rows,
-            ready,
-            waiting,
-            blocked,
-            catalog,
+        task_filter_inventory=(
+            None
+            if observation.error
+            else _task_filter_inventory(
+                observation,
+                open_rows,
+                ready,
+                waiting,
+                blocked,
+                task_config.task_project_validation_catalog(),
+            )
         ),
         _active_claims=_active_claim_index(open_rows),
         _task_cards_by_origin=_row_tuple_index(

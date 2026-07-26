@@ -11,9 +11,9 @@ import pytest
 
 from spice.mail.ackarchive import summarize_nack_archival
 from spice.mail.ackgrammar import extract_task_batch_lines_from_text
-from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore

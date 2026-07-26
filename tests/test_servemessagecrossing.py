@@ -26,9 +26,9 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import CLAUDE_DRIVER
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.messages import (
     MAX_MESSAGE_LIMIT,
-    AssistantMessage,
     RolloutCursor,
     read_assistant_messages,
 )
