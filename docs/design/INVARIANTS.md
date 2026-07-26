@@ -110,7 +110,7 @@ checklist.
   only compact prose; image markdown is described, not read; every prose message
   keeps a manual play affordance.
 
-### Storage Classes And Shape Changes
+## Storage Classes And Shape Changes
 
 The storage split is asymmetric: losing a projection costs a replay; losing
 authority costs facts no replay can recover. The five SQLite stores therefore
