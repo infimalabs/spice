@@ -1165,16 +1165,17 @@ def _validate(
 
 
 def _union_arm_object(candidate: WireType) -> WireObject | None:
-    """The object a union arm names, or None when the arm does not name one."""
+    """The object a union arm names, or None when the arm does not name one.
+
+    Resolves aliases by recursion, the way validation itself does, so a schema
+    that ever names itself through one raises RecursionError here too instead of
+    spinning in place.
+    """
     if candidate.kind != "reference":
         return None
-    name = candidate.name
-    while name in WIRE_ALIASES:
-        alias = WIRE_ALIASES[name]
-        if alias.kind != "reference":
-            return None
-        name = alias.name
-    return WIRE_OBJECTS_BY_NAME.get(name)
+    if candidate.name in WIRE_ALIASES:
+        return _union_arm_object(WIRE_ALIASES[candidate.name])
+    return WIRE_OBJECTS_BY_NAME.get(candidate.name)
 
 
 def _union_arm_literals(candidate: WireType) -> dict[str, Any] | None:
