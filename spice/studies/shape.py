@@ -25,7 +25,11 @@ from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
 from spice.config.layers import config_string_list, effective_table
 from spice.pathmatch import matches_repo_path
 from spice.config.pyproject import read_pyproject
-from spice.studies.walk import configured_test_roots, is_test_path
+from spice.studies.walk import (
+    configured_test_roots,
+    dedupe_resolved_paths,
+    is_test_path,
+)
 
 BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)
 # Generic continuation shards: a split must name the seam, not number it.
@@ -333,7 +337,7 @@ def namespace_policy_error(repo_root: Path) -> str:
 def path_shape_errors(repo_root: Path) -> list[str]:
     patterns = generated_path_patterns(repo_root)
     offenders: list[str] = []
-    scan_roots = _dedupe_scan_roots(
+    scan_roots = dedupe_resolved_paths(
         [*configured_package_roots(repo_root), *configured_test_roots(repo_root)]
     )
     for root in scan_roots:
@@ -365,18 +369,6 @@ def path_shape_errors(repo_root: Path) -> list[str]:
                     "name the seam instead"
                 )
     return offenders
-
-
-def _dedupe_scan_roots(paths: Iterable[Path]) -> list[Path]:
-    deduped: list[Path] = []
-    seen: set[Path] = set()
-    for path in paths:
-        resolved = path.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        deduped.append(path)
-    return deduped
 
 
 def _has_module_shape(path: Path, repo_root: Path) -> bool:

@@ -55,7 +55,7 @@ def configured_test_roots(repo_root: Path) -> list[Path]:
     roots: list[Path] = []
     for pattern in test_path_patterns(repo_root):
         roots.extend(_existing_test_roots(repo_root, pattern))
-    return _dedupe_paths(roots)
+    return dedupe_resolved_paths(roots)
 
 
 def is_test_path(path: Path, repo_root: Path) -> bool:
@@ -113,7 +113,7 @@ def _existing_test_roots(repo_root: Path, pattern: str) -> list[Path]:
     return [root] if root.is_dir() else []
 
 
-def _dedupe_paths(paths: Iterable[Path]) -> list[Path]:
+def dedupe_resolved_paths(paths: Iterable[Path]) -> list[Path]:
     deduped: list[Path] = []
     seen: set[Path] = set()
     for path in paths:
