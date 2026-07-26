@@ -160,24 +160,19 @@ class _PresenceFacts:
 
 
 def _text_groups(spans: Sequence[ClassifiedSpan]) -> list[_TextGroup]:
-    """Every prose and keyed-response run this locus carries, in source order.
-
-    A span names the run it belongs to, control lines included, so a directive
-    opening a refusal stays inside that refusal instead of being read as the
-    start of some other run.
-    """
+    """Every prose and keyed-response run this locus carries, in source order."""
     groups: list[_TextGroup] = []
     for span in spans:
-        if span.kind not in _TEXT_SPAN_KINDS:
+        marker = _span_marker(span)
+        if marker is None:
             continue
-        marker = (id(span.event), span.response_index, span.kind, span.keys)
         if not groups or groups[-1].marker != marker:
             groups.append(
                 _TextGroup(
                     event_identity=marker[0],
-                    response_index=span.response_index,
-                    kind=span.kind,
-                    keys=span.keys,
+                    response_index=marker[1],
+                    kind=marker[2],
+                    keys=marker[3],
                 )
             )
         _absorb_span(groups[-1], span)
@@ -188,8 +183,32 @@ def _text_groups(spans: Sequence[ClassifiedSpan]) -> list[_TextGroup]:
     ]
 
 
+def _span_marker(
+    span: ClassifiedSpan,
+) -> tuple[int, int | None, SpanKind, tuple[str, ...]] | None:
+    """The source event and response run a classified span already belongs to."""
+    if span.kind in _TEXT_SPAN_KINDS:
+        kind = span.response_kind or span.kind
+        return (id(span.event), span.response_index, kind, span.keys)
+    if span.kind is not SpanKind.DIRECTIVE:
+        return None
+    if span.response_index is None:
+        return (id(span.event), None, SpanKind.PROSE, ())
+    response_kind = span.response_kind
+    if response_kind is None or response_kind not in {SpanKind.ACK, SpanKind.NACK}:
+        raise ValueError(
+            f"response {span.response_index} directive has no ACK/NACK classification"
+        )
+    return (
+        id(span.event),
+        span.response_index,
+        response_kind,
+        span.keys,
+    )
+
+
 def _absorb_span(group: _TextGroup, span: ClassifiedSpan) -> None:
-    if span.directive_kind is not None:
+    if span.kind is SpanKind.DIRECTIVE:
         if span.directive_kind is DirectiveKind.TASK:
             group.lines.append(span.text)
         return
