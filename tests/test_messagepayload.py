@@ -942,7 +942,58 @@ def test_a_directive_opening_its_segment_indented_renders_no_card(position, tmp_
 
     assert extract_task_batch_lines_from_text(text) == []
     assert payload["task_card_count"] == len(extract_task_batch_lines_from_text(text))
-    assert _TASK_DIRECTIVE in payload["display_text"]
+    assert f"    {_TASK_DIRECTIVE}" in payload["display_text"]
+
+
+_INDENTED_OPENING_LINES = {
+    "directive": _TASK_DIRECTIVE,
+    "code": "def render(self):",
+}
+
+
+@pytest.mark.parametrize("opening", sorted(_INDENTED_OPENING_LINES))
+def test_an_indented_line_opening_a_message_keeps_its_indentation(opening, tmp_path):
+    """Where an example sits must not change how it is shown.
+
+    The display trim stripped the rendered message whole, so the first line
+    lost its indentation while every line under it kept theirs — an indented
+    block came out with a flush opening line and an indented body. Asserting
+    the exact text is the point: the earlier regression asked only that the
+    directive appear somewhere in display_text, which stayed true while the
+    indentation it was written with was being dropped.
+    """
+    line = _INDENTED_OPENING_LINES[opening]
+    body = f"    {line}\n        return 1\n\nThat is the shape."
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": body}],
+        },
+    )
+    moved = tmp_path / "moved.jsonl"
+    _write_response_item(
+        moved,
+        _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC)),
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": f"Shown here:\n\n{body}"}],
+        },
+    )
+
+    payload = message_reader.read_assistant_messages(transcript, limit=5)[
+        0
+    ].to_payload()
+    moved_payload = message_reader.read_assistant_messages(moved, limit=5)[
+        0
+    ].to_payload()
+
+    assert payload["display_text"] == body
+    assert moved_payload["display_text"] == f"Shown here:\n\n{body}"
 
 
 def test_an_ack_body_on_the_header_line_still_drops_the_separator_space(tmp_path):

@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from spice.mail.ackgrammar import task_directive_fields
+from spice.mail.ackgrammar import task_directive_fields, trim_blank_lines
 from spice.serve.markdown import render_message_html
 
 # Display order for the capture card; ordering only.
@@ -101,11 +101,18 @@ def _iter_directive_lines(
 
 
 def _display_text_with_task_directives(marked: MarkedText) -> str:
+    """The message as shown, with each marked line replaced by its summary.
+
+    Trimming through :func:`trim_blank_lines` rather than stripping keeps the
+    indentation of the first line, so an indented example reads the same
+    wherever the author put it: stripping flattened only the opening line and
+    left the rest of its block indented around it.
+    """
     lines = [
         line if directive is None else _task_directive_summary(directive)
         for line, directive in _iter_directive_lines(marked)
     ]
-    return "\n".join(lines).strip()
+    return trim_blank_lines("\n".join(lines))
 
 
 def _task_directive_count(marked: MarkedText) -> int:
