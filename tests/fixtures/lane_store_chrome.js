@@ -501,13 +501,27 @@ try {
 } catch (error) {
   missingTarget = error.message;
 }
+let undatedFacet = "";
+try {
+  store.applyLaneChrome(
+    chrome("target-f", {
+      pendingInbox: {
+        authority: authorities.pendingInbox,
+        value: pendingValue,
+      },
+    }),
+  );
+} catch (error) {
+  undatedFacet = error.message;
+}
 assert(
-  JSON.stringify({ crossAuthority, missingTarget }) ===
+  JSON.stringify({ crossAuthority, missingTarget, undatedFacet }) ===
     JSON.stringify({
       crossAuthority: "lane chrome facet authority mismatch: pendingInbox",
       missingTarget: "lane chrome target id is required",
+      undatedFacet: "lane chrome facet must carry an order: pendingInbox",
     }),
-  "the reducer refuses cross-authority facets and untargeted payloads",
+  "the reducer refuses cross-authority, untargeted, and undated payloads",
 );
 
 assert(

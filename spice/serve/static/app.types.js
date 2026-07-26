@@ -24,6 +24,10 @@
  */
 
 /**
+ * @typedef {(LaneChromeIdentityFacet|LaneChromeTeamConfigFacet|LaneChromePendingInboxFacet|LaneChromeTaskBoardFacet|LaneChromeLifecycleFacet|LaneChromeRenewalFacet|LaneChromeActivityFacet)} LaneChromeFacet
+ */
+
+/**
  * @typedef {Object} MessageAttachment
  * @property {string} name
  * @property {string} contentType

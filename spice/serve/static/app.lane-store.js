@@ -564,9 +564,16 @@ function emptyLaneChromeRecord(targetId) {
 }
 
 // An absent facet is one this payload's channel has nothing to say about; a
-// present facet always names its authority, so a payload that reaches the wrong
-// facet -- a team-store renewal landing as inbox chrome -- is a contract break
-// rather than data the reducer should guess at.
+// present facet always names its authority and carries the order that dates it,
+// so a payload that reaches the wrong facet -- a team-store renewal landing as
+// inbox chrome -- or one that arrives undated is a contract break rather than
+// data the reducer should guess at. Both are checked at this one door, which is
+// what lets every reader past it take the order as given.
+/**
+ * @param {LaneChromePayload} payload
+ * @param {string} name
+ * @returns {(LaneChromeFacet|null)}
+ */
 function laneChromeFacet(payload, name) {
   const facet = payload[name];
   if (facet === undefined) return null;
@@ -574,11 +581,17 @@ function laneChromeFacet(payload, name) {
     throw new TypeError("lane chrome facet must be an object: " + name);
   if (String(facet.authority || "") !== LANE_CHROME_FACET_AUTHORITIES[name])
     throw new Error("lane chrome facet authority mismatch: " + name);
+  if (!facet.order || typeof facet.order !== "object")
+    throw new TypeError("lane chrome facet must carry an order: " + name);
   return facet;
 }
 
+/**
+ * @param {LaneChromeFacet} facet
+ * @returns {LaneChromeFacetOrder}
+ */
 function laneChromeFacetOrder(facet) {
-  const order = facet.order || {};
+  const order = facet.order;
   return Object.freeze({
     epoch: String(order.epoch || ""),
     revision: Math.max(0, Number(order.revision) || 0),
@@ -589,6 +602,11 @@ function laneChromeFacetOrder(facet) {
 // names the authority's counter generation and only ever advances, so an
 // authority that restarted and resumed from a lower revision still supersedes,
 // while inside one epoch a lower revision is always a redelivery.
+/**
+ * @param {LaneChromeFacetOrder} order
+ * @param {(LaneChromeFacetOrder|undefined)} previous
+ * @returns {boolean}
+ */
 function isNewerLaneChromeOrder(order, previous) {
   if (!previous) return true;
   if (order.epoch !== previous.epoch)
