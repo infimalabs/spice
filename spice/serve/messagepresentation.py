@@ -48,6 +48,13 @@ from spice.transcript.reader import render_cursor
 
 IMAGE_REFERENCE_RE = re.compile(r"!\[[^\]]*\]\((?:<[^>]*>|[^)]*)\)")
 
+# A refusal the archival authority left pending acked nothing and refused
+# nothing, so its segment has neither ACK-state disposition. It still carries
+# whatever the message captured, so it goes out under a third name. This is a
+# wire and display state only: it is deliberately absent from ACK_DISPOSITIONS,
+# which is the vocabulary of dispositions an ack record may be stored under.
+SEGMENT_DISPOSITION_WITHHELD = "withheld"
+
 _PREVIEW_MAX_CHARS = 120
 _TEXT_SPAN_KINDS = frozenset({SpanKind.PROSE, SpanKind.ACK, SpanKind.NACK})
 _TOOL_CALL_TYPES = frozenset({"function_call", "custom_tool_call"})
@@ -567,6 +574,30 @@ def _normalize_terminal_colon_for_display(
     return _replace_terminal_colon(preamble), segment_bodies
 
 
+def _ack_segment(
+    segment: _TextGroup,
+    body: str,
+    *,
+    withheld: bool,
+    worktree_id: str | None,
+) -> dict[str, Any]:
+    """The wire record one keyed response contributes, honored or withheld.
+
+    A withheld segment names no keys: the operator's items are still pending, so
+    quoting them under this body would read as the answer the refusal did not
+    give. It carries the body regardless, because the capture inside it landed.
+    """
+    return {
+        "keys": [] if withheld else list(segment.keys),
+        "html": _render_message_html_with_task_directives(
+            body, worktree_id=worktree_id
+        ),
+        "disposition": SEGMENT_DISPOSITION_WITHHELD
+        if withheld
+        else span_disposition(segment.kind),
+    }
+
+
 def _assistant_message(
     key: str,
     offset: int,
@@ -604,32 +635,30 @@ def _assistant_message(
     task_card_count = _task_directive_count(preamble)
     for segment, segment_body in zip(segments, segment_bodies, strict=True):
         refused = segment.kind is SpanKind.NACK
-        if refused and not nack_response_is_honored(segment.body):
-            # The archival authority leaves a reasonless NACK pending. It must
-            # not become a refused/retired key merely because the transcript
-            # reducer correctly identified its negative polarity.
-            continue
+        # The archival authority leaves a reasonless NACK pending. It must not
+        # become a refused/retired key merely because the transcript reducer
+        # correctly identified its negative polarity.
+        withheld = refused and not nack_response_is_honored(segment.body)
         # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(segment_body)
+        # Withholding the refusal must not withhold what it captured, but a
+        # refusal that said nothing at all captured nothing to show.
+        if withheld and not body:
+            continue
         task_card_count += _task_directive_count(body)
         display_body = _display_text_with_task_directives(body)
         ack_segments.append(
-            {
-                "keys": list(segment.keys),
-                "html": _render_message_html_with_task_directives(
-                    body, worktree_id=worktree_id
-                ),
-                "disposition": span_disposition(segment.kind),
-            }
+            _ack_segment(segment, body, withheld=withheld, worktree_id=worktree_id)
         )
-        for keyed in segment.keys:
-            if keyed not in seen_keys:
-                seen_keys.add(keyed)
-                ack_keys.append(keyed)
-            (refused_keys if refused else acked_keys).add(keyed)
-        if segment.spoken:
-            ack_utterances.append(segment.spoken)
+        if not withheld:
+            for keyed in segment.keys:
+                if keyed not in seen_keys:
+                    seen_keys.add(keyed)
+                    ack_keys.append(keyed)
+                (refused_keys if refused else acked_keys).add(keyed)
+            if segment.spoken:
+                ack_utterances.append(segment.spoken)
         if body:
             display_sources.append(body)
         if display_body:

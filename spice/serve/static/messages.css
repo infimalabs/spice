@@ -355,6 +355,12 @@
 .message-body--refused {
   --quote-accent: var(--warn);
 }
+/* A withheld refusal answered nothing, so it takes neither accent: the body is
+   muted, marking it as the record of a capture rather than a reply. */
+.message-body--withheld {
+  --quote-accent: var(--muted);
+  color: var(--muted);
+}
 .ack-quote--pending {
   min-height: var(--ack-quote-reserve, 3.5rem);
   display: grid;

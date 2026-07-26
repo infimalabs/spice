@@ -120,6 +120,74 @@ assert(
   "completed lifecycle must link to the matching final response",
 );
 
+// A withheld segment is a refusal the archival authority left pending: it acked
+// nothing and refused nothing, so its message names no key at any level. The
+// submission it spoke about must stay exactly where it already stood, while an
+// honored refusal carrying the same key does advance it. Reconciling the two
+// against the same starting stage is what proves the third state is read here
+// rather than quietly collapsing into an acknowledgment.
+const withheld = lane("withheld");
+context.applyLaneSubmissionLifecycle(
+  withheld,
+  lifecycle("key-c", "accepted", {
+    accepted: stage(acceptedAt, "inbox-write", "key-c"),
+  }),
+);
+const withheldMessages = [
+  {
+    key: "message-withheld-c",
+    index: 1,
+    kind: "assistant",
+    timestamp: receivedAt,
+    ack_keys: [],
+    nack_keys: [],
+    ack_segments: [{ keys: [], html: "<p>Follow up</p>", disposition: "withheld" }],
+  },
+];
+withheld.knownMessageKeys = new Set(
+  withheldMessages.map((message) => message.key),
+);
+context.reconcileLaneSubmissionMessages(withheld, withheldMessages);
+const pending = latestSubmission(withheld);
+assert(
+  pending.stage === "accepted",
+  "a withheld receipt must leave its submission at the stage it already held",
+);
+
+const answeredLane = lane("answered");
+context.applyLaneSubmissionLifecycle(
+  answeredLane,
+  lifecycle("key-c", "accepted", {
+    accepted: stage(acceptedAt, "inbox-write", "key-c"),
+  }),
+);
+const refusedMessages = [
+  {
+    key: "message-refused-c",
+    index: 1,
+    kind: "assistant",
+    timestamp: receivedAt,
+    ack_keys: ["key-c"],
+    nack_keys: ["key-c"],
+    ack_segments: [
+      { keys: ["key-c"], html: "<p>Declined</p>", disposition: "refused" },
+    ],
+  },
+];
+answeredLane.knownMessageKeys = new Set(
+  refusedMessages.map((message) => message.key),
+);
+context.reconcileLaneSubmissionMessages(answeredLane, refusedMessages);
+const answered = latestSubmission(answeredLane);
+assert(
+  answered.stage === "received" && answered.disposition === "refused",
+  "an honored refusal must advance its submission and record the refusal",
+);
+assert(
+  pending.stage !== answered.stage,
+  "withheld and honored refusals must land their submissions apart",
+);
+
 const bounded = lane("bounded");
 for (let index = 0; index < lifecycleFixtureInsertCount; index += 1) {
   const key = "key-" + index;

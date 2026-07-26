@@ -109,6 +109,35 @@ const earlyTrace = mergeWithTrace(earlyLane, {
   messages: [buildMessage("early-message", earlyKey)],
 });
 
+// A withheld refusal answered nothing and so claims no key at all. Whatever
+// context the payload carried for that key is then referenced by no retained
+// message and prunes away: the browser holds nothing it could draw under a reply
+// that was never given. The same refusal honored does claim its key, and its
+// context survives the same merge -- one payload shape, two outcomes.
+const withheldLane = buildLane();
+const withheldKey = "withheld-key";
+const withheldMessage = buildMessage("withheld-message", withheldKey);
+withheldMessage.ack_count = 0;
+withheldMessage.ack_keys = [];
+withheldMessage.ack_segments = [
+  { keys: [], html: "<p>Follow up</p>", disposition: "withheld" },
+];
+ctx.mergePayloadMessages(withheldLane, {
+  messages: [withheldMessage],
+  ackContexts: [buildContext(withheldKey, "withheld context")],
+});
+
+const honoredLane = buildLane();
+const honoredKey = "honored-key";
+const honoredMessage = buildMessage("honored-message", honoredKey);
+honoredMessage.ack_segments = [
+  { keys: [honoredKey], html: "<p>Declined</p>", disposition: "refused" },
+];
+ctx.mergePayloadMessages(honoredLane, {
+  messages: [honoredMessage],
+  ackContexts: [buildContext(honoredKey, "honored context")],
+});
+
 process.stdout.write(
   JSON.stringify({
     early: {
@@ -125,6 +154,12 @@ process.stdout.write(
       final: contextState(reconnectLane, reconnectKey),
       text: reconnectLane.ackContextByKey.get(reconnectKey).text,
       trace: reconnectTrace,
+    },
+    withheld: {
+      final: contextState(withheldLane, withheldKey),
+      honoredFinal: contextState(honoredLane, honoredKey),
+      honoredRetained: ctx.ackKeysForMessages(honoredLane.knownMessages),
+      retained: ctx.ackKeysForMessages(withheldLane.knownMessages),
     },
   }),
 );

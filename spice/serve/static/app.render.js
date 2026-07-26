@@ -927,17 +927,37 @@ function renderMessageContent(lane, item) {
   for (const segment of segments) {
     // ACK and NACK render through one path; a refusal only flips the polarity
     // class so its quotes and body take the warn accent instead of the ack one.
-    const refused = segment.disposition === "refused";
-    const quotes = renderSegmentQuotes(lane, segment.keys || [], refused);
+    // A withheld refusal took neither disposition: it answered no key and names
+    // none, so it renders muted and quoteless -- a record of what the message
+    // captured, never styled as the acknowledgment it was not.
+    const modifier = messageSegmentModifier(segment.disposition);
+    const quotes = renderSegmentQuotes(
+      lane,
+      segment.keys || [],
+      modifier === "refused",
+    );
     if (quotes) frag.append(quotes);
-    if (segment.html) frag.append(makeMessageBody(segment.html, "", refused));
+    if (segment.html) frag.append(makeMessageBody(segment.html, "", modifier));
   }
   return frag;
 }
 
-function makeMessageBody(html, fallbackText, refused) {
+// The body modifier a segment's disposition earns. An acked segment takes the
+// bare class, so only the dispositions that restyle it appear here.
+const messageSegmentModifiers = Object.freeze({
+  refused: "refused",
+  withheld: "withheld",
+});
+
+function messageSegmentModifier(disposition) {
+  return messageSegmentModifiers[String(disposition || "")] || "";
+}
+
+function makeMessageBody(html, fallbackText, modifier) {
   const body = document.createElement("div");
-  body.className = refused ? "message-body message-body--refused" : "message-body";
+  body.className = modifier
+    ? "message-body message-body--" + modifier
+    : "message-body";
   body.innerHTML = html || "";
   if (!body.childNodes.length && fallbackText)
     body.append(document.createTextNode(fallbackText));

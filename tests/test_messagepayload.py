@@ -13,7 +13,10 @@ from spice.mail.ackarchive import summarize_nack_archival
 from spice.mail.ackgrammar import extract_task_batch_lines_from_text
 from spice.serve import messages as message_reader
 from spice.serve import lifecycle, taskboard
-from spice.serve.messagepresentation import AssistantMessage
+from spice.serve.messagepresentation import (
+    SEGMENT_DISPOSITION_WITHHELD,
+    AssistantMessage,
+)
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore
@@ -558,6 +561,12 @@ def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path)
 
 
 def test_assistant_message_payload_does_not_honor_a_reasonless_nack(tmp_path):
+    """A refusal that said nothing renders nothing, not an empty segment.
+
+    A withheld refusal keeps whatever body it carried, so this is the case that
+    holds the other edge: with no body there is nothing to keep, and the segment
+    stays absent rather than reaching the browser as a blank one to draw.
+    """
     latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"
     text = "NACK 1k4YggTX:"
@@ -602,10 +611,13 @@ def test_a_nack_whose_only_body_is_a_directive_is_not_honored(tmp_path):
     the predicate was not enough to make the two agree: the same refusal read
     as reasonless to the supervisor and refused on the wire, closing the
     operator's submission while the supervisor was still asking for a reason.
-    Withholding the refusal does withhold this message's card, because an
-    unhonored segment is dropped whole. The task itself is not lost: capture
-    reads the raw message, so the directive still reaches the board, and the
-    card is a display gap rather than a dropped ask.
+
+    Withholding the refusal must not withhold the record of what it captured.
+    The keys stay pending and the polarity stays unclaimed, so the segment names
+    no keys and takes neither ACK-state disposition; the body it carried still
+    renders, because the task in it did reach the board. All four hold at once,
+    which is the whole contract: an operator sees the capture without the wire
+    ever saying this message answered anything.
     """
     latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"
@@ -629,8 +641,13 @@ def test_a_nack_whose_only_body_is_a_directive_is_not_honored(tmp_path):
     assert payload["ack_keys"] == []
     assert payload["nack_keys"] == []
     assert payload["nack_count"] == 0
-    assert [segment["disposition"] for segment in payload["ack_segments"]] == []
-    assert payload["task_card_count"] == 0
+    assert payload["ack_count"] == 0
+    assert [segment["disposition"] for segment in payload["ack_segments"]] == [
+        SEGMENT_DISPOSITION_WITHHELD
+    ]
+    assert [segment["keys"] for segment in payload["ack_segments"]] == [[]]
+    assert payload["task_card_count"] == 1
+    assert "Follow up" in payload["ack_segments"][0]["html"]
     assert extract_task_batch_lines_from_text(text) == [_TASK_DIRECTIVE]
 
 
