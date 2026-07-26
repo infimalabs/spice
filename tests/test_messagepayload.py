@@ -11,7 +11,8 @@ import pytest
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import taskboard
+from spice.serve import lifecycle, taskboard
+from spice.serve.lifecycle import AutomaticLifecycleDecision
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.team.store import ServeTeamStore
@@ -129,12 +130,12 @@ def _stub_messages_payload(
     )
     monkeypatch.setattr(
         message,
-        "_ensure_work_tree_agent",
-        lambda _state, _target, resolved_thread: (
-            resolved_thread,
-            "",
-            False,
-            None,
+        "ensure_work_tree_agent",
+        lambda _state, _target, resolved_thread: AutomaticLifecycleDecision(
+            thread_id=resolved_thread,
+            predecessor_actor="",
+            renewal_intent=False,
+            agent_ensure=None,
         ),
     )
     monkeypatch.setattr(
@@ -176,7 +177,6 @@ class _State:
     ) -> None:
         self._sends = sends
         self.team_store = team_store or ServeTeamStore()
-        self.pending_agent_ensure_attempts: dict[str, float] = {}
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
@@ -618,12 +618,12 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_available_work",
         lambda *_args, **_kwargs: None,
     )

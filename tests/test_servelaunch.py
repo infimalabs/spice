@@ -7,8 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from spice.mail.inbox import pending_operator_inbox_items, write_inbox_item
-from spice.serve import launch, livebuswatch
-from spice.serve.worktree import inventory
+from spice.serve import launch, lifecycle, livebuswatch
 from spice.serve.worktree.target import WorktreeTarget
 
 # Spelled out here rather than read from the scheduler: reading the production
@@ -33,7 +32,6 @@ def _state(targets: list[WorktreeTarget]) -> SimpleNamespace:
         observer_mode=False,
         worktree_targets=lambda: list(targets),
         team_store=SimpleNamespace(global_fast_mode_enabled=lambda: False),
-        pending_agent_ensure_attempts={},
     )
 
 
@@ -56,17 +54,17 @@ def _patch_lanes(
         lambda _state, target: f"thread-{target.id}",
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "team_actor_for_target",
         lambda _store, _target, _thread: "",
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "ensure_agent_for_pending_inbox",
         lambda _target, **_kwargs: None,
     )
     monkeypatch.setattr(
-        inventory,
+        lifecycle,
         "team_facts_for_target",
         lambda _store, target, _thread: {"lifetime": lifetimes[target.id]},
     )
@@ -75,7 +73,7 @@ def _patch_lanes(
         ensured.append((target.id, kwargs["thread_id"]))
         return declined
 
-    monkeypatch.setattr(inventory, "ensure_agent_for_available_work", ensure)
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_available_work", ensure)
 
 
 def _capacity_decline(retry_after_seconds: float) -> dict:
@@ -230,7 +228,7 @@ def test_watch_looks_again_when_pending_inbox_is_published(tmp_path, monkeypatch
             return {}
         return None
 
-    monkeypatch.setattr(inventory, "ensure_agent_for_pending_inbox", ensure_pending)
+    monkeypatch.setattr(lifecycle, "ensure_agent_for_pending_inbox", ensure_pending)
     watch.start()
     try:
         assert watch.armed.wait(timeout=15.0) is True

@@ -6,20 +6,18 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config.values import effective_agent_config
-from spice.serve.agentapi import (
-    ensure_agent_for_available_work,
-    ensure_agent_for_pending_inbox,
+from spice.serve.lifecycle import (
+    AutomaticLifecycleDecision,
+    evaluate_automatic_lifecycle,
 )
 from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
-    record_started_renewal_from_ensure,
     renewal_intent_for_actor,
     renewal_intent_for_target,
     resolve_thread_id_for_target,
     serve_agent_identity_payload,
     target_identity_payload,
-    team_actor_for_target,
     team_facts_for_target,
     team_identity_payload,
 )
@@ -67,9 +65,11 @@ def _work_tree_payload(
     task_board: OpenTaskBoardProjection,
 ) -> dict[str, Any]:
     thread_id = resolve_thread_id_for_target(state, target) or ""
-    thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
-        state, target, thread_id
-    )
+    decision = ensure_work_tree_agent(state, target, thread_id)
+    thread_id = decision.thread_id
+    predecessor_actor = decision.predecessor_actor
+    renew_intent = decision.renewal_intent
+    agent_ensure = decision.agent_ensure
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
     status = agent_status(target.repo_root)
@@ -138,47 +138,13 @@ def _work_tree_payload(
 
 def ensure_work_tree_agent(
     state: Any, target: WorktreeTarget, thread_id: str
-) -> tuple[str, str, bool, dict[str, Any] | None]:
+) -> AutomaticLifecycleDecision:
     """Public server-owned entry point for the inventory launch decision."""
-    return _ensure_work_tree_agent(state, target, thread_id)
-
-
-def _ensure_work_tree_agent(
-    state: Any, target: WorktreeTarget, thread_id: str
-) -> tuple[str, str, bool, dict[str, Any] | None]:
-    """Run the shared pending-inbox and available-work launch decision."""
-    predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
-    renew_intent = bool(
-        thread_id
-        and predecessor_actor
-        and state.team_store.agent_renewal_active(predecessor_actor)
+    return evaluate_automatic_lifecycle(
+        state,
+        target,
+        thread_id=thread_id,
     )
-    if renew_intent:
-        serve_agent_identity_payload(
-            target,
-            thread_id,
-            actor_id=predecessor_actor,
-            store=state.team_store,
-        )
-    ensure_kwargs: dict[str, Any] = {
-        "attempt_cache": state.pending_agent_ensure_attempts,
-        "fast_mode": bool(state.team_store.global_fast_mode_enabled()),
-        "force_new": renew_intent,
-    }
-    agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
-    team_facts = team_facts_for_target(state.team_store, target, thread_id)
-    if agent_ensure is None and team_facts.get("lifetime") == "Drain":
-        agent_ensure = ensure_agent_for_available_work(
-            target,
-            thread_id=thread_id,
-            **ensure_kwargs,
-        )
-    ensured_thread_id = record_started_renewal_from_ensure(
-        state.team_store,
-        predecessor_agent_id=predecessor_actor,
-        agent_ensure=agent_ensure,
-    )
-    return ensured_thread_id or thread_id, predecessor_actor, renew_intent, agent_ensure
 
 
 def _work_tree_status_payloads(

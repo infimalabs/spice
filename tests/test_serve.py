@@ -31,6 +31,7 @@ from spice.mail.inbox import (
 from spice.mail.replies import append_reply_record, reply_log_path
 from spice.paths import shared_attachment_root
 from spice.serve import app, livebus
+from spice.serve.lifecycle import AutomaticLifecycleDecision
 from spice.serve.messages import AssistantMessage, AssistantMessageRead
 from spice.serve.payload import identity, message
 from spice.serve.workroutes import work_tree_send_response_payload
@@ -324,8 +325,13 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     )
     monkeypatch.setattr(
         message,
-        "_ensure_work_tree_agent",
-        lambda _state, _target, thread_id: (thread_id, "", False, None),
+        "ensure_work_tree_agent",
+        lambda _state, _target, thread_id: AutomaticLifecycleDecision(
+            thread_id=thread_id,
+            predecessor_actor="",
+            renewal_intent=False,
+            agent_ensure=None,
+        ),
     )
     monkeypatch.setattr(
         message.message_reader,

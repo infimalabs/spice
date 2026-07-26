@@ -37,6 +37,7 @@ from spice.serve.launch import start_available_work_watch
 from spice.serve.lifecycle import (
     AutomaticLifecycleWake,
     ExplicitLifecycleIntent,
+    LifecycleDecisionAuthority,
     LifecycleOutcome,
     LifecycleReconciler,
     cancel_lifecycle_reconciler,
@@ -181,7 +182,7 @@ class ServeState:
         self.last_known_targets: list[WorktreeTarget] = []
         self.targets_discovery_error = ""
         self.rollout_cursors: dict[tuple[str, str], RolloutCursor] = {}
-        self.pending_agent_ensure_attempts: dict[str, float] = {}
+        self.lifecycle_decision_authority: LifecycleDecisionAuthority | None = None
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self.lifecycle_reconciler: LifecycleReconciler | None = None
         self._team_store = (
