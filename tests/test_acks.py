@@ -342,6 +342,48 @@ def test_task_directives_ignore_markdown_examples():
     ]
 
 
+def test_task_directives_read_through_markdown_decoration():
+    text = (
+        "**TASK** title=Bold token | project=task.unit | acceptance=Captured\n"
+        "**TASK title=Bold wrapped | project=task.unit | acceptance=Captured**\n"
+        "*TASK title=Italic | project=task.unit | acceptance=Captured*\n"
+        "- TASK title=Bulleted | project=task.unit | acceptance=Captured\n"
+        "- **TASK** title=Bulleted bold | project=task.unit | acceptance=Captured"
+    )
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Bold token | project=task.unit | acceptance=Captured",
+        "TASK title=Bold wrapped | project=task.unit | acceptance=Captured",
+        "TASK title=Italic | project=task.unit | acceptance=Captured",
+        "TASK title=Bulleted | project=task.unit | acceptance=Captured",
+        "TASK title=Bulleted bold | project=task.unit | acceptance=Captured",
+    ]
+
+
+def test_decorated_ack_and_task_headers_agree_in_one_message():
+    text = (
+        f"**ACK {KEY_A}:** capturing it now.\n"
+        "**TASK** title=Captured | project=task.unit | acceptance=Tracked"
+    )
+
+    assert list(extract_ack_keys_from_text(text)) == [KEY_A]
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Captured | project=task.unit | acceptance=Tracked"
+    ]
+
+
+def test_decoration_stripping_leaves_prose_and_payloads_intact():
+    text = (
+        "**TASKS** are tracked on the board.\n"
+        "- TASKmaster names no directive.\n"
+        "TASK title=Trailing underscore_ | project=task.unit | acceptance=Kept"
+    )
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Trailing underscore_ | project=task.unit | acceptance=Kept"
+    ]
+
+
 def test_standalone_task_directive_is_stripped_from_display_text():
     text = "TASK title=Standalone | project=task.unit | acceptance=Tracked\nDone."
 
