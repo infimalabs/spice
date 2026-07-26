@@ -4,9 +4,14 @@ import argparse
 import json
 
 from spice.cli.parser import build_parser
+from spice.agent.driver import CODEX_DRIVER
 from spice.sessions import records
+from spice.sessions import slices as session_slices
 from spice.sessions.cli import handle_session
-from spice.sessions.slices import build_compaction_slices
+from spice.sessions.slices import (
+    build_compaction_slices,
+    select_compaction_windows_from_files,
+)
 from tests.test_sessionfixtures import (
     SUPERVISED_FIXTURES,
     transcript_driver_for_fixture,
@@ -110,6 +115,36 @@ def test_supervised_session_fixtures_build_three_compaction_windows(monkeypatch)
             "user_after",
             "user_after",
         ]
+
+
+def test_compaction_window_selection_pages_typed_reverse_chunks(
+    tmp_path, monkeypatch
+) -> None:
+    transcript = tmp_path / "session.jsonl"
+    _write_jsonl(
+        transcript,
+        [
+            _message("2026-01-01T00:00:00Z", "assistant", "a" * 90),
+            _event("2026-01-01T00:00:01Z", "compacted", {}),
+            _message("2026-01-01T00:00:02Z", "assistant", "b" * 90),
+            _event("2026-01-01T00:00:03Z", "compacted", {}),
+            _message("2026-01-01T00:00:04Z", "assistant", "c" * 90),
+            _event("2026-01-01T00:00:05Z", "compacted", {}),
+        ],
+    )
+    monkeypatch.setattr(
+        session_slices.session_records,
+        "driver_for_transcript",
+        lambda _path: CODEX_DRIVER,
+    )
+    monkeypatch.setattr(session_slices, "REVERSE_WINDOW_BYTES", 64)
+
+    selection = select_compaction_windows_from_files([transcript], count=2)
+
+    assert selection.selected_boundaries == (
+        "2026-01-01T00:00:03.000Z",
+        "2026-01-01T00:00:05.000Z",
+    )
 
 
 def _slice_fixture(tmp_path):
