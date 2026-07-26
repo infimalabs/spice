@@ -8,13 +8,15 @@ import json
 from pathlib import Path
 from typing import cast
 
+from spice.agent import launchhistory
+from spice.agent.driver import CLAUDE_DRIVER
 from spice.sessions import analysis, commandrecords, records
 from spice.sessions.slices import (
     build_compaction_slices,
     select_compaction_windows_from_files,
 )
 from spice.transcript.assembly import AssembledMessageReducer
-from spice.transcript.events import TranscriptEvent
+from spice.transcript.events import FailureSignal, Provenance, TranscriptEvent
 from spice.transcript.reader import TranscriptEventReader
 from tests.test_sessionfixtures import (
     SUPERVISED_FIXTURES,
@@ -32,6 +34,7 @@ from tests.test_transcriptparity import (
 SUPERVISED_PROJECTION_SHA256 = (
     "93f94ce87a49d93aef95446541bd73a55a602a5788772982e877ef98c6c59732"
 )
+FAILURE_RESET_EPOCH = 1_784_280_000
 
 
 def test_typed_crossing_preserves_supervised_fixture_projection_bytes(
@@ -110,6 +113,45 @@ def test_crossed_consumers_read_and_reduce_the_public_typed_stream(
     assert turns[0].assistant_commentary
     assert len(compactions) == 3
     assert len(selection.selected_boundaries) == 2
+
+
+def test_structural_failure_stays_a_launch_fact_without_creating_a_session_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    failure_path = tmp_path / "failure.jsonl"
+    event = FailureSignal(
+        at=Provenance(
+            source=str(failure_path),
+            line=1,
+            ordinal=0,
+            timestamp="2026-07-26T06:00:00.000Z",
+            offset=0,
+        ),
+        kind="out-of-credits",
+        reset_epoch=FAILURE_RESET_EPOCH,
+    )
+    failure_path.write_text(
+        json.dumps(
+            {
+                "type": "rate_limit_event",
+                "rate_limit_info": {
+                    "status": "rejected",
+                    "resetsAt": FAILURE_RESET_EPOCH,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launchhistory, "driver_for", lambda _root: CLAUDE_DRIVER)
+
+    assert records.collect_turns_from_events(failure_path, (event,)) == []
+    assert launchhistory.scan_launch_log(tmp_path, failure_path) == {
+        "assistant_messages": 0,
+        "tool_calls": 0,
+        "kind": "out-of-credits",
+        "reset_epoch": FAILURE_RESET_EPOCH,
+    }
 
 
 def _whole_pass_turn_records(case: CorpusCase) -> tuple[ParityOutput, ...]:

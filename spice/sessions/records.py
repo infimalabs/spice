@@ -35,6 +35,7 @@ from spice.transcript.events import (
     AssistantText,
     Compaction,
     ContextUsage,
+    FailureSignal,
     ToolCall,
     TranscriptEvent,
     TurnBoundary,
@@ -314,6 +315,13 @@ def _apply_assembled_turn_message(
             if isinstance(event, Compaction) and event.boundary and current is not None:
                 current.compaction_count += 1
                 current.last_activity_ts = ts
+            continue
+        if SpanKind.FAILURE in kinds:
+            if not isinstance(event, FailureSignal):
+                raise TypeError(
+                    "failure span backed by "
+                    f"{type(event).__name__}, expected FailureSignal"
+                )
             continue
         if current is None:
             current = TurnRecord(source_file=str(path), start_ts=ts)
