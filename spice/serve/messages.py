@@ -27,10 +27,7 @@ from spice.agent.identity import canonical_thread_id
 from spice.mail.feedback import SupervisorFeedback, parse_supervisor_feedback_line
 from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
 from spice.mail.ackgrammar import split_keyed_response
-from spice.mail.watch import (
-    extract_assistant_text,
-    strip_app_directive_lines,
-)
+from spice.mail.watch import extract_assistant_text
 from spice.serve.images import (
     assistant_image_markdown,
     tool_output_image_markdown,
@@ -40,11 +37,11 @@ from spice.serve.markdown import render_message_html
 from spice.serve.taskdirectives import (
     _display_text_with_task_directives,
     _render_message_html_with_task_directives,
-    _strip_task_directive_lines,
     _task_directive_count,
     _task_directive_html,
     _task_directive_summary,
 )
+from spice.transcript.assembly import DirectiveKind, strip_directive_lines
 from spice.transcript.reader import (
     REVERSE_WINDOW_BYTES,
     TranscriptCursor,
@@ -1098,9 +1095,10 @@ def _assistant_message(
     worktree_id: str | None = None,
 ) -> AssistantMessage:
     preamble, segments = split_keyed_response(text, drop_task_directives=False)
-    preamble = strip_app_directive_lines(preamble)
+    preamble = strip_directive_lines(preamble, kinds={DirectiveKind.APP})
     segment_bodies = [
-        strip_app_directive_lines(segment.content) for segment in segments
+        strip_directive_lines(segment.content, kinds={DirectiveKind.APP})
+        for segment in segments
     ]
     preamble, segment_bodies = _normalize_terminal_colon_for_display(
         text, preamble, segment_bodies
@@ -1142,7 +1140,7 @@ def _assistant_message(
                 seen_keys.add(keyed)
                 ack_keys.append(keyed)
             (refused_keys if refused else acked_keys).add(keyed)
-        spoken = _strip_task_directive_lines(strip_app_directive_lines(segment.content))
+        spoken = strip_directive_lines(segment.content)
         if spoken:
             ack_utterances.append(spoken)
         if body:
