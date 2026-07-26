@@ -386,3 +386,79 @@ def test_lane_chrome_is_the_assembler_emitted_contract():
     assert " * @property {string} targetId" in rendered
     assert " * @property {LaneChromeIdentityFacet=} identity" in rendered
     assert " * @property {LaneChromeActivityFacet=} activity" in rendered
+
+
+def _arms_reported(message: str, arms: tuple[str, ...]) -> list[str]:
+    """The arms a union rejection actually measured the value against."""
+    return [arm for arm in arms if f"as {arm}," in message]
+
+
+TEAM_COMMAND_ARMS = ("TeamCommandApplied", "TeamCommandRefused")
+LANE_CHROME_ARMS = tuple(wire.LANE_CHROME_FACET_SCHEMAS.values())
+ROUTED_RESULT_ARMS = ("TaskDrainResult", "WorkTreeSendResult")
+
+
+def test_union_rejection_names_the_one_arm_a_discriminant_narrows_to():
+    snapshot = valid_wire_payload("TeamSnapshot")
+    del snapshot["globalSettings"]
+    applied = {"ok": True, "revision": 3, "differential": False, "snapshot": snapshot}
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("TeamCommandResponse", applied)
+
+    message = str(rejection.value)
+    assert _arms_reported(message, TEAM_COMMAND_ARMS) == ["TeamCommandApplied"]
+    assert (
+        "TeamCommandResponse.snapshot is missing required fields: globalSettings"
+        in message
+    )
+
+
+def test_union_rejection_keeps_every_arm_that_shares_the_literal_value():
+    facet = valid_wire_payload("LaneChromeTeamConfigFacet")
+    del facet["value"]
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("LaneChromeFacet", facet)
+
+    message = str(rejection.value)
+    assert _arms_reported(message, LANE_CHROME_ARMS) == [
+        "LaneChromeTeamConfigFacet",
+        "LaneChromeRenewalFacet",
+    ]
+    assert "LaneChromeFacet is missing required fields: value" in message
+
+
+def test_union_rejection_reports_every_arm_when_none_pins_a_literal():
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("RoutedResult", {"bogus": 1})
+
+    message = str(rejection.value)
+    assert _arms_reported(message, ROUTED_RESULT_ARMS) == list(ROUTED_RESULT_ARMS)
+    assert "RoutedResult has undeclared fields: bogus" in message
+
+
+def test_union_rejection_reports_every_arm_when_the_literal_matches_none():
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("LaneChromeFacet", {"authority": "nowhere"})
+
+    message = str(rejection.value)
+    assert _arms_reported(message, LANE_CHROME_ARMS) == list(LANE_CHROME_ARMS)
+
+
+def test_union_rejection_draws_the_literal_an_otherwise_complete_value_missed():
+    applied = valid_wire_payload("TeamCommandApplied")
+
+    with pytest.raises(SpiceError) as rejection:
+        wire.validate_wire_payload("TeamCommandResponse", {**applied, "ok": "maybe"})
+
+    message = str(rejection.value)
+    assert "as TeamCommandApplied, TeamCommandResponse.ok must equal True" in message
+
+
+def test_union_acceptance_is_unchanged_by_the_rejection_detail():
+    applied = valid_wire_payload("TeamCommandApplied")
+    refused = valid_wire_payload("TeamCommandRefused")
+
+    assert wire.validate_wire_payload("TeamCommandResponse", applied) == applied
+    assert wire.validate_wire_payload("TeamCommandResponse", refused) == refused
