@@ -25,6 +25,11 @@ from spice.serve.payload.wire import (
 # keep, so a facet this side considers newer is never refused as a redelivery.
 _EPOCH_RUNS = re.compile(r"\d+|\D+")
 
+# What separates the generations of a facet dated by more than one authority.
+# Any non-digit does, because the comparator reads it as its own run and two
+# epochs joined the same way always tie there and fall through to the counts.
+LANE_CHROME_GENERATION_JOIN = "-"
+
 
 def lane_chrome_generation(value: object) -> str:
     """Admit only a generation an authority could have counted forward from.
@@ -46,6 +51,31 @@ def lane_chrome_generation(value: object) -> str:
     if not (text.isascii() and text.isdigit()):
         raise SpiceError(f"lane chrome generation must be a decimal count: {text!r}")
     return text
+
+
+def lane_chrome_generations(*values: object) -> str:
+    """Date a facet by every authority that orders it, in one epoch.
+
+    A facet can count its revision in one store while another store dates the
+    content it carries, and then neither generation carries it alone: the store
+    it counts in can be remade while the other stands, and its revision
+    restarts under an epoch that never moved. Joining them says what actually
+    dates the facet.
+
+    The comparator reads digit runs as numbers and the text between them as
+    text, so a joined epoch orders as the tuple it looks like -- the first
+    generation decides, the rest break its ties. Every generation only ever
+    rises, so the tuple only rises too.
+
+    Position is what makes that true, so an authority with nothing to report
+    still holds its place rather than dropping out and letting the generation
+    behind it be read as the one in front. Only when no authority has anything
+    to report is there no generation at all.
+    """
+    generations = [lane_chrome_generation(value) for value in values]
+    if not any(generations):
+        return ""
+    return LANE_CHROME_GENERATION_JOIN.join(generations)
 
 
 @dataclass(frozen=True)
