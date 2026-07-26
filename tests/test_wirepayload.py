@@ -134,10 +134,11 @@ BROWSER_PAYLOAD_MODULES = (
     ("worktree.inventory", inventory),
 )
 # Every module-level payload builder in those modules that does not validate
-# itself, beside what does validate it instead. Most nest into an emitter that
-# validates the whole envelope, which is why they need no schema of their own.
-# The three metrics responses are the exception and say so: they answer an HTTP
-# client directly with no wire object declared for them at all.
+# itself, beside what does validate it instead. Each one either nests into an
+# emitter that validates the whole envelope, rides a live-bus frame that
+# validate_live_bus_frame checks, or is assembled from arms its own builders
+# already validated. Nothing here reaches a client unchecked; an entry that
+# cannot name what covers it belongs in the registry instead.
 UNVALIDATED_PAYLOAD_BUILDERS = {
     "agentapi.agent_ensure_response_payload": (
         "returns only the two arms its builders already validated"
@@ -153,15 +154,6 @@ UNVALIDATED_PAYLOAD_BUILDERS = {
     ),
     "agentapi.sent_steering_response_payload": (
         "nests into workroutes.work_tree_send_response_payload"
-    ),
-    "httpapi.task_burndown_metrics_response_payload": (
-        "UNVALIDATED: answers a browser with no wire object declared"
-    ),
-    "httpapi.task_distribution_metrics_response_payload": (
-        "UNVALIDATED: answers a browser with no wire object declared"
-    ),
-    "httpapi.team_historical_metrics_response_payload": (
-        "UNVALIDATED: answers a browser with no wire object declared"
     ),
     "observer._observer_lane_payload": (
         "nests into observer.observer_messages_payload and observer.targets_payload"
