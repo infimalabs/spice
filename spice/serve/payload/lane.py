@@ -132,7 +132,6 @@ def lane_chrome_payload(
     task_filter_inventory: Mapping[str, Any] | None = None,
     pending_identity: Mapping[str, Any] | None = None,
     last_assistant_at: str | None = None,
-    private_task_count: int = 0,
 ) -> dict[str, Any]:
     """Project the chrome facets one pass actually observed.
 
@@ -182,7 +181,10 @@ def lane_chrome_payload(
                     "taskFilterEntries": team_facts.get("taskFilterEntries", []),
                     "effectiveTaskFilters": team_facts.get("effectiveTaskFilters", []),
                     "taskFilterInventory": task_filter_inventory,
-                    "privateTaskCount": private_task_count,
+                    # The filters above are observed; no server pass counts a
+                    # lane's private tasks yet. The board's shape requires a
+                    # number, so it publishes the only one nothing contradicts.
+                    "privateTaskCount": 0,
                 },
             )
         )
