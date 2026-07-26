@@ -553,7 +553,7 @@ def _is_app_directive_line(line: str) -> bool:
 
 def _task_batch_lines(text: str) -> list[str]:
     lines: list[str] = []
-    for line, suppressed in _iter_control_lines(text):
+    for line, suppressed in iter_control_lines(text):
         if suppressed:
             continue
         payload = _task_batch_line_from_directive(line)
@@ -610,7 +610,15 @@ def _position_in_ranges(position: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in ranges)
 
 
-def _iter_control_lines(text: str) -> Iterator[tuple[str, bool]]:
+def iter_control_lines(text: str) -> Iterator[tuple[str, bool]]:
+    """Yield each line with whether a control line on it would be suppressed.
+
+    Suppression is what keeps a control line that is being *shown* — fenced,
+    quoted, indented, or carried in rendered source context — from being read
+    as a control line. Every reader that decides whether a line acts must
+    share this walk, so a display and the supervisor cannot disagree about
+    which lines are real.
+    """
     for line, suppressed, _start, _end in _iter_control_line_ranges(text):
         yield line, suppressed
 
