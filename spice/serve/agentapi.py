@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import subprocess
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence, TypeAlias
 
 from spice.agent.driver import driver_for
 from spice.agent.identity import canonical_thread_id
@@ -35,7 +34,7 @@ from spice.process.git import git_read
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
-from spice.serve.lifecycle import lifecycle_decision_authority
+from spice.serve.lifecycle import ExplicitPendingInboxEnsure
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktree.target import WorktreeTarget
@@ -62,16 +61,16 @@ AVAILABLE_WORK_SETTLE_SECONDS = 3.0
 # Capacity, candidate selection, claim, and startup are one serialized decision:
 # another inventory refresh must observe the started lane before it can expand.
 _AVAILABLE_WORK_CLAIM_LOCK = threading.RLock()
-# The synchronous UI route acquires this before publishing its inbox item and
-# re-enters it for the explicit launch decision. Background inventory/watcher
-# decisions enter it here, so they cannot consume or dead-letter that item in
-# the publication-to-explicit-ensure gap.
+# Serialize the actuator itself across callers. The lifecycle authority owns
+# the wider target-local publication-through-decision scope and enters this
+# guard only after taking that target lock.
 _PENDING_INBOX_LAUNCH_LOCK = threading.RLock()
+_RetryDue: TypeAlias = Callable[[str, float], bool]
 
 
 @contextmanager
 def pending_inbox_launch_lock() -> Iterator[None]:
-    """Serialize publication grants and pending-inbox launch decisions."""
+    """Serialize actual pending-inbox launch decisions."""
     with _PENDING_INBOX_LAUNCH_LOCK:
         yield
 
@@ -199,22 +198,14 @@ def sent_steering_payload(
 def sent_steering_response_payload(
     sent: SentSteeringMessage,
     *,
-    state: Any,
-    target: WorktreeTarget | None,
+    target: WorktreeTarget,
+    ensure_pending: ExplicitPendingInboxEnsure,
     fast_mode: bool = False,
     force_new: bool = False,
 ) -> dict[str, Any]:
-    if target is None:
-        return sent_steering_payload(sent, target=None)
-    agent_ensure = ensure_agent_for_pending_inbox(
-        target,
-        attempt_cache=lifecycle_decision_authority(state).attempt_cache,
-        retry_seconds=0.0,
+    agent_ensure = ensure_pending(
         fast_mode=fast_mode,
         force_new=force_new,
-        # A fresh operator send is an explicit action: it grants exactly one
-        # launch attempt even while automatic restarts are refused.
-        automatic=False,
     )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
@@ -230,7 +221,7 @@ def sent_steering_response_payload(
 def ensure_agent_for_pending_inbox(
     target: WorktreeTarget,
     *,
-    attempt_cache: dict[str, float] | None = None,
+    retry_due: _RetryDue | None = None,
     retry_seconds: float = PENDING_AGENT_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
     force_new: bool = False,
@@ -244,7 +235,7 @@ def ensure_agent_for_pending_inbox(
     with pending_inbox_launch_lock():
         return _ensure_agent_for_pending_inbox_locked(
             target,
-            attempt_cache=attempt_cache,
+            retry_due=retry_due,
             retry_seconds=retry_seconds,
             fast_mode=fast_mode,
             force_new=force_new,
@@ -255,7 +246,7 @@ def ensure_agent_for_pending_inbox(
 def _ensure_agent_for_pending_inbox_locked(
     target: WorktreeTarget,
     *,
-    attempt_cache: dict[str, float] | None,
+    retry_due: _RetryDue | None,
     retry_seconds: float,
     fast_mode: bool,
     force_new: bool,
@@ -268,9 +259,7 @@ def _ensure_agent_for_pending_inbox_locked(
     status = agent_status(target.repo_root)
     if status.running:
         return None
-    if not _ensure_due(
-        target.id, attempt_cache=attempt_cache, retry_seconds=retry_seconds
-    ):
+    if not _retry_is_due(target.id, retry_due=retry_due, retry_seconds=retry_seconds):
         return None
     trigger_key = inbox_item_key(operator_items[0].name)
     payload, _status = agent_ensure_response_payload(
@@ -291,7 +280,7 @@ def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
     thread_id: str,
-    attempt_cache: dict[str, float] | None = None,
+    retry_due: _RetryDue | None = None,
     retry_seconds: float = AVAILABLE_WORK_ENSURE_RETRY_SECONDS,
     fast_mode: bool = False,
     force_new: bool = False,
@@ -346,9 +335,9 @@ def ensure_agent_for_available_work(
         # unspent and dispatches on arrival. What it does bound is attempts,
         # which is what keeps a launch that dies on contact from being retried
         # as fast as its own failure hands the rows back.
-        if not _ensure_due(
+        if not _retry_is_due(
             target.id,
-            attempt_cache=attempt_cache,
+            retry_due=retry_due,
             retry_seconds=retry_seconds,
         ):
             return _available_work_skip("retry-wait")
@@ -500,17 +489,10 @@ def deadletter_failed_agent_ensure_payload(
     return payload
 
 
-def _ensure_due(
+def _retry_is_due(
     target_id: str,
     *,
-    attempt_cache: dict[str, float] | None,
+    retry_due: _RetryDue | None,
     retry_seconds: float,
 ) -> bool:
-    if attempt_cache is None:
-        return True
-    now = time.monotonic()
-    last_attempt = attempt_cache.get(target_id)
-    if last_attempt is not None and now - last_attempt < retry_seconds:
-        return False
-    attempt_cache[target_id] = now
-    return True
+    return retry_due is None or retry_due(target_id, retry_seconds)

@@ -14,12 +14,12 @@ from spice.mail.ackstate import (
     record_directive_publications,
 )
 from spice.serve.payload import identity
-from spice.serve.agentapi import (
-    pending_inbox_launch_lock,
-    sent_steering_payload,
-    sent_steering_response_payload,
-)
+from spice.serve.agentapi import sent_steering_payload, sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
+from spice.serve.lifecycle import (
+    ExplicitPendingInboxEnsure,
+    lifecycle_decision_authority,
+)
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.payload.wire import validate_emitter_payload
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
@@ -72,13 +72,17 @@ def work_tree_send_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    # Hold the same reentrant guard as every background pending-inbox decision
-    # before the item becomes visible and through the direct automatic=False
-    # ensure. Suppressing this send's event alone cannot stop a watcher already
-    # evaluating for another event from entering the publication-to-ensure gap.
-    with pending_inbox_launch_lock():
+    authority = lifecycle_decision_authority(state)
+    # The authority keeps the target lock across publication and yields the sole
+    # explicit launch grant, so a watcher cannot enter the
+    # publication-to-ensure gap.
+    with authority.explicit_pending_inbox(target) as ensure_pending:
         response, status = _work_tree_send_response_payload(
-            state, target, payload, ensure_agent_before_reply=True
+            state,
+            target,
+            payload,
+            ensure_agent_before_reply=True,
+            ensure_pending=ensure_pending,
         )
     return (
         validate_emitter_payload(
@@ -93,9 +97,15 @@ def work_tree_send_accepted_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
-    response, status = _work_tree_send_response_payload(
-        state, target, payload, ensure_agent_before_reply=False
-    )
+    authority = lifecycle_decision_authority(state)
+    with authority.explicit_pending_inbox(target) as ensure_pending:
+        response, status = _work_tree_send_response_payload(
+            state,
+            target,
+            payload,
+            ensure_agent_before_reply=False,
+            ensure_pending=ensure_pending,
+        )
     return (
         validate_emitter_payload(
             "workroutes.work_tree_send_accepted_response_payload", response
@@ -110,6 +120,7 @@ def _work_tree_send_response_payload(
     payload: dict[str, Any],
     *,
     ensure_agent_before_reply: bool,
+    ensure_pending: ExplicitPendingInboxEnsure,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     request, error_response = _validate_work_tree_send_request(payload)
     if error_response is not None:
@@ -158,6 +169,7 @@ def _work_tree_send_response_payload(
         predecessor=predecessor,
         predecessor_actor=predecessor_actor,
         ensure_agent_before_reply=ensure_agent_before_reply,
+        ensure_pending=ensure_pending,
     )
     return response_payload, HTTPStatus.OK
 
@@ -208,6 +220,7 @@ def _work_tree_send_result_payload(
     predecessor: str,
     predecessor_actor: str,
     ensure_agent_before_reply: bool,
+    ensure_pending: ExplicitPendingInboxEnsure,
 ) -> dict[str, Any]:
     if not ensure_agent_before_reply and not force_new:
         response_payload = sent_steering_payload(
@@ -224,8 +237,8 @@ def _work_tree_send_result_payload(
 
     response_payload = sent_steering_response_payload(
         sent,
-        state=state,
         target=target,
+        ensure_pending=ensure_pending,
         fast_mode=bool(state.team_store.global_fast_mode_enabled()),
         force_new=force_new,
     )
