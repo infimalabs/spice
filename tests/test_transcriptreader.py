@@ -5,14 +5,19 @@ from __future__ import annotations
 import gzip
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 
 import pytest
 
+from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, AgentDriver
 from spice.transcript import reader
+from spice.transcript.decode import decode_line
+from spice.transcript.events import AssistantText, Reasoning, ToolCall, Unknown
 from spice.transcript.reader import (
     TranscriptCursor,
+    TranscriptEventReader,
     cursor_offset,
     dispatch_records,
     locked_cursor,
@@ -27,6 +32,8 @@ from spice.transcript.reader import (
 
 TIMESTAMP = "2026-07-26T01:15:00.000Z"
 UPDATED_CURSOR_OFFSET = 11
+SOURCE_ACTOR = "thread:reader-contract"
+SESSION_FIXTURES = Path(__file__).parent / "fixtures" / "session"
 
 
 def _raw(payload: dict) -> bytes:
@@ -197,6 +204,198 @@ def test_cursor_lock_is_reentrant_for_one_incremental_reader() -> None:
             inner.offset = UPDATED_CURSOR_OFFSET
     assert outer is cursor
     assert cursor.offset == UPDATED_CURSOR_OFFSET
+
+
+@pytest.mark.parametrize(
+    ("driver", "fixture_name"),
+    [
+        (CODEX_DRIVER, "supervised_codex.jsonl"),
+        (CLAUDE_DRIVER, "supervised_claude.jsonl"),
+    ],
+    ids=["codex", "claude"],
+)
+def test_public_reader_decodes_each_driver_fixture_into_located_typed_events(
+    driver: AgentDriver,
+    fixture_name: str,
+) -> None:
+    path = SESSION_FIXTURES / fixture_name
+    raw_lines = path.read_bytes().splitlines(keepends=True)
+    offsets = _offsets(raw_lines)
+    expected = [
+        replace(
+            event,
+            at=replace(
+                event.at,
+                offset=offset,
+                source_actor=SOURCE_ACTOR,
+            ),
+        )
+        for offset, raw in zip(offsets, raw_lines, strict=True)
+        for event in decode_line(
+            raw.decode(),
+            driver,
+            source=str(path),
+            line=offset,
+        )
+    ]
+
+    read = TranscriptEventReader(path, driver, SOURCE_ACTOR).read("forward")
+
+    assert list(read.events) == expected
+    assert read.end_offset == path.stat().st_size
+    assert read.error is None
+    for event in read.events:
+        assert event.at.source == str(path)
+        assert event.at.line == event.at.offset
+        assert event.at.source_actor == SOURCE_ACTOR
+        assert event.at.timestamp is not None
+
+
+def test_public_reader_keeps_every_event_on_one_multiblock_claude_line(
+    tmp_path,
+) -> None:
+    path = tmp_path / "claude.jsonl"
+    line = _raw(
+        {
+            "timestamp": TIMESTAMP,
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "checking the join"},
+                    {
+                        "type": "tool_use",
+                        "id": "call-1",
+                        "name": "Bash",
+                        "input": {"command": "pwd"},
+                    },
+                    {"type": "thinking", "thinking": "preserve all blocks"},
+                ]
+            },
+        }
+    )
+    path.write_bytes(line)
+
+    read = TranscriptEventReader(path, CLAUDE_DRIVER, SOURCE_ACTOR).read("forward")
+
+    assert [type(event) for event in read.events] == [
+        AssistantText,
+        ToolCall,
+        Reasoning,
+    ]
+    assert [event.at.ordinal for event in read.events] == [0, 1, 2]
+    assert {event.at.offset for event in read.events} == {0}
+    assert {event.at.line for event in read.events} == {0}
+    assert {event.at.source_actor for event in read.events} == {SOURCE_ACTOR}
+    assert {event.at.timestamp for event in read.events} == {TIMESTAMP}
+
+
+def test_public_reader_preserves_malformed_lines_as_located_unknowns(tmp_path) -> None:
+    path = tmp_path / "broken.jsonl"
+    path.write_bytes(b"{not json\n")
+
+    read = TranscriptEventReader(path, CODEX_DRIVER, SOURCE_ACTOR).read("forward")
+
+    assert len(read.events) == 1
+    unknown = read.events[0]
+    assert isinstance(unknown, Unknown)
+    assert unknown.at.source == str(path)
+    assert unknown.at.line == 0
+    assert unknown.at.offset == 0
+    assert unknown.at.ordinal == 0
+    assert unknown.at.source_actor == SOURCE_ACTOR
+    assert unknown.at.timestamp is None
+
+
+def test_typed_access_modes_preserve_overlaps_and_cursor_resume(tmp_path) -> None:
+    lines = [
+        _raw(
+            {
+                "timestamp": f"2026-07-26T01:15:0{index}.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"line {index}"}],
+                },
+            }
+        )
+        for index in range(4)
+    ]
+    offsets = _offsets(lines)
+    path = tmp_path / "codex.jsonl"
+    path.write_bytes(b"".join(lines))
+
+    event_reader = TranscriptEventReader(path, CODEX_DRIVER, SOURCE_ACTOR)
+    whole = event_reader.read("forward")
+    first = event_reader.read(
+        "bounded",
+        start_offset=0,
+        end_offset=offsets[2],
+    )
+    resumed = event_reader.read("forward", start_offset=first.end_offset)
+    reverse = event_reader.read(
+        "reverse",
+        end_offset=offsets[3],
+        max_bytes=offsets[3],
+    )
+
+    assert first.events + resumed.events == whole.events
+    assert reverse.events == whole.events[:3]
+    assert len({(event.at.offset, event.at.ordinal) for event in whole.events}) == len(
+        whole.events
+    )
+
+
+def test_one_typed_read_parses_and_decodes_once_before_many_projections(
+    tmp_path, monkeypatch
+) -> None:
+    lines = [
+        _raw(
+            {
+                "timestamp": TIMESTAMP,
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": str(index)}],
+                },
+            }
+        )
+        for index in range(3)
+    ]
+    path = tmp_path / "codex.jsonl"
+    path.write_bytes(b"".join(lines))
+    original_parse = reader._parse_json_object
+    parse_calls: list[str] = []
+    original_decode = CODEX_DRIVER.transcript_line_events
+    decode_calls: list[int] = []
+
+    def count_parse(raw: str):
+        parse_calls.append(raw)
+        return original_parse(raw)
+
+    def count_decode(_driver: AgentDriver, raw: dict, *, source: str, line: int):
+        decode_calls.append(line)
+        return original_decode(raw, source=source, line=line)
+
+    monkeypatch.setattr(reader, "_parse_json_object", count_parse)
+    monkeypatch.setattr(type(CODEX_DRIVER), "transcript_line_events", count_decode)
+
+    read = TranscriptEventReader(path, CODEX_DRIVER, SOURCE_ACTOR).read("forward")
+    first_projection = []
+    second_projection = []
+    read.dispatch(
+        first_projection.append,
+        second_projection.append,
+    )
+
+    assert len(parse_calls) == len(lines)
+    assert decode_calls == _offsets(lines)
+    assert first_projection == list(read.events)
+    assert second_projection == list(read.events)
+    assert [id(event) for event in first_projection] == [
+        id(event) for event in second_projection
+    ]
 
 
 @pytest.mark.parametrize("compressed", [False, True], ids=["plain", "gzip"])

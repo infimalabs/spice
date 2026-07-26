@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from spice.sessions.jsonl import iter_jsonl_lines_reverse
 from spice.sessions import records as session_records
 from spice.sessions.records import CompactionRecord, TurnRecord
+from spice.transcript.events import Compaction
+from spice.transcript.reader import REVERSE_WINDOW_BYTES, TranscriptEventReader
 from spice.transcript.timestamps import normalize_timestamp
 
 
@@ -77,23 +77,34 @@ def _latest_compaction_boundaries_for_file(
     if limit <= 0:
         return []
     driver = session_records.driver_for_transcript(path)
+    reader = TranscriptEventReader(path, driver, source_actor=None)
     boundaries: list[str] = []
-    for line in iter_jsonl_lines_reverse(path):
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        event = driver.normalize_transcript_line(obj)
-        if event is None or event.get("type") != "compacted":
-            continue
-        ts = normalize_timestamp(obj.get("timestamp"))
-        if not ts or (end and ts > end):
-            continue
-        boundaries.append(ts)
-        if len(boundaries) >= limit:
+    end_offset: int | None = None
+    while True:
+        read = reader.read(
+            "reverse",
+            end_offset=end_offset,
+            max_bytes=REVERSE_WINDOW_BYTES,
+        )
+        chunk_compactions: list[Compaction] = []
+
+        def collect_compaction(event: object) -> None:
+            if isinstance(event, Compaction) and event.boundary:
+                chunk_compactions.append(event)
+
+        read.dispatch(collect_compaction)
+        for event in reversed(chunk_compactions):
+            ts = normalize_timestamp(event.at.timestamp)
+            if not ts or (end and ts > end):
+                continue
+            boundaries.append(ts)
+            if len(boundaries) >= limit:
+                return list(reversed(boundaries))
+        if read.access_start_offset <= 0:
             break
+        if end_offset is not None and read.access_start_offset >= end_offset:
+            break
+        end_offset = read.access_start_offset
     return list(reversed(boundaries))
 
 
