@@ -31,7 +31,8 @@ from spice.mail.inbox import (
 from spice.mail.replies import append_reply_record, reply_log_path
 from spice.paths import shared_attachment_root
 from spice.serve import app, livebus
-from spice.serve.messages import AssistantMessage, AssistantMessageRead
+from spice.serve.messagepresentation import AssistantMessage
+from spice.serve.messages import AssistantMessageRead
 from spice.serve.payload import identity, message
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.workroutes import work_tree_send_response_payload

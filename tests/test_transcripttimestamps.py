@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from spice.agent import launchhistory, lifecyclebinding, wrap
-from spice.serve import messages as message_reader
 from spice.serve import submissions
+from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.payload import message
 from spice.tasks import artifacts, effort
 from spice.transcript.timestamps import normalize_timestamp, parse_timestamp
@@ -54,10 +54,8 @@ RECORD_READER_NAMES = (
 )
 
 
-def _assistant_message(
-    timestamp: str, *, index: int
-) -> message_reader.AssistantMessage:
-    return message_reader.AssistantMessage(
+def _assistant_message(timestamp: str, *, index: int) -> AssistantMessage:
+    return AssistantMessage(
         key=f"{timestamp}#{index}",
         index=index,
         timestamp=timestamp,
