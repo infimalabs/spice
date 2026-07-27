@@ -38,7 +38,9 @@ The exporter expands `git archive HEAD`, so ignored and untracked checkout
 state never enters the context. The new output directory must be outside the
 source worktree and may not already exist. The exporter records the original
 source commit, tree, and commit timestamp in `.release-proof/source.json`.
-It also resolves the latest release tag reachable from `HEAD^` and writes its
+It also resolves the release this tree upgrades from—the newest tag reachable
+from `HEAD` that sorts strictly below the version the tree declares in
+`pyproject.toml`—and writes its
 peeled commit plus the tagged Python schema source for the team, ACK,
 maxim-metrics, and projection stores to
 `.release-proof/prior-stores.json`. The exporter also builds that tagged

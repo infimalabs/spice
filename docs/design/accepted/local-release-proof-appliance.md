@@ -113,9 +113,10 @@ Before invoking the engine, the orchestrator verifies all of the following:
   worktree;
 - the repository exporter produces a context whose
   `.release-proof/source.json` names the resolved commit and tree; and
-- `.release-proof/prior-stores.json` binds the latest release tag reachable
-  from `HEAD^` to its peeled commit and the source-only schema surfaces for the
-  exact team, ACK, maxim-metrics, and projection store inventory; and
+- `.release-proof/prior-stores.json` binds the release the tree upgrades from —
+  the newest tag reachable from `HEAD` sorting strictly below the version the
+  tree declares — to its peeled commit and the source-only schema surfaces for
+  the exact team, ACK, maxim-metrics, and projection store inventory; and
 - the reserved `.release-proof` source path and other exporter invariants pass.
 
 No precondition failure builds an image. It still produces a bounded failure
