@@ -23,7 +23,15 @@ from spice.process.tool import run_tool_command
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records as session_records
 from spice.sessions import resolve as session_resolve
-from spice.tasks import alloc, config, identity, readiness, reviewfeedback, tw
+from spice.tasks import (
+    alloc,
+    config,
+    identity,
+    phasecontinuation,
+    readiness,
+    reviewfeedback,
+    tw,
+)
 from spice.tasks.git import boundaries
 from spice.tasks.claimstate import (
     CLAIM_CLEAR,
@@ -37,6 +45,7 @@ from spice.tasks.claimstate import (
     _require_single_active_slot,
     _task_continuation_contract,
     annotate,
+    annotate_once,
     current_claim_site,
     do_claim,
     phase_index,
@@ -551,22 +560,57 @@ def done(
     _require_bound_quality_gates_clean(row)
     _require_plan_phase_board_populated(row)
     _require_plan_phase_done_has_no_local_commits(row)
-    uuid = identity.uuid_of(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.
+    repo_root = config.repo_root()
+    before_head = git_read(repo_root, "rev-parse", "HEAD")
     sync = boundaries.integrate_and_publish(
         identity.render_handle(row),
         meta=_publish_meta(row, actor, validation),
     )
-    for note_text in notes or []:
-        annotate(uuid, note_text)
+    after_head = git_read(repo_root, "rev-parse", "HEAD")
+    return phasecontinuation.continue_after_integration(
+        "done",
+        {
+            "handle": identity.render_handle(row),
+            "actor": actor,
+            "validation": list(validation),
+            "judgment": judgment,
+            "notes": list(notes or []),
+            "chain_next": chain_next,
+            "sync_notes": list(sync.notes),
+            "sync_uda_args": list(sync.uda_args),
+        },
+        repo_root=repo_root,
+        before_head=before_head,
+        after_head=after_head,
+        environment=_phase_continuation_environment(),
+    )
+
+
+def _continue_done(payload: dict[str, Any]) -> str:
+    """Apply one already-integrated completion through the current checkout."""
+    handle = str(payload["handle"])
+    actor = str(payload["actor"])
+    validation = [str(item) for item in payload.get("validation") or []]
+    notes = [str(item) for item in payload.get("notes") or []]
+    judgment = payload.get("judgment")
+    chain_next = bool(payload.get("chain_next"))
+    sync_notes = [str(item) for item in payload.get("sync_notes") or []]
+    sync_uda_args = [str(item) for item in payload.get("sync_uda_args") or []]
+    row = identity.resolve(handle)
+    _require_pending(row, "complete")
+    _require_owner(row, actor, "complete")
+    uuid = identity.uuid_of(row)
+    for note_text in notes:
+        annotate_once(uuid, note_text)
     for item in validation:
-        annotate(uuid, f"validation: {item}")
+        annotate_once(uuid, f"validation: {item}")
     modify = [
         uuid,
         "modify",
         f"validation:{' | '.join(validation)}",
-        *sync.uda_args,
+        *sync_uda_args,
     ]
     if judgment:
         modify.append(f"judgment:{judgment}")
@@ -591,14 +635,14 @@ def done(
         if result.endswith(" -> review"):
             next_line = next_task_drain_line(review_assignment=True)
         if not chain_next:
-            return "\n".join([*transition_lines, *sync.notes, learning_line, next_line])
+            return "\n".join([*transition_lines, *sync_notes, learning_line, next_line])
         # Deferred to keep the read-side render -> ops dependency acyclic at
         # import time while reusing exactly the allocator continuation behind
         # `task next`.
         from spice.tasks import render
 
         return "\n".join(
-            [*transition_lines, *sync.notes, learning_line, render.render_next()]
+            [*transition_lines, *sync_notes, learning_line, render.render_next()]
         )
 
     return _report_landed_work(
@@ -626,6 +670,11 @@ def _report_landed_work(
                 "the task write is durable; do not repeat the command",
             ]
         )
+
+
+def _phase_continuation_environment() -> dict[str, str]:
+    backend = config.backend_override()
+    return {config.TASK_BACKEND_ENV: backend} if backend else {}
 
 
 def _phase_ownership_line() -> str:
@@ -800,8 +849,56 @@ def review(
             "or --followup HANDLE"
         )
     tw.require_clean_worktree("task review")
+    row, actor, _uuid, _prepared, _targets = _prepare_review_continuation(
+        handle,
+        then=list(then or []),
+        followup=list(followup or []),
+        creation_surface=creation_surface,
+    )
+    reviewed_handle = identity.render_handle(row)
+    repo_root = config.repo_root()
+    before_head = git_read(repo_root, "rev-parse", "HEAD")
+    sync = boundaries.integrate_and_publish(
+        reviewed_handle,
+        meta=_publish_meta(row, actor, [note or ""]),
+    )
+    after_head = git_read(repo_root, "rev-parse", "HEAD")
+    return phasecontinuation.continue_after_integration(
+        "review",
+        {
+            "handle": reviewed_handle,
+            "finding": finding,
+            "note": note,
+            "followup": list(followup or []),
+            "prepared_followups": [
+                phasecontinuation.serialize_prepared_followup(prepared)
+                for prepared in _prepared
+            ],
+            "creation_surface": creation_surface,
+            "sync_uda_args": list(sync.uda_args),
+        },
+        repo_root=repo_root,
+        before_head=before_head,
+        after_head=after_head,
+        environment=_phase_continuation_environment(),
+    )
+
+
+def _prepare_review_continuation(
+    handle: str | None,
+    *,
+    then: list[str],
+    followup: list[str],
+    creation_surface: str | None,
+) -> tuple[
+    dict[str, Any],
+    str,
+    str,
+    list[TaskAddPreparation],
+    list[dict[str, Any]],
+]:
+    """Validate and prepare review inputs without changing task state."""
     row = resolve_claim_target(handle, action="review")
-    handle = identity.render_handle(row)
     _require_pending(row, "review")
     if str(row.get("phase") or "") != "review":
         raise SpiceError("task review requires a task in the review phase")
@@ -818,11 +915,9 @@ def review(
 
     requests = [
         create.parse_task_batch_request(spec, require_project=False, index=position)
-        for position, spec in enumerate(then or [], start=1)
+        for position, spec in enumerate(then, start=1)
     ]
-    targets = [
-        _resolve_followup_target(name, after_uuid=uuid) for name in followup or []
-    ]
+    targets = [_resolve_followup_target(name, after_uuid=uuid) for name in followup]
     reviewed_handle = identity.render_handle(row)
     existing = {str(task.get("incepted") or "") for task in tw.export()}
     prepared_followups = [
@@ -835,6 +930,31 @@ def review(
         )
         for request in requests
     ]
+    return row, actor, uuid, prepared_followups, targets
+
+
+def _continue_review(payload: dict[str, Any]) -> str:
+    """Apply one already-integrated review through the current checkout."""
+    handle = str(payload["handle"])
+    finding = str(payload.get("finding") or "clean")
+    raw_note = payload.get("note")
+    note = str(raw_note) if raw_note is not None else None
+    followup = [str(item) for item in payload.get("followup") or []]
+    sync_uda_args = [str(item) for item in payload.get("sync_uda_args") or []]
+    row = resolve_claim_target(handle, action="review")
+    _require_pending(row, "review")
+    if str(row.get("phase") or "") != "review":
+        raise SpiceError("task review requires a task in the review phase")
+    actor = tw.current_actor()
+    _require_owner(row, actor, "review")
+    uuid = identity.uuid_of(row)
+    prepared_followups = [
+        phasecontinuation.deserialize_prepared_followup(item)
+        for item in payload.get("prepared_followups") or []
+    ]
+    targets = [_resolve_followup_target(name, after_uuid=uuid) for name in followup]
+    reviewed_handle = identity.render_handle(row)
+
     at = tw.now_iso()
     modify = [
         uuid,
@@ -846,17 +966,13 @@ def review(
     if note:
         modify.append(f"review_note:{note}")
     tw.run(modify)
-    annotate(uuid, f"review: finding={finding}; by={actor}")
-    spawned = [create.commit_prepared_add(prepared) for prepared in prepared_followups]
+    annotate_once(uuid, f"review: finding={finding}; by={actor}")
+    spawned = [_commit_prepared_followup(prepared) for prepared in prepared_followups]
     linked = [
         _link_existing_followup(target, after_uuid=uuid, after_handle=reviewed_handle)
         for target in targets
     ]
-    sync = boundaries.integrate_and_publish(
-        identity.render_handle(row),
-        meta=_publish_meta(row, actor, [note or ""]),
-    )
-    tw.run([uuid, "modify", *sync.uda_args])
+    tw.run([uuid, "modify", *sync_uda_args])
     feedback = reviewfeedback.emit_review_feedback(
         row,
         finding=finding,
@@ -865,7 +981,7 @@ def review(
         reviewer=actor,
         reviewed_at=at,
     )
-    result = _advance(identity.resolve(handle))
+    result = _advance(identity.resolve(reviewed_handle))
     reviewed_line = f"reviewed {identity.render_handle(row)} {finding}; {result}"
     spawned_lines = [f"spawned {h}" for h in spawned]
     linked_lines = [f"linked {h}" for h in linked]
@@ -886,6 +1002,32 @@ def review(
             *linked_lines,
         ],
     )
+
+
+def _continue_phase(payload: dict[str, Any]) -> str:
+    """Dispatch one fresh-checkout continuation through statically live handlers."""
+    operation = str(payload.get("operation") or "")
+    phase_input = payload.get("input")
+    if not isinstance(phase_input, dict):
+        raise SpiceError("task phase continuation input must be an object")
+    handlers = {
+        "done": _continue_done,
+        "review": _continue_review,
+    }
+    handler = handlers.get(operation)
+    if handler is None:
+        raise SpiceError(f"unknown task phase continuation operation: {operation}")
+    return handler(phase_input)
+
+
+def _commit_prepared_followup(prepared: TaskAddPreparation) -> str:
+    """Create one stable follow-up, or reuse it during exact continuation replay."""
+    existing = tw.export([f"incepted.is:{prepared.incepted}"])
+    if existing:
+        return identity.render_handle(existing[0])
+    from spice.tasks import create
+
+    return create.commit_prepared_add(prepared)
 
 
 def next_task_drain_line(
@@ -985,7 +1127,7 @@ def _link_existing_followup(
             f"could not link existing review follow-up {identity.render_handle(row)} "
             "(would it create a cycle?)"
         ) from exc
-    annotate(uuid, f"review follow-up depends on {after_handle}")
+    annotate_once(uuid, f"review follow-up depends on {after_handle}")
     return identity.render_handle(row)
 
 

@@ -91,7 +91,7 @@ TW_TOUCHPOINTS: dict[str, frozenset[str]] = {
     "spice/tasks/projectsubs.py": frozenset({"export"}),
     "spice/tasks/readiness.py": frozenset({"export", "run"}),
     "spice/tasks/render.py": frozenset(
-        {"canonical_actor", "current_actor", "export", "now_iso"}
+        {"canonical_actor", "canonical_utc", "current_actor", "export", "now_iso"}
     ),
     "spice/tasks/reviewfeedback.py": frozenset({"canonical_actor", "run"}),
     "spice/tasks/sizing.py": frozenset({"export"}),

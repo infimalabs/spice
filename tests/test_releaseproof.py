@@ -317,7 +317,7 @@ def test_prior_artifact_export_refuses_a_release_tag_it_cannot_build(tmp_path):
 def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
     evidence = UPGRADE.rehearse_prior_stores(PROJECT_ROOT)
 
-    assert evidence["release"]["tag"] == "v0.27.0"
+    assert evidence["release"]["tag"] == "v0.28.0"
     assert set(evidence["stores"]) == {
         "team",
         "ack",
@@ -332,7 +332,7 @@ def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
         evidence["stores"]["ack"]["version"]
         == evidence["stores"]["ack"]["expected_version"]
     )
-    assert evidence["stores"]["projection"]["source"] == "absent"
+    assert evidence["stores"]["projection"]["source"] == "source"
     assert (
         evidence["stores"]["projection"]["version"]
         == evidence["stores"]["projection"]["expected_version"]
@@ -636,8 +636,8 @@ def test_prior_release_rehearsal_detects_reversed_team_adoption_order(monkeypatc
 
     monkeypatch.setattr(
         store,
-        "TEAM_AUTHORITY_MONOTONIC_VERSION_MAX",
-        0x7FFFFFFF,
+        "TEAM_AUTHORITY_SCHEMA_VERSION",
+        store.TEAM_AUTHORITY_SCHEMA_VERSION - 1,
     )
 
     with pytest.raises(store.SpiceError, match="newer schema version"):
