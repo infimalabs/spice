@@ -34,6 +34,7 @@ from spice.agent.maximmetrics import (
     record_maxim_metric_events,
 )
 from spice.agent.maxims import MaximVerdict
+from spice.agent.sidechannelnotify import consume_side_channel_notices
 from spice.cli.parser import build_parser
 from spice.config import edit, layers, values
 from spice.errors import SpiceError
@@ -258,6 +259,46 @@ def test_maxim_store_refuses_a_newer_version_without_mutation(tmp_path):
             [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "new", "codex")],
         )
 
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_foreign_stamped_store_still_publishes_the_maxim_reminder(
+    tmp_path, monkeypatch
+):
+    """The refusal costs the metric and reaches the lane, not the reminder.
+
+    The fire event is recorded before the inbox item is written, so before
+    containment a single foreign stamp turned every maxim reminder in the lane
+    into a log line under .spice/agents/<thread>/logs. Both writes on this path
+    -- fire and published -- meet the refusal, so both report it.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    path = maxim_metrics_database_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}")
+    before = _maxim_database_snapshot(path)
+
+    paths = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in this assistant message",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    errors = [
+        line
+        for line in consume_side_channel_notices(repo)
+        if "maxim.metrics-error" in line
+    ]
+
+    assert len(paths) == 1
+    assert paths[0].read_text(encoding="utf-8") == "[MAXIM] ALPHA reminder.\n"
+    assert len(errors) == 2
+    assert f"event={MAXIM_EVENT_FIRE}" in errors[0]
+    assert f"event={MAXIM_EVENT_PUBLISHED}" in errors[1]
+    assert "newer schema version" in errors[0]
     assert _maxim_database_snapshot(path) == before
 
 

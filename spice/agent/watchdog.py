@@ -953,26 +953,50 @@ def _record_maxim_metrics(
     reminder_key: str = "",
     reminder_body: str = "",
 ) -> None:
+    """Record bookkeeping about a maxim event without ever costing the reminder.
+
+    The metrics store holds durable history nothing can regenerate, so it
+    refuses a schema it does not own rather than migrating it. That refusal
+    used to travel out through publish_maxim_hits_as_inbox, which records the
+    fire event before it writes the inbox item, so one foreign stamp silenced
+    every maxim reminder in the lane -- and the only trace was a log line under
+    .spice/agents/<thread>/logs that nothing reads.
+
+    Containment belongs here at the write, where the loss is the metric alone.
+    The refusal still reaches the lane on the side channel it already watches,
+    the way this module publishes task.error when an inline task fails. The
+    notice publisher is called directly rather than through
+    publish_supervisor_feedback because all that wrapper adds is a log-handle
+    fallback, and this path has no log handle to fall back to.
+    """
     if not hits:
         return
     driver_name = driver_for(repo_root).name
     thread_id = ambient_thread_id() or ""
-    record_maxim_metric_events(
-        repo_root,
-        [
-            MaximMetricEventWrite(
-                event_type=event_type,
-                bag_name=hit.name,
-                driver_name=driver_name,
-                thread_id=thread_id,
-                trigger_family=hit.name,
-                statement=statement,
-                reminder_key=reminder_key,
-                reminder_body=reminder_body,
-            )
-            for hit in hits
-        ],
-    )
+    try:
+        record_maxim_metric_events(
+            repo_root,
+            [
+                MaximMetricEventWrite(
+                    event_type=event_type,
+                    bag_name=hit.name,
+                    driver_name=driver_name,
+                    thread_id=thread_id,
+                    trigger_family=hit.name,
+                    statement=statement,
+                    reminder_key=reminder_key,
+                    reminder_body=reminder_body,
+                )
+                for hit in hits
+            ],
+        )
+    except Exception as exc:  # bookkeeping failure costs only the metric
+        publish_side_channel_feedback(
+            repo_root,
+            "maxim.metrics-error",
+            event=event_type,
+            error=str(exc),
+        )
 
 
 def discard_pending_maxim_reminders(
