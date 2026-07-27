@@ -11,14 +11,16 @@ layouts, the Python interpreter pyright should resolve against.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from spice.config.layers import effective_table
-from spice.config.pyproject import read_pyproject
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.process.tool import run_tool_command, run_typecheck_command
+from spice.process.tool import run_typecheck_command
+from spice.studies.pythonruntime import (
+    project_python_interpreter,
+    required_python_interpreter,
+)
 from spice.studies.shape import configured_package_roots
 
 # Fixed, opinionated: fail on type errors, in the repo's [tool.pyright] mode.
@@ -43,15 +45,7 @@ def python_typecheck_interpreter(repo_root: Path) -> Path | None:
     if configured is not None:
         return configured
 
-    active = _repo_local_virtual_env(repo_root)
-    if active is not None:
-        return _required_venv_python(active, "VIRTUAL_ENV")
-
-    local = repo_root / ".venv"
-    if local.exists():
-        return _required_venv_python(local, ".venv")
-
-    return _uv_project_interpreter(repo_root)
+    return project_python_interpreter(repo_root)
 
 
 def python_typecheck_argv(repo_root: Path, targets: tuple[str, ...]) -> tuple[str, ...]:
@@ -100,86 +94,4 @@ def _configured_typecheck_interpreter(repo_root: Path) -> Path | None:
     path = Path(raw.strip()).expanduser()
     if not path.is_absolute():
         path = repo_root / path
-    return _required_python(path, PYTHON_TYPECHECK_INTERPRETER_KEY)
-
-
-def _repo_local_virtual_env(repo_root: Path) -> Path | None:
-    raw = os.environ.get("VIRTUAL_ENV")  # env-policy: allow
-    if not raw:
-        return None
-    venv = Path(raw).expanduser()
-    resolved_venv = venv.resolve()
-    resolved_root = repo_root.resolve()
-    if resolved_venv == resolved_root or resolved_root in resolved_venv.parents:
-        return resolved_venv
-    return None
-
-
-def _required_venv_python(venv: Path, source: str) -> Path:
-    candidates = (
-        venv / "bin" / "python",
-        venv / "bin" / "python3",
-        venv / "Scripts" / "python.exe",
-    )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise SpiceError(
-        f"python-typecheck {source} exists but has no Python interpreter at "
-        f"{venv / 'bin' / 'python'}"
-    )
-
-
-def _uv_project_interpreter(repo_root: Path) -> Path | None:
-    if not _uv_project_configured(repo_root):
-        return None
-    uv = find_tool("uv")
-    if not uv:
-        raise SpiceError(
-            "python-typecheck detected a uv-managed project but uv is not installed"
-        )
-    result = run_tool_command(
-        [
-            uv,
-            "run",
-            "--directory",
-            str(repo_root),
-            "--project",
-            str(repo_root),
-            "--no-sync",
-            "python",
-            "-c",
-            "import sys; print(sys.executable)",
-        ],
-        policy="typecheck",
-        operation="resolve uv project interpreter",
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-        check=False,
-    )
-    if result.returncode != 0:
-        output = "\n".join(
-            part for part in (result.stdout.strip(), result.stderr.strip()) if part
-        )
-        message = "python-typecheck failed to resolve the uv project interpreter"
-        if output:
-            message += ":\n" + output
-        raise SpiceError(message)
-    resolved = result.stdout.strip()
-    if not resolved:
-        raise SpiceError("python-typecheck uv project interpreter resolution was empty")
-    return _required_python(Path(resolved), "uv project interpreter")
-
-
-def _uv_project_configured(repo_root: Path) -> bool:
-    if (repo_root / "uv.lock").is_file():
-        return True
-    tool = read_pyproject(repo_root).get("tool")
-    return isinstance(tool, dict) and isinstance(tool.get("uv"), dict)
-
-
-def _required_python(path: Path, source: str) -> Path:
-    if path.is_file():
-        return path
-    raise SpiceError(f"python-typecheck {source} does not exist: {path}")
+    return required_python_interpreter(path, PYTHON_TYPECHECK_INTERPRETER_KEY)

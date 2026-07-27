@@ -9,6 +9,13 @@ Record and scan checkout-safe coverage with declared development dependencies:
     uv sync --group dev
     uv run spice study subsumption --record --package spice
 
+Recording runs pytest in the bound checkout's own test interpreter, not in the
+interpreter that launched spice. An installed harness deliberately carries no
+repository development dependencies, so the process running spice usually
+cannot import pytest at all; the project runtime resolved by
+:mod:`spice.studies.pythonruntime` is the sole execution path, and its absence
+is reported before any coverage work begins rather than routed around.
+
 The recording workflow uses an explicit disposable coverage path by default.
 Pass ``--retain-coverage PATH`` only when the SQLite artifact should survive.
 """
@@ -18,7 +25,6 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
-import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -29,8 +35,16 @@ from typing import Sequence
 from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
 from spice.process.tool import run_tool_command
+from spice.studies.pythonruntime import project_python_interpreter
 
 COHORT_ID_HEX_LENGTH = 12
+DEV_DEPENDENCY_SETUP_COMMAND = "uv sync --group dev"
+COVERAGE_REQUIREMENTS = ("pytest", "pytest_cov")
+_REQUIREMENT_PROBE = (
+    "import importlib.util, sys; "
+    "print(' '.join(name for name in sys.argv[1:] "
+    "if importlib.util.find_spec(name) is None))"
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +89,10 @@ def record_subsumption(
 ) -> SubsumptionReport:
     """Record branch-aware per-test coverage, scan it, and clean temp artifacts."""
     root = root.resolve()
+    # Settle the runtime before anything observable happens: resolving the
+    # retained path creates its parent directory, so an unusable interpreter has
+    # to be reported while the checkout is still untouched.
+    interpreter = _project_test_interpreter(root)
     retained_path = _resolve_retained_path(root, coverage_output)
     with tempfile.TemporaryDirectory(prefix="spice-subsumption-") as temp_name:
         temp_root = Path(temp_name)
@@ -83,7 +101,7 @@ def record_subsumption(
         coverage_config = temp_root / "coveragerc"
         coverage_config.write_text("[run]\nbranch = True\n", encoding="utf-8")
         command = (
-            sys.executable,
+            str(interpreter),
             "-B",
             "-m",
             "pytest",
@@ -124,6 +142,43 @@ def record_subsumption(
             report,
             suite_tests=suite_tests,
             coverage_artifact=str(retained_path) if retained_path else None,
+        )
+
+
+def _project_test_interpreter(root: Path) -> Path:
+    """The checkout interpreter that owns pytest, or a refusal naming the gap."""
+    interpreter = project_python_interpreter(root)
+    if interpreter is None:
+        raise SpiceError(
+            f"subsumption recording needs the project test interpreter, but {root} "
+            "declares no virtualenv and no uv project; create one and install the "
+            f"development dependencies with `{DEV_DEPENDENCY_SETUP_COMMAND}`"
+        )
+    _require_coverage_dependencies(interpreter, root)
+    return interpreter
+
+
+def _require_coverage_dependencies(interpreter: Path, root: Path) -> None:
+    result = run_tool_command(
+        [str(interpreter), "-c", _REQUIREMENT_PROBE, *COVERAGE_REQUIREMENTS],
+        policy="probe",
+        operation="probe subsumption test dependencies",
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip() or f"exit {result.returncode}"
+        raise SpiceError(
+            f"project test interpreter {interpreter} could not be run: {detail}"
+        )
+    missing = result.stdout.split()
+    if missing:
+        raise SpiceError(
+            f"project test interpreter {interpreter} cannot import "
+            f"{', '.join(missing)}; install the development dependencies with "
+            f"`{DEV_DEPENDENCY_SETUP_COMMAND}`"
         )
 
 

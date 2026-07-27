@@ -363,7 +363,9 @@ def _configure_subsumption_parser(actions: Any) -> None:
         action="store_true",
         help=(
             "Run pytest with declared pytest-cov support and a disposable explicit "
-            "coverage path before scanning."
+            "coverage path before scanning. Uses the bound checkout's own test "
+            "interpreter -- its virtualenv or uv project runtime, which must "
+            "provide pytest and pytest-cov -- not the interpreter running spice."
         ),
     )
     sub_parser.add_argument(
