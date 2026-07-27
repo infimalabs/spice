@@ -99,7 +99,17 @@ def run_parent_lifetime_command(
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
+    capture_output: bool = False,
+    text: bool = False,
+    input_data: str | bytes | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     """Run an interactive foreground child until child exit or parent cancellation."""
-    return subprocess.run(command, cwd=cwd, env=env, check=check)
+    options: dict[str, Any] = {"cwd": cwd, "env": env, "check": check}
+    if capture_output:
+        options["capture_output"] = True
+    if text:
+        options["text"] = True
+    if input_data is not None:
+        options["input"] = input_data
+    return subprocess.run(command, **options)

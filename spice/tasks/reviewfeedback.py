@@ -202,7 +202,13 @@ def _record_feedback_status(
     uuid = str(reviewed_row.get("uuid") or "").strip()
     if not uuid:
         return
+    output = result.output_line()
+    if any(
+        str(item.get("description") or "") == output
+        for item in reviewed_row.get("annotations") or ()
+    ):
+        return
     try:
-        tw.run([uuid, "annotate", "--", result.output_line()])
+        tw.run([uuid, "annotate", "--", output])
     except SpiceError:
         return
