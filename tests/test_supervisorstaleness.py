@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import shutil
+import time
 
 import pytest
 
@@ -14,11 +16,17 @@ from spice.agent.lifecyclebinding import (
 from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
 from spice.serve.team.ids import thread_actor_id
-from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
+from spice.serve.team.schema import (
+    TEAM_AUTHORITY_SCHEMAS,
+    TEAM_AUTHORITY_SCHEMA_VERSION,
+)
 from spice.serve.team.store import (
     GLOBAL_LANE_SCHEMA_KEY_PREFIX,
+    GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,
+    PendingAuthorityMigration,
     ServeTeamStore,
     TeamConfig,
+    pending_authority_migration,
     team_database_path,
 )
 from spice.sqliteconnection import sqlite_connection
@@ -36,6 +44,10 @@ PEER_ACTOR = "dddddddddddddddddddddddddddddddd"
 # literal that a future bump would quietly turn into "current".
 STALE_SUPERVISOR_VERSION = TEAM_AUTHORITY_SCHEMA_VERSION - 1
 WIND_DOWN_WORDING = "predates the deployment and should wind down"
+PENDING_WIND_DOWN_WORDING = (
+    f"migration {STALE_SUPERVISOR_VERSION} -> "
+    f"{TEAM_AUTHORITY_SCHEMA_VERSION} is pending"
+)
 
 
 @pytest.fixture
@@ -69,6 +81,33 @@ def _recorded_lane_schema() -> str:
             (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{config.repo_root()}",),
         ).fetchone()
     return str(row[0]) if row is not None else ""
+
+
+def _build_authority_at(version: int) -> Path:
+    path = team_database_path()
+    with sqlite_connection(path, ensure_parent=True) as connection:
+        connection.executescript(TEAM_AUTHORITY_SCHEMAS[version])
+        connection.execute(f"PRAGMA user_version = {version}")
+    ServeTeamStore._initialized_paths.discard(path)
+    return path
+
+
+def _record_pending_migration(source_version: int, target_version: int) -> None:
+    with sqlite_connection(team_database_path()) as connection:
+        connection.execute(
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, 0)",
+            (
+                GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,
+                f"{source_version}:{target_version}",
+                time.time(),
+            ),
+        )
+
+
+def _stored_authority_version() -> int:
+    with sqlite_connection(team_database_path()) as connection:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
 
 
 def _seed_lane(title: str) -> str:
@@ -125,6 +164,55 @@ def test_current_supervisor_is_handed_new_work(task_repo):
 
     assert identity.render_handle(assigned or {}) == handle
     assert _recorded_lane_schema() == str(TEAM_AUTHORITY_SCHEMA_VERSION)
+
+
+def test_pending_migration_refuses_equal_stamp_and_unblocks_upgrade(task_repo):
+    """Refusal retires the lane record, so migration does not wait four hours."""
+    path = _build_authority_at(STALE_SUPERVISOR_VERSION)
+    _record_supervisor_version(task_repo, STALE_SUPERVISOR_VERSION)
+
+    # First ask records lane=1 beside stamp=1. The route read then reaches the
+    # version-2 writer, which defers and publishes the pending migration.
+    with pytest.raises(SpiceError, match="is not being applied yet"):
+        alloc.next_task()
+
+    assert _stored_authority_version() == STALE_SUPERVISOR_VERSION
+    assert _recorded_lane_schema() == str(STALE_SUPERVISOR_VERSION)
+    assert pending_authority_migration(path) == PendingAuthorityMigration(
+        source_version=STALE_SUPERVISOR_VERSION,
+        target_version=TEAM_AUTHORITY_SCHEMA_VERSION,
+    )
+
+    with pytest.raises(SpiceError, match=PENDING_WIND_DOWN_WORDING) as refusal:
+        alloc.next_task()
+
+    assert "should wind down instead of taking new work" in str(refusal.value)
+    assert _recorded_lane_schema() == ""
+
+    # No clock manipulation: retiring the refused lane is sufficient for the
+    # same forward migration to apply and clear its pending signal immediately.
+    ServeTeamStore._initialized_paths.discard(path)
+    with ServeTeamStore(path=path).connect():
+        pass
+
+    assert _stored_authority_version() == TEAM_AUTHORITY_SCHEMA_VERSION
+    assert pending_authority_migration(path) is None
+
+
+def test_pending_migration_keeps_the_task_already_held(task_repo):
+    handle = _seed_lane("Pending migration does not displace held work")
+    claimed = alloc.next_task()
+    assert identity.render_handle(claimed or {}) == handle
+
+    _record_supervisor_version(task_repo, TEAM_AUTHORITY_SCHEMA_VERSION)
+    _record_pending_migration(
+        TEAM_AUTHORITY_SCHEMA_VERSION,
+        TEAM_AUTHORITY_SCHEMA_VERSION + 1,
+    )
+
+    still_held = alloc.next_task()
+
+    assert identity.render_handle(still_held or {}) == handle
 
 
 def test_asking_for_work_records_this_lane_in_the_shared_store(task_repo):

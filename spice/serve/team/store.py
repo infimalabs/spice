@@ -192,6 +192,14 @@ def record_lane_schema_version(
     )
 
 
+def retire_lane_schema_version(connection: sqlite3.Connection, lane: str) -> None:
+    """Stop one lane from holding a pending authority migration back."""
+    connection.execute(
+        "DELETE FROM global_settings WHERE key = ?",
+        (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{lane}",),
+    )
+
+
 def _record_pending_authority_migration(
     connection: sqlite3.Connection, source_version: int, target_version: int
 ) -> None:
@@ -209,28 +217,21 @@ def _record_pending_authority_migration(
     )
 
 
-def pending_authority_migration(
-    path: Path | None = None, *, now: float | None = None
+def pending_authority_migration_from_connection(
+    connection: sqlite3.Connection, *, now: float | None = None
 ) -> PendingAuthorityMigration | None:
-    """Read a live migration intent without initializing or migrating the store."""
-    selected_path = Path(path) if path is not None else team_database_path()
-    if not selected_path.exists():
-        return None
-    with sqlite_connection(
-        selected_path, busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS
-    ) as connection:
-        settings_table = connection.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'global_settings'"
+    """Read migration intent through an already-open compatible store."""
+    settings_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'global_settings'"
+    ).fetchone()
+    row = (
+        connection.execute(
+            "SELECT value, updated_at FROM global_settings WHERE key = ?",
+            (GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,),
         ).fetchone()
-        row = (
-            connection.execute(
-                "SELECT value, updated_at FROM global_settings WHERE key = ?",
-                (GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,),
-            ).fetchone()
-            if settings_table is not None
-            else None
-        )
+        if settings_table is not None
+        else None
+    )
     if row is None:
         return None
     value, updated_at = row
@@ -248,6 +249,19 @@ def pending_authority_migration(
             "pending team authority migration record has an invalid version "
             f"pair: {value!r}"
         ) from error
+
+
+def pending_authority_migration(
+    path: Path | None = None, *, now: float | None = None
+) -> PendingAuthorityMigration | None:
+    """Read a live migration intent without initializing or migrating the store."""
+    selected_path = Path(path) if path is not None else team_database_path()
+    if not selected_path.exists():
+        return None
+    with sqlite_connection(
+        selected_path, busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS
+    ) as connection:
+        return pending_authority_migration_from_connection(connection, now=now)
 
 
 def _lagging_lanes(
