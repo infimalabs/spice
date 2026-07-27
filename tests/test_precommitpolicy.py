@@ -425,6 +425,8 @@ def _loc_finding(path: str, claim: FlexSliceClaim | None) -> LocFinding:
         over_byte_limit=False,
         line_limit=5,
         byte_limit=1000,
+        line_flex_breach=True,
+        byte_flex_breach=False,
         flex_slice_claim=claim,
     )
 

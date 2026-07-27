@@ -76,6 +76,35 @@ def bounded_disposition(
     )
 
 
+def held_at_base_reason(reason: str, *, held: bool, ledger_label: str) -> str:
+    """Tag a failing reason that is over base only because a latch holds it.
+
+    Names the ledger file carrying the latch so the otherwise-invisible git-dir
+    state is reachable; a current flex breach (``held`` is false) is left as-is.
+    """
+    if held:
+        return f"{reason} (held at base by {ledger_label})"
+    return reason
+
+
+def render_latch_held_guidance(noun: str) -> str:
+    """The shared remedy line for a value held to base by a sticky latch.
+
+    A held-at-base value is within its flex band now and fails only because an
+    earlier breach latched it in the named ledger; the fix is to drop back under
+    the base limit (or let a peer worktree's collateral latch heal on the shared
+    baseline), never to split a file that is already within flex. Both the
+    file-shape and complexity boards render this through one seam so the two
+    reconcile_sticky_latch consumers cannot drift apart.
+    """
+    return (
+        f"  a held-at-base {noun} is within flex now but latched by an earlier "
+        "breach recorded in the named ledger; it clears when any scan sees it "
+        "back under its base limit, so a latch left by a peer worktree heals "
+        "once the fix lands on the shared baseline"
+    )
+
+
 @dataclass(frozen=True)
 class StickyLedger(Generic[StickyKey]):
     """Typed storage contract for one sticky-latch set."""

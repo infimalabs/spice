@@ -619,6 +619,8 @@ def test_doctor_complexity_uses_staged_scan_with_scoped_bounds(
         over_length=False,
         ccn_limit=5,
         length_limit=8,
+        ccn_flex_breach=True,
+        length_flex_breach=False,
     )
 
     def scan(
