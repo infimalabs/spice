@@ -215,6 +215,60 @@ def test_fresh_continuation_launch_failure_names_landing_and_exact_resume(
     assert "-m spice.tasks.phasecontinuation --payload" in message
 
 
+def test_recovery_command_resumes_under_the_checkout_the_landing_selected(
+    tmp_path, monkeypatch
+):
+    # The operator runs this string from wherever their shell already stands,
+    # which is the one thing the failing child never had to worry about: it was
+    # launched with cwd=repo_root, and `-m` reads the checkout out of that
+    # directory. The probe module exists only under the landing checkout, so a
+    # recovery command that carried no directory would dispatch against
+    # whatever tree the shell was standing in and find nothing there.
+    monkeypatch.delenv(phasecontinuation.PHASE_CONTINUATION_ENV, raising=False)
+    landing = tmp_path / "landing"
+    landing.mkdir()
+    (landing / "recoveryprobe.py").write_text(
+        "def continue_phase(payload):\n    return 'resumed:' + payload['mark']\n",
+        encoding="utf-8",
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setattr(
+        phasecontinuation,
+        "run_parent_lifetime_command",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["python"], returncode=9, stdout="", stderr="child died"
+        ),
+    )
+
+    with pytest.raises(SpiceError) as raised:
+        phasecontinuation._run_fresh_checkout(
+            {
+                "protocol": phasecontinuation.PHASE_CONTINUATION_PROTOCOL,
+                "module": "recoveryprobe",
+                "function": "continue_phase",
+                "payload": {"mark": "landing"},
+                "environment": {},
+            },
+            repo_root=landing,
+            landing_head="fed321",
+            operation="review",
+        )
+
+    recovery = str(raised.value).split("continuation with `", 1)[1].split("`", 1)[0]
+    resumed = subprocess.run(
+        recovery,
+        shell=True,
+        cwd=elsewhere,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert resumed.returncode == 0, resumed.stderr
+    assert resumed.stdout.strip() == "resumed:landing"
+
+
 def test_nested_continuation_is_refused_without_spawning(tmp_path, monkeypatch):
     monkeypatch.setenv(phasecontinuation.PHASE_CONTINUATION_ENV, "landed")
     monkeypatch.setattr(

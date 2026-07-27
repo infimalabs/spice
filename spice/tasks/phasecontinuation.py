@@ -80,6 +80,7 @@ def _run_fresh_checkout(
         raise _fresh_continuation_error(
             serialized=serialized,
             command=command,
+            repo_root=repo_root,
             landing_head=landing_head,
             operation=operation,
             outcome=f"could not start: {exc}",
@@ -94,6 +95,7 @@ def _run_fresh_checkout(
     raise _fresh_continuation_error(
         serialized=serialized,
         command=command,
+        repo_root=repo_root,
         landing_head=landing_head,
         operation=operation,
         outcome=f"exited {result.returncode}",
@@ -105,6 +107,7 @@ def _fresh_continuation_error(
     *,
     serialized: str,
     command: list[str],
+    repo_root: Path,
     landing_head: str,
     operation: str,
     outcome: str,
@@ -112,7 +115,12 @@ def _fresh_continuation_error(
 ) -> SpiceError:
     """Describe one failed post-integration continuation without republishing."""
     token = base64.urlsafe_b64encode(serialized.encode()).decode()
-    recovery = shlex.join([*command, "--payload", token])
+    # `-m` binds the checkout through the working directory, which is the whole
+    # reason the child ran with cwd=repo_root. An operator resumes from wherever
+    # their shell happens to stand, so the recovery command carries that
+    # directory rather than assuming it.
+    resume = shlex.join([*command, "--payload", token])
+    recovery = f"cd {shlex.quote(str(repo_root))} && {resume}"
     message = (
         f"task {operation} integration landed at {landing_head}, but its fresh "
         f"checkout continuation {outcome}; the landing is "
