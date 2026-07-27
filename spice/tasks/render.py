@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -685,6 +685,33 @@ def _identity_problems(rows: list[dict[str, Any]]) -> list[str]:
     return found
 
 
+def _stranded_wait_problems(pending: list[dict[str, Any]]) -> list[str]:
+    """Name future-wait roots that make otherwise pending work unreachable."""
+    dependent_counts: dict[str, int] = {}
+    for row in pending:
+        raw = row.get("depends") or ()
+        dependencies = (raw,) if isinstance(raw, str) else raw
+        for dependency in dependencies:
+            uuid = str(dependency)
+            dependent_counts[uuid] = dependent_counts.get(uuid, 0) + 1
+
+    now = tw.canonical_utc(datetime.now(UTC))
+    found: list[str] = []
+    for row in pending:
+        uuid = identity.uuid_of(row)
+        wait = str(row.get("wait") or "")
+        count = dependent_counts.get(uuid, 0)
+        if str(row.get("claim_by") or "") or not wait or wait <= now or not count:
+            continue
+        handle = identity.render_handle(row)
+        noun = "dependent" if count == 1 else "dependents"
+        found.append(
+            f"{handle} future wait {wait} strands {count} pending {noun}; "
+            f"repair: spice task wake {handle}"
+        )
+    return found
+
+
 def render_doctor() -> str:
     return render_doctor_report()[0]
 
@@ -700,6 +727,7 @@ def render_doctor_report() -> tuple[str, list[str]]:
     problems = _identity_problems(rows)
     for r in pending:
         problems.extend(_row_problems(r))
+    problems.extend(_stranded_wait_problems(pending))
     active_by_actor: dict[str, int] = {}
     for r in pending:
         actor = str(r.get("claim_by") or "")
