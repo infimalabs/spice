@@ -27,8 +27,11 @@ from tests.test_releaseproofhelpers import (
     UPGRADE,
     _file_inventory,
     _git,
+    _release_pyproject,
+    _release_this_checkout_upgrades_from,
     _source_repository,
     _test_sha256,
+    _write_release_tree,
     _write_test_wheel,
 )
 
@@ -207,49 +210,20 @@ def test_synthetic_repository_preserves_sha256_object_format_and_provenance(
     assert _git(context, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
-def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path):
+def test_source_export_binds_the_newest_release_below_the_declared_version(tmp_path):
     repository, _source = _source_repository(tmp_path)
-    tagged_sources = {
-        # The exporter builds whatever a tag points at, so the tagged commit has
-        # to be a real distribution. uv's own backend keeps that hermetic: it
-        # ships inside the uv binary, so no build requirement is fetched.
-        "pyproject.toml": (
-            "[build-system]\n"
-            'requires = ["uv_build"]\n'
-            'build-backend = "uv_build"\n\n'
-            "[project]\n"
-            'name = "spice-harness"\n'
-            'version = "1.2.3"\n\n'
-            "[tool.uv.build-backend]\n"
-            'module-root = ""\n'
-            'module-name = "spice"\n'
-        ),
-        "spice/__init__.py": "",
-        "spice/serve/team/schema.py": 'TEAM_SCHEMA = "CREATE TABLE team_old(id)"\n',
-        "spice/mail/ackstate.py": (
-            'ACK_STATE_TABLE_SQL = "CREATE TABLE ack_old(id)"\n'
-            'ACK_STATE_INDEX_SQL = "CREATE INDEX ack_old_idx ON ack_old(id)"\n'
-        ),
-        "spice/agent/maximmetrics.py": (
-            'MAXIM_METRICS_TABLE_SQL = "CREATE TABLE maxim_metric_events(id)"\n'
-            "MAXIM_METRICS_EVENT_INDEX_SQL = "
-            '"CREATE INDEX maxim_event ON maxim_metric_events(id)"\n'
-            "MAXIM_METRICS_RECURRENCE_INDEX_SQL = "
-            '"CREATE INDEX maxim_recurrence ON maxim_metric_events(id)"\n'
-            "MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = "
-            '"CREATE INDEX maxim_recency ON maxim_metric_events(id)"\n'
-        ),
-    }
-    for relative, source_text in tagged_sources.items():
-        path = repository / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source_text, encoding="utf-8")
+    _write_release_tree(repository, "1.2.3")
     _git(repository, "add", "--all")
     _git(repository, "commit", "--quiet", "--message", "supported predecessor")
     predecessor = _git(repository, "rev-parse", "HEAD^{commit}")
     _git(repository, "tag", "v1.2.3")
+    # The candidate bumps the version the way a release cycle does, so the tree
+    # ships as 1.3.0 and v9.9.9 is excluded for sorting above what it ships.
+    (repository / "pyproject.toml").write_text(
+        _release_pyproject("1.3.0"), encoding="utf-8"
+    )
     (repository / "payload.txt").write_text("current head\n", encoding="utf-8")
-    _git(repository, "add", "payload.txt")
+    _git(repository, "add", "--all")
     _git(repository, "commit", "--quiet", "--message", "candidate")
     _git(repository, "tag", "v9.9.9")
 
@@ -295,6 +269,37 @@ def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path)
         )
 
 
+def test_cutting_a_release_leaves_a_predecessor_to_rehearse_against(tmp_path):
+    """Cutting a release must not turn the rehearsal into a self-comparison.
+
+    Every commit made after a tag still describes back to it, so resolving the
+    predecessor by ancestry names the tree's own release the moment one is cut.
+    The fixtures would then be generated from the very schema the current
+    writers open them with, and the rehearsal would report success while having
+    nothing left to fail against -- the shape that let an upgrade defect ship
+    undetected once already. This walks a whole cycle: release, tag, land work.
+    """
+    repository, _source = _source_repository(tmp_path)
+    _write_release_tree(repository, "1.2.3")
+    _git(repository, "add", "--all")
+    _git(repository, "commit", "--quiet", "--message", "the release before")
+    predecessor = _git(repository, "rev-parse", "HEAD^{commit}")
+    _git(repository, "tag", "v1.2.3")
+    _write_release_tree(repository, "1.3.0")
+    _git(repository, "add", "--all")
+    _git(repository, "commit", "--quiet", "--message", "release: bump to 1.3.0")
+    _git(repository, "tag", "v1.3.0")
+    (repository / "payload.txt").write_text("after the release\n", encoding="utf-8")
+    _git(repository, "add", "--all")
+    _git(repository, "commit", "--quiet", "--message", "work landed after 1.3.0")
+
+    release = UPGRADE.prior_store_manifest(repository)["releases"][0]
+
+    # The tree ships as 1.3.0 and v1.3.0 is already tagged behind HEAD, so the
+    # only release it can be upgraded from is the one before it.
+    assert (release["tag"], release["commit"]) == ("v1.2.3", predecessor)
+
+
 def test_prior_artifact_export_refuses_a_release_tag_it_cannot_build(tmp_path):
     """A tagged predecessor that will not build is broken, not absent.
 
@@ -304,8 +309,13 @@ def test_prior_artifact_export_refuses_a_release_tag_it_cannot_build(tmp_path):
     """
     repository, _source = _source_repository(tmp_path)
     _git(repository, "tag", "v1.2.3")
+    # Only the candidate declares a version, so v1.2.3 is the release this tree
+    # upgrades from while the tag itself still archives nothing that builds.
+    (repository / "pyproject.toml").write_text(
+        _release_pyproject("1.3.0"), encoding="utf-8"
+    )
     (repository / "payload.txt").write_text("current head\n", encoding="utf-8")
-    _git(repository, "add", "payload.txt")
+    _git(repository, "add", "--all")
     _git(repository, "commit", "--quiet", "--message", "candidate")
 
     with pytest.raises(UPGRADE.UpgradeProofError) as failure:
@@ -317,7 +327,11 @@ def test_prior_artifact_export_refuses_a_release_tag_it_cannot_build(tmp_path):
 def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
     evidence = UPGRADE.rehearse_prior_stores(PROJECT_ROOT)
 
-    assert evidence["release"]["tag"] == "v0.27.0"
+    # Pinning a release literal here would rebuild the failure this test exists
+    # to catch: cutting the next one would make the expectation stale rather
+    # than red, and staleness is what stopped the rehearsal from meaning
+    # anything the last time a release landed.
+    assert evidence["release"]["tag"] == _release_this_checkout_upgrades_from()
     assert set(evidence["stores"]) == {
         "team",
         "ack",

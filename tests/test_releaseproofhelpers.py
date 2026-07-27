@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import os
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -137,3 +138,77 @@ def _write_test_wheel(
 
 def _test_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _release_pyproject(version: str) -> str:
+    """Render a hermetic distribution declaring ``version``.
+
+    The exporter builds whatever a tag points at, so the tagged commit has to be
+    a real distribution. uv's own backend keeps that hermetic: it ships inside
+    the uv binary, so no build requirement is fetched.
+    """
+    return (
+        "[build-system]\n"
+        'requires = ["uv_build"]\n'
+        'build-backend = "uv_build"\n\n'
+        "[project]\n"
+        'name = "spice-harness"\n'
+        f'version = "{version}"\n\n'
+        "[tool.uv.build-backend]\n"
+        'module-root = ""\n'
+        'module-name = "spice"\n'
+    )
+
+
+def _write_release_tree(repository: Path, version: str) -> None:
+    """Lay down a distribution declaring ``version`` with the governed schemas.
+
+    Every store the manifest requires has to be readable at the tag, so a tree
+    that omits one is recorded absent and refused long before the tag it names
+    is the question under test.
+    """
+    sources = {
+        "pyproject.toml": _release_pyproject(version),
+        "spice/__init__.py": "",
+        "spice/serve/team/schema.py": 'TEAM_SCHEMA = "CREATE TABLE team_old(id)"\n',
+        "spice/mail/ackstate.py": (
+            'ACK_STATE_TABLE_SQL = "CREATE TABLE ack_old(id)"\n'
+            'ACK_STATE_INDEX_SQL = "CREATE INDEX ack_old_idx ON ack_old(id)"\n'
+        ),
+        "spice/agent/maximmetrics.py": (
+            'MAXIM_METRICS_TABLE_SQL = "CREATE TABLE maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_EVENT_INDEX_SQL = "
+            '"CREATE INDEX maxim_event ON maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_RECURRENCE_INDEX_SQL = "
+            '"CREATE INDEX maxim_recurrence ON maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = "
+            '"CREATE INDEX maxim_recency ON maxim_metric_events(id)"\n'
+        ),
+    }
+    for relative, source_text in sources.items():
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source_text, encoding="utf-8")
+
+
+def _release_this_checkout_upgrades_from() -> str:
+    """The newest release tag this checkout carries below the version it ships.
+
+    Read from git and the project metadata rather than from the exporter, so
+    the rehearsal is measured against the repository instead of against itself.
+    """
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+    ordering = {}
+    for tag in _git(
+        PROJECT_ROOT, "tag", "--list", "v[0-9]*", "--merged", "HEAD"
+    ).split():
+        fields = tag[1:].split(".")
+        if all(field.isdigit() for field in fields):
+            ordering[tag] = tuple(int(field) for field in fields)
+    shipping = tuple(int(field) for field in declared.split("."))
+    return max(
+        (tag for tag, order in ordering.items() if order < shipping),
+        key=ordering.__getitem__,
+    )

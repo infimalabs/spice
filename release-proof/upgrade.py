@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import tomllib
 from typing import NamedTuple
 import zlib
 
@@ -57,22 +58,63 @@ def _git(
     )
 
 
-def _latest_prior_tag(repository: Path) -> str | None:
-    parent = _git(repository, "rev-parse", "--verify", "HEAD^", check=False)
-    if parent.returncode != 0:
+def _release_version(tag: str) -> tuple[int, ...] | None:
+    """Order a ``vMAJOR.MINOR.PATCH`` tag as integers, or decline to rank it."""
+    fields = tag[1:].split(".") if tag.startswith("v") else []
+    if not fields or not all(field.isdigit() for field in fields):
         return None
-    described = _git(
+    return tuple(int(field) for field in fields)
+
+
+def _declared_release_version(repository: Path) -> tuple[int, ...] | None:
+    """Read the version this tree will ship as from its own project metadata."""
+    try:
+        payload = tomllib.loads(
+            (repository / "pyproject.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    project = payload.get("project")
+    declared = project.get("version") if isinstance(project, dict) else None
+    return _release_version(f"v{declared}") if isinstance(declared, str) else None
+
+
+def _prior_release_tag(repository: Path) -> str | None:
+    """Name the release this tree upgrades from, ordered by declared version.
+
+    Ancestry alone cannot answer this. Every commit made after a release still
+    describes back to that release's tag, so a rule reading ``HEAD^`` starts
+    naming the tree's own release the moment one is cut, and the rehearsal then
+    builds its fixtures from the very schema it opens them with -- passing while
+    comparing a release against itself. The tree already declares the version it
+    is going to ship as, so the release it upgrades from is the newest tag
+    ordered strictly below that. This holds for every commit of a cycle and
+    re-points itself when the next release lands, with nobody to remember it.
+
+    Declining when the tree names no version keeps that closed: an unrankable
+    tree yields no predecessor, and ``rehearse_prior_stores`` refuses a manifest
+    that carries none rather than rehearsing against whatever git described.
+    """
+    declared = _declared_release_version(repository)
+    if declared is None:
+        return None
+    listed = _git(
         repository,
-        "describe",
-        "--tags",
-        "--abbrev=0",
-        "--match",
+        "tag",
+        "--list",
         "v[0-9]*",
-        "HEAD^",
+        "--merged",
+        "HEAD",
+        "--sort=-v:refname",
         check=False,
     )
-    tag = described.stdout.strip()
-    return tag if described.returncode == 0 and tag else None
+    if listed.returncode != 0:
+        return None
+    for tag in listed.stdout.split():
+        version = _release_version(tag)
+        if version is not None and version < declared:
+            return tag
+    return None
 
 
 def prior_store_manifest(repository: Path) -> dict[str, object]:
@@ -88,7 +130,7 @@ def prior_store_manifest(repository: Path) -> dict[str, object]:
             ) from exc
         return _validate_manifest(payload)
 
-    tag = _latest_prior_tag(repository)
+    tag = _prior_release_tag(repository)
     releases: list[dict[str, object]] = []
     if tag is not None:
         commit = _git(repository, "rev-parse", f"{tag}^{{commit}}").stdout.strip()
@@ -180,7 +222,7 @@ def export_prior_artifact(repository: Path, output: Path) -> dict[str, object]:
     """
     repository = repository.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    tag = _latest_prior_tag(repository)
+    tag = _prior_release_tag(repository)
     release: dict[str, str] | None = None
     wheel: dict[str, str] | None = None
     if tag is not None:
