@@ -410,7 +410,12 @@ def _out_of_scope_refusal(
         *(f"  {path}" for path in paths),
         "these paths carry peer work already landed on the shared branch; "
         "publishing would silently overwrite it",
-        "next commands:",
+        "choose exactly one recovery branch before editing:",
+        "  accidental-restoration: the paths are unintended merge drift; "
+        "restore the shared-branch content",
+        "  intentional-ownership: the resolved changes are task work; keep "
+        "them and record every path in a new non-merge commit",
+        "next commands for accidental-restoration:",
     ]
     if present:
         lines.append(f"  git checkout {upstream_head} -- {_shell_join(present)}")
@@ -420,8 +425,14 @@ def _out_of_scope_refusal(
         [
             f'  git commit -m "Restore baseline content for {label}"',
             f'  spice task done {label} --validation "..."',
-            "an intentional change to any path above must land as its own commit "
-            "on this branch so the task owns it; then rerun spice task done",
+            "next commands for intentional-ownership:",
+            "  do not restore baseline content or run the accidental-restoration "
+            "commands",
+            "  edit every intentional path above so each has a real content "
+            "delta after the merge",
+            f"  git add -A -- {_shell_join(paths)}",
+            f'  git commit -m "Own intentional landing paths for {label}"',
+            f'  spice task done {label} --validation "..."',
         ]
     )
     return "\n".join(lines)
