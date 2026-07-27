@@ -115,6 +115,13 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
 
     monkeypatch.setattr(REHEARSAL, "_build_canonical_artifacts", build)
     monkeypatch.setattr(REHEARSAL, "_validate_installed_wheel", lambda *_args: None)
+    monkeypatch.setattr(
+        REHEARSAL,
+        "_validate_in_place_upgrade",
+        lambda *_args: {
+            "adopted": {"from": 783663365, "to": 2, "store": "spiceteams.sqlite3"}
+        },
+    )
     monkeypatch.setattr(REHEARSAL, "_rebuild_wheel_from_sdist", rebuild)
 
     receipt = REHEARSAL.rehearse(root, artifacts)

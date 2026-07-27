@@ -76,6 +76,11 @@ python3 "$script_directory/../release-proof/upgrade.py" export \
     --output "$staging/.release-proof/prior-stores.json" \
     --quiet
 
+python3 "$script_directory/../release-proof/upgrade.py" export-artifact \
+    --repository "$repository" \
+    --output "$staging/.release-proof/prior-artifact" \
+    --quiet
+
 mv "$staging" "$output"
 staging=""
 printf '%s\n' "$output"
