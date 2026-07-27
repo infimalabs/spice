@@ -17,6 +17,7 @@ import json
 import sqlite3
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Iterable, Iterator
@@ -111,6 +112,7 @@ GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
 GLOBAL_STORE_GENERATION_KEY = "store_generation"
 GLOBAL_LANE_SCHEMA_KEY_PREFIX = "lane_schema:"
+GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY = "pending_authority_migration"
 # SQLite reads `_` in a LIKE pattern as a single-character wildcard, and this
 # prefix has one, so the unescaped pattern also selects keys nothing here
 # wrote. Every key it selects is read as a schema version, and a value that
@@ -131,6 +133,14 @@ LANE_SCHEMA_RECORD_HORIZON_SECONDS = (
 )
 
 
+@dataclass(frozen=True)
+class PendingAuthorityMigration:
+    """One bounded signal that a writer is waiting to change the store."""
+
+    source_version: int
+    target_version: int
+
+
 class AuthorityStoreSupersededError(SpiceError):
     """The store moved to a schema past the one this process was built for.
 
@@ -145,6 +155,10 @@ class AuthorityStoreSupersededError(SpiceError):
     refusal into an error response -- matching on prose there would put the
     wording of an operator-facing message in the way of a process exiting.
     """
+
+
+class AuthorityMigrationDeferredError(SpiceError):
+    """A migration refusal whose pending-intent write must survive the raise."""
 
 
 def record_lane_schema_version(
@@ -178,6 +192,78 @@ def record_lane_schema_version(
     )
 
 
+def retire_lane_schema_version(connection: sqlite3.Connection, lane: str) -> None:
+    """Stop one lane from holding a pending authority migration back."""
+    connection.execute(
+        "DELETE FROM global_settings WHERE key = ?",
+        (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{lane}",),
+    )
+
+
+def _record_pending_authority_migration(
+    connection: sqlite3.Connection, source_version: int, target_version: int
+) -> None:
+    """Publish migration intent in the table both retained shapes can read."""
+    connection.execute(
+        "INSERT INTO global_settings (key, value, updated_at, revision) "
+        "VALUES (?, ?, ?, 0) "
+        "ON CONFLICT(key) DO UPDATE SET "
+        "value = excluded.value, updated_at = excluded.updated_at",
+        (
+            GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,
+            f"{source_version}:{target_version}",
+            time.time(),
+        ),
+    )
+
+
+def pending_authority_migration_from_connection(
+    connection: sqlite3.Connection, *, now: float | None = None
+) -> PendingAuthorityMigration | None:
+    """Read migration intent through an already-open compatible store."""
+    settings_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'global_settings'"
+    ).fetchone()
+    row = (
+        connection.execute(
+            "SELECT value, updated_at FROM global_settings WHERE key = ?",
+            (GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,),
+        ).fetchone()
+        if settings_table is not None
+        else None
+    )
+    if row is None:
+        return None
+    value, updated_at = row
+    observed_at = time.time() if now is None else now
+    if float(updated_at) < observed_at - LANE_SCHEMA_RECORD_HORIZON_SECONDS:
+        return None
+    try:
+        source_text, target_text = str(value).split(":", 1)
+        return PendingAuthorityMigration(
+            source_version=int(source_text),
+            target_version=int(target_text),
+        )
+    except (TypeError, ValueError) as error:
+        raise SpiceError(
+            "pending team authority migration record has an invalid version "
+            f"pair: {value!r}"
+        ) from error
+
+
+def pending_authority_migration(
+    path: Path | None = None, *, now: float | None = None
+) -> PendingAuthorityMigration | None:
+    """Read a live migration intent without initializing or migrating the store."""
+    selected_path = Path(path) if path is not None else team_database_path()
+    if not selected_path.exists():
+        return None
+    with sqlite_connection(
+        selected_path, busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS
+    ) as connection:
+        return pending_authority_migration_from_connection(connection, now=now)
+
+
 def _lagging_lanes(
     connection: sqlite3.Connection, version: int
 ) -> list[tuple[str, int]]:
@@ -197,7 +283,9 @@ def _lagging_lanes(
     return [(lane, found) for lane, found in recorded if found < version]
 
 
-def _require_drained_lanes(connection: sqlite3.Connection, version: int) -> None:
+def _require_drained_lanes(
+    connection: sqlite3.Connection, source_version: int, target_version: int
+) -> None:
     """Hold the migration back while a lane is still running the older shape.
 
     A migration is the one moment this store stops being readable by the code
@@ -208,12 +296,13 @@ def _require_drained_lanes(connection: sqlite3.Connection, version: int) -> None
     only the new process's start, and it is the only party that can wait,
     because it is the only one that knows a change is about to happen.
     """
-    lagging = _lagging_lanes(connection, version)
+    lagging = _lagging_lanes(connection, target_version)
     if not lagging:
         return
+    _record_pending_authority_migration(connection, source_version, target_version)
     detail = ", ".join(f"{lane} at schema {recorded}" for lane, recorded in lagging)
-    raise SpiceError(
-        f"team authority schema {version} is not being applied yet: "
+    raise AuthorityMigrationDeferredError(
+        f"team authority schema {target_version} is not being applied yet: "
         f"{len(lagging)} lane(s) are still running an older schema and would "
         f"lose this store the moment it moves -- {detail}. The migration runs "
         "on its own once those lanes finish, or "
@@ -335,10 +424,16 @@ def _require_authority_shape(connection: sqlite3.Connection, version: int) -> No
         raise _authority_shape_error(connection, version)
 
 
-def team_database_path() -> Path:
+def team_database_path(repo_root: Path | None = None) -> Path:
     from spice.tasks import config as task_config
 
-    return task_config.data_dir() / TEAM_DATABASE_FILENAME
+    if repo_root is None or task_config.backend_override() is not None:
+        backend_root = task_config.backend_root()
+    else:
+        from spice.paths import shared_state_root
+
+        backend_root = shared_state_root(repo_root)
+    return task_config.data_dir(backend_root) / TEAM_DATABASE_FILENAME
 
 
 def _default_directive_state_path(team_path: Path | None) -> Path:
@@ -455,7 +550,11 @@ class ServeTeamStore(
                 # lane records itself after the check and loses the store to
                 # the bump that follows -- the one lane whose timing this
                 # cannot afford to get wrong.
-                _require_drained_lanes(connection, TEAM_AUTHORITY_SCHEMA_VERSION)
+                _require_drained_lanes(
+                    connection,
+                    source_version,
+                    TEAM_AUTHORITY_SCHEMA_VERSION,
+                )
                 # The source resolver admits no version but the predecessor
                 # here, so this is the one forward step a writer ever runs.
                 _execute_schema_script(
@@ -463,7 +562,17 @@ class ServeTeamStore(
                 )
             _require_authority_shape(connection, TEAM_AUTHORITY_SCHEMA_VERSION)
             connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION}")
+            connection.execute(
+                "DELETE FROM global_settings WHERE key = ?",
+                (GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,),
+            )
             connection.commit()
+        except AuthorityMigrationDeferredError:
+            # The only write before this refusal is the pending intent. It has
+            # to outlive the failed open so old-code launchers can see the
+            # migration window; every other failure remains fully atomic.
+            connection.commit()
+            raise
         except BaseException:
             connection.rollback()
             raise

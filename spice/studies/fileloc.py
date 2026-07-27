@@ -30,12 +30,17 @@ from spice.policy import (
     FILE_SHAPE_SOURCE_SUFFIXES,
 )
 from spice.pathmatch import matches_repo_path
+from spice.paths import STATE_DIRNAME
 from spice.studies import gates
 from spice.studies.walk import is_excluded_path
 
 FILE_LOC_VERSION = 1
 FILE_LOC_STICKY_STATE_GIT_PATH = "file-loc-sticky.json"
 FILE_BYTE_STICKY_STATE_GIT_PATH = "file-byte-sticky.json"
+# Reachable name of each sticky ledger (worktree git-dir state), surfaced on the
+# board so a held-at-base failure points at the file holding the latch.
+_LINE_STICKY_LEDGER_LABEL = f"{STATE_DIRNAME}/{FILE_LOC_STICKY_STATE_GIT_PATH}"
+_BYTE_STICKY_LEDGER_LABEL = f"{STATE_DIRNAME}/{FILE_BYTE_STICKY_STATE_GIT_PATH}"
 _LINE_STICKY_LEDGER = gates.path_sticky_ledger(
     FILE_LOC_STICKY_STATE_GIT_PATH,
     version=FILE_LOC_VERSION,
@@ -55,7 +60,30 @@ class LocFinding:
     over_byte_limit: bool
     line_limit: int
     byte_limit: int
+    line_flex_breach: bool
+    byte_flex_breach: bool
     flex_slice_claim: FlexSliceClaim | None = None
+
+    @property
+    def line_latch_held(self) -> bool:
+        """Over the line limit only because a latch holds it to base."""
+        return self.over_line_limit and not self.line_flex_breach
+
+    @property
+    def byte_latch_held(self) -> bool:
+        """Over the byte limit only because a latch holds it to base."""
+        return self.over_byte_limit and not self.byte_flex_breach
+
+    @property
+    def latch_held(self) -> bool:
+        return self.line_latch_held or self.byte_latch_held
+
+    @property
+    def current_breach(self) -> bool:
+        """A dimension measures over the flex limit right now, latch or not."""
+        return (self.over_line_limit and self.line_flex_breach) or (
+            self.over_byte_limit and self.byte_flex_breach
+        )
 
 
 class FileShapeBounds(Protocol):
@@ -566,6 +594,8 @@ def scan_loc_violations(
                 over_byte_limit=byte_disposition.over_limit,
                 line_limit=line_disposition.limit,
                 byte_limit=byte_disposition.limit,
+                line_flex_breach=line_disposition.flex_breach,
+                byte_flex_breach=byte_disposition.flex_breach,
                 flex_slice_claim=flex_slice_claims.get(rel_path),
             )
         )
@@ -597,17 +627,31 @@ def render_loc_board(
     for finding in findings:
         reasons = []
         if finding.over_line_limit:
-            reasons.append(f"{finding.line_count} lines > {finding.line_limit}")
+            reasons.append(
+                gates.held_at_base_reason(
+                    f"{finding.line_count} lines > {finding.line_limit}",
+                    held=finding.line_latch_held,
+                    ledger_label=_LINE_STICKY_LEDGER_LABEL,
+                )
+            )
         if finding.over_byte_limit:
-            reasons.append(f"{finding.byte_count} bytes > {finding.byte_limit}")
+            reasons.append(
+                gates.held_at_base_reason(
+                    f"{finding.byte_count} bytes > {finding.byte_limit}",
+                    held=finding.byte_latch_held,
+                    ledger_label=_BYTE_STICKY_LEDGER_LABEL,
+                )
+            )
         if finding.flex_slice_claim is not None:
             reasons.append(render_flex_slice_claim_redirect(finding.flex_slice_claim))
         lines.append(f"  FAIL  {finding.path}: {'; '.join(reasons)}")
-    if any(finding.flex_slice_claim is None for finding in findings):
+    if any(f.current_breach and f.flex_slice_claim is None for f in findings):
         lines.append(
             "  a file that breached flex stays held to the base limit until it "
             "shrinks back under it; split by naming the seam"
         )
+    if any(finding.latch_held for finding in findings):
+        lines.append(gates.render_latch_held_guidance("path"))
     if any(finding.flex_slice_claim is not None for finding in findings):
         lines.append(
             "  peer-held flex slices redirect duplicate refactors; keep changes "

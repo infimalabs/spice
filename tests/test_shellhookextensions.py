@@ -3,7 +3,6 @@
 import io
 import json
 import os
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -118,7 +117,9 @@ def test_agent_run_yields_rtk_rewrite_to_selected_extension_wrapper(
         monkeypatch.setenv(name, value)
     monkeypatch.chdir(tmp_path)
 
-    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset({"toy-wrapper"})
+    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset(
+        {"grep", "toy-wrapper"}
+    )
     exit_code = wrap.run_agent_command(
         tmp_path,
         [bash, "-c", "toy-wrapper alpha beta"],
@@ -134,11 +135,7 @@ def test_agent_run_yields_rtk_rewrite_to_selected_extension_wrapper(
     assert _trace_lines(trace, expected_prefix="toy:") == [
         "toy:--from-entry-point alpha beta"
     ]
-    assert control == [
-        bash,
-        "-c",
-        f"{shlex.quote(str(rtk))} grep -n needle",
-    ]
+    assert control == [bash, "-c", "rg -n needle"]
 
 
 def test_agent_wrapper_lines_rejects_entry_point_shadowing_configured_group(

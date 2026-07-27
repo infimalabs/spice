@@ -52,7 +52,8 @@ command-selection policy, not command permission. Spice owns the finite
 `<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db` supplied through
 `RTK_DB_PATH`.
 Activation and Doctor report missing, obsolete, or protocol-invalid RTK as
-native-command mode without blocking agent setup. Cargo installation and the
+native-command mode without blocking agent setup, and report the same mode when
+a rewrite counts a different number of matches than the written search. Cargo installation and the
 complete protocol live in the
 [wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
 
@@ -109,8 +110,11 @@ Reference: [agent table](docs/config/reference.md#toolspiceagent).
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
 with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group contains
-the finite RTK command-shape transformations described above; `rtk rewrite`
-inside `spice agent run` remains the sole command selector.
+the finite RTK command-shape transformations described above. A selected direct
+wrapper whose argv head is not RTK owns its command word regardless of
+configuration source, so RTK cannot replace it before the shell function
+exists; `rtk rewrite` inside `spice agent run` remains the sole optimization
+candidate selector.
 
 Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
 

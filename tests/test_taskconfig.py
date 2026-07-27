@@ -28,6 +28,7 @@ def test_ensure_task_event_file_preserves_existing_event(tmp_path):
 
 def test_default_backend_root_is_shared_hidden_spice_dir(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
+    target = _init_repo(tmp_path / "target")
     monkeypatch.chdir(repo)
     monkeypatch.delenv(config.TASK_BACKEND_ENV, raising=False)
     config.set_backend(None)
@@ -37,6 +38,9 @@ def test_default_backend_root_is_shared_hidden_spice_dir(tmp_path, monkeypatch):
     assert config.data_dir() == common / ".spice" / "data"
     assert config.taskrc_path() == common / ".spice" / "taskrc"
     assert team_database_path() == common / ".spice" / "data" / TEAM_DATABASE_FILENAME
+    assert team_database_path(target) == (
+        git_common_dir(target) / ".spice" / "data" / TEAM_DATABASE_FILENAME
+    )
 
 
 def test_task_backend_override_requires_absolute_path(tmp_path, monkeypatch):

@@ -39,6 +39,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
     "hook": {"spice/hooks/precommit.py:_run_python_format_guard:capture=true"},
     "probe": {
         "spice/agent/driver.py:operator_color_scheme:capture=true",
+        "spice/studies/subsumption.py:_require_coverage_dependencies:capture=true",
         "spice/tasks/ops.py:rtk_usage_nudge:capture=true",
     },
     "release": {
@@ -51,7 +52,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
     "suite": {"spice/studies/suiteseam.py:_measure_suite:capture=true"},
     "typecheck": {
         "spice/process/tool.py:run_typecheck_command:capture=true",
-        "spice/studies/typecheck.py:_uv_project_interpreter:capture=true",
+        "spice/studies/pythonruntime.py:_uv_project_interpreter:capture=true",
     },
 }
 

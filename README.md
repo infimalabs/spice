@@ -214,8 +214,9 @@ walkthrough, which starts read-only.
 
 [RTK](https://github.com/rtk-ai/rtk) is an optional command-output optimizer for
 the agent shell. `spice agent activation` and `spice doctor` report whether its
-rewrite protocol is active; missing, obsolete, or invalid RTK leaves
-`spice agent run` on the original native command path. The local judge and
+rewrite protocol is active and preserves the answer a search already gave;
+missing, obsolete, invalid, or answer-changing RTK leaves `spice agent run` on
+the original native command path. The local judge and
 speech synthesis are also degradable companions; when unavailable, transcript
 capture, steering, tasks, and the constitution keep working while optional
 feedback or narration is skipped. Runtime, verification, and protocol details

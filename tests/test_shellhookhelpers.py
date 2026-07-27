@@ -176,23 +176,34 @@ def builtin_common_wrapper_lines(
             shellhook.grep_search_operand_route_guard_lines(f"{command_word} grep -r")
         )
     lines.extend([f'  command {command_word} "$@"', "}"])
+    lines.extend(
+        [
+            "",
+            "grep() {",
+            '  for _spice_word in "$@"; do',
+            '    case "$_spice_word" in',
+            "      -E|-F|-P|-G)",
+            '        command grep "$@"',
+            "        return",
+            "        ;;",
+            "    esac",
+            "  done",
+        ]
+    )
     if driver_name == "codex":
         lines.extend(
             [
-                "",
-                "grep() {",
                 '  for _spice_word in "$@"; do',
                 '    case "$_spice_word" in',
-                "      -E|-F|-P|-G)",
-                '        command grep "$@"',
+                "      *)",
+                '        command grep -E "$@"',
                 "        return",
                 "        ;;",
                 "    esac",
                 "  done",
-                '  command grep -E "$@"',
-                "}",
             ]
         )
+    lines.extend(['  command grep "$@"', "}"])
     return lines
 
 

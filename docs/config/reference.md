@@ -131,7 +131,9 @@ source checkout, import path, or virtualenv for the running code.
 The agent shell can optionally use
 [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer as a command-output
 optimizer. Missing, obsolete, or invalid RTK selects reported native-command
-mode without blocking activation. Install and protocol details live in
+mode without blocking activation, as does an RTK whose rewrite answers a probe
+search differently than the command as written. Install and protocol details
+live in
 [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
 ## `[tool.spice.rtk]`
@@ -353,9 +355,12 @@ RTK rewrite selection happens inside `spice agent run`. The built-in `common`
 group supplies only the finite post-selection command-shape transformations:
 rg-only grep flags to `rg`, native find predicates to `find`, diagnostic git
 flags to `git`, a Codex-scoped head-only route that injects `-E` into
-`rtk grep`, and a Codex-scoped plain `grep -E` wrapper. Claude receives the
-native forms because its BASIC-regexp authoring uses `\|`; Codex receives
-extended matching by default, with later explicit matcher flags still winning.
+`rtk grep`, and one plain `grep` wrapper shared by both drivers. Every selected
+direct wrapper whose argv head is not RTK owns its command word regardless of
+configuration source, so a raw `rg` whose RTK candidate ends at `grep` remains
+native `rg`. The shared plain wrapper preserves Claude's BASIC-regexp authoring
+with `\|`; its Codex-scoped catch-all injects `-E`, with explicit matcher flags
+still winning.
 Naming `common` in a repo `[tool.spice.wrappers.common]` table replaces the whole
 group atomically — routes do not concatenate, so an override must re-list every
 route it keeps — while omitting the table inherits this default and

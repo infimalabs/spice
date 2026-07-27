@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from spice.policy import (
 )
 from spice.sqliteconnection import sqlite_connection
 from spice.studies import cli as studies_cli
-from spice.studies import fileloc, gates, mutations, testquality
+from spice.studies import fileloc, gates, mutations, subsumption, testquality
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.subsumption import record_subsumption, scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
@@ -551,10 +552,7 @@ def test_subsumption_reports_analyzed_excluded_and_context_free_denominators(
     assert report.context_free_contexts == 1
 
 
-def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
-    tmp_path, monkeypatch
-):
-    root = tmp_path / "checkout"
+def _seed_checkout(root: Path) -> dict[str, str]:
     root.mkdir()
     original = {
         "tracked.txt": "tracked\n",
@@ -563,9 +561,62 @@ def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
     }
     for name, content in original.items():
         (root / name).write_text(content, encoding="utf-8")
-    observed: dict[str, object] = {}
+    return original
 
-    def fake_run(command, *, policy, operation, cwd, env, capture_output, check):
+
+def _link_project_interpreter(root: Path) -> Path:
+    """A checkout-local interpreter path distinct from the one running the tests.
+
+    The whole environment is linked, not just the binary: an interpreter reached
+    through a bare symlink resolves its prefix to the real installation behind
+    it, which is how a stray link ends up without the project's dependencies.
+    """
+    venv = root / ".venv"
+    venv.symlink_to(Path(sys.prefix), target_is_directory=True)
+    return venv / "bin" / "python"
+
+
+def _write_interpreter_missing_dev_dependencies(root: Path) -> Path:
+    """A real interpreter path whose probe reports every requirement absent."""
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text('#!/bin/sh\nshift 2\nprintf "%s\\n" "$*"\n', encoding="utf-8")
+    python.chmod(0o755)
+    return python
+
+
+def _checkout_files(root: Path) -> dict[str, str]:
+    return {
+        path.name: path.read_text(encoding="utf-8")
+        for path in root.iterdir()
+        if path.is_file()
+    }
+
+
+def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    root = tmp_path / "checkout"
+    original = _seed_checkout(root)
+    interpreter = _link_project_interpreter(root)
+    observed: dict[str, object] = {}
+    real_run_tool_command = subsumption.run_tool_command
+
+    def fake_run(command, *, policy, operation, cwd, capture_output, check, **kwargs):
+        if policy == "probe":
+            # The dependency probe is the real subprocess against the linked
+            # interpreter; only the coverage run is stood in for here.
+            return real_run_tool_command(
+                command,
+                policy=policy,
+                operation=operation,
+                cwd=cwd,
+                capture_output=capture_output,
+                check=check,
+                **kwargs,
+            )
+        env = kwargs["env"]
         coverage_path = Path(env["COVERAGE_FILE"])
         junit_arg = next(arg for arg in command if arg.startswith("--junitxml="))
         junit_path = Path(junit_arg.split("=", 1)[1])
@@ -590,12 +641,15 @@ def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
             policy=policy,
             operation=operation,
             capture_output=capture_output,
+            env=dict(env),
         )
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("spice.studies.subsumption.run_tool_command", fake_run)
 
-    report = record_subsumption(root, package="spice", package_prefix="spice")
+    report = record_subsumption(
+        root, package="spice", package_prefix="spice", pytest_args=["-k", "smoke"]
+    )
 
     assert report.suite_tests == 2
     assert report.tests_scanned == 2
@@ -605,12 +659,58 @@ def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
     assert observed["policy"] == "coverage"
     assert observed["operation"] == "record subsumption coverage"
     assert observed["capture_output"] is False
+    assert observed["command"][0] == str(interpreter)
+    assert observed["command"][0] != sys.executable
+    assert observed["command"][1:4] == ("-B", "-m", "pytest")
+    assert observed["command"][-2:] == ("-k", "smoke")
+    assert observed["env"]["COVERAGE_FILE"] == str(observed["coverage_path"])
     assert "--cov-context=test" in observed["command"]
     assert "--cov-branch" in observed["command"]
     assert str(observed["coverage_path"]).startswith(tempfile.gettempdir())
-    assert {
-        path.name: path.read_text(encoding="utf-8") for path in root.iterdir()
-    } == original
+    assert _checkout_files(root) == original
+
+
+def test_record_subsumption_refuses_a_checkout_with_no_declared_test_runtime(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    root = tmp_path / "checkout"
+    original = _seed_checkout(root)
+
+    with pytest.raises(SpiceError, match="uv sync --group dev") as failure:
+        record_subsumption(
+            root,
+            package="spice",
+            package_prefix="spice",
+            coverage_output=Path("artifacts/coverage.db"),
+        )
+
+    assert "declares no virtualenv and no uv project" in str(failure.value)
+    assert _checkout_files(root) == original
+    assert {path.name for path in root.iterdir()} == set(original)
+
+
+def test_record_subsumption_names_the_dependency_its_interpreter_cannot_import(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    root = tmp_path / "checkout"
+    original = _seed_checkout(root)
+    interpreter = _write_interpreter_missing_dev_dependencies(root)
+
+    with pytest.raises(SpiceError, match="uv sync --group dev") as failure:
+        record_subsumption(
+            root,
+            package="spice",
+            package_prefix="spice",
+            coverage_output=Path("artifacts/coverage.db"),
+        )
+
+    message = str(failure.value)
+    assert str(interpreter) in message
+    assert "cannot import pytest, pytest_cov" in message
+    assert _checkout_files(root) == original
+    assert {path.name for path in root.iterdir()} == {*original, ".venv"}
 
 
 def test_subsumption_no_findings_when_tests_are_disjoint(tmp_path):

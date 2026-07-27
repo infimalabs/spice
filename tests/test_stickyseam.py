@@ -115,6 +115,71 @@ def test_fileloc_sticky_latch_holds_in_flex_band_until_under_base(tmp_path):
     assert git_state_path(fileloc.FILE_LOC_STICKY_STATE_GIT_PATH, root=repo).exists()
 
 
+def test_fileloc_board_distinguishes_current_breach_from_latch_held(tmp_path):
+    repo = _init_repo(tmp_path)
+    big = repo / "big.py"
+    big.write_text("x = 1\n" * 8, encoding="utf-8")
+
+    breach_findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+
+    # A file over the flex limit on its current measured content: the remedy is
+    # to split, so the board renders the split guidance and no ledger tag.
+    assert fileloc.render_loc_board(
+        breach_findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+
+    big.write_text("x = 1\n" * 6, encoding="utf-8")  # base 5 < 6 <= flex 7
+    latched_findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+
+    # The same file is within flex now and fails only because the sticky latch
+    # holds it to base. The reason names the ledger file so the untracked git-dir
+    # state is reachable, and the guidance points at drop-under-base / peer heal
+    # rather than a split it does not need.
+    assert fileloc.render_loc_board(
+        latched_findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 6 lines > 5 (held at base by .spice/file-loc-sticky.json)",
+            "  a held-at-base path is within flex now but latched by an earlier "
+            "breach recorded in the named ledger; it clears when any scan sees it "
+            "back under its base limit, so a latch left by a peer worktree heals "
+            "once the fix lands on the shared baseline",
+        ]
+    )
+
+
 def test_complexity_reporting_scan_does_not_persist_sticky(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path)
     record = complexity.ComplexityRecord(
@@ -242,6 +307,126 @@ def test_complexity_sticky_latch_holds_in_flex_band_until_under_base(
     assert git_state_path(
         complexity.COMPLEXITY_LENGTH_STICKY_GIT_PATH, root=repo
     ).exists()
+
+
+def test_complexity_board_distinguishes_current_breach_from_latch_held(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    current = {
+        "record": complexity.ComplexityRecord(
+            path="big.py", function_name="f", ccn=8, length=1, nloc=1
+        )
+    }
+    monkeypatch.setattr(
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [current["record"]],
+    )
+
+    breach_findings = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_ccn=5,
+        ccn_flex_limit_value=7,
+        max_length=100,
+        length_flex_limit_value=100,
+        persist=True,
+    )
+
+    # ccn 8 is over the flex limit on its current measured content: a real
+    # breach, rendered without a ledger tag.
+    assert complexity.render_complexity_board(
+        breach_findings, max_ccn=5, max_length=100
+    ) == "\n".join(
+        [
+            "complexity: 1 violation(s)",
+            "  FAIL  big.py:f: ccn 8 > 5",
+        ]
+    )
+
+    current["record"] = complexity.ComplexityRecord(
+        path="big.py", function_name="f", ccn=6, length=1, nloc=1
+    )  # base 5 < 6 <= flex 7
+    latched_findings = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_ccn=5,
+        ccn_flex_limit_value=7,
+        max_length=100,
+        length_flex_limit_value=100,
+        persist=True,
+    )
+
+    # The same routine is within flex now and fails only because the sticky latch
+    # holds it to base. The reason names the ccn ledger and the guidance points at
+    # drop-under-base / peer heal -- the identical distinction the file-loc board
+    # draws, because both boards render through the shared reconcile_sticky_latch
+    # seam.
+    assert complexity.render_complexity_board(
+        latched_findings, max_ccn=5, max_length=100
+    ) == "\n".join(
+        [
+            "complexity: 1 violation(s)",
+            "  FAIL  big.py:f: ccn 6 > 5 (held at base by "
+            ".spice/complexity-ccn-sticky.json)",
+            "  a held-at-base routine is within flex now but latched by an earlier "
+            "breach recorded in the named ledger; it clears when any scan sees it "
+            "back under its base limit, so a latch left by a peer worktree heals "
+            "once the fix lands on the shared baseline",
+        ]
+    )
+
+
+def test_complexity_length_board_names_its_own_latch_ledger(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    current = {
+        "record": complexity.ComplexityRecord(
+            path="big.py", function_name="f", ccn=1, length=5, nloc=5
+        )
+    }
+    monkeypatch.setattr(
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [current["record"]],
+    )
+
+    complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+
+    current["record"] = complexity.ComplexityRecord(
+        path="big.py", function_name="f", ccn=1, length=4, nloc=4
+    )  # base 3 < 4 <= flex 4
+    latched_findings = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+
+    # The length board draws the same latch-held distinction as ccn, and names
+    # its own ledger file -- the two dimensions do not share one ledger.
+    assert complexity.render_complexity_board(
+        latched_findings, max_length=3
+    ) == "\n".join(
+        [
+            "complexity: 1 violation(s)",
+            "  FAIL  big.py:f: length 4 > 3 (held at base by "
+            ".spice/complexity-length-sticky.json)",
+            "  a held-at-base routine is within flex now but latched by an earlier "
+            "breach recorded in the named ledger; it clears when any scan sees it "
+            "back under its base limit, so a latch left by a peer worktree heals "
+            "once the fix lands on the shared baseline",
+        ]
+    )
 
 
 def test_flex_slice_claim_round_trips_live_claim(tmp_path):

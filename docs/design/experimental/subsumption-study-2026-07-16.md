@@ -28,6 +28,15 @@ and JUnit output; `--retain-coverage PATH` is the only explicit retention path.
 The pytest child runs under the named coverage deadline and process-group
 cleanup policy.
 
+That `uv sync` is a prerequisite of the checkout, not of whatever launched
+spice. The recorder runs pytest in the bound project's own test interpreter --
+an activated repo-local virtualenv, else the checkout's `.venv`, else the
+interpreter a uv-managed project declares -- because spice is usually launched
+by an installed harness Python that deliberately carries no repository
+development dependencies. A checkout declaring none of those, or one whose
+interpreter cannot import `pytest` and `pytest_cov`, is reported before any
+coverage work begins; the ambient `PATH` is never consulted for a substitute.
+
 ## Recorded Denominator
 
 | Measure | Count |

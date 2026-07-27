@@ -6,7 +6,7 @@ import pytest
 
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
-from spice.studies import typecheck
+from spice.studies import pythonruntime
 from spice.studies import cli as studies_cli
 from spice.studies.shape import (
     configured_package_roots,
@@ -241,7 +241,7 @@ def test_python_typecheck_interpreter_resolves_uv_project(tmp_path, monkeypatch)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     python = _write_fake_python(tmp_path / "uv-env" / "bin" / "python")
     (tmp_path / "uv.lock").write_text("", encoding="utf-8")
-    monkeypatch.setattr(typecheck, "find_tool", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(pythonruntime, "find_tool", lambda name: "/usr/bin/uv")
 
     def fake_run(argv, **kwargs):
         assert argv[:6] == [
@@ -255,7 +255,7 @@ def test_python_typecheck_interpreter_resolves_uv_project(tmp_path, monkeypatch)
         assert kwargs["cwd"] == tmp_path
         return subprocess.CompletedProcess(argv, 0, stdout=f"{python}\n", stderr="")
 
-    monkeypatch.setattr(typecheck, "run_tool_command", fake_run)
+    monkeypatch.setattr(pythonruntime, "run_tool_command", fake_run)
 
     assert python_typecheck_interpreter(tmp_path) == python
 

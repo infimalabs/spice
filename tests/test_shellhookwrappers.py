@@ -1,6 +1,7 @@
 """Agent shell wrapper line rendering and live dispatch."""
 
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -44,6 +45,44 @@ def test_agent_wrapper_lines_scopes_builtin_common_default_by_driver(
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
     ) == builtin_common_wrapper_lines(driver_name=driver_name)
+
+
+@pytest.mark.parametrize(
+    ("driver_name", "authored_pattern"),
+    [("codex", "alpha|beta"), ("claude", r"alpha\|beta")],
+)
+def test_plain_grep_preserves_each_driver_authoring_dialect(
+    tmp_path, monkeypatch, driver_name, authored_pattern
+):
+    shell = shutil.which("zsh")
+    if shell is None:
+        pytest.skip("zsh is not installed")
+    fixture = tmp_path / "grep-dialects.txt"
+    fixture.write_text("alpha\nbeta\nalpha|beta\n", encoding="utf-8")
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            f"grep -n {shlex.quote(authored_pattern)} {shlex.quote(str(fixture))}",
+            f"grep -n -F 'alpha|beta' {shlex.quote(str(fixture))}",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed_process_detail(completed)
+    assert completed.stdout.splitlines() == [
+        "1:alpha",
+        "2:beta",
+        "3:alpha|beta",
+        "3:alpha|beta",
+    ]
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):

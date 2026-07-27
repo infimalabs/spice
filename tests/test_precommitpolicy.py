@@ -4,16 +4,31 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
-from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim, git_state_path
+from spice.flexstate import (
+    FLEX_SLICE_CLAIM_TTL_SECONDS,
+    FlexSliceClaim,
+    git_state_path,
+    save_flex_slice_claims,
+)
 from spice.hooks import precommit
-from spice.studies import taste
-from spice.studies.fileloc import LocFinding
+from spice.studies import gates, taste
+from spice.studies.complexity import (
+    COMPLEXITY_CCN_STICKY_GIT_PATH,
+    COMPLEXITY_LENGTH_STICKY_GIT_PATH,
+)
+from spice.studies.fileloc import (
+    FILE_BYTE_STICKY_STATE_GIT_PATH,
+    FILE_LOC_STICKY_STATE_GIT_PATH,
+    LocFinding,
+)
 from spice.studies.repodocs import (
     REPO_DOC_CHAR_STICKY_STATE_GIT_PATH,
     render_repo_truth_doc_lines,
@@ -72,6 +87,25 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "assertion-free-tests",
     "private-internals",
 ]
+
+STICKY_LEDGER_GIT_PATHS = (
+    FILE_LOC_STICKY_STATE_GIT_PATH,
+    FILE_BYTE_STICKY_STATE_GIT_PATH,
+    COMPLEXITY_CCN_STICKY_GIT_PATH,
+    COMPLEXITY_LENGTH_STICKY_GIT_PATH,
+    REPO_DOC_CHAR_STICKY_STATE_GIT_PATH,
+)
+# A file-shape gate sized so one staged path sits over the flex ceiling (a
+# breach, which latches) and another sits inside the flex band (retained only
+# while a latch already names it).
+LATCH_PROBE_BASE_LOC = 2
+LATCH_PROBE_FLEX_RATIO = 2.0
+LATCH_PROBE_BYTE_LOC = 1000000
+LATCH_PROBE_BREACH_LINES = 5
+LATCH_PROBE_BAND_LINES = 3
+# A flex slice is only ever claimed on behalf of a named worktree, so the probe
+# repo needs the agent thread pointer a real one carries.
+LATCH_PROBE_THREAD_ID = "0123456789abcdef0123456789abcdef"
 
 
 def repo_truth_doc_violations(repo: Path) -> list[str]:
@@ -391,6 +425,8 @@ def _loc_finding(path: str, claim: FlexSliceClaim | None) -> LocFinding:
         over_byte_limit=False,
         line_limit=5,
         byte_limit=1000,
+        line_flex_breach=True,
+        byte_flex_breach=False,
         flex_slice_claim=claim,
     )
 
@@ -896,6 +932,57 @@ def test_policy_pre_commit_combined_scopes_select_layered_agent_context(
     ]
 
 
+def test_rejected_pre_commit_run_leaves_every_sticky_ledger_as_it_found_it(
+    tmp_path, monkeypatch
+):
+    repo = _latch_probe_repo(tmp_path)
+    _seed_line_sticky_ledger(repo, {Path("band.py")})
+    _patch_builtins_except_file_shape(monkeypatch)
+    before = _sticky_ledger_text(repo)
+
+    with pytest.raises(SpiceError, match="big.py"):
+        precommit.handle_pre_commit(repo)
+
+    # The commit was refused, so the author's next attempt must meet the same
+    # ceiling this one did. A latch recorded here would hold the rejected work
+    # to base instead, making the remedy this very failure printed unreachable.
+    assert _sticky_ledger_text(repo) == before
+
+
+def test_accepted_pre_commit_run_latches_its_breach_and_prunes_stale_paths(
+    tmp_path, monkeypatch
+):
+    repo = _latch_probe_repo(tmp_path)
+    _seed_line_sticky_ledger(repo, {Path("gone.py")})
+    _hold_peer_flex_slice(repo, Path("big.py"))
+    _patch_builtins_except_file_shape(monkeypatch)
+
+    assert precommit.handle_pre_commit(repo) == 0
+
+    # A peer holds big.py's flex slice, so its breach reports as a redirect and
+    # the commit lands. This run was accepted, so its latch is exactly what the
+    # next commit must live with: the landed breach held, the vanished path gone.
+    assert _line_sticky_paths(repo) == ["big.py"]
+
+
+def test_file_shrunk_after_a_rejected_attempt_passes_the_next_run(
+    tmp_path, monkeypatch
+):
+    repo = _latch_probe_repo(tmp_path)
+    _patch_builtins_except_file_shape(monkeypatch)
+    with pytest.raises(SpiceError, match="big.py"):
+        precommit.handle_pre_commit(repo)
+
+    # The author does exactly what the refusal asked and lands the file inside
+    # the flex band it was measured against.
+    _write_repo_file(repo, "big.py", "line\n" * LATCH_PROBE_BAND_LINES)
+    _git(repo, "add", ".")
+
+    # Nothing was committed, so nothing may hold this file to base: a size the
+    # gate would have accepted from any other author has to be accepted here.
+    assert precommit.handle_pre_commit(repo) == 0
+
+
 def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     events = tmp_path / "events.txt"
 
@@ -1047,6 +1134,76 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
 def _patch_pre_commit_builtin_noops(monkeypatch) -> None:
     _patch_pre_commit_builtin_noops_except_staging(monkeypatch)
     monkeypatch.setattr(precommit, "_run_staging_guard", lambda repo_root: None)
+
+
+def _patch_builtins_except_file_shape(monkeypatch) -> None:
+    """No-op every builtin gate except the one whose latch is under test."""
+    file_loc_guard = precommit._run_file_loc_guard
+    _patch_pre_commit_builtin_noops(monkeypatch)
+    monkeypatch.setattr(precommit, "_run_file_loc_guard", file_loc_guard)
+
+
+def _latch_probe_repo(tmp_path: Path) -> Path:
+    """A staged repo with one path over the flex ceiling and one inside it."""
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.limits]\n"
+        f"file_loc = {LATCH_PROBE_BASE_LOC}\n"
+        f"file_bytes = {LATCH_PROBE_BYTE_LOC}\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        f"ratio = {LATCH_PROBE_FLEX_RATIO}\n"
+        "\n"
+        "[[tool.spice.policy.rules]]\n"
+        'scopes = { paths = ["pyproject.toml"] }\n'
+        "unlimited = true\n",
+    )
+    _write_repo_file(repo, "big.py", "line\n" * LATCH_PROBE_BREACH_LINES)
+    _write_repo_file(repo, "band.py", "line\n" * LATCH_PROBE_BAND_LINES)
+    _git(repo, "add", ".")
+    write_agent_thread_pointer(repo, LATCH_PROBE_THREAD_ID)
+    return repo
+
+
+def _line_sticky_ledger() -> gates.StickyLedger[Path]:
+    return gates.path_sticky_ledger(FILE_LOC_STICKY_STATE_GIT_PATH)
+
+
+def _seed_line_sticky_ledger(repo: Path, paths: set[Path]) -> None:
+    gates.persist_sticky_ledger(_line_sticky_ledger(), paths, root=repo)
+
+
+def _line_sticky_paths(repo: Path) -> list[str]:
+    latched = gates.load_sticky_ledger(_line_sticky_ledger(), root=repo, renames={})
+    return sorted(path.as_posix() for path in latched)
+
+
+def _sticky_ledger_text(repo: Path) -> dict[str, str]:
+    """Every sticky ledger's on-disk text, keyed by its git-state path."""
+    snapshot: dict[str, str] = {}
+    for git_path in STICKY_LEDGER_GIT_PATHS:
+        state_path = git_state_path(git_path, root=repo)
+        if state_path.exists():
+            snapshot[git_path] = state_path.read_text(encoding="utf-8")
+    return snapshot
+
+
+def _hold_peer_flex_slice(repo: Path, path: Path) -> None:
+    """A live claim by another actor, which reports a breach as a redirect."""
+    now = time.time()
+    save_flex_slice_claims(
+        (
+            FlexSliceClaim(
+                path=path,
+                actor="peer-worktree",
+                created_at=now,
+                expires_at=now + FLEX_SLICE_CLAIM_TTL_SECONDS,
+            ),
+        ),
+        root=repo,
+    )
 
 
 def _write_recorder(tmp_path):

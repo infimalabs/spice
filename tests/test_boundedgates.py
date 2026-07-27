@@ -123,6 +123,81 @@ def test_function_sticky_ledger_preserves_schema_and_rename_identity(tmp_path):
     assert loaded == {("old.py", "run"), ("new.py", "run")}
 
 
+EVERY_STICKY_LEDGER = (
+    (
+        gates.path_sticky_ledger(
+            fileloc.FILE_LOC_STICKY_STATE_GIT_PATH, version=fileloc.FILE_LOC_VERSION
+        ),
+        Path("landed.py"),
+        Path("breached.py"),
+    ),
+    (
+        gates.path_sticky_ledger(
+            fileloc.FILE_BYTE_STICKY_STATE_GIT_PATH, version=fileloc.FILE_LOC_VERSION
+        ),
+        Path("landed.py"),
+        Path("breached.py"),
+    ),
+    (
+        gates.function_sticky_ledger(
+            complexity.COMPLEXITY_CCN_STICKY_GIT_PATH,
+            version=complexity.COMPLEXITY_VERSION,
+        ),
+        ("landed.py", "run"),
+        ("breached.py", "run"),
+    ),
+    (
+        gates.function_sticky_ledger(
+            complexity.COMPLEXITY_LENGTH_STICKY_GIT_PATH,
+            version=complexity.COMPLEXITY_VERSION,
+        ),
+        ("landed.py", "run"),
+        ("breached.py", "run"),
+    ),
+    (
+        gates.path_sticky_ledger(
+            repodocs.REPO_DOC_CHAR_STICKY_STATE_GIT_PATH,
+            version=repodocs.REPO_DOC_CHAR_STICKY_VERSION,
+        ),
+        Path("LANDED.md"),
+        Path("BREACHED.md"),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("ledger", "landed", "breached"),
+    EVERY_STICKY_LEDGER,
+    ids=[entry[0].git_path for entry in EVERY_STICKY_LEDGER],
+)
+def test_deferred_writes_hold_each_ledger_at_its_prior_truth_until_commit(
+    tmp_path, ledger, landed, breached
+):
+    repo = _init_repo(tmp_path)
+    gates.persist_sticky_ledger(ledger, {landed}, root=repo)
+
+    with gates.deferred_sticky_writes() as pending:
+        state = gates.reconcile_sticky_latch(
+            ledger,
+            root=repo,
+            renames={},
+            retain=lambda _keys: set(),
+            breach_keys={breached},
+            persist=True,
+        )
+
+        # This run's own verdict advances exactly as it always did: deferral
+        # moves when a write reaches disk, never what the scan decided.
+        assert state.updated == {breached}
+        # Meanwhile the ledger still reads as the last accepted run left it, so
+        # a caller that goes on to reject this run leaves that truth standing.
+        assert gates.load_sticky_ledger(ledger, root=repo, renames={}) == {landed}
+
+        pending.commit()
+
+    assert gates.load_sticky_ledger(ledger, root=repo, renames={}) == {breached}
+
+
 def test_peer_claims_return_only_the_existing_owner(tmp_path):
     repo = _init_repo(tmp_path)
     path = Path("shared.py")
@@ -157,9 +232,11 @@ _BOUNDED_STUDY_CONTRACT = {
         "kernel_call_counts": {
             "BoundedValue": 2,
             "bounded_disposition": 4,
+            "held_at_base_reason": 2,
             "path_sticky_ledger": 2,
             "peer_flex_slice_claims": 1,
             "reconcile_sticky_latch": 1,
+            "render_latch_held_guidance": 1,
             "staged_gate_renames": 1,
         },
         "module_definitions": [
@@ -192,8 +269,10 @@ _BOUNDED_STUDY_CONTRACT = {
             "BoundedValue": 2,
             "bounded_disposition": 5,
             "function_sticky_ledger": 2,
+            "held_at_base_reason": 2,
             "peer_flex_slice_claims": 1,
             "reconcile_sticky_latch": 2,
+            "render_latch_held_guidance": 1,
             "staged_gate_renames": 1,
         },
         "module_definitions": [

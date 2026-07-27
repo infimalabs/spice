@@ -95,11 +95,14 @@ does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group contains the finite post-selection RTK command-shape
 transformations for rg-only grep flags, native find predicates, and diagnostic
 git flags, plus the driver-scoped regexp defaults for RTK grep and plain grep.
-Codex receives `-E`; Claude preserves native BASIC-regexp arguments. RTK
-rewrite selection remains wholly inside `spice agent run`. Repos can override
-`common` for their own command-shape contract, and repo-specific direct-command
-wrappers such as code generators belong in their own selected extension
-groups. An explicit empty list disables wrapper generation.
+Every selected direct wrapper whose argv head is not RTK owns its command word
+regardless of configuration source, so the shared plain grep wrapper prevents
+an RTK candidate from changing a raw `rg` into platform grep. Codex receives
+`-E`; Claude preserves native BASIC-regexp arguments. RTK rewrite selection
+remains wholly inside `spice agent run`. Repos can override `common` for their
+own command-shape contract, and repo-specific direct-command wrappers such as
+code generators belong in their own selected extension groups. An explicit
+empty list disables wrapper generation.
 
 Example:
 

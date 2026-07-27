@@ -561,6 +561,8 @@ def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
                 over_byte_limit=False,
                 line_limit=1500,
                 byte_limit=120_000,
+                line_flex_breach=True,
+                byte_flex_breach=False,
             )
         ],
     )

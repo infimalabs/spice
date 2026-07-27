@@ -378,6 +378,8 @@ def ensure_agent(
     resolved_root = repo_root.resolve()
     with agent_ensure_lock(resolved_root):
         status = agent_status(resolved_root)
+        if not status.running:
+            _require_no_pending_authority_migration(resolved_root)
         driver = driver_for(resolved_root)
         prompt_skill_path = resolve_agent_prompt_skill_path(resolved_root)
         prompt = skill_invocation_prompt(resolved_root, prompt_skill_path)
@@ -433,6 +435,25 @@ def ensure_agent(
             log_path=log_path,
             unhonored_launch_knobs=launch.unhonored_knobs,
         )
+
+
+def _require_no_pending_authority_migration(repo_root: Path) -> None:
+    """Keep every launch surface out of a store's pending migration window."""
+    from spice.serve.team.store import (
+        LANE_SCHEMA_RECORD_HORIZON_HOURS,
+        pending_authority_migration,
+        team_database_path,
+    )
+
+    pending = pending_authority_migration(team_database_path(repo_root))
+    if pending is None:
+        return
+    raise SpiceError(
+        "refusing to start an agent while team authority schema migration "
+        f"{pending.source_version} -> {pending.target_version} is pending; "
+        "the migration clears this signal once the older lanes drain, and an "
+        f"abandoned signal expires after {LANE_SCHEMA_RECORD_HORIZON_HOURS} hours"
+    )
 
 
 def start_agent(

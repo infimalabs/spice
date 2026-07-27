@@ -10,9 +10,10 @@ const repoLocalServeCommand = path.join(repoRoot, ".venv", "bin", "spice");
 const playwrightMcpConfigEnv = "SPICE_PLAYWRIGHT_MCP_CONFIG"; // env-policy: allow
 const defaultStartTimeoutMs = 15000;
 // Boot is usually ~2s, but the shared sandbox can stall past 10s when sibling
-// agents load the machine; this is an upper bound on reaching lifecycle ready,
+// agents load the machine, and a full multi-worktree drain has pushed a
+// lifecycle wait past 20s; this is an upper bound on reaching lifecycle ready,
 // not an expected wait.
-const defaultLifecycleReadyTimeoutMs = 20000;
+const defaultLifecycleReadyTimeoutMs = 30000;
 // Stopfile-change delivery rides macOS FSEvents, which under sandbox load
 // takes multiple seconds to notice the stop write (~7s observed, with an
 // unbounded tail); past this window teardown falls back to SIGINT.

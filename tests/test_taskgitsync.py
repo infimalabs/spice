@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
+from spice.hooks import precommit
 from spice.process import git
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.agent import lifecyclebinding
@@ -153,6 +154,93 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
     assert (repo / "peer.txt").read_text(encoding="utf-8") == "peer feature\n"
     assert (repo / "README.md").read_text(encoding="utf-8") == "agent work\n"
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_intentional_out_of_scope_recovery_owns_a_gate_required_split(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    test_root = peer / "tests"
+    test_root.mkdir()
+    large_module = Path("tests/test_large_module.py")
+    split_module = Path("tests/test_large_module_split.py")
+    oversized = "def test_large_module():\n    assert True\n" + "# peer case\n" * 1_700
+    (peer / large_module).write_text(oversized, encoding="utf-8")
+    (peer / "README.md").write_text("peer work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md", large_module.as_posix())
+    _run(peer, "git", "commit", "-m", "peer adds oversized test module")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(SpiceError, match="test_large_module.py"):
+        precommit._run_file_loc_guard(peer, [large_module])
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish("TASK-1jN54zJR", repo_root=repo)
+
+    first_half = "def test_large_module():\n    assert True\n" + "# first case\n" * 850
+    second_half = (
+        "def test_large_module_split():\n    assert True\n" + "# second case\n" * 850
+    )
+    (repo / large_module).write_text(first_half, encoding="utf-8")
+    (repo / split_module).write_text(second_half, encoding="utf-8")
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(
+        repo,
+        "git",
+        "add",
+        "README.md",
+        large_module.as_posix(),
+        split_module.as_posix(),
+    )
+    _run(repo, "git", "commit", "-m", "Resolve overlap with the required split")
+
+    with pytest.raises(SpiceError) as exc_info:
+        boundaries.integrate_and_publish("TASK-1jN54zJR", repo_root=repo)
+
+    message = str(exc_info.value)
+    choice = message.index("choose exactly one recovery branch before editing:")
+    accidental = message.index("accidental-restoration:")
+    intentional = message.index("intentional-ownership:")
+    first_commands = message.index("next commands for accidental-restoration:")
+    assert choice < accidental < intentional < first_commands
+    assert "do not restore baseline content" in message
+    assert "every intentional path above" in message
+    assert large_module.as_posix() in message
+    assert split_module.as_posix() in message
+
+    with (repo / large_module).open("a", encoding="utf-8") as stream:
+        stream.write("# task-owned first-half case\n")
+    with (repo / split_module).open("a", encoding="utf-8") as stream:
+        stream.write("# task-owned second-half case\n")
+    _run(repo, "git", "add", large_module.as_posix(), split_module.as_posix())
+    precommit._run_file_loc_guard(repo, [large_module, split_module])
+    _run(repo, "git", "commit", "-m", "Own both intentional split paths")
+
+    result = boundaries.integrate_and_publish("TASK-1jN54zJR", repo_root=repo)
+    merge_head = _uda_map(result.uda_args)["done_merge_head"]
+
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert (
+        _git(repo, "show", f"{merge_head}:{large_module}")
+        == (repo / large_module).read_text(encoding="utf-8").rstrip()
+    )
+    assert (
+        _git(repo, "show", f"{merge_head}:{split_module}")
+        == (repo / split_module).read_text(encoding="utf-8").rstrip()
+    )
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
     assert _git(repo, "status", "--porcelain") == ""
 
 
@@ -1313,9 +1401,11 @@ def _uda_map(args: list[str]) -> dict[str, str]:
     return dict(item.split(":", 1) for item in args)
 
 
-def _refusal_commands(message: str) -> list[str]:
+def _refusal_commands(
+    message: str, heading: str = "next commands for accidental-restoration:"
+) -> list[str]:
     lines = message.splitlines()
-    start = lines.index("next commands:") + 1
+    start = lines.index(heading) + 1
     commands: list[str] = []
     for line in lines[start:]:
         if line.startswith("  "):

@@ -29,6 +29,7 @@ from spice.serve.team.schema import (
 )
 from spice.serve.team.store import (
     GLOBAL_LANE_SCHEMA_KEY_PREFIX,
+    GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY,
     LANE_SCHEMA_RECORD_HORIZON_SECONDS,
     AuthorityStoreSupersededError,
     ServeTeamStore,
@@ -770,9 +771,19 @@ def test_a_migration_waits_while_a_lane_still_runs_the_older_schema(tmp_path):
     message = str(refusal.value)
     assert f"{LAGGING_LANE} at schema {PRIOR_AUTHORITY_VERSION}" in message
     assert "1 lane(s)" in message
-    # Declining has to leave the store exactly as the lane still using it can
-    # keep using it. A store carried halfway is the outage this exists to stop.
-    assert _authority_state(path) == before
+    # Declining leaves the store exactly as the lane still using it can keep
+    # using it, apart from the revision-zero intent every launcher has to see.
+    # A store carried halfway is the outage this exists to stop.
+    after = _authority_state(path)
+    assert {
+        table: rows for table, rows in after.items() if table != "global_settings"
+    } == {table: rows for table, rows in before.items() if table != "global_settings"}
+    before_settings = {str(row[0]): row[1:] for row in before["global_settings"]}
+    after_settings = {str(row[0]): row[1:] for row in after["global_settings"]}
+    pending = after_settings.pop(GLOBAL_PENDING_AUTHORITY_MIGRATION_KEY)
+    assert after_settings == before_settings
+    assert pending[0] == (f"{PRIOR_AUTHORITY_VERSION}:{TEAM_AUTHORITY_SCHEMA_VERSION}")
+    assert pending[2] == 0
     with sqlite_connection(path) as connection:
         assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
             PRIOR_AUTHORITY_VERSION

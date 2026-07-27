@@ -11,7 +11,7 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from spice.config.values import configured_rtk_executable
 from spice.errors import SpiceError
@@ -173,6 +173,25 @@ def unclaim(handle: str | None = None) -> str:
     return identity.render_handle(row)
 
 
+def _deferred_intake_mods(row: dict[str, Any], *, at: str) -> tuple[str, ...]:
+    """Clear pre-intake deferral and start its suspended SLA in one mutation."""
+    from spice.tasks import create
+
+    due_mods = (
+        ()
+        if str(row.get("due") or "")
+        else tuple(create.sla_due_args(None, str(row.get("priority") or "")))
+    )
+    return (
+        "wait:",
+        *due_mods,
+        readiness.transition_arg(
+            at=at,
+            ready=readiness.ready_after_clearing_wait(row, at=at),
+        ),
+    )
+
+
 def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     """Clear delayed task waits so the allocator can see them as current.
 
@@ -205,29 +224,15 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
 
-    from spice.tasks import create
-
-    base_mods = ["wait:"]
+    base_mods: list[str] = []
     if target is not None:
         base_mods.append(f"project:{target}")
     mods_by_uuid: dict[str, tuple[str, ...]] = {}
     woke_at = tw.now_iso()
     for row in rows:
-        # Waking starts the SLA clock deferred creation suspended, through
-        # the same due-calculation seam ordinary creation uses; a due already
-        # on the row is an exact deadline and stays untouched.
-        due_mods = (
-            []
-            if str(row.get("due") or "")
-            else create.sla_due_args(None, str(row.get("priority") or ""))
-        )
         mods_by_uuid[identity.uuid_of(row)] = (
+            *_deferred_intake_mods(row, at=woke_at),
             *base_mods,
-            *due_mods,
-            readiness.transition_arg(
-                at=woke_at,
-                ready=readiness.ready_after_clearing_wait(row, at=woke_at),
-            ),
         )
     groups: dict[tuple[str, ...], list[str]] = {}
     for uuid, mods in mods_by_uuid.items():
@@ -526,10 +531,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         f"phase:{nxt}",
         "start:",
         *CLAIM_CLEAR,
-        readiness.transition_arg(
-            at=transitioned_at,
-            ready=readiness.ready_when_inactive(uuid),
-        ),
+        *_deferred_intake_mods(row, at=transitioned_at),
     ]
     if nxt == "review":
         author = review_author or str(row.get("claim_by") or "") or tw.current_actor()
@@ -614,27 +616,60 @@ def _continue_done(payload: dict[str, Any]) -> str:
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
-    transition_lines = [result]
-    if result.startswith("advanced "):
-        transition_lines.append(_phase_ownership_line())
-    learning_line = _distill_task_done_learnings(
-        row,
-        done_at=tw.now_iso(),
-        handle_text=identity.render_handle(row),
-        repo_root=config.repo_root(),
-    ).render()
-    next_line = next_task_drain_line()
-    if result.endswith(" -> review"):
-        next_line = next_task_drain_line(review_assignment=True)
-    if not chain_next:
-        return "\n".join([*transition_lines, *sync_notes, learning_line, next_line])
-    # Deferred to keep the read-side render -> ops dependency acyclic at import
-    # time while reusing exactly the allocator continuation behind `task next`.
-    from spice.tasks import render
 
-    return "\n".join(
-        [*transition_lines, *sync_notes, learning_line, render.render_next()]
+    # _advance returning is the commit point: phase and validation are durable.
+    # Everything after it is continuation or presentation for that finished
+    # phase, so a stale dependency must report the landed transition instead
+    # of turning success into exit 2 and inviting the operator to repeat done.
+    def presentation() -> str:
+        transition_lines = [result]
+        if result.startswith("advanced "):
+            transition_lines.append(_phase_ownership_line())
+        learning_line = _distill_task_done_learnings(
+            row,
+            done_at=tw.now_iso(),
+            handle_text=identity.render_handle(row),
+            repo_root=config.repo_root(),
+        ).render()
+        next_line = next_task_drain_line()
+        if result.endswith(" -> review"):
+            next_line = next_task_drain_line(review_assignment=True)
+        if not chain_next:
+            return "\n".join([*transition_lines, *sync_notes, learning_line, next_line])
+        # Deferred to keep the read-side render -> ops dependency acyclic at
+        # import time while reusing exactly the allocator continuation behind
+        # `task next`.
+        from spice.tasks import render
+
+        return "\n".join(
+            [*transition_lines, *sync_notes, learning_line, render.render_next()]
+        )
+
+    return _report_landed_work(
+        presentation,
+        landed_lines=[
+            result,
+            f"validation recorded: {' | '.join(validation)}",
+        ],
     )
+
+
+def _report_landed_work(
+    presentation: Callable[[], str],
+    *,
+    landed_lines: Sequence[str],
+) -> str:
+    """Render post-commit output without invalidating already-durable work."""
+    try:
+        return presentation()
+    except Exception as exc:
+        return "\n".join(
+            [
+                *landed_lines,
+                f"post-commit presentation failed: {exc}",
+                "the task write is durable; do not repeat the command",
+            ]
+        )
 
 
 def _phase_continuation_environment() -> dict[str, str]:
@@ -947,13 +982,26 @@ def _continue_review(payload: dict[str, Any]) -> str:
         reviewed_at=at,
     )
     result = _advance(identity.resolve(reviewed_handle))
-    lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
-    lines += [f"spawned {h}" for h in spawned]
-    lines += [f"linked {h}" for h in linked]
-    if feedback.status != "clean":
-        lines.append(feedback.output_line())
-    lines.append(next_task_drain_line())
-    return "\n".join(lines)
+    reviewed_line = f"reviewed {identity.render_handle(row)} {finding}; {result}"
+    spawned_lines = [f"spawned {h}" for h in spawned]
+    linked_lines = [f"linked {h}" for h in linked]
+
+    def presentation() -> str:
+        lines = [reviewed_line, *spawned_lines, *linked_lines]
+        if feedback.status != "clean":
+            lines.append(feedback.output_line())
+        lines.append(next_task_drain_line())
+        return "\n".join(lines)
+
+    return _report_landed_work(
+        presentation,
+        landed_lines=[
+            reviewed_line,
+            f"finding recorded: {finding}",
+            *spawned_lines,
+            *linked_lines,
+        ],
+    )
 
 
 def _continue_phase(payload: dict[str, Any]) -> str:

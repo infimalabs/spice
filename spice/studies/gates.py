@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -74,6 +76,35 @@ def bounded_disposition(
     )
 
 
+def held_at_base_reason(reason: str, *, held: bool, ledger_label: str) -> str:
+    """Tag a failing reason that is over base only because a latch holds it.
+
+    Names the ledger file carrying the latch so the otherwise-invisible git-dir
+    state is reachable; a current flex breach (``held`` is false) is left as-is.
+    """
+    if held:
+        return f"{reason} (held at base by {ledger_label})"
+    return reason
+
+
+def render_latch_held_guidance(noun: str) -> str:
+    """The shared remedy line for a value held to base by a sticky latch.
+
+    A held-at-base value is within its flex band now and fails only because an
+    earlier breach latched it in the named ledger; the fix is to drop back under
+    the base limit (or let a peer worktree's collateral latch heal on the shared
+    baseline), never to split a file that is already within flex. Both the
+    file-shape and complexity boards render this through one seam so the two
+    reconcile_sticky_latch consumers cannot drift apart.
+    """
+    return (
+        f"  a held-at-base {noun} is within flex now but latched by an earlier "
+        "breach recorded in the named ledger; it clears when any scan sees it "
+        "back under its base limit, so a latch left by a peer worktree heals "
+        "once the fix lands on the shared baseline"
+    )
+
+
 @dataclass(frozen=True)
 class StickyLedger(Generic[StickyKey]):
     """Typed storage contract for one sticky-latch set."""
@@ -136,6 +167,54 @@ def load_sticky_ledger(
     return ledger.remap(loaded, renames)
 
 
+class DeferredStickyWrites:
+    """Sticky-ledger writes held until the run that produced them is accepted.
+
+    A gate scan computes its latch set well before anything decides whether the
+    commit lands. Holding the write here keeps a rejected run from latching a
+    breach that never entered the tree, while the in-memory latch state each
+    scan returns is untouched, so the current run's findings are unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._held: list[tuple[StickyLedger[Any], set[Any], Path, GateErrors]] = []
+
+    def hold(
+        self,
+        ledger: StickyLedger[StickyKey],
+        items: set[StickyKey],
+        *,
+        root: Path,
+        errors: GateErrors,
+    ) -> None:
+        self._held.append((ledger, set(items), root, errors))
+
+    def commit(self) -> None:
+        """Persist every held write, each under its own call site's tolerances."""
+        held, self._held = self._held, []
+        for ledger, items, root, errors in held:
+            try:
+                persist_sticky_ledger(ledger, items, root=root)
+            except errors:
+                pass
+
+
+_DEFERRED_STICKY_WRITES: ContextVar[DeferredStickyWrites | None] = ContextVar(
+    "spice_deferred_sticky_writes", default=None
+)
+
+
+@contextmanager
+def deferred_sticky_writes() -> Iterator[DeferredStickyWrites]:
+    """Hold every sticky-ledger write of one run for the caller to commit."""
+    pending = DeferredStickyWrites()
+    token = _DEFERRED_STICKY_WRITES.set(pending)
+    try:
+        yield pending
+    finally:
+        _DEFERRED_STICKY_WRITES.reset(token)
+
+
 def reconcile_sticky_latch(
     ledger: StickyLedger[StickyKey],
     *,
@@ -154,11 +233,26 @@ def reconcile_sticky_latch(
     retained = retain(set(loaded)) & loaded
     updated = retained | set(breach_keys)
     if persist and updated != loaded:
-        try:
-            persist_sticky_ledger(ledger, updated, root=root)
-        except persist_errors:
-            pass
+        _record_sticky_update(ledger, updated, root=root, persist_errors=persist_errors)
     return StickyLatchState(loaded=loaded, retained=retained, updated=updated)
+
+
+def _record_sticky_update(
+    ledger: StickyLedger[StickyKey],
+    updated: set[StickyKey],
+    *,
+    root: Path,
+    persist_errors: GateErrors,
+) -> None:
+    """Write the latch now, or hold it for whoever accepts the run."""
+    pending = _DEFERRED_STICKY_WRITES.get()
+    if pending is not None:
+        pending.hold(ledger, updated, root=root, errors=persist_errors)
+        return
+    try:
+        persist_sticky_ledger(ledger, updated, root=root)
+    except persist_errors:
+        pass
 
 
 def persist_sticky_ledger(

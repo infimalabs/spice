@@ -20,6 +20,13 @@ RTK_MINIMUM_VERSION = (0, 42, 4)
 RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
 RTK_VERSION_PATTERN = re.compile(r"\brtk\s+(\d+)\.(\d+)\.(\d+)\b", re.IGNORECASE)
 RTK_PROTOCOL_PROBE = ("git", "status")
+# A search the two regex dialects answer differently. ``+`` is a quantifier to
+# the written command and a literal character in basic mode, so a rewrite that
+# changes the dialect counts nothing where the written command counts one. The
+# subject arrives on stdin so probing reads the repository and writes nothing.
+RTK_FIDELITY_PROBE = ("rg", "--count", "al+pha", "-")
+RTK_FIDELITY_SUBJECT = "alpha\nbeta\n"
+SEARCH_NO_MATCH_EXIT_CODE = 1
 
 
 @dataclass(frozen=True)
@@ -93,11 +100,11 @@ def probe_rtk_health(
         return RtkHealth(executable, "missing", launch_detail, version)
     rewritten = _stdout_text(rewrite_result).strip()
     if rewrite_result.returncode in RTK_REWRITE_SUCCESS_EXIT_CODES and rewritten:
-        return RtkHealth(
+        return _answer_preserving_health(
+            runner,
             executable,
-            "active",
-            f"rewrite protocol valid (exit {rewrite_result.returncode})",
             version,
+            protocol_exit=rewrite_result.returncode,
         )
     stdout_shape = "nonempty" if rewritten else "empty"
     return RtkHealth(
@@ -112,12 +119,90 @@ def probe_rtk_health(
     )
 
 
-def _run_probe(
+def _answer_preserving_health(
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    executable: str,
+    version: str,
+    *,
+    protocol_exit: int,
+) -> RtkHealth:
+    """Active unless a rewritten search answered differently than as written."""
+    active = RtkHealth(
+        executable,
+        "active",
+        f"rewrite protocol valid (exit {protocol_exit})",
+        version,
+    )
+    written = _search_count(runner, list(RTK_FIDELITY_PROBE))
+    if written is None:
+        return active
+    rewritten = _rewritten_search_count(runner, executable)
+    # Only a counted disagreement is reported. A rewrite that cannot answer at
+    # all already surfaces its own error to the caller; the failure worth a
+    # state of its own is the one that answers confidently and wrongly.
+    if rewritten is None or rewritten == written:
+        return active
+    return RtkHealth(
+        executable,
+        "rewrite-unfaithful",
+        (
+            f"rewriting {shlex.join(RTK_FIDELITY_PROBE)} changed its answer: "
+            f"as written it counted {written}, rewritten it counted {rewritten}"
+        ),
+        version,
+    )
+
+
+def _rewritten_search_count(
+    runner: Callable[..., subprocess.CompletedProcess[str]], executable: str
+) -> int | None:
+    """The count the rewritten probe reports, or None when there is none to compare."""
+    command = [executable, "rewrite", "--", *RTK_FIDELITY_PROBE]
+    result, _ = _run_probe(runner, command)
+    if result is None or result.returncode not in RTK_REWRITE_SUCCESS_EXIT_CODES:
+        return None
+    rewritten = _stdout_text(result).strip()
+    if not rewritten:
+        return None
+    try:
+        parsed = shlex.split(rewritten)
+    except ValueError:
+        return None
+    if not parsed:
+        return None
+    return _search_count(runner, parsed)
+
+
+def _search_count(
     runner: Callable[..., subprocess.CompletedProcess[str]], command: list[str]
+) -> int | None:
+    """The match count the search reported, or None when it reported no count."""
+    result, _ = _run_probe(runner, command, stdin_text=RTK_FIDELITY_SUBJECT)
+    if result is None:
+        return None
+    text = _stdout_text(result).strip()
+    if text.isdigit():
+        return int(text)
+    if not text and result.returncode == SEARCH_NO_MATCH_EXIT_CODE:
+        return 0
+    return None
+
+
+def _run_probe(
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    command: list[str],
+    *,
+    stdin_text: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
     try:
         return (
-            runner(command, capture_output=True, text=True, check=False),
+            runner(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                input=stdin_text,
+            ),
             "",
         )
     except OSError as exc:
