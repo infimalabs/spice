@@ -856,7 +856,6 @@ def review(
         creation_surface=creation_surface,
     )
     reviewed_handle = identity.render_handle(row)
-    reviewed_at = tw.now_iso()
     repo_root = config.repo_root()
     before_head = git_read(repo_root, "rev-parse", "HEAD")
     sync = boundaries.integrate_and_publish(
@@ -868,10 +867,8 @@ def review(
         "review",
         {
             "handle": reviewed_handle,
-            "actor": actor,
             "finding": finding,
             "note": note,
-            "reviewed_at": reviewed_at,
             "followup": list(followup or []),
             "prepared_followups": [
                 phasecontinuation.serialize_prepared_followup(prepared)
@@ -936,22 +933,45 @@ def _prepare_review_continuation(
     return row, actor, uuid, prepared_followups, targets
 
 
+def _review_cycle_time(row: dict[str, Any], *, actor: str, finding: str) -> str:
+    """The review time this continuation records, held steady across a replay.
+
+    The continuation payload crosses a checkout boundary: it is built by the
+    process running pre-landing code and decoded by the one running the code
+    that just landed, so every key it carries is a wire contract that a later
+    field addition can break mid-review. The reviewer's timestamp does not have
+    to travel. ``review_at`` is written once per review, and a row only enters
+    the review phase once, so a value already recorded under this reviewer and
+    this verdict can only be a partial write of the very continuation being
+    applied; reading it back makes an exact replay land identical durable
+    state. Any other recorded verdict belongs to a different review and stamps
+    its own time.
+    """
+    recorded = str(row.get("review_at") or "")
+    if (
+        recorded
+        and str(row.get("review_by") or "") == actor
+        and str(row.get("review_finding") or "") == finding
+    ):
+        return recorded
+    return tw.now_iso()
+
+
 def _continue_review(payload: dict[str, Any]) -> str:
     """Apply one already-integrated review through the current checkout."""
     handle = str(payload["handle"])
-    actor = str(payload.get("actor") or "")
     finding = str(payload.get("finding") or "clean")
     raw_note = payload.get("note")
     note = str(raw_note) if raw_note is not None else None
-    at = str(payload.get("reviewed_at") or "")
-    if not actor or not at:
-        raise SpiceError("task review continuation lacks reviewer identity or time")
     followup = [str(item) for item in payload.get("followup") or []]
     sync_uda_args = [str(item) for item in payload.get("sync_uda_args") or []]
     row = resolve_claim_target(handle, action="review")
     _require_pending(row, "review")
     if str(row.get("phase") or "") != "review":
         raise SpiceError("task review requires a task in the review phase")
+    # The reviewer is the durable claim holder, which _require_owner asserts
+    # this process to be, so the identity never has to ride the payload.
+    actor = tw.current_actor()
     _require_owner(row, actor, "review")
     uuid = identity.uuid_of(row)
     prepared_followups = [
@@ -960,6 +980,7 @@ def _continue_review(payload: dict[str, Any]) -> str:
     ]
     targets = [_resolve_followup_target(name, after_uuid=uuid) for name in followup]
     reviewed_handle = identity.render_handle(row)
+    at = _review_cycle_time(row, actor=actor, finding=finding)
 
     modify = [
         uuid,
