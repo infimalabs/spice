@@ -10,12 +10,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from spice.config.values import configured_agent_driver, configured_rtk_executable
-from spice.config.layers import (
-    SYSTEM_SOURCE,
-    contextualize_config_error,
-    effective_table,
-    load_config,
-)
+from spice.config.layers import contextualize_config_error, effective_table
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_WRAPPER_ENTRY_POINT_GROUP,
@@ -291,12 +286,11 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
     """Wrapper words the agent-run RTK rewrite must leave to the shell.
 
-    A selected non-system direct wrapper whose argv head is not RTK claims its
-    selector word: the pre-shell rewrite substitutes command text before any
-    wrapper function exists, so an RTK claim on such a word would shadow the
-    configured or extension-provided expansion. Installed system wrappers stay
-    rewritable because they are designed around RTK. Configuration errors
-    yield the empty set here; shell-hook rendering surfaces them loudly.
+    A selected direct wrapper whose argv head is not RTK claims its selector
+    word regardless of configuration source: the pre-shell rewrite substitutes
+    command text before any wrapper function exists, so an RTK claim on such a
+    word would shadow the selected expansion. Configuration errors yield the
+    empty set here; shell-hook rendering surfaces them loudly.
     """
     try:
         return _rtk_rewrite_yield_selectors(repo_root)
@@ -305,7 +299,6 @@ def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
 
 
 def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
-    layered = load_config(repo_root)
     context = ScopeContext(driver=active_wrapper_driver_name(repo_root))
     rtk_words = {RTK_CANONICAL_EXECUTABLE, configured_rtk_executable(repo_root)}
     selectors: set[str] = set()
@@ -318,10 +311,6 @@ def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
             wrapper = str(raw_wrapper).strip()
             if wrapper == SCOPES_KEY or not isinstance(raw_entry, Mapping):
                 continue
-            if not selected.from_extension:
-                source = layered.source_for(("wrappers", group_name, wrapper))
-                if source is None or source.name == SYSTEM_SOURCE:
-                    continue
             if not WRAPPER_SCOPES.parse(raw_entry.get(SCOPES_KEY)).matches(context):
                 continue
             command_words = command_words_from_config(

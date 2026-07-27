@@ -89,7 +89,11 @@ def test_rtk_command_shape_ownership_matches_the_default_group():
         "The built-in `common` group contains the global `rtk` and plain `grep` wrappers"
         in wrapper_contract
     )
-    assert "Those two driver-scoped routes" in wrapper_contract
+    assert "Every selected direct wrapper" in wrapper_contract
+    assert "regardless of whether the wrapper came from packaged defaults" in (
+        wrapper_contract
+    )
+    assert "Both drivers receive that plain `grep` wrapper" in wrapper_contract
     assert "RTK rewrite selection happens inside `spice agent run`" in reference
     assert "rg-only grep flags" in wrapper_contract
     assert "Trailing-directory operands" in wrapper_contract

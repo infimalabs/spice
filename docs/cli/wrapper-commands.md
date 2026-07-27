@@ -121,20 +121,24 @@ form is a known limitation of the shell-function mechanism, not a routed case;
 Spice's post-selection routing governs only wrapper-visible command words, never
 RTK's external rewrite selection.
 
-The Codex driver also receives the global plain `grep` wrapper. Those two
-driver-scoped routes make extended regular expressions the Codex default:
-`rtk grep` delegates to the platform grep, whose BASIC dialect would read
-Codex-authored `| + ? ( )` as literals, so `-E` is injected ahead of the
-caller's arguments. Claude authors BASIC alternation as `\|`, so its generated
-wrapper set omits both `-E` dialect injections and preserves the native dialect,
-while still gaining the search-operand `-r` recursion route so a bare directory
-operand recurses through native grep instead of failing. Matcher
-selection stays deterministic for Codex — an explicit `-F` or `-G`, later in
-argv, still wins because grep honors the last matcher flag; a repeated `-E` is
-harmless; and unsupported or conflicting backend flags pass through unchanged
-to fail natively rather than selecting an alternate path. Any new
-transformation belongs in the published contract and its executable tests; it
-is not an alternate rewrite selector.
+Every selected direct wrapper whose argv head is not the configured RTK
+executable owns its command word before RTK rewrite, regardless of whether the
+wrapper came from packaged defaults, repository configuration, or an extension.
+The global plain `grep` wrapper therefore makes an RTK candidate ending at
+`rtk grep` yield: an agent-authored `rg` remains `rg`, preserving ripgrep's
+regular-expression dialect and flags. RTK-headed and unselected wrapper words
+remain eligible for rewrite.
+
+Both drivers receive that plain `grep` wrapper. Its shared base invokes native
+grep, preserving Claude-authored BASIC alternation such as `\|`; a Codex-scoped
+catch-all injects `-E` so Codex-authored `| + ? ( )` remain operators. Explicit
+`-E`, `-F`, `-P`, or `-G` matcher flags route first and pass through unchanged,
+so no injected matcher competes with the caller's choice. The separate
+driver-scoped `rtk grep` routes still provide recursive `-r` behavior for search
+operands. Unsupported or conflicting backend flags pass through unchanged to
+fail natively rather than selecting another path. Any new transformation
+belongs in the published contract and its executable tests; it is not another
+rewrite selector.
 
 Selecting `common` inherits this global default in full. A later-scope
 `wrappers.common` table replaces the whole group atomically at the named-group
