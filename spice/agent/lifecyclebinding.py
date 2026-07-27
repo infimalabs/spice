@@ -309,6 +309,12 @@ def materialize_worktree_skill(
     reinstalling spice updates every ignored worktree copy on its next
     activation or launch. A tracked worktree copy is returned without rewriting,
     because Git cannot ignore tracked-file modifications.
+
+    A source that cannot be decoded leaves the worktree exactly as an
+    unreadable one does. Both are the same condition to a caller -- this
+    materializer could not produce a fresh copy -- and callers on the launch and
+    activation path treat that as a note rather than an exception, so neither
+    may escape as one.
     """
     target = worktree_skill_path(repo_root)
     packaged = packaged_path or packaged_skill_path()
@@ -317,8 +323,8 @@ def materialize_worktree_skill(
             materialize_worktree_skill_gitignore(repo_root)
             return target
         return None
-    content = packaged.read_text(encoding="utf-8")
     try:
+        content = packaged.read_text(encoding="utf-8")
         materialize_worktree_skill_gitignore(repo_root)
         if target.is_file():
             if target.read_text(encoding="utf-8") == content:
@@ -326,7 +332,7 @@ def materialize_worktree_skill(
             if git_tracks_relative_path(repo_root, WORKTREE_SKILL_RELATIVE_PATH):
                 return target
         atomic_write_text(target, content, write_if_changed=True)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return target if target.is_file() else None
     return target
 
