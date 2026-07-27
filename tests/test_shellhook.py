@@ -511,6 +511,85 @@ def test_agent_run_preserves_native_rg_extended_regexp_results(
     assert len(through_agent.stdout.splitlines()) == 3
 
 
+@pytest.mark.parametrize("driver_name", ["codex", "claude"])
+@pytest.mark.parametrize("rg_flag", ["--hidden", "--no-ignore"])
+@pytest.mark.parametrize("flag_position", ["leading", "trailing"])
+def test_agent_run_preserves_rg_only_flags_in_any_position(
+    tmp_path, monkeypatch, driver_name, rg_flag, flag_position
+):
+    shell = shutil.which("zsh")
+    if shell is None:
+        pytest.skip("zsh is required for the agent-run shell path")
+    fixture = tmp_path / "search-fixture"
+    fixture.mkdir()
+    init_git_repo(fixture)
+    (fixture / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    (fixture / "flag.txt").write_text(
+        "contains --hidden and --no-ignore literally\n",
+        encoding="utf-8",
+    )
+    (fixture / "visible.txt").write_text("alpha visible\n", encoding="utf-8")
+    (fixture / ".hidden.txt").write_text("alpha hidden\n", encoding="utf-8")
+    (fixture / "ignored.txt").write_text("alpha ignored\n", encoding="utf-8")
+    if flag_position == "leading":
+        raw_words = ["rg", rg_flag, "alpha", str(fixture / "flag.txt")]
+    else:
+        raw_words = ["rg", "alpha", str(fixture), rg_flag]
+    raw = shlex.join(raw_words)
+    rewritten = shlex.join(["rtk", "grep", *raw_words[1:]])
+    repo = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    monkeypatch.setattr(
+        wrap,
+        "rtk_rewrite_command_text",
+        lambda *_args, **_kwargs: rewritten,
+    )
+
+    agent_command = wrap.build_agent_run_command(
+        [shell, "-c", raw],
+        repo_root=repo,
+        rewrite_rtk=True,
+    )
+    native = subprocess.run(
+        [shell, "-c", f"command {raw}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    through_agent = subprocess.run(
+        agent_command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert agent_command == [shell, "-c", raw]
+    assert (
+        through_agent.returncode,
+        set(through_agent.stdout.splitlines()),
+        through_agent.stderr.splitlines(),
+    ) == (
+        native.returncode,
+        set(native.stdout.splitlines()),
+        native.stderr.splitlines(),
+    )
+    if flag_position == "leading":
+        # The intended alpha pattern is still the pattern: the flag itself must
+        # not become grep's pattern and match the literal flag fixture.
+        assert through_agent.returncode == 1
+        assert through_agent.stdout == ""
+    else:
+        expected_names = (
+            {".hidden.txt", "visible.txt"}
+            if rg_flag == "--hidden"
+            else {"ignored.txt", "visible.txt"}
+        )
+        assert {
+            Path(line.split(":", 1)[0]).name
+            for line in through_agent.stdout.splitlines()
+        } == expected_names
+
+
 def test_wrapper_degrades_malformed_direct_rewrite_to_original_execution(
     monkeypatch,
 ):
