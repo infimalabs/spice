@@ -658,7 +658,8 @@ def test_task_wake_into_promotes_deferred_oops_into_public_project(task_repo):
     assert not str(row.get("wait") or "")
     assert row.get("tags", []) == []
     assert fresh != handle
-    assert f"promoted {handle} -> {fresh}: wait: project:task.unit" in output
+    assert f"promoted {handle} -> {fresh}: wait:" in output
+    assert "project:task.unit" in output
     assert "route_filter=added:task.unit:auto:create" in output
     assert team_config.task_filters == ("task.unit",)
     assert fresh in _ready_handles()

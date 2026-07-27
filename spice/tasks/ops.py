@@ -164,6 +164,25 @@ def unclaim(handle: str | None = None) -> str:
     return identity.render_handle(row)
 
 
+def _deferred_intake_mods(row: dict[str, Any], *, at: str) -> tuple[str, ...]:
+    """Clear pre-intake deferral and start its suspended SLA in one mutation."""
+    from spice.tasks import create
+
+    due_mods = (
+        ()
+        if str(row.get("due") or "")
+        else tuple(create.sla_due_args(None, str(row.get("priority") or "")))
+    )
+    return (
+        "wait:",
+        *due_mods,
+        readiness.transition_arg(
+            at=at,
+            ready=readiness.ready_after_clearing_wait(row, at=at),
+        ),
+    )
+
+
 def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     """Clear delayed task waits so the allocator can see them as current.
 
@@ -196,29 +215,15 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
 
-    from spice.tasks import create
-
-    base_mods = ["wait:"]
+    base_mods: list[str] = []
     if target is not None:
         base_mods.append(f"project:{target}")
     mods_by_uuid: dict[str, tuple[str, ...]] = {}
     woke_at = tw.now_iso()
     for row in rows:
-        # Waking starts the SLA clock deferred creation suspended, through
-        # the same due-calculation seam ordinary creation uses; a due already
-        # on the row is an exact deadline and stays untouched.
-        due_mods = (
-            []
-            if str(row.get("due") or "")
-            else create.sla_due_args(None, str(row.get("priority") or ""))
-        )
         mods_by_uuid[identity.uuid_of(row)] = (
+            *_deferred_intake_mods(row, at=woke_at),
             *base_mods,
-            *due_mods,
-            readiness.transition_arg(
-                at=woke_at,
-                ready=readiness.ready_after_clearing_wait(row, at=woke_at),
-            ),
         )
     groups: dict[tuple[str, ...], list[str]] = {}
     for uuid, mods in mods_by_uuid.items():
@@ -517,10 +522,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         f"phase:{nxt}",
         "start:",
         *CLAIM_CLEAR,
-        readiness.transition_arg(
-            at=transitioned_at,
-            ready=readiness.ready_when_inactive(uuid),
-        ),
+        *_deferred_intake_mods(row, at=transitioned_at),
     ]
     if nxt == "review":
         author = review_author or str(row.get("claim_by") or "") or tw.current_actor()

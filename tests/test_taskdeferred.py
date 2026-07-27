@@ -1,4 +1,4 @@
-"""Deferred task creation and deferral-preserving lifecycle coverage."""
+"""Deferred task creation, intake, and lifecycle scheduling coverage."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from spice.tasks import alloc, claimstate, config, create, identity, ops, render
 from tests.test_reposcaffolding import init_committed_repo as _init_repo
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SECOND_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 SCHEDULING_FIELDS = ("wait", "scheduled", "due", "until")
 
@@ -136,9 +137,9 @@ def test_unclaim_preserves_scheduling(task_repo):
     assert str(row.get("start") or "") == ""
 
 
-def test_deferred_plan_to_todo_advancement_preserves_scheduling(task_repo):
+def test_deferred_plan_to_todo_advancement_starts_intake(task_repo, monkeypatch):
     handle = _deferred_task(
-        "Deferred plan advancement keeps the envelope", flow=["plan", "todo"]
+        "Deferred plan advancement starts intake", flow=["plan", "todo"]
     )
     before = _scheduling_snapshot(handle)
     ops.claim(handle)
@@ -146,17 +147,33 @@ def test_deferred_plan_to_todo_advancement_preserves_scheduling(task_repo):
     output = ops.done(handle, validation=["plan phase validated"])
 
     assert f"advanced {handle} -> todo" in output
-    assert _scheduling_snapshot(handle) == before
+    after = _scheduling_snapshot(handle)
+    assert after["wait"] == ""
+    assert {field: after[field] for field in ("scheduled", "due", "until")} == {
+        field: before[field] for field in ("scheduled", "due", "until")
+    }
     row = identity.resolve(handle)
     assert str(row.get("phase") or "") == "todo"
     assert str(row.get("claim_by") or "") == ""
-    # Still deferred: the todo phase stays off the allocator until woken.
-    assert alloc.next_task() is None
+    assert str(row.get(config.TASK_READY_AT_UDA) or "") != ""
+    assert handle in _ready_handles()
+
+    # Phase advance is intake. The claim it releases is immediately available
+    # to another lane without an intervening task-wake mutation.
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, SECOND_ACTOR)
+    offered = alloc.next_task()
+    assert offered is not None
+    assert identity.render_handle(offered) == handle
+    assert str(offered.get("claim_by") or "") == SECOND_ACTOR
 
 
-def test_deferred_todo_to_review_advancement_preserves_scheduling(task_repo):
+def test_deferred_todo_to_review_advancement_starts_intake(task_repo):
     handle = _deferred_task(
-        "Deferred review advancement keeps the envelope", flow=["todo", "review"]
+        "Deferred review advancement starts intake", flow=["todo", "review"]
     )
     before = _scheduling_snapshot(handle)
     ops.claim(handle)
@@ -164,31 +181,111 @@ def test_deferred_todo_to_review_advancement_preserves_scheduling(task_repo):
     output = ops.done(handle, validation=["todo phase validated"])
 
     assert f"advanced {handle} -> review" in output
-    assert _scheduling_snapshot(handle) == before
+    after = _scheduling_snapshot(handle)
+    assert after["wait"] == ""
+    assert {field: after[field] for field in ("scheduled", "due", "until")} == {
+        field: before[field] for field in ("scheduled", "due", "until")
+    }
     row = identity.resolve(handle)
     assert str(row.get("phase") or "") == "review"
     assert str(row.get("review_author") or "") == ACTOR
-    assert alloc.next_task() is None
+    assert str(row.get(config.TASK_READY_AT_UDA) or "") != ""
+    assert handle in _ready_handles()
 
 
-def test_deferred_review_completion_preserves_scheduling(task_repo, monkeypatch):
+def test_deferred_review_completion_preserves_intake_scheduling(task_repo, monkeypatch):
     handle = _deferred_task(
-        "Deferred review completion keeps the envelope", flow=["todo", "review"]
+        "Deferred review completion keeps intake scheduling", flow=["todo", "review"]
     )
     ops.claim(handle)
     ops.done(handle, validation=["todo phase validated"])
     before = _scheduling_snapshot(handle)
-    reviewer = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    monkeypatch.setenv(DRIVER.thread_id_env, reviewer)
+    assert before["wait"] == ""
+    monkeypatch.setenv(DRIVER.thread_id_env, SECOND_ACTOR)
 
     ops.claim(handle)
     assert _scheduling_snapshot(handle) == before
-    output = ops.review(handle, finding="clean", note="deferral intact")
+    output = ops.review(handle, finding="clean", note="intake scheduling intact")
 
     assert f"completed {handle}" in output
     assert _scheduling_snapshot(handle) == before
     row = identity.resolve(handle)
-    assert str(row.get("review_by") or "") == reviewer
+    assert str(row.get("review_by") or "") == SECOND_ACTOR
+
+
+def test_phase_advance_and_wake_start_the_same_suspended_sla(task_repo, monkeypatch):
+    due = "20300102T030405Z"
+    calls: list[tuple[str | None, str]] = []
+
+    def fixed_sla_due_args(
+        explicit: str | None, priority: str, *, auto_due: bool = True
+    ) -> list[str]:
+        assert auto_due is True
+        calls.append((explicit, priority))
+        return [f"due:{due}"]
+
+    advanced = create.add(
+        "Phase intake starts its suspended SLA",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["phase intake starts the SLA"],
+        flow=["plan", "todo"],
+        deferred=True,
+    )
+    woken = create.add(
+        "Wake starts the comparison SLA",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["wake starts the SLA"],
+        deferred=True,
+    )
+    monkeypatch.setattr(create, "sla_due_args", fixed_sla_due_args)
+
+    ops.claim(advanced)
+    ops.done(advanced, validation=["plan accepted"])
+    ops.wake([woken])
+
+    assert _scheduling_snapshot(advanced)["due"] == due
+    assert _scheduling_snapshot(woken)["due"] == due
+    assert calls == [(None, "M"), (None, "M")]
+
+
+def test_hidden_oops_advance_clears_wait_without_entering_public_queue(
+    task_repo, monkeypatch
+):
+    handle = create.add_one(
+        title="Hidden triage advances without promotion",
+        project=config.OOPS_PROJECT,
+        priority=config.SEVERITY_PRIORITY["medium"],
+        flow=["plan", "todo"],
+        tags=[],
+        after=[],
+        acceptance=["triage plan is actionable"],
+        wait=None,
+        claim=False,
+        origin="ack:1jN54zJJ",
+        system_project=True,
+    )
+    assert _scheduling_snapshot(handle)["wait"] != ""
+    ops.claim(handle)
+
+    ops.done(handle, validation=["triage planned"])
+
+    row = identity.resolve(handle)
+    assert str(row.get("phase") or "") == "todo"
+    assert str(row.get("wait") or "") == ""
+    assert alloc.is_hidden(row)
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {
+            "filter": [f"project:{config.OOPS_PROJECT}"],
+            "lifetime": "Drive",
+        },
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, SECOND_ACTOR)
+    assert alloc.next_task() is None
 
 
 def test_blocked_task_claim_preserves_scheduling(task_repo):
@@ -321,7 +418,8 @@ def test_wake_into_promotion_starts_sla_clock(task_repo):
     priority = str(row.get("priority") or "")
     sla_seconds = config.SLA_DUE_SECONDS[priority]
     due_delta = (_parse_tw_datetime(str(row.get("due"))) - started).total_seconds()
-    assert f"promoted {handle} -> {fresh}: wait: project:task.unit due:" in output
+    assert f"promoted {handle} -> {fresh}: wait: due:" in output
+    assert "project:task.unit" in output
     assert sla_seconds - SLA_TOLERANCE_SECONDS <= due_delta
     assert due_delta <= sla_seconds + SLA_TOLERANCE_SECONDS
     assert fresh in _ready_handles()
