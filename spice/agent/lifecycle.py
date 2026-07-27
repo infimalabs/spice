@@ -1335,11 +1335,17 @@ def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:
 
 
 def available_skill_path(repo_root: Path, *, required: bool) -> Path | None:
-    return _available_skill_path(
-        repo_root,
-        required=required,
-        packaged_path=packaged_skill_path(),
-    )
+    """The skill for launch and activation, which never choose their own source.
+
+    The packaged source is deliberately not resolved here. Passing one would
+    make this module a second place that answers "which packaged skill?", and
+    the callee already answers it; the two would then agree only by accident,
+    and which one a caller got would depend on the entry point it happened to
+    reach. `spice.tasks.git.boundaries` is the one caller that does choose,
+    passing a checkout-local source explicitly because its contract names that
+    override outright.
+    """
+    return _available_skill_path(repo_root, required=required)
 
 
 def prompt_skill_invocation_path(repo_root: Path, skill_path: Path) -> Path:

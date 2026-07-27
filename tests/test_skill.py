@@ -26,17 +26,16 @@ UNDECODABLE_WORKTREE_SKILL_BYTES = b"\xff\xfegenerated skill\n"
 
 
 def _undecodable_packaged_skill(tmp_path, monkeypatch):
-    """Point every packaged-source lookup at bytes this process cannot decode.
+    """Point the packaged-source lookup at bytes this process cannot decode.
 
-    Both namespaces are patched because the wrapper resolves the source in
-    ``lifecycle`` while ``materialize_worktree_skill`` resolves its own default
-    in ``lifecyclebinding``; patching one leaves the other serving the real
-    packaged skill, which would let a caller escape the condition under test.
+    One namespace is patched because only one resolves the default. Every
+    entry point that does not name a source of its own reaches
+    ``lifecyclebinding``, so this is the whole surface a caller could use to
+    escape the condition under test.
     """
     packaged = tmp_path / "packaged-skill.md"
     packaged.write_bytes(UNDECODABLE_PACKAGED_SKILL_BYTES)
-    for module in (lifecycle, lifecyclebinding):
-        monkeypatch.setattr(module, "packaged_skill_path", lambda: packaged)
+    monkeypatch.setattr(lifecyclebinding, "packaged_skill_path", lambda: packaged)
     return packaged
 
 
@@ -124,7 +123,7 @@ def test_available_skill_path_required_fails_without_worktree_skill(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
-        lifecycle, "packaged_skill_path", lambda: tmp_path / "missing-package.md"
+        lifecyclebinding, "packaged_skill_path", lambda: tmp_path / "missing-package.md"
     )
 
     with pytest.raises(SpiceError, match="missing spice skill at"):
