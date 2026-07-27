@@ -52,7 +52,8 @@ command-selection policy, not command permission. Spice owns the finite
 `<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db` supplied through
 `RTK_DB_PATH`.
 Activation and Doctor report missing, obsolete, or protocol-invalid RTK as
-native-command mode without blocking agent setup. Cargo installation and the
+native-command mode without blocking agent setup, and report the same mode when
+a rewrite counts a different number of matches than the written search. Cargo installation and the
 complete protocol live in the
 [wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
 

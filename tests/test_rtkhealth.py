@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from spice.config import edit, layers, values
-from spice.agent.rtkhealth import probe_rtk_health
+from spice.agent.rtkhealth import RTK_FIDELITY_PROBE, probe_rtk_health
+
+FIDELITY_REWRITE = "rtk grep --count -E al+pha -"
 
 
 @pytest.mark.parametrize(
@@ -27,14 +29,7 @@ def test_health_probe_uses_exact_executable_and_accepts_supported_rewrites(
 ) -> None:
     _configure_executable(tmp_path, executable)
     calls: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        if command[1:] == ["--version"]:
-            return subprocess.CompletedProcess(command, 0, "rtk 0.42.4\n", "")
-        return subprocess.CompletedProcess(
-            command, rewrite_exit, "rtk git status --short\n", ""
-        )
+    run = _staged_run(executable, rewrite_exit, ("1\n", 0), calls)
 
     health = probe_rtk_health(tmp_path, run=run)
 
@@ -48,6 +43,9 @@ def test_health_probe_uses_exact_executable_and_accepts_supported_rewrites(
         "calls": [
             [executable, "--version"],
             [executable, "rewrite", "--", "git", "status"],
+            list(RTK_FIDELITY_PROBE),
+            [executable, "rewrite", "--", *RTK_FIDELITY_PROBE],
+            ["rtk", "grep", "--count", "-E", "al+pha", "-"],
         ],
         "state": "active",
         "mode": "active",
@@ -56,6 +54,105 @@ def test_health_probe_uses_exact_executable_and_accepts_supported_rewrites(
             f"{_quoted(executable)} --version && "
             f"{_quoted(executable)} rewrite -- git status"
         ),
+    }
+
+
+def test_health_probe_reports_a_rewrite_that_counted_a_different_answer(
+    tmp_path: Path,
+) -> None:
+    """A rewrite answering zero where the written command answers one is reported."""
+    _configure_executable(tmp_path, "rtk")
+    calls: list[list[str]] = []
+    run = _staged_run("rtk", 0, ("", 1), calls)
+
+    health = probe_rtk_health(tmp_path, run=run)
+    payload = json.loads(health.activation_status_line().removeprefix("rtk_status="))
+
+    assert {
+        "state": health.state,
+        "mode": health.mode,
+        "detail": health.detail,
+        "payload_state": payload["state"],
+        "payload_detail": payload["detail"],
+        "searched": calls[2:],
+    } == {
+        "state": "rewrite-unfaithful",
+        "mode": "native",
+        "detail": (
+            "rewriting rg --count al+pha - changed its answer: "
+            "as written it counted 1, rewritten it counted 0"
+        ),
+        "payload_state": "rewrite-unfaithful",
+        "payload_detail": (
+            "rewriting rg --count al+pha - changed its answer: "
+            "as written it counted 1, rewritten it counted 0"
+        ),
+        "searched": [
+            list(RTK_FIDELITY_PROBE),
+            ["rtk", "rewrite", "--", *RTK_FIDELITY_PROBE],
+            ["rtk", "grep", "--count", "-E", "al+pha", "-"],
+        ],
+    }
+
+
+def test_health_probe_carries_its_own_subject_and_leaves_the_checkout_alone(
+    tmp_path: Path,
+) -> None:
+    """The fidelity search reads its subject from stdin, so probing writes nothing."""
+    _configure_executable(tmp_path, "rtk")
+    calls: list[list[str]] = []
+    stdin_texts: list[object] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdin_texts.append(kwargs.get("input"))
+        return _staged_run("rtk", 0, ("", 1), calls)(command, **kwargs)
+
+    before = _tree_entries(tmp_path)
+    health = probe_rtk_health(tmp_path, run=run)
+    after = _tree_entries(tmp_path)
+
+    assert {
+        "entries": after,
+        "state": health.state,
+        "subjects": stdin_texts[2:],
+    } == {
+        "entries": before,
+        "state": "rewrite-unfaithful",
+        "subjects": ["alpha\nbeta\n", None, "alpha\nbeta\n"],
+    }
+
+
+def _staged_run(
+    executable: str,
+    rewrite_exit: int,
+    rewritten: tuple[str, int],
+    calls: list[list[str]],
+):
+    """A runner answering each probe stage, with the rewritten search controllable."""
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[1:] == ["--version"]:
+            return subprocess.CompletedProcess(command, 0, "rtk 0.42.4\n", "")
+        if command[1:] == ["rewrite", "--", "git", "status"]:
+            return subprocess.CompletedProcess(
+                command, rewrite_exit, "rtk git status --short\n", ""
+            )
+        if command[1:2] == ["rewrite"]:
+            return subprocess.CompletedProcess(
+                command, rewrite_exit, f"{FIDELITY_REWRITE}\n", ""
+            )
+        if command == list(RTK_FIDELITY_PROBE):
+            return subprocess.CompletedProcess(command, 0, "1\n", "")
+        return subprocess.CompletedProcess(command, rewritten[1], rewritten[0], "")
+
+    return run
+
+
+def _tree_entries(root: Path) -> dict[str, bytes | None]:
+    return {
+        str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
+        for path in sorted(root.rglob("*"))
     }
 
 
