@@ -138,10 +138,12 @@ def _refresh_generated_skill_after_advance(repo_root: Path) -> str | None:
     source. Materialization intentionally preserves a tracked worktree skill;
     ignored copies must match byte-for-byte or the sync reports the failure.
 
-    Every failure leaves as a note, because both callers run this only after
+    Every failure leaves as a note, because every caller runs this only after
     HEAD has already advanced. The arriving bytes are whatever the advanced
     tree carries, so a skill that is not valid UTF-8 is reachable and decodes
     to a note rather than an exception that would wedge every lane's launch.
+    The landing caller raises the stakes further: it runs after the merge has
+    published, where an escaping exception would fail work already pushed.
     """
     from spice.agent import lifecyclebinding
 
@@ -334,6 +336,13 @@ def integrate_and_publish(
     on the merged tree. With no
     configured remote this records the local HEAD and performs no network or
     history mutation.
+
+    A landing that moves HEAD carries the baseline's packaged skill into this
+    tree, so it rematerializes the ignored generated copy exactly as the claim
+    and launch advances do. This is the third HEAD-moving boundary; without it
+    new packaged bytes arrive here and the next claim correctly observes no
+    advance and correctly skips, leaving the stale copy in service for the
+    lifetime of the lane.
     """
     root = repo_root or config.repo_root()
     wordingreview.require_integrate_allowed(label, meta)
@@ -389,8 +398,13 @@ def integrate_and_publish(
         agent_head=agent_head,
         message=message,
     )
+    notes = [tree_same_note] if tree_same_note else []
+    if plumbing.read(root, "rev-parse", "HEAD") != agent_head:
+        refresh_note = _refresh_generated_skill_after_advance(root)
+        if refresh_note is not None:
+            notes.append(refresh_note)
     return SyncResult(
-        notes=[tree_same_note] if tree_same_note else [],
+        notes=notes,
         uda_args=merging.capture(
             agent_head,
             merge_head,
