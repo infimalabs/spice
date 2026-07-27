@@ -125,14 +125,21 @@ OPAQUE_JSON_ALLOWLIST = {
 APP_TYPES_GIT_PATH = Path("spice/serve/static/app.types.js")
 
 
+class WireValidationError(SpiceError):
+    """A server-emitted payload violated its declared browser wire contract."""
+
+
 def validate_emitter_payload(emitter: str, payload: PayloadValue) -> PayloadValue:
     try:
         schema_name = BROWSER_PAYLOAD_EMITTER_SCHEMAS[emitter]
     except KeyError as exc:
-        raise SpiceError(
+        raise WireValidationError(
             f"browser payload emitter has no wire schema: {emitter}"
         ) from exc
-    return validate_wire_payload(schema_name, payload)
+    try:
+        return validate_wire_payload(schema_name, payload)
+    except SpiceError as exc:
+        raise WireValidationError(str(exc)) from exc
 
 
 def validate_live_bus_frame(payload: PayloadValue) -> PayloadValue:

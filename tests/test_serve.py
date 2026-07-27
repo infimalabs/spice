@@ -30,7 +30,7 @@ from spice.mail.inbox import (
 )
 from spice.mail.replies import append_reply_record, reply_log_path
 from spice.paths import shared_attachment_root
-from spice.serve import app, livebus
+from spice.serve import app, httpapi, livebus
 from spice.serve.messagepresentation import AssistantMessage
 from spice.serve.messages import AssistantMessageRead
 from spice.serve.payload import identity, message
@@ -724,6 +724,37 @@ def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
     assert handler.status == HTTPStatus.BAD_REQUEST
     assert payload["ok"] is False
     assert "exceeds" in payload["error"]
+
+
+def test_task_burndown_metrics_endpoint_hides_wire_validation_failure(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    validate_emitter_payload = httpapi.validate_emitter_payload
+
+    def validate_with_schema_drift(emitter, payload):
+        if emitter == "httpapi.task_burndown_metrics_response_payload":
+            payload = {**payload, "internalSchemaDrift": True}
+        return validate_emitter_payload(emitter, payload)
+
+    monkeypatch.setattr(
+        httpapi,
+        "validate_emitter_payload",
+        validate_with_schema_drift,
+    )
+    handler = _ImageHandler(state)
+
+    app._ServeHandler._get_task_burndown_metrics(
+        handler,
+        "teamId=team-a&start=0&end=180&bucketSeconds=60",
+    )
+    payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert payload == {"ok": False, "error": "internal server error"}
+    assert "TaskBurndownMetricsResponse" not in handler.body.getvalue().decode()
+    assert "internalSchemaDrift" not in handler.body.getvalue().decode()
 
 
 def _task_distribution_metrics_state(tmp_path, task_plane, team_event):

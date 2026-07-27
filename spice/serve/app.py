@@ -24,6 +24,7 @@ from spice.errors import SpiceError
 from spice.paths import STATE_BACKEND_TASK_DIR, repo_root_from_cwd, set_state_backend
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, message, metric
+from spice.serve.payload.wire import WireValidationError
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -681,6 +682,15 @@ class _ServeHandler(BaseHTTPRequestHandler):
             HTTPStatus.NOT_FOUND,
         )
 
+    def _send_metrics_error(self, exc: SpiceError) -> None:
+        if isinstance(exc, WireValidationError):
+            self._send_json(
+                {"ok": False, "error": "internal server error"},
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+            return
+        self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
     def _get_team_metrics(self, team_id: str, query_string: str) -> None:
         try:
             payload = team_historical_metrics_response_payload(
@@ -689,7 +699,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 parse_qs(query_string),
             )
         except SpiceError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            _ServeHandler._send_metrics_error(self, exc)
             return
         self._send_json(payload)
 
@@ -700,7 +710,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 parse_qs(query_string),
             )
         except SpiceError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            _ServeHandler._send_metrics_error(self, exc)
             return
         self._send_json(payload)
 
@@ -711,7 +721,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 parse_qs(query_string),
             )
         except SpiceError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            _ServeHandler._send_metrics_error(self, exc)
             return
         self._send_json(payload)
 
