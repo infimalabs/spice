@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from spice.errors import SpiceError
-from spice.paths import find_tool
+from spice.paths import STATE_DIRNAME, find_tool
 from spice.process.groups import run_bounded_process_group
 from spice.flexstate import (
     FlexSliceClaim,
@@ -36,6 +36,10 @@ COMPLEXITY_VERSION = 1
 COMPLEXITY_PROCESS_TIMEOUT_SECONDS = 30.0
 COMPLEXITY_CCN_STICKY_GIT_PATH = "complexity-ccn-sticky.json"
 COMPLEXITY_LENGTH_STICKY_GIT_PATH = "complexity-length-sticky.json"
+# Reachable name of each sticky ledger (worktree git-dir state), surfaced on the
+# board so a held-at-base routine points at the file holding the latch.
+_CCN_STICKY_LEDGER_LABEL = f"{STATE_DIRNAME}/{COMPLEXITY_CCN_STICKY_GIT_PATH}"
+_LENGTH_STICKY_LEDGER_LABEL = f"{STATE_DIRNAME}/{COMPLEXITY_LENGTH_STICKY_GIT_PATH}"
 _CCN_STICKY_LEDGER = gates.function_sticky_ledger(
     COMPLEXITY_CCN_STICKY_GIT_PATH,
     version=COMPLEXITY_VERSION,
@@ -76,7 +80,30 @@ class ComplexityFinding:
     over_length: bool
     ccn_limit: int
     length_limit: int
+    ccn_flex_breach: bool
+    length_flex_breach: bool
     flex_slice_claim: FlexSliceClaim | None = None
+
+    @property
+    def ccn_latch_held(self) -> bool:
+        """Over the CCN limit only because a latch holds it to base."""
+        return self.over_ccn and not self.ccn_flex_breach
+
+    @property
+    def length_latch_held(self) -> bool:
+        """Over the length limit only because a latch holds it to base."""
+        return self.over_length and not self.length_flex_breach
+
+    @property
+    def latch_held(self) -> bool:
+        return self.ccn_latch_held or self.length_latch_held
+
+    @property
+    def current_breach(self) -> bool:
+        """A dimension measures over the flex limit right now, latch or not."""
+        return (self.over_ccn and self.ccn_flex_breach) or (
+            self.over_length and self.length_flex_breach
+        )
 
 
 def complexity_hotspot_rows(
@@ -376,6 +403,8 @@ def _complexity_findings(
                     over_length=length_disposition.over_limit,
                     ccn_limit=ccn_disposition.limit,
                     length_limit=length_disposition.limit,
+                    ccn_flex_breach=ccn_disposition.flex_breach,
+                    length_flex_breach=length_disposition.flex_breach,
                     flex_slice_claim=peer_claims.get(Path(record.path)),
                 )
             )
@@ -426,15 +455,29 @@ def render_complexity_board(
     for finding in findings:
         reasons = []
         if finding.over_ccn:
-            reasons.append(f"ccn {finding.record.ccn} > {finding.ccn_limit}")
+            reasons.append(
+                gates.held_at_base_reason(
+                    f"ccn {finding.record.ccn} > {finding.ccn_limit}",
+                    held=finding.ccn_latch_held,
+                    ledger_label=_CCN_STICKY_LEDGER_LABEL,
+                )
+            )
         if finding.over_length:
-            reasons.append(f"length {finding.record.length} > {finding.length_limit}")
+            reasons.append(
+                gates.held_at_base_reason(
+                    f"length {finding.record.length} > {finding.length_limit}",
+                    held=finding.length_latch_held,
+                    ledger_label=_LENGTH_STICKY_LEDGER_LABEL,
+                )
+            )
         if finding.flex_slice_claim is not None:
             reasons.append(render_flex_slice_claim_redirect(finding.flex_slice_claim))
         lines.append(
             f"  FAIL  {finding.record.path}:{finding.record.function_name}: "
             f"{'; '.join(reasons)}"
         )
+    if any(finding.latch_held for finding in findings):
+        lines.append(gates.render_latch_held_guidance("routine"))
     if any(finding.flex_slice_claim is not None for finding in findings):
         lines.append(
             "  peer-held flex slices redirect duplicate refactors; keep changes "

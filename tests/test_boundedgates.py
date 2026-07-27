@@ -157,9 +157,11 @@ _BOUNDED_STUDY_CONTRACT = {
         "kernel_call_counts": {
             "BoundedValue": 2,
             "bounded_disposition": 4,
+            "held_at_base_reason": 2,
             "path_sticky_ledger": 2,
             "peer_flex_slice_claims": 1,
             "reconcile_sticky_latch": 1,
+            "render_latch_held_guidance": 1,
             "staged_gate_renames": 1,
         },
         "module_definitions": [
@@ -192,8 +194,10 @@ _BOUNDED_STUDY_CONTRACT = {
             "BoundedValue": 2,
             "bounded_disposition": 5,
             "function_sticky_ledger": 2,
+            "held_at_base_reason": 2,
             "peer_flex_slice_claims": 1,
             "reconcile_sticky_latch": 2,
+            "render_latch_held_guidance": 1,
             "staged_gate_renames": 1,
         },
         "module_definitions": [
