@@ -143,6 +143,9 @@ def test_deferred_plan_to_todo_advancement_starts_intake(task_repo, monkeypatch)
     )
     before = _scheduling_snapshot(handle)
     ops.claim(handle)
+    claimed = _scheduling_snapshot(handle)
+    assert claimed == before
+    assert claimed["wait"] != ""
 
     output = ops.done(handle, validation=["plan phase validated"])
 
