@@ -17,12 +17,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from spice.errors import SpiceError
 from spice.mail.inbox import (
     compose_inbox_text,
     default_inbox_name,
     inbox_item_key,
     write_inbox_item,
 )
+from spice.sqliteconnection import sqlite_connection
 from spice.tasks import claimstate, config, identity, lanes, tw
 from spice.tasks.git import boundaries
 
@@ -337,6 +339,48 @@ def _claim_first(
     return None
 
 
+def _require_current_supervisor() -> None:
+    """Refuse to hand out new work when the lane's supervisor predates the store.
+
+    The supervisor is the long-lived process, so it is the one that goes stale:
+    an editable deployment reaches new processes at once and running ones never.
+    This CLI is short-lived and always reads current code, so it cannot detect
+    its own staleness -- it can only compare what the supervisor recorded when
+    it started against what the store carries now.
+
+    Both sides must actually say something before this refuses. A lane with no
+    agent state, a supervisor from before this field existed, and a store that
+    has not been created yet each leave nothing to compare, and absence is not
+    evidence of staleness. Only a recorded version strictly older than the live
+    stamp names a process that outlived the constant it compiled in.
+
+    The imports are function-local so the ordinary `spice task` path does not
+    pay for the agent and serve modules on every command, matching how
+    `spice.serve.team.store` reaches back into task config.
+    """
+    from spice.agent.lifecyclebinding import (
+        SUPERVISOR_SCHEMA_VERSION_FIELD,
+        read_agent_state,
+    )
+    from spice.serve.team.store import team_database_path
+
+    state = read_agent_state(config.repo_root())
+    recorded = state.get(SUPERVISOR_SCHEMA_VERSION_FIELD)
+    database = team_database_path()
+    if not isinstance(recorded, int) or not database.exists():
+        return
+    with sqlite_connection(database) as connection:
+        stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if recorded >= stored:
+        return
+    raise SpiceError(
+        "supervisor for this lane imported team authority schema version "
+        f"{recorded} but the store is stamped {stored}; this process predates "
+        "the deployment and should wind down instead of taking new work. "
+        "Finish and close the task you already hold, then exit."
+    )
+
+
 def next_task() -> dict[str, Any] | None:
     actor = tw.current_actor()
     active_rows = [r for r in tw.export(["+ACTIVE"]) if _is_open_task(r)]
@@ -344,6 +388,9 @@ def next_task() -> dict[str, Any] | None:
     if own_active:
         return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
 
+    # Past the held-task return, so a stale lane still finishes what it holds
+    # and only stops receiving work it has not started.
+    _require_current_supervisor()
     route = lanes.team_route_for_actor(actor)
     overrides = actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
