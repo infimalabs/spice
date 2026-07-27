@@ -83,6 +83,14 @@ command carries its parent interpreter across the deliberate candidate-code
 reexec and refuses to run release gates unless the independently installed
 checkout and candidate have the same committed tree.
 
+A committed tree describes that deployment only while it has nothing else in
+it. The installed CLI is an editable checkout, so it imports the deployment
+working tree rather than its `HEAD`, and an uncommitted edit to a module the
+probe resolves leaves the compared tree hash byte-identical while changing what
+every fleet command runs. A deployment carrying uncommitted changes is
+therefore not an evidence source at all, and the gate refuses it rather than
+reading its committed identity.
+
 Deployment also closes existing generated-copy drift. Once the editable
 checkout carries the new packaged source, every `spice agent activation`
 materializes the skill before baseline refresh, including when the lane is
