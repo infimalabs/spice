@@ -180,6 +180,41 @@ def test_failed_fresh_continuation_names_authoritative_landing_and_exact_resume(
     assert "new schema refused" in message
 
 
+def test_fresh_continuation_launch_failure_names_landing_and_exact_resume(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(phasecontinuation.PHASE_CONTINUATION_ENV, raising=False)
+    monkeypatch.setattr(
+        phasecontinuation,
+        "run_parent_lifetime_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("interpreter unavailable")
+        ),
+    )
+
+    with pytest.raises(SpiceError) as raised:
+        phasecontinuation._run_fresh_checkout(
+            {
+                "protocol": phasecontinuation.PHASE_CONTINUATION_PROTOCOL,
+                "module": "spice.tasks.ops",
+                "function": "_continue_phase",
+                "payload": {"operation": "done", "input": {"handle": "TASK-landed"}},
+                "environment": {},
+            },
+            repo_root=tmp_path,
+            landing_head="def456",
+            operation="done",
+        )
+
+    message = str(raised.value)
+    assert "integration landed at def456" in message
+    assert "could not start: interpreter unavailable" in message
+    assert "landing is authoritative and will not be rolled back or re-published" in (
+        message
+    )
+    assert "-m spice.tasks.phasecontinuation --payload" in message
+
+
 def test_nested_continuation_is_refused_without_spawning(tmp_path, monkeypatch):
     monkeypatch.setenv(phasecontinuation.PHASE_CONTINUATION_ENV, "landed")
     monkeypatch.setattr(

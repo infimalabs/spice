@@ -66,15 +66,24 @@ def _run_fresh_checkout(
     env = dict(os.environ)  # env-policy: allow
     env[PHASE_CONTINUATION_ENV] = landing_head
     command = [sys.executable, "-B", "-m", "spice.tasks.phasecontinuation"]
-    result = run_parent_lifetime_command(
-        command,
-        cwd=repo_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        input_data=serialized,
-        check=False,
-    )
+    try:
+        result = run_parent_lifetime_command(
+            command,
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            input_data=serialized,
+            check=False,
+        )
+    except OSError as exc:
+        raise _fresh_continuation_error(
+            serialized=serialized,
+            command=command,
+            landing_head=landing_head,
+            operation=operation,
+            outcome=f"could not start: {exc}",
+        ) from exc
     if result.returncode == 0:
         return str(result.stdout).removesuffix("\n")
     detail = "\n".join(
@@ -82,17 +91,37 @@ def _run_fresh_checkout(
         for text in (str(result.stdout or ""), str(result.stderr or ""))
         if text.strip()
     )
+    raise _fresh_continuation_error(
+        serialized=serialized,
+        command=command,
+        landing_head=landing_head,
+        operation=operation,
+        outcome=f"exited {result.returncode}",
+        detail=detail,
+    )
+
+
+def _fresh_continuation_error(
+    *,
+    serialized: str,
+    command: list[str],
+    landing_head: str,
+    operation: str,
+    outcome: str,
+    detail: str = "",
+) -> SpiceError:
+    """Describe one failed post-integration continuation without republishing."""
     token = base64.urlsafe_b64encode(serialized.encode()).decode()
     recovery = shlex.join([*command, "--payload", token])
     message = (
         f"task {operation} integration landed at {landing_head}, but its fresh "
-        f"checkout continuation exited {result.returncode}; the landing is "
+        f"checkout continuation {outcome}; the landing is "
         f"authoritative and will not be rolled back or re-published. Run "
         f"`spice task status`, then resume the exact continuation with `{recovery}`"
     )
     if detail:
         message += f":\n{detail}"
-    raise SpiceError(message)
+    return SpiceError(message)
 
 
 def _dispatch(request: Mapping[str, Any], *, apply_environment: bool = False) -> str:
