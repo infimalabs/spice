@@ -52,8 +52,50 @@ def test_health_probe_uses_exact_executable_and_accepts_supported_rewrites(
         "version": "0.42.4",
         "command": (
             f"{_quoted(executable)} --version && "
-            f"{_quoted(executable)} rewrite -- git status"
+            f"{_quoted(executable)} rewrite -- git status; echo; "
+            "printf 'alpha\\nbeta\\n' | rg --count al+pha -; "
+            f"printf 'alpha\\nbeta\\n' | $({_quoted(executable)} "
+            "rewrite -- rg --count al+pha -)"
         ),
+    }
+
+
+def test_health_probe_separates_a_verified_answer_from_an_unchecked_one(
+    tmp_path: Path,
+) -> None:
+    """Both outcomes stay active, so the detail is what tells them apart."""
+    _configure_executable(tmp_path, "rtk")
+    verified_calls: list[list[str]] = []
+    unchecked_calls: list[list[str]] = []
+    staged = _staged_run("rtk", 0, ("1\n", 0), unchecked_calls)
+
+    def unlaunchable_search(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if command == list(RTK_FIDELITY_PROBE):
+            raise FileNotFoundError(2, "No such file or directory", "rg")
+        return staged(command, **kwargs)
+
+    verified = probe_rtk_health(
+        tmp_path, run=_staged_run("rtk", 0, ("1\n", 0), verified_calls)
+    )
+    unchecked = probe_rtk_health(tmp_path, run=unlaunchable_search)
+
+    assert {
+        "verified": (verified.state, verified.detail),
+        "unchecked": (unchecked.state, unchecked.detail),
+        "details_differ": verified.detail != unchecked.detail,
+    } == {
+        "verified": (
+            "active",
+            "rewrite protocol valid (exit 0); rewrite preserved the answer (counted 1)",
+        ),
+        "unchecked": (
+            "active",
+            "rewrite protocol valid (exit 0); "
+            "answer unchecked: rg --count al+pha - reported no count",
+        ),
+        "details_differ": True,
     }
 
 
