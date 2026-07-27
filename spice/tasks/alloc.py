@@ -340,19 +340,19 @@ def _claim_first(
 
 
 def _require_current_supervisor() -> None:
-    """Refuse to hand out new work when the lane's supervisor predates the store.
+    """Refuse new work when the lane cannot survive the authority transition.
 
     The supervisor is the long-lived process, so it is the one that goes stale:
     an editable deployment reaches new processes at once and running ones never.
     This CLI is short-lived and always reads current code, so it cannot detect
     its own staleness -- it can only compare what the supervisor recorded when
-    it started against what the store carries now.
+    it started against what the store carries now or is preparing to carry.
 
-    Both sides must actually say something before this refuses. A lane with no
-    agent state, a supervisor from before this field existed, and a store that
-    has not been created yet each leave nothing to compare, and absence is not
-    evidence of staleness. Only a recorded version strictly older than the live
-    stamp names a process that outlived the constant it compiled in.
+    A pending migration is the preventive signal: retire this lane's schema
+    record and refuse before more work can keep the migration waiting. The live
+    stamp comparison remains the recovery signal after a migration has already
+    landed. Both require a recorded supervisor version and an existing store;
+    absence is not evidence of staleness.
 
     The imports are function-local so the ordinary `spice task` path does not
     pay for the agent and serve modules on every command, matching how
@@ -364,26 +364,47 @@ def _require_current_supervisor() -> None:
     )
     from spice.serve.team.store import (
         TEAM_SQLITE_BUSY_TIMEOUT_MS,
+        pending_authority_migration_from_connection,
         record_lane_schema_version,
+        retire_lane_schema_version,
         team_database_path,
     )
 
     repo_root = config.repo_root()
+    lane = str(repo_root)
     state = read_agent_state(repo_root)
     recorded = state.get(SUPERVISOR_SCHEMA_VERSION_FIELD)
     database = team_database_path()
     if not isinstance(recorded, int) or not database.exists():
         return
+    pending_refusal = None
     with sqlite_connection(
         database, busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS
     ) as connection:
+        # Serialize this decision with a migrator's BEGIN IMMEDIATE. Whichever
+        # arrives first wins cleanly: either this lane records itself before
+        # intent exists, or it sees the intent and retires without refreshing.
+        connection.execute("BEGIN IMMEDIATE")
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if stored:
+        pending = pending_authority_migration_from_connection(connection)
+        if pending is not None and recorded < pending.target_version:
+            retire_lane_schema_version(connection, lane)
+            pending_refusal = pending
+        elif stored:
             # Recorded on the connection already open, on the way past: this is
             # what a writer arriving with a newer constant reads to know that
             # migrating now would strand this lane mid-task. A store with no
             # stamp has no shape to record into and no migration to defer.
-            record_lane_schema_version(connection, str(repo_root), recorded)
+            record_lane_schema_version(connection, lane, recorded)
+    if pending_refusal is not None:
+        raise SpiceError(
+            "team authority schema migration "
+            f"{pending_refusal.source_version} -> "
+            f"{pending_refusal.target_version} is pending; supervisor for this "
+            f"lane imported schema version {recorded} and would be stranded. "
+            "This lane should wind down instead of taking new work. Finish any "
+            "task already held, then exit."
+        )
     if recorded >= stored:
         return
     raise SpiceError(
