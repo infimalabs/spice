@@ -84,6 +84,42 @@ def test_exact_done_resume_does_not_duplicate_annotations(task_repo, monkeypatch
     assert annotations.count("validation: resume validated") == 1
 
 
+def test_done_continuation_payload_keeps_its_exact_key_set(task_repo, monkeypatch):
+    # The sibling arm of the same protocol. Its hand-built payload elsewhere in
+    # this module cannot see the emitter drift, and a required key added here
+    # would refuse a live completion after its landing is already authoritative.
+    handle = create.add(
+        "Pin one completion payload",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo"],
+        acceptance=["the completion payload key set is the wire contract"],
+    )
+    ops.claim(handle)
+    captured: dict[str, object] = {}
+
+    def capture(operation, payload, **_kwargs):
+        captured.update(operation=operation, payload=payload)
+        return "captured"
+
+    monkeypatch.setattr(phasecontinuation, "continue_after_integration", capture)
+    assert ops.done(handle, validation=["payload pinned"]) == "captured"
+    payload = captured["payload"]
+
+    assert captured["operation"] == "done"
+    assert isinstance(payload, dict)
+    assert sorted(payload) == [
+        "actor",
+        "chain_next",
+        "handle",
+        "judgment",
+        "notes",
+        "sync_notes",
+        "sync_uda_args",
+        "validation",
+    ]
+
+
 def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
     handle = create.add(
         "Resume one review exactly",
@@ -117,8 +153,19 @@ def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
     assert captured["operation"] == "review"
     payload = captured["payload"]
     assert isinstance(payload, dict)
-    assert payload["actor"] == PEER_ACTOR
-    assert str(payload["reviewed_at"])
+    # The payload is decoded by whichever checkout the landing selected, so its
+    # exact key set is the wire contract. This is the shape 987f38b1 emitted,
+    # before the reload landing made a reviewer and a timestamp required and
+    # refused a live review mid-flight; pinning it fails if a key returns.
+    assert sorted(payload) == [
+        "creation_surface",
+        "finding",
+        "followup",
+        "handle",
+        "note",
+        "prepared_followups",
+        "sync_uda_args",
+    ]
     original_advance = ops._advance
     monkeypatch.setattr(
         ops,
@@ -142,8 +189,53 @@ def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
 
     assert f"reviewed {handle} clean; completed {handle}" in output
     assert len(children) == 1
-    assert reviewed["review_at"] == first_reviewed_at == payload["reviewed_at"]
+    assert reviewed["review_at"] == first_reviewed_at
+    assert reviewed["review_by"] == PEER_ACTOR
     assert annotations.count(f"review: finding=clean; by={PEER_ACTOR}") == 1
+
+
+def test_review_continuation_time_follows_the_recorded_verdict(task_repo, monkeypatch):
+    handle = create.add(
+        "Stamp one review time per verdict",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        acceptance=["the recorded verdict decides the review time"],
+    )
+    ops.claim(handle)
+    ops.done(handle, validation=["todo complete"])
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    captured: dict[str, object] = {}
+
+    def capture(operation, payload, **_kwargs):
+        captured.update(operation=operation, payload=payload)
+        return "captured"
+
+    monkeypatch.setattr(phasecontinuation, "continue_after_integration", capture)
+    ops.review(handle, finding="clean", note="first pass")
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    monkeypatch.setattr(
+        ops,
+        "_advance",
+        lambda _row: (_ for _ in ()).throw(SpiceError("injected after finding")),
+    )
+
+    with pytest.raises(SpiceError, match="injected after finding"):
+        ops._continue_review(payload)
+    first = identity.resolve(handle)["review_at"]
+
+    with pytest.raises(SpiceError, match="injected after finding"):
+        ops._continue_review(payload)
+    replayed = identity.resolve(handle)["review_at"]
+
+    with pytest.raises(SpiceError, match="injected after finding"):
+        ops._continue_review(dict(payload, finding="changes"))
+    reverdicted = identity.resolve(handle)
+
+    assert replayed == first
+    assert reverdicted["review_finding"] == "changes"
+    assert reverdicted["review_at"] != first
 
 
 def test_head_moving_done_next_claims_follow_on_from_the_fresh_process(
