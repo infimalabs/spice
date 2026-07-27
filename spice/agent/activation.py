@@ -55,7 +55,8 @@ def activation_command_surface_lines(*, rtk_active: bool) -> list[str]:
         (
             "rtk_contract=RTK is an optional command-output optimization; "
             "activation reports its health, and spice agent run preserves native "
-            "command execution when RTK is missing, obsolete, or protocol-invalid"
+            "command execution when RTK is missing, obsolete, protocol-invalid, "
+            "or rewriting a probe search into a different answer"
         ),
         (
             "command_surface=run shell commands normally; spice shell startup "

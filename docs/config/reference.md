@@ -131,7 +131,9 @@ source checkout, import path, or virtualenv for the running code.
 The agent shell can optionally use
 [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer as a command-output
 optimizer. Missing, obsolete, or invalid RTK selects reported native-command
-mode without blocking activation. Install and protocol details live in
+mode without blocking activation, as does an RTK whose rewrite answers a probe
+search differently than the command as written. Install and protocol details
+live in
 [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
 ## `[tool.spice.rtk]`
