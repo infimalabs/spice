@@ -18,6 +18,7 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_JUDGED_CONFIRMED,
     MAXIM_EVENT_JUDGED_REJECTED,
     MAXIM_EVENT_PUBLISHED,
+    MAXIM_METRICS_SCHEMA_VERSION,
     MAXIM_METRICS_TABLE_SQL,
     MaximMetricCounts,
     MaximMetricEventWrite,
@@ -35,6 +36,9 @@ from spice.cli.parser import build_parser
 from spice.config import edit, layers, values
 from spice.sqliteconnection import sqlite_connection
 from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
+
+# A stamp no writer in this repo has ever set, standing for some other shape.
+FOREIGN_MAXIM_SCHEMA_VERSION = MAXIM_METRICS_SCHEMA_VERSION + 1
 
 
 def _write_maxim_config(repo, *, name: str = "alpha") -> None:
@@ -785,3 +789,99 @@ def test_wal_maxim_write_commits_while_a_reader_is_open_unlike_rollback(tmp_path
     assert rollback_outcome.startswith("locked")
     # The WAL write committed while the reader was open and is the newest fire.
     assert latest_fire_bag_name(repo) == "live"
+
+
+def test_a_store_stamped_by_another_shape_is_rebuilt_rather_than_refused(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    database = maxim_metrics_database_path(repo)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    # Some other shape entirely: the owned table name over a foreign column set,
+    # under a stamp this repo has never written.
+    with sqlite_connection(database) as connection:
+        connection.execute("CREATE TABLE maxim_metric_events (stale TEXT NOT NULL)")
+        connection.execute("INSERT INTO maxim_metric_events (stale) VALUES ('old')")
+        connection.execute(f"PRAGMA user_version = {FOREIGN_MAXIM_SCHEMA_VERSION}")
+
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="rebuilt", driver_name="codex"
+            )
+        ],
+        now=100.0,
+    )
+
+    # The write lands rather than raising, and the foreign row left with the
+    # table that held it.
+    assert [record.bag_name for record in maxim_metric_records(repo)] == ["rebuilt"]
+    with sqlite_connection(database) as connection:
+        stamped = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert stamped == MAXIM_METRICS_SCHEMA_VERSION
+
+
+def test_an_unstamped_store_is_stamped_where_it_stands_and_keeps_its_rows(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    database = maxim_metrics_database_path(repo)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    # Every store in the field: the current shape, written before any writer
+    # stamped, so its user_version is still the default.
+    with sqlite_connection(database) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(
+            "INSERT INTO maxim_metric_events "
+            "(occurred_at, event_type, bag_name, driver_name) VALUES (?, ?, ?, ?)",
+            (100.0, MAXIM_EVENT_FIRE, "before-stamping", "codex"),
+        )
+
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="after-stamping", driver_name="codex"
+            )
+        ],
+        now=101.0,
+    )
+
+    assert [record.bag_name for record in maxim_metric_records(repo)] == [
+        "before-stamping",
+        "after-stamping",
+    ]
+    with sqlite_connection(database) as connection:
+        stamped = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert stamped == MAXIM_METRICS_SCHEMA_VERSION
+
+
+def test_a_stamped_store_keeps_its_rows_when_the_next_command_opens_it(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    database = maxim_metrics_database_path(repo)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    # What every ordinary command finds: a store an earlier process already
+    # built and stamped. The schema step runs at most once per path per
+    # process, so a path this process has never opened reaches it exactly as a
+    # freshly started command does -- which is the only place the rebuild could
+    # fire against a store that deserves to be kept.
+    with sqlite_connection(database) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(
+            "INSERT INTO maxim_metric_events "
+            "(occurred_at, event_type, bag_name, driver_name) VALUES (?, ?, ?, ?)",
+            (100.0, MAXIM_EVENT_FIRE, "earlier", "codex"),
+        )
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
+
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE, bag_name="later", driver_name="codex"
+            )
+        ],
+        now=101.0,
+    )
+
+    assert [record.bag_name for record in maxim_metric_records(repo)] == [
+        "earlier",
+        "later",
+    ]

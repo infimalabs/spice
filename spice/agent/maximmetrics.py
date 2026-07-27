@@ -16,6 +16,8 @@ MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
 MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS = 5000
 MAXIM_RECURRENCE_HORIZON_SECONDS = 24 * 60 * 60
+MAXIM_METRICS_SCHEMA_VERSION = 1
+MAXIM_METRICS_UNSTAMPED_VERSION = 0
 
 MAXIM_EVENT_FIRE = "fire"
 MAXIM_EVENT_JUDGED_CONFIRMED = "judged_confirmed"
@@ -326,10 +328,30 @@ def _ensure_schema_once(path: Path) -> None:
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
+    """Build the current shape, discarding whatever a different stamp describes.
+
+    These rows are observation data: recurrence counting reads them over a
+    bounded horizon and rebuilds its picture from whatever it finds, so a store
+    left by a different shape costs that horizon of history and nothing else.
+    Refusing one instead, as `spice.serve.team.store` must for team authority
+    nothing can regenerate, would strand every writer still holding the older
+    constant until its process exits.
+
+    Version 0 is named outright as this same shape from before any writer
+    stamped, which every store in the field carries today. It is stamped where
+    it stands and keeps its rows, because nothing about it differs; treating a
+    missing stamp as a foreign shape would delete live history to record a
+    number. That is the one forward migration, and after it a stamp is either
+    current or foreign, with no third reading.
+    """
+    stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if stored not in (MAXIM_METRICS_UNSTAMPED_VERSION, MAXIM_METRICS_SCHEMA_VERSION):
+        connection.execute("DROP TABLE IF EXISTS maxim_metric_events")
     connection.execute(MAXIM_METRICS_TABLE_SQL)
     connection.execute(MAXIM_METRICS_EVENT_INDEX_SQL)
     connection.execute(MAXIM_METRICS_RECURRENCE_INDEX_SQL)
     connection.execute(MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+    connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
 
 
 def _event_row(
