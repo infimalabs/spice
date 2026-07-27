@@ -20,8 +20,11 @@ attempt reports the whole picture:
    regressions, all against staged paths with flex + sticky semantics.
 
 Flex + sticky latches self-heal in-scan: every gate run drops any file,
-routine, or doc that measures back at or under its base limit — the gate
-forgives exactly when the code earns it, even on an otherwise failing run.
+routine, or doc that measures back at or under its base limit from its own
+verdict — the gate forgives exactly when the code earns it, even on an
+otherwise failing run. The ledgers behind those latches are rewritten only by
+a run this hook accepted, so a refused commit leaves them exactly as it found
+them and the author's next attempt meets the same limits this one reported.
 """
 
 from __future__ import annotations
@@ -65,6 +68,7 @@ from spice.studies import (
     complexity,
     envpolicy,
     fileloc,
+    gates,
     javascriptunused,
     links,
     localpaths,
@@ -121,19 +125,25 @@ def handle_pre_commit(repo_root: Path) -> int:
     failures: list[PreCommitFailure] = []
     paths = staged_paths(repo_root)
     staging_verified = False
-    for step in pre_commit_steps(repo_root, paths):
-        if step.key.startswith("extension-") and not staging_verified:
-            continue
-        passed = _run_step(failures, step.label, step.action)
-        if step.key == "staging" and passed:
-            staging_verified = True
-    if failures:
-        raise _pre_commit_failure_error(failures)
-    success_failures: list[PreCommitFailure] = []
-    for step in post_success_pre_commit_steps(repo_root, paths):
-        _run_step(success_failures, step.label, step.action)
-    if success_failures:
-        raise _pre_commit_failure_error(success_failures)
+    # A sticky latch records what a landed commit must live with, so it persists
+    # only once every step below has accepted this run. A rejected run leaves the
+    # ledgers exactly as it found them, rather than latching a breach on work the
+    # author is being told to go back and change.
+    with gates.deferred_sticky_writes() as pending_sticky:
+        for step in pre_commit_steps(repo_root, paths):
+            if step.key.startswith("extension-") and not staging_verified:
+                continue
+            passed = _run_step(failures, step.label, step.action)
+            if step.key == "staging" and passed:
+                staging_verified = True
+        if failures:
+            raise _pre_commit_failure_error(failures)
+        success_failures: list[PreCommitFailure] = []
+        for step in post_success_pre_commit_steps(repo_root, paths):
+            _run_step(success_failures, step.label, step.action)
+        if success_failures:
+            raise _pre_commit_failure_error(success_failures)
+        pending_sticky.commit()
     return 0
 
 
