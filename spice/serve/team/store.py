@@ -111,6 +111,12 @@ GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
 GLOBAL_STORE_GENERATION_KEY = "store_generation"
 GLOBAL_LANE_SCHEMA_KEY_PREFIX = "lane_schema:"
+# SQLite reads `_` in a LIKE pattern as a single-character wildcard, and this
+# prefix has one, so the unescaped pattern also selects keys nothing here
+# wrote. Every key it selects is read as a schema version, and a value that
+# never was one raises inside the migration transaction -- turning a store that
+# would have opened into one no process in the fleet can open at all.
+_LANE_SCHEMA_KEY_PATTERN = GLOBAL_LANE_SCHEMA_KEY_PREFIX.replace("_", r"\_") + "%"
 _NANOSECONDS_PER_MICROSECOND = 1000
 _SECONDS_PER_HOUR = 3600
 # How long one lane's recorded schema version keeps a migration waiting. A lane
@@ -162,9 +168,9 @@ def _lagging_lanes(
     """Return each recently heard-from lane still running older than `version`."""
     rows = connection.execute(
         "SELECT key, value FROM global_settings "
-        "WHERE key LIKE ? AND updated_at >= ? ORDER BY key",
+        "WHERE key LIKE ? ESCAPE '\\' AND updated_at >= ? ORDER BY key",
         (
-            f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}%",
+            _LANE_SCHEMA_KEY_PATTERN,
             time.time() - LANE_SCHEMA_RECORD_HORIZON_SECONDS,
         ),
     ).fetchall()
