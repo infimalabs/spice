@@ -564,16 +564,17 @@ def _seed_checkout(root: Path) -> dict[str, str]:
     return original
 
 
-def _link_project_interpreter(root: Path) -> Path:
-    """A checkout-local interpreter path distinct from the one running the tests.
+def _write_interpreter_with_dev_dependencies(root: Path) -> Path:
+    """A checkout-local interpreter double whose dependency probe reports no gaps.
 
-    The whole environment is linked, not just the binary: an interpreter reached
-    through a bare symlink resolves its prefix to the real installation behind
-    it, which is how a stray link ends up without the project's dependencies.
+    It must not borrow ``sys.prefix``: the harness running this test need not carry
+    the checkout's pytest-cov development dependency.
     """
-    venv = root / ".venv"
-    venv.symlink_to(Path(sys.prefix), target_is_directory=True)
-    return venv / "bin" / "python"
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o755)
+    return python
 
 
 def _write_interpreter_missing_dev_dependencies(root: Path) -> Path:
@@ -599,14 +600,14 @@ def test_record_subsumption_uses_disposable_artifacts_and_preserves_checkout(
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     root = tmp_path / "checkout"
     original = _seed_checkout(root)
-    interpreter = _link_project_interpreter(root)
+    interpreter = _write_interpreter_with_dev_dependencies(root)
     observed: dict[str, object] = {}
     real_run_tool_command = subsumption.run_tool_command
 
     def fake_run(command, *, policy, operation, cwd, capture_output, check, **kwargs):
         if policy == "probe":
-            # The dependency probe is the real subprocess against the linked
-            # interpreter; only the coverage run is stood in for here.
+            # The dependency probe is a real subprocess against the checkout's
+            # declared interpreter; only the coverage run is stood in for here.
             return real_run_tool_command(
                 command,
                 policy=policy,
