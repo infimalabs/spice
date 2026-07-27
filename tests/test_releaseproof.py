@@ -27,6 +27,7 @@ from tests.test_releaseproofhelpers import (
     UPGRADE,
     _file_inventory,
     _git,
+    _projection_store_state_at,
     _release_pyproject,
     _release_this_checkout_upgrades_from,
     _source_repository,
@@ -346,7 +347,12 @@ def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
         evidence["stores"]["ack"]["version"]
         == evidence["stores"]["ack"]["expected_version"]
     )
-    assert evidence["stores"]["projection"]["source"] == "absent"
+    # Projection is the store a predecessor may legitimately lack, so this
+    # literal comes due the first release that ships the module -- the same
+    # stale-expectation shape as the tag above, measured against the tag's tree.
+    assert evidence["stores"]["projection"]["source"] == _projection_store_state_at(
+        evidence["release"]["tag"]
+    )
     assert (
         evidence["stores"]["projection"]["version"]
         == evidence["stores"]["projection"]["expected_version"]
@@ -646,13 +652,24 @@ def test_in_place_upgrade_is_a_registered_release_proof_check():
 
 
 def test_prior_release_rehearsal_detects_reversed_team_adoption_order(monkeypatch):
+    """Reversal stays detectable whichever era stamped the predecessor.
+
+    A predecessor from before monotonic versions stamps a 31-bit CRC
+    fingerprint; every release since stamps a low monotonic version. Widening
+    only the ceiling reaches the fingerprint and nothing else, so this control
+    goes blind the release after the predecessor becomes a versioned one --
+    measured, a v0.28.0 predecessor stamps 2 and raises nothing at all. That is
+    the failure this rehearsal exists to not have: a control that reports
+    success while having lost the thing it was watching for.
+
+    Claiming this writer is older than any stamp, across the whole namespace a
+    stamp can occupy, makes every predecessor read as strictly newer in either
+    era, so the reversal stays real without anyone re-deriving it per release.
+    """
     from spice.serve.team import store
 
-    monkeypatch.setattr(
-        store,
-        "TEAM_AUTHORITY_MONOTONIC_VERSION_MAX",
-        0x7FFFFFFF,
-    )
+    monkeypatch.setattr(store, "TEAM_AUTHORITY_MONOTONIC_VERSION_MAX", 0x7FFFFFFF)
+    monkeypatch.setattr(store, "TEAM_AUTHORITY_SCHEMA_VERSION", 0)
 
     with pytest.raises(store.SpiceError, match="newer schema version"):
         UPGRADE.rehearse_prior_stores(PROJECT_ROOT)

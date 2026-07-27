@@ -26,6 +26,7 @@ PINNED_SCRIPT = PROJECT_ROOT / "release-proof" / "pinned.py"
 BASE_IMAGE = "mcr.microsoft.com/playwright:v1.61.0-noble"
 BASE_DIGEST = "sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a"
 FAKE_COPY_FAILURE_EXIT_CODE = 41
+PROJECTION_SOURCE_PATH = "spice/serve/team/projection.py"
 
 
 def _load_script(script: Path) -> Any:
@@ -189,6 +190,22 @@ def _write_release_tree(repository: Path, version: str) -> None:
         path = repository / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source_text, encoding="utf-8")
+
+
+def _projection_store_state_at(tag: str) -> str:
+    """How the release at ``tag`` leaves the projection store classified.
+
+    Read from that tag's own tree rather than from the manifest, so the
+    classification is measured against what the release actually shipped
+    instead of against the exporter under test. Projection is the one governed
+    store a predecessor may legitimately lack, so which of the two states
+    applies changes on whichever release first ships the module -- and pinning
+    either literal here would come due as a stale expectation exactly then.
+    """
+    listed = _git(
+        PROJECT_ROOT, "ls-tree", "-r", "--name-only", tag, "--", PROJECTION_SOURCE_PATH
+    ).split()
+    return "source" if PROJECTION_SOURCE_PATH in listed else "absent"
 
 
 def _release_this_checkout_upgrades_from() -> str:
