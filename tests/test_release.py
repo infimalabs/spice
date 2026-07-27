@@ -379,6 +379,15 @@ def test_release_cleanup_removes_stale_build_and_distribution_trees(tmp_path):
     assert sorted(path.name for path in tmp_path.iterdir()) == ["keep.txt"]
 
 
+def _commit_deployment(root: Path) -> None:
+    """Make ``root`` a deployment checkout carrying nothing its HEAD lacks."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    for key, value in (("user.email", "deploy@example.test"), ("user.name", "Deploy")):
+        subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "deploy"], check=True)
+
+
 def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
     tmp_path, monkeypatch
 ):
@@ -392,9 +401,15 @@ def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
     (root / "pyproject.toml").write_text(
         '[project]\nname = "spice-harness"\n', encoding="utf-8"
     )
+    _commit_deployment(root)
     observed = {}
+    real_run = release.run
 
     def probe(command, *, capture=False, cwd=None, env=None):
+        # Only the interpreter probe is faked. Git runs for real so the
+        # deployment's own drift is measured rather than asserted.
+        if command[0] == "git":
+            return real_run(command, capture=capture, cwd=cwd, env=env)
         observed["command"] = command
         observed["capture"] = capture
         observed["cwd"] = cwd
@@ -434,6 +449,50 @@ def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
         "installed-commit",
         "installed-tree",
     )
+
+
+def test_release_refuses_a_deployment_carrying_uncommitted_edits(tmp_path, monkeypatch):
+    """A matching committed identity must not vouch for a dirty deployment.
+
+    The edit lands in the very module the probe resolves, which is what an
+    editable install imports, and it leaves HEAD's tree hash untouched. Only
+    reading the working tree can tell this deployment from a clean one.
+    """
+    python = tmp_path / "tool" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("# runtime identity\n", encoding="utf-8")
+    root = tmp_path / "deployment"
+    module = root / "spice" / "tasks" / "git" / "boundaries.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("# installed module\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "spice-harness"\n', encoding="utf-8"
+    )
+    _commit_deployment(root)
+    committed_tree = _deployment_tree(root)
+    module.write_text("# edited after deploy\n", encoding="utf-8")
+    real_run = release.run
+
+    def probe(command, *, capture=False, cwd=None, env=None):
+        if command[0] == "git":
+            return real_run(command, capture=capture, cwd=cwd, env=env)
+        return subprocess.CompletedProcess(command, 0, stdout=f"{module}\n", stderr="")
+
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+    monkeypatch.setattr(release, "run", probe)
+
+    assert _deployment_tree(root) == committed_tree
+    with pytest.raises(SpiceError, match="dirty deployment executes code"):
+        release.require_installed_cli_carries_release_tree(tmp_path)
+
+
+def _deployment_tree(root: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def test_release_refuses_branch_tree_the_installed_cli_does_not_carry(

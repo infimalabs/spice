@@ -410,8 +410,30 @@ def _installed_cli_source() -> InstalledCliSource:
             f"installed CLI module {module} is not backed by an editable Spice "
             "source checkout; deploy with `uv tool install -e <main-tree>`"
         )
+    drift = _worktree_drift(root)
+    if drift:
+        raise SpiceError(
+            "the installed CLI runs its source checkout directly, so a dirty "
+            "deployment executes code no commit contains and its committed "
+            f"identity proves nothing; commit or revert {root} before "
+            f"releasing:\n{drift}"
+        )
     commit, tree = _source_identity(root)
     return InstalledCliSource(python, module, root, commit, tree)
+
+
+def _worktree_drift(root: Path) -> str:
+    """Whatever the deployment carries that its own HEAD does not.
+
+    An editable install imports the working tree, never HEAD, so comparing
+    committed identities alone would let uncommitted edits to the very modules
+    the probe resolves pass the gate untouched: the tree hash is the same
+    before and after them.
+    """
+    return run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        capture=True,
+    ).stdout.strip()
 
 
 def _source_identity(root: Path) -> tuple[str, str]:
