@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from spice.agent import lifecyclebinding
 from spice.errors import SpiceError
 from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_taskgitsync import (
     ACTOR_A,
+    UNDECODABLE_SKILL_BYTES,
     _advance_upstream,
     _configure_git_identity,
     _empty_merges,
@@ -18,10 +20,26 @@ from tests.test_taskgitsync import (
     _gitsync_outcome,
     _init_repo,
     _merge_parents,
+    _repo_with_stale_generated_skill,
+    _repo_with_tracked_generated_skill,
     _repo_with_upstream,
     _run,
     _uda_map,
 )
+
+LANDING_SKILL_META = {
+    "title": "Land task work over an advanced packaged skill",
+    "actor": ACTOR_A,
+    "phase": "todo",
+    "project": "task.unit",
+}
+
+
+def _commit_agent_work(repo: Path) -> None:
+    """Give the lane a commit of its own so a landing has something to merge."""
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
 
 
 def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path):
@@ -596,3 +614,161 @@ def test_merge_message_appends_non_todo_phase_after_three_segment_project():
         "Task-Project: lifecycle.config.scopes\n"
         f"Task-Session: {ACTOR_A}"
     )
+
+
+def test_integrate_and_publish_rematerializes_the_generated_skill(tmp_path):
+    """The landing is the third HEAD-moving boundary and the only one that
+    carries a peer's packaged skill into a lane that never fast-forwards again.
+
+    New packaged bytes reach this tree through the baseline merge, so a lane
+    that never refreshes here keeps serving the stale generated copy for its
+    whole life: the next claim correctly observes no advance and correctly
+    skips, which is contracted behavior rather than a second bug to fix.
+    """
+    repo, target, advanced = _repo_with_stale_generated_skill(tmp_path)
+    stale = target.read_bytes()
+    _commit_agent_work(repo)
+
+    result = boundaries.integrate_and_publish(
+        "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+    )
+
+    packaged = repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
+    assert stale != advanced
+    assert packaged.read_bytes() == advanced
+    assert target.read_bytes() == packaged.read_bytes()
+    assert result.notes == []
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_integrate_and_publish_reports_an_undecodable_skill_without_losing_the_landing(
+    tmp_path,
+):
+    """The refresh runs after the merge has published, so it may only report.
+
+    An exception escaping here would fail a landing whose merge is already on
+    the remote, which is why the note carries the failure and the published
+    ref is asserted alongside it.
+    """
+    repo, target, advanced = _repo_with_stale_generated_skill(
+        tmp_path, advanced=UNDECODABLE_SKILL_BYTES
+    )
+    stale = target.read_bytes()
+    _commit_agent_work(repo)
+
+    result = boundaries.integrate_and_publish(
+        "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+    )
+
+    assert result.notes == [
+        "generated skill refresh failed: 'utf-8' codec can't decode byte 0xff "
+        "in position 0: invalid start byte"
+    ]
+    assert target.read_bytes() == stale
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        advanced
+    )
+    landed = _git(repo, "rev-parse", "HEAD")
+    assert _uda_map(result.uda_args)["done_merge_head"] == landed
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == landed
+
+
+def test_integrate_and_publish_keeps_a_tracked_generated_skill(tmp_path):
+    repo, target, advanced = _repo_with_tracked_generated_skill(tmp_path)
+    tracked = target.read_bytes()
+    _commit_agent_work(repo)
+
+    result = boundaries.integrate_and_publish(
+        "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+    )
+
+    assert result.notes == []
+    assert target.read_bytes() == tracked
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        advanced
+    )
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_integrate_and_publish_landing_without_a_head_move_leaves_assets_alone(
+    tmp_path, monkeypatch
+):
+    """A phase that publishes nothing must not rewrite generated state."""
+    repo = _repo_with_upstream(tmp_path)
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"generated sentinel\n")
+    before = _git(repo, "rev-parse", "HEAD")
+
+    def fail_if_refreshed(repo_root):
+        raise AssertionError("a landing that moved no HEAD rematerialized the skill")
+
+    monkeypatch.setattr(
+        boundaries, "_refresh_generated_skill_after_advance", fail_if_refreshed
+    )
+
+    result = boundaries.integrate_and_publish(
+        "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+    )
+
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert target.read_bytes() == b"generated sentinel\n"
+    assert result.notes == []
+
+
+def test_integrate_and_publish_leaves_generated_assets_alone_when_it_cannot_land(
+    tmp_path, monkeypatch
+):
+    """A conflict and a refusal both stop before any generated rewrite.
+
+    Each raises while HEAD sits on a merge that never reached the baseline, so
+    refreshing there would rewrite the lane's skill from a tree no peer will
+    ever see. Both shapes are asserted rather than left to the call's position
+    in the function, because that position is what a later edit can move.
+    """
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"generated sentinel\n")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    (peer / "peer.txt").write_text("peer feature\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md", "peer.txt")
+    _run(peer, "git", "commit", "-m", "peer feature")
+    _run(peer, "git", "push", "origin", "main")
+
+    def fail_if_refreshed(repo_root):
+        raise AssertionError("a landing that never published rematerialized the skill")
+
+    monkeypatch.setattr(
+        boundaries, "_refresh_generated_skill_after_advance", fail_if_refreshed
+    )
+
+    with pytest.raises(boundaries.MergeConflict):
+        boundaries.integrate_and_publish(
+            "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+        )
+    assert target.read_bytes() == b"generated sentinel\n"
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "rm", "-f", "peer.txt")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
+
+    with pytest.raises(SpiceError):
+        boundaries.integrate_and_publish(
+            "TASK-1kH7Ld3r", repo_root=repo, meta=LANDING_SKILL_META
+        )
+    assert target.read_bytes() == b"generated sentinel\n"

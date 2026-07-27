@@ -17,6 +17,7 @@ from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_taskgitsync import (
     ACTOR_A,
     _configure_git_identity,
+    _git,
     _repo_with_upstream,
     _run,
 )
@@ -90,12 +91,18 @@ def test_publication_merge_deleting_package_purges_bytecode_and_directory(tmp_pa
     _peer_pushes(tmp_path, delete_package)
     _publish_agent_work(repo)
 
+    # `.agents` is the generated worktree skill the landing rematerializes, the
+    # same ignored artifact the claim and launch advances write. It is listed
+    # here because this assertion enumerates the whole tree: the subject is that
+    # `pkg` and its bytecode are gone, not that the tree holds nothing else.
     assert sorted(entry.name for entry in repo.iterdir()) == [
+        ".agents",
         ".git",
         ".gitignore",
         "README.md",
         "agent.txt",
     ]
+    assert _git(repo, "status", "--porcelain") == ""
     assert _fresh_interpreter_output(repo, FIND_SPEC_PROBE) == "None"
 
 
