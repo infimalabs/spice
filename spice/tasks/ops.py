@@ -573,7 +573,6 @@ def done(
         "done",
         {
             "handle": identity.render_handle(row),
-            "actor": actor,
             "validation": list(validation),
             "judgment": judgment,
             "notes": list(notes or []),
@@ -591,7 +590,6 @@ def done(
 def _continue_done(payload: dict[str, Any]) -> str:
     """Apply one already-integrated completion through the current checkout."""
     handle = str(payload["handle"])
-    actor = str(payload["actor"])
     validation = [str(item) for item in payload.get("validation") or []]
     notes = [str(item) for item in payload.get("notes") or []]
     judgment = payload.get("judgment")
@@ -600,6 +598,9 @@ def _continue_done(payload: dict[str, Any]) -> str:
     sync_uda_args = [str(item) for item in payload.get("sync_uda_args") or []]
     row = identity.resolve(handle)
     _require_pending(row, "complete")
+    # The completer is the durable claim holder, which _require_owner asserts
+    # this process to be, so the identity never has to ride the payload.
+    actor = tw.current_actor()
     _require_owner(row, actor, "complete")
     uuid = identity.uuid_of(row)
     for note_text in notes:
