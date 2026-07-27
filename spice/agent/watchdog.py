@@ -45,7 +45,6 @@ from spice.agent.maximmetrics import (
     record_maxim_metric_events,
 )
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
-from spice.errors import SpiceError
 from spice.mail.ackarchive import summarize_ack_archival, summarize_nack_archival
 from spice.mail.ackgrammar import (
     extract_ack_keys_from_text,
@@ -337,30 +336,9 @@ def process_supervised_assistant_message(
     except Exception as exc:  # supervisor-visible metric failure
         log_handle.write(f"spice metrics supervisor error: {exc}\n")
         log_handle.flush()
-    reported_maxim_metrics_errors: set[str] = set()
-
-    def report_maxim_metrics_error(event_type: str, error: SpiceError) -> None:
-        detail = str(error)
-        if detail in reported_maxim_metrics_errors:
-            return
-        reported_maxim_metrics_errors.add(detail)
-        log_handle.write(f"spice maxim metrics supervisor error: {detail}\n")
-        log_handle.flush()
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "maxim.metrics-error",
-            database=MAXIM_METRICS_DATABASE_FILENAME,
-            event_type=event_type,
-            error=detail,
-        )
-
     try:
         publish_maxim_hits_as_inbox(
-            repo_root,
-            message_text,
-            reminder_gate=reminder_gate,
-            on_metrics_error=report_maxim_metrics_error,
+            repo_root, message_text, reminder_gate=reminder_gate
         )
     except Exception as exc:  # defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
@@ -880,7 +858,6 @@ def publish_maxim_hits_as_inbox(
     message_text: str,
     *,
     reminder_gate: MaximReminderGate,
-    on_metrics_error: Callable[[str, SpiceError], None] | None = None,
 ) -> list[Path]:
     statement_text = watchdog_judge_statement(message_text)
     if not statement_text:
@@ -901,7 +878,6 @@ def publish_maxim_hits_as_inbox(
         hits,
         event_type=MAXIM_EVENT_FIRE,
         statement=statement_text,
-        on_error=on_metrics_error,
     )
     if not reminder_gate.should_publish(reminder_key):
         _record_maxim_metrics(
@@ -911,15 +887,9 @@ def publish_maxim_hits_as_inbox(
             statement=statement_text,
             reminder_key=reminder_key,
             reminder_body=_maxim_inbox_body(hits),
-            on_error=on_metrics_error,
         )
         return []
-    violations = _publishable_maxim_hits(
-        repo_root,
-        hits,
-        statement_text,
-        on_metrics_error=on_metrics_error,
-    )
+    violations = _publishable_maxim_hits(repo_root, hits, statement_text)
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
@@ -931,18 +901,13 @@ def publish_maxim_hits_as_inbox(
         event_type=MAXIM_EVENT_PUBLISHED,
         reminder_key=path.stem,
         reminder_body=body,
-        on_error=on_metrics_error,
     )
     paths = [path]
     return paths
 
 
 def _publishable_maxim_hits(
-    repo_root: Path,
-    hits: list[MaximBag],
-    statement_text: str,
-    *,
-    on_metrics_error: Callable[[str, SpiceError], None] | None,
+    repo_root: Path, hits: list[MaximBag], statement_text: str
 ) -> list[MaximBag]:
     """Return the triggered hits that should publish as reminders.
 
@@ -968,7 +933,6 @@ def _publishable_maxim_hits(
                 [hit],
                 event_type=MAXIM_EVENT_JUDGED_REJECTED,
                 statement=statement_text,
-                on_error=on_metrics_error,
             )
             continue
         _record_maxim_metrics(
@@ -976,7 +940,6 @@ def _publishable_maxim_hits(
             [hit],
             event_type=MAXIM_EVENT_JUDGED_CONFIRMED,
             statement=statement_text,
-            on_error=on_metrics_error,
         )
         violations.append(hit)
     return violations
@@ -990,8 +953,23 @@ def _record_maxim_metrics(
     statement: str = "",
     reminder_key: str = "",
     reminder_body: str = "",
-    on_error: Callable[[str, SpiceError], None] | None = None,
 ) -> None:
+    """Record bookkeeping about a maxim event without ever costing the reminder.
+
+    The metrics store holds durable history nothing can regenerate, so it
+    refuses a schema it does not own rather than migrating it. That refusal
+    used to travel out through publish_maxim_hits_as_inbox, which records the
+    fire event before it writes the inbox item, so one foreign stamp silenced
+    every maxim reminder in the lane -- and the only trace was a log line under
+    .spice/agents/<thread>/logs that nothing reads.
+
+    Containment belongs here at the write, where the loss is the metric alone.
+    The refusal still reaches the lane on the side channel it already watches,
+    the way this module publishes task.error when an inline task fails. The
+    The one deterministic failure path emits the notice here for every caller.
+    Even a broken notice transport cannot turn lost bookkeeping into a lost
+    reminder.
+    """
     if not hits:
         return
     driver_name = driver_for(repo_root).name
@@ -1013,9 +991,17 @@ def _record_maxim_metrics(
                 for hit in hits
             ],
         )
-    except SpiceError as error:
-        if on_error is not None:
-            on_error(event_type, error)
+    except Exception as error:  # bookkeeping failure costs only the metric
+        try:
+            publish_side_channel_feedback(
+                repo_root,
+                "maxim.metrics-error",
+                database=MAXIM_METRICS_DATABASE_FILENAME,
+                event=event_type,
+                error=str(error),
+            )
+        except Exception:
+            return
 
 
 def discard_pending_maxim_reminders(
