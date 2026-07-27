@@ -30,6 +30,7 @@ from spice.serve.team.schema import (
 from spice.serve.team.store import (
     GLOBAL_LANE_SCHEMA_KEY_PREFIX,
     LANE_SCHEMA_RECORD_HORIZON_SECONDS,
+    AuthorityStoreSupersededError,
     ServeTeamStore,
     record_lane_schema_version,
 )
@@ -439,6 +440,82 @@ def test_v027_fingerprint_store_migrates_by_shape_and_leaves_retired_tables_whol
         for row in identity_before
     )
     assert retired_after == retired_before
+
+
+def test_a_store_that_moved_ahead_refuses_as_superseded_and_says_so_to_the_process(
+    tmp_path,
+):
+    """The one refusal a restart resolves, told apart and told to the process.
+
+    Both halves matter. The type is what a caller can act on, because every
+    caller that reaches this store today catches `SpiceError` broadly and turns
+    it into an answer; the wording is asserted beside it because those callers
+    keep reading the message, and a type added for one of them must not change
+    what the rest print.
+
+    The hook carries it out of the exception's path on purpose: by the time
+    this is raised, the process is running code the store no longer matches,
+    and the exception is about to be handled by someone with no interest in
+    that fact.
+    """
+    path = tmp_path / "moved-ahead.sqlite3"
+    heard: list[str] = []
+
+    def hear(error: AuthorityStoreSupersededError) -> None:
+        heard.append(str(error))
+
+    store = ServeTeamStore(path=path, superseded_hook=hear)
+    with store.connect():
+        pass
+    with sqlite_connection(path) as connection:
+        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
+    before = _logical_state(path)
+
+    with pytest.raises(AuthorityStoreSupersededError) as refusal:
+        with store.connect():
+            pytest.fail("superseded database partially opened")
+
+    assert isinstance(refusal.value, SpiceError)
+    assert str(refusal.value) == (
+        "team authority database changed to newer schema version "
+        f"{TEAM_AUTHORITY_SCHEMA_VERSION + 1}; this writer requires "
+        f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
+    )
+    assert heard == [str(refusal.value)]
+    assert _logical_state(path) == before
+
+
+def test_a_store_stamped_behind_this_writer_stays_the_refusal_it_already_was(tmp_path):
+    """Backwards is not superseded: restarting on this code would meet it again.
+
+    The distinction is the whole point of the type. A store ahead of this
+    process names a build that exists and can serve it; a store behind it names
+    nothing, so a process that exited over it would exit again, and the loop
+    that restarts it would spin instead of upgrading.
+    """
+    path = tmp_path / "moved-behind.sqlite3"
+    heard: list[str] = []
+
+    def hear(error: AuthorityStoreSupersededError) -> None:
+        heard.append(str(error))
+
+    store = ServeTeamStore(path=path, superseded_hook=hear)
+    with store.connect():
+        pass
+    with sqlite_connection(path) as connection:
+        connection.execute(f"PRAGMA user_version = {PRIOR_AUTHORITY_VERSION}")
+
+    with pytest.raises(SpiceError) as refusal:
+        with store.connect():
+            pytest.fail("unsupported database partially opened")
+
+    assert type(refusal.value) is SpiceError
+    assert str(refusal.value) == (
+        "team authority database changed to unsupported schema version "
+        f"{PRIOR_AUTHORITY_VERSION}; this writer requires "
+        f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
+    )
+    assert heard == []
 
 
 def test_cached_store_rechecks_newer_writer_version_before_use(tmp_path):

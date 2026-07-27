@@ -131,6 +131,22 @@ LANE_SCHEMA_RECORD_HORIZON_SECONDS = (
 )
 
 
+class AuthorityStoreSupersededError(SpiceError):
+    """The store moved to a schema past the one this process was built for.
+
+    Alone among this store's refusals in being about the process rather than
+    the database: nothing is wrong with the store, and nothing this process
+    can do will make it readable again, because the version it requires is
+    compiled in. Restarting on current code is the whole repair, which is why
+    it is worth telling apart from a refusal that a restart would only repeat.
+
+    A distinct type rather than a distinct message because the callers who
+    have to tell them apart are `except SpiceError` handlers that turn a
+    refusal into an error response -- matching on prose there would put the
+    wording of an operator-facing message in the way of a process exiting.
+    """
+
+
 def record_lane_schema_version(
     connection: sqlite3.Connection, lane: str, version: int
 ) -> None:
@@ -361,8 +377,10 @@ class ServeTeamStore(
         *,
         directive_state_path: Path | None = None,
         projection_path: Path | None = None,
+        superseded_hook: Callable[[AuthorityStoreSupersededError], None] | None = None,
     ) -> None:
         self.path = path or team_database_path()
+        self._superseded_hook = superseded_hook
         self.directive_state_path = (
             directive_state_path
             if directive_state_path is not None
@@ -378,6 +396,22 @@ class ServeTeamStore(
             else _default_projection_path(path)
         )
         self._task_event_wake_connection_ids: set[int] = set()
+
+    def _superseded(self, message: str) -> AuthorityStoreSupersededError:
+        """Build the refusal for a store that moved past this writer, and tell.
+
+        Told before it is raised, because raising is not how this reaches the
+        one party that can act on it. A long-running process meets this from
+        whatever thread happened to touch the store next, inside a caller that
+        already turns any `SpiceError` into an error response and carries on
+        serving; the exception is answered locally and the process never learns
+        it has been left behind. The hook is the process itself, hearing about
+        it at the only moment anything knows.
+        """
+        error = AuthorityStoreSupersededError(message)
+        if self._superseded_hook is not None:
+            self._superseded_hook(error)
+        return error
 
     def _ensure_schema(self) -> None:
         if self.path in self._initialized_paths:
@@ -514,7 +548,7 @@ class ServeTeamStore(
             < stored
             <= TEAM_AUTHORITY_MONOTONIC_VERSION_MAX
         ):
-            raise SpiceError(
+            raise self._superseded(
                 "team authority database was written by newer schema version "
                 f"{stored}; this writer supports through "
                 f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
@@ -555,14 +589,19 @@ class ServeTeamStore(
             connection.execute(f"PRAGMA busy_timeout = {TEAM_SQLITE_BUSY_TIMEOUT_MS}")
             stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if stored != TEAM_AUTHORITY_SCHEMA_VERSION:
-                relation = (
-                    "newer" if stored > TEAM_AUTHORITY_SCHEMA_VERSION else "unsupported"
-                )
-                raise SpiceError(
+                superseded = stored > TEAM_AUTHORITY_SCHEMA_VERSION
+                relation = "newer" if superseded else "unsupported"
+                message = (
                     f"team authority database changed to {relation} schema "
                     f"version {stored}; this writer requires "
                     f"{TEAM_AUTHORITY_SCHEMA_VERSION} and will not mutate it"
                 )
+                # Only forward. A store stamped below what this process runs is
+                # not something a restart resolves -- the same code would come
+                # back and refuse it again -- so it stays the refusal it was.
+                if superseded:
+                    raise self._superseded(message)
+                raise SpiceError(message)
             yield connection
             connection.commit()
             if id(connection) in self._task_event_wake_connection_ids:
