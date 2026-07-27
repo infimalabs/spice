@@ -40,10 +40,12 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_JUDGED_CONFIRMED,
     MAXIM_EVENT_JUDGED_REJECTED,
     MAXIM_EVENT_PUBLISHED,
+    MAXIM_METRICS_DATABASE_FILENAME,
     MaximMetricEventWrite,
     record_maxim_metric_events,
 )
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
+from spice.errors import SpiceError
 from spice.mail.ackarchive import summarize_ack_archival, summarize_nack_archival
 from spice.mail.ackgrammar import (
     extract_ack_keys_from_text,
@@ -335,9 +337,30 @@ def process_supervised_assistant_message(
     except Exception as exc:  # supervisor-visible metric failure
         log_handle.write(f"spice metrics supervisor error: {exc}\n")
         log_handle.flush()
+    reported_maxim_metrics_errors: set[str] = set()
+
+    def report_maxim_metrics_error(event_type: str, error: SpiceError) -> None:
+        detail = str(error)
+        if detail in reported_maxim_metrics_errors:
+            return
+        reported_maxim_metrics_errors.add(detail)
+        log_handle.write(f"spice maxim metrics supervisor error: {detail}\n")
+        log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "maxim.metrics-error",
+            database=MAXIM_METRICS_DATABASE_FILENAME,
+            event_type=event_type,
+            error=detail,
+        )
+
     try:
         publish_maxim_hits_as_inbox(
-            repo_root, message_text, reminder_gate=reminder_gate
+            repo_root,
+            message_text,
+            reminder_gate=reminder_gate,
+            on_metrics_error=report_maxim_metrics_error,
         )
     except Exception as exc:  # defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
@@ -857,6 +880,7 @@ def publish_maxim_hits_as_inbox(
     message_text: str,
     *,
     reminder_gate: MaximReminderGate,
+    on_metrics_error: Callable[[str, SpiceError], None] | None = None,
 ) -> list[Path]:
     statement_text = watchdog_judge_statement(message_text)
     if not statement_text:
@@ -877,6 +901,7 @@ def publish_maxim_hits_as_inbox(
         hits,
         event_type=MAXIM_EVENT_FIRE,
         statement=statement_text,
+        on_error=on_metrics_error,
     )
     if not reminder_gate.should_publish(reminder_key):
         _record_maxim_metrics(
@@ -886,9 +911,15 @@ def publish_maxim_hits_as_inbox(
             statement=statement_text,
             reminder_key=reminder_key,
             reminder_body=_maxim_inbox_body(hits),
+            on_error=on_metrics_error,
         )
         return []
-    violations = _publishable_maxim_hits(repo_root, hits, statement_text)
+    violations = _publishable_maxim_hits(
+        repo_root,
+        hits,
+        statement_text,
+        on_metrics_error=on_metrics_error,
+    )
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
@@ -900,13 +931,18 @@ def publish_maxim_hits_as_inbox(
         event_type=MAXIM_EVENT_PUBLISHED,
         reminder_key=path.stem,
         reminder_body=body,
+        on_error=on_metrics_error,
     )
     paths = [path]
     return paths
 
 
 def _publishable_maxim_hits(
-    repo_root: Path, hits: list[MaximBag], statement_text: str
+    repo_root: Path,
+    hits: list[MaximBag],
+    statement_text: str,
+    *,
+    on_metrics_error: Callable[[str, SpiceError], None] | None,
 ) -> list[MaximBag]:
     """Return the triggered hits that should publish as reminders.
 
@@ -932,6 +968,7 @@ def _publishable_maxim_hits(
                 [hit],
                 event_type=MAXIM_EVENT_JUDGED_REJECTED,
                 statement=statement_text,
+                on_error=on_metrics_error,
             )
             continue
         _record_maxim_metrics(
@@ -939,6 +976,7 @@ def _publishable_maxim_hits(
             [hit],
             event_type=MAXIM_EVENT_JUDGED_CONFIRMED,
             statement=statement_text,
+            on_error=on_metrics_error,
         )
         violations.append(hit)
     return violations
@@ -952,27 +990,32 @@ def _record_maxim_metrics(
     statement: str = "",
     reminder_key: str = "",
     reminder_body: str = "",
+    on_error: Callable[[str, SpiceError], None] | None = None,
 ) -> None:
     if not hits:
         return
     driver_name = driver_for(repo_root).name
     thread_id = ambient_thread_id() or ""
-    record_maxim_metric_events(
-        repo_root,
-        [
-            MaximMetricEventWrite(
-                event_type=event_type,
-                bag_name=hit.name,
-                driver_name=driver_name,
-                thread_id=thread_id,
-                trigger_family=hit.name,
-                statement=statement,
-                reminder_key=reminder_key,
-                reminder_body=reminder_body,
-            )
-            for hit in hits
-        ],
-    )
+    try:
+        record_maxim_metric_events(
+            repo_root,
+            [
+                MaximMetricEventWrite(
+                    event_type=event_type,
+                    bag_name=hit.name,
+                    driver_name=driver_name,
+                    thread_id=thread_id,
+                    trigger_family=hit.name,
+                    statement=statement,
+                    reminder_key=reminder_key,
+                    reminder_body=reminder_body,
+                )
+                for hit in hits
+            ],
+        )
+    except SpiceError as error:
+        if on_error is not None:
+            on_error(event_type, error)
 
 
 def discard_pending_maxim_reminders(

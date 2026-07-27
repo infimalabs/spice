@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from io import StringIO
 
 import pytest
 
@@ -37,6 +38,7 @@ from spice.agent.maxims import MaximVerdict
 from spice.cli.parser import build_parser
 from spice.config import edit, layers, values
 from spice.errors import SpiceError
+from spice.mail.inbox import collect_inbox_items
 from spice.sqliteconnection import sqlite_connection
 from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
@@ -218,6 +220,115 @@ def _maxim_database_snapshot(path):
             str(connection.execute("PRAGMA journal_mode").fetchone()[0]),
             tuple(connection.iterdump()),
         )
+
+
+def _write_incompatible_maxim_store(path, store_kind):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        if store_kind == "future":
+            connection.execute(MAXIM_METRICS_TABLE_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_EVENT_INDEX_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+            connection.execute(
+                f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}"
+            )
+            return
+        connection.execute(
+            "CREATE TABLE maxim_metric_events "
+            "(id INTEGER PRIMARY KEY, occurred_at REAL NOT NULL, payload TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO maxim_metric_events (occurred_at, payload) VALUES (1.0, 'old')"
+        )
+
+
+@pytest.mark.parametrize("store_kind", ["future", "malformed"])
+def test_maxim_metrics_refusal_does_not_suppress_the_reminder(
+    tmp_path, monkeypatch, store_kind
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        watchdog,
+        "evaluate_maxim_any_violation",
+        lambda _maxim, _statement: _judge_verdict(agrees=False),
+    )
+    path = maxim_metrics_database_path(repo)
+    _write_incompatible_maxim_store(path, store_kind)
+    before = _maxim_database_snapshot(path)
+    errors = []
+    gate = watchdog.MaximReminderGate()
+
+    reminders = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in assistant prose",
+        reminder_gate=gate,
+        on_metrics_error=lambda event_type, error: errors.append(
+            (event_type, str(error))
+        ),
+    )
+
+    assert len(reminders) == 1
+    assert reminders[0].is_file()
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] ALPHA reminder.\n"
+    ]
+    assert [event_type for event_type, _ in errors] == [
+        MAXIM_EVENT_FIRE,
+        MAXIM_EVENT_JUDGED_CONFIRMED,
+        MAXIM_EVENT_PUBLISHED,
+    ]
+    assert all("maxim metrics database" in detail for _, detail in errors)
+    assert gate.published_reminders() == ((reminders[0], "[MAXIM] ALPHA reminder.\n"),)
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_supervisor_surfaces_maxim_metrics_refusal_and_keeps_the_reminder(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    path = maxim_metrics_database_path(repo)
+    _write_incompatible_maxim_store(path, "future")
+    before = _maxim_database_snapshot(path)
+    feedback = []
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
+    )
+    log = StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        repo,
+        "alpha appears in assistant prose",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] ALPHA reminder.\n"
+    ]
+    assert feedback == [
+        (
+            "maxim.metrics-error",
+            {
+                "database": "spicemaxims.sqlite3",
+                "event_type": MAXIM_EVENT_FIRE,
+                "error": (
+                    "maxim metrics database was written by newer schema version 2; "
+                    "this writer supports through 1 and will not mutate it"
+                ),
+            },
+        )
+    ]
+    assert "spice maxim metrics supervisor error:" in log.getvalue()
+    assert _maxim_database_snapshot(path) == before
 
 
 def test_maxim_store_refuses_an_unknown_unversioned_shape_without_mutation(tmp_path):
