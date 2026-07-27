@@ -17,7 +17,9 @@ from spice.agent.driver import (
     CODEX_DRIVER,
     RATE_LIMIT_HTTP_STATUS,
 )
+from spice.agent.lifecyclebinding import SUPERVISOR_SCHEMA_VERSION_FIELD
 from spice.errors import SpiceError
+from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
 from spice.tasks import claimstate
 from tests.test_lifecyclehelpers import (
     FakeProcess,
@@ -104,6 +106,11 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     ]
     assert state["pid"] == SUPERVISED_AGENT_PID
     assert state["supervisor_pid"] == os.getpid()
+    # Beside the pid because the supervisor writes both in one operation: this
+    # is the record a later `spice task next` compares against the live store
+    # stamp, so the write has to be observed here or the comparison guards a
+    # field nothing produces.
+    assert state[SUPERVISOR_SCHEMA_VERSION_FIELD] == TEAM_AUTHORITY_SCHEMA_VERSION
     assert state["thread_id"] == thread_id
     assert state["log_path"] == str(final_log_path)
     assert state["prompt_skill_path"] == str(skill_path)
