@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.cli.mounts import RUNTIME_PYTHON_ENV
 from spice.errors import SpiceError
 from spice.tasks import config as task_config
 from spice.process.tool import run_tool_command
@@ -48,7 +49,21 @@ class ReleaseRecord:
     task_key: str = ""
 
 
+@dataclass(frozen=True)
+class InstalledCliSource:
+    python: Path
+    module: Path
+    root: Path
+    commit: str
+    tree: str
+
+
 SIGINT_EXIT_CODE = 130
+INSTALLED_CLI_PROBE_SCRIPT = (
+    "from pathlib import Path;"
+    "import spice.tasks.git.boundaries as boundaries;"
+    "print(Path(boundaries.__file__).resolve())"
+)
 
 
 def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser:
@@ -322,11 +337,93 @@ def run_release_gates(root: Path, choose_version: Callable[[], str]) -> str:
     ship a version nothing ever built. Returning the chosen version keeps that
     decision readable at the call site.
     """
+    require_installed_cli_carries_release_tree(root)
     clean_build_artifacts(root)
     run_constitution_gate()
     version = choose_version()
     run_artifact_gate(version)
     return version
+
+
+def require_installed_cli_carries_release_tree(root: Path) -> InstalledCliSource:
+    """Prove ordinary fleet commands import the exact committed release tree."""
+    installed = _installed_cli_source()
+    candidate_root = root.resolve()
+    if installed.python.is_relative_to(candidate_root):
+        raise SpiceError(
+            "release evidence must come from the independently installed CLI, "
+            f"not the candidate worktree interpreter {installed.python}"
+        )
+    candidate_commit, candidate_tree = _source_identity(root)
+    if installed.tree != candidate_tree:
+        raise SpiceError(
+            "deploy the candidate tree through the installed CLI before claiming "
+            "release behavior; branch state has no fleet effect by itself: "
+            f"candidate HEAD {candidate_commit} tree {candidate_tree}, while "
+            f"{installed.python} -P imports {installed.module} from "
+            f"{installed.commit} tree {installed.tree}"
+        )
+    print(
+        "installed CLI source gate passed: "
+        f"{installed.python} -P imports {installed.module}; "
+        f"candidate {candidate_commit} and installed {installed.commit} "
+        f"share tree {candidate_tree}"
+    )
+    return installed
+
+
+def _installed_cli_source() -> InstalledCliSource:
+    raw_python = str(
+        os.environ.get(RUNTIME_PYTHON_ENV) or ""  # env-policy: allow
+    ).strip()
+    if not raw_python:
+        raise SpiceError(
+            "run release gates through the repository-mounted `spice release` "
+            f"command; {RUNTIME_PYTHON_ENV} did not identify the installed CLI"
+        )
+    python = Path(raw_python).expanduser().absolute()
+    if not python.is_file():
+        raise SpiceError(f"installed CLI interpreter does not exist: {python}")
+    probe_env = dict(os.environ)  # env-policy: allow
+    probe_env.pop("PYTHONPATH", None)
+    result = run(
+        [str(python), "-P", "-c", INSTALLED_CLI_PROBE_SCRIPT],
+        capture=True,
+        cwd=Path("/"),
+        env=probe_env,
+    )
+    try:
+        module = Path(result.stdout.strip().splitlines()[-1]).resolve(strict=True)
+        root = module.parents[3]
+    except (IndexError, OSError) as exc:
+        raise SpiceError(
+            f"installed CLI probe returned no usable module path: {result.stdout!r}"
+        ) from exc
+    expected = Path("spice/tasks/git/boundaries.py")
+    if module.relative_to(root) != expected:
+        raise SpiceError(
+            f"installed CLI probe resolved unexpected module path {module}; "
+            f"expected <source-root>/{expected}"
+        )
+    if not (root / "pyproject.toml").is_file():
+        raise SpiceError(
+            f"installed CLI module {module} is not backed by an editable Spice "
+            "source checkout; deploy with `uv tool install -e <main-tree>`"
+        )
+    commit, tree = _source_identity(root)
+    return InstalledCliSource(python, module, root, commit, tree)
+
+
+def _source_identity(root: Path) -> tuple[str, str]:
+    commit = run(
+        ["git", "-C", str(root), "rev-parse", "HEAD^{commit}"],
+        capture=True,
+    ).stdout.strip()
+    tree = run(
+        ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"],
+        capture=True,
+    ).stdout.strip()
+    return commit, tree
 
 
 def run_constitution_gate() -> None:
@@ -917,6 +1014,7 @@ def run(
     command: list[str],
     *,
     capture: bool = False,
+    cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return run_tool_command(
@@ -925,6 +1023,7 @@ def run(
         operation="run release command",
         capture_output=capture,
         check=True,
+        cwd=cwd,
         text=True,
         env=env,
     )
