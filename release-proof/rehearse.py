@@ -37,6 +37,16 @@ EXIT_FAILURE = 2
 HASH_CHUNK_BYTES = 1024 * 1024
 PYTHON_GATE_COMMAND = ("uv", "run", "--locked", "pytest")
 RUFF_GATE_COMMAND = ("uv", "run", "--locked", "ruff", "check", ".")
+PRIOR_UPGRADE_GATE_COMMAND = (
+    "uv",
+    "run",
+    "--locked",
+    "python",
+    "release-proof/upgrade.py",
+    "rehearse",
+    "--root",
+    ".",
+)
 TOOLCHAIN_DECLARATION_PATH = "release-proof/toolchain.json"
 BROWSER_GATE_COMMAND = ("node", "tests/browser/run_release_smokes.js")
 MUTATION_GATE_COMMAND = (
@@ -78,6 +88,7 @@ CHECKS = (
     "packaging-toolchain",
     "python",
     "ruff",
+    "prior-store-upgrades",
     "browser-release-manifest",
     "deterministic-mutation-cohort",
     "build-sdist",
@@ -201,6 +212,13 @@ def _run_source_gates(
         raise RehearsalError(str(exc)) from exc
     print(python.stdout, end="")
     _run(RUFF_GATE_COMMAND, cwd=root, failures=failures, gate="ruff")
+    upgrades = _run(
+        PRIOR_UPGRADE_GATE_COMMAND,
+        cwd=root,
+        capture=True,
+        failures=failures,
+        gate="prior-store-upgrades",
+    )
     browser_env = dict(os.environ)  # env-policy: allow
     browser_env[PLAYWRIGHT_CONFIG_ENV] = str(_playwright_config(root, failures))
     browser_report_path = scratch / BROWSER_REPORT_NAME
@@ -225,9 +243,26 @@ def _run_source_gates(
     return {
         "python": python_counts,
         "ruff": {"passed": True},
+        "upgrades": _load_upgrade_report(upgrades.stdout),
         "browser": browser,
         "mutation": verify_mutation_cohort(root, mutation.stdout),
     }
+
+
+def _load_upgrade_report(output: str) -> dict[str, object]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RehearsalError("prior-store upgrade proof returned invalid JSON") from exc
+    stores = payload.get("stores") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 1
+        or not isinstance(stores, dict)
+        or set(stores) != {"team", "ack", "maxim-metrics", "projection"}
+    ):
+        raise RehearsalError("prior-store upgrade proof returned incomplete evidence")
+    return payload
 
 
 def _load_browser_report(path: Path) -> dict[str, object]:
@@ -772,6 +807,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         },
         "browser": gate_evidence["browser"],
         "mutation": gate_evidence["mutation"],
+        "upgrades": gate_evidence["upgrades"],
         "artifacts": {
             "sdist": {
                 "filename": sdist.name,

@@ -23,6 +23,7 @@ from tests.test_releaseproofhelpers import (
     REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
+    UPGRADE,
     _file_inventory,
     _git,
     _source_repository,
@@ -101,9 +102,14 @@ def test_source_export_contains_exact_head_and_is_stable_across_ignored_residue(
     assert second_provenance == expected_provenance
     assert _file_inventory(first) == [
         ".gitignore",
+        ".release-proof/prior-stores.json",
         ".release-proof/source.json",
         "payload.txt",
     ]
+    prior_stores = json.loads(
+        (first / ".release-proof/prior-stores.json").read_text(encoding="utf-8")
+    )
+    assert prior_stores == {"schema_version": 1, "releases": []}
     assert _content_identity(first) == _content_identity(second)
 
 
@@ -135,6 +141,12 @@ def test_synthetic_repository_keeps_source_identity_and_clean_git_semantics(tmp_
         == expected
     )
     assert _git(first, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert _git(first, "ls-files", ".release-proof") == "\n".join(
+        [
+            ".release-proof/prior-stores.json",
+            ".release-proof/source.json",
+        ]
+    )
     assert _git(first, "log", "-1", "--format=%s") == (
         "Synthetic release-proof source snapshot"
     )
@@ -181,6 +193,114 @@ def test_synthetic_repository_preserves_sha256_object_format_and_provenance(
     assert _git(context, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
+def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path):
+    repository, _source = _source_repository(tmp_path)
+    tagged_sources = {
+        "spice/serve/team/schema.py": 'TEAM_SCHEMA = "CREATE TABLE team_old(id)"\n',
+        "spice/mail/ackstate.py": (
+            'ACK_STATE_TABLE_SQL = "CREATE TABLE ack_old(id)"\n'
+            'ACK_STATE_INDEX_SQL = "CREATE INDEX ack_old_idx ON ack_old(id)"\n'
+        ),
+        "spice/agent/maximmetrics.py": (
+            'MAXIM_METRICS_TABLE_SQL = "CREATE TABLE maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_EVENT_INDEX_SQL = "
+            '"CREATE INDEX maxim_event ON maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_RECURRENCE_INDEX_SQL = "
+            '"CREATE INDEX maxim_recurrence ON maxim_metric_events(id)"\n'
+            "MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = "
+            '"CREATE INDEX maxim_recency ON maxim_metric_events(id)"\n'
+        ),
+    }
+    for relative, source_text in tagged_sources.items():
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source_text, encoding="utf-8")
+    _git(repository, "add", "--all")
+    _git(repository, "commit", "--quiet", "--message", "supported predecessor")
+    predecessor = _git(repository, "rev-parse", "HEAD^{commit}")
+    _git(repository, "tag", "v1.2.3")
+    (repository / "payload.txt").write_text("current head\n", encoding="utf-8")
+    _git(repository, "add", "payload.txt")
+    _git(repository, "commit", "--quiet", "--message", "candidate")
+    _git(repository, "tag", "v9.9.9")
+
+    context = tmp_path / "context"
+    _export(repository, context)
+    manifest = json.loads(
+        (context / ".release-proof/prior-stores.json").read_text(encoding="utf-8")
+    )
+
+    release = manifest["releases"][0]
+    assert (release["tag"], release["commit"]) == ("v1.2.3", predecessor)
+    assert set(release["stores"]) == {
+        "team",
+        "ack",
+        "maxim-metrics",
+        "projection",
+    }
+    assert release["stores"]["projection"] == {"state": "absent", "sources": {}}
+    for name in ("team", "ack", "maxim-metrics"):
+        assert release["stores"][name]["state"] == "source"
+        assert all(
+            path.endswith(".py") and isinstance(source_text, str) and source_text
+            for path, source_text in release["stores"][name]["sources"].items()
+        )
+
+
+def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
+    evidence = UPGRADE.rehearse_prior_stores(PROJECT_ROOT)
+
+    assert evidence["release"]["tag"] == "v0.27.0"
+    assert set(evidence["stores"]) == {
+        "team",
+        "ack",
+        "maxim-metrics",
+        "projection",
+    }
+    assert (
+        evidence["stores"]["team"]["version"]
+        == evidence["stores"]["team"]["expected_version"]
+    )
+    assert (
+        evidence["stores"]["ack"]["version"]
+        == evidence["stores"]["ack"]["expected_version"]
+    )
+    assert evidence["stores"]["projection"]["source"] == "absent"
+    assert (
+        evidence["stores"]["projection"]["version"]
+        == evidence["stores"]["projection"]["expected_version"]
+    )
+    assert evidence["stores"]["maxim-metrics"]["shape"] == "current"
+    for name in ("team", "ack", "maxim-metrics"):
+        assert evidence["stores"][name]["preserved_rows"] > 0
+
+
+def test_prior_release_manifest_rejects_missing_or_unclassified_stores():
+    manifest = UPGRADE.prior_store_manifest(PROJECT_ROOT)
+    missing = json.loads(json.dumps(manifest))
+    del missing["releases"][0]["stores"]["ack"]
+    with pytest.raises(UPGRADE.UpgradeProofError, match="inventory"):
+        UPGRADE._validate_manifest(missing)
+
+    absent = json.loads(json.dumps(manifest))
+    absent["releases"][0]["stores"]["team"] = {"state": "absent", "sources": {}}
+    with pytest.raises(UPGRADE.UpgradeProofError, match="required prior store"):
+        UPGRADE._validate_manifest(absent)
+
+
+def test_prior_release_rehearsal_detects_reversed_team_adoption_order(monkeypatch):
+    from spice.serve.team import store
+
+    monkeypatch.setattr(
+        store,
+        "TEAM_AUTHORITY_MONOTONIC_VERSION_MAX",
+        0x7FFFFFFF,
+    )
+
+    with pytest.raises(store.SpiceError, match="newer schema version"):
+        UPGRADE.rehearse_prior_stores(PROJECT_ROOT)
+
+
 def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
     containerfile = CONTAINERFILE.read_text(encoding="utf-8")
 
@@ -191,6 +311,16 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "--locked",
         "ruff",
         "check",
+        ".",
+    )
+    assert REHEARSAL.PRIOR_UPGRADE_GATE_COMMAND == (
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "release-proof/upgrade.py",
+        "rehearse",
+        "--root",
         ".",
     )
     assert REHEARSAL.BROWSER_GATE_COMMAND == (
@@ -219,6 +349,7 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "packaging-toolchain",
         "python",
         "ruff",
+        "prior-store-upgrades",
         "browser-release-manifest",
         "deterministic-mutation-cohort",
         "build-sdist",
@@ -688,6 +819,14 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
                 ],
             },
             "mutation": {"spice/config/layers.py": {"killed": 13, "mutants": 20}},
+            "upgrades": {
+                "schema_version": 1,
+                "release": {"tag": "v0.27.0", "commit": "a" * 40},
+                "stores": {
+                    name: {"preserved_rows": 1}
+                    for name in ("team", "ack", "maxim-metrics", "projection")
+                },
+            },
         },
     )
 
@@ -839,6 +978,12 @@ def _assert_release_receipt(
         "passed": 45,
         "skipped": 1,
         "total": 46,
+    }
+    assert set(receipt["upgrades"]["stores"]) == {
+        "team",
+        "ack",
+        "maxim-metrics",
+        "projection",
     }
     # The receipt carries the packaging pins the artifact chain actually ran on,
     # so host evidence states its own toolchain instead of implying the image's.

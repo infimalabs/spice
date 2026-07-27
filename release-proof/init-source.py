@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import TypedDict
 
 SOURCE_PROVENANCE = Path(".release-proof/source.json")
+PRIOR_STORES_PROVENANCE = Path(".release-proof/prior-stores.json")
+PRIOR_STORE_NAMES = {"team", "ack", "maxim-metrics", "projection"}
 IDENTITIES_GIT_PATH = "release-proof-identities.json"
 OBJECT_FORMAT_BY_ID_LENGTH = {40: "sha1", 64: "sha256"}
 OBJECT_ID = re.compile(
@@ -82,6 +84,32 @@ def _source_object_format(source: SourceIdentity) -> str:
     return OBJECT_FORMAT_BY_ID_LENGTH[len(source["tree"])]
 
 
+def _load_prior_stores(root: Path) -> dict[str, object]:
+    path = root / PRIOR_STORES_PROVENANCE
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version",
+        "releases",
+    }:
+        raise SystemExit(f"invalid prior-store provenance schema: {path}")
+    if payload.get("schema_version") != 1:
+        raise SystemExit(f"unsupported prior-store provenance schema: {path}")
+    releases = payload.get("releases")
+    if not isinstance(releases, list) or len(releases) > 1:
+        raise SystemExit(f"invalid prior-store release inventory: {path}")
+    for release in releases:
+        if not isinstance(release, dict) or set(release) != {
+            "tag",
+            "commit",
+            "stores",
+        }:
+            raise SystemExit(f"invalid prior-store release entry: {path}")
+        stores = release.get("stores")
+        if not isinstance(stores, dict) or set(stores) != PRIOR_STORE_NAMES:
+            raise SystemExit(f"invalid prior-store store inventory: {path}")
+    return payload
+
+
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
@@ -94,6 +122,7 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 def initialize(root: Path) -> dict[str, object]:
     root = root.resolve(strict=True)
     source = _load_source(root)
+    _load_prior_stores(root)
     environment = _git_environment()
 
     _git(
@@ -117,7 +146,7 @@ def initialize(root: Path) -> dict[str, object]:
         "--all",
         "--",
         ".",
-        f":(exclude){SOURCE_PROVENANCE.as_posix()}",
+        ":(exclude).release-proof",
         environment=environment,
     )
     exported_tree = _git(root, "write-tree", environment=environment)
@@ -133,6 +162,7 @@ def initialize(root: Path) -> dict[str, object]:
         "--force",
         "--",
         SOURCE_PROVENANCE.as_posix(),
+        PRIOR_STORES_PROVENANCE.as_posix(),
         environment=environment,
     )
     commit_environment = dict(environment)

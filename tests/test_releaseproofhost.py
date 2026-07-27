@@ -85,6 +85,14 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
             "ruff": {"passed": True},
             "browser": {"counts": {"failed": 0, "passed": 1, "total": 1}},
             "mutation": {"probe.py": {"killed": 1, "mutants": 1}},
+            "upgrades": {
+                "schema_version": 1,
+                "release": {"tag": "v0.27.0", "commit": "a" * 40},
+                "stores": {
+                    name: {"preserved_rows": 1}
+                    for name in ("team", "ack", "maxim-metrics", "projection")
+                },
+            },
         },
     )
     monkeypatch.setattr(
@@ -134,6 +142,7 @@ def test_direct_host_rehearsal_emits_citable_container_absence(tmp_path, monkeyp
         "record": "release-proof-toolchain.json",
         "scope": "container-only",
     }
+    assert receipt["upgrades"]["release"]["tag"] == "v0.27.0"
     assert (
         json.loads((artifacts / REHEARSAL.RECEIPT_NAME).read_text(encoding="utf-8"))
         == receipt

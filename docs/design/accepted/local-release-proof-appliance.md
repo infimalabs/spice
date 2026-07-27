@@ -70,7 +70,8 @@ The implementation is bound by these rules:
 ```text
 clean host HEAD
     |
-    | scripts/release-proof-source (git archive + source.json)
+    | scripts/release-proof-source
+    | (git archive + current identity + tagged prior-store source)
     v
 private, read-only-by-convention temporary context outside the worktree
     |
@@ -112,6 +113,9 @@ Before invoking the engine, the orchestrator verifies all of the following:
   worktree;
 - the repository exporter produces a context whose
   `.release-proof/source.json` names the resolved commit and tree; and
+- `.release-proof/prior-stores.json` binds the latest release tag reachable
+  from `HEAD^` to its peeled commit and the source-only schema surfaces for the
+  exact team, ACK, maxim-metrics, and projection store inventory; and
 - the reserved `.release-proof` source path and other exporter invariants pass.
 
 No precondition failure builds an image. It still produces a bounded failure
@@ -182,8 +186,8 @@ Before publishing a successful output directory, the orchestrator requires:
 - a report source commit and tree equal to the preflight and exported source
   identities;
 - artifact filenames, byte sizes, and SHA-256 digests equal to the report;
-- successful Linux test, browser, mutation, build, metadata, installation, and
-  sdist-to-wheel comparison results; and
+- successful Linux test, prior-store upgrade, browser, mutation, build,
+  metadata, installation, and sdist-to-wheel comparison results; and
 - no symlink, device, socket, unexpected directory, or undeclared top-level
   file in the copied bundle.
 
@@ -296,7 +300,8 @@ Implementation is accepted only when all of these observable checks pass:
 8. **Darwin integration tests** exercise an actual bounded host event and bind
    the companion to the exact container commit and report digest. Non-Darwin
    tests prove the Linux-only result makes no macOS claim.
-9. **Existing release gates** continue to pass, including package installation,
+9. **Existing release gates** continue to pass, including tagged prior-store
+   generation and current-writer upgrade rehearsal, package installation,
    browser evidence, mutation evidence, sdist rebuild comparison, redaction,
    and host-native tests.
 

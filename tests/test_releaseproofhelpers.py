@@ -16,6 +16,7 @@ SOURCE_INITIALIZER = PROJECT_ROOT / "release-proof" / "init-source.py"
 CONTAINERFILE = PROJECT_ROOT / "release-proof" / "Containerfile"
 TOOLCHAIN_DECLARATION = PROJECT_ROOT / "release-proof" / "toolchain.json"
 REHEARSAL_SCRIPT = PROJECT_ROOT / "release-proof" / "rehearse.py"
+UPGRADE_SCRIPT = PROJECT_ROOT / "release-proof" / "upgrade.py"
 EVIDENCE_SCRIPT = PROJECT_ROOT / "release-proof" / "evidence.py"
 HOSTNATIVE_SCRIPT = PROJECT_ROOT / "release-proof" / "hostnative.py"
 APPLIANCE_SCRIPT = PROJECT_ROOT / "release-proof" / "appliance.py"
@@ -37,6 +38,7 @@ def _load_script(script: Path) -> Any:
 
 
 REHEARSAL = _load_script(REHEARSAL_SCRIPT)
+UPGRADE = _load_script(UPGRADE_SCRIPT)
 EVIDENCE = _load_script(EVIDENCE_SCRIPT)
 HOSTNATIVE = _load_script(HOSTNATIVE_SCRIPT)
 APPLIANCE = _load_script(APPLIANCE_SCRIPT)
