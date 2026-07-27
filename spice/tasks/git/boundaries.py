@@ -137,6 +137,11 @@ def _refresh_generated_skill_after_advance(repo_root: Path) -> str | None:
     the fast-forward. Other repositories keep using the installed package's
     source. Materialization intentionally preserves a tracked worktree skill;
     ignored copies must match byte-for-byte or the sync reports the failure.
+
+    Every failure leaves as a note, because both callers run this only after
+    HEAD has already advanced. The arriving bytes are whatever the advanced
+    tree carries, so a skill that is not valid UTF-8 is reachable and decodes
+    to a note rather than an exception that would wedge every lane's launch.
     """
     from spice.agent import lifecyclebinding
 
@@ -160,7 +165,7 @@ def _refresh_generated_skill_after_advance(repo_root: Path) -> str | None:
                 f"{lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH.as_posix()} "
                 "does not match its packaged source"
             )
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return f"generated skill refresh failed: {exc}"
     return None
 

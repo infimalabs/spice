@@ -19,6 +19,11 @@ from tests.test_reposcaffolding import run as _run
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+# A UTF-16 byte order mark opens this, so the very first byte is one UTF-8
+# rejects outright: the packaged skill an advance carries is not always text
+# this process can decode.
+UNDECODABLE_SKILL_BYTES = b"\xff\xfeadvanced skill\n"
+
 
 @dataclass(frozen=True)
 class GitsyncOutcome:
@@ -933,6 +938,67 @@ def test_head_advance_reports_generated_skill_refresh_failure(
     ]
 
 
+@pytest.mark.parametrize(
+    "advance",
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
+    ids=["claim", "launch"],
+)
+def test_head_advance_reports_an_undecodable_generated_skill_as_a_note(
+    tmp_path, advance
+):
+    """An advanced tree can carry bytes no decoder accepts, and a lane still starts.
+
+    The refresh runs after HEAD has already moved, so an escaping decode error
+    would break both boundary contracts at once: ``fast_forward_if_safe`` never
+    raises, and ``prepare_for_claim`` raises only ``SpiceError``. One commit
+    carrying an undecodable packaged skill would otherwise wedge every lane's
+    launch, which is the opposite of leaving a failed refresh observable.
+    """
+    repo, target, expected = _repo_with_stale_generated_skill(
+        tmp_path, advanced=UNDECODABLE_SKILL_BYTES
+    )
+    stale = target.read_bytes()
+
+    result = advance(repo)
+
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        expected
+    )
+    assert target.read_bytes() == stale
+    assert result.notes == [
+        "updated working tree to the current baseline",
+        "generated skill refresh failed: 'utf-8' codec can't decode byte 0xff "
+        "in position 0: invalid start byte",
+    ]
+
+
+@pytest.mark.parametrize(
+    "advance",
+    [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
+    ids=["claim", "launch"],
+)
+def test_head_advance_keeps_a_tracked_generated_skill_and_reports_no_failure(
+    tmp_path, advance
+):
+    """A tracked worktree skill is the repository's own file, and drift is not failure.
+
+    Materialization returns a tracked copy without rewriting it, because Git
+    cannot ignore modifications to a tracked file. The byte comparison that
+    follows would then call that untouched drift a refresh failure on every
+    advance, so the tracked-path guard is what keeps the note honest.
+    """
+    repo, target, expected = _repo_with_tracked_generated_skill(tmp_path)
+    tracked = target.read_bytes()
+
+    result = advance(repo)
+
+    assert result.notes == ["updated working tree to the current baseline"]
+    assert target.read_bytes() == tracked
+    assert (repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).read_bytes() == (
+        expected
+    )
+
+
 def test_fast_forward_if_safe_fast_forwards_then_skips_divergence(tmp_path):
     # The pre-supervisor-launch autoupdate (start_agent) and activation share
     # this one safe advance. It must behave like `git merge --ff-only --quiet
@@ -1149,6 +1215,8 @@ def _advance_upstream(tmp_path: Path) -> None:
 
 def _repo_with_stale_generated_skill(
     tmp_path: Path,
+    *,
+    advanced: bytes = b"new packaged skill from advanced tree\n",
 ) -> tuple[Path, Path, bytes]:
     repo = _repo_with_upstream(tmp_path)
     packaged = repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
@@ -1163,11 +1231,39 @@ def _repo_with_stale_generated_skill(
     target.parent.mkdir(parents=True)
     target.write_bytes(packaged.read_bytes())
 
+    _advance_packaged_skill(tmp_path, advanced)
+    return repo, target, advanced
+
+
+def _repo_with_tracked_generated_skill(
+    tmp_path: Path,
+) -> tuple[Path, Path, bytes]:
+    """A repo whose worktree skill is committed rather than ignored.
+
+    The tracked copy is seeded already drifted from the packaged source, which
+    is the state materialization deliberately leaves alone.
+    """
+    repo = _repo_with_upstream(tmp_path)
+    packaged = repo / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
+    packaged.parent.mkdir(parents=True)
+    packaged.write_bytes(b"old packaged skill\n")
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"operator edited skill\n")
+    _run(repo, "git", "add", packaged.as_posix(), target.as_posix())
+    _run(repo, "git", "commit", "-m", "seed tracked skill")
+    _run(repo, "git", "push", "origin", "main")
+
+    advanced = b"new packaged skill from advanced tree\n"
+    _advance_packaged_skill(tmp_path, advanced)
+    return repo, target, advanced
+
+
+def _advance_packaged_skill(tmp_path: Path, advanced: bytes) -> None:
     peer = tmp_path / "peer"
     _run(tmp_path, "git", "clone", str(tmp_path / "remote.git"), str(peer))
     _configure_git_identity(peer)
-    expected = b"new packaged skill from advanced tree\n"
-    (peer / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).write_bytes(expected)
+    (peer / boundaries.CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH).write_bytes(advanced)
     _run(
         peer,
         "git",
@@ -1176,7 +1272,6 @@ def _repo_with_stale_generated_skill(
     )
     _run(peer, "git", "commit", "-m", "advance packaged skill")
     _run(peer, "git", "push", "origin", "main")
-    return repo, target, expected
 
 
 def _configure_git_identity(repo: Path) -> None:
