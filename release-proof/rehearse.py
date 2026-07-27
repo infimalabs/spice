@@ -1056,7 +1056,6 @@ def _upgrade_installed_package(
         failures=failures,
         gate="in-place-upgrade",
     )
-    _require_upgrade_tasks(seed, seed.tasks, phase="upgraded", failures=failures)
     current_paths_payload = _run_installed_probe(
         seed.python,
         root,
@@ -1090,6 +1089,7 @@ def _upgrade_installed_package(
         ),
         written=True,
     )
+    _require_upgrade_tasks(seed, seed.tasks, phase="upgraded", failures=failures)
     tasks = _add_upgrade_task(
         seed.console,
         seed.repository,

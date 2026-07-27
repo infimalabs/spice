@@ -590,6 +590,51 @@ def test_installed_upgrade_names_team_store_when_adoption_is_reversed(
         INSTALLED_UPGRADE._authority_verify_and_write(tmp_path)
 
 
+def test_artifact_upgrade_verifies_named_authorities_before_console_reads(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    seed = REHEARSAL._UpgradeSeed(
+        venv=venv,
+        python=venv / "bin" / "python",
+        console=venv / "bin" / "spice",
+        repository=repository,
+        environment={},
+        facts={},
+        paths={},
+        identities={},
+        versions={},
+        tasks=["UPGRADE-1kH8Proof"],
+    )
+
+    def fake_run(command, **_kwargs):
+        if command[0] != "uv":
+            raise AssertionError("console read ran before named authority verification")
+
+    def fake_probe(_python, _root, _repository, action, _environment, _failures):
+        if action == "paths":
+            return {}
+        raise REHEARSAL.RehearsalError(
+            "spiceteams.sqlite3: team authority database was written by newer schema"
+        )
+
+    monkeypatch.setattr(REHEARSAL, "_run", fake_run)
+    monkeypatch.setattr(REHEARSAL, "_run_installed_probe", fake_probe)
+    monkeypatch.setattr(REHEARSAL, "_validated_installed_paths", lambda *_a, **_k: {})
+
+    with pytest.raises(REHEARSAL.RehearsalError, match=r"spiceteams\.sqlite3"):
+        REHEARSAL._upgrade_installed_package(
+            tmp_path,
+            tmp_path / "current.whl",
+            tmp_path,
+            seed,
+            None,
+        )
+
+
 def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
     containerfile = CONTAINERFILE.read_text(encoding="utf-8")
 
