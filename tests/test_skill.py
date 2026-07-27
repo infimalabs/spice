@@ -247,21 +247,50 @@ def test_activation_serves_the_worktree_copy_when_packaged_bytes_are_undecodable
     assert target.read_text(encoding="utf-8") == LAST_GOOD_WORKTREE_SKILL
 
 
-def test_launch_reports_a_missing_skill_when_packaged_bytes_are_undecodable(
-    tmp_path, monkeypatch
-):
-    _undecodable_packaged_skill(tmp_path, monkeypatch)
-
-    with pytest.raises(SpiceError, match="missing spice skill at"):
-        lifecycle.resolve_agent_prompt_skill_path(tmp_path)
-
-
-def test_launch_reports_a_missing_skill_when_the_worktree_copy_is_undecodable(
+def test_launch_repairs_an_undecodable_untracked_worktree_skill_and_converges(
     tmp_path,
-):
+) -> None:
     target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
     target.parent.mkdir(parents=True)
     target.write_bytes(UNDECODABLE_WORKTREE_SKILL_BYTES)
+    packaged_bytes = lifecycle.packaged_skill_path().read_bytes()
+
+    first = lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+    second = lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+
+    assert first == target.resolve()
+    assert second == first
+    assert target.read_bytes() == packaged_bytes
+
+
+@pytest.mark.parametrize("unrepairable", ["packaged-source", "tracked-copy"])
+def test_launch_reports_a_missing_skill_when_undecodable_bytes_cannot_be_repaired(
+    tmp_path,
+    monkeypatch,
+    unrepairable,
+) -> None:
+    if unrepairable == "packaged-source":
+        preserved = _undecodable_packaged_skill(tmp_path, monkeypatch)
+        expected = UNDECODABLE_PACKAGED_SKILL_BYTES
+    else:
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        preserved = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+        preserved.parent.mkdir(parents=True)
+        preserved.write_bytes(UNDECODABLE_WORKTREE_SKILL_BYTES)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "add",
+                "--",
+                lifecycle.WORKTREE_SKILL_RELATIVE_PATH.as_posix(),
+            ],
+            check=True,
+        )
+        expected = UNDECODABLE_WORKTREE_SKILL_BYTES
 
     with pytest.raises(SpiceError, match="missing spice skill at"):
         lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+
+    assert preserved.read_bytes() == expected

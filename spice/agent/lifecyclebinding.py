@@ -284,12 +284,12 @@ def available_skill_path(
     The materialized (or repo-owned) worktree file is the only runtime path.
     The packaged skill is only a source for writing that file into the tree.
 
-    Bytes that are not valid UTF-8 anywhere in that copy step leave whatever
-    readable copy the tree already holds in service, exactly as an unwritable
-    tree does. Launch and activation resolve the skill through here, and the
-    packaged source is the tracked file an advance rewrites, so undecodable
-    bytes have to degrade to the ordinary missing-skill answer instead of a
-    decode traceback.
+    An undecodable packaged source leaves whatever readable copy the tree
+    already holds in service, exactly as an unwritable tree does. A corrupt
+    untracked generated copy is repaired once the packaged source decodes, while
+    a corrupt tracked copy remains repository-owned and therefore unavailable.
+    Every unrepairable decode degrades to the ordinary missing-skill answer
+    instead of a traceback.
     """
     try:
         materialized = materialize_worktree_skill(
@@ -333,10 +333,11 @@ def materialize_worktree_skill(
 ) -> Path | None:
     """The worktree's skill file, kept fresh; None when the tree can't hold one.
 
-    The file is rewritten whenever it drifts from the packaged source, so
-    reinstalling spice updates every ignored worktree copy on its next
-    activation or launch. A tracked worktree copy is returned without rewriting,
-    because Git cannot ignore tracked-file modifications.
+    The file is rewritten whenever it drifts from the packaged source, including
+    when an untracked copy no longer decodes, so reinstalling spice updates every
+    ignored worktree copy on its next activation or launch. A tracked worktree
+    copy is never rewritten, because Git cannot ignore tracked-file
+    modifications; an undecodable tracked copy is unavailable.
     """
     target = worktree_skill_path(repo_root)
     packaged = packaged_path or packaged_skill_path()
@@ -349,10 +350,16 @@ def materialize_worktree_skill(
     try:
         materialize_worktree_skill_gitignore(repo_root)
         if target.is_file():
-            if target.read_text(encoding="utf-8") == content:
-                return target
-            if git_tracks_relative_path(repo_root, WORKTREE_SKILL_RELATIVE_PATH):
-                return target
+            try:
+                current = target.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                if git_tracks_relative_path(repo_root, WORKTREE_SKILL_RELATIVE_PATH):
+                    return None
+            else:
+                if current == content:
+                    return target
+                if git_tracks_relative_path(repo_root, WORKTREE_SKILL_RELATIVE_PATH):
+                    return target
         atomic_write_text(target, content, write_if_changed=True)
     except OSError:
         return target if target.is_file() else None
