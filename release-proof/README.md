@@ -40,9 +40,8 @@ source worktree and may not already exist. The exporter records the original
 source commit, tree, and commit timestamp in `.release-proof/source.json`.
 It also resolves the release this tree upgrades from—the newest tag reachable
 from `HEAD` that sorts strictly below the version the tree declares in
-`pyproject.toml`—and writes its
-peeled commit plus the tagged Python schema source for the team, ACK,
-maxim-metrics, and projection stores to
+`pyproject.toml`—and writes its peeled commit plus the tagged Python schema
+source for the team, ACK, maxim-metrics, and projection stores to
 `.release-proof/prior-stores.json`. The exporter also builds that tagged
 release and carries its wheel plus digest in
 `.release-proof/prior-artifact/`. The schema provenance carries source text
