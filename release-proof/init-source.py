@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,8 @@ from typing import TypedDict
 
 SOURCE_PROVENANCE = Path(".release-proof/source.json")
 PRIOR_STORES_PROVENANCE = Path(".release-proof/prior-stores.json")
+PRIOR_ARTIFACT_PROVENANCE = Path(".release-proof/prior-artifact")
+PRIOR_ARTIFACT_MANIFEST = PRIOR_ARTIFACT_PROVENANCE / "manifest.json"
 PRIOR_STORE_NAMES = {"team", "ack", "maxim-metrics", "projection"}
 IDENTITIES_GIT_PATH = "release-proof-identities.json"
 OBJECT_FORMAT_BY_ID_LENGTH = {40: "sha1", 64: "sha256"}
@@ -110,6 +113,53 @@ def _load_prior_stores(root: Path) -> dict[str, object]:
     return payload
 
 
+def _load_prior_artifact(root: Path) -> dict[str, object]:
+    """Confirm the carried predecessor wheel is present and unaltered.
+
+    The synthetic repository has no tags, so this artifact can only arrive by
+    being staged upstream. A missing or rewritten one is a hard stop rather
+    than an invitation to rebuild something from the wrong commit.
+    """
+    manifest = root / PRIOR_ARTIFACT_MANIFEST
+    if not manifest.is_file():
+        raise SystemExit(f"missing carried predecessor artifact: {manifest}")
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"unreadable predecessor artifact manifest: {exc}") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version",
+        "release",
+        "state",
+        "wheel",
+    }:
+        raise SystemExit(f"invalid predecessor artifact manifest: {manifest}")
+    if payload.get("schema_version") != 1:
+        raise SystemExit(f"unsupported predecessor artifact schema: {manifest}")
+    state = payload.get("state")
+    wheel = payload.get("wheel")
+    if state not in {"built", "absent"}:
+        raise SystemExit(f"invalid predecessor artifact state: {manifest}")
+    if (state == "built") != isinstance(wheel, dict):
+        raise SystemExit(
+            f"predecessor artifact state does not agree with its wheel: {manifest}"
+        )
+    if state == "absent":
+        return payload
+    if set(wheel) != {"name", "sha256"}:
+        raise SystemExit(f"invalid predecessor artifact inventory: {manifest}")
+    carried = root / PRIOR_ARTIFACT_PROVENANCE / str(wheel["name"])
+    if not carried.is_file():
+        raise SystemExit(f"predecessor artifact names no carried wheel: {carried}")
+    digest = hashlib.sha256(carried.read_bytes()).hexdigest()
+    if digest != wheel["sha256"]:
+        raise SystemExit(
+            f"carried predecessor wheel does not match its manifest: {carried} "
+            f"records {wheel['sha256']}, resolved {digest}"
+        )
+    return payload
+
+
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
@@ -123,6 +173,7 @@ def initialize(root: Path) -> dict[str, object]:
     root = root.resolve(strict=True)
     source = _load_source(root)
     _load_prior_stores(root)
+    _load_prior_artifact(root)
     environment = _git_environment()
 
     _git(
@@ -163,6 +214,7 @@ def initialize(root: Path) -> dict[str, object]:
         "--",
         SOURCE_PROVENANCE.as_posix(),
         PRIOR_STORES_PROVENANCE.as_posix(),
+        PRIOR_ARTIFACT_PROVENANCE.as_posix(),
         environment=environment,
     )
     commit_environment = dict(environment)

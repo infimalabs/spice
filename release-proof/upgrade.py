@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 from collections import Counter
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -17,6 +18,8 @@ import zlib
 
 SCHEMA_VERSION = 1
 MANIFEST_RELATIVE_PATH = Path(".release-proof") / "prior-stores.json"
+ARTIFACT_RELATIVE_PATH = Path(".release-proof") / "prior-artifact"
+ARTIFACT_MANIFEST_NAME = "manifest.json"
 REQUIRED_STORES = ("team", "ack", "maxim-metrics", "projection")
 STORE_SOURCE_PATHS = {
     "team": ("spice/serve/team/schema.py",),
@@ -117,6 +120,83 @@ def export_prior_store_manifest(repository: Path, output: Path) -> dict[str, obj
         encoding="utf-8",
     )
     temporary.replace(output)
+    return payload
+
+
+def _require(command: list[str], *, purpose: str) -> None:
+    """Run a build step, surfacing its own stderr instead of a bare exit code."""
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise UpgradeProofError(
+            f"{purpose} failed ({completed.returncode}): {completed.stderr.strip()}"
+        )
+
+
+def _build_prior_wheel(repository: Path, tag: str, output: Path) -> dict[str, str]:
+    """Build the tagged predecessor into ``output`` and describe its one wheel."""
+    with tempfile.TemporaryDirectory() as scratch:
+        source = Path(scratch) / "source"
+        source.mkdir()
+        archive = Path(scratch) / "source.tar"
+        _git(repository, "archive", "--format=tar", f"--output={archive}", tag)
+        _require(
+            ["tar", "-xf", str(archive), "-C", str(source)],
+            purpose=f"unpacking {tag}",
+        )
+        _require(
+            ["uv", "build", "--wheel", "--out-dir", str(output), str(source)],
+            purpose=f"building the {tag} wheel",
+        )
+    # ``uv build`` seeds its output directory with a catch-all ignore rule. The
+    # carried artifact is tracked on purpose, so that rule must not travel.
+    (output / ".gitignore").unlink(missing_ok=True)
+    wheels = sorted(output.glob("*.whl"))
+    if len(wheels) != 1:
+        raise UpgradeProofError(
+            f"building {tag} produced {len(wheels)} wheels under {output}; "
+            "the in-place upgrade proof needs exactly one predecessor"
+        )
+    return {
+        "name": wheels[0].name,
+        "sha256": hashlib.sha256(wheels[0].read_bytes()).hexdigest(),
+    }
+
+
+def export_prior_artifact(repository: Path, output: Path) -> dict[str, object]:
+    """Build the predecessor wheel here, where its release tag is reachable.
+
+    The synthetic release-proof repository is a single tagless commit, so it can
+    never build its own predecessor, and deriving one from ``HEAD^`` there would
+    silently attest the wrong bytes. The carried manifest is the only source.
+
+    ``state`` names what was carried, mirroring the ``source``/``absent`` states
+    ``_validate_store_entry`` already accepts, and the sole thing that decides
+    it is whether a release tag exists. A repository with none has nothing to be
+    upgraded from, which ``prior_store_manifest`` already treats as a legitimate
+    shape; refusing that absent predecessor belongs to the gate that consumes
+    this manifest, not to the exporter that describes it. A tag that will not
+    build is the opposite case -- a broken release, not an absent one -- and it
+    raises here, where the failing build command can still say why.
+    """
+    repository = repository.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    tag = _latest_prior_tag(repository)
+    release: dict[str, str] | None = None
+    wheel: dict[str, str] | None = None
+    if tag is not None:
+        commit = _git(repository, "rev-parse", f"{tag}^{{commit}}").stdout.strip()
+        release = {"tag": tag, "commit": commit}
+        wheel = _build_prior_wheel(repository, tag, output)
+    payload: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION,
+        "release": release,
+        "state": "built" if wheel is not None else "absent",
+        "wheel": wheel,
+    }
+    (output / ARTIFACT_MANIFEST_NAME).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return payload
 
 
@@ -671,20 +751,27 @@ def main() -> int:
     export.add_argument("--repository", required=True, type=Path)
     export.add_argument("--output", required=True, type=Path)
     export.add_argument("--quiet", action="store_true")
+    artifact = actions.add_parser("export-artifact")
+    artifact.add_argument("--repository", required=True, type=Path)
+    artifact.add_argument("--output", required=True, type=Path)
+    artifact.add_argument("--quiet", action="store_true")
     rehearse = actions.add_parser("rehearse")
     rehearse.add_argument("--root", default=Path.cwd(), type=Path)
+    rehearse.set_defaults(quiet=False)
     arguments = parser.parse_args()
     try:
         if arguments.action == "export":
             payload = export_prior_store_manifest(
                 arguments.repository, arguments.output
             )
+        elif arguments.action == "export-artifact":
+            payload = export_prior_artifact(arguments.repository, arguments.output)
         else:
             payload = rehearse_prior_stores(arguments.root)
     except (OSError, sqlite3.DatabaseError, RuntimeError, ValueError) as exc:
         print(f"prior-store upgrade proof: {exc}", file=sys.stderr)
         return 2
-    if arguments.action != "export" or not arguments.quiet:
+    if not arguments.quiet:
         print(json.dumps(payload, sort_keys=True))
     return 0
 

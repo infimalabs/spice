@@ -102,6 +102,7 @@ def test_source_export_contains_exact_head_and_is_stable_across_ignored_residue(
     assert second_provenance == expected_provenance
     assert _file_inventory(first) == [
         ".gitignore",
+        ".release-proof/prior-artifact/manifest.json",
         ".release-proof/prior-stores.json",
         ".release-proof/source.json",
         "payload.txt",
@@ -110,6 +111,17 @@ def test_source_export_contains_exact_head_and_is_stable_across_ignored_residue(
         (first / ".release-proof/prior-stores.json").read_text(encoding="utf-8")
     )
     assert prior_stores == {"schema_version": 1, "releases": []}
+    prior_artifact = json.loads(
+        (first / ".release-proof/prior-artifact/manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert prior_artifact == {
+        "schema_version": 1,
+        "release": None,
+        "state": "absent",
+        "wheel": None,
+    }
     assert _content_identity(first) == _content_identity(second)
 
 
@@ -143,6 +155,7 @@ def test_synthetic_repository_keeps_source_identity_and_clean_git_semantics(tmp_
     assert _git(first, "status", "--porcelain=v1", "--untracked-files=all") == ""
     assert _git(first, "ls-files", ".release-proof") == "\n".join(
         [
+            ".release-proof/prior-artifact/manifest.json",
             ".release-proof/prior-stores.json",
             ".release-proof/source.json",
         ]
@@ -196,6 +209,21 @@ def test_synthetic_repository_preserves_sha256_object_format_and_provenance(
 def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path):
     repository, _source = _source_repository(tmp_path)
     tagged_sources = {
+        # The exporter builds whatever a tag points at, so the tagged commit has
+        # to be a real distribution. uv's own backend keeps that hermetic: it
+        # ships inside the uv binary, so no build requirement is fetched.
+        "pyproject.toml": (
+            "[build-system]\n"
+            'requires = ["uv_build"]\n'
+            'build-backend = "uv_build"\n\n'
+            "[project]\n"
+            'name = "spice-harness"\n'
+            'version = "1.2.3"\n\n'
+            "[tool.uv.build-backend]\n"
+            'module-root = ""\n'
+            'module-name = "spice"\n'
+        ),
+        "spice/__init__.py": "",
         "spice/serve/team/schema.py": 'TEAM_SCHEMA = "CREATE TABLE team_old(id)"\n',
         "spice/mail/ackstate.py": (
             'ACK_STATE_TABLE_SQL = "CREATE TABLE ack_old(id)"\n'
@@ -230,6 +258,25 @@ def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path)
         (context / ".release-proof/prior-stores.json").read_text(encoding="utf-8")
     )
 
+    artifact = json.loads(
+        (context / ".release-proof/prior-artifact/manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    carried = context / ".release-proof/prior-artifact" / artifact["wheel"]["name"]
+
+    assert (artifact["state"], artifact["release"]) == (
+        "built",
+        {"tag": "v1.2.3", "commit": predecessor},
+    )
+    assert _test_sha256(carried) == artifact["wheel"]["sha256"]
+    # uv build seeds its output directory with a catch-all ignore rule, which
+    # would silently keep the carried wheel out of the synthetic commit.
+    assert sorted(path.name for path in carried.parent.iterdir()) == [
+        "manifest.json",
+        carried.name,
+    ]
+
     release = manifest["releases"][0]
     assert (release["tag"], release["commit"]) == ("v1.2.3", predecessor)
     assert set(release["stores"]) == {
@@ -245,6 +292,25 @@ def test_source_export_binds_the_latest_tag_reachable_from_head_parent(tmp_path)
             path.endswith(".py") and isinstance(source_text, str) and source_text
             for path, source_text in release["stores"][name]["sources"].items()
         )
+
+
+def test_prior_artifact_export_refuses_a_release_tag_it_cannot_build(tmp_path):
+    """A tagged predecessor that will not build is broken, not absent.
+
+    Recording it as absent would look identical to a repository that has cut no
+    release at all, and the in-place upgrade gate would then refuse it with the
+    wrong reason far downstream. The build command's own stderr is the answer.
+    """
+    repository, _source = _source_repository(tmp_path)
+    _git(repository, "tag", "v1.2.3")
+    (repository / "payload.txt").write_text("current head\n", encoding="utf-8")
+    _git(repository, "add", "payload.txt")
+    _git(repository, "commit", "--quiet", "--message", "candidate")
+
+    with pytest.raises(UPGRADE.UpgradeProofError) as failure:
+        UPGRADE.export_prior_artifact(repository, tmp_path / "artifact")
+
+    assert str(failure.value).startswith("building the v1.2.3 wheel failed (")
 
 
 def test_prior_release_rehearsal_opens_every_store_and_preserves_rows():
@@ -286,6 +352,105 @@ def test_prior_release_manifest_rejects_missing_or_unclassified_stores():
     absent["releases"][0]["stores"]["team"] = {"state": "absent", "sources": {}}
     with pytest.raises(UPGRADE.UpgradeProofError, match="required prior store"):
         UPGRADE._validate_manifest(absent)
+
+
+def _artifact_manifest(root: Path, payload: dict[str, object]) -> None:
+    directory = root / REHEARSAL.PRIOR_ARTIFACT_DIRECTORY
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "manifest.json").write_text(
+        json.dumps(payload, sort_keys=True), encoding="utf-8"
+    )
+
+
+def test_in_place_upgrade_refuses_a_predecessor_that_was_never_built(tmp_path):
+    _artifact_manifest(
+        tmp_path,
+        {"schema_version": 1, "release": None, "state": "absent", "wheel": None},
+    )
+    with pytest.raises(REHEARSAL.RehearsalError, match="built predecessor artifact"):
+        REHEARSAL._carried_predecessor(tmp_path)
+
+
+def test_in_place_upgrade_refuses_a_manifest_naming_an_uncarried_wheel(tmp_path):
+    _artifact_manifest(
+        tmp_path,
+        {
+            "schema_version": 1,
+            "release": {"tag": "v0.27.0", "commit": "0" * 40},
+            "state": "built",
+            "wheel": {"name": "spice_harness-0.27.0-py3-none-any.whl", "sha256": "0"},
+        },
+    )
+    with pytest.raises(REHEARSAL.RehearsalError, match="missing"):
+        REHEARSAL._carried_predecessor(tmp_path)
+
+
+def test_in_place_upgrade_rejects_state_resolved_outside_the_scratch_root(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
+    with pytest.raises(REHEARSAL.RehearsalError, match="escaped the proof scratch"):
+        REHEARSAL._assert_state_is_isolated(elsewhere, scratch)
+
+
+def test_in_place_upgrade_fails_closed_on_an_unrecorded_state_file(tmp_path):
+    scratch = tmp_path / "scratch"
+    state = scratch / "upgrade-state" / ".git" / ".spice" / "data"
+    state.mkdir(parents=True)
+    (state / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
+    (state / "spicerogue.sqlite3").write_bytes(b"")
+    with pytest.raises(REHEARSAL.RehearsalError, match="spicerogue.sqlite3"):
+        REHEARSAL._assert_state_is_isolated(state, scratch)
+
+
+def test_in_place_upgrade_accepts_the_recorded_state_exclusions(tmp_path):
+    scratch = tmp_path / "scratch"
+    state = scratch / "upgrade-state" / ".git" / ".spice" / "data"
+    state.mkdir(parents=True)
+    (state / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
+    for name in REHEARSAL.UPGRADE_EXCLUDED_STATE:
+        (state / name).write_bytes(b"")
+    inventory = REHEARSAL._assert_state_is_isolated(state, scratch)
+    assert inventory == sorted(
+        [REHEARSAL.UPGRADE_TEAM_STORE, *REHEARSAL.UPGRADE_EXCLUDED_STATE]
+    )
+
+
+def test_in_place_upgrade_inventory_answers_to_current_source():
+    """The stores this repository declares are all accounted for right now."""
+    declared = REHEARSAL._assert_state_inventory_is_declared(PROJECT_ROOT)
+
+    assert set(declared) == set(REHEARSAL.UPGRADE_GOVERNED_STATE) | {
+        "taskchampion.sqlite3"
+    }
+
+
+def test_in_place_upgrade_fails_closed_on_an_undeclared_new_store(tmp_path):
+    """A store added lazily never appears in a run, so source is the check."""
+    package = tmp_path / "spice" / "newthing"
+    package.mkdir(parents=True)
+    (package / "store.py").write_text(
+        'NEWTHING_DATABASE_FILENAME = "spicenewthing.sqlite3"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._assert_state_inventory_is_declared(tmp_path)
+
+    assert "spicenewthing.sqlite3" in str(failure.value)
+
+
+def test_in_place_upgrade_refuses_a_tree_that_declares_no_store(tmp_path):
+    """An empty read is a broken probe, not a clean inventory."""
+    (tmp_path / "spice").mkdir()
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="nothing to answer to"):
+        REHEARSAL._assert_state_inventory_is_declared(tmp_path)
+
+
+def test_in_place_upgrade_is_a_registered_release_proof_check():
+    assert "in-place-upgrade" in REHEARSAL.CHECKS
 
 
 def test_prior_release_rehearsal_detects_reversed_team_adoption_order(monkeypatch):
@@ -358,6 +523,7 @@ def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
         "isolated-install",
         "installed-imports",
         "installed-console",
+        "in-place-upgrade",
         "sdist-rebuild",
         "wheel-member-content",
         "clean-worktree",
@@ -874,6 +1040,14 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
         lambda _root, _scratch: root,
     )
     monkeypatch.setattr(REHEARSAL, "_validate_installed_wheel", validate_installed)
+    monkeypatch.setattr(
+        REHEARSAL,
+        "_validate_in_place_upgrade",
+        lambda _root, wheel, _scratch, _failures: (
+            carried.append(("upgraded", wheel))
+            or {"adopted": {"from": 783663365, "to": 2, "store": "spiceteams.sqlite3"}}
+        ),
+    )
     monkeypatch.setattr(REHEARSAL, "_rebuild_wheel_from_sdist", rebuild_from_sdist)
     monkeypatch.setattr(REHEARSAL, "_run", clean_status)
 
@@ -884,6 +1058,7 @@ def test_rehearsal_receipt_carries_the_artifacts_it_installs_and_rebuilds(
     assert carried == [
         ("built", root),
         ("installed", wheel),
+        ("upgraded", wheel),
         ("rebuilt", root),
         ("rebuilt-from", sdist),
     ]
@@ -984,6 +1159,11 @@ def _assert_release_receipt(
         "ack",
         "maxim-metrics",
         "projection",
+    }
+    # The prior-store gate replays a tagged store against the source tree; this
+    # one is the artifact's own evidence, so the receipt carries both separately.
+    assert receipt["in_place_upgrade"] == {
+        "adopted": {"from": 783663365, "to": 2, "store": "spiceteams.sqlite3"}
     }
     # The receipt carries the packaging pins the artifact chain actually ran on,
     # so host evidence states its own toolchain instead of implying the image's.
