@@ -570,27 +570,42 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
-    transition_lines = [result]
-    if result.startswith("advanced "):
-        transition_lines.append(_phase_ownership_line())
-    learning_line = _distill_task_done_learnings(
-        row,
-        done_at=tw.now_iso(),
-        handle_text=identity.render_handle(row),
-        repo_root=config.repo_root(),
-    ).render()
-    next_line = next_task_drain_line()
-    if result.endswith(" -> review"):
-        next_line = next_task_drain_line(review_assignment=True)
-    if not chain_next:
-        return "\n".join([*transition_lines, *sync.notes, learning_line, next_line])
-    # Deferred to keep the read-side render -> ops dependency acyclic at import
-    # time while reusing exactly the allocator continuation behind `task next`.
-    from spice.tasks import render
+    # _advance returning is the commit point: phase and validation are durable.
+    # Everything after it only presents that result, so a stale presentation
+    # dependency must report the landed transition instead of turning success
+    # into exit 2 and inviting the operator to repeat task done.
+    try:
+        transition_lines = [result]
+        if result.startswith("advanced "):
+            transition_lines.append(_phase_ownership_line())
+        learning_line = _distill_task_done_learnings(
+            row,
+            done_at=tw.now_iso(),
+            handle_text=identity.render_handle(row),
+            repo_root=config.repo_root(),
+        ).render()
+        next_line = next_task_drain_line()
+        if result.endswith(" -> review"):
+            next_line = next_task_drain_line(review_assignment=True)
+        if not chain_next:
+            return "\n".join([*transition_lines, *sync.notes, learning_line, next_line])
+        # Deferred to keep the read-side render -> ops dependency acyclic at
+        # import time while reusing exactly the allocator continuation behind
+        # `task next`.
+        from spice.tasks import render
 
-    return "\n".join(
-        [*transition_lines, *sync.notes, learning_line, render.render_next()]
-    )
+        return "\n".join(
+            [*transition_lines, *sync.notes, learning_line, render.render_next()]
+        )
+    except Exception as exc:
+        return "\n".join(
+            [
+                result,
+                f"validation recorded: {' | '.join(validation)}",
+                f"post-advance presentation failed: {exc}",
+                "the task transition is durable; do not rerun task done",
+            ]
+        )
 
 
 def _phase_ownership_line() -> str:

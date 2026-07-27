@@ -9,13 +9,18 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.cli.entry import main as cli_main
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.hooks import precommit
+from spice.sqliteconnection import sqlite_connection
+from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
+from spice.serve.team.store import ServeTeamStore, team_database_path
 from spice.sessions import learnings
 from spice.tasks import (
     alloc,
+    config,
     create,
     identity,
     ops,
@@ -456,6 +461,84 @@ def test_task_done_parser_forwards_next_with_all_evidence(monkeypatch, capsys):
             "chain_next": True,
         }
     ]
+
+
+def test_task_done_reports_durable_advance_when_continuation_store_is_ahead(
+    task_repo, capsys
+):
+    handle = create.add(
+        "Advance before stale continuation rendering",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo", "review"],
+        acceptance=["the durable advance survives presentation failure"],
+    )
+    ops.claim(handle)
+    store = ServeTeamStore()
+    with store.connect():
+        pass
+    with sqlite_connection(team_database_path()) as connection:
+        connection.execute(f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}")
+    backend = config.backend_root()
+
+    code = cli_main(
+        [
+            "task",
+            "--backend",
+            str(backend),
+            "done",
+            handle,
+            "--validation",
+            "authority-stamped done",
+        ]
+    )
+    captured = capsys.readouterr()
+    row = identity.resolve(handle)
+
+    assert code == 0
+    assert f"advanced {handle} -> review" in captured.out
+    assert "validation recorded: authority-stamped done" in captured.out
+    assert "post-advance presentation failed" in captured.out
+    assert "changed to newer schema version" in captured.out
+    assert "the task transition is durable; do not rerun task done" in captured.out
+    assert captured.err == ""
+    assert row["phase"] == "review"
+    assert row["validation"] == "authority-stamped done"
+    assert not row.get("claim_by")
+
+
+def test_task_done_pre_advance_failure_stays_nonzero_and_claimed(task_repo, capsys):
+    handle = create.add(
+        "Keep pre-advance failures loud",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo", "review"],
+        acceptance=["a dirty worktree prevents the durable advance"],
+    )
+    ops.claim(handle)
+    (task_repo / "uncommitted.txt").write_text("not ready\n", encoding="utf-8")
+    backend = config.backend_root()
+
+    code = cli_main(
+        [
+            "task",
+            "--backend",
+            str(backend),
+            "done",
+            handle,
+            "--validation",
+            "must not land",
+        ]
+    )
+    captured = capsys.readouterr()
+    row = identity.resolve(handle)
+
+    assert code == 2
+    assert captured.out == ""
+    assert "task done requires a clean worktree" in captured.err
+    assert row["phase"] == "todo"
+    assert not row.get("validation")
+    assert row["claim_by"] == ACTOR_A
 
 
 @pytest.mark.parametrize("explicit_handle", [True, False], ids=("explicit", "sole"))
