@@ -255,7 +255,9 @@ def test_recovery_command_resumes_under_the_checkout_the_landing_selected(
             operation="review",
         )
 
-    recovery = str(raised.value).split("continuation with `", 1)[1].split("`", 1)[0]
+    # The command is the last backticked span, so this reads what an operator
+    # would copy out of the message however the surrounding prose is worded.
+    recovery = str(raised.value).rsplit("`", 2)[-2]
     resumed = subprocess.run(
         recovery,
         shell=True,
@@ -267,6 +269,41 @@ def test_recovery_command_resumes_under_the_checkout_the_landing_selected(
 
     assert resumed.returncode == 0, resumed.stderr
     assert resumed.stdout.strip() == "resumed:landing"
+
+
+def test_failed_continuation_message_names_the_shell_the_resume_runs_in(
+    tmp_path, monkeypatch
+):
+    # The child inherited this process's whole environment; the recovery
+    # command carries only the directory, and both continuation arms read the
+    # claim holder out of the environment rather than the payload. So the
+    # message says which shell the resume belongs in, ahead of the attempt,
+    # because the landing it belongs to is already authoritative by then and
+    # the claim guard refuses anyone else by name.
+    monkeypatch.delenv(phasecontinuation.PHASE_CONTINUATION_ENV, raising=False)
+    monkeypatch.setattr(
+        phasecontinuation,
+        "run_parent_lifetime_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("no interpreter")),
+    )
+
+    with pytest.raises(SpiceError) as raised:
+        phasecontinuation._run_fresh_checkout(
+            {
+                "protocol": phasecontinuation.PHASE_CONTINUATION_PROTOCOL,
+                "module": "spice.tasks.ops",
+                "function": "_continue_phase",
+                "payload": {"operation": "done", "input": {"handle": "TASK-1kHeld"}},
+                "environment": {},
+            },
+            repo_root=tmp_path,
+            landing_head="9ab876",
+            operation="done",
+        )
+
+    message = str(raised.value)
+    assert "takes the claim holder from the environment" in message
+    assert "run it from this shell" in message
 
 
 def test_nested_continuation_is_refused_without_spawning(tmp_path, monkeypatch):

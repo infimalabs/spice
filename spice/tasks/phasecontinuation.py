@@ -125,7 +125,10 @@ def _fresh_continuation_error(
         f"task {operation} integration landed at {landing_head}, but its fresh "
         f"checkout continuation {outcome}; the landing is "
         f"authoritative and will not be rolled back or re-published. Run "
-        f"`spice task status`, then resume the exact continuation with `{recovery}`"
+        f"`spice task status`, then resume the exact continuation. The resume "
+        f"takes the claim holder from the environment rather than the payload, "
+        f"so run it from this shell, whose environment names that holder: "
+        f"`{recovery}`"
     )
     if detail:
         message += f":\n{detail}"

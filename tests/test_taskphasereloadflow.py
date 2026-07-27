@@ -155,6 +155,40 @@ def test_done_continuation_derives_the_completer_from_durable_claim_state(
     assert row["validation"] == "derived completer verified"
 
 
+def test_continuation_refuses_a_process_that_does_not_hold_the_claim(
+    task_repo, monkeypatch
+):
+    # What the failed-continuation recovery message promises a reader: the
+    # resume reads its actor out of the environment, so a shell missing this
+    # lane's driver identity is refused by the name of the holder instead of
+    # completing the task as whoever pasted the token.
+    handle = create.add(
+        "Refuse a completer that holds nothing",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo"],
+        acceptance=["a process outside the claim cannot complete the phase"],
+    )
+    ops.claim(handle)
+    payload = {
+        "handle": handle,
+        "validation": ["never applied"],
+        "judgment": "sound",
+        "notes": [],
+        "chain_next": False,
+        "sync_notes": [],
+        "sync_uda_args": [],
+    }
+    monkeypatch.delenv(DRIVER.thread_id_env)
+
+    with pytest.raises(SpiceError, match=f"task claimed by {ACTOR_A}"):
+        ops._continue_done(payload)
+    row = identity.resolve(handle)
+
+    assert row["status"] == "pending"
+    assert row["claim_by"] == ACTOR_A
+
+
 def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
     handle = create.add(
         "Resume one review exactly",
