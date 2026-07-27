@@ -283,13 +283,41 @@ def available_skill_path(
 
     The materialized (or repo-owned) worktree file is the only runtime path.
     The packaged skill is only a source for writing that file into the tree.
+
+    Bytes that are not valid UTF-8 anywhere in that copy step leave whatever
+    readable copy the tree already holds in service, exactly as an unwritable
+    tree does. Launch and activation resolve the skill through here, and the
+    packaged source is the tracked file an advance rewrites, so undecodable
+    bytes have to degrade to the ordinary missing-skill answer instead of a
+    decode traceback.
     """
-    materialized = materialize_worktree_skill(repo_root, packaged_path=packaged_path)
+    try:
+        materialized = materialize_worktree_skill(
+            repo_root, packaged_path=packaged_path
+        )
+    except UnicodeDecodeError:
+        materialized = _readable_worktree_skill(repo_root)
     if materialized is not None:
         return materialized
     if required:
         raise SpiceError(f"missing spice skill at {worktree_skill_path(repo_root)}")
     return None
+
+
+def _readable_worktree_skill(repo_root: Path) -> Path | None:
+    """The worktree skill only when this process can read it back as text.
+
+    The undecodable bytes are not always the packaged source: the generated
+    copy in the tree can be the corrupt file itself. Serving that path would
+    answer a caller with a skill nothing can read, so a copy that fails to
+    decode is treated as absent and takes the missing-skill answer.
+    """
+    existing = worktree_skill_path(repo_root)
+    try:
+        existing.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return existing
 
 
 def worktree_skill_path(repo_root: Path) -> Path:
