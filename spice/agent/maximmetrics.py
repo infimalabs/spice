@@ -76,6 +76,29 @@ _MAXIM_METRICS_TABLE_SHAPE = (
     ("reminder_key", "TEXT", 1, "''", 0),
     ("reminder_body", "TEXT", 1, "''", 0),
 )
+_MAXIM_METRICS_INDEX_SHAPE = (
+    (
+        "maxim_metric_events_fire_recency_idx",
+        0,
+        "c",
+        0,
+        ("event_type", "occurred_at", "id"),
+    ),
+    (
+        "maxim_metric_events_lookup_idx",
+        0,
+        "c",
+        0,
+        ("bag_name", "driver_name", "event_type", "occurred_at"),
+    ),
+    (
+        "maxim_metric_events_recurrence_idx",
+        0,
+        "c",
+        0,
+        ("trigger_family", "driver_name", "occurred_at"),
+    ),
+)
 _FRESH_SOURCE = "fresh"
 _UNVERSIONED_CURRENT_SOURCE = "unversioned-current"
 
@@ -356,6 +379,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         connection.execute(MAXIM_METRICS_EVENT_INDEX_SQL)
         connection.execute(MAXIM_METRICS_RECURRENCE_INDEX_SQL)
         connection.execute(MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+        _validate_index_shape_locked(connection)
         connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
         connection.commit()
     except BaseException:
@@ -372,13 +396,13 @@ def _validate_current_schema(connection: sqlite3.Connection) -> None:
             f"{relation} schema version {stored}; this writer requires "
             f"{MAXIM_METRICS_SCHEMA_VERSION} and will not mutate it"
         )
-    _validate_table_shape_locked(connection)
+    _validate_schema_shape_locked(connection)
 
 
 def _maxim_metrics_source_locked(connection: sqlite3.Connection) -> str | None:
     stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if stored == MAXIM_METRICS_SCHEMA_VERSION:
-        _validate_table_shape_locked(connection)
+        _validate_schema_shape_locked(connection)
         return None
     if stored > MAXIM_METRICS_SCHEMA_VERSION:
         raise SpiceError(
@@ -397,12 +421,18 @@ def _maxim_metrics_source_locked(connection: sqlite3.Connection) -> str | None:
         return _FRESH_SOURCE
     if tables == {_MAXIM_METRICS_TABLE_NAME} and (
         _maxim_metrics_table_shape(connection) == _MAXIM_METRICS_TABLE_SHAPE
+        and _maxim_metrics_index_shape(connection) == _MAXIM_METRICS_INDEX_SHAPE
     ):
         return _UNVERSIONED_CURRENT_SOURCE
     raise SpiceError(
-        "unversioned maxim metrics database has an unsupported table shape; "
+        "unversioned maxim metrics database has an unsupported schema shape; "
         "refusing to mutate durable maxim history"
     )
+
+
+def _validate_schema_shape_locked(connection: sqlite3.Connection) -> None:
+    _validate_table_shape_locked(connection)
+    _validate_index_shape_locked(connection)
 
 
 def _validate_table_shape_locked(connection: sqlite3.Connection) -> None:
@@ -411,6 +441,14 @@ def _validate_table_shape_locked(connection: sqlite3.Connection) -> None:
     if tables != {_MAXIM_METRICS_TABLE_NAME} or shape != _MAXIM_METRICS_TABLE_SHAPE:
         raise SpiceError(
             "maxim metrics database table shape does not match schema version "
+            f"{MAXIM_METRICS_SCHEMA_VERSION}; refusing to mutate durable maxim history"
+        )
+
+
+def _validate_index_shape_locked(connection: sqlite3.Connection) -> None:
+    if _maxim_metrics_index_shape(connection) != _MAXIM_METRICS_INDEX_SHAPE:
+        raise SpiceError(
+            "maxim metrics database index shape does not match schema version "
             f"{MAXIM_METRICS_SCHEMA_VERSION}; refusing to mutate durable maxim history"
         )
 
@@ -434,6 +472,21 @@ def _maxim_metrics_table_shape(
             f'PRAGMA table_info("{_MAXIM_METRICS_TABLE_NAME}")'
         )
     )
+
+
+def _maxim_metrics_index_shape(
+    connection: sqlite3.Connection,
+) -> tuple[tuple[object, ...], ...]:
+    indexes = []
+    for row in connection.execute(f'PRAGMA index_list("{_MAXIM_METRICS_TABLE_NAME}")'):
+        name = str(row[1])
+        quoted_name = name.replace('"', '""')
+        columns = tuple(
+            str(column[2])
+            for column in connection.execute(f'PRAGMA index_info("{quoted_name}")')
+        )
+        indexes.append((name, int(row[2]), str(row[3]), int(row[4]), columns))
+    return tuple(sorted(indexes))
 
 
 def _event_row(

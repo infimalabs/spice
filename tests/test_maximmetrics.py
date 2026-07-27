@@ -234,7 +234,7 @@ def test_maxim_store_refuses_an_unknown_unversioned_shape_without_mutation(tmp_p
         )
     before = _maxim_database_snapshot(path)
 
-    with pytest.raises(SpiceError, match="unsupported table shape"):
+    with pytest.raises(SpiceError, match="unsupported schema shape"):
         record_maxim_metric_events(
             repo,
             [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "new", "codex")],
@@ -271,11 +271,17 @@ def test_maxim_store_revalidates_a_cached_path_after_replacement(tmp_path):
     replacement = path.with_name("replacement.sqlite3")
     with sqlite_connection(replacement) as connection:
         connection.execute(MAXIM_METRICS_TABLE_SQL)
-        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}")
+        connection.execute(
+            "CREATE INDEX maxim_metric_events_lookup_idx "
+            "ON maxim_metric_events(occurred_at)"
+        )
+        connection.execute(maximmetrics.MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+        connection.execute(maximmetrics.MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
     replacement.replace(path)
     before = _maxim_database_snapshot(path)
 
-    with pytest.raises(SpiceError, match="changed to newer schema version"):
+    with pytest.raises(SpiceError, match="index shape does not match"):
         record_maxim_metric_events(
             repo,
             [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "after", "codex")],
