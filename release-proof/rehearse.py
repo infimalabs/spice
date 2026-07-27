@@ -8,8 +8,10 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -84,6 +86,31 @@ PLAYWRIGHT_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 RECEIPT_NAME = "release-proof.json"
 BROWSER_REPORT_NAME = "browser-scenarios.json"
 MUTATION_COUNT_FIELDS = ("killed", "mutants", "score", "survived", "timed_out")
+PRIOR_ARTIFACT_DIRECTORY = Path(".release-proof") / "prior-artifact"
+PRIOR_ARTIFACT_MANIFEST = PRIOR_ARTIFACT_DIRECTORY / "manifest.json"
+UPGRADE_SEED_PROJECT = "task.upgradeproof"
+# Task creation requires provenance. Nothing steered these throwaway rows, so
+# they carry the key of the task that introduced this gate.
+UPGRADE_SEED_ORIGIN = "ack:1kH7dz6P"
+UPGRADE_TEAM_STORE = "spiceteams.sqlite3"
+# Every SQLite file an upgraded install may leave under the proof's own state
+# directory. Anything outside these two sets is drift and fails the gate closed.
+UPGRADE_GOVERNED_STATE = (
+    "spiceacks.sqlite3",
+    "spicemaxims.sqlite3",
+    "spiceprojections.sqlite3",
+    "spiceteams.sqlite3",
+)
+# state_5.sqlite is an agent driver's own home file and taskchampion.sqlite3 is
+# Taskwarrior-owned and opened read-only; both are excluded on the record.
+UPGRADE_EXCLUDED_STATE = ("state_5.sqlite", "taskchampion.sqlite3")
+# Source names each durable store in a constant beside the code that opens it.
+# Reading them back is what makes the inventory above answerable to the tree
+# under proof instead of to whichever files happened to appear during a run.
+UPGRADE_STATE_DECLARATION = re.compile(
+    r'^[A-Z][A-Z0-9_]*(?:_DB|_DATABASE)_FILENAME\s*=\s*"([^"]+\.sqlite3)"',
+    re.MULTILINE,
+)
 CHECKS = (
     "packaging-toolchain",
     "python",
@@ -97,6 +124,7 @@ CHECKS = (
     "isolated-install",
     "installed-imports",
     "installed-console",
+    "in-place-upgrade",
     "sdist-rebuild",
     "wheel-member-content",
     "clean-worktree",
@@ -561,6 +589,239 @@ def _validate_installed_wheel(
         raise RehearsalError("isolated import resolved back into the source worktree")
 
 
+def _carried_predecessor(root: Path) -> Path:
+    """Resolve the carried predecessor wheel, refusing to proceed without one.
+
+    The synthetic repository has no tags, so there is nothing here to derive a
+    predecessor from. An absent artifact means the release under proof has no
+    demonstrated upgrade path, which is a failure and never a skip.
+    """
+    manifest_path = root / PRIOR_ARTIFACT_MANIFEST
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RehearsalError(
+            f"could not read the carried predecessor manifest {manifest_path}: {exc}"
+        ) from exc
+    if manifest.get("state") != "built":
+        raise RehearsalError(
+            "the in-place upgrade proof needs a built predecessor artifact; "
+            f"{manifest_path} records state={manifest.get('state')!r}"
+        )
+    wheel = root / PRIOR_ARTIFACT_DIRECTORY / str(manifest["wheel"]["name"])
+    if not wheel.is_file():
+        raise RehearsalError(f"carried predecessor wheel is missing: {wheel}")
+    return wheel
+
+
+def _assert_state_inventory_is_declared(root: Path) -> list[str]:
+    """Answer the recorded inventory to the stores current source opens.
+
+    Observing a run only catches a store the seed happens to create. Reading the
+    declarations catches one added lazily too, so a new spice-owned store stops
+    the release until it is rehearsed or excluded on the record.
+    """
+    package = root / "spice"
+    declared: set[str] = set()
+    for module in sorted(package.rglob("*.py")):
+        declared.update(
+            UPGRADE_STATE_DECLARATION.findall(module.read_text(encoding="utf-8"))
+        )
+    if not declared:
+        raise RehearsalError(
+            f"no durable store filename is declared under {package}; the in-place "
+            "upgrade inventory has nothing to answer to"
+        )
+    unrecorded = sorted(
+        declared.difference(UPGRADE_GOVERNED_STATE).difference(UPGRADE_EXCLUDED_STATE)
+    )
+    if unrecorded:
+        raise RehearsalError(
+            "current source opens durable stores the in-place upgrade proof does "
+            f"not account for: {', '.join(unrecorded)}; rehearse each one or "
+            "record it as an exclusion with its reason"
+        )
+    return sorted(declared)
+
+
+def _seed_repository(scratch: Path, failures: FailureArtifactStore | None) -> Path:
+    """Create the scratch repository whose Git directory anchors proof state."""
+    repository = scratch / "upgrade-state"
+    repository.mkdir()
+    (repository / "seed.txt").write_text("in-place upgrade proof\n", encoding="utf-8")
+    for argv in (
+        ["git", "init", "--quiet", "--initial-branch=upgrade-proof"],
+        ["git", "config", "user.email", "release-proof@spice.invalid"],
+        ["git", "config", "user.name", "Spice Release Proof"],
+        ["git", "config", "commit.gpgsign", "false"],
+        ["git", "add", "seed.txt"],
+        ["git", "commit", "--quiet", "--message", "upgrade proof seed"],
+    ):
+        _run(argv, cwd=repository, failures=failures, gate="in-place-upgrade")
+    return repository
+
+
+def _team_store_version(path: Path) -> int:
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        connection.close()
+
+
+def _assert_state_is_isolated(state: Path, scratch: Path) -> list[str]:
+    """Prove every store resolved under the proof's own scratch root.
+
+    Resolved paths are the measurement, never hashes of live files: the shared
+    stores churn from ordinary fleet traffic, so a byte-identity assertion is
+    flaky in one direction and vacuous in the other.
+    """
+    resolved_scratch = scratch.resolve()
+    inventory = sorted(item.name for item in state.glob("*.sqlite*"))
+    for name in inventory:
+        resolved = (state / name).resolve()
+        if resolved_scratch not in resolved.parents:
+            raise RehearsalError(
+                f"in-place upgrade state escaped the proof scratch root: {resolved}"
+            )
+        if name not in UPGRADE_GOVERNED_STATE and name not in UPGRADE_EXCLUDED_STATE:
+            raise RehearsalError(
+                f"in-place upgrade produced an unrecorded state file: {name}; "
+                "add it to the governed stores or to the recorded exclusions"
+            )
+    if UPGRADE_TEAM_STORE not in inventory:
+        raise RehearsalError(
+            f"the seeded install never created {UPGRADE_TEAM_STORE} under {state}"
+        )
+    return inventory
+
+
+def _validate_in_place_upgrade(
+    root: Path,
+    wheel: Path,
+    scratch: Path,
+    failures: FailureArtifactStore | None = None,
+) -> dict[str, object]:
+    """Install the predecessor, seed it, install over it, then read and write."""
+    declared = _assert_state_inventory_is_declared(root)
+    predecessor = _carried_predecessor(root)
+    venv = scratch / "upgrade-venv"
+    python = venv / "bin" / "python"
+    console = venv / "bin" / "spice"
+    environment = _isolated_environment()
+    _run(
+        [sys.executable, "-m", "venv", str(venv)],
+        cwd=scratch,
+        failures=failures,
+        gate="in-place-upgrade",
+    )
+    _run(
+        ["uv", "pip", "install", "--python", str(python), str(predecessor)],
+        cwd=scratch,
+        failures=failures,
+        gate="in-place-upgrade",
+    )
+    repository = _seed_repository(scratch, failures)
+    _run(
+        [
+            str(console),
+            "task",
+            "add",
+            "--project",
+            UPGRADE_SEED_PROJECT,
+            "--origin",
+            UPGRADE_SEED_ORIGIN,
+            "Seed state before the in-place upgrade",
+        ],
+        cwd=repository,
+        env=environment,
+        failures=failures,
+        gate="in-place-upgrade",
+    )
+    state = repository / ".git" / ".spice" / "data"
+    inventory = _assert_state_is_isolated(state, scratch)
+    store = state / UPGRADE_TEAM_STORE
+    before = _team_store_version(store)
+    seeded = _run(
+        [str(console), "task", "list"],
+        cwd=repository,
+        capture=True,
+        env=environment,
+        failures=failures,
+        gate="in-place-upgrade",
+    ).stdout
+    _run(
+        ["uv", "pip", "install", "--reinstall", "--python", str(python), str(wheel)],
+        cwd=scratch,
+        failures=failures,
+        gate="in-place-upgrade",
+    )
+    return {
+        "declared": declared,
+        **_confirm_upgraded_state(
+            console, repository, store, before, seeded, environment, inventory, failures
+        ),
+    }
+
+
+def _confirm_upgraded_state(
+    console: Path,
+    repository: Path,
+    store: Path,
+    before: int,
+    seeded: str,
+    environment: dict[str, str],
+    inventory: list[str],
+    failures: FailureArtifactStore | None,
+) -> dict[str, object]:
+    """Read pre-upgrade rows through the new install, then write a new one."""
+    handles = sorted(set(re.findall(r"\b[A-Z]+-[0-9A-Za-z]{8}\b", seeded)))
+    if not handles:
+        raise RehearsalError("the predecessor install seeded no readable task handle")
+    survived = _run(
+        [str(console), "task", "list"],
+        cwd=repository,
+        capture=True,
+        env=environment,
+        failures=failures,
+        gate="in-place-upgrade",
+    ).stdout
+    missing = [handle for handle in handles if handle not in survived]
+    if missing:
+        raise RehearsalError(
+            "the upgraded install could not read pre-upgrade state in "
+            f"{store.name}: {', '.join(missing)}"
+        )
+    _run(
+        [
+            str(console),
+            "task",
+            "add",
+            "--project",
+            UPGRADE_SEED_PROJECT,
+            "--origin",
+            UPGRADE_SEED_ORIGIN,
+            "Write state after the in-place upgrade",
+        ],
+        cwd=repository,
+        env=environment,
+        failures=failures,
+        gate="in-place-upgrade",
+    )
+    after = _team_store_version(store)
+    if after == before:
+        raise RehearsalError(
+            f"the upgraded install never adopted {store.name}: it stayed at "
+            f"user_version {before}, so no migration ran"
+        )
+    return {
+        "adopted": {"from": before, "to": after, "store": store.name},
+        "excluded": list(UPGRADE_EXCLUDED_STATE),
+        "preserved": handles,
+        "state": inventory,
+    }
+
+
 def _extract_sdist(sdist: Path, destination: Path, version: str) -> Path:
     destination.mkdir()
     with tarfile.open(sdist, "r:gz") as archive:
@@ -775,6 +1036,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
             source, artifact_dir, version, failures, project_root=root
         )
         _validate_installed_wheel(root, wheel, version, scratch, failures)
+        in_place_upgrade = _validate_in_place_upgrade(root, wheel, scratch, failures)
         rebuilt = _rebuild_wheel_from_sdist(
             sdist, version, scratch, failures, project_root=root
         )
@@ -808,6 +1070,7 @@ def rehearse(root: Path, artifact_dir: Path) -> dict[str, object]:
         "browser": gate_evidence["browser"],
         "mutation": gate_evidence["mutation"],
         "upgrades": gate_evidence["upgrades"],
+        "in_place_upgrade": in_place_upgrade,
         "artifacts": {
             "sdist": {
                 "filename": sdist.name,

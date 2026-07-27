@@ -15,9 +15,8 @@ from spice.sqliteconnection import ensure_sqlite_schema_once, sqlite_connection
 MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
 MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS = 5000
-MAXIM_RECURRENCE_HORIZON_SECONDS = 24 * 60 * 60
 MAXIM_METRICS_SCHEMA_VERSION = 1
-MAXIM_METRICS_UNSTAMPED_VERSION = 0
+MAXIM_RECURRENCE_HORIZON_SECONDS = 24 * 60 * 60
 
 MAXIM_EVENT_FIRE = "fire"
 MAXIM_EVENT_JUDGED_CONFIRMED = "judged_confirmed"
@@ -63,6 +62,22 @@ MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS maxim_metric_events_fire_recency_idx
   ON maxim_metric_events(event_type, occurred_at, id);
 """
+
+_MAXIM_METRICS_TABLE_NAME = "maxim_metric_events"
+_MAXIM_METRICS_TABLE_SHAPE = (
+    ("id", "INTEGER", 0, None, 1),
+    ("occurred_at", "REAL", 1, None, 0),
+    ("event_type", "TEXT", 1, None, 0),
+    ("bag_name", "TEXT", 1, None, 0),
+    ("driver_name", "TEXT", 1, None, 0),
+    ("thread_id", "TEXT", 1, "''", 0),
+    ("trigger_family", "TEXT", 1, "''", 0),
+    ("statement", "TEXT", 1, "''", 0),
+    ("reminder_key", "TEXT", 1, "''", 0),
+    ("reminder_body", "TEXT", 1, "''", 0),
+)
+_FRESH_SOURCE = "fresh"
+_UNVERSIONED_CURRENT_SOURCE = "unversioned-current"
 
 
 @dataclass(frozen=True)
@@ -324,34 +339,101 @@ def _ensure_schema_once(path: Path) -> None:
         path,
         busy_timeout_ms=MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS,
         initialize=_ensure_schema,
+        validate=_validate_current_schema,
+        wal_after_initialize=True,
     )
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    """Build the current shape, discarding whatever a different stamp describes.
+    """Create or stamp exactly one supported maxim-metrics source shape."""
+    _maxim_metrics_source_locked(connection)
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        source = _maxim_metrics_source_locked(connection)
+        if source == _FRESH_SOURCE:
+            connection.execute(MAXIM_METRICS_TABLE_SQL)
+        _validate_table_shape_locked(connection)
+        connection.execute(MAXIM_METRICS_EVENT_INDEX_SQL)
+        connection.execute(MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+        connection.execute(MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
 
-    These rows are observation data: recurrence counting reads them over a
-    bounded horizon and rebuilds its picture from whatever it finds, so a store
-    left by a different shape costs that horizon of history and nothing else.
-    Refusing one instead, as `spice.serve.team.store` must for team authority
-    nothing can regenerate, would strand every writer still holding the older
-    constant until its process exits.
 
-    Version 0 is named outright as this same shape from before any writer
-    stamped, which every store in the field carries today. It is stamped where
-    it stands and keeps its rows, because nothing about it differs; treating a
-    missing stamp as a foreign shape would delete live history to record a
-    number. That is the one forward migration, and after it a stamp is either
-    current or foreign, with no third reading.
-    """
+def _validate_current_schema(connection: sqlite3.Connection) -> None:
     stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if stored not in (MAXIM_METRICS_UNSTAMPED_VERSION, MAXIM_METRICS_SCHEMA_VERSION):
-        connection.execute("DROP TABLE IF EXISTS maxim_metric_events")
-    connection.execute(MAXIM_METRICS_TABLE_SQL)
-    connection.execute(MAXIM_METRICS_EVENT_INDEX_SQL)
-    connection.execute(MAXIM_METRICS_RECURRENCE_INDEX_SQL)
-    connection.execute(MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
-    connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION}")
+    if stored != MAXIM_METRICS_SCHEMA_VERSION:
+        relation = "newer" if stored > MAXIM_METRICS_SCHEMA_VERSION else "unsupported"
+        raise SpiceError(
+            "maxim metrics database changed to "
+            f"{relation} schema version {stored}; this writer requires "
+            f"{MAXIM_METRICS_SCHEMA_VERSION} and will not mutate it"
+        )
+    _validate_table_shape_locked(connection)
+
+
+def _maxim_metrics_source_locked(connection: sqlite3.Connection) -> str | None:
+    stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if stored == MAXIM_METRICS_SCHEMA_VERSION:
+        _validate_table_shape_locked(connection)
+        return None
+    if stored > MAXIM_METRICS_SCHEMA_VERSION:
+        raise SpiceError(
+            "maxim metrics database was written by newer schema version "
+            f"{stored}; this writer supports through "
+            f"{MAXIM_METRICS_SCHEMA_VERSION} and will not mutate it"
+        )
+    if stored != 0:
+        raise SpiceError(
+            f"unsupported maxim metrics schema version {stored}; refusing to "
+            "mutate durable maxim history"
+        )
+
+    tables = _maxim_metrics_tables(connection)
+    if not tables:
+        return _FRESH_SOURCE
+    if tables == {_MAXIM_METRICS_TABLE_NAME} and (
+        _maxim_metrics_table_shape(connection) == _MAXIM_METRICS_TABLE_SHAPE
+    ):
+        return _UNVERSIONED_CURRENT_SOURCE
+    raise SpiceError(
+        "unversioned maxim metrics database has an unsupported table shape; "
+        "refusing to mutate durable maxim history"
+    )
+
+
+def _validate_table_shape_locked(connection: sqlite3.Connection) -> None:
+    tables = _maxim_metrics_tables(connection)
+    shape = _maxim_metrics_table_shape(connection)
+    if tables != {_MAXIM_METRICS_TABLE_NAME} or shape != _MAXIM_METRICS_TABLE_SHAPE:
+        raise SpiceError(
+            "maxim metrics database table shape does not match schema version "
+            f"{MAXIM_METRICS_SCHEMA_VERSION}; refusing to mutate durable maxim history"
+        )
+
+
+def _maxim_metrics_tables(connection: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+
+def _maxim_metrics_table_shape(
+    connection: sqlite3.Connection,
+) -> tuple[tuple[object, ...], ...]:
+    return tuple(
+        tuple(row[1:6])
+        for row in connection.execute(
+            f'PRAGMA table_info("{_MAXIM_METRICS_TABLE_NAME}")'
+        )
+    )
 
 
 def _event_row(
