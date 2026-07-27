@@ -8,6 +8,7 @@ fi
 
 repository=$(git rev-parse --show-toplevel)
 repository=$(cd "$repository" && pwd -P)
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 worktree_state=$(git -C "$repository" status --porcelain=v1 --untracked-files=all)
 if [ -n "$worktree_state" ]; then
     echo "release proof requires a clean worktree" >&2
@@ -69,6 +70,11 @@ mkdir -p "$(dirname "$provenance")"
 
 printf '{\n  "schema_version": 1,\n  "source": {\n    "commit": "%s",\n    "tree": "%s",\n    "commit_epoch": %s\n  }\n}\n' \
     "$source_commit" "$source_tree" "$source_commit_epoch" >"$provenance"
+
+python3 "$script_directory/../release-proof/upgrade.py" export \
+    --repository "$repository" \
+    --output "$staging/.release-proof/prior-stores.json" \
+    --quiet
 
 mv "$staging" "$output"
 staging=""

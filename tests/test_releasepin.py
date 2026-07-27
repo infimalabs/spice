@@ -18,6 +18,7 @@ from tests.test_releaseproofhelpers import (
     REHEARSAL,
     SOURCE_EXPORTER,
     SOURCE_INITIALIZER,
+    UPGRADE_SCRIPT,
     _git,
     _source_repository,
     _test_sha256,
@@ -31,6 +32,7 @@ def _pinned_repository(root: Path) -> tuple[Path, dict[str, object]]:
     (repository / "release-proof").mkdir()
     shutil.copy2(SOURCE_EXPORTER, repository / "scripts" / "release-proof-source")
     shutil.copy2(SOURCE_INITIALIZER, repository / "release-proof" / "init-source.py")
+    shutil.copy2(UPGRADE_SCRIPT, repository / "release-proof" / "upgrade.py")
     _git(repository, "add", "--all")
     _git(repository, "commit", "--quiet", "--message", "boundary")
     return repository, {
