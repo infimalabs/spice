@@ -222,14 +222,20 @@ class ServeState:
         touched the store first -- it is in the middle of raising, and the loop
         it would wait on may not even have started yet.
         """
+        stop = self.stop_serving
+        if stop is None:
+            # Read before the latch, never after. A state with no server is a
+            # state with nothing to stop, and latching on it would spend the
+            # one shot at a moment when it could not be taken -- leaving the
+            # refusal that does arrive with a server to stop looking like one
+            # already handled, and this process serving on in silence.
+            return
         with self.superseded_lock:
             if self.authority_store_superseded:
                 return
             self.authority_store_superseded = True
         print(f"spice serve: {error}; exiting so a restart can serve it")
-        stop = self.stop_serving
-        if stop is not None:
-            Thread(target=stop, name="spice-serve-superseded", daemon=True).start()
+        Thread(target=stop, name="spice-serve-superseded", daemon=True).start()
 
     @property
     def observer_mode(self) -> bool:
