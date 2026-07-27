@@ -14,17 +14,16 @@ names what to do about it — and every refusal here clears itself. The fleet ru
 unattended, so none of them waits on a human, and none of them stays latched
 because a process died.
 
-Five refusals implement it, coordinating through two records kept in one place:
-the `global_settings` key/value table inside the shared authority store. One
-record says which schema each lane is running; the other says a migration is
-waiting to happen. The store's own version stamp is the third fact, and it was
-already there.
+Five refusals implement it, coordinating through two records in the
+`global_settings` key/value table of the shared authority store: one says which
+schema each lane is running, the other says a migration is waiting to happen.
+The store's own version stamp is the third fact, and it was already there.
 
-That table carries the two new records because it exists in both retained
-authority shapes, so a process compiled against the older constant can read and
-write it in a store that has not migrated yet. That is the only reason this
-protocol can exist: the participants who most need to be heard are exactly the
-ones who cannot open the new shape.
+That table carries them because it exists in both retained authority shapes, so
+a process compiled against the older constant can read and write it in a store
+that has not migrated yet. That is the only reason this protocol can exist: the
+participants who most need to be heard are exactly the ones who cannot open the
+new shape.
 
 Both records carry revision zero. They are facts about processes, not team
 events, and spending a revision would wake every connected client every time a
@@ -136,23 +135,24 @@ in `spice/serve/team/store.py` and `spice/serve/app.py`.
 - Protects: the upgrade, from a process that would otherwise keep answering
   requests with a refusal it will never stop producing, while the restart that
   could serve them waits for it to exit.
-- Message: `spice serve: team authority database changed to newer schema version
-  2; this writer requires 1 and will not mutate it; exiting so a restart can
-  serve it`, printed to the log the serve loop tails.
+- Message: `spice serve: <refusal>; exiting so a restart can serve it`, printed
+  to the log the serve loop tails. The refusal reads `changed to newer schema
+  version 3; this writer requires 2` when the store moved while this process was
+  running, and `was written by newer schema version 3; this writer supports
+  through 2` when it was already ahead at startup.
 - Clears: by the restart, which comes back on the code the store is stamped for.
 
 Only a forward stamp exits. A store that is older, or unsupported for any other
 reason, keeps its existing refusal, because those are not situations a restart
 resolves — the same code would return and refuse again.
 
-The refusal is a distinct exception type rather than distinct prose because the
-callers who must tell it apart are `except SpiceError` handlers that turn a
-refusal into an error response. Matching on wording there would put the phrasing
-of an operator-facing message in the way of a process exiting. The hook fires
-where the error is built, because raising is not how this reaches the one party
-that can act on it: a long-lived server meets it on whichever thread touched the
-store next, answers it locally, and would otherwise never learn it had been left
-behind.
+It is a distinct exception type rather than distinct prose because the callers
+who must tell it apart are `except SpiceError` handlers that turn a refusal into
+an error response; matching on wording there would put an operator-facing
+message in the way of a process exiting. The hook fires where the error is built,
+because raising does not reach the party that can act on it: a long-lived server
+meets this on whichever thread touched the store next, answers it locally, and
+would otherwise never learn it had been left behind.
 
 ## Constraints
 
