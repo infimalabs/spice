@@ -61,17 +61,19 @@ match = [
   # never receive -E. Because a search_operand route dispatches and returns, each
   # driver carries its complete prefix here (Codex -E -r, Claude -r) rather than
   # layering -E over a shared -r route; the final head-only 'rtk grep -E' route
-  # then covers Codex greps that carry no search operand.
+  # then covers Codex greps that carry no search operand. The plain grep wrapper
+  # below uses native BASIC as its base and a Codex-only catch-all for -E.
   { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
   { head = "grep", search_operands = true, scopes = { drivers = ["claude"] }, argv = ["rtk", "grep", "-r"] },
   { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },
 ]
 
 [wrappers.common.grep]
-scopes = { drivers = ["codex"] }
-argv = ["grep", "-E"]
+argv = ["grep"]
 match = [
+  # An explicit matcher always wins before the Codex default route.
   { flags = ["-E", "-F", "-P", "-G"], argv = ["grep"] },
+  { flags = ["*"], scopes = { drivers = ["codex"] }, argv = ["grep", "-E"] },
 ]
 
 [policy.limits]

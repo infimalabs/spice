@@ -109,8 +109,11 @@ Reference: [agent table](docs/config/reference.md#toolspiceagent).
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
 with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group contains
-the finite RTK command-shape transformations described above; `rtk rewrite`
-inside `spice agent run` remains the sole command selector.
+the finite RTK command-shape transformations described above. A selected direct
+wrapper whose argv head is not RTK owns its command word regardless of
+configuration source, so RTK cannot replace it before the shell function
+exists; `rtk rewrite` inside `spice agent run` remains the sole optimization
+candidate selector.
 
 Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
 

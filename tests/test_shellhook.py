@@ -198,7 +198,7 @@ def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypa
 
 
 @pytest.mark.parametrize("identity_kind", ["basename", "absolute"])
-def test_configured_rtk_routes_canonical_shell_and_direct_rewrites(
+def test_configured_rtk_routes_non_shadowing_rewrite_and_yields_selected_grep(
     tmp_path, monkeypatch, identity_kind
 ):
     executable = (
@@ -224,7 +224,7 @@ def test_configured_rtk_routes_canonical_shell_and_direct_rewrites(
         ["zsh", "-c", "git status"], repo_root=tmp_path, rewrite_rtk=True
     )
 
-    assert direct == [executable, "grep", "needle"]
+    assert direct == ["rg", "needle"]
     assert shell == ["zsh", "-c", f"{shlex.quote(executable)} git status"]
     assert calls == [
         (("rg", "needle"), executable),
@@ -310,7 +310,7 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
     }
 
 
-def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_path):
+def test_shell_rewrite_yield_covers_module_pytest_and_selected_plain_grep(tmp_path):
     rtk = write_fake_rewriting_rtk(tmp_path)
     write_rtk_config(tmp_path, str(rtk))
     write_agent_wrapper_config(
@@ -327,7 +327,7 @@ def test_shell_rewrite_yield_covers_module_pytest_and_keeps_rtk_for_others(tmp_p
     )
 
     assert module == ["zsh", "-c", "python -m pytest -q"]
-    assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
+    assert control == ["zsh", "-c", "rg -n needle"]
 
 
 def test_agent_run_routes_python_module_wrapper_through_uv(tmp_path, monkeypatch):
@@ -417,7 +417,7 @@ def test_agent_run_routes_python_module_wrapper_through_uv(tmp_path, monkeypatch
         "run python -m pytest -s test_probe.py"
     ]
     assert executed == [["zsh", "-c", "pytest -s test_probe.py"]]
-    assert control == ["zsh", "-c", f"{shlex.quote(str(rtk))} grep -n needle"]
+    assert control == ["zsh", "-c", "rg -n needle"]
     assert executed[0][2] != control[2]
 
 
@@ -435,14 +435,80 @@ def test_rtk_rewrite_yield_selectors_claim_repository_non_rtk_words(tmp_path):
     )
 
     assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset(
-        {"pytest", "pre-commit"}
+        {"grep", "pytest", "pre-commit"}
     )
 
 
-def test_rtk_rewrite_yield_selectors_leave_packaged_wrappers_rewritable(tmp_path):
+@pytest.mark.parametrize("driver_name", ["codex", "claude"])
+def test_rtk_rewrite_yield_selectors_include_selected_packaged_non_rtk_wrapper(
+    tmp_path, monkeypatch, driver_name
+):
     write_rtk_config(tmp_path, "alternate-rtk")
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+
+    assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset({"grep"})
+
+
+def test_rtk_rewrite_yield_selectors_leave_unselected_and_rtk_headed_words(
+    tmp_path,
+):
+    write_agent_wrapper_config(
+        tmp_path,
+        order=["tools"],
+        groups={"tools": {"summary": {"argv": ["rtk", "summary"]}}},
+    )
 
     assert shellhook.rtk_rewrite_yield_selectors(tmp_path) == frozenset()
+
+
+@pytest.mark.parametrize("driver_name", ["codex", "claude"])
+def test_agent_run_preserves_native_rg_extended_regexp_results(
+    tmp_path, monkeypatch, driver_name
+):
+    shell = shutil.which("zsh")
+    if shell is None:
+        pytest.skip("zsh is required for the agent-run shell path")
+    fixture = tmp_path / "search-fixture.txt"
+    fixture.write_text(
+        "alpha-gamm\nbeta-gamma\nalphabeta-gamma\ngamma\nalpha-gammax\n",
+        encoding="utf-8",
+    )
+    pattern = r"^(alpha|beta)+-gamma?$"
+    raw = f"rg -n {shlex.quote(pattern)} {shlex.quote(str(fixture))}"
+    rewritten = f"rtk grep -n {shlex.quote(pattern)} {shlex.quote(str(fixture))}"
+    repo = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    monkeypatch.setattr(
+        wrap,
+        "rtk_rewrite_command_text",
+        lambda *_args, **_kwargs: rewritten,
+    )
+
+    agent_command = wrap.build_agent_run_command(
+        [shell, "-c", raw],
+        repo_root=repo,
+        rewrite_rtk=True,
+    )
+    native = subprocess.run(
+        [shell, "-c", f"command {raw}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    through_agent = subprocess.run(
+        agent_command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert agent_command == [shell, "-c", raw]
+    assert (through_agent.returncode, through_agent.stdout.splitlines()) == (
+        native.returncode,
+        native.stdout.splitlines(),
+    )
+    assert through_agent.returncode == 0
+    assert len(through_agent.stdout.splitlines()) == 3
 
 
 def test_wrapper_degrades_malformed_direct_rewrite_to_original_execution(
