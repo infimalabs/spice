@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import cli as agent_cli
+from spice.agent import lifecycle as agent_lifecycle
 from spice.agent import lifecyclebinding
 from spice.agent.activation import (
     activation_browser_validation_lines,
@@ -122,7 +123,8 @@ def test_activation_converges_an_already_stale_skill_by_raw_bytes(
     target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
     target.parent.mkdir(parents=True)
     target.write_bytes(b"older generated skill bytes\n")
-    monkeypatch.setattr(lifecyclebinding, "packaged_skill_path", lambda: packaged)
+    for module in (agent_lifecycle, lifecyclebinding):
+        monkeypatch.setattr(module, "packaged_skill_path", lambda: packaged)
     monkeypatch.setattr(
         agent_cli,
         "_bind_activation_thread",

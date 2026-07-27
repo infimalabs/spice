@@ -943,20 +943,34 @@ def test_head_advance_reports_generated_skill_refresh_failure(
     [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
     ids=["claim", "launch"],
 )
-def test_head_advance_reports_an_undecodable_generated_skill_as_a_note(
-    tmp_path, advance
+@pytest.mark.parametrize(
+    "undecodable_input",
+    ["packaged-source", "gitignore"],
+)
+def test_head_advance_reports_an_undecodable_skill_input_as_a_note(
+    tmp_path, advance, undecodable_input
 ):
-    """An advanced tree can carry bytes no decoder accepts, and a lane still starts.
+    """Every undecodable refresh input becomes a note, and the lane still starts.
 
     The refresh runs after HEAD has already moved, so an escaping decode error
     would break both boundary contracts at once: ``fast_forward_if_safe`` never
     raises, and ``prepare_for_claim`` raises only ``SpiceError``. One commit
-    carrying an undecodable packaged skill would otherwise wedge every lane's
-    launch, which is the opposite of leaving a failed refresh observable.
+    carrying an undecodable packaged skill, or one corrupt generated gitignore,
+    would otherwise wedge the lane's launch instead of leaving the failed
+    refresh observable.
     """
-    repo, target, expected = _repo_with_stale_generated_skill(
-        tmp_path, advanced=UNDECODABLE_SKILL_BYTES
+    advanced = (
+        UNDECODABLE_SKILL_BYTES
+        if undecodable_input == "packaged-source"
+        else b"valid advanced skill\n"
     )
+    repo, target, expected = _repo_with_stale_generated_skill(
+        tmp_path, advanced=advanced
+    )
+    if undecodable_input == "gitignore":
+        (repo / lifecyclebinding.WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH).write_bytes(
+            UNDECODABLE_SKILL_BYTES
+        )
     stale = target.read_bytes()
 
     result = advance(repo)
