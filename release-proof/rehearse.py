@@ -603,12 +603,24 @@ def _carried_predecessor(root: Path) -> Path:
         raise RehearsalError(
             f"could not read the carried predecessor manifest {manifest_path}: {exc}"
         ) from exc
+    if not isinstance(manifest, dict):
+        raise RehearsalError(
+            "the carried predecessor manifest is not an object; "
+            f"{manifest_path} holds {type(manifest).__name__}"
+        )
     if manifest.get("state") != "built":
         raise RehearsalError(
             "the in-place upgrade proof needs a built predecessor artifact; "
             f"{manifest_path} records state={manifest.get('state')!r}"
         )
-    wheel = root / PRIOR_ARTIFACT_DIRECTORY / str(manifest["wheel"]["name"])
+    entry = manifest.get("wheel")
+    name = entry.get("name") if isinstance(entry, dict) else None
+    if not isinstance(name, str) or not name or name != Path(name).name:
+        raise RehearsalError(
+            "the carried predecessor manifest claims a built artifact but names "
+            f"no wheel file beside itself; {manifest_path} records wheel={entry!r}"
+        )
+    wheel = root / PRIOR_ARTIFACT_DIRECTORY / name
     if not wheel.is_file():
         raise RehearsalError(f"carried predecessor wheel is missing: {wheel}")
     return wheel
