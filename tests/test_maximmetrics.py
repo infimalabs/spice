@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from spice.agent import maximmetrics, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
@@ -18,6 +20,7 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_JUDGED_CONFIRMED,
     MAXIM_EVENT_JUDGED_REJECTED,
     MAXIM_EVENT_PUBLISHED,
+    MAXIM_METRICS_SCHEMA_VERSION,
     MAXIM_METRICS_TABLE_SQL,
     MaximMetricCounts,
     MaximMetricEventWrite,
@@ -33,6 +36,7 @@ from spice.agent.maximmetrics import (
 from spice.agent.maxims import MaximVerdict
 from spice.cli.parser import build_parser
 from spice.config import edit, layers, values
+from spice.errors import SpiceError
 from spice.sqliteconnection import sqlite_connection
 from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
@@ -167,6 +171,117 @@ def test_maxim_metric_store_persists_aggregate_counts_after_reload(tmp_path):
         gate_suppressed_count=0,
         published_count=0,
     )
+    with sqlite_connection(maxim_metrics_database_path(repo)) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            MAXIM_METRICS_SCHEMA_VERSION
+        )
+
+
+def test_maxim_store_stamps_the_exact_unversioned_source_without_losing_rows(
+    tmp_path,
+):
+    repo = _init_repo(tmp_path / "repo")
+    path = maxim_metrics_database_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(maximmetrics.MAXIM_METRICS_EVENT_INDEX_SQL)
+        connection.execute(maximmetrics.MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+        connection.execute(maximmetrics.MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+        connection.execute(
+            "INSERT INTO maxim_metric_events "
+            "(occurred_at, event_type, bag_name, driver_name) VALUES (?, ?, ?, ?)",
+            (1.0, MAXIM_EVENT_FIRE, "before", "codex"),
+        )
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 0
+
+    record_maxim_metric_events(
+        repo,
+        [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "after", "codex")],
+        now=2.0,
+    )
+
+    with sqlite_connection(path) as connection:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        rows = connection.execute(
+            "SELECT occurred_at, bag_name FROM maxim_metric_events ORDER BY id"
+        ).fetchall()
+
+    assert version == MAXIM_METRICS_SCHEMA_VERSION
+    assert rows == [(1.0, "before"), (2.0, "after")]
+
+
+def _maxim_database_snapshot(path):
+    with sqlite_connection(path) as connection:
+        return (
+            int(connection.execute("PRAGMA user_version").fetchone()[0]),
+            str(connection.execute("PRAGMA journal_mode").fetchone()[0]),
+            tuple(connection.iterdump()),
+        )
+
+
+def test_maxim_store_refuses_an_unknown_unversioned_shape_without_mutation(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    path = maxim_metrics_database_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        connection.execute(
+            "CREATE TABLE maxim_metric_events "
+            "(id INTEGER PRIMARY KEY, occurred_at REAL NOT NULL, payload TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO maxim_metric_events (occurred_at, payload) VALUES (1.0, 'old')"
+        )
+    before = _maxim_database_snapshot(path)
+
+    with pytest.raises(SpiceError, match="unsupported table shape"):
+        record_maxim_metric_events(
+            repo,
+            [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "new", "codex")],
+        )
+
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_maxim_store_refuses_a_newer_version_without_mutation(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    path = maxim_metrics_database_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}")
+    before = _maxim_database_snapshot(path)
+
+    with pytest.raises(SpiceError, match="newer schema version"):
+        record_maxim_metric_events(
+            repo,
+            [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "new", "codex")],
+        )
+
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_maxim_store_revalidates_a_cached_path_after_replacement(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    record_maxim_metric_events(
+        repo,
+        [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "before", "codex")],
+    )
+    path = maxim_metrics_database_path(repo)
+    replacement = path.with_name("replacement.sqlite3")
+    with sqlite_connection(replacement) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}")
+    replacement.replace(path)
+    before = _maxim_database_snapshot(path)
+
+    with pytest.raises(SpiceError, match="changed to newer schema version"):
+        record_maxim_metric_events(
+            repo,
+            [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "after", "codex")],
+        )
+
+    assert _maxim_database_snapshot(path) == before
 
 
 def test_maxim_metric_recurrence_inputs_keep_trigger_and_reminder_context(tmp_path):
