@@ -963,6 +963,24 @@ def test_accepted_pre_commit_run_latches_its_breach_and_prunes_stale_paths(
     assert _line_sticky_paths(repo) == ["big.py"]
 
 
+def test_file_shrunk_after_a_rejected_attempt_passes_the_next_run(
+    tmp_path, monkeypatch
+):
+    repo = _latch_probe_repo(tmp_path)
+    _patch_builtins_except_file_shape(monkeypatch)
+    with pytest.raises(SpiceError, match="big.py"):
+        precommit.handle_pre_commit(repo)
+
+    # The author does exactly what the refusal asked and lands the file inside
+    # the flex band it was measured against.
+    _write_repo_file(repo, "big.py", "line\n" * LATCH_PROBE_BAND_LINES)
+    _git(repo, "add", ".")
+
+    # Nothing was committed, so nothing may hold this file to base: a size the
+    # gate would have accepted from any other author has to be accepted here.
+    assert precommit.handle_pre_commit(repo) == 0
+
+
 def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     events = tmp_path / "events.txt"
 
