@@ -169,14 +169,22 @@ def test_head_moving_done_next_claims_follow_on_from_the_fresh_process(
     output = ops.done(
         current,
         validation=["fresh chained allocation verified"],
+        judgment="fresh checkout retained judgment",
+        notes=["fresh checkout retained note"],
         chain_next=True,
     )
+    completed = identity.resolve(current)
 
     assert f"completed {current}" in output
     assert "next task:" in output
     assert follow_on in output
     assert identity.resolve(follow_on)["claim_by"] == ACTOR_A
-    assert identity.resolve(current)["done_head"] == landed_work
+    assert completed["done_head"] == landed_work
+    assert completed["judgment"] == "fresh checkout retained judgment"
+    assert any(
+        item.get("description") == "fresh checkout retained note"
+        for item in completed.get("annotations") or []
+    )
 
 
 def test_head_moving_review_completes_from_the_fresh_process(
@@ -203,10 +211,25 @@ def test_head_moving_review_completes_from_the_fresh_process(
     _run(peer, "git", "push", "origin", "main")
     peer_head = _run(peer, "git", "rev-parse", "HEAD")
 
-    output = ops.review(handle, finding="clean", note="fresh review verified")
+    output = ops.review(
+        handle,
+        finding="clean",
+        note="fresh review verified",
+        then=[
+            "title=Fresh review follow-up | project=task.unit | "
+            "acceptance=Crossed the reload seam once"
+        ],
+    )
     row = identity.resolve(handle)
+    followups = [
+        task
+        for task in tw.export()
+        if task.get("description") == "Fresh review follow-up"
+    ]
 
     assert f"reviewed {handle} clean; completed {handle}" in output
     assert row["status"] == "completed"
     assert row["review_finding"] == "clean"
+    assert row["review_note"] == "fresh review verified"
+    assert len(followups) == 1
     assert _run(remote_task_repo, "git", "rev-parse", "HEAD") == peer_head
