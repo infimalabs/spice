@@ -24,6 +24,11 @@ LAST_GOOD_WORKTREE_SKILL = "---\nname: spice\n---\nlast good skill\n"
 # that decode no better than a bad packaged source does.
 UNDECODABLE_WORKTREE_SKILL_BYTES = b"\xff\xfegenerated skill\n"
 
+# Readable and searchable but not writable, so an existing copy can still be
+# read back while every repair write fails.
+SEALED_DIRECTORY_MODE = 0o500
+READABLE_DIRECTORY_MODE = 0o700
+
 
 def _undecodable_packaged_skill(tmp_path, monkeypatch):
     """Point the packaged-source lookup at bytes this process cannot decode.
@@ -293,3 +298,59 @@ def test_launch_reports_a_missing_skill_when_undecodable_bytes_cannot_be_repaire
         lifecycle.resolve_agent_prompt_skill_path(tmp_path)
 
     assert preserved.read_bytes() == expected
+
+
+def test_unwritable_tree_reports_a_missing_skill_rather_than_the_corrupt_copy(
+    tmp_path,
+) -> None:
+    """A repair that cannot be written must not answer with what it failed to fix.
+
+    The packaged source decodes here, so this copy is repairable in principle
+    and only the write stands in the way. The directory is sealed and the
+    ignore file is written first, which leaves the repair as the single write
+    that can fail, so the missing-skill answer can only come from the corrupt
+    copy being judged unservable.
+    """
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(UNDECODABLE_WORKTREE_SKILL_BYTES)
+    ignore = tmp_path / lifecycle.WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH
+    ignore.write_text(lifecycle.WORKTREE_SKILL_GITIGNORE_CONTENT, encoding="utf-8")
+
+    target.parent.chmod(SEALED_DIRECTORY_MODE)
+    try:
+        assert lifecyclebinding.available_skill_path(tmp_path, required=False) is None
+        with pytest.raises(SpiceError, match="missing spice skill at"):
+            lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+    finally:
+        target.parent.chmod(READABLE_DIRECTORY_MODE)
+
+    assert target.read_bytes() == UNDECODABLE_WORKTREE_SKILL_BYTES
+
+
+def test_unwritable_tree_still_serves_a_stale_copy_that_reads_back_as_text(
+    tmp_path,
+) -> None:
+    """Only the undecodable copy loses service when the repair cannot be written.
+
+    A stale copy is the same kind of drift, failing the same write, and it
+    stays in service because a caller can still read it. Sealing the directory
+    around a readable copy is what separates that from the corrupt case.
+    """
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_text(LAST_GOOD_WORKTREE_SKILL, encoding="utf-8")
+    ignore = tmp_path / lifecycle.WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH
+    ignore.write_text(lifecycle.WORKTREE_SKILL_GITIGNORE_CONTENT, encoding="utf-8")
+
+    target.parent.chmod(SEALED_DIRECTORY_MODE)
+    try:
+        located = lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+    finally:
+        target.parent.chmod(READABLE_DIRECTORY_MODE)
+
+    packaged = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+    assert located == target.resolve()
+    assert target.read_text(encoding="utf-8") == LAST_GOOD_WORKTREE_SKILL
+    # The served copy is genuinely the stale one, not a quietly repaired file.
+    assert located.read_text(encoding="utf-8") != packaged

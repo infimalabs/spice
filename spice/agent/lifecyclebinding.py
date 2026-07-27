@@ -338,6 +338,11 @@ def materialize_worktree_skill(
     ignored worktree copy on its next activation or launch. A tracked worktree
     copy is never rewritten, because Git cannot ignore tracked-file
     modifications; an undecodable tracked copy is unavailable.
+
+    A tree that cannot be written serves the copy it already holds, and only
+    when that copy reads back as text: the repair a corrupt copy needs is the
+    very write that just failed, so answering with it would hand a caller a
+    skill nothing can decode instead of the ordinary missing-skill answer.
     """
     target = worktree_skill_path(repo_root)
     packaged = packaged_path or packaged_skill_path()
@@ -362,7 +367,7 @@ def materialize_worktree_skill(
                     return target
         atomic_write_text(target, content, write_if_changed=True)
     except OSError:
-        return target if target.is_file() else None
+        return _readable_worktree_skill(repo_root)
     return target
 
 
