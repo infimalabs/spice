@@ -385,6 +385,47 @@ def test_in_place_upgrade_refuses_a_manifest_naming_an_uncarried_wheel(tmp_path)
         REHEARSAL._carried_predecessor(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "wheel",
+    [None, {}, {"sha256": "0"}, {"name": ""}, {"name": "../escape.whl"}],
+    ids=["null", "empty", "unnamed", "blank-name", "traversing-name"],
+)
+def test_in_place_upgrade_cites_a_manifest_that_contradicts_itself(tmp_path, wheel):
+    """A built state with no usable wheel name must read as a corrupt carry.
+
+    Every one of these already exited non-zero, but as a raw TypeError, KeyError
+    or AttributeError out of a container build log, where a corrupt carry and a
+    bug in the gate look exactly alike.
+    """
+    _artifact_manifest(
+        tmp_path,
+        {
+            "schema_version": 1,
+            "release": {"tag": "v0.27.0", "commit": "0" * 40},
+            "state": "built",
+            "wheel": wheel,
+        },
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._carried_predecessor(tmp_path)
+
+    assert str(failure.value).endswith(
+        f"{tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST} records wheel={wheel!r}"
+    )
+
+
+def test_in_place_upgrade_cites_a_manifest_that_is_not_an_object(tmp_path):
+    _artifact_manifest(tmp_path, cast(dict[str, object], ["not", "a", "manifest"]))
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._carried_predecessor(tmp_path)
+
+    assert str(failure.value).endswith(
+        f"{tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST} holds list"
+    )
+
+
 def test_in_place_upgrade_rejects_state_resolved_outside_the_scratch_root(tmp_path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
