@@ -19,6 +19,7 @@ from tests.test_releaseproofhelpers import (
     CONTAINERFILE,
     EVIDENCE,
     HOSTNATIVE,
+    INSTALLED_UPGRADE,
     PROJECT_ROOT,
     REHEARSAL,
     SOURCE_EXPORTER,
@@ -385,37 +386,112 @@ def test_in_place_upgrade_refuses_a_manifest_naming_an_uncarried_wheel(tmp_path)
         REHEARSAL._carried_predecessor(tmp_path)
 
 
-def test_in_place_upgrade_rejects_state_resolved_outside_the_scratch_root(tmp_path):
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
+def test_in_place_upgrade_rejects_an_installed_path_outside_scratch(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    repository = tmp_path / "scratch" / "repository"
+    repository.mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
-    with pytest.raises(REHEARSAL.RehearsalError, match="escaped the proof scratch"):
-        REHEARSAL._assert_state_is_isolated(elsewhere, scratch)
+    report = {
+        "import_origin": str(venv / "site-packages" / "spice" / "store.py"),
+        "paths": {REHEARSAL.UPGRADE_TEAM_STORE: str(elsewhere / "store.sqlite3")},
+    }
+    with pytest.raises(REHEARSAL.RehearsalError, match="escaped.*repository"):
+        REHEARSAL._validated_installed_paths(
+            report,
+            expected={REHEARSAL.UPGRADE_TEAM_STORE},
+            root=root,
+            repository=repository,
+            venv=venv,
+        )
 
 
 def test_in_place_upgrade_fails_closed_on_an_unrecorded_state_file(tmp_path):
-    scratch = tmp_path / "scratch"
-    state = scratch / "upgrade-state" / ".git" / ".spice" / "data"
+    state = tmp_path / "upgrade-state" / ".git" / ".spice" / "data"
     state.mkdir(parents=True)
     (state / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
     (state / "spicerogue.sqlite3").write_bytes(b"")
+    paths = {REHEARSAL.UPGRADE_TEAM_STORE: state / REHEARSAL.UPGRADE_TEAM_STORE}
     with pytest.raises(REHEARSAL.RehearsalError, match="spicerogue.sqlite3"):
-        REHEARSAL._assert_state_is_isolated(state, scratch)
+        REHEARSAL._assert_rehearsed_state_files(
+            paths, required={REHEARSAL.UPGRADE_TEAM_STORE}
+        )
 
 
-def test_in_place_upgrade_accepts_the_recorded_state_exclusions(tmp_path):
-    scratch = tmp_path / "scratch"
-    state = scratch / "upgrade-state" / ".git" / ".spice" / "data"
+def test_in_place_upgrade_refuses_a_governed_store_with_no_rehearsal(tmp_path):
+    state = tmp_path / "upgrade-state" / ".git" / ".spice" / "data"
     state.mkdir(parents=True)
     (state / REHEARSAL.UPGRADE_TEAM_STORE).write_bytes(b"")
-    for name in REHEARSAL.UPGRADE_EXCLUDED_STATE:
-        (state / name).write_bytes(b"")
-    inventory = REHEARSAL._assert_state_is_isolated(state, scratch)
-    assert inventory == sorted(
-        [REHEARSAL.UPGRADE_TEAM_STORE, *REHEARSAL.UPGRADE_EXCLUDED_STATE]
-    )
+    paths = {name: state / name for name in REHEARSAL.UPGRADE_GOVERNED_STATE}
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="did not exercise"):
+        REHEARSAL._assert_rehearsed_state_files(
+            paths, required=set(REHEARSAL.UPGRADE_GOVERNED_STATE)
+        )
+
+
+def test_in_place_upgrade_accepts_the_rehearsed_foreign_task_store(tmp_path):
+    state = tmp_path / "upgrade-state" / ".git" / ".spice" / "data"
+    state.mkdir(parents=True)
+    required = {REHEARSAL.UPGRADE_TEAM_STORE, "taskchampion.sqlite3"}
+    paths = {name: state / name for name in required}
+    for path in paths.values():
+        path.write_bytes(b"")
+
+    inventory = REHEARSAL._assert_rehearsed_state_files(paths, required=required)
+
+    assert inventory == sorted(required)
+
+
+def test_in_place_upgrade_rejects_source_shadowing_the_installed_probe(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    report = {
+        "import_origin": str(root / "spice" / "serve" / "team" / "store.py"),
+        "paths": {},
+    }
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="imported Spice from source"):
+        REHEARSAL._validated_installed_paths(
+            report,
+            expected=set(),
+            root=root,
+            repository=repository,
+            venv=venv,
+        )
+
+
+def test_in_place_upgrade_rejects_destructive_authority_replacement():
+    seeded = {
+        name: {"preserved": [f"{name}-before"]}
+        for name in REHEARSAL.UPGRADE_AUTHORITY_STATE
+    }
+    upgraded = {
+        name: {
+            "preserved": [f"{name}-before"],
+            "written": [f"{name}-after"],
+        }
+        for name in REHEARSAL.UPGRADE_AUTHORITY_STATE
+    }
+    before = {
+        name: (1, index)
+        for index, name in enumerate(REHEARSAL.UPGRADE_AUTHORITY_STATE, start=1)
+    }
+    after = dict(before)
+    after[REHEARSAL.UPGRADE_TEAM_STORE] = (1, 999)
+
+    with pytest.raises(
+        REHEARSAL.RehearsalError,
+        match=f"reinitialized authority store {REHEARSAL.UPGRADE_TEAM_STORE}",
+    ):
+        REHEARSAL._assert_authority_preserved(seeded, upgraded, before, after)
 
 
 def test_in_place_upgrade_inventory_answers_to_current_source():
@@ -431,14 +507,43 @@ def test_in_place_upgrade_fails_closed_on_an_undeclared_new_store(tmp_path):
     """A store added lazily never appears in a run, so source is the check."""
     package = tmp_path / "spice" / "newthing"
     package.mkdir(parents=True)
+    declared = [
+        *REHEARSAL.UPGRADE_GOVERNED_STATE,
+        "taskchampion.sqlite3",
+        "spicenewthing.sqlite3",
+    ]
     (package / "store.py").write_text(
-        'NEWTHING_DATABASE_FILENAME = "spicenewthing.sqlite3"\n', encoding="utf-8"
+        "".join(
+            f'STORE_{index}_DATABASE_FILENAME = "{name}"\n'
+            for index, name in enumerate(declared)
+        ),
+        encoding="utf-8",
     )
 
     with pytest.raises(REHEARSAL.RehearsalError) as failure:
         REHEARSAL._assert_state_inventory_is_declared(tmp_path)
 
     assert "spicenewthing.sqlite3" in str(failure.value)
+
+
+def test_in_place_upgrade_fails_when_governed_store_has_no_rehearsal(monkeypatch):
+    registry = dict(REHEARSAL.UPGRADE_REHEARSAL_BY_STORE)
+    registry.pop(REHEARSAL.UPGRADE_TEAM_STORE)
+    monkeypatch.setattr(REHEARSAL, "UPGRADE_REHEARSAL_BY_STORE", registry)
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="registry drifted"):
+        REHEARSAL._assert_state_inventory_is_declared(PROJECT_ROOT)
+
+
+def test_in_place_upgrade_fails_when_governed_inventory_alone_grows(monkeypatch):
+    monkeypatch.setattr(
+        REHEARSAL,
+        "UPGRADE_GOVERNED_STATE",
+        (*REHEARSAL.UPGRADE_GOVERNED_STATE, "spiceunrehearsed.sqlite3"),
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="registry drifted"):
+        REHEARSAL._assert_state_inventory_is_declared(PROJECT_ROOT)
 
 
 def test_in_place_upgrade_refuses_a_tree_that_declares_no_store(tmp_path):
@@ -464,6 +569,25 @@ def test_prior_release_rehearsal_detects_reversed_team_adoption_order(monkeypatc
 
     with pytest.raises(store.SpiceError, match="newer schema version"):
         UPGRADE.rehearse_prior_stores(PROJECT_ROOT)
+
+
+def test_installed_upgrade_names_team_store_when_adoption_is_reversed(
+    tmp_path, monkeypatch
+):
+    from spice.errors import SpiceError
+    from spice.serve.team import store
+
+    class RefusingTeamStore:
+        def team_state(self, _team_id):
+            raise SpiceError("newer schema version")
+
+    monkeypatch.setattr(store, "ServeTeamStore", RefusingTeamStore)
+
+    with pytest.raises(
+        SystemExit,
+        match=r"spiceteams\.sqlite3: newer schema version",
+    ):
+        INSTALLED_UPGRADE._authority_verify_and_write(tmp_path)
 
 
 def test_rehearsal_declares_every_gate_and_runs_during_the_container_build():
