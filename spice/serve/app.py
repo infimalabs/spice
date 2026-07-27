@@ -14,7 +14,7 @@ from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -86,7 +86,11 @@ from spice.serve.observer import (
     observer_lane_signature,
     observer_messages_payload,
 )
-from spice.serve.team.store import ServeTeamStore, TeamCommandService
+from spice.serve.team.store import (
+    AuthorityStoreSupersededError,
+    ServeTeamStore,
+    TeamCommandService,
+)
 from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
 from spice.serve.workroutes import (
@@ -181,16 +185,51 @@ class ServeState:
         self.lifecycle_decision_authority: LifecycleDecisionAuthority | None = None
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self.lifecycle_reconciler: LifecycleReconciler | None = None
+        # Assigned once the server exists, which is after this. Serving is what
+        # a superseded store ends, so until there is a server to stop there is
+        # nothing for the store to interrupt.
+        self.stop_serving: Callable[[], None] | None = None
+        self.superseded_lock = Lock()
+        self.authority_store_superseded = False
         self._team_store = (
             team_store
             if team_store is not None
-            else (ServeTeamStore() if observer is None else None)
+            else (
+                ServeTeamStore(superseded_hook=self._stop_serving_superseded_store)
+                if observer is None
+                else None
+            )
         )
         self._team_commands = (
             TeamCommandService(self._team_store)
             if self._team_store is not None
             else None
         )
+
+    def _stop_serving_superseded_store(
+        self, error: AuthorityStoreSupersededError
+    ) -> None:
+        """Stop serving once the team store has moved past this process.
+
+        Serving on is the failure. Every request that reaches team state now
+        meets a refusal this process will never stop producing, and the loop
+        that would replace it with a build the store is stamped for is waiting
+        on this one to exit. Exiting is therefore the whole upgrade, and the
+        only part of it this process is in a position to perform.
+
+        On a thread of its own because stopping the server waits for the serve
+        loop to leave, and the caller is whichever request or watcher thread
+        touched the store first -- it is in the middle of raising, and the loop
+        it would wait on may not even have started yet.
+        """
+        with self.superseded_lock:
+            if self.authority_store_superseded:
+                return
+            self.authority_store_superseded = True
+        print(f"spice serve: {error}; exiting so a restart can serve it")
+        stop = self.stop_serving
+        if stop is not None:
+            Thread(target=stop, name="spice-serve-superseded", daemon=True).start()
 
     @property
     def observer_mode(self) -> bool:
@@ -370,6 +409,11 @@ def run_serve(args: argparse.Namespace) -> int:
         observer=observer,
     )
     server = _ServeHttpServer((args.host, args.port), _ServeHandler, state)
+    # The same stop `--until` uses, reached from the same place: a store that
+    # moved ahead and a watched file that changed are one situation to this
+    # process, which is that the code it is running is no longer the code that
+    # should be serving.
+    state.stop_serving = server.shutdown
     watch_stop = Event()
     watch_thread = start_exit_file_watch(server, args, stop_event=watch_stop)
     lifecycle_reconciler = start_lifecycle_reconciler(state)

@@ -912,6 +912,13 @@ def test_run_serve_owns_reconciler_start_cancel_and_join(monkeypatch) -> None:
         def serve_forever(self) -> None:
             events.append("serve")
 
+        def shutdown(self) -> None:
+            # Handed to the state so a superseded store can stop serving.
+            # Recorded like the rest: nothing supersedes anything here, so the
+            # expected ordering below is also the assertion that run_serve
+            # only ever hands this out and never calls it itself.
+            events.append("shutdown")
+
         def server_close(self) -> None:
             events.append("server-close")
 
