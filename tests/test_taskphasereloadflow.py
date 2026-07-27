@@ -109,7 +109,6 @@ def test_done_continuation_payload_keeps_its_exact_key_set(task_repo, monkeypatc
     assert captured["operation"] == "done"
     assert isinstance(payload, dict)
     assert sorted(payload) == [
-        "actor",
         "chain_next",
         "handle",
         "judgment",
@@ -118,6 +117,42 @@ def test_done_continuation_payload_keeps_its_exact_key_set(task_repo, monkeypatc
         "sync_uda_args",
         "validation",
     ]
+
+
+def test_done_continuation_derives_the_completer_from_durable_claim_state(
+    task_repo, monkeypatch
+):
+    # The shape a process running pre-landing code still emits, carrying the
+    # completer key this landing removed. Dropping a key is the safe direction
+    # across the checkout seam precisely because the decoder can ignore one,
+    # so this payload must complete on the durable claim holder while the
+    # stale value rides along unread. A decoder still trusting that value would
+    # refuse the completion outright, because it names someone else.
+    handle = create.add(
+        "Complete from durable claim state",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        flow=["todo"],
+        acceptance=["the durable claim holder is the completer of record"],
+    )
+    ops.claim(handle)
+    payload = {
+        "handle": handle,
+        "actor": PEER_ACTOR,
+        "validation": ["derived completer verified"],
+        "judgment": "sound",
+        "notes": [],
+        "chain_next": False,
+        "sync_notes": [],
+        "sync_uda_args": [],
+    }
+
+    output = ops._continue_done(payload)
+    row = identity.resolve(handle)
+
+    assert f"completed {handle}" in output
+    assert row["status"] == "completed"
+    assert row["validation"] == "derived completer verified"
 
 
 def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
