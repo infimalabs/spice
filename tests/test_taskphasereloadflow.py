@@ -117,6 +117,8 @@ def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
     assert captured["operation"] == "review"
     payload = captured["payload"]
     assert isinstance(payload, dict)
+    assert payload["actor"] == PEER_ACTOR
+    assert str(payload["reviewed_at"])
     original_advance = ops._advance
     monkeypatch.setattr(
         ops,
@@ -126,6 +128,7 @@ def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
 
     with pytest.raises(SpiceError, match="injected after follow-up"):
         ops._continue_review(payload)
+    first_reviewed_at = identity.resolve(handle)["review_at"]
 
     monkeypatch.setattr(ops, "_advance", original_advance)
     output = ops._continue_review(payload)
@@ -139,6 +142,7 @@ def test_exact_review_resume_reuses_prepared_followup(task_repo, monkeypatch):
 
     assert f"reviewed {handle} clean; completed {handle}" in output
     assert len(children) == 1
+    assert reviewed["review_at"] == first_reviewed_at == payload["reviewed_at"]
     assert annotations.count(f"review: finding=clean; by={PEER_ACTOR}") == 1
 
 

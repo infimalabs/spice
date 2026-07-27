@@ -856,6 +856,7 @@ def review(
         creation_surface=creation_surface,
     )
     reviewed_handle = identity.render_handle(row)
+    reviewed_at = tw.now_iso()
     repo_root = config.repo_root()
     before_head = git_read(repo_root, "rev-parse", "HEAD")
     sync = boundaries.integrate_and_publish(
@@ -867,8 +868,10 @@ def review(
         "review",
         {
             "handle": reviewed_handle,
+            "actor": actor,
             "finding": finding,
             "note": note,
+            "reviewed_at": reviewed_at,
             "followup": list(followup or []),
             "prepared_followups": [
                 phasecontinuation.serialize_prepared_followup(prepared)
@@ -936,16 +939,19 @@ def _prepare_review_continuation(
 def _continue_review(payload: dict[str, Any]) -> str:
     """Apply one already-integrated review through the current checkout."""
     handle = str(payload["handle"])
+    actor = str(payload.get("actor") or "")
     finding = str(payload.get("finding") or "clean")
     raw_note = payload.get("note")
     note = str(raw_note) if raw_note is not None else None
+    at = str(payload.get("reviewed_at") or "")
+    if not actor or not at:
+        raise SpiceError("task review continuation lacks reviewer identity or time")
     followup = [str(item) for item in payload.get("followup") or []]
     sync_uda_args = [str(item) for item in payload.get("sync_uda_args") or []]
     row = resolve_claim_target(handle, action="review")
     _require_pending(row, "review")
     if str(row.get("phase") or "") != "review":
         raise SpiceError("task review requires a task in the review phase")
-    actor = tw.current_actor()
     _require_owner(row, actor, "review")
     uuid = identity.uuid_of(row)
     prepared_followups = [
@@ -955,7 +961,6 @@ def _continue_review(payload: dict[str, Any]) -> str:
     targets = [_resolve_followup_target(name, after_uuid=uuid) for name in followup]
     reviewed_handle = identity.render_handle(row)
 
-    at = tw.now_iso()
     modify = [
         uuid,
         "modify",
