@@ -40,6 +40,7 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_JUDGED_CONFIRMED,
     MAXIM_EVENT_JUDGED_REJECTED,
     MAXIM_EVENT_PUBLISHED,
+    MAXIM_METRICS_DATABASE_FILENAME,
     MaximMetricEventWrite,
     record_maxim_metric_events,
 )
@@ -965,9 +966,9 @@ def _record_maxim_metrics(
     Containment belongs here at the write, where the loss is the metric alone.
     The refusal still reaches the lane on the side channel it already watches,
     the way this module publishes task.error when an inline task fails. The
-    notice publisher is called directly rather than through
-    publish_supervisor_feedback because all that wrapper adds is a log-handle
-    fallback, and this path has no log handle to fall back to.
+    The one deterministic failure path emits the notice here for every caller.
+    Even a broken notice transport cannot turn lost bookkeeping into a lost
+    reminder.
     """
     if not hits:
         return
@@ -990,13 +991,17 @@ def _record_maxim_metrics(
                 for hit in hits
             ],
         )
-    except Exception as exc:  # bookkeeping failure costs only the metric
-        publish_side_channel_feedback(
-            repo_root,
-            "maxim.metrics-error",
-            event=event_type,
-            error=str(exc),
-        )
+    except Exception as error:  # bookkeeping failure costs only the metric
+        try:
+            publish_side_channel_feedback(
+                repo_root,
+                "maxim.metrics-error",
+                database=MAXIM_METRICS_DATABASE_FILENAME,
+                event=event_type,
+                error=str(error),
+            )
+        except Exception:
+            return
 
 
 def discard_pending_maxim_reminders(
