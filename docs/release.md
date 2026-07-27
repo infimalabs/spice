@@ -22,6 +22,26 @@ bumps the version and commits the bump before it stops. `check` and the release
 path share one gate body on purpose: a separate verification path would drift
 until it certified something the release does not actually run.
 
+The first release gate is the installed-runtime boundary. A branch can contain
+passing lifecycle, task, and schema code while the fleet's editable `spice`
+tool still imports an older deployment checkout; branch state alone therefore
+cannot support a fleet-wide release claim. Before running the release command,
+fast-forward the clean editable main tree that backs the installed tool to the
+candidate baseline. The repository-mounted command preserves the parent
+interpreter, runs it with `-P` and no `PYTHONPATH`, resolves
+`spice.tasks.git.boundaries.__file__`, and compares that source checkout's
+committed tree with the release tree. An interpreter inside the candidate
+worktree cannot self-certify as the installed CLI. Any mismatch stops before
+the Python, browser, or artifact gates.
+
+After `prepare` creates a release commit, deploy that prepared commit before a
+separate `publish`, because `publish` repeats the same installed-runtime gate.
+The one-pass `minor` and `patch` modes prove the pre-bump tree before making
+their guarded release commit. Once deployed, ordinary `spice agent activation`
+also rewrites already-stale generated skills from the installed packaged source
+even when a lane has no baseline advance; prove that convergence by comparing
+raw bytes, not a rendered diff.
+
 Release validation runs every scratch-safe served-UI Playwright scenario from
 `tests/browser/release_smoke_manifest.js` using the repository's pinned
 `playwright` dependency. Run `npm ci` in the repository before releasing. The

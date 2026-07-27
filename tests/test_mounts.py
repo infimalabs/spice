@@ -1,6 +1,7 @@
 """Mounted commands: validation, precedence, dotted-path dispatch."""
 
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from spice.cli.mounts import (
     MOUNT_SEGMENT_RE,
     MOUNTED_COMMAND_ENV,
     MountedCommand,
+    RUNTIME_PYTHON_ENV,
     VISIBLE_PROG_ENV,
     find_mounted_command,
     mounted_commands,
@@ -171,6 +173,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
             "VIRTUAL_ENV": env.get("VIRTUAL_ENV"),
             "PATH": env.get("PATH"),
             MOUNTED_COMMAND_ENV: env.get(MOUNTED_COMMAND_ENV),
+            RUNTIME_PYTHON_ENV: env.get(RUNTIME_PYTHON_ENV),
             VISIBLE_PROG_ENV: env.get(VISIBLE_PROG_ENV),
         }
         captured["check"] = check
@@ -191,6 +194,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
             "VIRTUAL_ENV": "/tmp/foreign-venv",
             "PATH": "/usr/bin",
             MOUNTED_COMMAND_ENV: "1",
+            RUNTIME_PYTHON_ENV: sys.executable,
             VISIBLE_PROG_ENV: "spice report inspect",
         },
         "check": False,

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import cli as agent_cli
+from spice.agent import lifecyclebinding
 from spice.agent.activation import (
     activation_browser_validation_lines,
     activation_command_surface_lines,
@@ -105,6 +106,45 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     }
     assert "dev_hooks_detail=hook-row" in packet
     assert "claim_renewal=skipped no_active_claim" in packet
+    assert "baseline_refresh=current" in packet
+
+
+def test_activation_converges_an_already_stale_skill_by_raw_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    packaged = tmp_path / "installed" / "SKILL.md"
+    packaged.parent.mkdir()
+    packaged_bytes = "Software control plane π\n".encode()
+    packaged.write_bytes(packaged_bytes)
+    target = repo / lifecyclebinding.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"older generated skill bytes\n")
+    monkeypatch.setattr(lifecyclebinding, "packaged_skill_path", lambda: packaged)
+    monkeypatch.setattr(
+        agent_cli,
+        "_bind_activation_thread",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli,
+        "_refresh_activation_baseline",
+        lambda _repo: SimpleNamespace(notes=["current"]),
+    )
+    monkeypatch.setattr(
+        agent_cli,
+        "_renew_activation_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
+
+    packet = agent_cli.render_activation_packet(repo)
+
+    assert target.read_bytes() == packaged_bytes
+    assert f"skill={target.resolve()}" in packet
     assert "baseline_refresh=current" in packet
 
 

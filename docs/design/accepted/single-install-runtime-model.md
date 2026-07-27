@@ -48,6 +48,49 @@ surfaces; the runtime is a deliberate, separately-managed deployment. Editing a
 worker is always safe. Updating the server is an explicit reinstall/redeploy
 step, not an accident of `cd`.
 
+## Deployment Evidence Boundary
+
+A change landed on a branch has **no fleet effect** until the installed CLI
+carries it. Branch tests establish what the candidate tree contains; they do
+not establish what ordinary `spice agent`, `spice task`, `spice serve`, or
+`spice session` commands run. Release and task evidence must not claim
+fleet-wide behavior from branch state alone.
+
+Two incidents made this distinction load-bearing:
+
+- a team-authority schema version landed while the installed CLI still wrote
+  the previous version, so agents repeatedly encountered a shared store whose
+  stamp and writer disagreed; and
+- generated-skill refresh code landed while the installed editable checkout
+  still lacked `_refresh_generated_skill_after_advance`, so no claim or launch
+  driven by that runtime could execute the branch's repair.
+
+A reviewer proves the two states independently. `git rev-parse HEAD` describes
+the operated candidate. The installed interpreter must be run with the current
+directory kept off its import path, and its imported module names the deployed
+source:
+
+```sh
+/path/to/installed/python -P -c \
+  'import spice.tasks.git.boundaries as b; print(b.__file__)'
+```
+
+Resolve that module back to its source checkout, then compare that checkout's
+commit and tree with the candidate. Importing the candidate from its current
+working directory, `PYTHONPATH`, or an interpreter inside the candidate
+worktree is not installed-runtime evidence. The repository-mounted release
+command carries its parent interpreter across the deliberate candidate-code
+reexec and refuses to run release gates unless the independently installed
+checkout and candidate have the same committed tree.
+
+Deployment also closes existing generated-copy drift. Once the editable
+checkout carries the new packaged source, every `spice agent activation`
+materializes the skill before baseline refresh, including when the lane is
+already current and no Git advance occurs. Validate convergence with a raw byte
+comparison such as `Path(...).read_bytes() == Path(...).read_bytes()`. A
+human-oriented diff rendering or its summarized output is not evidence of byte
+identity.
+
 ## Per-Tree-Runtime Magic Removed
 
 The old code made the active worktree win the runtime through several coupled

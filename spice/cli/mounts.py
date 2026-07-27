@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from spice.config.layers import contextualize_config_error, effective_commands
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
 VISIBLE_PROG_ENV = "SPICE_VISIBLE_PROG"  # env-policy: allow
+RUNTIME_PYTHON_ENV = "SPICE_RUNTIME_PYTHON"  # env-policy: allow
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,10 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     env = dict(os.environ)  # env-policy: allow
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
+    # The mounted child deliberately enters candidate checkout code. Preserve
+    # the parent interpreter as the independently installed runtime identity so
+    # release evidence can prove what ordinary fleet commands actually import.
+    env[RUNTIME_PYTHON_ENV] = sys.executable
     result = run_parent_lifetime_command(
         [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
     )
