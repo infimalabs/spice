@@ -11,7 +11,7 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from spice.config.values import configured_rtk_executable
 from spice.errors import SpiceError
@@ -570,11 +570,12 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
+
     # _advance returning is the commit point: phase and validation are durable.
-    # Everything after it only presents that result, so a stale presentation
-    # dependency must report the landed transition instead of turning success
-    # into exit 2 and inviting the operator to repeat task done.
-    try:
+    # Everything after it is continuation or presentation for that finished
+    # phase, so a stale dependency must report the landed transition instead
+    # of turning success into exit 2 and inviting the operator to repeat done.
+    def presentation() -> str:
         transition_lines = [result]
         if result.startswith("advanced "):
             transition_lines.append(_phase_ownership_line())
@@ -597,13 +598,30 @@ def done(
         return "\n".join(
             [*transition_lines, *sync.notes, learning_line, render.render_next()]
         )
+
+    return _report_landed_work(
+        presentation,
+        landed_lines=[
+            result,
+            f"validation recorded: {' | '.join(validation)}",
+        ],
+    )
+
+
+def _report_landed_work(
+    presentation: Callable[[], str],
+    *,
+    landed_lines: Sequence[str],
+) -> str:
+    """Render post-commit output without invalidating already-durable work."""
+    try:
+        return presentation()
     except Exception as exc:
         return "\n".join(
             [
-                result,
-                f"validation recorded: {' | '.join(validation)}",
-                f"post-advance presentation failed: {exc}",
-                "the task transition is durable; do not rerun task done",
+                *landed_lines,
+                f"post-commit presentation failed: {exc}",
+                "the task write is durable; do not repeat the command",
             ]
         )
 
@@ -846,13 +864,26 @@ def review(
         reviewed_at=at,
     )
     result = _advance(identity.resolve(handle))
-    lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
-    lines += [f"spawned {h}" for h in spawned]
-    lines += [f"linked {h}" for h in linked]
-    if feedback.status != "clean":
-        lines.append(feedback.output_line())
-    lines.append(next_task_drain_line())
-    return "\n".join(lines)
+    reviewed_line = f"reviewed {identity.render_handle(row)} {finding}; {result}"
+    spawned_lines = [f"spawned {h}" for h in spawned]
+    linked_lines = [f"linked {h}" for h in linked]
+
+    def presentation() -> str:
+        lines = [reviewed_line, *spawned_lines, *linked_lines]
+        if feedback.status != "clean":
+            lines.append(feedback.output_line())
+        lines.append(next_task_drain_line())
+        return "\n".join(lines)
+
+    return _report_landed_work(
+        presentation,
+        landed_lines=[
+            reviewed_line,
+            f"finding recorded: {finding}",
+            *spawned_lines,
+            *linked_lines,
+        ],
+    )
 
 
 def next_task_drain_line(
