@@ -291,6 +291,108 @@ def test_hidden_oops_advance_clears_wait_without_entering_public_queue(
     assert alloc.next_task() is None
 
 
+def test_task_doctor_distinguishes_parked_work_from_a_stranded_subtree(task_repo):
+    create.add(
+        "Legitimately parked deferred work",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["parked work has no dependents"],
+        deferred=True,
+    )
+    healthy_text, healthy_problems = render.render_doctor_report()
+    assert healthy_text.endswith("ok: no problems found")
+    assert healthy_problems == []
+
+    stranded = create.add(
+        "Deferred root strands its child",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["the root must enter intake"],
+        deferred=True,
+    )
+    create.add(
+        "Pending work behind the deferred root",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["the dependent is reachable"],
+        after=[stranded],
+    )
+    create.add(
+        "Second pending branch behind the deferred root",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["the second dependent is counted"],
+        after=[stranded],
+    )
+    wait = _scheduling_snapshot(stranded)["wait"]
+
+    flagged_text, flagged_problems = render.render_doctor_report()
+
+    expected = (
+        f"{stranded} future wait {wait} strands 2 pending dependents; "
+        f"repair: spice task wake {stranded}"
+    )
+    assert flagged_text != healthy_text
+    assert flagged_problems == [expected]
+    assert f"PROBLEMS (1):\n  {expected}" in flagged_text
+
+
+def test_task_doctor_leaves_claimed_deferred_work_to_its_active_lane(task_repo):
+    claimed = create.add(
+        "Claimed deferred root is still reachable",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["the active lane owns the root"],
+        deferred=True,
+    )
+    create.add(
+        "Pending work behind the active root",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["the active root will release it"],
+        after=[claimed],
+    )
+    ops.claim(claimed)
+
+    text, problems = render.render_doctor_report()
+
+    assert text.endswith("ok: no problems found")
+    assert problems == []
+
+
+def test_task_doctor_flags_a_hidden_oops_stranding_pending_work(task_repo):
+    created = ops.oops(
+        "Hidden deferred root strands its child",
+        description="triage has a pending dependent",
+        origin="ack:1jN54zJJ",
+    )
+    hidden = created.split()[1]
+    create.add(
+        "Pending public child behind hidden triage",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        acceptance=["hiddenness does not silence the strand"],
+        after=[hidden],
+    )
+    wait = _scheduling_snapshot(hidden)["wait"]
+
+    text, problems = render.render_doctor_report()
+
+    expected = (
+        f"{hidden} future wait {wait} strands 1 pending dependent; "
+        f"repair: spice task wake {hidden}"
+    )
+    assert problems == [expected]
+    assert expected in text
+
+
 def test_blocked_task_claim_preserves_scheduling(task_repo):
     blocker = create.add(
         "Blocker in front of the deferred follow-up",
