@@ -73,6 +73,7 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     AGENT_STARTUP_STARTING,
     PACKAGED_SKILL_RESOURCE,
     SUPERVISOR_ENVIRONMENT_SCRUB_NAMES,
+    SUPERVISOR_SCHEMA_VERSION_FIELD,
     WORKTREE_SKILL_GITIGNORE_CONTENT,
     WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH,
     WORKTREE_SKILL_RELATIVE_PATH,
@@ -125,6 +126,7 @@ from spice.process.groups import (
     process_id_is_running,
     terminate_process_group,
 )
+from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
 from spice.tasks.git import boundaries
 
 STARTUP_GRACE_SECONDS = 0.25
@@ -1164,6 +1166,10 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
                 startup_status=AGENT_STARTUP_STARTING,
             )
             state["supervisor_pid"] = os.getpid()
+            # Stamped beside the pid because it describes the same process: this
+            # supervisor will write the team authority store at this version for
+            # its whole life, whatever the deployment moves to underneath it.
+            state[SUPERVISOR_SCHEMA_VERSION_FIELD] = TEAM_AUTHORITY_SCHEMA_VERSION
             write_agent_state(repo_root, state)
             startup_watch = Thread(
                 target=_watch_agent_startup,

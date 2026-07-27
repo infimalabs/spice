@@ -386,6 +386,79 @@ def test_in_place_upgrade_refuses_a_manifest_naming_an_uncarried_wheel(tmp_path)
         REHEARSAL._carried_predecessor(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "wheel",
+    [None, {}, {"sha256": "0"}, {"name": ""}, {"name": "../escape.whl"}],
+    ids=["null", "empty", "unnamed", "blank-name", "traversing-name"],
+)
+def test_in_place_upgrade_cites_a_manifest_that_contradicts_itself(tmp_path, wheel):
+    """A built state with no usable wheel name must read as a corrupt carry.
+
+    Every one of these already exited non-zero, but as a raw TypeError, KeyError
+    or AttributeError out of a container build log, where a corrupt carry and a
+    bug in the gate look exactly alike.
+    """
+    _artifact_manifest(
+        tmp_path,
+        {
+            "schema_version": 1,
+            "release": {"tag": "v0.27.0", "commit": "0" * 40},
+            "state": "built",
+            "wheel": wheel,
+        },
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._carried_predecessor(tmp_path)
+
+    assert str(failure.value).endswith(
+        f"{tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST} records wheel={wheel!r}"
+    )
+
+
+def test_in_place_upgrade_refuses_a_wheel_that_exists_outside_the_carry(tmp_path):
+    """The traversal case above is only cited when the escape target is absent.
+
+    Put a real file where '../escape.whl' resolves and the unguarded expression
+    stops raising anything at all: it finds a file, returns it, and the gate
+    installs a wheel from outside .release-proof/prior-artifact/ that no carried
+    manifest ever hashed. Refusing the name is what prevents that, not the
+    later is_file() check, so this asserts the escape target is untouched.
+    """
+    escape = tmp_path / REHEARSAL.PRIOR_ARTIFACT_DIRECTORY.parent / "escape.whl"
+    escape.parent.mkdir(parents=True, exist_ok=True)
+    escape.write_bytes(b"a wheel nobody carried\n")
+    _artifact_manifest(
+        tmp_path,
+        {
+            "schema_version": 1,
+            "release": {"tag": "v0.27.0", "commit": "0" * 40},
+            "state": "built",
+            "wheel": {"name": "../escape.whl", "sha256": "0"},
+        },
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._carried_predecessor(tmp_path)
+
+    assert str(failure.value).endswith(
+        f"{tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST} records "
+        "wheel={'name': '../escape.whl', 'sha256': '0'}"
+    )
+    assert escape.read_bytes() == b"a wheel nobody carried\n"
+
+
+def test_in_place_upgrade_cites_a_manifest_that_is_not_an_object(tmp_path):
+    _artifact_manifest(tmp_path, cast(dict[str, object], ["not", "a", "manifest"]))
+
+    with pytest.raises(REHEARSAL.RehearsalError) as failure:
+        REHEARSAL._carried_predecessor(tmp_path)
+
+    assert str(failure.value).endswith(
+        f"{tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST} holds list"
+    )
+
+
 def test_in_place_upgrade_rejects_an_installed_path_outside_scratch(tmp_path):
     root = tmp_path / "source"
     root.mkdir()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from io import StringIO
 
 import pytest
 
@@ -34,9 +35,11 @@ from spice.agent.maximmetrics import (
     record_maxim_metric_events,
 )
 from spice.agent.maxims import MaximVerdict
+from spice.agent.sidechannelnotify import consume_side_channel_notices
 from spice.cli.parser import build_parser
 from spice.config import edit, layers, values
 from spice.errors import SpiceError
+from spice.mail.inbox import collect_inbox_items
 from spice.sqliteconnection import sqlite_connection
 from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
@@ -220,6 +223,106 @@ def _maxim_database_snapshot(path):
         )
 
 
+def _write_incompatible_maxim_store(path, store_kind):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        if store_kind == "future":
+            connection.execute(MAXIM_METRICS_TABLE_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_EVENT_INDEX_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_RECURRENCE_INDEX_SQL)
+            connection.execute(maximmetrics.MAXIM_METRICS_FIRE_RECENCY_INDEX_SQL)
+            connection.execute(
+                f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}"
+            )
+            return
+        connection.execute(
+            "CREATE TABLE maxim_metric_events "
+            "(id INTEGER PRIMARY KEY, occurred_at REAL NOT NULL, payload TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO maxim_metric_events (occurred_at, payload) VALUES (1.0, 'old')"
+        )
+
+
+@pytest.mark.parametrize("store_kind", ["future", "malformed"])
+def test_maxim_metrics_refusal_does_not_suppress_the_reminder(
+    tmp_path, monkeypatch, store_kind
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        watchdog,
+        "evaluate_maxim_any_violation",
+        lambda _maxim, _statement: _judge_verdict(agrees=False),
+    )
+    path = maxim_metrics_database_path(repo)
+    _write_incompatible_maxim_store(path, store_kind)
+    before = _maxim_database_snapshot(path)
+    gate = watchdog.MaximReminderGate()
+
+    reminders = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in assistant prose",
+        reminder_gate=gate,
+    )
+    errors = [
+        line
+        for line in consume_side_channel_notices(repo)
+        if "maxim.metrics-error" in line
+    ]
+
+    assert len(reminders) == 1
+    assert reminders[0].is_file()
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] ALPHA reminder.\n"
+    ]
+    assert len(errors) == 3
+    assert f"event={MAXIM_EVENT_FIRE}" in errors[0]
+    assert f"event={MAXIM_EVENT_JUDGED_CONFIRMED}" in errors[1]
+    assert f"event={MAXIM_EVENT_PUBLISHED}" in errors[2]
+    assert all("database=spicemaxims.sqlite3" in detail for detail in errors)
+    assert all("maxim metrics database" in detail for detail in errors)
+    assert gate.published_reminders() == ((reminders[0], "[MAXIM] ALPHA reminder.\n"),)
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_supervisor_surfaces_maxim_metrics_refusal_and_keeps_the_reminder(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    path = maxim_metrics_database_path(repo)
+    _write_incompatible_maxim_store(path, "future")
+    before = _maxim_database_snapshot(path)
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    log = StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        repo,
+        "alpha appears in assistant prose",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+    feedback = [
+        line
+        for line in consume_side_channel_notices(repo)
+        if "maxim.metrics-error" in line
+    ]
+
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] ALPHA reminder.\n"
+    ]
+    assert len(feedback) == 2
+    assert f"event={MAXIM_EVENT_FIRE}" in feedback[0]
+    assert f"event={MAXIM_EVENT_PUBLISHED}" in feedback[1]
+    assert all("database=spicemaxims.sqlite3" in detail for detail in feedback)
+    assert all("newer schema version 2" in detail for detail in feedback)
+    assert _maxim_database_snapshot(path) == before
+
+
 def test_maxim_store_refuses_an_unknown_unversioned_shape_without_mutation(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     path = maxim_metrics_database_path(repo)
@@ -258,6 +361,46 @@ def test_maxim_store_refuses_a_newer_version_without_mutation(tmp_path):
             [MaximMetricEventWrite(MAXIM_EVENT_FIRE, "new", "codex")],
         )
 
+    assert _maxim_database_snapshot(path) == before
+
+
+def test_foreign_stamped_store_still_publishes_the_maxim_reminder(
+    tmp_path, monkeypatch
+):
+    """The refusal costs the metric and reaches the lane, not the reminder.
+
+    The fire event is recorded before the inbox item is written, so before
+    containment a single foreign stamp turned every maxim reminder in the lane
+    into a log line under .spice/agents/<thread>/logs. Both writes on this path
+    -- fire and published -- meet the refusal, so both report it.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    path = maxim_metrics_database_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite_connection(path) as connection:
+        connection.execute(MAXIM_METRICS_TABLE_SQL)
+        connection.execute(f"PRAGMA user_version = {MAXIM_METRICS_SCHEMA_VERSION + 1}")
+    before = _maxim_database_snapshot(path)
+
+    paths = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in this assistant message",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    errors = [
+        line
+        for line in consume_side_channel_notices(repo)
+        if "maxim.metrics-error" in line
+    ]
+
+    assert len(paths) == 1
+    assert paths[0].read_text(encoding="utf-8") == "[MAXIM] ALPHA reminder.\n"
+    assert len(errors) == 2
+    assert f"event={MAXIM_EVENT_FIRE}" in errors[0]
+    assert f"event={MAXIM_EVENT_PUBLISHED}" in errors[1]
+    assert "newer schema version" in errors[0]
     assert _maxim_database_snapshot(path) == before
 
 

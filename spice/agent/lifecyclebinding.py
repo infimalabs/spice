@@ -56,6 +56,13 @@ WORKTREE_SKILL_GITIGNORE_CONTENT = (
 )
 PACKAGED_SKILL_RESOURCE = ("spice.agent", "SKILL.md")
 AGENT_STATE_FILE = "state.json"
+# The team-authority schema constant the supervisor imported when it started.
+# An editable deployment reaches new processes immediately and running ones
+# never, so a supervisor keeps writing the version it compiled in for as long
+# as it lives -- hours. Recording it here is what lets the short-lived CLI,
+# which always reads current code and so cannot detect itself, tell a lane
+# whose supervisor predates the deployment from one that is current.
+SUPERVISOR_SCHEMA_VERSION_FIELD = "supervisor_team_authority_schema_version"
 AGENT_LOCK_FILE = "ensure.lock"
 AGENT_STARTUP_STARTING = "starting"
 AGENT_STARTUP_READY = "ready"
