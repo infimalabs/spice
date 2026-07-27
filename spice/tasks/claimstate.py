@@ -41,6 +41,18 @@ def annotate(target: str, text: str) -> None:
     tw.run([target, "annotate", "--", text])
 
 
+def annotate_once(target: str, text: str) -> None:
+    """Write one exact annotation at most once across continuation recovery."""
+    text = _task_text(text)
+    rows = tw.export([target])
+    if rows and any(
+        str(item.get("description") or "") == text
+        for item in rows[0].get("annotations") or ()
+    ):
+        return
+    annotate(target, text)
+
+
 def _task_text(text: str) -> str:
     return text
 
