@@ -8,10 +8,12 @@ from argparse import Namespace
 from http import HTTPStatus
 from pathlib import Path
 
+import pytest
+
 from spice.serve import app as serve_app
 from spice.serve.app import run_serve
 from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
-from spice.serve.team.store import team_database_path
+from spice.serve.team.store import AuthorityStoreSupersededError, team_database_path
 from spice.sqliteconnection import sqlite_connection
 from spice.tasks import config as task_config
 
@@ -61,6 +63,42 @@ def _ask_for_team_state(host: str, port: int) -> None:
         return
 
 
+def test_a_refusal_arriving_before_the_server_leaves_the_next_one_able_to_stop_it(
+    tmp_path,
+):
+    """The one shot belongs to the refusal that has a server to stop.
+
+    A state exists before its server does, so a refusal can reach it with
+    nothing to stop yet. Spending the single stop there would leave the refusal
+    that arrives afterward -- the one holding a live serve loop -- looking like
+    work already done, and this process would go on serving with nothing left
+    to notice.
+    """
+    task_config.set_backend(str(tmp_path / "backend"))
+    try:
+        state = serve_app.ServeState(anchor_root=tmp_path)
+        with state.team_store.connect():
+            pass
+        with sqlite_connection(team_database_path()) as connection:
+            connection.execute(
+                f"PRAGMA user_version = {TEAM_AUTHORITY_SCHEMA_VERSION + 1}"
+            )
+
+        with pytest.raises(AuthorityStoreSupersededError):
+            with state.team_store.connect():
+                pytest.fail("superseded store opened before the server existed")
+
+        stopped = threading.Event()
+        state.stop_serving = stopped.set
+        with pytest.raises(AuthorityStoreSupersededError):
+            with state.team_store.connect():
+                pytest.fail("superseded store opened once the server existed")
+
+        assert stopped.wait(SERVE_EXIT_TIMEOUT_SECONDS)
+    finally:
+        task_config.set_backend(None)
+
+
 def test_serve_stops_serving_once_the_store_moves_past_this_build(
     monkeypatch, tmp_path, capfd
 ):
@@ -80,9 +118,9 @@ def test_serve_stops_serving_once_the_store_moves_past_this_build(
     monkeypatch.setattr(serve_app, "start_lifecycle_reconciler", lambda _state: None)
     real_server_class = serve_app._ServeHttpServer
     bound = threading.Event()
-    servers: list[object] = []
+    servers: list[serve_app._ServeHttpServer] = []
 
-    def record_server(*args: object) -> object:
+    def record_server(*args: object) -> serve_app._ServeHttpServer:
         server = real_server_class(*args)
         servers.append(server)
         bound.set()
@@ -98,7 +136,7 @@ def test_serve_stops_serving_once_the_store_moves_past_this_build(
     try:
         serve_thread.start()
         assert bound.wait(SERVER_BIND_TIMEOUT_SECONDS)
-        host, port = servers[0].server_address[:2]  # type: ignore[attr-defined]
+        host, port = servers[0].server_address[:2]
 
         assert _team_snapshot_status(str(host), int(port)) == HTTPStatus.OK
 
@@ -114,7 +152,7 @@ def test_serve_stops_serving_once_the_store_moves_past_this_build(
         assert exit_codes == [0]
     finally:
         for server in servers:
-            server.shutdown()  # type: ignore[attr-defined]
+            server.shutdown()
         serve_thread.join(SERVE_EXIT_TIMEOUT_SECONDS)
         task_config.set_backend(None)
 
