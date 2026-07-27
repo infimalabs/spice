@@ -362,15 +362,28 @@ def _require_current_supervisor() -> None:
         SUPERVISOR_SCHEMA_VERSION_FIELD,
         read_agent_state,
     )
-    from spice.serve.team.store import team_database_path
+    from spice.serve.team.store import (
+        TEAM_SQLITE_BUSY_TIMEOUT_MS,
+        record_lane_schema_version,
+        team_database_path,
+    )
 
-    state = read_agent_state(config.repo_root())
+    repo_root = config.repo_root()
+    state = read_agent_state(repo_root)
     recorded = state.get(SUPERVISOR_SCHEMA_VERSION_FIELD)
     database = team_database_path()
     if not isinstance(recorded, int) or not database.exists():
         return
-    with sqlite_connection(database) as connection:
+    with sqlite_connection(
+        database, busy_timeout_ms=TEAM_SQLITE_BUSY_TIMEOUT_MS
+    ) as connection:
         stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if stored:
+            # Recorded on the connection already open, on the way past: this is
+            # what a writer arriving with a newer constant reads to know that
+            # migrating now would strand this lane mid-task. A store with no
+            # stamp has no shape to record into and no migration to defer.
+            record_lane_schema_version(connection, str(repo_root), recorded)
     if recorded >= stored:
         return
     raise SpiceError(

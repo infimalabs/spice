@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,17 @@ from spice.serve.team.schema import (
     TEAM_AUTHORITY_SCHEMAS,
     TEAM_AUTHORITY_TABLES,
 )
-from spice.serve.team.store import ServeTeamStore
+from spice.serve.team.store import (
+    GLOBAL_LANE_SCHEMA_KEY_PREFIX,
+    LANE_SCHEMA_RECORD_HORIZON_SECONDS,
+    ServeTeamStore,
+    record_lane_schema_version,
+)
+
+# Two lanes sharing one store, told apart the way the fleet tells them apart:
+# by worktree, one per supervisor.
+LAGGING_LANE = "/fleet/spice-lagging"
+CURRENT_LANE = "/fleet/spice-current"
 
 # The shape each retained authority version describes, pinned. Databases in the
 # field are stamped with these numbers, so a number cannot come to mean a
@@ -655,6 +666,68 @@ def test_a_prior_shape_store_reaches_the_settled_shape_in_one_forward_step(
     assert {table: after[table] for table in after if table != "agent_identities"} == {
         table: before[table] for table in before if table != "agent_identities"
     }
+
+
+def test_a_migration_waits_while_a_lane_still_runs_the_older_schema(tmp_path):
+    path = tmp_path / "occupied.sqlite3"
+    _build_authority_at(path, PRIOR_AUTHORITY_VERSION)
+    _seed_authority(path)
+    with sqlite_connection(path) as connection:
+        record_lane_schema_version(connection, LAGGING_LANE, PRIOR_AUTHORITY_VERSION)
+        record_lane_schema_version(
+            connection, CURRENT_LANE, TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    before = _authority_state(path)
+
+    _forget_initialized(path)
+    with pytest.raises(SpiceError) as refusal:
+        ServeTeamStore(path=path).agent_identity_for_actor("agent-a")
+
+    # The lane that would lose the store is named with the schema it is on, so
+    # whoever reads this knows which process it is waiting for. The lane already
+    # on the current schema is one this migration cannot hurt, so it is counted
+    # out: one lane holds the store back, and the message says one.
+    message = str(refusal.value)
+    assert f"{LAGGING_LANE} at schema {PRIOR_AUTHORITY_VERSION}" in message
+    assert "1 lane(s)" in message
+    # Declining has to leave the store exactly as the lane still using it can
+    # keep using it. A store carried halfway is the outage this exists to stop.
+    assert _authority_state(path) == before
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            PRIOR_AUTHORITY_VERSION
+        )
+
+
+def test_a_migration_proceeds_once_the_lagging_lane_ages_past_the_horizon(tmp_path):
+    path = tmp_path / "departed.sqlite3"
+    _build_authority_at(path, PRIOR_AUTHORITY_VERSION)
+    _seed_authority(path)
+    with sqlite_connection(path) as connection:
+        record_lane_schema_version(connection, LAGGING_LANE, PRIOR_AUTHORITY_VERSION)
+        record_lane_schema_version(
+            connection, CURRENT_LANE, TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+        connection.execute(
+            "UPDATE global_settings SET updated_at = ? WHERE key = ?",
+            (
+                time.time() - LANE_SCHEMA_RECORD_HORIZON_SECONDS - 1,
+                f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{LAGGING_LANE}",
+            ),
+        )
+
+    _forget_initialized(path)
+    identity = ServeTeamStore(path=path).agent_identity_for_actor("agent-a")
+
+    # Nothing proved that lane dead, and for a lane that exits without cleanup
+    # nothing ever would. Going the horizon without asking for work is what
+    # retires its record, so one abandoned worktree cannot leave an unattended
+    # fleet unable to migrate for the rest of its life.
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    assert identity.actor_id == "agent-a"
 
 
 def test_a_store_stamped_behind_its_own_shape_is_carried_forward_by_the_writer(

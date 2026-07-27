@@ -110,7 +110,94 @@ PRUNE_EVENT_TEAM_ID = "__system__"
 GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
 GLOBAL_STORE_GENERATION_KEY = "store_generation"
+GLOBAL_LANE_SCHEMA_KEY_PREFIX = "lane_schema:"
 _NANOSECONDS_PER_MICROSECOND = 1000
+_SECONDS_PER_HOUR = 3600
+# How long one lane's recorded schema version keeps a migration waiting. A lane
+# refreshes its record every time it asks for work, so this has to outlast the
+# time a lane spends on a single task or a working lane would look departed.
+# It is also what bounds the wait: nothing has to prove a process dead, so a
+# lane that exits without cleanup stops deferring on its own once it goes this
+# long without being heard from.
+LANE_SCHEMA_RECORD_HORIZON_HOURS = 4
+LANE_SCHEMA_RECORD_HORIZON_SECONDS = (
+    LANE_SCHEMA_RECORD_HORIZON_HOURS * _SECONDS_PER_HOUR
+)
+
+
+def record_lane_schema_version(
+    connection: sqlite3.Connection, lane: str, version: int
+) -> None:
+    """Record which authority schema the process working `lane` is running.
+
+    This store is the only thing every lane already shares, so it is where a
+    writer about to migrate can learn who else is running -- without walking
+    every worktree's agent state to find out, and without a second sensing
+    layer to keep alive. `global_settings` carries it because both retained
+    authority shapes already have that table, which is what makes the record
+    possible at all: it has to be written by a process compiled against the
+    older constant, into a store that has not been migrated yet.
+
+    One row per lane, overwritten in place. The only question a migrator asks
+    is which schemas are running now, so a lane's earlier records answer a
+    question nobody is asking, and keeping them would strand the horizon on
+    whatever that lane was doing hours ago.
+
+    Revision zero, like the store's own generation: this is a fact about a
+    process, not a team event, and spending a revision on it would wake every
+    connected client every time a lane asked for work.
+    """
+    connection.execute(
+        "INSERT INTO global_settings (key, value, updated_at, revision) "
+        "VALUES (?, ?, ?, 0) "
+        "ON CONFLICT(key) DO UPDATE SET "
+        "value = excluded.value, updated_at = excluded.updated_at",
+        (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{lane}", str(version), time.time()),
+    )
+
+
+def _lagging_lanes(
+    connection: sqlite3.Connection, version: int
+) -> list[tuple[str, int]]:
+    """Return each recently heard-from lane still running older than `version`."""
+    rows = connection.execute(
+        "SELECT key, value FROM global_settings "
+        "WHERE key LIKE ? AND updated_at >= ? ORDER BY key",
+        (
+            f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}%",
+            time.time() - LANE_SCHEMA_RECORD_HORIZON_SECONDS,
+        ),
+    ).fetchall()
+    recorded = (
+        (str(key)[len(GLOBAL_LANE_SCHEMA_KEY_PREFIX) :], int(value))
+        for key, value in rows
+    )
+    return [(lane, found) for lane, found in recorded if found < version]
+
+
+def _require_drained_lanes(connection: sqlite3.Connection, version: int) -> None:
+    """Hold the migration back while a lane is still running the older shape.
+
+    A migration is the one moment this store stops being readable by the code
+    that was already using it: the writer that arrives with a newer constant
+    replaces the shape underneath every process holding the old one, and those
+    processes then refuse the store rather than corrupt it -- which is a fleet
+    outage produced by an upgrade, not by anything going wrong. Waiting costs
+    only the new process's start, and it is the only party that can wait,
+    because it is the only one that knows a change is about to happen.
+    """
+    lagging = _lagging_lanes(connection, version)
+    if not lagging:
+        return
+    detail = ", ".join(f"{lane} at schema {recorded}" for lane, recorded in lagging)
+    raise SpiceError(
+        f"team authority schema {version} is not being applied yet: "
+        f"{len(lagging)} lane(s) are still running an older schema and would "
+        f"lose this store the moment it moves -- {detail}. The migration runs "
+        "on its own once those lanes finish, or "
+        f"{LANE_SCHEMA_RECORD_HORIZON_HOURS} hours after the last one was "
+        "heard from."
+    )
 
 
 def _schema_statements(script: str) -> tuple[str, ...]:
@@ -323,6 +410,12 @@ class ServeTeamStore(
                 )
                 self._write_store_generation_locked(connection)
             elif source_version != TEAM_AUTHORITY_SCHEMA_VERSION:
+                # Checked inside the write transaction, beside the step it
+                # guards. Deciding outside it would leave a window where a
+                # lane records itself after the check and loses the store to
+                # the bump that follows -- the one lane whose timing this
+                # cannot afford to get wrong.
+                _require_drained_lanes(connection, TEAM_AUTHORITY_SCHEMA_VERSION)
                 # The source resolver admits no version but the predecessor
                 # here, so this is the one forward step a writer ever runs.
                 _execute_schema_script(
