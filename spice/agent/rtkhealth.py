@@ -57,10 +57,17 @@ class RtkHealth:
         )
 
     def verification_command(self) -> str:
+        """The operator's reproduction of every probe this state was decided by."""
         executable = shlex.quote(self.executable)
+        subject = RTK_FIDELITY_SUBJECT.replace("\n", "\\n")
+        probe = shlex.join(RTK_FIDELITY_PROBE)
+        # The two searches are sequenced rather than chained: a rewrite that
+        # answers nothing exits non-zero, and that answer is the reproduction.
         return (
             f"{executable} --version && "
-            f"{executable} rewrite -- {' '.join(RTK_PROTOCOL_PROBE)}"
+            f"{executable} rewrite -- {' '.join(RTK_PROTOCOL_PROBE)}; echo; "
+            f"printf '{subject}' | {probe}; "
+            f"printf '{subject}' | $({executable} rewrite -- {probe})"
         )
 
 
@@ -127,26 +134,30 @@ def _answer_preserving_health(
     protocol_exit: int,
 ) -> RtkHealth:
     """Active unless a rewritten search answered differently than as written."""
-    active = RtkHealth(
-        executable,
-        "active",
-        f"rewrite protocol valid (exit {protocol_exit})",
-        version,
-    )
+    protocol = f"rewrite protocol valid (exit {protocol_exit})"
+
+    def active(fidelity: str) -> RtkHealth:
+        return RtkHealth(executable, "active", f"{protocol}; {fidelity}", version)
+
+    probe = shlex.join(RTK_FIDELITY_PROBE)
     written = _search_count(runner, list(RTK_FIDELITY_PROBE))
     if written is None:
-        return active
+        return active(f"answer unchecked: {probe} reported no count")
     rewritten = _rewritten_search_count(runner, executable)
     # Only a counted disagreement is reported. A rewrite that cannot answer at
     # all already surfaces its own error to the caller; the failure worth a
-    # state of its own is the one that answers confidently and wrongly.
-    if rewritten is None or rewritten == written:
-        return active
+    # state of its own is the one that answers confidently and wrongly. Saying
+    # which of the two happened is what lets an unchecked machine read apart
+    # from a verified one, since both stay active.
+    if rewritten is None:
+        return active("answer unchecked: the rewrite reported no count")
+    if rewritten == written:
+        return active(f"rewrite preserved the answer (counted {written})")
     return RtkHealth(
         executable,
         "rewrite-unfaithful",
         (
-            f"rewriting {shlex.join(RTK_FIDELITY_PROBE)} changed its answer: "
+            f"rewriting {probe} changed its answer: "
             f"as written it counted {written}, rewritten it counted {rewritten}"
         ),
         version,
