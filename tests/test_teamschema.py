@@ -38,6 +38,9 @@ from spice.serve.team.store import (
 # by worktree, one per supervisor.
 LAGGING_LANE = "/fleet/spice-lagging"
 CURRENT_LANE = "/fleet/spice-current"
+# Not a lane record, and picked so only a LIKE pattern treating the `_` in the
+# lane prefix as a wildcard would ever collect it.
+LOOKALIKE_SETTINGS_KEY = "lane-schema:not-a-version"
 
 # The shape each retained authority version describes, pinned. Databases in the
 # field are stamped with these numbers, so a number cannot come to mean a
@@ -723,6 +726,36 @@ def test_a_migration_proceeds_once_the_lagging_lane_ages_past_the_horizon(tmp_pa
     # nothing ever would. Going the horizon without asking for work is what
     # retires its record, so one abandoned worktree cannot leave an unattended
     # fleet unable to migrate for the rest of its life.
+    with sqlite_connection(path) as connection:
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
+            TEAM_AUTHORITY_SCHEMA_VERSION
+        )
+    assert identity.actor_id == "agent-a"
+
+
+def test_a_lookalike_settings_key_is_not_read_as_a_lane_record(tmp_path):
+    """Only keys this store wrote as lane records may be read back as versions.
+
+    Every key the sweep collects is read as a schema version, so collecting one
+    it had no business collecting produces a value that never was a version --
+    raised inside the transaction that was about to migrate, which leaves a
+    store that would have opened as one nothing in the fleet can open. The
+    lane prefix ends in `_`, which SQLite's LIKE reads as a wildcard, so
+    matching it exactly is what keeps that key out.
+    """
+    path = tmp_path / "lookalike.sqlite3"
+    _build_authority_at(path, PRIOR_AUTHORITY_VERSION)
+    _seed_authority(path)
+    with sqlite_connection(path) as connection:
+        connection.execute(
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, 0)",
+            (LOOKALIKE_SETTINGS_KEY, "nonsense", time.time()),
+        )
+
+    _forget_initialized(path)
+    identity = ServeTeamStore(path=path).agent_identity_for_actor("agent-a")
+
     with sqlite_connection(path) as connection:
         assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == (
             TEAM_AUTHORITY_SCHEMA_VERSION
