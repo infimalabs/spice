@@ -27,8 +27,9 @@
 const { waitForServeLifecycleReady } = require("./serve_playwright_harness");
 
 // Upper bound, not a wait: boot is usually ~2s, but the shared sandbox can
-// stall past 10s when sibling agents load the machine.
-const isolatedLaneReadyTimeoutMs = 20000;
+// stall past 10s when sibling agents load the machine, and past 20s under a
+// full multi-worktree drain.
+const isolatedLaneReadyTimeoutMs = 30000;
 
 const isolatedLaneRequiredGlobals = [
   "addEmptyTeamLane",
