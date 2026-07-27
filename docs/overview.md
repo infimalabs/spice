@@ -1,10 +1,11 @@
 # Operating Overview
 
-spice is a self-hosting agent harness: the same task board, live steering,
-git-bound workflow, and pre-commit constitution it installs in target
-repositories also operate this repository. The system is intentionally narrow.
-It favors a durable transcript, explicit steering, bounded code shape, and
-machine-checked repository hygiene over neutral configurability.
+Spice Harness — the Software Production, Integration, and Control Environment —
+is a self-hosting agent harness: the same task board, live steering, git-bound
+workflow, and pre-commit constitution it installs in target repositories also
+operate this repository. The system is intentionally narrow. It favors a
+durable transcript, explicit steering, bounded code shape, and machine-checked
+repository hygiene over neutral configurability.
 
 ## Core Ideas
 
@@ -16,6 +17,16 @@ inbox item with a key, and that item retires only when the agent writes an
 records both the instruction and the agent's interpretation of it. Unhandled
 keys keep redisplaying at command boundaries so silence is never mistaken for
 completion.
+
+### Transcript Observation Plane
+
+The immutable Claude or Codex transcript is the sole stored truth for agent
+activity. One reader decodes provider records into typed events and one
+assembly layer classifies messages, directives, ACKs, tools, reasoning, images,
+compactions, and failures. Serve history, live delivery, activity metrics,
+effort accounting, session forensics, and recovery slices project those same
+facts; they do not maintain a normalized transcript mirror or reinterpret
+provider JSON independently.
 
 ### Cheap-Wrong Conscience
 
@@ -33,6 +44,32 @@ not pull and push as ordinary development behavior. Synchronization belongs to
 task boundaries, where the control plane can fast-forward, merge, and surface
 real content conflicts.
 
+### Target-Scoped Lifecycle Authority
+
+Serve sends, pending-inbox wakes, available work, renewals, and agent launches
+converge on one lifecycle decision authority per server. Decisions for one
+worktree target are serialized; sibling lanes remain independent. Inventory,
+HTTP, and live-bus producers only project the authority's settled decision, so
+rendering a lane cannot become a second launch policy. The durable inbox and
+task facts remain available to retry when a bounded caller wait expires.
+
+### Authority And Replayable State
+
+Spice keeps facts that cannot be reconstructed in their owning stores: team
+topology, routing, filters, renewals, identities, and revision history live in
+`spiceteams.sqlite3`; directive delivery and ACK dispositions live in the ACK
+store; task lifecycle comes from the task backend's operations log. Rebuildable
+Serve activity materializations live separately in
+`spiceprojections.sqlite3`.
+
+The split is an operational boundary, not an implementation detail. A projection
+failure costs a transcript replay; an authority failure costs facts. Use
+`spice serve teams` (or `spice serve teams --json`) to see each metric family's
+owner, source, status, freshness, replay horizon, and recovery action. Use
+`spice serve rebuild-projections` to atomically rebuild every registered
+projection family, or append `agentActivity` to rebuild that family alone.
+Never apply projection deletion or rebuild advice to `spiceteams.sqlite3`.
+
 ## Why The Loop Exists
 
 You rarely know exactly what you want until you watch a system fail. A written
@@ -49,7 +86,8 @@ That loop needs more than chat. It needs:
 - a task allocator that keeps many worktrees from choosing the same work;
 - git pressure that shows conflicts at phase boundaries instead of ambiently;
 - studies and gates that catch structural drift before review has to;
-- a UI that keeps live transcripts, task state, and steering in one place.
+- a UI that keeps transcript projections, task state, lifecycle decisions, and
+  steering in one place.
 
 ## Credibility Signal
 
@@ -134,5 +172,6 @@ listening over upfront specification. It will fight users who want a neutral
 tool, unsupported agent drivers, or a stable supported surface today.
 
 The project is still settling, but the operating loop is real: work is selected
-through the allocator, executed in worktree-bound lanes, reviewed as task
-phases, and guarded by the same gate it ships.
+through the allocator, executed in worktree-bound lanes under one lifecycle
+authority, observed from typed transcript facts, reviewed as task phases, and
+guarded by the same gate it ships.
