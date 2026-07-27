@@ -341,9 +341,9 @@ def _install_activation_hooks(repo_root: Path) -> list[str]:
 
 
 def _materialize_activation_skill(repo_root: Path) -> Path | None:
-    from spice.agent.lifecycle import materialize_worktree_skill
+    from spice.agent.lifecycle import available_skill_path
 
-    return materialize_worktree_skill(repo_root)
+    return available_skill_path(repo_root, required=False)
 
 
 def _refresh_activation_baseline(repo_root: Path):

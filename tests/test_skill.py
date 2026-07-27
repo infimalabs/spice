@@ -3,11 +3,63 @@
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from spice.agent import lifecycle
+from spice.agent import cli as agent_cli
+from spice.agent import lifecycle, lifecyclebinding
 from spice.errors import SpiceError
+from spice.tasks import claimstate
+
+# A UTF-16 byte order mark opens this, so the very first byte is one UTF-8
+# rejects outright: the packaged skill is the tracked file an advance rewrites,
+# so its bytes are whatever a peer committed rather than guaranteed text.
+UNDECODABLE_PACKAGED_SKILL_BYTES = b"\xff\xfepackaged skill\n"
+
+LAST_GOOD_WORKTREE_SKILL = "---\nname: spice\n---\nlast good skill\n"
+
+# The generated worktree copy can be the corrupt file instead: it is untracked
+# state nothing validates, so a truncated or partial write leaves bytes here
+# that decode no better than a bad packaged source does.
+UNDECODABLE_WORKTREE_SKILL_BYTES = b"\xff\xfegenerated skill\n"
+
+
+def _undecodable_packaged_skill(tmp_path, monkeypatch):
+    """Point every packaged-source lookup at bytes this process cannot decode.
+
+    Both namespaces are patched because the wrapper resolves the source in
+    ``lifecycle`` while ``materialize_worktree_skill`` resolves its own default
+    in ``lifecyclebinding``; patching one leaves the other serving the real
+    packaged skill, which would let a caller escape the condition under test.
+    """
+    packaged = tmp_path / "packaged-skill.md"
+    packaged.write_bytes(UNDECODABLE_PACKAGED_SKILL_BYTES)
+    for module in (lifecycle, lifecyclebinding):
+        monkeypatch.setattr(module, "packaged_skill_path", lambda: packaged)
+    return packaged
+
+
+def _activation_packet(repo_root, monkeypatch):
+    """Render the real activation packet with only its skill step left live."""
+    monkeypatch.setattr(
+        agent_cli,
+        "_bind_activation_thread",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli,
+        "_refresh_activation_baseline",
+        lambda _repo: SimpleNamespace(notes=["current"]),
+    )
+    monkeypatch.setattr(
+        agent_cli,
+        "_renew_activation_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
+    return agent_cli.render_activation_packet(repo_root)
 
 
 def test_packaged_skill_uses_uniform_spice_command_surface():
@@ -168,3 +220,48 @@ def test_materialize_worktree_skill_leaves_current_copy_untouched(
     located = lifecycle.materialize_worktree_skill(tmp_path)
 
     assert located == target.resolve()
+
+
+def test_activation_renders_when_packaged_skill_bytes_are_undecodable(
+    tmp_path, monkeypatch
+):
+    _undecodable_packaged_skill(tmp_path, monkeypatch)
+
+    packet = _activation_packet(tmp_path, monkeypatch)
+
+    assert packet.startswith("spice_agent_activation\n")
+    assert f"worktree={tmp_path.resolve()}" in packet
+
+
+def test_activation_serves_the_worktree_copy_when_packaged_bytes_are_undecodable(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_text(LAST_GOOD_WORKTREE_SKILL, encoding="utf-8")
+    _undecodable_packaged_skill(tmp_path, monkeypatch)
+
+    packet = _activation_packet(tmp_path, monkeypatch)
+
+    assert f"skill={target.resolve()}" in packet
+    assert target.read_text(encoding="utf-8") == LAST_GOOD_WORKTREE_SKILL
+
+
+def test_launch_reports_a_missing_skill_when_packaged_bytes_are_undecodable(
+    tmp_path, monkeypatch
+):
+    _undecodable_packaged_skill(tmp_path, monkeypatch)
+
+    with pytest.raises(SpiceError, match="missing spice skill at"):
+        lifecycle.resolve_agent_prompt_skill_path(tmp_path)
+
+
+def test_launch_reports_a_missing_skill_when_the_worktree_copy_is_undecodable(
+    tmp_path,
+):
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(UNDECODABLE_WORKTREE_SKILL_BYTES)
+
+    with pytest.raises(SpiceError, match="missing spice skill at"):
+        lifecycle.resolve_agent_prompt_skill_path(tmp_path)
