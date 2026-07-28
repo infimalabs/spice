@@ -45,6 +45,7 @@ from spice.releasenotes import (
 from spice.releaseplan import (
     ReleasePlan,
     ReleasePlanOperation,
+    curated_notes_operation as _curated_notes_operation,
     github_publication_operations as _github_publication_operations,
     publication_operations as _publication_operations,
 )
@@ -86,14 +87,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
             bump,
             help=f"Plan a {bump} bump, validation, commit, push, and publish.",
         )
-        one_pass.add_argument(
-            "--notes-file",
-            type=Path,
-            help=(
-                "Curated GitHub release notes; the untouched generated draft "
-                "is refused."
-            ),
-        )
+        _add_notes_file(one_pass)
         _add_apply_options(one_pass)
         _mark_authored_release(one_pass)
         one_pass.set_defaults(func=handle_release, release_mode="release", bump=bump)
@@ -134,13 +128,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     publish = actions.add_parser(
         "publish", help="Validate the prepared version, then push and publish."
     )
-    publish.add_argument(
-        "--notes-file",
-        type=Path,
-        help=(
-            "Curated GitHub release notes; the untouched generated draft is refused."
-        ),
-    )
+    _add_notes_file(publish)
     publish.add_argument(
         "--release-commit",
         help=(
@@ -156,13 +144,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         "github", help="Create/push the release tag and GitHub Release."
     )
     github.add_argument("version", nargs="?")
-    github.add_argument(
-        "--notes-file",
-        type=Path,
-        help=(
-            "Curated GitHub release notes; the untouched generated draft is refused."
-        ),
-    )
+    _add_notes_file(github)
     github.add_argument(
         "--release-commit",
         help="Commit-ish to tag and use as the release notes target.",
@@ -204,6 +186,16 @@ def _add_apply_options(parser: argparse.ArgumentParser) -> None:
         "--json",
         action="store_true",
         help="Emit the ordered plan as JSON without applying it.",
+    )
+
+
+def _add_notes_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--notes-file",
+        type=Path,
+        help=(
+            "Curated GitHub release notes; the untouched generated draft is refused."
+        ),
     )
 
 
@@ -364,6 +356,7 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             version = version_for_release_commit(version, release_commit)
         ensure_publish_release_commit_is_head(release_commit)
         operations = [
+            _curated_notes_operation(),
             ReleasePlanOperation(
                 "verify-installed-runtime",
                 "prove the independently installed CLI matches this release",
@@ -377,7 +370,7 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             ReleasePlanOperation(
                 "build-and-probe", f"build and verify artifacts for {version}"
             ),
-            *_publication_operations(version),
+            *_publication_operations(version, check_notes=False),
         ]
     elif mode == "github":
         requested_version = args.version

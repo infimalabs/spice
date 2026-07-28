@@ -78,9 +78,14 @@ class ReleasePlan:
         return rows
 
 
-def publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
+def publication_operations(
+    version: str,
+    *,
+    check_notes: bool = True,
+) -> tuple[ReleasePlanOperation, ...]:
+    notes = (curated_notes_operation(),) if check_notes else ()
     return (
-        curated_notes_operation(),
+        *notes,
         ReleasePlanOperation(
             "check-publish", f"dry-run upload artifacts for {version}"
         ),
