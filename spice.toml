@@ -22,6 +22,9 @@ argv = ["spice", "dev", "pytest"]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 
 [policy]
+pre_commit = [
+    { label = "current documentation spellings", run = ["scripts/check-current-doc-spellings"], scopes = { paths = ["README.md", "DESIGN.md", "CONFIG.md", "STABILITY.md", "docs/cli/wrapper-commands.md", "docs/config/reference.md", "docs/overview.md", "docs/release.md", "scripts/check-current-doc-spellings", "spice.toml"] } },
+]
 env_names = [
     "BASH_ENV",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW",

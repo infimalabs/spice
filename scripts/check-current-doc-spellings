@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    set -- \
+        README.md \
+        DESIGN.md \
+        CONFIG.md \
+        STABILITY.md \
+        docs/cli/wrapper-commands.md \
+        docs/config/reference.md \
+        docs/overview.md \
+        docs/release.md
+fi
+
+pattern='--dry-run|spice[[:space:]]+deinit([[:space:][:punct:]]|$)|\.spice/init-receipt\.json([^[:alnum:]_]|$)|^[[:space:]]*\[tool\.spice'
+
+set +e
+matches=$(git grep --line-number --extended-regexp -e "$pattern" -- "$@")
+status=$?
+set -e
+
+if [ "$status" -eq 1 ]; then
+    exit 0
+fi
+if [ "$status" -ne 0 ]; then
+    exit "$status"
+fi
+
+printf '%s\n' \
+    "current documentation names a withdrawn spelling:" \
+    "$matches" \
+    "use bare authored-input commands for preview, --apply for mutation," \
+    "spice init --unapply for reversal, root spice.toml plain tables, and" \
+    "<worktree-git-dir>/.spice/init-receipt.jsonl for receipt authority." >&2
+exit 1

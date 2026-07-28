@@ -155,6 +155,12 @@ without allocator-driven fleet operation. Taskwarrior begins at Fleet: Watch,
 Retrospect, and Gates do not require Taskwarrior, and Steer can operate one
 manually routed lane without the task plane.
 
+Applying either initialization rung also records worktree-local approval of the
+current tracked executable settings in root `spice.toml`. If those commands,
+wrappers, or constitution extensions change, preview and apply initialization
+again before Spice will execute them; another clone or worktree records its own
+approval rather than inheriting this one.
+
 ## Honest Feedback
 
 One principle runs through the design: do not let a thing fail silently in
