@@ -435,10 +435,12 @@ requires a specific zero-based shard.
 Default state paths live under `.spice/locks/` when a resource omits `path` or
 `directory`. Each held lock writes JSON holder metadata into its lock file with
 `pid`, `cwd`, and `started_at`; `spice lock status --json` lists configured
-locks and pool shards with that metadata. Per-invocation flags such as
-`--path`, `--directory`, `--shards`, `--lock-contention-exit-code`,
-`--chosen-shard-contention-exit-code`, and `--pool-exhaustion-exit-code`
-override the tracked defaults for that one run.
+locks and pool shards with that metadata without acquiring the resource locks.
+A non-empty malformed metadata record reports `unknown`, never `free`.
+Contention exits name the recorded holder on stderr. Per-invocation flags
+such as `--path`, `--directory`, `--shards`,
+`--lock-contention-exit-code`, `--chosen-shard-contention-exit-code`, and
+`--pool-exhaustion-exit-code` override the tracked defaults for that one run.
 
 ## `[tool.spice.policy]`
 
