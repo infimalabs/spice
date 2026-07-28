@@ -20,6 +20,8 @@ from spice.config import layers, schema, values
 from spice.config.layers import SYSTEM_SOURCE, load_packaged_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_REFERENCE = PROJECT_ROOT / "docs" / "config" / "reference.md"
+PACKAGED_DEFAULT_MANIFEST = PROJECT_ROOT / "docs" / "config" / "packaged-defaults.toml"
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _DEFAULT_ACCESSORS = frozenset(
     {"integer", "number", "packaged_values", "string", "strings", "table", "value"}
@@ -232,6 +234,17 @@ def test_every_packaged_key_round_trips_through_the_configuration_schema():
         source_path=path,
     )
     assert set(packaged) == set(schema.CONFIG_SCHEMA.children)
+
+
+def test_config_reference_packaged_default_manifest_matches_runtime():
+    reference = CONFIG_REFERENCE.read_text(encoding="utf-8")
+    assert "[packaged-default manifest](packaged-defaults.toml)" in reference
+    with PACKAGED_DEFAULT_MANIFEST.open("rb") as manifest:
+        documented = tomllib.load(manifest)
+    with (PROJECT_ROOT / "spice" / "spice.toml").open("rb") as source:
+        packaged = tomllib.load(source)
+
+    assert documented == packaged
 
 
 @pytest.mark.parametrize(

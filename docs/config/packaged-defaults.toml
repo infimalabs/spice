@@ -1,0 +1,326 @@
+# This documentation manifest is checked against spice/spice.toml.
+
+[say]
+backend = "say"
+backend_choices = ["say", "external"]
+content_type = "audio/wav"
+words_per_minute = 175
+timeout_seconds = 300.0
+
+[agent]
+personality = "pragmatic"
+personality_choices = ["none", "friendly", "pragmatic"]
+wrappers = ["common"]
+
+[agent.playwright_mcp]
+server_name = "playwright"
+command = "npx"
+args = ["--yes", "@playwright/mcp@latest", "--headless"]
+
+[agent.claude]
+default_model = "claude-opus-4-8"
+auto_compact_window_tokens = 200000
+
+[judge]
+bin = "afm-cli"
+portable_bin = "spice-judge"
+model = "llama3.2"
+model_command = ["ollama", "run", "llama3.2"]
+timeout_seconds = 60.0
+
+[rtk]
+executable = "rtk"
+
+[wrappers.common.rtk]
+argv = ["rtk"]
+match = [
+  { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "--pcre2", "-g", "--glob", "--glob=*"], argv = ["rg"] },
+  { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
+  { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
+  { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
+  { head = "grep", search_operands = true, scopes = { drivers = ["claude"] }, argv = ["rtk", "grep", "-r"] },
+  { head = "grep", scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E"] },
+]
+
+[wrappers.common.grep]
+argv = ["grep"]
+match = [
+  { flags = ["-E", "-F", "-P", "-G"], argv = ["grep"] },
+  { flags = ["*"], scopes = { drivers = ["codex"] }, argv = ["grep", "-E"] },
+]
+
+[policy.limits]
+file_loc = 1000
+file_bytes = 80000
+routine_ccn = 20
+routine_length = 80
+commit_message_wrap = 100
+repo_truth_doc_chars = 10000
+
+[policy.flex]
+ratio = 1.5
+jitter_percent = 5
+
+[policy.complexity]
+hotspot_limit = 20
+
+[policy.pre_commit_builtins]
+"merge-integrity" = true
+"plan-phase" = true
+"repo-shape" = true
+staging = true
+"repo-docs" = true
+"config-key-validity" = true
+"config-false-disable" = true
+"config-tracked-trust" = true
+formatters = true
+"local-paths" = true
+taste = true
+"serve-web-typecheck" = true
+"javascript-unused" = true
+"python-typecheck" = true
+"env-policy" = true
+"env-name-ledger" = true
+"file-shape" = true
+complexity = true
+"magic-numbers" = true
+"markdown-links" = true
+reachability = true
+"symbol-reachability" = true
+"python-unused" = true
+"assertion-free-tests" = true
+"private-internals" = true
+
+[policy.taste.words]
+'hallucinat*' = "confabulate"
+master = "main, primary, or leader"
+'orphan*' = "loose"
+whitelist = "allowlist"
+whitelists = "allowlists"
+whitelisted = "allowlisted"
+whitelisting = "allowlisting"
+blacklist = "blocklist"
+blacklists = "blocklists"
+blacklisted = "blocklisted"
+blacklisting = "blocklisting"
+
+[policy.repo_truth]
+docs = ["AGENTS.md"]
+
+[policy.markdown_depth_budget]
+extensions = [".md"]
+
+[policy.markdown_depth]
+base_chars = 10000
+max_bounded_chars = 30000
+
+[policy.package]
+boundary_underscore_pattern = '^_*[0-9a-z]+_*$'
+
+[policy.debt]
+reachability_test_only = 0
+assertion_free_tests = 0
+
+[policy.magic]
+baseline_ref = "HEAD"
+examine_threshold = 10
+
+[policy.env]
+allow_marker = "env-policy: allow"
+default_name_patterns = ['SPICE_[A-Z0-9_]+', 'CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID']
+self_path_suffix = "studies/envpolicy.py"
+
+[policy.env_access.family_suffixes]
+python = [".py"]
+csharp = [".cs"]
+lua = [".lua"]
+shell = [".bash", ".sh", ".zsh"]
+javascript = [".js", ".ts"]
+
+[policy.env_access.default_patterns]
+python = ['\bos\.(?:environ|getenv|putenv|unsetenv)\b']
+csharp = ['\b(?:System\.)?Environment\.(?:GetEnvironmentVariable|SetEnvironmentVariable)\b']
+lua = ['\bos\.getenv\b']
+shell = ['(?<!\\)\$(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+|\{(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)\})', '\bexport\s+(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)=']
+javascript = ['\bprocess\.env\b']
+
+[policy.env_access.finding_names]
+python = "os env access"
+csharp = "environment env access"
+lua = "lua env access"
+shell = "shell env access"
+javascript = "process.env access"
+
+[policy.languages]
+c_grammar = [".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt", ".m", ".mm", ".rs", ".scala", ".swift", ".ts"]
+complexity = [".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt", ".m", ".mm", ".rs", ".scala", ".swift", ".ts", ".lua", ".php", ".py", ".rb"]
+magic = [".py", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt", ".m", ".mm", ".rs", ".scala", ".swift", ".ts"]
+env = [".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt", ".m", ".mm", ".rs", ".scala", ".swift", ".ts", ".lua", ".php", ".py", ".rb", ".bash", ".sh", ".zsh"]
+
+[policy.lockfiles]
+suffixes = [".lock"]
+names = ["bun.lockb", "package-lock.json", "pnpm-lock.yaml"]
+
+[policy.file_shape]
+source_suffixes = [".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt", ".m", ".mm", ".rs", ".scala", ".swift", ".ts", ".lua", ".php", ".py", ".rb", ".bash", ".sh", ".zsh", ".astro", ".cjs", ".cts", ".css", ".html", ".json", ".jsx", ".less", ".md", ".mjs", ".mts", ".pyi", ".rst", ".sass", ".scss", ".sql", ".svelte", ".toml", ".tsx", ".txt", ".vue", ".xml", ".yaml", ".yml"]
+generated_patterns = ["**/*.generated.*", "**/*_generated.*", "**/*.g.*", "**/*_pb2.py", "**/*_pb2_grpc.py", "**/*.min.css", "**/*.min.js", "build/**", "coverage/**", "dist/**"]
+
+[tasks]
+base_stems = ["task", "serve", "agent"]
+internal_stems = ["agent"]
+hidden_stems = ["oops", "maxim_proposal"]
+oops_hidden_stem = "oops"
+maxim_proposal_hidden_stem = "maxim_proposal"
+approved_phases = ["design", "plan", "todo", "verify", "review"]
+phase_slot_count = 7
+default_flow = ["todo", "review"]
+private_default_flow = ["todo"]
+oops_default_flow = ["plan"]
+default_priority = "medium"
+severities = ["low", "medium", "high", "critical"]
+project_min_depth = 2
+project_max_depth = 3
+claim_ttl_seconds = 3600
+claim_context_seconds = 300
+deferred_wait = "2099-01-01T00:00:00"
+oops_wait_seconds = 604800
+allocator_band_width = 2.0
+allocator_anti_self_review = -100.0
+
+[tasks.priority]
+critical = "C"
+high = "H"
+medium = "M"
+low = "L"
+none = ""
+'' = ""
+
+[tasks.severity_priority]
+critical = "C"
+high = "H"
+medium = "M"
+low = "L"
+
+[tasks.severity_shorthands]
+c = "critical"
+h = "high"
+m = "medium"
+l = "low"
+
+[tasks.priority_urgency]
+C = 8.1
+H = 6.0
+M = 3.9
+L = 1.8
+
+[tasks.taskwarrior_urgency]
+"active.coefficient" = 4.0
+"age.coefficient" = 2.0
+"age.max" = 365
+"annotations.coefficient" = 1.0
+"blocked.coefficient" = 0.0
+"blocking.coefficient" = 0.0
+"due.coefficient" = 12.0
+inherit = 0
+"project.coefficient" = 1.0
+"scheduled.coefficient" = 5.0
+"tags.coefficient" = 1.0
+"uda.phase.review.coefficient" = 4.0
+"user.tag.next.coefficient" = 15.0
+"waiting.coefficient" = -3.0
+
+[tasks.sla_due_seconds]
+C = 86400
+H = 86400
+M = 604800
+L = 2592000
+
+[tasks.reports.oready]
+description = "spice ready queue"
+filter = "status:pending +READY project.not:.oops"
+sort = "urgency-"
+
+[tasks.reports.oreview]
+description = "spice review queue"
+filter = "status:pending phase:review"
+sort = "urgency-"
+
+[tasks.reports.oactive]
+description = "spice active claims"
+filter = "status:pending +ACTIVE"
+sort = "claim_at+"
+
+[tasks.reports.oblocked]
+description = "spice blocked"
+filter = "status:pending +BLOCKED"
+sort = "urgency-"
+
+[tasks.reports.owaiting]
+description = "spice waiting/deferred"
+filter = "+WAITING"
+sort = "wait+"
+
+[tasks.reports.ooops]
+description = "spice oops triage"
+filter = "project:.oops -COMPLETED -DELETED"
+sort = "urgency-"
+
+[tasks.analytics]
+commands = ["history", "burndown.daily", "burndown.weekly"]
+
+[locks]
+lock_contention_exit_code = 75
+chosen_shard_contention_exit_code = 76
+pool_exhaustion_exit_code = 77
+state_root = ".spice/locks"
+
+[commands]
+
+[maxim]
+max_attempts = 2
+parallel_judges = 2
+proposal_min_recurrence = 2
+proposal_draft_max_words = 8
+prompt_lines = [
+  'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
+  'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
+  'IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".',
+  'IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".',
+]
+
+[maxims.polling]
+words = ["delay", "delayed", "delaying", "delays", "poll", "polled", "polling", "polls", "sleep", "sleeping", "sleeps", "slept"]
+message = "😊 Respond to the real event, signal, or completion notification through a blocking call, watcher, or callback, or else restructure the flow so nothing remains to be awaited at all!"
+
+[maxims.fallbacks]
+words = ["fall back", "fall backs", "fallback", "fallbacks", "falls back"]
+message = "😊 Commit to a single deterministic path and let violated assumptions fail loudly and immediately, reserving an explicit default or documented resolver order strictly for what the contract names outright!"
+
+[maxims.backwards-compat]
+words = ["compatibilities", "compatibility", "compatible"]
+message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
+
+[maxims.shims]
+words = ["shim", "shimmed", "shimming", "shims"]
+message = "😊 Replace the old shape outright, delete it completely, and route every caller straight to the new shape's real interface!"
+
+[maxims.aliases]
+words = ["alias", "aliased", "aliases", "aliasing"]
+message = "😊 Rename in place, update every reference immediately, and let the changeover happen in one clean move so exactly one name survives!"
+
+[maxims.legacy]
+words = ["legacy", "legacies"]
+message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
+
+[serve]
+brand = "spice"
+default_lifetime = "Drive"
+valid_lifetimes = ["Steer", "Drive", "Drain"]
+host = "127.0.0.1"
+port = 8765
+
+[inventory]
+toml_static = ["agent", "commands", "judge", "locks", "maxim", "maxims", "policy", "rtk", "say", "serve", "tasks", "wrappers"]
+platform_derived = ["spice.config.PORTABLE_JUDGE_BIN", "spice.paths.runtime_spice_source"]
+driver_derived = ["spice.agent.driver.BUILTIN_DRIVERS", "spice.agent.driver.DRIVER"]
+protocol_invariant = ["spice.cli.parser.BUILTIN_COMMANDS", "spice.tasks.config.SENTINEL_ACTOR", "spice.resourcelocks.MAX_EXIT_CODE"]

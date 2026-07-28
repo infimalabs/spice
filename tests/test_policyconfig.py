@@ -380,8 +380,9 @@ def test_policy_resolver_allows_explicit_co_authored_by_trailer(tmp_path):
 
 
 def test_config_reference_mentions_tracked_policy_keys():
-    text = (PROJECT_ROOT / "docs" / "config" / "reference.md").read_text(
-        encoding="utf-8"
+    text = "\n".join(
+        (PROJECT_ROOT / "docs" / "config" / name).read_text(encoding="utf-8")
+        for name in ("reference.md", "policy.md")
     )
     expected = [
         "[policy]",
