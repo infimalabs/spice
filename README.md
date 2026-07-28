@@ -217,6 +217,11 @@ brew install rtk
 # or: cargo install --git https://github.com/rtk-ai/rtk
 ```
 
+If an install or reinstall replaces the uv tool while `spice serve` is live,
+Serve stops before it can mix old code with missing or new package files,
+validates the replacement runtime, and reexecs itself on the same command and
+port. Requests arriving at that narrow boundary receive a retryable HTTP 503.
+
 The default install is a uv tool. Operators who deploy from a main tree should
 use the editable form so the installed `spice` command resolves to that tree;
 that editable main tree is the server deployment. Other worktrees remain
