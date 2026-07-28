@@ -66,14 +66,13 @@ PRODUCTION_ROOTS = (
     "spice/hooks/install.py",
     "spice/agent/cli.py",
     "spice/agent/judgeadapter.py",  # spice-judge console script
+    "spice/release.py",  # repository-mounted release command
 )
 
 # Allowlist for modules that are only test-reachable but are legitimately
 # dead-tested (e.g., backwards-compat stubs, dynamic dispatch via string keys).
 # Entries are dotted module paths within the spice package.
-REACHABILITY_ALLOWLIST: tuple[str, ...] = (
-    "spice.release",  # mounted command from [commands]
-)
+REACHABILITY_ALLOWLIST: tuple[str, ...] = ()
 
 # Allowlist for production symbols that look test-only to static analysis but
 # are reached dynamically in production (getattr/registry/string-key dispatch),

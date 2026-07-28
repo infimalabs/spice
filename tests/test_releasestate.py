@@ -85,7 +85,7 @@ def test_release_check_runs_the_gates_and_leaves_the_tree_where_it_found_it(
     )
     monkeypatch.setattr(
         release,
-        "require_installed_cli_carries_release_tree",
+        "require_installed_cli_matches_release",
         lambda root: ran.append(("installed", root)),
     )
 

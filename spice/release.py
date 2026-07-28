@@ -7,14 +7,12 @@ import configparser
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
-from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,46 +23,31 @@ from spice.cli.effects import (
     MutationDecision,
     mark_authored_input,
 )
-from spice.cli.mounts import RUNTIME_PYTHON_ENV
 from spice.commandplan import assert_plan_digest, command_plan_payload
 from spice.errors import SpiceError
-from spice.tasks import config as task_config
 from spice.process.tool import run_tool_command
+from spice.releaseidentity import (
+    INSTALLED_CLI_PROBE_SCRIPT as INSTALLED_CLI_PROBE_SCRIPT,
+    RUNTIME_PYTHON_ENV as RUNTIME_PYTHON_ENV,
+    InstalledCliRegistry,
+    InstalledCliSource,
+    installed_cli_identity as _probe_installed_cli_identity,
+    require_installed_cli_matches_release as _require_installed_cli_matches_release,
+)
+from spice.releasenotes import (
+    ReleaseRecord,
+    commit_records as _collect_commit_records,
+    edited_release_highlight as edited_release_highlight,
+    is_ancestor as _release_note_is_ancestor,
+    render_release_notes,
+    render_release_range,
+)
 
 BUMP_CHOICES = ("minor", "patch")
 PLAYWRIGHT_MCP_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 PYPI_POLL_ATTEMPTS = 20
 PYPI_POLL_SECONDS = 3
 PYPI_URL = "https://pypi.org/pypi/spice-harness/json"
-PROJECT_HEADINGS = {
-    "cli": "CLI",
-    "ui": "UI",
-}
-TASK_PHASE_SUBJECT_PREFIX_RE = re.compile(
-    r"^(?:design|plan|todo|verify|review)\([^)]+\):\s*",
-    re.IGNORECASE,
-)
-TASK_PHASE_SUBJECT_SUFFIX_RE = re.compile(
-    r"\s+\((?:design|plan|verify|review)\)$",
-    re.IGNORECASE,
-)
-
-
-@dataclass(frozen=True)
-class ReleaseRecord:
-    commit: str
-    subject: str
-    project: str
-    task_key: str = ""
-
-
-@dataclass(frozen=True)
-class InstalledCliSource:
-    python: Path
-    module: Path
-    root: Path
-    commit: str
-    tree: str
 
 
 @dataclass(frozen=True)
@@ -138,11 +121,6 @@ class ReleasePlan:
 
 
 SIGINT_EXIT_CODE = 130
-INSTALLED_CLI_PROBE_SCRIPT = (
-    "from pathlib import Path;"
-    "import spice.tasks.git.boundaries as boundaries;"
-    "print(Path(boundaries.__file__).resolve())"
-)
 
 
 def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser:
@@ -387,8 +365,8 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
         version = preview_bumped_version(str(args.bump))
         operations = [
             ReleasePlanOperation(
-                "verify-installed-source",
-                "prove the independently installed CLI carries this tree",
+                "verify-installed-runtime",
+                "prove the independently installed CLI matches this release",
             ),
             ReleasePlanOperation(
                 "clean-artifacts", "remove stale build and dist trees"
@@ -417,8 +395,8 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
         ensure_publish_release_commit_is_head(release_commit)
         operations = [
             ReleasePlanOperation(
-                "verify-installed-source",
-                "prove the independently installed CLI carries this tree",
+                "verify-installed-runtime",
+                "prove the independently installed CLI matches this release",
             ),
             ReleasePlanOperation(
                 "clean-artifacts", "remove stale build and dist trees"
@@ -585,7 +563,7 @@ def run_release_gates(root: Path, choose_version: Callable[[], str]) -> str:
     ship a version nothing ever built. Returning the chosen version keeps that
     decision readable at the call site.
     """
-    require_installed_cli_carries_release_tree(root)
+    require_installed_cli_matches_release(root)
     clean_build_artifacts(root)
     run_constitution_gate()
     version = choose_version()
@@ -593,81 +571,36 @@ def run_release_gates(root: Path, choose_version: Callable[[], str]) -> str:
     return version
 
 
-def require_installed_cli_carries_release_tree(root: Path) -> InstalledCliSource:
-    """Prove ordinary fleet commands import the exact committed release tree."""
-    installed = _installed_cli_source()
-    candidate_root = root.resolve()
-    if installed.python.is_relative_to(candidate_root):
+def require_installed_cli_matches_release(
+    root: Path,
+) -> InstalledCliSource | InstalledCliRegistry:
+    installed = _installed_cli_identity()
+    if installed.python.is_relative_to(root.resolve()):
         raise SpiceError(
             "release evidence must come from the independently installed CLI, "
             f"not the candidate worktree interpreter {installed.python}"
         )
     candidate_commit, candidate_tree = _source_identity(root)
-    if installed.tree != candidate_tree:
-        raise SpiceError(
-            "deploy the candidate tree through the installed CLI before claiming "
-            "release behavior; branch state has no fleet effect by itself: "
-            f"candidate HEAD {candidate_commit} tree {candidate_tree}, while "
-            f"{installed.python} -P imports {installed.module} from "
-            f"{installed.commit} tree {installed.tree}"
-        )
-    print(
-        "installed CLI source gate passed: "
-        f"{installed.python} -P imports {installed.module}; "
-        f"candidate {candidate_commit} and installed {installed.commit} "
-        f"share tree {candidate_tree}"
+    return _require_installed_cli_matches_release(
+        root,
+        installed,
+        candidate_commit,
+        candidate_tree,
+        run=run,
     )
-    return installed
 
 
-def _installed_cli_source() -> InstalledCliSource:
+def _installed_cli_identity() -> InstalledCliSource | InstalledCliRegistry:
     raw_python = str(
         os.environ.get(RUNTIME_PYTHON_ENV) or ""  # env-policy: allow
-    ).strip()
-    if not raw_python:
-        raise SpiceError(
-            "run release gates through the repository-mounted `spice release` "
-            f"command; {RUNTIME_PYTHON_ENV} did not identify the installed CLI"
-        )
-    python = Path(raw_python).expanduser().absolute()
-    if not python.is_file():
-        raise SpiceError(f"installed CLI interpreter does not exist: {python}")
-    probe_env = dict(os.environ)  # env-policy: allow
-    probe_env.pop("PYTHONPATH", None)
-    result = run(
-        [str(python), "-P", "-c", INSTALLED_CLI_PROBE_SCRIPT],
-        capture=True,
-        cwd=Path("/"),
-        env=probe_env,
     )
-    try:
-        module = Path(result.stdout.strip().splitlines()[-1]).resolve(strict=True)
-        root = module.parents[3]
-    except (IndexError, OSError) as exc:
-        raise SpiceError(
-            f"installed CLI probe returned no usable module path: {result.stdout!r}"
-        ) from exc
-    expected = Path("spice/tasks/git/boundaries.py")
-    if module.relative_to(root) != expected:
-        raise SpiceError(
-            f"installed CLI probe resolved unexpected module path {module}; "
-            f"expected <source-root>/{expected}"
-        )
-    if not (root / "pyproject.toml").is_file():
-        raise SpiceError(
-            f"installed CLI module {module} is not backed by an editable Spice "
-            "source checkout; deploy with `uv tool install -e <main-tree>`"
-        )
-    drift = _worktree_drift(root)
-    if drift:
-        raise SpiceError(
-            "the installed CLI runs its source checkout directly, so a dirty "
-            "deployment executes code no commit contains and its committed "
-            f"identity proves nothing; commit or revert {root} before "
-            f"releasing:\n{drift}"
-        )
-    commit, tree = _source_identity(root)
-    return InstalledCliSource(python, module, root, commit, tree)
+    return _probe_installed_cli_identity(
+        raw_python,
+        environ=os.environ,  # env-policy: allow
+        run=run,
+        source_identity=_source_identity,
+        worktree_drift=_worktree_drift,
+    )
 
 
 def _worktree_drift(root: Path) -> str:
@@ -843,12 +776,6 @@ def release_notes_for_unreleased(release_commit: str) -> str:
     )
 
 
-def tag_ref(tag: str) -> str:
-    # Address the tag by its full ref so a same-named branch or shadow ref can
-    # never mask the real tag when computing a release range.
-    return f"refs/tags/{tag}"
-
-
 def release_range_for_version(version: str, release_commit: str) -> str:
     current_tag = f"v{version}"
     previous_tag = previous_release_tag(current_tag)
@@ -879,289 +806,17 @@ def latest_release_tag_merged_into(commit: str) -> str:
     return raw.splitlines()[0] if raw else ""
 
 
-def render_release_range(
-    *,
-    version: str,
-    release_short: str,
-    current_tag: str,
-    previous_tag: str,
-    records: list[ReleaseRecord],
-) -> str:
-    if previous_tag:
-        span = f"{tag_ref(previous_tag)}..{release_short}"
-    else:
-        span = f"latest first-parent commits ending at {release_short}"
-    lines = [
-        f"Release range for {version}",
-        f"Range: {span}",
-        f"Release tag: {current_tag}",
-        f"Landed commits: {len(records)}",
-        "",
-    ]
-    if records:
-        width = max(len(release_project_key(record.project)) for record in records)
-        for record in records:
-            key = release_project_key(record.project)
-            lines.append(
-                f"{shortish_commit(record.commit)}  {key.ljust(width)}  {record.subject}"
-            )
-    else:
-        lines.append("No non-release commits found.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-REVERT_TARGET_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})\b")
+def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord]:
+    return _collect_commit_records(
+        previous_tag,
+        release_commit,
+        run=run,
+        is_ancestor=_is_ancestor,
+    )
 
 
 def _is_ancestor(candidate: str, commit: str) -> bool:
-    """True iff `candidate` is an ancestor of (or equal to) `commit`."""
-    result = run_tool_command(
-        ["git", "merge-base", "--is-ancestor", candidate, commit],
-        policy="release",
-        operation="check release ancestry",
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
-
-
-def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord]:
-    format_arg = (
-        "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)"
-        "%x1f%(trailers:key=Task-Key,valueonly)%x1f%b%x1e"
-    )
-    if previous_tag:
-        args = [
-            "log",
-            "--first-parent",
-            "--reverse",
-            format_arg,
-            f"{tag_ref(previous_tag)}..{release_commit}",
-        ]
-    else:
-        args = [
-            "log",
-            "--first-parent",
-            "--reverse",
-            "-n",
-            "5",
-            format_arg,
-            release_commit,
-        ]
-
-    raw = run(["git", *args], capture=True).stdout
-    rows: list[tuple[str, str, str, str, str]] = []
-    for raw_record in raw.split("\x1e"):
-        raw_record = raw_record.strip("\n")
-        if not raw_record:
-            continue
-        commit, subject, project, task_key, body = (
-            raw_record.split("\x1f", 4) + ["", "", "", "", ""]
-        )[:5]
-        if subject.startswith("release: bump to "):
-            continue
-        rows.append(
-            (commit, subject, project.strip() or "general", task_key.strip(), body)
-        )
-
-    # A revert commit and the (first-parent) commit that introduced the work
-    # it reverts both landing in this same range is a net no-op for this
-    # release; suppress the pair rather than claim credit for shipping
-    # something that got undone before it shipped. The revert body names the
-    # raw commit it undoes, which usually merged in on a side branch, so find
-    # the first-parent commit whose history contains it instead of matching
-    # commit hashes directly.
-    suppressed_commits: set[str] = set()
-    for revert_commit, _subject, _project, _task_key, body in rows:
-        match = REVERT_TARGET_RE.search(body)
-        if not match:
-            continue
-        target = match.group(1)
-        introduced_by = next(
-            (
-                commit
-                for commit, *_rest in rows
-                if commit != revert_commit and _is_ancestor(target, commit)
-            ),
-            None,
-        )
-        if introduced_by is None:
-            continue
-        suppressed_commits.add(revert_commit)
-        suppressed_commits.add(introduced_by)
-
-    records: list[ReleaseRecord] = []
-    latest_index_by_task_key: dict[str, int] = {}
-    for commit, subject, project, task_key, _body in rows:
-        if commit in suppressed_commits:
-            continue
-        record = ReleaseRecord(
-            commit=commit, subject=subject, project=project, task_key=task_key
-        )
-        # A task's todo-phase and review-phase merges carry the same
-        # Task-Key; keep one highlight per task, at its first position, with
-        # the latest (most final) subject.
-        if task_key and task_key in latest_index_by_task_key:
-            records[latest_index_by_task_key[task_key]] = record
-            continue
-        if task_key:
-            latest_index_by_task_key[task_key] = len(records)
-        records.append(record)
-    return records
-
-
-def render_release_notes(
-    *,
-    version: str,
-    release_commit: str,
-    release_short: str,
-    current_tag: str,
-    previous_tag: str,
-    records: list[ReleaseRecord],
-) -> str:
-    groups: OrderedDict[str, OrderedDict[str, list[str]]] = OrderedDict()
-    for record in records:
-        project_subjects = groups.setdefault(
-            release_project_key(record.project), OrderedDict()
-        )
-        project_subjects.setdefault(
-            edited_release_highlight(
-                release_note_subject(record.subject, record.task_key, record.project)
-            ),
-            [],
-        ).append(shortish_commit(record.commit))
-
-    lines = [
-        "> [!IMPORTANT]",
-        "> **Draft release notes — curate Highlights before publishing.** Replace",
-        "> the placeholder under _Highlights_ with a short summary, then delete this",
-        "> banner. The generated task inventory is already wrapped in the collapsed",
-        "> _Task-level changes_ section below; keep that section intact. Omit from",
-        "> Highlights any feature that was added and then functionally reverted",
-        "> within this same release window — a net-zero change is not a highlight.",
-        "",
-        "## Highlights",
-        "",
-        "_Replace this line with a short, curated set of highlights folded from "
-        "the changes below._",
-        "",
-        "<details>",
-        "<summary>Task-level changes</summary>",
-        "",
-        "## Changes by project",
-        "",
-    ]
-    if groups:
-        for project, subjects in groups.items():
-            lines.extend([f"### {release_project_heading(project)}", ""])
-            for highlight, commits in subjects.items():
-                # GitHub release pages turn bare repository SHAs into commit links.
-                refs = ", ".join(commits)
-                lines.append(f"- {highlight} ({refs})")
-            lines.append("")
-    else:
-        lines.extend(["- No non-release commits found.", ""])
-
-    lines.extend(
-        [
-            "</details>",
-            "",
-            "## Package Notes",
-            "",
-            f"- PyPI release: `spice-harness=={version}`",
-            f"- Release commit: `{release_short}`",
-        ]
-    )
-    if previous_tag:
-        lines.append(f"- Commit range: `{previous_tag}..{release_short}`")
-    else:
-        lines.append(
-            f"- Commit range: latest first-parent commits ending at `{release_short}`"
-        )
-    lines.append(
-        "- Commit source: first-parent history grouped by `Task-Project` metadata"
-    )
-    if current_tag:
-        lines.append(f"- Release tag: `{current_tag}`")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def edited_release_highlight(subject: str) -> str:
-    raw = " ".join(subject.split()).strip()
-    if not raw:
-        return "Updated the release."
-    replacements = (
-        ("fix ", "Fixed "),
-        ("prefer ", "Improved "),
-        ("add ", "Added "),
-        ("expose ", "Added "),
-        ("remove ", "Removed "),
-        ("update ", "Updated "),
-        ("track ", "Tracked "),
-        ("document ", "Documented "),
-        ("restore ", "Restored "),
-        ("clean ", "Cleaned "),
-        ("wire ", "Wired "),
-        ("make ", "Made "),
-    )
-    lower = raw.lower()
-    for prefix, replacement in replacements:
-        if lower.startswith(prefix):
-            return punctuate(replacement + raw[len(prefix) :])
-    return punctuate(capitalize_first(raw))
-
-
-def release_note_subject(subject: str, task_key: str = "", project: str = "") -> str:
-    trimmed = TASK_PHASE_SUBJECT_PREFIX_RE.sub("", subject, count=1)
-    if project:
-        project_prefix = f"{task_config.project_stem(project)}: "
-        if trimmed.casefold().startswith(project_prefix.casefold()):
-            trimmed = trimmed[len(project_prefix) :]
-            trimmed = TASK_PHASE_SUBJECT_SUFFIX_RE.sub("", trimmed, count=1)
-    if task_key:
-        head, sep, last = trimmed.rpartition(" ")
-        if sep and head and last.endswith(f"-{task_key}"):
-            # Drop the trailing KEY-INCEPTED handle: GitHub already renders each
-            # entry's bare short SHA as a commit link, so the handle token is
-            # redundant. Keyed on this commit's own Task-Key, never a guess.
-            trimmed = head
-    return trimmed
-
-
-def release_project_heading(project: str) -> str:
-    if project in PROJECT_HEADINGS:
-        return PROJECT_HEADINGS[project]
-    parts = [
-        segment
-        for dotted in project.replace("_", "-").split(".")
-        for segment in dotted.split("-")
-        if segment
-    ]
-    if not parts:
-        return "General"
-    return " ".join(PROJECT_HEADINGS.get(part, part.title()) for part in parts)
-
-
-def release_project_key(project: str) -> str:
-    key = project.strip().lower()
-    if not key or key.startswith("agent."):
-        return "general"
-    return key
-
-
-def capitalize_first(text: str) -> str:
-    first = text[:1]
-    return f"{first.upper()}{text[1:]}" if first.islower() else text
-
-
-def punctuate(text: str) -> str:
-    return text if text.endswith((".", "!", "?")) else f"{text}."
-
-
-def shortish_commit(commit: str) -> str:
-    return commit[:7] if len(commit) > 7 else commit
+    return _release_note_is_ancestor(candidate, commit)
 
 
 def short_commit(commit: str) -> str:

@@ -34,16 +34,25 @@ purpose: a separate verification path would drift until it certified something
 the release does not actually run.
 
 The first release gate is the installed-runtime boundary. A branch can contain
-passing lifecycle, task, and schema code while the fleet's editable `spice`
-tool still imports an older deployment checkout; branch state alone therefore
-cannot support a fleet-wide release claim. Before running the release command,
-fast-forward the clean editable main tree that backs the installed tool to the
-candidate baseline. The repository-mounted command preserves the parent
-interpreter, runs it with `-P` and no `PYTHONPATH`, resolves
-`spice.tasks.git.boundaries.__file__`, and compares that source checkout's
-committed tree with the release tree. An interpreter inside the candidate
-worktree cannot self-certify as the installed CLI. Any mismatch stops before
-the Python, browser, or artifact gates.
+passing lifecycle, task, and schema code while the fleet's `spice` tool still
+imports an older deployment; branch state alone therefore cannot support a
+fleet-wide release claim. The repository-mounted command preserves the parent
+interpreter, runs it with `-P` and no `PYTHONPATH`, and resolves
+`spice.tasks.git.boundaries.__file__`. An interpreter inside the candidate
+worktree cannot self-certify as the installed CLI.
+
+Before publication, deploy the candidate through a clean editable main tree.
+The gate compares that checkout's committed Git tree with the release tree and
+refuses uncommitted deployment edits. After publication, a registry-installed
+release with no `direct_url.json` can validate its exact checked-out release
+tag: the installed distribution version must equal the tag's project version,
+and the path, byte size, and SHA-256 hash of every installed `spice/` payload
+file must equal the tagged source payload. This second identity is what lets a
+post-release `spice release check` validate the immutable registry artifact
+without weakening the editable-source proof. A missing tag, version mismatch,
+payload mismatch, or locally modified installed file reports both candidate
+and installed identities and stops before the Python, browser, or artifact
+gates.
 
 After `prepare` creates a release commit, deploy that prepared commit before a
 separate `publish`, because `publish` repeats the same installed-runtime gate.

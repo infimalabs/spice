@@ -229,6 +229,9 @@ def test_release_docs_show_lane_release_workflow():
     assert "first release gate is the installed-runtime boundary" in normalized_section
     assert "runs it with `-P` and no `PYTHONPATH`" in normalized_section
     assert "branch state alone" in normalized_section
+    assert "registry-installed release with no `direct_url.json`" in normalized_section
+    assert "exact checked-out release tag" in normalized_section
+    assert "reports both candidate and installed identities" in normalized_section
     assert "comparing raw bytes, not a rendered diff" in normalized_section
     assert release_section.index("Use a minor release") < release_section.index(
         "Use a patch release"
@@ -386,7 +389,7 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     )
     monkeypatch.setattr(
         release,
-        "require_installed_cli_carries_release_tree",
+        "require_installed_cli_matches_release",
         lambda root: calls.append(("installed", root)),
     )
     monkeypatch.setattr(
@@ -518,6 +521,195 @@ def _commit_deployment(root: Path) -> None:
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "deploy"], check=True)
 
 
+def _editable_probe_payload(module: Path) -> str:
+    return (
+        json.dumps(
+            {
+                "artifact": "",
+                "files": [],
+                "module": str(module),
+                "registry": False,
+                "version": "0.30.0",
+            }
+        )
+        + "\n"
+    )
+
+
+def _tagged_release_candidate(root: Path, version: str, payload: str) -> Path:
+    module = root / "spice" / "tasks" / "git" / "boundaries.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(payload, encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        f'[project]\nname = "spice-harness"\nversion = "{version}"\n',
+        encoding="utf-8",
+    )
+    _commit_deployment(root)
+    subprocess.run(
+        ["git", "-C", str(root), "tag", f"v{version}"],
+        check=True,
+        capture_output=True,
+    )
+    return module
+
+
+def _registry_install(
+    root: Path,
+    version: str,
+    payload: str,
+) -> tuple[Path, Path]:
+    tool = root / "tool"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(tool)],
+        check=True,
+        capture_output=True,
+    )
+    python = tool / "bin" / "python"
+    purelib = Path(
+        subprocess.run(
+            [
+                str(python),
+                "-P",
+                "-c",
+                "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    module = purelib / "spice" / "tasks" / "git" / "boundaries.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(payload, encoding="utf-8")
+    dist_info = purelib / f"spice_harness-{version}.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.4\nName: spice-harness\nVersion: {version}\n",
+        encoding="utf-8",
+    )
+    module_record = module.relative_to(purelib).as_posix()
+    (dist_info / "RECORD").write_text(
+        f"{module_record},,\n{dist_info.name}/METADATA,,\n{dist_info.name}/RECORD,,\n",
+        encoding="utf-8",
+    )
+    return python, module
+
+
+def test_registry_install_without_direct_url_matches_the_tagged_release(
+    tmp_path, monkeypatch, capsys
+):
+    payload = "# released payload\n"
+    candidate = tmp_path / "candidate"
+    _tagged_release_candidate(candidate, "0.30.0", payload)
+    python, module = _registry_install(
+        tmp_path / "registry",
+        "0.30.0",
+        payload,
+    )
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+
+    installed = release._installed_cli_identity()
+
+    assert isinstance(installed, release.InstalledCliRegistry)
+    assert installed.python == python.absolute()
+    assert installed.module == module.resolve()
+    assert installed.version == "0.30.0"
+    assert release.require_installed_cli_matches_release(candidate) == installed
+    output = capsys.readouterr().out
+    assert "candidate tag v0.30.0" in output
+    assert "installed spice-harness==0.30.0" in output
+
+
+def test_registry_install_refuses_an_untagged_candidate(tmp_path, monkeypatch):
+    payload = "# released payload\n"
+    candidate = tmp_path / "candidate"
+    _tagged_release_candidate(candidate, "0.30.0", payload)
+    subprocess.run(
+        ["git", "-C", str(candidate), "tag", "--delete", "v0.30.0"],
+        check=True,
+        capture_output=True,
+    )
+    python, _module = _registry_install(
+        tmp_path / "registry",
+        "0.30.0",
+        payload,
+    )
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+
+    with pytest.raises(SpiceError) as raised:
+        release.require_installed_cli_matches_release(candidate)
+
+    message = str(raised.value)
+    assert "requires the checked-out release tag" in message
+    assert "candidate tag v0.30.0" in message
+    assert "installed spice-harness==0.30.0" in message
+
+
+def test_registry_install_refuses_a_different_version_with_both_identities(
+    tmp_path, monkeypatch
+):
+    candidate = tmp_path / "candidate"
+    _tagged_release_candidate(candidate, "0.30.0", "# candidate payload\n")
+    python, _module = _registry_install(
+        tmp_path / "registry",
+        "0.29.0",
+        "# installed payload\n",
+    )
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+
+    with pytest.raises(SpiceError) as raised:
+        release.require_installed_cli_matches_release(candidate)
+
+    message = str(raised.value)
+    assert "candidate tag v0.30.0" in message
+    assert "installed spice-harness==0.29.0" in message
+
+
+def test_registry_install_refuses_different_payload_with_both_artifacts(
+    tmp_path, monkeypatch
+):
+    candidate = tmp_path / "candidate"
+    _tagged_release_candidate(candidate, "0.30.0", "# candidate payload\n")
+    python, _module = _registry_install(
+        tmp_path / "registry",
+        "0.30.0",
+        "# tampered installed payload\n",
+    )
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+
+    with pytest.raises(SpiceError) as raised:
+        release.require_installed_cli_matches_release(candidate)
+
+    message = str(raised.value)
+    assert "candidate tag v0.30.0" in message
+    assert "installed spice-harness==0.30.0" in message
+    assert message.count("artifact sha256:") == 2
+
+
+def test_registry_install_refuses_an_extra_runtime_payload_path(tmp_path, monkeypatch):
+    payload = "# released payload\n"
+    candidate = tmp_path / "candidate"
+    _tagged_release_candidate(candidate, "0.30.0", payload)
+    python, module = _registry_install(
+        tmp_path / "registry",
+        "0.30.0",
+        payload,
+    )
+    (module.parents[3] / "spice" / "injected.py").write_text(
+        "# not carried by the release tag\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
+
+    with pytest.raises(SpiceError) as raised:
+        release.require_installed_cli_matches_release(candidate)
+
+    message = str(raised.value)
+    assert "payload paths" in message
+    assert "candidate tag v0.30.0" in message
+    assert "installed spice-harness==0.30.0" in message
+
+
 def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
     tmp_path, monkeypatch
 ):
@@ -544,7 +736,12 @@ def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
         observed["capture"] = capture
         observed["cwd"] = cwd
         observed["pythonpath"] = env.get("PYTHONPATH")
-        return subprocess.CompletedProcess(command, 0, stdout=f"{module}\n", stderr="")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=_editable_probe_payload(module),
+            stderr="",
+        )
 
     monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
     monkeypatch.setenv("PYTHONPATH", "/candidate-shadow")
@@ -559,7 +756,7 @@ def test_installed_cli_probe_uses_mounted_parent_outside_candidate_sys_path(
         ),
     )
 
-    installed = release._installed_cli_source()
+    installed = release._installed_cli_identity()
 
     assert observed == {
         "command": [
@@ -606,14 +803,19 @@ def test_release_refuses_a_deployment_carrying_uncommitted_edits(tmp_path, monke
     def probe(command, *, capture=False, cwd=None, env=None):
         if command[0] == "git":
             return real_run(command, capture=capture, cwd=cwd, env=env)
-        return subprocess.CompletedProcess(command, 0, stdout=f"{module}\n", stderr="")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=_editable_probe_payload(module),
+            stderr="",
+        )
 
     monkeypatch.setenv(release.RUNTIME_PYTHON_ENV, str(python))
     monkeypatch.setattr(release, "run", probe)
 
     assert _deployment_tree(root) == committed_tree
     with pytest.raises(SpiceError, match="dirty deployment executes code"):
-        release.require_installed_cli_carries_release_tree(tmp_path)
+        release.require_installed_cli_matches_release(tmp_path)
 
 
 def _deployment_tree(root: Path) -> str:
@@ -635,7 +837,7 @@ def test_release_refuses_branch_tree_the_installed_cli_does_not_carry(
         "installed-commit",
         "installed-tree",
     )
-    monkeypatch.setattr(release, "_installed_cli_source", lambda: installed)
+    monkeypatch.setattr(release, "_installed_cli_identity", lambda: installed)
     monkeypatch.setattr(
         release,
         "_source_identity",
@@ -643,7 +845,7 @@ def test_release_refuses_branch_tree_the_installed_cli_does_not_carry(
     )
 
     with pytest.raises(SpiceError, match="branch state has no fleet effect"):
-        release.require_installed_cli_carries_release_tree(tmp_path)
+        release.require_installed_cli_matches_release(tmp_path)
 
 
 def test_release_refuses_a_candidate_worktree_interpreter(tmp_path, monkeypatch):
@@ -654,7 +856,7 @@ def test_release_refuses_a_candidate_worktree_interpreter(tmp_path, monkeypatch)
         "candidate-commit",
         "candidate-tree",
     )
-    monkeypatch.setattr(release, "_installed_cli_source", lambda: installed)
+    monkeypatch.setattr(release, "_installed_cli_identity", lambda: installed)
     monkeypatch.setattr(
         release,
         "_source_identity",
@@ -662,7 +864,7 @@ def test_release_refuses_a_candidate_worktree_interpreter(tmp_path, monkeypatch)
     )
 
     with pytest.raises(SpiceError, match="independently installed CLI"):
-        release.require_installed_cli_carries_release_tree(tmp_path)
+        release.require_installed_cli_matches_release(tmp_path)
 
 
 def test_release_accepts_the_tree_the_installed_cli_imports(
@@ -675,14 +877,14 @@ def test_release_accepts_the_tree_the_installed_cli_imports(
         "installed-commit",
         "shared-tree",
     )
-    monkeypatch.setattr(release, "_installed_cli_source", lambda: installed)
+    monkeypatch.setattr(release, "_installed_cli_identity", lambda: installed)
     monkeypatch.setattr(
         release,
         "_source_identity",
         lambda _root: ("candidate-commit", "shared-tree"),
     )
 
-    assert release.require_installed_cli_carries_release_tree(tmp_path) == installed
+    assert release.require_installed_cli_matches_release(tmp_path) == installed
     assert "candidate candidate-commit and installed installed-commit" in (
         capsys.readouterr().out
     )
@@ -743,7 +945,7 @@ def test_prepare_artifacts_do_not_make_the_publish_handoff_dirty(tmp_path, monke
     monkeypatch.setattr(release, "run", artifact_tools)
     monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
     monkeypatch.setattr(
-        release, "require_installed_cli_carries_release_tree", lambda root: None
+        release, "require_installed_cli_matches_release", lambda root: None
     )
     monkeypatch.setattr(release, "run_constitution_gate", lambda: None)
     monkeypatch.setattr(release, "bump_version", bump_version)
