@@ -30,21 +30,27 @@ operational outputs rather than separate mutation-default decisions.
 The default follows from a verb's **effect-driving reads**: inputs whose
 contents can change the operations it plans or the payload it applies. Reads
 used only to locate a target, check a precondition, preserve unrelated content,
-copy caller-selected bytes opaquely, or parameterize an already-named action as
-approved standing policy do not make that input the operation's authored
-operand.
+copy bytes or publish a selected Git tree opaquely, or parameterize an
+already-named action as approved standing policy do not make that input the
+operation's authored operand.
 
 **Default criterion:** A bare mutating verb previews when any effect-driving
 read is semantic input the operator authored: a document, a configuration or
-manifest surface, or a repository tree the verb will rewrite or publish. It
-applies when all of its effects are specified by the command line, the task or
-agent board, live runtime state, and approved standing policy alone. Batch
-records whose grammar is the argv equivalent count as command-line intent; a
-document does not change provenance merely because standard input transports
-it. An explicit mutation option is part of the command line, so a read-only
-verb with `--fix`, `--write-*`, or `--create-tasks` has already received its
-apply instruction; this classification does not make those existing spellings
-stable.
+manifest surface, or repository content the verb semantically interprets to
+decide what it will rewrite or publish. It applies when all of its effects are
+specified by the command line, the task or agent board, live runtime state, and
+approved standing policy alone. Batch records whose grammar is the argv
+equivalent count as command-line intent; a document does not change provenance
+merely because standard input transports it. An explicit mutation option is
+part of the command line, so a read-only verb with `--fix`, `--write-*`, or
+`--create-tasks` has already received its apply instruction; this
+classification does not make those existing spellings stable.
+
+Invocation through a Git or agent hook supplies command-line intent for the
+backend. It does not change the provenance of a semantic payload the backend
+reads or make the backend inherit the parent's mutation-default classification.
+A backend that only validates or vetoes a parent-owned mutation has no
+mutation-default decision of its own.
 
 Effect count, destructiveness, and reversibility do not choose the default.
 There are no per-verb exceptions: if the reads below predict the wrong answer,
@@ -52,24 +58,23 @@ the criterion or the read classification must change.
 
 | Mutating verb or invocation | Effect-driving reads | Classification |
 | --- | --- | --- |
-| `spice init`; `spice deinit` | The repository and Git configuration being reconciled, plus the ownership receipt for reversal | Authored input |
+| `spice init`; `spice dev install-hooks` | The existing repository and Git configuration semantically reconciled with packaged initialization policy through the shared planner | Authored input |
+| `spice deinit` | The ownership receipt and current repository and Git configuration semantically reconciled to determine safe reversal | Authored input |
 | `spice task ingest` | The Markdown task document selected by path or standard input | Authored input |
 | `spice task artifact prune` | Operator-chosen retention metadata in artifact manifests, combined with task completion state | Authored input |
 | `spice release minor`; `patch`; `prepare`; `publish`; `github` | The versioned repository tree and, where supplied, curated release notes that become the published payload | Authored input |
 | `spice study env-policy --write-baseline`; `mutations --write-ratchet`; `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals` with `--create-tasks` | Repository content interpreted into a baseline, ratchet, or finding tasks; the explicit option is the apply instruction | Authored input |
 | `spice dev serve-web-types --write`; `spice doctor --fix`; `spice dev doctor --fix` | Authored schema or repository state interpreted into generated-state repairs; the explicit option is the apply instruction | Authored input |
-| `spice task next`; `add`; `done`; `review`; `oops`; `note`; `reword`; `depends`; `wake`; `claim`; `reclaim`; `unclaim`; `modify`; `delete`; `capture` | Command-line intent and the task board, claim, and dependency graph | Direct intent |
+| `spice dev commit-msg`; `pre-commit` | The commit message or staged repository tree, plus tracked policy, semantically interpreted to validate and rewrite or restage authored content | Authored input |
+| `spice task next`; `add`; `done`; `review`; `oops`; `note`; `reword`; `depends`; `wake`; `claim`; `reclaim`; `unclaim`; `modify`; `delete`; `capture` | Command-line intent and the task board, claim, and dependency graph; a repository tree selected for integration or publication is transferred opaquely | Direct intent |
 | `spice task artifact add` | The command line names the task and source path; the selected bytes are copied opaquely rather than interpreted as instructions | Direct intent |
-| `spice agent activation`; `requeue-deadletter`; `import`; `reply`; `ensure`; `supervise` | Command-line or ambient-agent identity, approved launch policy, and live agent, inbox, and supervisor state | Direct intent |
+| `spice agent activation`; `requeue-deadletter`; `import`; `reply`; `ensure`; `supervise`; `post-tool-hook` | Command-line or ambient-agent identity, approved launch policy, and live agent, inbox, and supervisor state | Direct intent |
 | Mutating forms of `spice config say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys | Direct intent |
 | `spice maxim propose`; `file-proposals`; `disable`; `enable` | Command-line intent and durable ACK, maxim, and task-board state | Direct intent |
 | Interactive Serve mutations | Native fact stores plus the live operator action that requests the authority change | Direct intent |
-| `spice dev install-hooks`; `commit-msg`; `spice agent post-tool-hook` | Packaged policy plus an explicit command or parent Git/agent protocol request | Direct intent |
 
-Task completion remains direct intent even though it reaches Git integration
-and publication: the claim, board, and command line determine what it
-integrates. `spice agent run` and `spice lock run` only delegate an argv; the
-child verb owns the default for its own effects.
+`spice agent run` and `spice lock run` only delegate an argv; the child verb
+owns the default for its own effects.
 
 When in doubt, prefer commands, tracked config, and extension entry points over internal files.
 Stable means compatibility matters; in motion means the idea is real, but the
