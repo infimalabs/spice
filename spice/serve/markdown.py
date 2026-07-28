@@ -278,7 +278,7 @@ def _image_html(alt: str, src: str, worktree_id: str | None) -> str:
 def work_tree_proxy_url(target: str, *, worktree_id: str | None = None) -> str:
     parsed = urlparse(target)
     if (
-        parsed.scheme in {"data", "http", "https", "mailto"}
+        parsed.scheme in {"http", "https", "mailto"}
         or target.startswith("#")
         or target.startswith("/api/")
     ):
