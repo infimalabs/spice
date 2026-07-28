@@ -87,14 +87,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
             bump,
             help=f"Plan a {bump} bump, validation, commit, push, and publish.",
         )
-        one_pass.add_argument(
-            "--notes-file",
-            type=Path,
-            help=(
-                "Curated GitHub release notes; the untouched generated draft "
-                "is refused."
-            ),
-        )
+        _add_notes_file(one_pass)
         _add_apply_options(one_pass)
         _mark_authored_release(one_pass)
         one_pass.set_defaults(func=handle_release, release_mode="release", bump=bump)
@@ -135,13 +128,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     publish = actions.add_parser(
         "publish", help="Validate the prepared version, then push and publish."
     )
-    publish.add_argument(
-        "--notes-file",
-        type=Path,
-        help=(
-            "Curated GitHub release notes; the untouched generated draft is refused."
-        ),
-    )
+    _add_notes_file(publish)
     publish.add_argument(
         "--release-commit",
         help=(
@@ -157,13 +144,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         "github", help="Create/push the release tag and GitHub Release."
     )
     github.add_argument("version", nargs="?")
-    github.add_argument(
-        "--notes-file",
-        type=Path,
-        help=(
-            "Curated GitHub release notes; the untouched generated draft is refused."
-        ),
-    )
+    _add_notes_file(github)
     github.add_argument(
         "--release-commit",
         help="Commit-ish to tag and use as the release notes target.",
@@ -205,6 +186,16 @@ def _add_apply_options(parser: argparse.ArgumentParser) -> None:
         "--json",
         action="store_true",
         help="Emit the ordered plan as JSON without applying it.",
+    )
+
+
+def _add_notes_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--notes-file",
+        type=Path,
+        help=(
+            "Curated GitHub release notes; the untouched generated draft is refused."
+        ),
     )
 
 
