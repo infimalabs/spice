@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -365,7 +366,11 @@ def _run_named_lock(lock: NamedLockConfig, child: list[str]) -> int:
         with _metadata_lock(lock.path, metadata):
             return _run_child(child)
     except FileLockUnavailable:
-        print(f"spice lock: lock {lock.name!r} is already held")
+        print(
+            f"spice lock: lock {lock.name!r} is already held; "
+            f"{_contention_holder_detail(lock.path)}",
+            file=sys.stderr,
+        )
         return lock.contention_exit_code
 
 
@@ -378,8 +383,13 @@ def _run_pool(pool: LockPoolConfig, shard: int | None, child: list[str]) -> int:
             with _metadata_lock(path, metadata):
                 return _run_child(child)
         except FileLockUnavailable:
-            print(f"spice lock: pool {pool.name!r} shard {shard} is already held")
+            print(
+                f"spice lock: pool {pool.name!r} shard {shard} is already held; "
+                f"{_contention_holder_detail(path)}",
+                file=sys.stderr,
+            )
             return pool.chosen_shard_contention_exit_code
+    holders: list[str] = []
     for candidate in range(pool.shards):
         path = _pool_shard_path(pool, candidate)
         metadata = _holder_metadata("pool", pool.name, path, shard=candidate)
@@ -387,8 +397,12 @@ def _run_pool(pool: LockPoolConfig, shard: int | None, child: list[str]) -> int:
             with _metadata_lock(path, metadata):
                 return _run_child(child)
         except FileLockUnavailable:
+            holders.append(f"shard {candidate} {_contention_holder_detail(path)}")
             continue
-    print(f"spice lock: pool {pool.name!r} has no free shards")
+    print(
+        f"spice lock: pool {pool.name!r} has no free shards; " + "; ".join(holders),
+        file=sys.stderr,
+    )
     return pool.pool_exhaustion_exit_code
 
 
@@ -422,20 +436,29 @@ def _write_metadata(handle: Any, metadata: dict[str, Any]) -> None:
 
 
 def _lock_state(path: Path) -> tuple[str, dict[str, Any] | None]:
-    if not path.exists():
+    text = _read_lock_metadata(path)
+    if text is None or text == "":
         return "free", None
-    handle = path.open("a+")
+    holder = _metadata_from_text(text)
+    return ("held", holder) if holder is not None else ("unknown", None)
+
+
+def _read_lock_metadata(path: Path) -> str | None:
     try:
-        try:
-            lock_fd_exclusive(handle.fileno(), blocking=False)
-        except FileLockUnavailable:
-            handle.seek(0)
-            holder = _metadata_from_text(handle.read())
-            return "held", holder
-        unlock_fd(handle.fileno())
-        return "free", None
-    finally:
-        handle.close()
+        return path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+
+
+def _contention_holder_detail(path: Path) -> str:
+    text = _read_lock_metadata(path)
+    holder = _metadata_from_text(text) if text else None
+    if holder is None:
+        return f"holder metadata unavailable path={path}"
+    return (
+        f"holder pid={holder.get('pid', '-')} cwd={holder.get('cwd', '-')} "
+        f"started_at={holder.get('started_at', '-')}"
+    )
 
 
 def _metadata_from_text(text: str) -> dict[str, Any] | None:

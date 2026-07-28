@@ -164,6 +164,19 @@ def test_markdown_keeps_nested_backtick_code_span_text_literal():
     assert html == "<p>Shape: <code>`[file](path.py:line)`</code></p>"
 
 
+def test_markdown_keeps_former_inline_code_sentinel_text_in_place():
+    sentinel_text = "\ufff00\ufff1"
+
+    html = render_message_html(f"{sentinel_text} `real span`")
+
+    assert html == f"<p>{sentinel_text} <code>real span</code></p>"
+
+
+def test_markdown_round_trips_each_former_inline_code_sentinel_codepoint():
+    for codepoint in ("\ufff0", "\ufff1"):
+        assert render_message_html(codepoint) == f"<p>{codepoint}</p>"
+
+
 def test_work_tree_proxy_route_resolves_lane_worktree_file(tmp_path):
     anchor = tmp_path / "anchor"
     worktree = tmp_path / "lane"

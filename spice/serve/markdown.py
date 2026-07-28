@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import quote, unquote, urlparse
 
 from spice.serve.images import worktree_file_image_url
@@ -27,7 +28,21 @@ _THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$")
 _TABLE_DELIMITER_CELL_RE = re.compile(r"^:?-+:?$")
 _GITHUB_LINE_SUFFIX_RE = re.compile(r"^(?P<path>.+):(?P<start>\d+)(?:-(?P<end>\d+))?$")
 _LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")
+_INLINE_CODE_TAG_RE = re.compile(r"<code>(.*?)</code>")
 _MAX_HEADING_LEVEL = 6
+_INLINE_CODE_MARKUP_ENTITIES = {
+    "!": "&#33;",
+    "*": "&#42;",
+    "(": "&#40;",
+    ")": "&#41;",
+    "[": "&#91;",
+    "]": "&#93;",
+}
+
+
+@dataclass(frozen=True)
+class _InlineCodeSpan:
+    body: str
 
 
 def render_message_html(text: str, *, worktree_id: str | None = None) -> str:
@@ -310,7 +325,7 @@ def _transform_line_suffix(target: str) -> str:
 
 def _render_inline(raw: str, worktree_id: str | None = None) -> str:
     escaped = html.escape(raw, quote=False)
-    escaped, code_spans = _stash_inline_code(escaped)
+    escaped = _render_inline_code_parts(_stash_inline_code(escaped))
     escaped = _IMAGE_RE.sub(
         lambda match: _image_html(
             html.unescape(match.group(1) or "image"),
@@ -325,30 +340,31 @@ def _render_inline(raw: str, worktree_id: str | None = None) -> str:
         lambda match: _link_html(match, worktree_id),
         escaped,
     )
-    return _restore_inline_code(escaped, code_spans)
+    return _restore_inline_code_markup(escaped)
 
 
-def _stash_inline_code(escaped: str) -> tuple[str, list[str]]:
-    code_spans: list[str] = []
-    rendered: list[str] = []
+def _stash_inline_code(escaped: str) -> list[str | _InlineCodeSpan]:
+    parts: list[str | _InlineCodeSpan] = []
     index = 0
+    text_start = 0
     while index < len(escaped):
         if escaped[index] != "`":
-            rendered.append(escaped[index])
             index += 1
             continue
         tick_count = _backtick_run_length(escaped, index)
         close = escaped.find("`" * tick_count, index + tick_count)
         if close < 0:
-            rendered.append(escaped[index : index + tick_count])
             index += tick_count
             continue
+        if text_start < index:
+            parts.append(escaped[text_start:index])
         body = _normalize_code_span(escaped[index + tick_count : close])
-        span_index = len(code_spans)
-        code_spans.append(f"<code>{body}</code>")
-        rendered.append(f"\ufff0{span_index}\ufff1")
+        parts.append(_InlineCodeSpan(body))
         index = close + tick_count
-    return "".join(rendered), code_spans
+        text_start = index
+    if text_start < len(escaped):
+        parts.append(escaped[text_start:])
+    return parts
 
 
 def _backtick_run_length(text: str, start: int) -> int:
@@ -370,10 +386,29 @@ def _normalize_code_span(body: str) -> str:
     return normalized
 
 
-def _restore_inline_code(escaped: str, code_spans: list[str]) -> str:
-    for index, code in enumerate(code_spans):
-        escaped = escaped.replace(f"\ufff0{index}\ufff1", code)
-    return escaped
+def _render_inline_code_parts(parts: list[str | _InlineCodeSpan]) -> str:
+    return "".join(
+        part
+        if isinstance(part, str)
+        else f"<code>{_protect_inline_code_markup(part.body)}</code>"
+        for part in parts
+    )
+
+
+def _protect_inline_code_markup(body: str) -> str:
+    for marker, entity in _INLINE_CODE_MARKUP_ENTITIES.items():
+        body = body.replace(marker, entity)
+    return body
+
+
+def _restore_inline_code_markup(rendered: str) -> str:
+    def restore(match: re.Match[str]) -> str:
+        body = match.group(1)
+        for marker, entity in _INLINE_CODE_MARKUP_ENTITIES.items():
+            body = body.replace(entity, marker)
+        return f"<code>{body}</code>"
+
+    return _INLINE_CODE_TAG_RE.sub(restore, rendered)
 
 
 def _link_html(match: re.Match[str], worktree_id: str | None) -> str:

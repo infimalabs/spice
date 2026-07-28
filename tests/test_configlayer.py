@@ -176,8 +176,8 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         argv = ["rtk"]
         match = [{ head = "grep", argv = ["rg"] }]
 
-        [policy]
-        mode = "strict"
+        [policy.suite_seam]
+        paths = ["packaged.py"]
 
         [[policy.internal_couplings]]
         path = "packaged.py"
@@ -189,7 +189,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         tmp_path / "pyproject.toml",
         """
         [tool.spice.wrappers.common.rtk]
-        executable = "configured-rtk"
+        argv = ["configured-rtk"]
 
         [[tool.spice.policy.internal_couplings]]
         path = "project.py"
@@ -204,7 +204,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         argv = ["repo-rtk"]
 
         [policy]
-        mode = { level = 2 }
+        suite_seam = { seconds = 2 }
         """,
     )
     _write(
@@ -214,7 +214,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         match = []
 
         [policy]
-        mode = ["worktree"]
+        suite_seam = ["worktree"]
         """,
     )
 
@@ -222,7 +222,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
 
     assert loaded.effective["wrappers"]["common"]["rtk"] == {"match": ()}
     assert loaded.effective["policy"] == {
-        "mode": ("worktree",),
+        "suite_seam": ("worktree",),
         "internal_couplings": (
             {
                 "path": "project.py",
@@ -234,7 +234,116 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
     assert loaded.source_for("wrappers.common.rtk.match") == loaded.layer(
         layers.WORKTREE_SOURCE
     )
-    assert loaded.source_for("policy.mode") == loaded.layer(layers.WORKTREE_SOURCE)
+    assert loaded.source_for("policy.suite_seam") == loaded.layer(
+        layers.WORKTREE_SOURCE
+    )
+
+
+@pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
+def test_unknown_key_names_the_exact_layer_and_suggests_nearest_key(
+    tmp_path, monkeypatch, scope
+):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
+    paths = {
+        layers.SYSTEM_SOURCE: system_root / "spice.toml",
+        layers.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
+        layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
+        layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
+    }
+    _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
+    prefix = "tool.spice." if scope == layers.PYPROJECT_SOURCE else ""
+    _write(paths[scope], f'[{prefix}agent]\nmodle = "typo"\n')
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome == {
+        "state": "rejected",
+        "message": (
+            "unknown configuration key agent.modle "
+            f"(source={scope} path={paths[scope]}); did you mean agent.model?"
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    ("document", "unknown_path", "suggested_path"),
+    (
+        ("[polciy]\nexclude = []\n", "polciy", "policy"),
+        ("[say]\nvoiec = 'Ava'\n", "say.voiec", "say.voice"),
+        (
+            "[agent]\npersonaliyt = 'friendly'\n",
+            "agent.personaliyt",
+            "agent.personality",
+        ),
+        ("[judge]\nenabeld = true\n", "judge.enabeld", "judge.enabled"),
+        (
+            "[policy.limits]\nfile_lco = 12\n",
+            "policy.limits.file_lco",
+            "policy.limits.file_loc",
+        ),
+        (
+            "[locks.named.editor]\npatth = 'editor.lock'\n",
+            "locks.named.editor.patth",
+            "locks.named.editor.path",
+        ),
+        (
+            "[tasks.phase_models.codex.todo]\nmodle = 'gpt'\n",
+            "tasks.phase_models.codex.todo.modle",
+            "tasks.phase_models.codex.todo.model",
+        ),
+        (
+            "[maxims.careful]\nwords = ['careful']\nmesage = 'Take care.'\n",
+            "maxims.careful.mesage",
+            "maxims.careful.message",
+        ),
+        (
+            "[wrappers.tools.echo]\nagrv = ['echo']\n",
+            "wrappers.tools.echo.agrv",
+            "wrappers.tools.echo.argv",
+        ),
+    ),
+)
+def test_unknown_key_validation_reaches_fixed_fields_beneath_dynamic_tables(
+    tmp_path, document, unknown_path, suggested_path
+):
+    _write(tmp_path / "spice.toml", document)
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome["state"] == "rejected"
+    assert outcome["message"].startswith(
+        f"unknown configuration key {unknown_path} "
+        f"(source=repository path={tmp_path / 'spice.toml'})"
+    )
+    assert outcome["message"].endswith(f"; did you mean {suggested_path}?")
+
+
+def test_distant_unknown_key_has_no_misleading_suggestion(tmp_path):
+    _write(tmp_path / "spice.toml", "[say]\nopaque = true\n")
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome == {
+        "state": "rejected",
+        "message": (
+            "unknown configuration key say.opaque "
+            f"(source=repository path={tmp_path / 'spice.toml'})"
+        ),
+    }
+
+
+def test_unknown_key_reports_the_highest_precedence_layer_that_defines_it(tmp_path):
+    repository = tmp_path / "spice.toml"
+    worktree = edit.worktree_config_path(tmp_path)
+    _write(repository, '[agent]\nmodle = "repository"\n')
+    _write(worktree, '[agent]\nmodle = "worktree"\n')
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome["state"] == "rejected"
+    assert f"agent.modle (source=worktree path={worktree})" in outcome["message"]
 
 
 def test_contextualization_preserves_table_grammar_and_repository_source(tmp_path):
@@ -249,6 +358,11 @@ def test_contextualization_preserves_table_grammar_and_repository_source(tmp_pat
     assert str(contextual) == (
         f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
     )
+
+
+def test_registry_resolver_refuses_an_undeclared_false_disable_contract():
+    with pytest.raises(SpiceError, match="does not declare false-disable semantics"):
+        layers.enabled_registry_entries({"sample": False}, "future", "registry")
 
 
 def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):

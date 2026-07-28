@@ -47,7 +47,11 @@ from spice.config.values import (
     AGENT_MODEL_KEY,
     effective_agent_config,
 )
-from spice.config.layers import contextualize_config_error, effective_table
+from spice.config.layers import (
+    contextualize_config_error,
+    effective_table,
+    enabled_registry_entries,
+)
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.process.git import run_git_command
@@ -498,11 +502,11 @@ def _configured_builtin_steps(
         )
 
     by_key = {step.key: step for step in builtin_steps}
-    overrides = {
+    normalized = {
         _normalize_step_key(raw_key): raw_value
         for raw_key, raw_value in raw_overrides.items()
     }
-    unknown = sorted(key for key in overrides if key not in by_key)
+    unknown = sorted(key for key in normalized if key not in by_key)
     if unknown:
         known = ", ".join(step.key for step in builtin_steps)
         listed = ", ".join(unknown)
@@ -510,13 +514,13 @@ def _configured_builtin_steps(
             "[tool.spice.policy.pre_commit_builtins] unknown step(s): "
             f"{listed}; known steps: {known}"
         )
+    overrides = enabled_registry_entries(normalized, "policy", "pre_commit_builtins")
 
     configured: list[PreCommitStep] = []
     for step in builtin_steps:
-        replacement = overrides.get(step.key)
-        if replacement is None:
-            configured.append(step)
+        if step.key not in overrides:
             continue
+        replacement = overrides[step.key]
         configured_step = _configured_builtin_step(repo_root, step, replacement)
         if configured_step is not None:
             configured.append(configured_step)
@@ -528,8 +532,6 @@ def _configured_builtin_step(
 ) -> PreCommitStep | None:
     if raw is True:
         return step
-    if raw is False:
-        return None
     if isinstance(raw, str):
         command = _mounted_command_step(repo_root, raw)
         return _command_pre_commit_step(step.key, command)

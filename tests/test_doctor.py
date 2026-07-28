@@ -72,6 +72,29 @@ def test_doctor_fails_dirty_worktree_with_investigation_command(tmp_path, monkey
     assert "cmd: git status --short" in report.render()
 
 
+def test_doctor_reports_builtin_shadowing_mount_as_refused(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["pkg"]\n'
+        '[tool.spice.commands]\ntask = ["./scripts/task"]\n',
+        encoding="utf-8",
+    )
+    install_hooks_for_repo(repo)
+    _patch_non_hook_checks(monkeypatch)
+
+    report = doctor.run_doctor(repo)
+
+    mounts = _check(report, "commands.mounts")
+    assert report.failed
+    assert mounts.status == "fail"
+    assert "refused 1 mount(s)" in mounts.detail
+    assert (
+        f"commands (source=pyproject path={repo / 'pyproject.toml'})" in mounts.detail
+    )
+    assert "entry 'task'" in mounts.detail
+    assert "shadows a built-in spice command" in mounts.detail
+
+
 def test_doctor_warns_about_executable_default_hooks_shadowed_by_spice(
     tmp_path, monkeypatch
 ):
@@ -204,7 +227,7 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
     } == {
         "rtk": expected_rtk,
         "remaining_check": "env-name-ledger",
-        "check_count": 25,
+        "check_count": 26,
     }
 
 
@@ -308,20 +331,29 @@ def test_doctor_reports_single_spice_namespace_portion(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
     package = checkout / "spice"
     module = package / "hooks" / "doctor.py"
+    finder_path_hook = "__editable__.spice_harness-0.16.0.finder.__path_hook__"
     repo.mkdir()
     module.parent.mkdir(parents=True)
-    portions = doctor._spice_namespace_portions_from(
+    ordinary_cwd_portions = doctor._spice_namespace_portions_from(
         [
             package,
             package,
-            "__editable__.spice_harness-0.16.0.finder.__path_hook__",
+            finder_path_hook,
         ],
+        [module],
+    )
+    cwd_beneath_spice = tmp_path / "unrelated" / "spice" / "nested"
+    cwd_beneath_spice.mkdir(parents=True)
+    monkeypatch.chdir(cwd_beneath_spice)
+    portions = doctor._spice_namespace_portions_from(
+        [package, package, finder_path_hook],
         [module],
     )
     monkeypatch.setattr(doctor, "_spice_namespace_portions", lambda: portions)
 
     check = doctor._spice_namespace_portions_check(repo)
 
+    assert ordinary_cwd_portions == [checkout.resolve()]
     assert portions == [checkout.resolve()]
     assert check.status == "ok"
     assert f"single spice namespace portion -> {checkout.resolve()}" == check.detail
@@ -708,6 +740,47 @@ def test_doctor_judge_optional_by_default_and_required_when_opted_in(
             "opted in" in opted_in_check.detail,
         ),
     ] == [("skip", False, True), ("fail", True, True)]
+
+
+@pytest.mark.parametrize(
+    ("version", "expected_status"),
+    (("2.6.2", "fail"), ("3.0.0", "ok"), ("4.1.0", "ok")),
+)
+def test_doctor_enforces_taskwarrior_three_version(
+    monkeypatch, version, expected_status
+):
+    calls = []
+
+    def run_tool(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"{version}\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(doctor, "run_tool_command", run_tool)
+
+    check = doctor._taskwarrior_check("/tools/task")
+
+    assert check.status == expected_status
+    assert "Taskwarrior 3" in check.detail
+    assert "task control plane" in check.detail
+    if expected_status == "fail":
+        assert f"Taskwarrior {version} is below required" in check.detail
+    assert calls == [
+        (
+            ["/tools/task", "--version"],
+            {
+                "policy": "probe",
+                "operation": "probe Taskwarrior version",
+                "capture_output": True,
+                "text": True,
+                "check": False,
+            },
+        )
+    ]
 
 
 def _binary_check(repo: Path, name: str) -> doctor.DoctorCheck:

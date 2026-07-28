@@ -211,6 +211,14 @@ operated trees and do not supply their own runtime. See the
 [Quickstart](#quickstart) for the watch -> retrospect -> gates -> steer -> fleet
 walkthrough, which starts read-only.
 
+Taskwarrior 3 or newer is required for the task plane and the Fleet rung, but
+not for the earlier read-only or gates workflows. Before using `spice task`,
+verify the separately installed system binary:
+
+```sh
+task --version  # must report 3.x or newer
+```
+
 ### Graceful degradation
 
 [RTK](https://github.com/rtk-ai/rtk) is an optional command-output optimizer for

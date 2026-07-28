@@ -34,6 +34,22 @@ Every inline `scopes = { ... }` selector is also one atomic leaf: a later
 configuration layer replaces the complete selector instead of inheriting
 individual axes from earlier layers.
 
+Registry-shaped tables share one removal rule. In `commands`, `maxims`,
+`policy.pre_commit_builtins`, `policy.taste.words`, `tasks.reports`, the
+`wrappers` group registry, and the entry registry inside each wrapper group, a
+literal boolean `false` at a later scope disables that named inherited entry.
+Empty strings, lists, and tables retain their domain-specific meanings; none is
+a removal spelling. A new packaged named-entry registry must declare this
+contract and prove its consumer returns the same disabled answer before the
+configuration gate accepts it.
+
+Every Spice table is checked against the structural configuration schema
+before layers merge. An unknown structural key refuses with its dotted path
+and winning source layer, and suggests the nearest known sibling when the edit
+distance is small. Data-keyed maps such as command paths, wrapper names, lock
+names, maxim bags, and policy word maps remain open while their fixed nested
+fields are checked.
+
 ### Universal applicability selectors
 
 Configurable entries express applicability with one inline selector:
@@ -369,9 +385,8 @@ still winning.
 Naming `common` in a repo `[tool.spice.wrappers.common]` table replaces the whole
 group atomically — routes do not concatenate, so an override must re-list every
 route it keeps — while omitting the table inherits this default and
-`wrappers = []` disables generation. A `false` group or entry disables that
-inherited name explicitly. Repo groups should otherwise wrap stable repo-owned
-tools (see [wrapper commands](../cli/wrapper-commands.md)).
+`wrappers = []` disables generation. Repo groups should otherwise wrap stable
+repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
@@ -387,8 +402,10 @@ report.inspect = ["project-tool", "report", "inspect"]
 Keys are dot-separated command paths with lowercase/digit/hyphen segments.
 Mounts cannot shadow built-in or extension-provided `spice` actions at any
 depth. Dotted mounts under built-in verbs are allowed when the full command path
-is a novel action name. For example, these fail because the full paths already
-resolve to registered actions:
+is a novel action name. Collisions are refused individually and reported by
+`spice doctor`; built-in commands and valid sibling mounts remain available.
+For example, these entries are refused because the full paths already resolve
+to registered actions:
 
 ```toml
 [tool.spice.commands]
@@ -438,10 +455,12 @@ requires a specific zero-based shard.
 Default state paths live under `.spice/locks/` when a resource omits `path` or
 `directory`. Each held lock writes JSON holder metadata into its lock file with
 `pid`, `cwd`, and `started_at`; `spice lock status --json` lists configured
-locks and pool shards with that metadata. Per-invocation flags such as
-`--path`, `--directory`, `--shards`, `--lock-contention-exit-code`,
-`--chosen-shard-contention-exit-code`, and `--pool-exhaustion-exit-code`
-override the tracked defaults for that one run.
+locks and pool shards with that metadata without acquiring the resource locks.
+A non-empty malformed metadata record reports `unknown`, never `free`.
+Contention exits name the recorded holder on stderr. Per-invocation flags
+such as `--path`, `--directory`, `--shards`,
+`--lock-contention-exit-code`, `--chosen-shard-contention-exit-code`, and
+`--pool-exhaustion-exit-code` override the tracked defaults for that one run.
 
 ## `[tool.spice.policy]`
 
@@ -708,7 +727,6 @@ required non-empty strings. `test` is the test function name or `<module>`, and
 Each built-in key may be:
 
 - `true` to keep the default.
-- `false` to disable it.
 - A mounted command name to replace it.
 - A command-step table using `mount`, `run`, or `argv`.
 - `{ enabled = false }` to disable with an explicit table.

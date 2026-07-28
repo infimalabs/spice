@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Any
 
 from spice import paths
+from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
 from spice.operatorstate import (
     WORKTREE_CONFIG_PATH,
@@ -30,6 +31,19 @@ CONFIG_SCOPE_NAMES = (
     PYPROJECT_SOURCE,
     REPOSITORY_SOURCE,
     WORKTREE_SOURCE,
+)
+# Named entries in these tables inherit across configuration layers and use the
+# literal boolean ``false`` as their one removal spelling. Wrapper entries are
+# the nested named registry inside each wrapper group; the wildcard is a schema
+# path, not a configuration lookup path.
+FALSE_DISABLE_REGISTRY_PATHS = (
+    ("commands",),
+    ("maxims",),
+    ("policy", "pre_commit_builtins"),
+    ("policy", "taste", "words"),
+    ("tasks", "reports"),
+    ("wrappers",),
+    ("wrappers", "*"),
 )
 
 
@@ -167,6 +181,15 @@ def _load_config_sources(
             )
         )
 
+    for layer, values in reversed(tuple(zip(layers, parsed, strict=True))):
+        if layer.path is None:
+            continue
+        validate_config_keys(
+            values,
+            source_name=layer.name,
+            source_path=layer.path,
+        )
+
     effective: dict[str, Any] = {}
     sources: dict[tuple[str, ...], ConfigLayer] = {}
     for layer, values in zip(layers, parsed, strict=True):
@@ -184,6 +207,7 @@ def load_packaged_config() -> ConfigLayer:
     values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
+    validate_config_keys(values, source_name=SYSTEM_SOURCE, source_path=path)
     return ConfigLayer(
         name=SYSTEM_SOURCE,
         path=path,
@@ -212,6 +236,24 @@ def effective_table(repo_root: Path | None, *path: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def enabled_registry_entries(
+    entries: Mapping[str, Any], *registry_path: str
+) -> dict[str, Any]:
+    """Return enabled named entries from one declared configuration registry."""
+    path = tuple(registry_path)
+    if path not in FALSE_DISABLE_REGISTRY_PATHS:
+        raise SpiceError(
+            "configuration registry "
+            f"{'.'.join(path)!r} does not declare false-disable semantics"
+        )
+    return {str(name): value for name, value in entries.items() if value is not False}
+
+
+def effective_registry(repo_root: Path | None, *path: str) -> dict[str, Any]:
+    """Return one effective named-entry table with false entries removed."""
+    return enabled_registry_entries(effective_table(repo_root, *path), *path)
+
+
 def layer_table(repo_root: Path, layer_name: str, *path: str) -> dict[str, Any]:
     """Return one mutable table from a specific named configuration layer."""
     value: Any = load_config(repo_root).layer(layer_name).values
@@ -226,7 +268,7 @@ def effective_commands(repo_root: Path | None) -> dict[str, Any]:
     """Return effective mounted commands flattened to dotted command names."""
     flattened: dict[str, Any] = {}
     _flatten_mapping(effective_table(repo_root, "commands"), flattened)
-    return flattened
+    return enabled_registry_entries(flattened, "commands")
 
 
 def config_string_list(raw: Any) -> list[str]:

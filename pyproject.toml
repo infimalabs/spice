@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spice-harness"
 version = "0.29.0"
-description = "Spice Harness: an agent harness / fleet operations console for coding repositories."
+description = "Spice Harness: an agent harness / fleet operations console for coding repositories; its task plane requires Taskwarrior 3."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -216,6 +216,7 @@ paths = [
     "spice/agent/identity.py",
     "spice/agent/paths.py",
     "spice/config/layers.py",
+    "spice/config/schema.py",
     "spice/config/values.py",
     "spice/defaultinventory.py",
     "spice/defaults.py",

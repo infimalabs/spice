@@ -20,6 +20,7 @@ from spice.serve.observer import (
     discover_observer_sessions,
     observer_messages_payload,
 )
+from tests.test_permissionhelpers import REQUIRES_MODE_BIT_DENIAL
 
 FIXTURES = Path(__file__).parent / "fixtures" / "session"
 CODEX_THREAD = "12345678-1234-1234-1234-123456789abc"
@@ -356,6 +357,7 @@ def test_observer_http_surface_is_read_only_and_directory_stable(
     assert _directory_snapshot(tmp_path) == before
 
 
+@REQUIRES_MODE_BIT_DENIAL
 def test_observer_reports_empty_and_unreadable_sources(tmp_path: Path) -> None:
     empty = discover_observer_sessions([tmp_path])
     assert empty.sessions == ()
