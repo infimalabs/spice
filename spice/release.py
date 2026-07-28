@@ -12,9 +12,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from spice.cli.effects import (
@@ -23,7 +23,7 @@ from spice.cli.effects import (
     MutationDecision,
     mark_authored_input,
 )
-from spice.commandplan import assert_plan_digest, command_plan_payload
+from spice.commandplan import assert_plan_digest
 from spice.errors import SpiceError
 from spice.process.tool import run_tool_command
 from spice.releaseidentity import (
@@ -42,82 +42,18 @@ from spice.releasenotes import (
     render_release_notes,
     render_release_range,
 )
+from spice.releaseplan import (
+    ReleasePlan,
+    ReleasePlanOperation,
+    github_publication_operations as _github_publication_operations,
+    publication_operations as _publication_operations,
+)
 
 BUMP_CHOICES = ("minor", "patch")
 PLAYWRIGHT_MCP_CONFIG_ENV = "SPICE_PLAYWRIGHT_MCP_CONFIG"  # env-policy: allow
 PYPI_POLL_ATTEMPTS = 20
 PYPI_POLL_SECONDS = 3
 PYPI_URL = "https://pypi.org/pypi/spice-harness/json"
-
-
-@dataclass(frozen=True)
-class ReleasePlanOperation:
-    """One ordered release action described without executing it."""
-
-    action: str
-    detail: str
-
-
-@dataclass(frozen=True)
-class ReleasePlan:
-    """A complete operator-readable plan for one mutating release verb."""
-
-    repository: Path
-    action: str
-    version: str
-    source_commit: str
-    notes_sha256: str | None
-    release_commit: str | None
-    notes_file: Path | None
-    operations: tuple[ReleasePlanOperation, ...]
-    schema_version: int = 1
-
-    def payload(self) -> dict[str, object]:
-        return command_plan_payload(
-            command=f"release {self.action}",
-            metadata={
-                "repository": str(self.repository),
-                "action": self.action,
-                "version": self.version,
-                "source_commit": self.source_commit,
-                "notes_sha256": self.notes_sha256,
-                "release_commit": self.release_commit,
-                "notes_file": (
-                    str(self.notes_file) if self.notes_file is not None else None
-                ),
-            },
-            operations=[
-                {
-                    "kind": operation.action,
-                    "target": operation.detail,
-                    "scope": "repository",
-                    "action": operation.action,
-                    "detail": operation.detail,
-                    "source_commit": self.source_commit,
-                    "notes_sha256": self.notes_sha256,
-                    "release_commit": self.release_commit,
-                }
-                for operation in self.operations
-            ],
-        )
-
-    def rows(self) -> list[str]:
-        digest = str(self.payload()["plan_digest"])
-        rows = [
-            f"release-plan schema={self.schema_version} action={self.action} "
-            f"version={self.version} digest={digest}",
-            f"repository={self.repository}",
-        ]
-        if self.release_commit is not None:
-            rows.append(f"release-commit={self.release_commit}")
-        if self.notes_file is not None:
-            rows.append(f"notes-file={self.notes_file}")
-        rows.extend(
-            f"{order}. {operation.action} {operation.detail}"
-            for order, operation in enumerate(self.operations, start=1)
-        )
-        rows.append("preview: no changes applied; pass --apply to execute")
-        return rows
 
 
 SIGINT_EXIT_CODE = 130
@@ -149,6 +85,14 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         one_pass = actions.add_parser(
             bump,
             help=f"Plan a {bump} bump, validation, commit, push, and publish.",
+        )
+        one_pass.add_argument(
+            "--notes-file",
+            type=Path,
+            help=(
+                "Curated GitHub release notes; the untouched generated draft "
+                "is refused."
+            ),
         )
         _add_apply_options(one_pass)
         _mark_authored_release(one_pass)
@@ -190,7 +134,13 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     publish = actions.add_parser(
         "publish", help="Validate the prepared version, then push and publish."
     )
-    publish.add_argument("--notes-file", type=Path)
+    publish.add_argument(
+        "--notes-file",
+        type=Path,
+        help=(
+            "Curated GitHub release notes; the untouched generated draft is refused."
+        ),
+    )
     publish.add_argument(
         "--release-commit",
         help=(
@@ -206,7 +156,13 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         "github", help="Create/push the release tag and GitHub Release."
     )
     github.add_argument("version", nargs="?")
-    github.add_argument("--notes-file", type=Path)
+    github.add_argument(
+        "--notes-file",
+        type=Path,
+        help=(
+            "Curated GitHub release notes; the untouched generated draft is refused."
+        ),
+    )
     github.add_argument(
         "--release-commit",
         help="Commit-ish to tag and use as the release notes target.",
@@ -288,10 +244,15 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             else:
                 output = release_notes_for_version(version, release_commit)
         else:
-            version = str(args.version or current_version())
+            requested_version = args.version
+            version = str(requested_version or current_version())
+            target = getattr(args, "release_commit", None)
             release_commit = release_commit_for_target(
-                version, getattr(args, "release_commit", None)
+                version,
+                target,
             )
+            if target is not None:
+                version = version_for_release_commit(requested_version, release_commit)
             output = release_notes_for_version(version, release_commit)
         notes_output = getattr(args, "output", None)
         if notes_output:
@@ -313,10 +274,15 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             output = release_range_for_unreleased(release_commit)
             print(output, end="" if output.endswith("\n") else "\n")
             return 0
-        version = str(args.version or current_version())
+        requested_version = args.version
+        version = str(requested_version or current_version())
+        target = getattr(args, "release_commit", None)
         release_commit = release_commit_for_target(
-            version, getattr(args, "release_commit", None)
+            version,
+            target,
         )
+        if target is not None:
+            version = version_for_release_commit(requested_version, release_commit)
         output = release_range_for_version(version, release_commit)
         print(output, end="" if output.endswith("\n") else "\n")
         return 0
@@ -389,9 +355,13 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             operations.extend(_publication_operations(version))
     elif mode == "publish":
         version = current_version()
+        target = getattr(args, "release_commit", None)
         release_commit = release_commit_for_target(
-            version, getattr(args, "release_commit", None)
+            version,
+            target,
         )
+        if target is not None:
+            version = version_for_release_commit(version, release_commit)
         ensure_publish_release_commit_is_head(release_commit)
         operations = [
             ReleasePlanOperation(
@@ -410,10 +380,15 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             *_publication_operations(version),
         ]
     elif mode == "github":
-        version = str(args.version or current_version())
+        requested_version = args.version
+        version = str(requested_version or current_version())
+        target = getattr(args, "release_commit", None)
         release_commit = release_commit_for_target(
-            version, getattr(args, "release_commit", None)
+            version,
+            target,
         )
+        if target is not None:
+            version = version_for_release_commit(requested_version, release_commit)
         operations = list(_github_publication_operations(version))
     else:
         raise SpiceError(f"cannot plan non-mutating release action {mode!r}")
@@ -435,28 +410,6 @@ def _release_notes_digest(path: Path | None) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
-    return (
-        ReleasePlanOperation(
-            "check-publish", f"dry-run upload artifacts for {version}"
-        ),
-        ReleasePlanOperation("push-main", "push HEAD to origin/main"),
-        ReleasePlanOperation("publish-package", f"upload spice-harness {version}"),
-        ReleasePlanOperation("wait-for-pypi", f"wait for PyPI to report {version}"),
-        *_github_publication_operations(version),
-    )
-
-
-def _github_publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
-    return (
-        ReleasePlanOperation("create-tag", f"create v{version} when absent"),
-        ReleasePlanOperation("push-tag", f"push v{version} to origin"),
-        ReleasePlanOperation(
-            "create-github-release", f"publish release v{version} when absent"
-        ),
-    )
-
-
 def apply_release_plan(args: argparse.Namespace, root: Path, plan: ReleasePlan) -> int:
     """Execute a previously rendered release plan through the canonical seams."""
     mode = str(args.release_mode)
@@ -472,16 +425,21 @@ def apply_release_plan(args: argparse.Namespace, root: Path, plan: ReleasePlan) 
             print_prepare_instructions(version)
             run(["git", "status", "--short", "--branch"])
             return 0
-        publish_release(version, getattr(args, "notes_file", None))
+        notes_file = getattr(args, "notes_file", None)
+        release_commit = git("rev-parse", "HEAD")
+        ensure_curated_release_notes(notes_file, release_commit)
+        publish_release(version, notes_file, release_commit=release_commit)
         return 0
     if mode == "publish":
         release_commit = plan.release_commit
         if release_commit is None:
             raise SpiceError("publish plan is missing its release commit")
+        notes_file = getattr(args, "notes_file", None)
+        ensure_curated_release_notes(notes_file, release_commit)
         run_release_gates(root, lambda: plan.version)
         publish_release(
             plan.version,
-            getattr(args, "notes_file", None),
+            notes_file,
             release_commit=release_commit,
         )
         return 0
@@ -489,9 +447,11 @@ def apply_release_plan(args: argparse.Namespace, root: Path, plan: ReleasePlan) 
         release_commit = plan.release_commit
         if release_commit is None:
             raise SpiceError("GitHub plan is missing its release commit")
+        notes_file = getattr(args, "notes_file", None)
+        ensure_curated_release_notes(notes_file, release_commit)
         publish_github_release(
             plan.version,
-            getattr(args, "notes_file", None),
+            notes_file,
             release_commit=release_commit,
         )
         return 0
@@ -741,8 +701,15 @@ def ensure_publish_release_commit_is_head(release_commit: str) -> None:
         )
 
 
-def previous_release_tag(current_tag: str) -> str:
-    raw = git("tag", "--list", "v*", "--sort=-v:refname")
+def previous_release_tag(current_tag: str, release_commit: str) -> str:
+    raw = git(
+        "tag",
+        "--merged",
+        release_commit,
+        "--list",
+        "v*",
+        "--sort=-v:refname",
+    )
     for tag in raw.splitlines():
         if tag and tag != current_tag:
             return tag
@@ -751,7 +718,7 @@ def previous_release_tag(current_tag: str) -> str:
 
 def release_notes_for_version(version: str, release_commit: str) -> str:
     current_tag = f"v{version}"
-    previous_tag = previous_release_tag(current_tag)
+    previous_tag = previous_release_tag(current_tag, release_commit)
     records = commit_records(previous_tag, release_commit)
     return render_release_notes(
         version=version,
@@ -778,7 +745,7 @@ def release_notes_for_unreleased(release_commit: str) -> str:
 
 def release_range_for_version(version: str, release_commit: str) -> str:
     current_tag = f"v{version}"
-    previous_tag = previous_release_tag(current_tag)
+    previous_tag = previous_release_tag(current_tag, release_commit)
     records = commit_records(previous_tag, release_commit)
     return render_release_range(
         version=version,
@@ -821,6 +788,59 @@ def _is_ancestor(candidate: str, commit: str) -> bool:
 
 def short_commit(commit: str) -> str:
     return git("rev-parse", "--short", commit)
+
+
+def release_version_at_commit(release_commit: str) -> str:
+    """Read the package version from the exact tree the release will name."""
+    try:
+        pyproject = tomllib.loads(git("show", f"{release_commit}:pyproject.toml"))
+        version = pyproject["project"]["version"]
+    except (KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise SpiceError(
+            f"release commit {release_commit} has no valid project.version"
+        ) from exc
+    if not isinstance(version, str) or not version:
+        raise SpiceError(
+            f"release commit {release_commit} has no valid project.version"
+        )
+    return version
+
+
+def version_for_release_commit(
+    requested_version: str | None,
+    release_commit: str,
+) -> str:
+    """Bind an explicit release target to the version stored in that tree."""
+    tree_version = release_version_at_commit(release_commit)
+    if requested_version is not None and requested_version != tree_version:
+        raise SpiceError(
+            f"release commit {release_commit} contains version {tree_version}, "
+            f"not requested version {requested_version}"
+        )
+    return tree_version
+
+
+def canonical_release_notes_for_commit(release_commit: str) -> str:
+    """Generate the untouched draft solely from the candidate release tree."""
+    return release_notes_for_version(
+        release_version_at_commit(release_commit),
+        release_commit,
+    )
+
+
+def ensure_curated_release_notes(
+    notes_file: Path | None,
+    release_commit: str,
+) -> None:
+    """Refuse the generator's untouched Highlights scaffold before publication."""
+    canonical = canonical_release_notes_for_commit(release_commit).encode("utf-8")
+    candidate = canonical if notes_file is None else notes_file.read_bytes()
+    if candidate == canonical:
+        raise SpiceError(
+            "refusing to publish untouched generated release notes: the candidate "
+            "still exactly matches the canonical draft and retains the Highlights "
+            "placeholder; curate Highlights before publication"
+        )
 
 
 def publish_release(
