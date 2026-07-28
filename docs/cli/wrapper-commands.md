@@ -279,10 +279,12 @@ vocabulary Spice can apply itself; an unknown operation kind refuses rather
 than being delegated back to the mounted executable. An operation explicitly
 marked `managed: false` is preflighted and preserved.
 
-Successful application appends one bounded JSONL fact per completed operation
-to a mount-scoped receipt under the worktree Git directory. The receipt reuses
-the plan's normalized operation records and digest; the mounted child does not
-write or know its path.
+Application appends a bounded write-ahead intent before each effect and a
+completion fact afterward to a mount-scoped JSONL receipt under the worktree
+Git directory. Both facts reuse the plan's normalized operation record and
+digest; the mounted child does not write or know the receipt path. If completion
+append is interrupted after the effect, resume observes the intended-after state
+and completes the same intent without repeating the effect.
 
 `spice generate --unapply` reads that authoritative receipt and previews its
 ownership-aware reverse plan without invoking the mounted child.

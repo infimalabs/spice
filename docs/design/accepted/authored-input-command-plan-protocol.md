@@ -121,22 +121,27 @@ repository common Git directory and not the checked-out
 log remains private mode `0600`; relocating it does not relax the prior receipt
 access boundary.
 
-Apply appends one total record for each completed operation. Each record is
-encoded once and emitted by one unbuffered append-mode write; a record that
-exceeds the checked post-encoding bound refuses before writing. An interrupted
-apply therefore leaves an authoritative completed prefix that resume can
-continue. No path rebuilds or replaces the receipt to acknowledge an operation.
-The concurrency guarantee comes from opening the regular file with
-`O_APPEND`: positioning at end-of-file and the following write occur as one
-indivisible step relative to other writers. One unbuffered write call per
-encoded record and a pre-write byte bound are the two conditions that preserve
-that guarantee. A conservative record-size constant is a refusal margin; it is
-not presented as the source of regular-file append atomicity or borrowed from a
-different file type.
+Apply appends a write-ahead intent before each operation and a completion fact
+afterward. Each fact contains the same total normalized operation record, is
+encoded once, and is emitted by one unbuffered append-mode write; a fact that
+exceeds the checked post-encoding bound refuses before the associated effect.
+An interrupted apply therefore leaves an authoritative completed prefix and at
+most one pending intent. Resume observes that intent's target: matching
+observed-before state means the effect still needs to run, while matching
+intended-after state means only its completion fact was interrupted. Divergence
+refuses rather than guessing. No path rebuilds or replaces the receipt to
+acknowledge an operation. The concurrency guarantee comes from opening the
+regular file with `O_APPEND`: positioning at end-of-file and the following
+write occur as one indivisible step relative to other writers. One unbuffered
+write call per encoded record and a pre-write byte bound are the two conditions
+that preserve that guarantee. A conservative record-size constant is a refusal
+margin; it is not presented as the source of regular-file append atomicity or
+borrowed from a different file type.
 
 The receipt uses the plan's normalized operation vocabulary, so plan and receipt
-digests use the same canonical encoding. Each receipt record contains the
-observed-before and intended-after state needed for ownership-aware reversal.
+digests use the same canonical encoding. Each intent and completion fact
+contains the observed-before and intended-after state needed for
+ownership-aware reversal.
 Repository executable-configuration approval is carried on newly completed
 operation records. If every initialization operation is already complete, a
 distinct approval fact is appended against an unchanged active operation
