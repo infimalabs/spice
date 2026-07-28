@@ -14,7 +14,8 @@ The production command surface is:
 spice task artifact add <task> <path> [--name NAME] [--type CONTENT_TYPE]
 spice task artifact list <task>
 spice task artifact show <task> <artifact-id>
-spice task artifact prune [--older-than DURATION]
+spice task artifact prune [--older-than DURATION] [--json]
+spice task artifact prune [--older-than DURATION] --apply
 ```
 
 Do not add new task phases for plans, research, prototypes, or long reviews.
@@ -112,8 +113,10 @@ Retention should be explicit, not implicit cleanup of "old-looking" files.
 
 - Artifacts attached to pending or waiting tasks are retained.
 - Artifacts attached to completed tasks are retained by default.
-- `spice task artifact prune --older-than <duration>` may remove artifacts for
-  completed tasks when their manifest marks them `retention: prunable`.
+- `spice task artifact prune --older-than <duration>` previews the ordered
+  removals for completed tasks whose manifests mark them
+  `retention: prunable`; `--json` emits the same plan for machines and
+  `--apply` performs it.
 - Artifacts marked `retention: permanent` are never pruned by the default
   command.
 - Deleting a task should not delete artifacts automatically; deletion should

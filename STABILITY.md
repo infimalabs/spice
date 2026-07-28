@@ -56,9 +56,16 @@ Effect count, destructiveness, and reversibility do not choose the default.
 There are no per-verb exceptions: if the reads below predict the wrong answer,
 the criterion or the read classification must change.
 
-For `init`, `init --unapply`, `task ingest`, and the publishing release verbs,
-bare invocation renders the human plan, `--json` renders the same ordered plan
-for machines, and `--apply` is the only mutation instruction.
+For `init`, `init --unapply`, `dev install-hooks`, `task ingest`,
+`task artifact prune`, and the publishing release verbs, bare invocation
+renders the human plan, `--json` renders the same ordered plan for machines,
+and `--apply` is the only mutation instruction.
+
+The executable authored-input inventory is metadata on the live leaf parsers,
+not a second hand-maintained command list. Its regression walks those parsers,
+derives every preview/apply, explicit-option, and hook-backend case from that
+metadata, and independently checks every live `--fix`, `--write*`, and
+`--create-tasks` option against the classification.
 
 Beginning with v0.30.0, `--dry-run` is withdrawn from `spice init` and
 `spice task ingest`. Those commands refuse the old spelling with the owning

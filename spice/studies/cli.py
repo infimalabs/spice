@@ -10,6 +10,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_STUDY_ENTRY_POINT_GROUP,
@@ -194,6 +200,14 @@ def _configure_env_parser(actions: Any) -> None:
         default=None,
         help="Write current env-policy findings to a JSON baseline file.",
     )
+    mark_authored_input(
+        env_policy,
+        AuthoredInputInvocation(
+            reads=(EffectRead.AUTHORED_REPOSITORY,),
+            decision=MutationDecision.EXPLICIT_OPTION,
+            mutation_args=("--write-baseline", "baseline.json"),
+        ),
+    )
     _add_study_action(
         actions,
         "env-name-ledger",
@@ -240,6 +254,14 @@ def _configure_mutation_parser(actions: Any) -> None:
         "--write-ratchet",
         type=Path,
         help="Write current scores to a mutation ratchet JSON file.",
+    )
+    mark_authored_input(
+        mutation,
+        AuthoredInputInvocation(
+            reads=(EffectRead.AUTHORED_REPOSITORY,),
+            decision=MutationDecision.EXPLICIT_OPTION,
+            mutation_args=("--write-ratchet", "ratchet.json"),
+        ),
     )
 
 
@@ -434,6 +456,17 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     task_generation = TASK_GENERATING_STUDY_ACTIONS.get(name)
     if task_generation is not None:
         _add_task_creation_arguments(sub, help_text=task_generation.create_tasks_help)
+        mark_authored_input(
+            sub,
+            AuthoredInputInvocation(
+                reads=(
+                    EffectRead.AUTHORED_REPOSITORY,
+                    EffectRead.TASK_BOARD,
+                ),
+                decision=MutationDecision.EXPLICIT_OPTION,
+                mutation_args=("--create-tasks",),
+            ),
+        )
     return sub
 
 

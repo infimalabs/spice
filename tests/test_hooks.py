@@ -1,5 +1,6 @@
 """Pre-commit hook installation, execution, and runtime integration tests."""
 
+import json
 import os
 import shlex
 import shutil
@@ -626,6 +627,41 @@ def test_dev_serve_web_typecheck_parser_exposes_command():
     args = build_parser().parse_args(["dev", "serve-web-typecheck"])
 
     assert args.dev_command == "serve-web-typecheck"
+
+
+def test_dev_install_hooks_previews_json_and_applies_shared_plan(
+    tmp_path, monkeypatch, capsys
+):
+    from spice.cli.parser import build_parser
+    from spice.hooks.initplan import initialization_plan_payload
+    from spice.hooks.install import plan_hook_installation
+
+    repo = _git_init(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    parser = build_parser()
+    expected = initialization_plan_payload(plan_hook_installation(repo))
+
+    preview = parser.parse_args(["dev", "install-hooks"])
+    assert preview.func(preview) == 0
+    preview_output = capsys.readouterr().out
+    assert preview_output.startswith("initialization-plan schema=1 mode=full\n")
+    assert "preview: no changes applied; pass --apply to execute" in preview_output
+    assert not hooks_dir(repo).exists()
+
+    machine = parser.parse_args(["dev", "install-hooks", "--json"])
+    assert machine.func(machine) == 0
+    assert json.loads(capsys.readouterr().out) == expected
+    assert not hooks_dir(repo).exists()
+
+    apply = parser.parse_args(["dev", "install-hooks", "--apply"])
+    assert apply.func(apply) == 0
+    apply_output = capsys.readouterr().out
+    assert "hook pre-commit -> .spice/hooks/pre-commit" in apply_output
+    assert (hooks_dir(repo) / "pre-commit").is_file()
+
+    conflicting = parser.parse_args(["dev", "install-hooks", "--apply", "--json"])
+    with pytest.raises(SpiceError, match="cannot be combined"):
+        conflicting.func(conflicting)
 
 
 def test_dev_serve_web_types_parser_exposes_write_mode():

@@ -14,6 +14,12 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.paths import require_repo_root
 
 
@@ -32,6 +38,17 @@ def configure_doctor_parser(subparsers: Any) -> None:
         "--fix",
         action="store_true",
         help="Apply the environment doctor's safe generated-state repairs.",
+    )
+    mark_authored_input(
+        doctor,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.EXPLICIT_OPTION,
+            mutation_args=("--fix",),
+        ),
     )
     doctor.set_defaults(func=handle_doctor)
 
