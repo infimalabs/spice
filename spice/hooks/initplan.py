@@ -746,6 +746,7 @@ def _completed_plan_receipt(
     plan: InitializationPlan,
     receipt: InitializationReceipt,
 ) -> InitializationReceipt:
+    """Project one receipt through every operation named by the current plan."""
     plan_keys = tuple(_operation_key(operation) for operation in plan.operations)
     if len(set(plan_keys)) != len(plan_keys):
         raise SpiceError("initialization plan contains duplicate operation identities")
@@ -768,6 +769,7 @@ def _apply_initialization_operations(
     receipt: InitializationReceipt,
     approved_digest: str | None,
 ) -> tuple[InitializationReceipt, bool]:
+    """Apply incomplete plan operations and report whether a record was appended."""
     operations = list(receipt.operations)
     positions = {
         _operation_key(receipt_operation.operation): index
@@ -806,6 +808,7 @@ def _append_initialization_approval(
     receipt: InitializationReceipt,
     approved_digest: str | None,
 ) -> None:
+    """Append a standalone approval fact against an existing receipt operation."""
     if not receipt.operations:
         raise SpiceError(
             "cannot record repository configuration approval without an "
