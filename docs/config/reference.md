@@ -16,7 +16,7 @@ current worktree, while `<git-common>` is the path reported by
 | Namespace | Ownership | Examples |
 | --- | --- | --- |
 | `<repository>/.spice` | Deliberately visible live and generated integration surfaces | Git hook shims, inbox files, learning records, browser artifacts |
-| `<git-common>/.spice` | Managed state shared by every worktree of the repository | Task backend by default, team state, ACKs, maxim metrics, attachments, task artifacts, flex claims |
+| `<git-common>/.spice` | Managed state shared by every worktree of the repository | Task backend by default, team state, ACKs, maxim metrics, attachments, task artifacts, flex claims, executable-configuration authority |
 | `<worktree-git-dir>/.spice` | Managed state and operator-owned input for one worktree/lane | Worktree configuration, initialization receipt, agent runtime, sticky constitution state, disabled-maxim state |
 
 An explicit absolute `SPICE_TASK_BACKEND` redirects task configuration,
@@ -65,6 +65,100 @@ Selector axes, live routing distinctions, mutation commands, and v0.30
 migration refusals live in the
 [layers and routing companion](layers-and-routing.md). They all use the layer
 and removal rules above.
+
+## Executable repository configuration authority
+
+Tracked configuration that names a command is inert until an operator approves
+it. The executable capabilities are `commands`, `wrappers`,
+`policy.pre_commit`, `policy.pre_commit_success`,
+`policy.pre_commit_builtins`, `say.command`, `judge.bin`, `rtk.executable`,
+`policy.suite_seam.run`, `policy.reachability_providers`, and
+`policy.python_typecheck_interpreter`. Spice digests each capability
+independently: approving or changing `wrappers` neither approves nor invalidates
+`policy.pre_commit`.
+
+`spice init --apply` is the exact-approval path. It records the current digest
+of every repository-defined executable capability in
+`<git-common>/.spice/repository-config-trust.jsonl`. The append-only file is
+mode `0600`, is shared by linked worktrees, and is absent from clones. Authority
+never lives in `<repository>/.spice`, root `spice.toml`, another tracked path, or
+any path an agent can force-commit. The old worktree initialization-receipt
+digest is migrated once in v0.31.0 through one repository-shared common-Git-dir
+migration marker; after that migration no linked worktree can import another
+legacy receipt and the old digest is not an approval path. If the lane that
+wins this one-time migration has no complete receipt matching its current
+configuration, it imports nothing; explicitly reapprove the current
+capabilities with `spice init --apply`.
+
+Reads and appends are serialized by a bounded lock in the same common-Git-dir
+namespace. A truncated, malformed, non-regular, or group/world-accessible
+authority log refuses instead of falling back to another approval source.
+
+Repositories that intentionally accept future signed updates can opt into a
+standing grant. Grant and revoke are authored-input mutations: both preview a
+versioned plan and change nothing until an operator supplies `--apply` (and may
+assert the displayed digest).
+
+```sh
+spice config trust show
+spice config trust grant \
+  --path wrappers \
+  --signer SHA256:operator-approved-key
+spice config trust grant \
+  --path wrappers \
+  --signer SHA256:operator-approved-key \
+  --apply=<previewed-plan-digest>
+```
+
+Omitting `--path` selects all executable capabilities currently present in
+repository configuration. `--signer` is repeatable and must match the
+fingerprint Git reports for each capability-changing commit.
+
+A standing grant pins the current `origin` URL, tracked upstream ref, exact
+anchor commit, capability set, and signer fingerprints. A later digest is
+derived only when all of these facts hold:
+
+- HEAD equals the pinned, locally fetched upstream ref and still descends from
+  the anchor;
+- root `spice.toml` is tracked, clean, and byte-identical to HEAD;
+- the remote URL and branch routing still equal the grant;
+- every commit since the anchor that changes a delegated capability has a
+  verifiable Git signature from an explicitly named fingerprint.
+
+These current remote/ref/HEAD/clean-tree facts are rechecked on every delegated
+use. A previously derived digest does not remain executable from a later local
+or divergent HEAD; only an exact operator approval is independent of the
+standing provenance route.
+
+Successful derivation appends the commit, capability digest, and signer
+evidence to the same common-Git-dir log. Serve launch fast-forward and task
+publication do not write grants and do not confer authority: a clean Serve
+advance merely supplies verifiable Git evidence, while an unsigned agent commit
+remains refused even after task publication moves the trusted ref to it.
+Unsigned commits, unknown signers, force-pushed/divergent history, local commits,
+dirty or untracked configuration, changed remotes, and ambiguous refs all
+refuse before the named command starts. The refusal includes the capability
+digest, command words, and the failed provenance fact.
+
+Revoke all exact and delegated authority without erasing its audit history:
+
+```sh
+spice config trust revoke --reason "rotate signing authority"
+spice config trust revoke \
+  --reason "rotate signing authority" \
+  --apply=<previewed-plan-digest>
+```
+
+Revocation immediately invalidates all exact and delegated executable-
+configuration authority while preserving its audit history. It is therefore
+also the recovery path for an exact approval when no standing grant is active.
+To recover, first make the lane clean and equal to the intended trusted ref. An
+unsigned or untrusted commit cannot be repaired by a later signed descendant
+because its provenance remains in the range: inspect the new anchor, revoke the
+old authority, then preview and apply a replacement grant, or explicitly
+approve only the current capability digests with `spice init --apply`. A
+changed remote, ref, or force-pushed history likewise requires revocation and a
+newly inspected grant.
 
 ## Runtime Model
 

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from spice.config.trust import plan_exact_repository_config_approval
 from spice.hooks.initplan import (
     InitializationMode,
     apply_initialization_plan,
@@ -17,4 +18,7 @@ def approve_repository_config(repo: Path) -> None:
         InitializationMode.GATES_ONLY,
         include_agent_skill=False,
     )
-    apply_initialization_plan(plan, approve_repository_config=True)
+    apply_initialization_plan(
+        plan,
+        repository_config_approval=plan_exact_repository_config_approval(resolved),
+    )

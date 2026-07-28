@@ -39,8 +39,10 @@ def test_agent_guidance_routes_authority_gate_refusals_to_the_operator():
 
     assert "## Operator Decision Boundaries" in skill
     assert "refusals to\nsurface, not speed bumps to log or route around" in skill
-    assert "current\n  configuration digest may execute" in skill
-    assert "Do not\n  run `spice init --apply`" in skill
+    assert "current\n  capability digest may execute" in skill
+    assert "command words. Do not run `spice init --apply`" in skill
+    assert "`spice config trust grant` / `revoke` plan" in skill
+    assert "A fetched ref,\n  successful task publication" in skill
     assert "current ordered plan may mutate\n  operator-authored state" in skill
     assert "Do not add `--apply`" in skill
     assert "unless the operator explicitly decides" in skill

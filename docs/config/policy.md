@@ -240,7 +240,10 @@ The shared registry-removal rule in the
 [configuration reference](reference.md) applies to bare built-in entries.
 Every pre-commit invocation prints each disabled built-in by name. A
 disablement from tracked repository configuration is covered by the
-executable-configuration digest approved through `spice init --apply`; `spice
-doctor` reports a required failure until that current approval receipt exists.
-Git-dir operator-owned disablements are already explicit operator intent and do
-not require a repository approval receipt.
+capability-scoped executable-configuration authority described in the
+[configuration reference](reference.md#executable-repository-configuration-authority).
+`spice init --apply` records an exact approval; an opt-in standing grant may
+derive a later digest only from its pinned signed provenance. `spice doctor`
+reports a required failure until current authority exists. Git-dir
+operator-owned disablements are already explicit operator intent and do not
+require a repository approval receipt.

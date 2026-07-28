@@ -8,6 +8,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.config import edit, layers, values
 from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
@@ -32,6 +38,8 @@ def configure_config_parser(subparsers: Any) -> None:
         help="Print the classification inventory for exported defaults.",
     )
     defaults_action.set_defaults(func=handle_config)
+
+    _configure_trust_parser(actions)
 
     set_action = actions.add_parser(
         "set",
@@ -130,6 +138,97 @@ def configure_config_parser(subparsers: Any) -> None:
     agent.set_defaults(func=handle_config)
 
 
+def _configure_trust_parser(actions: Any) -> None:
+    from spice.config.trust import EXECUTABLE_REPOSITORY_CAPABILITIES
+
+    trust = actions.add_parser(
+        "trust",
+        help="Inspect or authorize executable repository configuration.",
+    )
+    trust_actions = trust.add_subparsers(dest="trust_action", required=True)
+    show = trust_actions.add_parser(
+        "show",
+        help="Show shared exact approvals and the active standing grant.",
+    )
+    show.set_defaults(func=handle_config)
+
+    grant = trust_actions.add_parser(
+        "grant",
+        help="Preview a signed-provenance standing grant.",
+    )
+    grant.add_argument(
+        "--path",
+        action="append",
+        choices=EXECUTABLE_REPOSITORY_CAPABILITIES,
+        default=[],
+        help=(
+            "Executable capability to delegate; repeat as needed. The default "
+            "is every capability currently defined by repository configuration."
+        ),
+    )
+    grant.add_argument(
+        "--signer",
+        action="append",
+        default=[],
+        help="Trusted Git signature fingerprint; repeat for multiple signers.",
+    )
+    _add_trust_apply_arguments(grant)
+    mark_authored_input(
+        grant,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+                EffectRead.OWNERSHIP_RECEIPT,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            mutation_args=("--apply",),
+        ),
+    )
+    grant.set_defaults(func=handle_config)
+
+    revoke = trust_actions.add_parser(
+        "revoke",
+        help="Preview revocation of all exact and standing authority.",
+    )
+    revoke.add_argument(
+        "--reason",
+        default="operator revocation",
+        help="Audit reason stored with the append-only authority revocation.",
+    )
+    _add_trust_apply_arguments(revoke)
+    mark_authored_input(
+        revoke,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.OWNERSHIP_RECEIPT,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            mutation_args=("--apply",),
+        ),
+    )
+    revoke.set_defaults(func=handle_config)
+
+
+def _add_trust_apply_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--apply",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Append the common-Git-dir authority fact, optionally asserting "
+            "the previewed plan digest."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the versioned authority plan as JSON without applying it.",
+    )
+
+
 def _add_scope_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--scope",
@@ -169,6 +268,101 @@ def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
     _ = repo_root
     print(json.dumps(values.default_classifications(), indent=2, sort_keys=True))
     return 0
+
+
+def _handle_trust(args: argparse.Namespace, repo_root: Path) -> int:
+    from spice.commandplan import assert_plan_digest
+    from spice.config.trust import (
+        apply_standing_trust_plan,
+        plan_standing_repository_revocation,
+        plan_standing_repository_trust,
+        repository_config_approval,
+        repository_config_trust_state,
+        standing_trust_plan_rows,
+    )
+    from spice.config.trustpolicy import repository_trust_log_path
+
+    if args.trust_action == "show":
+        approval = repository_config_approval(repo_root)
+        state = repository_config_trust_state(repo_root)
+        print(
+            json.dumps(
+                _trust_state_payload(repo_root, state, approval),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    plan = (
+        plan_standing_repository_trust(
+            repo_root,
+            capabilities=args.path,
+            trusted_signers=args.signer,
+        )
+        if args.trust_action == "grant"
+        else plan_standing_repository_revocation(repo_root, reason=args.reason)
+    )
+    apply_requested = args.apply is not None
+    if apply_requested and args.json:
+        raise SpiceError(
+            "`spice config trust --apply` cannot be combined with `--json`"
+        )
+    if not apply_requested:
+        if args.json:
+            print(json.dumps(plan.payload, indent=2, sort_keys=True))
+        else:
+            print("\n".join(standing_trust_plan_rows(plan)))
+        return 0
+    expected = args.apply if isinstance(args.apply, str) else None
+    assert_plan_digest(plan.payload, expected)
+    apply_standing_trust_plan(plan)
+    rows = standing_trust_plan_rows(plan)
+    print(
+        "\n".join(
+            (*rows[:-1], f"authority-recorded={repository_trust_log_path(repo_root)}")
+        )
+    )
+    return 0
+
+
+def _trust_state_payload(
+    repo_root: Path,
+    state: Any,
+    approval: Any,
+) -> dict[str, Any]:
+    from spice.config.trustpolicy import repository_trust_log_path
+
+    grant = state.active_grant
+    return {
+        "authority_path": str(repository_trust_log_path(repo_root)),
+        "record_count": state.record_count,
+        "current": {
+            "approved": approval.approved,
+            "approved_digest": approval.approved_digest,
+            "digest": approval.digest,
+        },
+        "exact_approvals": {
+            capability: sorted(digests)
+            for capability, digests in state.exact_approvals.items()
+        },
+        "active_grant": (
+            {
+                "grant_id": grant.grant_id,
+                "repository_url": grant.repository_url,
+                "remote": grant.remote,
+                "ref": grant.ref,
+                "anchor_commit": grant.anchor_commit,
+                "capabilities": list(grant.capabilities),
+                "trusted_signers": list(grant.trusted_signers),
+                "delegated_approvals": {
+                    capability: sorted(digests)
+                    for capability, digests in state.delegated_approvals.items()
+                },
+            }
+            if grant is not None
+            else None
+        ),
+    }
 
 
 def _handle_set(args: argparse.Namespace, repo_root: Path) -> int:
@@ -420,6 +614,7 @@ _CONFIG_ACTIONS = {
     "show": _handle_show,
     "system": _handle_system,
     "defaults": _handle_defaults,
+    "trust": _handle_trust,
     "set": _handle_set,
     "say": _handle_say,
     "judge": _handle_judge,
