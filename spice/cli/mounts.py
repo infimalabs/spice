@@ -191,6 +191,7 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     env = dict(os.environ)  # env-policy: allow
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
+    env[COMMAND_PLAN_EXECUTION_DIGEST_ENV] = ""
     # The mounted child deliberately enters candidate checkout code. Preserve
     # the parent interpreter as the independently installed runtime identity so
     # release evidence can prove what ordinary fleet commands actually import.

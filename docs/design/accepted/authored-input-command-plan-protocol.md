@@ -119,6 +119,13 @@ means `spice`, preserving the original mounted-plan vocabulary:
   does not create a generic mounted-operation receipt or offer `--unapply` for
   those opaque effects.
 
+The parent advertises this ownership handshake with the empty internal
+execution-digest variable on the planning pass. Its absence identifies a
+pre-ownership installed parent; a newer candidate then retains the former
+single self-owned apply path only as the bootstrap needed to publish the first
+compatible parent. Once the installed parent advertises the handshake, explicit
+digest authorization and the two-pass boundary are mandatory.
+
 Unknown or mixed executors refuse. A command cannot switch ownership without
 changing every operation and therefore the plan digest. This second ownership
 mode is for commands such as the repository release appliance whose operations

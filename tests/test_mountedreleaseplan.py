@@ -16,6 +16,8 @@ from spice.cli.mounts import MountedCommand, run_mounted_command
 from spice.commandownership import (
     COMMAND_PLAN_EXECUTION_DIGEST_ENV,
     COMMAND_PLAN_EXECUTOR,
+    MOUNTED_COMMAND_ENV,
+    defer_command_owned_apply,
 )
 from spice.commandplan import command_plan_payload
 from spice.errors import SpiceError
@@ -135,7 +137,7 @@ def test_digest_authorized_mounted_release_apply_executes_once(tmp_path, monkeyp
     assert calls == [
         (
             ["release-tool", "prepare", "patch", f"--apply={digest}"],
-            None,
+            "",
             True,
         ),
         (
@@ -153,7 +155,7 @@ def test_mounted_release_apply_requires_an_explicit_digest(tmp_path, monkeypatch
         run_mounted_command(mount, ["prepare", "patch", "--apply"])
 
     assert effects == []
-    assert calls == [(["release-tool", "prepare", "patch", "--apply"], None, True)]
+    assert calls == [(["release-tool", "prepare", "patch", "--apply"], "", True)]
 
 
 def test_stale_mounted_release_digest_refuses_before_execution(
@@ -252,3 +254,18 @@ def test_operation_executor_is_bound_into_the_plan_digest():
     )
 
     assert spice_owned["plan_digest"] != command_owned["plan_digest"]
+
+
+def test_candidate_release_can_bootstrap_through_a_pre_ownership_parent(
+    tmp_path, monkeypatch
+):
+    _mount, _effects, _calls = _release_mount(tmp_path, monkeypatch)
+    args = release.build_release_parser().parse_args(["prepare", "patch"])
+    payload = release.plan_release(args, tmp_path).payload()
+    legacy_environ = {MOUNTED_COMMAND_ENV: "1"}
+
+    assert not defer_command_owned_apply(
+        payload,
+        apply_requested=True,
+        environ=legacy_environ,
+    )

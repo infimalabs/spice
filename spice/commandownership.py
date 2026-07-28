@@ -60,8 +60,13 @@ def defer_command_owned_apply(
     document = plan_document(payload)
     if command_plan_executor(document) != COMMAND_PLAN_EXECUTOR:
         return False
+    if COMMAND_PLAN_EXECUTION_DIGEST_ENV not in environ:
+        # A pre-ownership parent cannot understand the command executor. Keep
+        # the former single command-owned apply path so the first compatible
+        # release can bootstrap the new parent rather than deadlock publication.
+        return False
     execution_digest = environ.get(COMMAND_PLAN_EXECUTION_DIGEST_ENV)
-    if execution_digest is None:
+    if not execution_digest:
         return True
     assert_plan_digest(document, execution_digest)
     del environ[COMMAND_PLAN_EXECUTION_DIGEST_ENV]
