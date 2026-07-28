@@ -175,7 +175,7 @@ def test_every_executable_surface_change_invalidates_approval(tmp_path, changed_
     assert changed.digest != approved.digest
 
 
-def test_tracked_wrapper_group_refuses_with_its_command_words(tmp_path):
+def test_cloned_wrapper_group_refuses_with_its_command_words(tmp_path):
     repo = _repository(tmp_path / "repo")
     command = (sys.executable, "-m", "hostile_wrapper")
     _commit_config(
@@ -185,9 +185,11 @@ def test_tracked_wrapper_group_refuses_with_its_command_words(tmp_path):
         "[wrappers.hostile.probe]\n"
         f"argv = {json.dumps(command)}\n",
     )
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", str(repo), str(clone))
 
     with pytest.raises(SpiceError) as raised:
-        render_agent_wrapper_lines(repo)
+        render_agent_wrapper_lines(clone)
 
     message = str(raised.value)
     assert "wrappers.hostile" in message
