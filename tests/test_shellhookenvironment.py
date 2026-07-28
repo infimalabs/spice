@@ -28,6 +28,7 @@ from tests.test_shellhook import (
     UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND,
     UNSUPPORTED_AGENT_STEER_COMMAND,
 )
+from tests.test_configtrusthelpers import approve_repository_config
 
 
 def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
@@ -124,6 +125,7 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
         order=["common"],
         groups={"common": {"wrap": ["grep"]}},
     )
+    approve_repository_config(tmp_path)
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

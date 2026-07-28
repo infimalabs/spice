@@ -78,7 +78,7 @@ execution; they never accept both spellings in one invocation.
 | `spice task next`; `add`; `done`; `review`; `oops`; `note`; `reword`; `depends`; `wake`; `claim`; `reclaim`; `unclaim`; `modify`; `delete`; `capture` | Command-line intent and the task board, claim, and dependency graph; a repository tree selected for integration or publication is transferred opaquely | Direct intent |
 | `spice task artifact add` | The command line names the task and source path; the selected bytes are copied opaquely rather than interpreted as instructions | Direct intent |
 | `spice agent activation`; `requeue-deadletter`; `import`; `reply`; `ensure`; `supervise`; `post-tool-hook` | Command-line or ambient-agent identity, approved launch policy, and live agent, inbox, and supervisor state | Direct intent |
-| Mutating forms of `spice config say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys | Direct intent |
+| Mutating forms of `spice config set`; `say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys. The system-scope form includes explicit `--apply` after a bare preview names the installed path and reinstall loss. | Direct intent |
 | `spice maxim propose`; `file-proposals`; `disable`; `enable` | Command-line intent and durable ACK, maxim, and task-board state | Direct intent |
 | Interactive Serve mutations | Native fact stores plus the live operator action that requests the authority change | Direct intent |
 
