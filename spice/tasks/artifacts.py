@@ -188,7 +188,7 @@ def prune_artifacts(*, older_than: str | None = None, apply: bool = False) -> st
     if not lines:
         return "no prunable artifacts"
     if not apply and pruned:
-        lines.append("dry_run true; pass --apply to remove")
+        lines.append("preview true; pass --apply to remove")
     return "\n".join(lines)
 
 

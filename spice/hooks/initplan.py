@@ -245,15 +245,19 @@ def plan_initialization(
 
 
 def initialization_plan_payload(plan: InitializationPlan) -> dict[str, object]:
-    """Return the versioned JSON shape consumed by dry-run clients."""
+    """Return the versioned JSON shape consumed by preview clients."""
     return {
         "schema_version": plan.schema_version,
         "repository": str(plan.repo_root),
         "mode": plan.mode.value,
         "receipt_path": INIT_RECEIPT_RELATIVE_PATH.as_posix(),
         "operations": [
-            {**_operation_payload(operation), "will_change": operation.will_change}
-            for operation in plan.operations
+            {
+                "order": order,
+                **_operation_payload(operation),
+                "will_change": operation.will_change,
+            }
+            for order, operation in enumerate(plan.operations, start=1)
         ],
     }
 
@@ -293,7 +297,7 @@ def initialization_preview_rows(plan: InitializationPlan) -> list[str]:
             f"{_render_value(operation.generated_value)}"
             f"{effective} state={state}"
         )
-    rows.append("dry-run: no changes applied")
+    rows.append("preview: no changes applied; pass --apply to execute")
     return rows
 
 

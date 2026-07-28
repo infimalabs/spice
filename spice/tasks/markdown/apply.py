@@ -106,8 +106,35 @@ class ApplyPlan:
 
     def report(self) -> str:
         return "\n".join(
-            [f"root {self.root_handle}", *(verb.render() for verb in self.verbs)]
+            [
+                f"root {self.root_handle}",
+                *(verb.render() for verb in self.verbs),
+                "preview: no changes applied; pass --apply to execute",
+            ]
         )
+
+    def payload(self) -> dict[str, object]:
+        """Return the stable ordered machine representation of this plan."""
+        return {
+            "schema_version": 1,
+            "project": self.project,
+            "origin": self.origin,
+            "root_handle": self.root_handle,
+            "operations": [
+                {
+                    "order": order,
+                    "kind": verb.kind,
+                    "slug": verb.slug,
+                    "handle": verb.handle,
+                    "field": verb.field,
+                    "target": verb.target,
+                    "line": verb.line,
+                    "code": verb.code,
+                    "message": verb.message,
+                }
+                for order, verb in enumerate(self.verbs, start=1)
+            ],
+        }
 
 
 def resolve_ingest_project(actor: str, project: str | None) -> str:
@@ -1024,12 +1051,9 @@ def apply_document(
     *,
     project: str,
     origin: str,
-    dry_run: bool = False,
 ) -> str:
     """Plan and apply a parsed task document to its board family."""
     plan = plan_document(document, project=project, origin=origin)
-    if dry_run:
-        return plan.report()
     return execute_plan(plan)
 
 
@@ -1038,10 +1062,10 @@ def ingest_path(
     *,
     project: str | None,
     origin: str | None = None,
-    dry_run: bool = False,
+    apply: bool = False,
     infer_ordered_dependencies: bool = False,
-) -> str:
-    """Read, parse, and apply one task document."""
+) -> ApplyPlan | str:
+    """Read and plan one task document, applying only when explicitly requested."""
     actor = tw.canonical_actor(tw.current_actor())
     resolved_project, resolved_origin = resolve_ingest_target(
         actor, project=project, origin=origin
@@ -1050,9 +1074,14 @@ def ingest_path(
         read_document(str(path)),
         infer_ordered_dependencies=infer_ordered_dependencies,
     )
-    return apply_document(
+    if apply:
+        return apply_document(
+            document,
+            project=resolved_project,
+            origin=resolved_origin,
+        )
+    return plan_document(
         document,
         project=resolved_project,
         origin=resolved_origin,
-        dry_run=dry_run,
     )

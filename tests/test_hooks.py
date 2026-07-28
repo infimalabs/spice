@@ -441,7 +441,10 @@ def test_gates_only_initialization_installs_constitution_without_fleet_assets(tm
 def test_init_gates_cli_is_a_standalone_entry(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
 
-    result = _run([sys.executable, "-m", "spice", "init", "--gates"], cwd=repo)
+    result = _run(
+        [sys.executable, "-m", "spice", "init", "--gates", "--apply"],
+        cwd=repo,
+    )
 
     assert result.returncode == 0
     assert "hook pre-commit -> .spice/hooks/pre-commit" in result.stdout
@@ -527,7 +530,7 @@ def test_init_cli_bootstraps_bare_common_linked_worktree_before_repo_detection(
     lane = tmp_path / "lane"
     _git(source, "worktree", "add", str(lane), "main")
 
-    result = _run([sys.executable, "-m", "spice", "init"], cwd=lane)
+    result = _run([sys.executable, "-m", "spice", "init", "--apply"], cwd=lane)
 
     assert result.returncode == 0
     assert "core.hooksPath=.spice/hooks" in result.stdout
