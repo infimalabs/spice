@@ -19,6 +19,58 @@ and assume anything unlisted is internal unless another document says otherwise.
 | Static browser modules | Internal | `spice/serve/static/app.*.js` files are frameworkless implementation modules. Tests document invariants, but module boundaries are not public APIs. |
 | Supervisor internals | Internal | Watchdog, side-channel, lifecycle state files, and process supervision details may change as long as the public agent/session/task contracts remain true. |
 
+## Mutating command defaults
+
+For this contract, a mutation changes persistent repository or harness
+authority, or publishes to an external authority. Rendering standard output or
+a caller-selected report, creating a scratch tree, rebuilding a disposable
+projection, holding a process lifetime, and delegating a child argv are
+operational outputs rather than separate mutation-default decisions.
+
+The default follows from a verb's **effect-driving reads**: inputs whose
+contents can change the operations it plans or the payload it applies. Reads
+used only to locate a target, check a precondition, preserve unrelated content,
+copy caller-selected bytes opaquely, or parameterize an already-named action as
+approved standing policy do not make that input the operation's authored
+operand.
+
+**Default criterion:** A bare mutating verb previews when any effect-driving
+read is semantic input the operator authored: a document, a configuration or
+manifest surface, or a repository tree the verb will rewrite or publish. It
+applies when all of its effects are specified by the command line, the task or
+agent board, live runtime state, and approved standing policy alone. Batch
+records whose grammar is the argv equivalent count as command-line intent; a
+document does not change provenance merely because standard input transports
+it. An explicit mutation option is part of the command line, so a read-only
+verb with `--fix`, `--write-*`, or `--create-tasks` has already received its
+apply instruction; this classification does not make those existing spellings
+stable.
+
+Effect count, destructiveness, and reversibility do not choose the default.
+There are no per-verb exceptions: if the reads below predict the wrong answer,
+the criterion or the read classification must change.
+
+| Mutating verb or invocation | Effect-driving reads | Classification |
+| --- | --- | --- |
+| `spice init`; `spice deinit` | The repository and Git configuration being reconciled, plus the ownership receipt for reversal | Authored input |
+| `spice task ingest` | The Markdown task document selected by path or standard input | Authored input |
+| `spice task artifact prune` | Operator-chosen retention metadata in artifact manifests, combined with task completion state | Authored input |
+| `spice release minor`; `patch`; `prepare`; `publish`; `github` | The versioned repository tree and, where supplied, curated release notes that become the published payload | Authored input |
+| `spice study env-policy --write-baseline`; `mutations --write-ratchet`; `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals` with `--create-tasks` | Repository content interpreted into a baseline, ratchet, or finding tasks; the explicit option is the apply instruction | Authored input |
+| `spice dev serve-web-types --write`; `spice doctor --fix`; `spice dev doctor --fix` | Authored schema or repository state interpreted into generated-state repairs; the explicit option is the apply instruction | Authored input |
+| `spice task next`; `add`; `done`; `review`; `oops`; `note`; `reword`; `depends`; `wake`; `claim`; `reclaim`; `unclaim`; `modify`; `delete`; `capture` | Command-line intent and the task board, claim, and dependency graph | Direct intent |
+| `spice task artifact add` | The command line names the task and source path; the selected bytes are copied opaquely rather than interpreted as instructions | Direct intent |
+| `spice agent activation`; `requeue-deadletter`; `import`; `reply`; `ensure`; `supervise` | Command-line or ambient-agent identity, approved launch policy, and live agent, inbox, and supervisor state | Direct intent |
+| Mutating forms of `spice config say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys | Direct intent |
+| `spice maxim propose`; `file-proposals`; `disable`; `enable` | Command-line intent and durable ACK, maxim, and task-board state | Direct intent |
+| Interactive Serve mutations | Native fact stores plus the live operator action that requests the authority change | Direct intent |
+| `spice dev install-hooks`; `commit-msg`; `spice agent post-tool-hook` | Packaged policy plus an explicit command or parent Git/agent protocol request | Direct intent |
+
+Task completion remains direct intent even though it reaches Git integration
+and publication: the claim, board, and command line determine what it
+integrates. `spice agent run` and `spice lock run` only delegate an argv; the
+child verb owns the default for its own effects.
+
 When in doubt, prefer commands, tracked config, and extension entry points over internal files.
 Stable means compatibility matters; in motion means the idea is real, but the
 shape is still allowed to improve.
