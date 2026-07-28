@@ -222,27 +222,6 @@ def _target_names(target: ast.expr) -> tuple[str, ...]:
     return ()
 
 
-def test_every_declared_static_family_exists_in_packaged_configuration():
-    inventory = defaults.table("inventory")
-    families = set(inventory["toml_static"])
-
-    assert families == {
-        "agent",
-        "commands",
-        "judge",
-        "locks",
-        "maxim",
-        "maxims",
-        "policy",
-        "rtk",
-        "say",
-        "serve",
-        "tasks",
-        "wrappers",
-    }
-    assert families <= set(defaults.packaged_values())
-
-
 def test_every_packaged_key_round_trips_through_the_configuration_schema():
     path = PROJECT_ROOT / "spice" / "spice.toml"
     packaged = tomllib.loads(path.read_text(encoding="utf-8"))

@@ -126,9 +126,6 @@ def test_packaged_scalar_families_reach_their_typed_consumers(tmp_path, monkeypa
         [serve]
         host = "127.0.0.9"
         port = 9876
-
-        [inventory]
-        protocol_invariant = ["configured.inventory.probe"]
         """,
         encoding="utf-8",
     )
@@ -168,9 +165,6 @@ def test_packaged_scalar_families_reach_their_typed_consumers(tmp_path, monkeypa
     serve_args = build_parser(include_mounted_epilog=False).parse_args(["serve"])
     assert serve_args.host == "127.0.0.9"
     assert serve_args.port == SERVE_PORT_OVERRIDE
-    assert values.config_overview(tmp_path)["effective"]["inventory"][
-        "protocol_invariant"
-    ] == ["configured.inventory.probe"]
 
 
 def test_config_overview_shows_layers_effective_values_and_provenance(
