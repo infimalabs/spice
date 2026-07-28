@@ -1,4 +1,4 @@
-"""Refusals shared by manual and automatic agent starts."""
+"""Launch refusals extracted for reuse by manual and automatic starts."""
 
 from pathlib import Path
 

@@ -34,6 +34,7 @@ _FUNCTION_SCOPE_PACKAGED_READ = (
 _FROZEN_DEFAULT_RESOLVER_FUNCTIONS = frozenset(
     {
         "spice.agent.driver.resolve_claude_model",
+        # The lifecycle split keeps this frozen read in its decision-only seam.
         "spice.agent.agentmodel.requested_launch_knobs",
         "spice.agent.maxims.render_maxim_prompt",
         "spice.config.values.configured_agent_personality",

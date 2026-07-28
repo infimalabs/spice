@@ -7,9 +7,8 @@ git-backed agent state. Runtime state always lives under this worktree's git
 dir at `spice/agents/<driver>/`; once the real thread id is known, thread-owned
 state and logs live under `spice/agents/<driver>/<thread-id>/` in that same
 worktree git dir.
-The agent runs under a detached supervisor process (`spice agent supervise`)
-that owns the side-channel socket and the stdout watchdog, publishes the agent
-state, and survives the parent that launched it.
+The facade delegates immutable launch decisions and blocking supervisor watches
+to named seams while preserving its public compatibility surface.
 
 The prompt boundary: the initial prompt is only a neutral skill invocation.
 Operator prose never rides the start prompt — the agent recovers intent from

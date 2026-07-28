@@ -1,4 +1,4 @@
-"""Worktree skill discovery for neutral initial prompts."""
+"""Neutral-prompt skill discovery extracted from the lifecycle facade."""
 
 from pathlib import Path
 

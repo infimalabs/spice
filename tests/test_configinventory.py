@@ -87,11 +87,11 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
     }
 
     assert inventory == {
+        # Keep this list tied to active direct parsers after baseline integration.
         "toml_importers": (
             "spice/config/edit.py",
             "spice/config/layers.py",
             "spice/config/pyproject.py",
-            "spice/release.py",
         ),
         "retired_source_guards": (
             "_reject_retired_pyproject_config",

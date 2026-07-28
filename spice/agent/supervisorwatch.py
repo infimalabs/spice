@@ -1,4 +1,4 @@
-"""Supervisor-owned claim renewal, lane observation, and startup watching."""
+"""Blocking supervisor watches extracted from the lifecycle facade."""
 
 from __future__ import annotations
 

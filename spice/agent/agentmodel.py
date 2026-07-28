@@ -1,4 +1,4 @@
-"""Immutable decisions and records shared by the agent lifecycle."""
+"""Immutable lifecycle decisions extracted from the process-owning facade."""
 
 import json
 import subprocess
