@@ -124,7 +124,12 @@ reference guard. Commit normally to run the gates, or invoke the staged gate
 directly with `spice dev pre-commit`. Add `--json` to either preview form for
 the same ordered operations as a versioned machine-readable plan. Apply stores
 its interruption-safe ownership receipt under
-`<worktree-git-dir>/.spice/init-receipt.json`, outside the tracked work tree.
+`<worktree-git-dir>/.spice/init-receipt.jsonl`, outside the tracked work tree.
+The receipt is an append-only JSONL log: each completed operation is
+pre-encoded, checked against the record-size refusal bound, and emitted by one
+unbuffered write on a regular file opened with `O_APPEND`. The regular-file
+`O_APPEND` contract makes end positioning and that write indivisible between
+writers; the byte bound is a resource margin, not the source of atomicity.
 Run `spice init --unapply` to preview reversal of that receipt in exact reverse
 order, then `spice init --unapply --apply` to execute it. The preview includes
 the current receipt digest; pass it as `--unapply=<receipt-digest>` to assert

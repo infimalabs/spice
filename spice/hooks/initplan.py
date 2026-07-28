@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -25,10 +26,17 @@ from spice.agent.lifecycle import (
 from spice.errors import SpiceError
 from spice.operatorstate import (
     INITIALIZATION_RECEIPT_PATH,
+    OPERATOR_STATE_RELOCATION_RELEASE,
     operator_state_path,
     prepare_operator_state_path,
 )
-from spice.paths import STATE_DIRNAME, atomic_write_text, git_common_dir, git_dir
+from spice.paths import (
+    STATE_DIRNAME,
+    atomic_write_text,
+    fsync_directory,
+    git_common_dir,
+    git_dir,
+)
 from spice.process.git import run_git_command
 
 HOOKS_DIRNAME = "hooks"
@@ -48,9 +56,15 @@ STATE_GITIGNORE_CONTENT = (
 )
 HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
 INIT_RECEIPT_MODE = 0o600
-DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
+WITHDRAWN_INIT_RECEIPT_FILENAME = "init-receipt.json"
+WITHDRAWN_DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
 RECEIPT_DIGEST_BYTES = 32
+RECEIPT_LOG_SCHEMA_VERSION = 1
+# This is a refusal/resource bound, not the source of regular-file append
+# atomicity. POSIX O_APPEND supplies the indivisible seek-to-end plus write;
+# one unbuffered os.write call per pre-encoded record preserves that guarantee.
+RECEIPT_RECORD_MAX_BYTES = 64 * 1024
 FILE_MODE_MAX = 0o7777
 
 
@@ -76,6 +90,14 @@ class InitReceiptStatus(StrEnum):
     APPLYING = "applying"
     COMPLETE = "complete"
     DEINITIALIZING = "deinitializing"
+
+
+class InitReceiptEvent(StrEnum):
+    """One durable fact in the initialization ownership log."""
+
+    APPLY = "apply"
+    UNAPPLY = "unapply"
+    TRANSFER = "transfer"
 
 
 @dataclass(frozen=True)
@@ -136,6 +158,26 @@ class InitializationReceipt:
     status: InitReceiptStatus
     operations: tuple[InitReceiptOperation, ...]
     schema_version: int = 1
+
+
+@dataclass(frozen=True)
+class InitializationReceiptRecord:
+    """One complete append-only fact over the shared plan operation vocabulary."""
+
+    repo_root: Path
+    mode: InitializationMode
+    plan_schema_version: int
+    event: InitReceiptEvent
+    operation_index: int
+    operation_count: int
+    operation: InitOperation
+    outcome: str | None = None
+    observed_kind: str | None = None
+    observed_value: str | None = None
+    observed_mode: int | None = None
+    observed_sha256: str | None = None
+    shared_owner: str | None = None
+    schema_version: int = RECEIPT_LOG_SCHEMA_VERSION
 
 
 def hook_shim_content(args: str) -> str:
@@ -253,6 +295,7 @@ def initialization_plan_payload(plan: InitializationPlan) -> dict[str, object]:
     """Return the versioned JSON shape consumed by preview clients."""
     return {
         "schema_version": plan.schema_version,
+        "plan_digest": initialization_plan_digest(plan),
         "repository": str(plan.repo_root),
         "mode": plan.mode.value,
         "receipt_path": str(initialization_receipt_path(plan.repo_root)),
@@ -330,34 +373,289 @@ def initialization_receipt_payload(
 
 
 def initialization_receipt_digest(receipt: InitializationReceipt) -> str:
-    """Hash the complete normalized receipt used as unapply authority."""
+    """Hash active receipt operations through the plan's canonical vocabulary."""
+    return _operation_sequence_digest(
+        receipt.repo_root,
+        receipt.mode,
+        receipt.plan_schema_version,
+        tuple(item.operation for item in receipt.operations if item.completed),
+    )
+
+
+def initialization_plan_digest(plan: InitializationPlan) -> str:
+    """Hash a plan through the same normalized operation sequence as its receipt."""
+    return _operation_sequence_digest(
+        plan.repo_root,
+        plan.mode,
+        plan.schema_version,
+        plan.operations,
+    )
+
+
+def _operation_sequence_digest(
+    repo_root: Path,
+    mode: InitializationMode,
+    plan_schema_version: int,
+    operations: tuple[InitOperation, ...],
+) -> str:
     encoded = json.dumps(
-        initialization_receipt_payload(receipt),
+        {
+            "schema_version": plan_schema_version,
+            "repository": str(repo_root),
+            "mode": mode.value,
+            "operations": [_operation_payload(operation) for operation in operations],
+        },
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
-def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
-    path = prepare_operator_state_path(repo_root, INITIALIZATION_RECEIPT_PATH)
+def initialization_receipt_record_payload(
+    record: InitializationReceiptRecord,
+) -> dict[str, object]:
+    """Return one total JSONL record over the normalized plan operation."""
+    return {
+        "schema_version": record.schema_version,
+        "plan_schema_version": record.plan_schema_version,
+        "repository": str(record.repo_root),
+        "mode": record.mode.value,
+        "event": record.event.value,
+        "operation_index": record.operation_index,
+        "operation_count": record.operation_count,
+        **_operation_payload(record.operation),
+        "outcome": record.outcome,
+        "observed_kind": record.observed_kind,
+        "observed_value": record.observed_value,
+        "observed_mode": record.observed_mode,
+        "observed_sha256": record.observed_sha256,
+        "shared_owner": record.shared_owner,
+    }
+
+
+def encode_initialization_receipt_record(
+    record: InitializationReceiptRecord,
+) -> bytes:
+    """Encode and bound one record before any append or associated mutation."""
+    encoded = (
+        json.dumps(
+            initialization_receipt_record_payload(record),
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    if len(encoded) > RECEIPT_RECORD_MAX_BYTES:
+        raise SpiceError(
+            "initialization receipt record exceeds encoded byte bound: "
+            f"{len(encoded)} > {RECEIPT_RECORD_MAX_BYTES}"
+        )
+    return encoded
+
+
+def append_initialization_receipt_record(
+    record: InitializationReceiptRecord,
+    *,
+    encoded: bytes | None = None,
+) -> None:
+    """Append one pre-bounded record with one unbuffered O_APPEND write.
+
+    POSIX regular-file ``O_APPEND`` makes positioning at end-of-file and the
+    following write one indivisible step relative to other writers. That is the
+    guarantee. The two conditions preserving it here are that the complete
+    record is encoded and size-checked first, then emitted by exactly one
+    unbuffered ``os.write`` call. ``RECEIPT_RECORD_MAX_BYTES`` is a refusal and
+    resource margin; it is not borrowed atomicity from pipes or another file
+    type.
+    """
+    payload = encode_initialization_receipt_record(record)
+    if encoded is not None and encoded != payload:
+        raise SpiceError(
+            "pre-encoded initialization receipt record does not match its fact"
+        )
+    path = initialization_receipt_path(record.repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existed = path.exists()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        descriptor = os.open(path, flags, INIT_RECEIPT_MODE)
+    except OSError as exc:
+        raise SpiceError(
+            f"could not open initialization receipt {path}: {exc}"
+        ) from exc
+    chmod_after_close = not hasattr(os, "fchmod")
+    try:
+        if not chmod_after_close:
+            os.fchmod(descriptor, INIT_RECEIPT_MODE)
+        written = os.write(descriptor, payload)
+        if written != len(payload):
+            raise SpiceError(
+                "short initialization receipt append: "
+                f"wrote {written} of {len(payload)} bytes"
+            )
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise SpiceError(
+            f"could not append initialization receipt {path}: {exc}"
+        ) from exc
+    finally:
+        os.close(descriptor)
+    if chmod_after_close:
+        path.chmod(INIT_RECEIPT_MODE)
+    if not existed:
+        fsync_directory(path.parent)
+
+
+def load_initialization_receipt_records(
+    repo_root: Path,
+) -> tuple[InitializationReceiptRecord, ...]:
+    """Read and validate the complete append-only receipt log."""
+    resolved_root = repo_root.expanduser().resolve()
+    path = _prepare_initialization_receipt_log(resolved_root)
+    try:
+        content = path.read_bytes()
     except FileNotFoundError:
-        return None
-    except (OSError, json.JSONDecodeError) as exc:
+        return ()
+    except OSError as exc:
         raise SpiceError(
             f"could not read initialization receipt {path}: {exc}"
         ) from exc
-    try:
-        return initialization_receipt_from_payload(payload)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise SpiceError(f"invalid initialization receipt {path}: {exc}") from exc
+    if not content:
+        return ()
+    if not content.endswith(b"\n"):
+        raise SpiceError(f"invalid initialization receipt {path}: unterminated record")
+    records: list[InitializationReceiptRecord] = []
+    for line_number, encoded in enumerate(content.splitlines(keepends=True), start=1):
+        if len(encoded) > RECEIPT_RECORD_MAX_BYTES:
+            raise SpiceError(
+                f"invalid initialization receipt {path}: record {line_number} "
+                f"exceeds {RECEIPT_RECORD_MAX_BYTES} bytes"
+            )
+        try:
+            payload = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SpiceError(
+                f"invalid initialization receipt {path}: record {line_number}: {exc}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise SpiceError(
+                f"invalid initialization receipt {path}: "
+                f"record {line_number} must be an object"
+            )
+        try:
+            record = initialization_receipt_record_from_payload(payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SpiceError(
+                f"invalid initialization receipt {path}: record {line_number}: {exc}"
+            ) from exc
+        if record.repo_root != resolved_root:
+            raise SpiceError(
+                "initialization receipt belongs to a different repository: "
+                f"{record.repo_root}"
+            )
+        records.append(record)
+    return tuple(records)
+
+
+def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
+    """Replay the append-only log into the current active ownership receipt."""
+    records = load_initialization_receipt_records(repo_root)
+    if not records:
+        return None
+    active: dict[
+        tuple[InitOperationKind, InitOperationScope, str],
+        InitializationReceiptRecord,
+    ] = {}
+    expected_count = 0
+    unapplying = False
+    plan_schema_version = records[0].plan_schema_version
+    mode = records[0].mode
+    for record in records:
+        if record.plan_schema_version != plan_schema_version:
+            raise SpiceError("initialization receipt mixes plan schema versions")
+        if record.mode is InitializationMode.FULL:
+            mode = InitializationMode.FULL
+        if record.event is InitReceiptEvent.UNAPPLY:
+            unapplying = True
+            continue
+        if unapplying:
+            raise SpiceError(
+                "initialization receipt contains an apply or transfer record "
+                "after reversal began"
+            )
+        key = _operation_key(record.operation)
+        if record.event is InitReceiptEvent.TRANSFER and key not in active:
+            raise SpiceError(
+                "initialization receipt transfers unknown operation "
+                f"{record.operation.target!r}"
+            )
+        active[key] = record
+        expected_count = max(expected_count, record.operation_count)
+    ordered = tuple(sorted(active.values(), key=lambda item: item.operation_index))
+    indices = tuple(record.operation_index for record in ordered)
+    if len(set(indices)) != len(indices):
+        raise SpiceError("initialization receipt has duplicate operation positions")
+    complete = len(ordered) == expected_count and indices == tuple(
+        range(expected_count)
+    )
+    return InitializationReceipt(
+        repo_root=records[0].repo_root,
+        mode=mode,
+        plan_schema_version=plan_schema_version,
+        status=(
+            InitReceiptStatus.DEINITIALIZING
+            if unapplying
+            else InitReceiptStatus.COMPLETE
+            if complete
+            else InitReceiptStatus.APPLYING
+        ),
+        operations=tuple(
+            InitReceiptOperation(operation=record.operation, completed=True)
+            for record in ordered
+        ),
+    )
+
+
+def initialization_receipt_record_from_payload(
+    payload: dict[str, object],
+) -> InitializationReceiptRecord:
+    schema_version = _required_int(payload["schema_version"])
+    if schema_version != RECEIPT_LOG_SCHEMA_VERSION:
+        raise ValueError(f"unsupported receipt record schema {schema_version!r}")
+    plan_schema_version = _required_int(payload["plan_schema_version"])
+    if plan_schema_version != 1:
+        raise ValueError(f"unsupported plan schema version {plan_schema_version!r}")
+    event = InitReceiptEvent(_required_string(payload["event"]))
+    operation_index = _required_int(payload["operation_index"])
+    operation_count = _required_int(payload["operation_count"])
+    if operation_index < 0 or operation_count <= operation_index:
+        raise ValueError("receipt operation position is outside its operation count")
+    outcome = _optional_string(payload.get("outcome"))
+    if (event is InitReceiptEvent.UNAPPLY) != (outcome is not None):
+        raise ValueError("only unapply records carry a reversal outcome")
+    return InitializationReceiptRecord(
+        repo_root=Path(_required_string(payload["repository"])).expanduser().resolve(),
+        mode=InitializationMode(_required_string(payload["mode"])),
+        plan_schema_version=plan_schema_version,
+        event=event,
+        operation_index=operation_index,
+        operation_count=operation_count,
+        operation=_operation_from_payload(payload),
+        outcome=outcome,
+        observed_kind=_optional_string(payload.get("observed_kind")),
+        observed_value=_optional_string(payload.get("observed_value")),
+        observed_mode=_optional_mode(payload.get("observed_mode")),
+        observed_sha256=_optional_string(payload.get("observed_sha256")),
+        shared_owner=_optional_string(payload.get("shared_owner")),
+        schema_version=schema_version,
+    )
 
 
 def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
-    """Apply one plan with an atomically updated receipt after every operation."""
-    if (git_dir(plan.repo_root) / DEINIT_RECEIPT_FILENAME).is_file():
+    """Apply one plan, appending exactly one receipt record per completion."""
+    if (git_dir(plan.repo_root) / WITHDRAWN_DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
             "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
@@ -396,7 +694,6 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
     ):
         return existing
 
-    write_initialization_receipt(receipt)
     operations = list(receipt.operations)
     positions = {
         _operation_key(receipt_operation.operation): index
@@ -404,15 +701,27 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
     }
     for operation in plan.operations:
         position = positions[_operation_key(operation)]
+        if operations[position].completed:
+            continue
+        receipt_operation = operations[position].operation
+        record = InitializationReceiptRecord(
+            repo_root=receipt.repo_root,
+            mode=receipt.mode,
+            plan_schema_version=receipt.plan_schema_version,
+            event=InitReceiptEvent.APPLY,
+            operation_index=position,
+            operation_count=len(operations),
+            operation=receipt_operation,
+        )
+        encoded = encode_initialization_receipt_record(record)
         if operation.will_change:
             if operation.kind is InitOperationKind.FILE:
                 _apply_file_operation(plan.repo_root, operation)
             else:
                 _apply_config_operation(plan.repo_root, operation)
-        if not operations[position].completed:
-            operations[position] = replace(operations[position], completed=True)
-            receipt = replace(receipt, operations=tuple(operations))
-            write_initialization_receipt(receipt)
+        append_initialization_receipt_record(record, encoded=encoded)
+        operations[position] = replace(operations[position], completed=True)
+        receipt = replace(receipt, operations=tuple(operations))
 
     status = (
         InitReceiptStatus.COMPLETE
@@ -420,7 +729,6 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
         else InitReceiptStatus.APPLYING
     )
     receipt = replace(receipt, status=status, operations=tuple(operations))
-    write_initialization_receipt(receipt)
     return receipt
 
 
@@ -681,18 +989,100 @@ def _merge_receipt_operation(
     return InitReceiptOperation(operation=operation, completed=completed)
 
 
-def write_initialization_receipt(receipt: InitializationReceipt) -> None:
-    path = initialization_receipt_path(receipt.repo_root)
-    content = (
-        json.dumps(
-            initialization_receipt_payload(receipt),
-            indent=2,
-            sort_keys=True,
+def _prepare_initialization_receipt_log(repo_root: Path) -> Path:
+    """Perform the v0.30.0 document-to-log migration once, then return JSONL."""
+    canonical = initialization_receipt_path(repo_root)
+    predecessor = canonical.with_name(WITHDRAWN_INIT_RECEIPT_FILENAME)
+    if predecessor.exists() or predecessor.is_symlink():
+        if canonical.exists() or canonical.is_symlink():
+            raise SpiceError(
+                f"remove {predecessor}; initialization receipt document was "
+                f"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE} and the "
+                f"append-only log already exists at {canonical}"
+            )
+        if predecessor.is_symlink() or not predecessor.is_file():
+            raise SpiceError(
+                f"remove {predecessor}; initialization receipt document was "
+                f"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE} and is not "
+                "a regular file"
+            )
+        _migrate_initialization_receipt_document(
+            predecessor,
+            canonical,
+            expected_repo_root=repo_root,
         )
-        + "\n"
+        fsync_directory(canonical.parent)
+
+    return prepare_operator_state_path(
+        repo_root,
+        INITIALIZATION_RECEIPT_PATH,
+        migrate=lambda source, target: _migrate_initialization_receipt_document(
+            source,
+            target,
+            expected_repo_root=repo_root,
+        ),
     )
-    atomic_write_text(path, content, write_if_changed=True)
-    path.chmod(INIT_RECEIPT_MODE)
+
+
+def _migrate_initialization_receipt_document(
+    source: Path,
+    target: Path,
+    *,
+    expected_repo_root: Path,
+) -> None:
+    """Translate one retired mutable document into its completed record prefix."""
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SpiceError(
+            f"could not migrate initialization receipt document {source}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise SpiceError(
+            f"could not migrate initialization receipt document {source}: "
+            "top level must be an object"
+        )
+    try:
+        receipt = initialization_receipt_from_payload(payload)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SpiceError(
+            f"could not migrate initialization receipt document {source}: {exc}"
+        ) from exc
+    if receipt.repo_root != expected_repo_root:
+        raise SpiceError(
+            f"could not migrate initialization receipt document {source}: "
+            f"receipt belongs to {receipt.repo_root}, not {expected_repo_root}"
+        )
+    completed_positions = tuple(
+        position for position, item in enumerate(receipt.operations) if item.completed
+    )
+    if completed_positions != tuple(range(len(completed_positions))):
+        raise SpiceError(
+            f"could not migrate initialization receipt document {source}: "
+            "completed operations are not an authoritative prefix"
+        )
+    encoded_records = tuple(
+        encode_initialization_receipt_record(
+            InitializationReceiptRecord(
+                repo_root=receipt.repo_root,
+                mode=receipt.mode,
+                plan_schema_version=receipt.plan_schema_version,
+                event=InitReceiptEvent.APPLY,
+                operation_index=position,
+                operation_count=len(receipt.operations),
+                operation=item.operation,
+            )
+        )
+        for position, item in enumerate(receipt.operations)
+        if item.completed
+    )
+    atomic_write_text(
+        target,
+        b"".join(encoded_records).decode("utf-8"),
+        write_if_changed=False,
+    )
+    target.chmod(INIT_RECEIPT_MODE)
+    source.unlink()
 
 
 def _render_mode(mode: int | None) -> str:

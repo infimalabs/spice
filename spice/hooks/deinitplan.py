@@ -15,21 +15,26 @@ from typing import Literal, TypedDict
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
     INIT_RECEIPT_MODE,
-    DEINIT_RECEIPT_FILENAME,
+    WITHDRAWN_DEINIT_RECEIPT_FILENAME,
     InitOperation,
     InitOperationKind,
     InitOperationScope,
+    InitReceiptEvent,
     InitReceiptStatus,
     InitializationReceipt,
+    InitializationReceiptRecord,
+    append_initialization_receipt_record,
+    encode_initialization_receipt_record,
     initialization_receipt_from_payload,
     initialization_receipt_digest,
     initialization_receipt_path,
     initialization_receipt_payload,
     git_config_file_get,
     load_initialization_receipt,
-    write_initialization_receipt,
+    load_initialization_receipt_records,
 )
-from spice.paths import atomic_write_text, git_dir
+from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
+from spice.paths import atomic_write_text, fsync_directory, git_dir
 from spice.process.git import run_git_command
 
 DEINIT_SCHEMA_VERSION = 1
@@ -120,39 +125,67 @@ class DeinitializationReport(TypedDict):
 
 
 def deinitialization_receipt_path(repo_root: Path) -> Path:
-    return git_dir(repo_root.expanduser().resolve()) / DEINIT_RECEIPT_FILENAME
+    """Return the withdrawn separate reverse-document path for migration checks."""
+    return git_dir(repo_root.expanduser().resolve()) / WITHDRAWN_DEINIT_RECEIPT_FILENAME
 
 
 def load_deinitialization_receipt(
     repo_root: Path,
 ) -> DeinitializationReceipt | None:
-    path = deinitialization_receipt_path(repo_root)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    """Replay reversal outcomes by walking the shared receipt log back to front."""
+    resolved_root = repo_root.expanduser().resolve()
+    _migrate_deinitialization_receipt_document(resolved_root)
+    records = load_initialization_receipt_records(resolved_root)
+    reversed_records: dict[int, InitializationReceiptRecord] = {}
+    for record in reversed(records):
+        if record.event is not InitReceiptEvent.UNAPPLY:
+            continue
+        if record.operation_index in reversed_records:
+            continue
+        reversed_records[record.operation_index] = record
+    if not reversed_records:
         return None
-    except (OSError, json.JSONDecodeError) as exc:
+    initialization = load_initialization_receipt(resolved_root)
+    if initialization is None:
         raise SpiceError(
-            f"could not read deinitialization receipt {path}: {exc}"
-        ) from exc
-    try:
-        return _deinitialization_receipt_from_payload(payload)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise SpiceError(f"invalid deinitialization receipt {path}: {exc}") from exc
-
-
-def write_deinitialization_receipt(receipt: DeinitializationReceipt) -> None:
-    path = deinitialization_receipt_path(receipt.repo_root)
-    content = (
-        json.dumps(
-            deinitialization_receipt_payload(receipt),
-            indent=2,
-            sort_keys=True,
+            "initialization receipt contains reversal outcomes without "
+            "active apply records"
         )
-        + "\n"
+    for index, record in reversed_records.items():
+        if index >= len(initialization.operations):
+            raise SpiceError(
+                f"initialization receipt reverses unknown operation position {index}"
+            )
+        expected = initialization.operations[index].operation
+        if (
+            record.operation.kind,
+            record.operation.scope,
+            record.operation.target,
+        ) != (expected.kind, expected.scope, expected.target):
+            raise SpiceError(
+                "initialization receipt reversal record does not match "
+                f"operation position {index}"
+            )
+    operations: list[DeinitOperationState] = []
+    for index in reversed(range(len(initialization.operations))):
+        record = reversed_records.get(index)
+        if record is not None:
+            operations.append(_state_from_record(record))
+        else:
+            operations.append(DeinitOperationState(initialization_index=index))
+    return DeinitializationReceipt(
+        repo_root=resolved_root,
+        initialization=replace(
+            initialization,
+            status=InitReceiptStatus.DEINITIALIZING,
+        ),
+        status=(
+            DeinitReceiptStatus.COMPLETE
+            if all(state.completed for state in operations)
+            else DeinitReceiptStatus.REVERSING
+        ),
+        operations=tuple(operations),
     )
-    atomic_write_text(path, content, write_if_changed=True)
-    path.chmod(INIT_RECEIPT_MODE)
 
 
 def deinitialization_receipt_payload(
@@ -179,6 +212,98 @@ def deinitialization_receipt_payload(
             for state in receipt.operations
         ],
     }
+
+
+def _migrate_deinitialization_receipt_document(repo_root: Path) -> None:
+    """Append completed reverse facts from the withdrawn document, then remove it."""
+    path = deinitialization_receipt_path(repo_root)
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or not path.is_file():
+        raise SpiceError(
+            f"remove {path}; separate reversal receipt was withdrawn in "
+            f"{OPERATOR_STATE_RELOCATION_RELEASE} and is not a regular file"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SpiceError(
+            f"could not migrate withdrawn deinitialization receipt {path}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise SpiceError(
+            f"could not migrate withdrawn deinitialization receipt {path}: "
+            "top level must be an object"
+        )
+    try:
+        receipt = _deinitialization_receipt_from_payload(payload)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SpiceError(
+            f"could not migrate withdrawn deinitialization receipt {path}: {exc}"
+        ) from exc
+    existing = {
+        record.operation_index
+        for record in load_initialization_receipt_records(repo_root)
+        if record.event is InitReceiptEvent.UNAPPLY
+    }
+    for state in receipt.operations:
+        if not state.completed or state.initialization_index in existing:
+            continue
+        record = _unapply_record(receipt, state)
+        encoded = encode_initialization_receipt_record(record)
+        append_initialization_receipt_record(record, encoded=encoded)
+    try:
+        path.unlink()
+        fsync_directory(path.parent)
+    except OSError as exc:
+        raise SpiceError(
+            f"could not retire deinitialization receipt {path}: {exc}"
+        ) from exc
+
+
+def _unapply_record(
+    receipt: DeinitializationReceipt,
+    state: DeinitOperationState,
+) -> InitializationReceiptRecord:
+    if state.outcome is None:
+        raise SpiceError("cannot append an unfinished reversal outcome")
+    operation = receipt.initialization.operations[state.initialization_index].operation
+    return InitializationReceiptRecord(
+        repo_root=receipt.repo_root,
+        mode=receipt.initialization.mode,
+        plan_schema_version=receipt.initialization.plan_schema_version,
+        event=InitReceiptEvent.UNAPPLY,
+        operation_index=state.initialization_index,
+        operation_count=len(receipt.initialization.operations),
+        operation=operation,
+        outcome=state.outcome.value,
+        observed_kind=state.observed_kind,
+        observed_value=state.observed_value,
+        observed_mode=state.observed_mode,
+        observed_sha256=state.observed_sha256,
+        shared_owner=state.shared_owner,
+    )
+
+
+def _state_from_record(record: InitializationReceiptRecord) -> DeinitOperationState:
+    if record.outcome is None:
+        raise SpiceError("unapply receipt record is missing its outcome")
+    try:
+        outcome = DeinitOutcome(record.outcome)
+    except ValueError as exc:
+        raise SpiceError(
+            f"unapply receipt record has unknown outcome {record.outcome!r}"
+        ) from exc
+    return DeinitOperationState(
+        initialization_index=record.operation_index,
+        completed=True,
+        outcome=outcome,
+        observed_kind=record.observed_kind,
+        observed_value=record.observed_value,
+        observed_mode=record.observed_mode,
+        observed_sha256=record.observed_sha256,
+        shared_owner=record.shared_owner,
+    )
 
 
 def plan_deinitialization(repo_root: Path) -> DeinitializationPlan:
@@ -310,8 +435,6 @@ def apply_deinitialization_plan(
         if initialization is None:
             return _not_initialized_report(plan.repo_root)
         reversal = _new_deinitialization_receipt(initialization)
-        write_deinitialization_receipt(reversal)
-        write_initialization_receipt(reversal.initialization)
     if reversal.repo_root != plan.repo_root:
         raise SpiceError(
             "deinitialization receipt belongs to a different repository: "
@@ -327,17 +450,25 @@ def apply_deinitialization_plan(
         operation = reversal.initialization.operations[
             state.initialization_index
         ].operation
-        states[position] = _reverse_operation(
+        # Refuse an oversized record before the associated reversal whenever
+        # the preview still describes the current state. The actual outcome is
+        # encoded again after the operation and is the one appended.
+        encode_initialization_receipt_record(
+            _unapply_record(reversal, plan.operations[position])
+        )
+        completed = _reverse_operation(
             plan.repo_root,
             operation,
             state.initialization_index,
             reversal,
         )
+        record = _unapply_record(reversal, completed)
+        encoded = encode_initialization_receipt_record(record)
+        append_initialization_receipt_record(record, encoded=encoded)
+        states[position] = completed
         reversal = replace(reversal, operations=tuple(states))
-        write_deinitialization_receipt(reversal)
 
     reversal = replace(reversal, status=DeinitReceiptStatus.COMPLETE)
-    write_deinitialization_receipt(reversal)
     return _finalize_deinitialization(reversal)
 
 
@@ -615,9 +746,17 @@ def _transfer_common_ownership(
             introduced=operation.introduced,
             previous_effective_value=operation.previous_effective_value,
         )
-        operations = list(receipt.operations)
-        operations[position] = replace(receiver, operation=transferred)
-        write_initialization_receipt(replace(receipt, operations=tuple(operations)))
+        record = InitializationReceiptRecord(
+            repo_root=receipt.repo_root,
+            mode=receipt.mode,
+            plan_schema_version=receipt.plan_schema_version,
+            event=InitReceiptEvent.TRANSFER,
+            operation_index=position,
+            operation_count=len(receipt.operations),
+            operation=transferred,
+        )
+        encoded = encode_initialization_receipt_record(record)
+        append_initialization_receipt_record(record, encoded=encoded)
         return owner_root
     return None
 
