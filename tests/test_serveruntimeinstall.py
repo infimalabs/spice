@@ -130,7 +130,7 @@ def test_runtime_watch_startup_error_uses_named_cleanup_deadline(
             on_replacement=lambda: None,
         )
 
-    assert join_timeouts == [runtimeinstall.RUNTIME_WATCH_STARTUP_JOIN_TIMEOUT_SECONDS]
+    assert join_timeouts == [runtimeinstall.RUNTIME_WATCH_JOIN_TIMEOUT_SECONDS]
 
 
 def test_live_serve_reexecs_across_wheel_editable_wheel_replacements(

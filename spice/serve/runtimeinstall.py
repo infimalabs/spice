@@ -18,7 +18,7 @@ from spice.errors import SpiceError
 from spice.serve.livebuswatch import FileChangeWatch
 
 RUNTIME_WATCH_ACTIVATION_TIMEOUT_SECONDS = 5.0
-RUNTIME_WATCH_STARTUP_JOIN_TIMEOUT_SECONDS = 1.0
+RUNTIME_WATCH_JOIN_TIMEOUT_SECONDS = 1.0
 RUNTIME_RESTART_WAIT_SECONDS = 15.0
 RUNTIME_RESTART_RETRY_SECONDS = 0.05
 RUNTIME_RESTART_PROBE_TIMEOUT_SECONDS = 2.0
@@ -121,7 +121,7 @@ def start_runtime_replacement_watch(
             f"budget={RUNTIME_WATCH_ACTIVATION_TIMEOUT_SECONDS:g}s"
         )
     if startup_errors:
-        thread.join(timeout=RUNTIME_WATCH_STARTUP_JOIN_TIMEOUT_SECONDS)
+        thread.join(timeout=RUNTIME_WATCH_JOIN_TIMEOUT_SECONDS)
         error = startup_errors[0]
         raise SpiceError(f"spice serve runtime watch failed: {error}") from error
     if not installation.is_current():
