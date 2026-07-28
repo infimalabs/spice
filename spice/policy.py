@@ -73,7 +73,7 @@ MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = defaults.integer(
 # Namespace packages only: no __init__.py anywhere under a declared package
 # root. Package path names match the boundary-underscore shape. Splitting a
 # file requires naming the seam: generic continuation shards are rejected.
-# A target repo declares its roots in tracked `pyproject.toml` under
+# A target repo declares its roots in root `spice.toml` under
 # `[policy] package_roots`; repos without a declaration skip the
 # Python package guards (the rest of the constitution still applies).
 BOUNDARY_UNDERSCORE_PATTERN = defaults.string(
