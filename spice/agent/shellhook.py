@@ -5,15 +5,18 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
 from spice.config.values import configured_agent_driver, configured_rtk_executable
 from spice.config.layers import (
+    SYSTEM_SOURCE,
     contextualize_config_error,
     effective_table,
     enabled_registry_entries,
+    load_config,
 )
 from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
@@ -283,13 +286,11 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
         command=shlex.join((rtk_executable,)),
     )
     lines: list[str] = []
-    seen_selectors: dict[str, str] = {}
     for selected in _selected_agent_wrapper_groups(repo_root):
         lines.extend(
             render_agent_wrapper_group_lines(
                 group_name=selected.name,
                 group=selected.group,
-                seen_selectors=seen_selectors,
                 driver_name=driver_name,
                 rtk_executable=rtk_executable,
             )
@@ -380,6 +381,7 @@ def _selected_agent_wrapper_groups(
                 ("wrappers", group_name),
                 command=_wrapper_group_command_summary(group_name, raw_group),
             )
+            _warn_dropped_packaged_wrappers(repo_root, group_name, raw_group)
         selected.append(
             _SelectedAgentWrapperGroup(
                 name=group_name,
@@ -388,6 +390,38 @@ def _selected_agent_wrapper_groups(
             )
         )
     return tuple(selected)
+
+
+def _warn_dropped_packaged_wrappers(
+    repo_root: Path,
+    group_name: str,
+    replacement: Mapping[str, object],
+) -> None:
+    loaded = load_config(repo_root)
+    source = loaded.source_for(("wrappers", group_name))
+    if source is None or source.name == SYSTEM_SOURCE:
+        return
+    packaged_wrappers = loaded.layer(SYSTEM_SOURCE).values.get("wrappers")
+    if not isinstance(packaged_wrappers, Mapping):
+        return
+    packaged_group = packaged_wrappers.get(group_name)
+    if not isinstance(packaged_group, Mapping):
+        return
+    dropped = sorted(
+        _enabled_wrapper_names(packaged_group) - _enabled_wrapper_names(replacement)
+    )
+    if not dropped:
+        return
+    warnings.warn(
+        "spice shell hook: "
+        f"wrappers.{group_name} from {source.name} replaces the packaged "
+        "wrapper group and drops packaged wrappers: " + ", ".join(dropped),
+        stacklevel=3,
+    )
+
+
+def _enabled_wrapper_names(group: Mapping[str, object]) -> set[str]:
+    return set(enabled_registry_entries(group, "wrappers", "*")) - {SCOPES_KEY}
 
 
 def _wrapper_group_command_summary(
@@ -476,7 +510,6 @@ def render_agent_wrapper_group_lines(
     *,
     group_name: str,
     group: Mapping[str, object],
-    seen_selectors: dict[str, str],
     driver_name: str,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
@@ -497,7 +530,6 @@ def render_agent_wrapper_group_lines(
                     group_name=group_name,
                     selector=wrapper,
                     entry=raw_entry,
-                    seen_selectors=seen_selectors,
                     driver_name=driver_name,
                     rtk_executable=rtk_executable,
                 )
@@ -526,7 +558,6 @@ def render_agent_wrapper_group_lines(
                     group_name=group_name,
                     wrapper=wrapper,
                     selector=selector,
-                    seen_selectors=seen_selectors,
                 )
             )
     return lines
@@ -537,7 +568,6 @@ def render_agent_direct_wrapper_lines(
     group_name: str,
     selector: str,
     entry: Mapping[str, object],
-    seen_selectors: dict[str, str],
     driver_name: str,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
@@ -573,11 +603,6 @@ def render_agent_direct_wrapper_lines(
         return []
     if routes and not active_routes and selector == command_words[0]:
         return []
-    record_agent_wrapper_selector(
-        selector,
-        config_path,
-        seen_selectors=seen_selectors,
-    )
     if active_routes:
         return render_agent_match_wrapper_lines(selector, command_words, active_routes)
     command = " ".join(shell_command_word(word) for word in command_words)
@@ -895,14 +920,8 @@ def render_agent_wrapper_selector_lines(
     group_name: str,
     wrapper: str,
     selector: str,
-    seen_selectors: dict[str, str],
 ) -> list[str]:
     config_path = f"wrappers.{group_name}.{wrapper}"
-    if "/" in selector:
-        raise SpiceError(
-            "spice shell hook: path selector "
-            f"{selector!r} in {config_path} requires the redirector stage"
-        )
     require_shell_function_name(
         selector,
         label=f"{config_path} command",
@@ -912,11 +931,6 @@ def render_agent_wrapper_selector_lines(
             "spice shell hook: wrapper "
             f"{wrapper!r} cannot intercept itself in {config_path}"
         )
-    record_agent_wrapper_selector(
-        selector,
-        config_path,
-        seen_selectors=seen_selectors,
-    )
     return [
         "",
         f"{selector}() {{",
@@ -925,28 +939,10 @@ def render_agent_wrapper_selector_lines(
     ]
 
 
-def record_agent_wrapper_selector(
-    selector: str, config_path: str, *, seen_selectors: dict[str, str]
-) -> None:
-    previous = seen_selectors.get(selector)
-    if previous is not None:
-        raise SpiceError(
-            "spice shell hook: command "
-            f"{selector!r} is configured by both {previous} and {config_path}"
-        )
-    seen_selectors[selector] = config_path
-
-
 def command_words_from_config(raw: object, *, label: str) -> list[str]:
     words = config_string_list(raw, label=label)
     if not words:
         raise SpiceError(f"spice shell hook: {label} has no entries")
-    for word in words:
-        if "/" in word:
-            raise SpiceError(
-                "spice shell hook: path wrapper command "
-                f"{word!r} in {label} requires the redirector stage"
-            )
     return words
 
 
