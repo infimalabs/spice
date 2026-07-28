@@ -16,6 +16,7 @@ from spice.hooks.initplan import (
     HOOK_ARGS as HOOK_ARGS,
     HOOKS_DIRNAME,
     STATE_GITIGNORE_CONTENT,
+    InitializationPlan,
     InitializationMode,
     apply_initialization_plan,
     hook_shim_content as hook_shim_content,
@@ -29,13 +30,18 @@ def hooks_dir(repo_root: Path) -> Path:
     return repo_root / STATE_DIRNAME / HOOKS_DIRNAME
 
 
-def install_hooks_for_repo(repo_root: Path) -> list[str]:
-    """Write the shims and point `core.hooksPath` at them; return detail rows."""
-    plan = plan_initialization(
+def plan_hook_installation(repo_root: Path) -> InitializationPlan:
+    """Inspect the shared initialization repair surface without changing it."""
+    return plan_initialization(
         repo_root,
         InitializationMode.FULL,
         include_agent_skill=False,
     )
+
+
+def install_hooks_for_repo(repo_root: Path) -> list[str]:
+    """Write the shims and point `core.hooksPath` at them; return detail rows."""
+    plan = plan_hook_installation(repo_root)
     apply_initialization_plan(plan)
     return initialization_detail_rows(plan, include_ready=False)
 

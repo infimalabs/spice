@@ -19,6 +19,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.cli.mounts import RUNTIME_PYTHON_ENV
 from spice.commandplan import assert_plan_digest, command_plan_payload
 from spice.errors import SpiceError
@@ -167,6 +173,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
             help=f"Plan a {bump} bump, validation, commit, push, and publish.",
         )
         _add_apply_options(one_pass)
+        _mark_authored_release(one_pass)
         one_pass.set_defaults(func=handle_release, release_mode="release", bump=bump)
 
     prepare = actions.add_parser(
@@ -174,6 +181,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     )
     prepare.add_argument("bump", choices=BUMP_CHOICES)
     _add_apply_options(prepare)
+    _mark_authored_release(prepare, sample_suffix=("minor",))
     prepare.set_defaults(func=handle_release, release_mode="prepare")
 
     notes = actions.add_parser(
@@ -213,6 +221,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         ),
     )
     _add_apply_options(publish)
+    _mark_authored_release(publish)
     publish.set_defaults(func=handle_release, release_mode="publish")
 
     github = actions.add_parser(
@@ -225,8 +234,25 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         help="Commit-ish to tag and use as the release notes target.",
     )
     _add_apply_options(github)
+    _mark_authored_release(github)
     github.set_defaults(func=handle_release, release_mode="github")
     return parser
+
+
+def _mark_authored_release(
+    parser: argparse.ArgumentParser,
+    *,
+    sample_suffix: tuple[str, ...] = (),
+) -> None:
+    mark_authored_input(
+        parser,
+        AuthoredInputInvocation(
+            reads=(EffectRead.AUTHORED_REPOSITORY,),
+            decision=MutationDecision.PREVIEW_APPLY,
+            sample_suffix=sample_suffix,
+            mutation_args=("--apply",),
+        ),
+    )
 
 
 def _add_apply_options(parser: argparse.ArgumentParser) -> None:

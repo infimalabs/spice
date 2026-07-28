@@ -2,87 +2,39 @@
 
 import argparse
 from dataclasses import dataclass
-from enum import StrEnum
 
 import pytest
 
+from spice.cli.effects import (
+    AUTHORED_EFFECT_READS,
+    AuthoredInputInvocation,
+    MutationDecision,
+    authored_input_invocations,
+)
 from spice.cli.entry import main
 from spice.cli.parser import build_parser
 from spice.cli.withdrawn import DRY_RUN_WITHDRAWAL_RELEASE
 from spice.release import build_release_parser
 
 
-class EffectRead(StrEnum):
-    """Inputs whose semantics can determine a command's planned effects."""
-
-    AUTHORED_DOCUMENT = "authored-document"
-    AUTHORED_REPOSITORY = "authored-repository"
-    AUTHORED_CONFIGURATION = "authored-configuration"
-    OWNERSHIP_RECEIPT = "ownership-receipt"
-    COMMAND_LINE = "command-line"
-    TASK_BOARD = "task-board"
-
-
-AUTHORED_READS = frozenset(
-    {
-        EffectRead.AUTHORED_DOCUMENT,
-        EffectRead.AUTHORED_REPOSITORY,
-        EffectRead.AUTHORED_CONFIGURATION,
-        EffectRead.OWNERSHIP_RECEIPT,
-    }
-)
-
-
 @dataclass(frozen=True)
-class MutatingVerb:
-    argv: tuple[str, ...]
-    reads: tuple[EffectRead, ...]
-    release: bool = False
+class LiveAuthoredInputInvocation:
+    command_path: tuple[str, ...]
+    parse_path: tuple[str, ...]
+    root_parser: argparse.ArgumentParser
+    leaf_parser: argparse.ArgumentParser
+    contract: AuthoredInputInvocation
 
+    @property
+    def invocation_argv(self) -> tuple[str, ...]:
+        return (*self.parse_path, *self.contract.sample_suffix)
 
-MUTATING_VERBS = (
-    MutatingVerb(
-        ("init",),
-        (EffectRead.AUTHORED_REPOSITORY, EffectRead.AUTHORED_CONFIGURATION),
-    ),
-    MutatingVerb(
-        ("init", "--unapply"),
-        (
-            EffectRead.AUTHORED_REPOSITORY,
-            EffectRead.AUTHORED_CONFIGURATION,
-            EffectRead.OWNERSHIP_RECEIPT,
-        ),
-    ),
-    MutatingVerb(
-        ("task", "ingest", "plan.md", "--project", "task.plan"),
-        (EffectRead.AUTHORED_DOCUMENT, EffectRead.TASK_BOARD),
-    ),
-    MutatingVerb(
-        ("minor",),
-        (EffectRead.AUTHORED_REPOSITORY,),
-        release=True,
-    ),
-    MutatingVerb(
-        ("patch",),
-        (EffectRead.AUTHORED_REPOSITORY,),
-        release=True,
-    ),
-    MutatingVerb(
-        ("prepare", "minor"),
-        (EffectRead.AUTHORED_REPOSITORY,),
-        release=True,
-    ),
-    MutatingVerb(
-        ("publish",),
-        (EffectRead.AUTHORED_REPOSITORY,),
-        release=True,
-    ),
-    MutatingVerb(
-        ("github",),
-        (EffectRead.AUTHORED_REPOSITORY,),
-        release=True,
-    ),
-)
+    @property
+    def display(self) -> str:
+        suffix = " ".join((*self.contract.sample_suffix, *self.contract.mutation_args))
+        command = " ".join(self.command_path)
+        return f"{command} {suffix}".strip()
+
 
 DRY_RUN_REPLACED_VERBS = (
     ("init",),
@@ -90,22 +42,125 @@ DRY_RUN_REPLACED_VERBS = (
 )
 
 
-def _derived_default(reads: tuple[EffectRead, ...]) -> str:
-    return "preview" if AUTHORED_READS.intersection(reads) else "apply"
+def _command_parsers(
+    parser: argparse.ArgumentParser,
+    prefix: tuple[str, ...] = (),
+) -> tuple[tuple[tuple[str, ...], argparse.ArgumentParser], ...]:
+    commands: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = []
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, child in action.choices.items():
+            path = (*prefix, name)
+            commands.append((path, child))
+            commands.extend(_command_parsers(child, path))
+    return tuple(commands)
 
 
-@pytest.mark.parametrize("verb", MUTATING_VERBS, ids=lambda verb: " ".join(verb.argv))
-def test_mutating_verb_default_is_derived_from_effect_driving_reads(
-    verb: MutatingVerb,
+def _live_authored_input_inventory() -> tuple[LiveAuthoredInputInvocation, ...]:
+    inventory: list[LiveAuthoredInputInvocation] = []
+    roots = (
+        ((), build_parser(include_mounted_epilog=False)),
+        (("release",), build_release_parser()),
+    )
+    for display_prefix, root_parser in roots:
+        for parse_path, leaf_parser in _command_parsers(root_parser):
+            for contract in authored_input_invocations(leaf_parser):
+                inventory.append(
+                    LiveAuthoredInputInvocation(
+                        command_path=(*display_prefix, *parse_path),
+                        parse_path=parse_path,
+                        root_parser=root_parser,
+                        leaf_parser=leaf_parser,
+                        contract=contract,
+                    )
+                )
+    return tuple(inventory)
+
+
+LIVE_AUTHORED_INPUT_INVENTORY = _live_authored_input_inventory()
+
+
+@pytest.mark.parametrize(
+    "live",
+    LIVE_AUTHORED_INPUT_INVENTORY,
+    ids=lambda live: live.display,
+)
+def test_live_authored_input_mutation_decision_matches_effect_driving_reads(
+    live: LiveAuthoredInputInvocation,
 ) -> None:
-    parser = build_release_parser() if verb.release else build_parser()
+    contract = live.contract
+    assert AUTHORED_EFFECT_READS.intersection(contract.reads)
+    bare = live.root_parser.parse_args(list(live.invocation_argv))
 
-    bare = parser.parse_args(list(verb.argv))
-    explicit = parser.parse_args([*verb.argv, "--apply"])
-    observed_default = "apply" if bare.apply else "preview"
+    if contract.decision is MutationDecision.PREVIEW_APPLY:
+        explicit = live.root_parser.parse_args(
+            [*live.invocation_argv, *contract.mutation_args]
+        )
+        assert bare.apply is False
+        assert explicit.apply is True
+        return
 
-    assert _derived_default(verb.reads) == observed_default
-    assert explicit.apply is True
+    assert not hasattr(bare, "apply")
+    if contract.decision is MutationDecision.EXPLICIT_OPTION:
+        explicit = live.root_parser.parse_args(
+            [*live.invocation_argv, *contract.mutation_args]
+        )
+        destination = _option_destination(live.leaf_parser, contract.mutation_args[0])
+        assert getattr(bare, destination) in (None, False)
+        assert getattr(explicit, destination) not in (None, False)
+        return
+
+    assert contract.decision is MutationDecision.HOOK_BACKEND
+    assert contract.mutation_args == ()
+
+
+def test_live_authored_input_inventory_is_unique_and_exercises_every_decision() -> None:
+    identities = [
+        (
+            live.command_path,
+            live.contract.sample_suffix,
+            live.contract.mutation_args,
+        )
+        for live in LIVE_AUTHORED_INPUT_INVENTORY
+    ]
+
+    assert len(identities) == len(set(identities))
+    assert {live.contract.decision for live in LIVE_AUTHORED_INPUT_INVENTORY} == set(
+        MutationDecision
+    )
+
+
+def test_every_live_explicit_mutation_option_has_an_authored_input_contract() -> None:
+    classified = {
+        (live.command_path, live.contract.mutation_args[0])
+        for live in LIVE_AUTHORED_INPUT_INVENTORY
+        if live.contract.decision is MutationDecision.EXPLICIT_OPTION
+    }
+    live_options: set[tuple[tuple[str, ...], str]] = set()
+    for display_prefix, root_parser in (
+        ((), build_parser(include_mounted_epilog=False)),
+        (("release",), build_release_parser()),
+    ):
+        for parse_path, leaf_parser in _command_parsers(root_parser):
+            for action in leaf_parser._actions:
+                for option in action.option_strings:
+                    if (
+                        option == "--fix"
+                        or option == "--create-tasks"
+                        or option.startswith("--write")
+                    ):
+                        live_options.add(((*display_prefix, *parse_path), option))
+
+    assert classified == live_options
+
+
+def _option_destination(parser: argparse.ArgumentParser, option: str) -> str:
+    matches = [
+        action.dest for action in parser._actions if option in action.option_strings
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 @pytest.mark.parametrize(
@@ -156,18 +211,3 @@ def test_receipt_writers_and_unapply_verbs_are_the_same_live_parser_set() -> Non
     }
 
     assert (receipt_writers, unapply_verbs) == ({("init",)}, {("init",)})
-
-
-def _command_parsers(
-    parser: argparse.ArgumentParser,
-    prefix: tuple[str, ...] = (),
-) -> tuple[tuple[tuple[str, ...], argparse.ArgumentParser], ...]:
-    commands: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = []
-    for action in parser._actions:
-        if not isinstance(action, argparse._SubParsersAction):
-            continue
-        for name, child in action.choices.items():
-            path = (*prefix, name)
-            commands.append((path, child))
-            commands.extend(_command_parsers(child, path))
-    return tuple(commands)
