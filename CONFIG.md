@@ -17,6 +17,11 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+Taskwarrior 3 or newer is a separate system requirement for the task plane, not
+a Python package or per-repo setting. `spice doctor` verifies the installed
+`task` binary and its version before task-plane use. Watch, Retrospect, and
+Gates do not require Taskwarrior.
+
 ## RTK Rewrite Companion
 
 The agent shell can use [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer

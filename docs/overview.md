@@ -145,13 +145,15 @@ the default starting point.
 | **Retrospect** | An existing Claude Code or Codex transcript; run `spice session briefing` for the ambient agent, or `spice session briefing <thread-id-or-transcript>` for an explicit subject. | Read-only agent self-understanding through briefing and session forensics, with no repo binding, hooks, steering, or task plane. | Add **gates** when a recurring finding should become enforced policy. |
 | **Gates** | A Git repository and the installed `spice` CLI; run `spice init --gates`. | Pre-commit and commit-message enforcement, including sticky-flex hysteresis limits, regression-only magic-number ratchets against `HEAD`, taste policy, and configured extensions. No agent skill, wrapper, task plane, or fleet reference guard is installed. | Add **steer** when automated policy can identify a problem but an operator needs to correct agent behavior while it happens. |
 | **Steer** | A gates-proven repository plus one agent worth directing; run full `spice init`, bind it with `spice agent ensure`, open `spice serve`, and keep the lane in **Steer** lifetime. | One manually routed lane with live transcript, durable inbox steering, and semantic ACKs; task allocation is not yet the operating posture. | Add the **fleet** when work must be selected, routed, or reviewed across multiple lanes. |
-| **Fleet** | A successful steered lane, Taskwarrior, and work that benefits from coordination; use `spice task next` and Serve **Drive/Drain** lifetimes. | The full task plane, worktree-bound lanes, team routing, phase-boundary Git synchronization, and review flow. | Stay here while coordination pays for its overhead; this is the top tier. |
+| **Fleet** | A successful steered lane, Taskwarrior 3 or newer, and work that benefits from coordination; use `spice task next` and Serve **Drive/Drain** lifetimes. | The full task plane, worktree-bound lanes, team routing, phase-boundary Git synchronization, and review flow. | Stay here while coordination pays for its overhead; this is the top tier. |
 
 The ladder is additive in operating posture, not a demand to install everything
 up front. Watch remains the operator/browser observation surface; Retrospect
 changes the transcript consumer to the agent itself while remaining read-only.
 Gates remain useful without steering, and a single steered lane remains useful
-without allocator-driven fleet operation.
+without allocator-driven fleet operation. Taskwarrior begins at Fleet: Watch,
+Retrospect, and Gates do not require Taskwarrior, and Steer can operate one
+manually routed lane without the task plane.
 
 ## Honest Feedback
 
