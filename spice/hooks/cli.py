@@ -187,6 +187,7 @@ def _configure_commit_parsers(actions: Any) -> None:
 
 
 def handle_init(args: argparse.Namespace) -> int:
+    # Parser-free callers use minimal namespaces, so an omitted direction is forward.
     if getattr(args, "unapply", None) is not None:
         return _handle_init_unapply(args)
 
