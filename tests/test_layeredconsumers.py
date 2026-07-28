@@ -19,6 +19,7 @@ from spice.policyconfig import resolve_policy
 from spice.resourcelocks import configured_lock_settings
 from spice.serve.web import serve_branding
 from spice.tasks import config as task_config
+from tests.test_configtrusthelpers import approve_repository_config
 
 SYSTEM_FILE_BYTES = 222
 REPOSITORY_FILE_LOC = 333
@@ -262,6 +263,7 @@ def test_false_disables_one_inherited_entry_in_every_registry(
     assert entry in _resolved_registry_names(registry_path, tmp_path)
 
     (tmp_path / "spice.toml").write_text(repository_config, encoding="utf-8")
+    approve_repository_config(tmp_path)
 
     assert entry not in _resolved_registry_names(registry_path, tmp_path)
 

@@ -105,7 +105,10 @@ def test_init_apply_records_the_current_repository_approval(
     _commit_config(repo, '[commands]\nprobe = ["tool", "first"]\n')
     monkeypatch.chdir(repo)
 
-    assert handle_init(SimpleNamespace(gates=True, apply=True, json=False)) == 0
+    assert (
+        handle_init(SimpleNamespace(gates=True, apply=True, json=False, unapply=None))
+        == 0
+    )
 
     assert repository_config_approval(repo).approved
     assert "ready: git commit | spice dev pre-commit" in capsys.readouterr().out
