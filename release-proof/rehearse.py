@@ -48,6 +48,7 @@ UPGRADE_PROJECTION_STATE = _inplace_upgrade.UPGRADE_PROJECTION_STATE
 UPGRADE_REHEARSAL_BY_STORE = _inplace_upgrade.UPGRADE_REHEARSAL_BY_STORE
 UPGRADE_TEAM_STORE = _inplace_upgrade.UPGRADE_TEAM_STORE
 _assert_authority_preserved = _inplace_upgrade._assert_authority_preserved
+_authority_version_evidence = _inplace_upgrade._authority_version_evidence
 _assert_rehearsed_state_files = _inplace_upgrade._assert_rehearsed_state_files
 _core_assert_state_inventory_is_declared = (
     _inplace_upgrade._assert_state_inventory_is_declared
