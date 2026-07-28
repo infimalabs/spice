@@ -87,6 +87,15 @@ def require_repository_config_approval(
     """Refuse one repository-sourced executable until its digest is approved."""
     resolved_root = repo_root.expanduser().resolve()
     path = tuple(config_path)
+    if not any(
+        path[: len(declared)] == declared
+        for declared in EXECUTABLE_REPOSITORY_CONFIG_PATHS
+    ):
+        raise SpiceError(
+            "repository executable configuration guard path "
+            f"{'.'.join(path)} is absent from "
+            "EXECUTABLE_REPOSITORY_CONFIG_PATHS"
+        )
     loaded = load_config(resolved_root)
     source = loaded.source_for(path)
     if source is None or source.name != REPOSITORY_SOURCE:

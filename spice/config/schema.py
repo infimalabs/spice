@@ -104,6 +104,9 @@ _PRE_COMMIT_BUILTIN_NAMES = (
     "repo-shape",
     "staging",
     "repo-docs",
+    "config-key-validity",
+    "config-false-disable",
+    "config-tracked-trust",
     "formatters",
     "local-paths",
     "taste",
@@ -321,6 +324,30 @@ CONFIG_SCHEMA = _table(
         ),
     }
 )
+
+
+def config_schema_at(path: Sequence[str]) -> Schema:
+    """Return the declared schema node at one exact dotted configuration path."""
+    parts = tuple(str(part) for part in path)
+    current: Schema = CONFIG_SCHEMA
+    traversed: list[str] = []
+    for part in parts:
+        if not isinstance(current, TableSchema):
+            parent = ".".join(traversed) or "<root>"
+            raise SpiceError(
+                f"configuration schema path {'.'.join(parts)} descends through "
+                f"non-table {parent}"
+            )
+        child: Schema | _Missing = (
+            current.wildcard if part == "*" else current.children.get(part, _MISSING)
+        )
+        if isinstance(child, _Missing):
+            raise SpiceError(
+                f"configuration schema has no path {'.'.join((*traversed, part))}"
+            )
+        current = child
+        traversed.append(part)
+    return current
 
 
 def validate_config_keys(
