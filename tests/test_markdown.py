@@ -4,6 +4,8 @@ import re
 import subprocess
 from urllib.parse import urlparse
 
+import pytest
+
 from spice.paths import shared_attachment_root
 from spice.serve.app import (
     ServeState,
@@ -150,6 +152,84 @@ def test_markdown_renders_absolute_file_links_through_worktree_proxy():
     ) in html
 
 
+@pytest.mark.parametrize(
+    ("scheme", "target", "expected_link", "expected_image"),
+    (
+        (
+            "http",
+            "http://example.test/asset.png",
+            "http://example.test/asset.png",
+            "http://example.test/asset.png",
+        ),
+        (
+            "https",
+            "https://example.test/asset.png",
+            "https://example.test/asset.png",
+            "https://example.test/asset.png",
+        ),
+        (
+            "mailto",
+            "mailto:docs@example.test",
+            "mailto:docs@example.test",
+            "/api/work/trees/lane/files/image?path=mailto%3Adocs%40example.test"
+            "&missing=placeholder",
+        ),
+        (
+            "data",
+            "data:image/png;base64,aW1n",
+            "/work/tree/lane/data%3Aimage/png%3Bbase64%2CaW1n",
+            "data:image/png;base64,aW1n",
+        ),
+        (
+            "javascript",
+            "javascript:alert",
+            "/work/tree/lane/javascript%3Aalert",
+            "/api/work/trees/lane/files/image?path=javascript%3Aalert"
+            "&missing=placeholder",
+        ),
+        (
+            "vbscript",
+            "vbscript:msgbox",
+            "/work/tree/lane/vbscript%3Amsgbox",
+            "/api/work/trees/lane/files/image?path=vbscript%3Amsgbox"
+            "&missing=placeholder",
+        ),
+        (
+            "file",
+            "file:///tmp/asset.png",
+            "/work/tree/lane//tmp/asset.png",
+            "/api/work/trees/lane/files/image?path=file%3A///tmp/asset.png"
+            "&missing=placeholder",
+        ),
+    ),
+)
+def test_markdown_link_and_image_scheme_table(
+    scheme,
+    target,
+    expected_link,
+    expected_image,
+):
+    link_html = render_message_html(f"[{scheme}]({target})", worktree_id="lane")
+    image_html = render_message_html(f"![{scheme}]({target})", worktree_id="lane")
+
+    assert _first_href(link_html) == expected_link
+    assert _first_src(image_html) == expected_image
+
+
+@pytest.mark.parametrize(
+    "target",
+    (
+        "data:text/plain,hello",
+        "data:text/plain;base64,aGVsbG8=",
+    ),
+)
+def test_markdown_data_links_never_emit_data_hrefs(target):
+    rendered = render_message_html(f"[payload]({target})", worktree_id="lane")
+
+    assert _first_href(rendered).startswith("/work/tree/lane/data%3A")
+    assert 'href="data:' not in rendered
+
+
 def test_markdown_keeps_markdown_link_text_inside_inline_code_as_code():
     html = render_message_html("Shape: `[file](path.py:line)`")
 
@@ -267,6 +347,12 @@ def _first_href(html: str) -> str:
     match = re.search(r'href="([^"]+)"', html)
     assert match is not None
     return match.group(1)
+
+
+def _first_src(html: str) -> str:
+    match = re.search(r'src="([^"]+)"', html)
+    assert match is not None
+    return match.group(1).replace("&amp;", "&")
 
 
 def _git_repo(path):
