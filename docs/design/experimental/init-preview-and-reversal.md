@@ -1,6 +1,12 @@
 # Previewable, Reversible Initialization
 
-Status: implemented contract, 2026-07-21.
+Status: superseded, 2026-07-28.
+
+Superseded by
+[`accepted/authored-input-command-plan-protocol.md`](../accepted/authored-input-command-plan-protocol.md).
+The replacement preserves or explicitly withdraws every clause below. This
+record remains intact as the historical contract that the replacement
+superseded.
 
 ## Decision
 
