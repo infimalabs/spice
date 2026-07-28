@@ -13,6 +13,7 @@ import json
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.commandplan import PLAN_DIGEST_HEX_LENGTH
 from spice.errors import SpiceError
 from spice.tasks import cli as task_cli
 from spice.tasks import config, create, identity, ops, tw
@@ -225,11 +226,76 @@ def test_cli_json_ingest_preview_is_ordered_and_does_not_write_tasks(task_repo, 
     assert task_cli.handle(args) == 0
     payload = json.loads(capsys.readouterr().out)
 
+    assert payload["protocol"] == "spice.command-plan"
     assert payload["schema_version"] == 1
+    assert len(payload["plan_digest"]) == PLAN_DIGEST_HEX_LENGTH
     assert [item["order"] for item in payload["operations"]] == list(
         range(1, len(payload["operations"]) + 1)
     )
     assert tw.export(["status:pending"]) == before
+
+
+def test_ingest_digest_refuses_when_authored_document_changes_after_preview(
+    task_repo, capsys
+):
+    source = task_repo / "plan.md"
+    source.write_text(
+        "# Root\nAcceptance: first criterion\nFlow: todo\n",
+        encoding="utf-8",
+    )
+    parser = build_parser()
+    base = [
+        "task",
+        "ingest",
+        str(source),
+        "--project",
+        "task.unit",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    ]
+    assert task_cli.handle(parser.parse_args([*base, "--json"])) == 0
+    digest = json.loads(capsys.readouterr().out)["plan_digest"]
+    source.write_text(
+        "# Root\nAcceptance: changed criterion\nFlow: todo\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        task_cli.handle(parser.parse_args([*base, f"--apply={digest}"]))
+
+    assert "stale command plan digest" in str(exc_info.value)
+    assert "1:created:task-board:" in str(exc_info.value)
+    assert tw.export(["status:pending"]) == []
+
+
+def test_ingest_digest_applies_unchanged_document_despite_runtime_identity_change(
+    task_repo, capsys, monkeypatch
+):
+    source = task_repo / "plan.md"
+    source.write_text(
+        "# Root\nAcceptance: unchanged criterion\nFlow: todo\n",
+        encoding="utf-8",
+    )
+    minted_millis = iter((1_700_000_000_000, 1_700_000_001_000))
+    monkeypatch.setattr(identity, "epoch_millis", lambda: next(minted_millis))
+    parser = build_parser()
+    base = [
+        "task",
+        "ingest",
+        str(source),
+        "--project",
+        "task.unit",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    ]
+
+    assert task_cli.handle(parser.parse_args([*base, "--json"])) == 0
+    digest = json.loads(capsys.readouterr().out)["plan_digest"]
+    assert task_cli.handle(parser.parse_args([*base, f"--apply={digest}"])) == 0
+
+    rows = tw.export(["status:pending"])
+    assert len(rows) == 1
+    assert rows[0]["acceptance"] == "unchanged criterion"
 
 
 def test_plan_equalizes_fields_appends_annotations_and_orders_verbs(task_repo):
@@ -278,6 +344,7 @@ def test_plan_equalizes_fields_appends_annotations_and_orders_verbs(task_repo):
         f"updated root {root} tags",
         f"updated root {root} annotations",
         "edge-added root -> child",
+        f"plan-digest {plan.payload()['plan_digest']}",
         "preview: no changes applied; pass --apply to execute",
     ]
 

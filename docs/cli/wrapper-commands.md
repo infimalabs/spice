@@ -234,6 +234,56 @@ Mounted commands can import the public repo-tool seam documented in the README.
 They should not rely on private spice modules unless the seam is deliberately
 expanded with tests and documentation.
 
+### Versioned command plans
+
+A mounted command opts into Spice's command-plan protocol solely through its
+stdout. A successful command whose entire stdout is a valid
+`spice.command-plan` JSON document is a side-effect-free planner; no
+configuration field, alternate argv, or second executable is declared. Any
+other output, stderr, and exit status pass through exactly as ordinary mounted
+command output does.
+
+The document carries `schema_version`, `command`, `plan_digest`, and one ordered
+`operations` list. Every operation names its `kind`, `target`, and `scope`; an
+applicable `file` or `git-config` operation also carries total
+`observed_before` and `intended_after` states. The digest is SHA-256 over the
+schema version and complete normalized ordered list, so a one-operation plan
+and a fifty-operation plan use the same protocol:
+
+```json
+{
+  "protocol": "spice.command-plan",
+  "schema_version": 1,
+  "command": "generate",
+  "plan_digest": "<sha256>",
+  "operations": [
+    {
+      "order": 1,
+      "kind": "file",
+      "target": "generated.txt",
+      "scope": "worktree-file",
+      "observed_before": {"value": null, "mode": null},
+      "intended_after": {"value": "generated\n", "mode": 420}
+    }
+  ]
+}
+```
+
+Bare invocation prints the preview. `spice generate --apply=<sha256>` invokes
+the same mounted planner once, recomputes and verifies the document digest, and
+then Spice applies the operations itself. A changed authored input produces a
+different plan and refuses before any operation while naming the current
+ordered operations. Bare `--apply` uses the same path without asserting a
+previous digest. Mounted plans may use only the initialization operation
+vocabulary Spice can apply itself; an unknown operation kind refuses rather
+than being delegated back to the mounted executable. An operation explicitly
+marked `managed: false` is preflighted and preserved.
+
+The same normalized document can be reversed by swapping total before/after
+states and reversing operation order. Durable receipt selection and the
+operator-facing `--unapply` flag are specified separately; callers never pass
+a receipt path through this mounted-command seam.
+
 ### Execution context: mount vs gate step
 
 The environment a command receives reflects *what it actually is*, consistently

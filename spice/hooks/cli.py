@@ -111,8 +111,13 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
     )
     init.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the ordered initialization plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the ordered initialization plan, optionally asserting its "
+            "digest; bare invocation only previews."
+        ),
     )
     add_withdrawn_dry_run_argument(init)
     init.add_argument(
@@ -130,8 +135,13 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
     )
     deinit.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the ordered reversal plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the ordered reversal plan, optionally asserting its digest; "
+            "bare invocation only previews."
+        ),
     )
     deinit.add_argument(
         "--json",
@@ -191,6 +201,7 @@ def handle_init(args: argparse.Namespace) -> int:
     if getattr(args, "unapply", None) is not None:
         return _handle_init_unapply(args)
 
+    from spice.commandplan import assert_plan_digest
     from spice.hooks.initplan import (
         InitializationMode,
         apply_initialization_plan,
@@ -205,18 +216,20 @@ def handle_init(args: argparse.Namespace) -> int:
         InitializationMode.GATES_ONLY if bool(args.gates) else InitializationMode.FULL
     )
     plan = plan_initialization(repo_root, mode)
-    if bool(args.apply) and bool(args.json):
+    apply_requested = args.apply is not None
+    if apply_requested and bool(args.json):
         raise SpiceError("`spice init --apply` cannot be combined with `--json`")
-    if not bool(args.apply):
+    payload = initialization_plan_payload(plan)
+    if not apply_requested:
         if bool(args.json):
-            print(
-                json.dumps(initialization_plan_payload(plan), indent=2, sort_keys=True)
-            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         for row in initialization_preview_rows(plan):
             print(row)
         return 0
 
+    expected_digest = args.apply if isinstance(args.apply, str) else None
+    assert_plan_digest(payload, expected_digest)
     apply_initialization_plan(plan, approve_repository_config=True)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
@@ -224,6 +237,7 @@ def handle_init(args: argparse.Namespace) -> int:
 
 
 def _handle_init_unapply(args: argparse.Namespace) -> int:
+    from spice.commandplan import assert_plan_digest
     from spice.hooks.deinitplan import (
         apply_deinitialization_plan,
         deinitialization_plan_payload,
@@ -232,16 +246,18 @@ def _handle_init_unapply(args: argparse.Namespace) -> int:
         plan_deinitialization,
     )
 
+    apply_requested = args.apply is not None
     if bool(args.gates):
         raise SpiceError(
             "`spice init --gates` cannot be combined with `--unapply`; "
             "the current receipt selects the reversal surface"
         )
-    if bool(args.apply) and bool(args.json):
+    if apply_requested and bool(args.json):
         raise SpiceError(
             "`spice init --unapply --apply` cannot be combined with `--json`"
         )
     plan = plan_deinitialization(init_repo_root())
+    payload = deinitialization_plan_payload(plan)
     asserted_digest = str(args.unapply)
     if asserted_digest and asserted_digest != plan.receipt_digest:
         raise SpiceError(
@@ -249,17 +265,15 @@ def _handle_init_unapply(args: argparse.Namespace) -> int:
             f"expected {asserted_digest}; "
             f"observed {plan.receipt_digest or '<none>'}"
         )
-    if not bool(args.apply):
+    if not apply_requested:
         if bool(args.json):
-            print(
-                json.dumps(
-                    deinitialization_plan_payload(plan), indent=2, sort_keys=True
-                )
-            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         for row in deinitialization_plan_rows(plan):
             print(row)
         return 0
+    expected_digest = args.apply if isinstance(args.apply, str) else None
+    assert_plan_digest(payload, expected_digest)
     report = apply_deinitialization_plan(plan)
     for row in deinitialization_report_rows(report):
         print(row)
