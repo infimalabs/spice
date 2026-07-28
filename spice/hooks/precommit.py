@@ -7,16 +7,18 @@ attempt reports the whole picture:
    tree through an index that still equals the first parent;
 2. repo shape — namespace packages, path shape, no generic split names;
 3. staging — partially staged files are rejected (the fully-staged rule);
-4. formatters — staged Python must satisfy `ruff format --check` and
+4. configuration governance — key validity, false-disable consumers, and
+   tracked executable approval guards stay complete;
+5. formatters — staged Python must satisfy `ruff format --check` and
    `ruff check`;
-5. local paths — no committed absolute macOS user path literals;
-6. serve web typecheck — static browser JavaScript must pass TypeScript
+6. local paths — no committed absolute macOS user path literals;
+7. serve web typecheck — static browser JavaScript must pass TypeScript
    `checkJs`;
-7. python typecheck — the project's own package roots must pass `pyright`;
-8. env policy — undeclared environment literals (and, when
+8. python typecheck — the project's own package roots must pass `pyright`;
+9. env policy — undeclared environment literals (and, when
    `env_access_gate` is on, undeclared env-access sites);
-9. env name ledger — exact manifest accounting for literal env names;
-10. shape pressure — file LOC/bytes, routine complexity, magic-number
+10. env name ledger — exact manifest accounting for literal env names;
+11. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
 Flex + sticky latches self-heal in-scan: every gate run drops any file,
@@ -71,6 +73,7 @@ from spice.scopes import (
 )
 from spice.studies import (
     complexity,
+    configgovernance,
     envpolicy,
     fileloc,
     gates,
@@ -221,6 +224,21 @@ def _builtin_pre_commit_steps(
         PreCommitStep("staging", "staging", lambda: _run_staging_guard(repo_root)),
         PreCommitStep(
             "repo-docs", "repo docs", lambda: _run_repo_truth_doc_guard(repo_root)
+        ),
+        PreCommitStep(
+            "config-key-validity",
+            "config key validity",
+            lambda: configgovernance.run_config_key_validity_gate(repo_root),
+        ),
+        PreCommitStep(
+            "config-false-disable",
+            "config false disable",
+            lambda: configgovernance.run_false_disable_gate(repo_root),
+        ),
+        PreCommitStep(
+            "config-tracked-trust",
+            "config tracked trust",
+            lambda: configgovernance.run_tracked_file_trust_gate(repo_root),
         ),
         PreCommitStep(
             "formatters",
