@@ -151,8 +151,8 @@ def test_operator_state_paths_are_distinct_for_linked_worktrees(tmp_path):
 
 
 def test_source_tree_outside_git_has_no_worktree_configuration_path(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "project-model"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[agent]\nmodel = "repository-model"\n',
         encoding="utf-8",
     )
     withdrawn = tmp_path / WORKTREE_CONFIG_PATH.withdrawn_relative
@@ -160,7 +160,7 @@ def test_source_tree_outside_git_has_no_worktree_configuration_path(tmp_path):
 
     loaded = layers.load_config(tmp_path)
 
-    assert loaded.effective["agent"]["model"] == "project-model"
+    assert loaded.effective["agent"]["model"] == "repository-model"
     assert loaded.layer(layers.WORKTREE_SOURCE).path is None
     assert loaded.layer(layers.WORKTREE_SOURCE).present is False
     assert withdrawn.read_text(encoding="utf-8") == (

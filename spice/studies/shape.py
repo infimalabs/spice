@@ -1,7 +1,7 @@
 """Repo shape opinions: namespace packages, path names, no generic splits.
 
 These guards bite inside the package roots a repo declares in its tracked
-`pyproject.toml` under `[tool.spice.policy] package_roots` (plus `tests/`
+`pyproject.toml` under `[policy] package_roots` (plus `tests/`
 when present). Repos without a declaration skip them — the opinions are
 Python-package-specific; the rest of the constitution still applies.
 
@@ -10,7 +10,7 @@ suffix — a package hiding behind an affix. `name_cluster_error` computes it an
 is enforced as a blocking gate: `precommit._run_shape_guards` raises on any
 offender alongside the namespace and path-shape guards. Repos can tune the
 number of sibling modules that trips this guard with
-`[tool.spice.policy].name_cluster_threshold`; unset repos use the default.
+`[policy].name_cluster_threshold`; unset repos use the default.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ GENERATED_PATHS_KEY = "generated_paths"
 
 
 def configured_package_roots(repo_root: Path) -> list[Path]:
-    # Explicit `[tool.spice.policy] package_roots` wins; otherwise derive the
+    # Explicit `[policy] package_roots` wins; otherwise derive the
     # roots from the project's own Python packaging config so a standard project
     # needs no spice-local declaration. Neither present -> no roots (skip).
     names = config_string_list(
@@ -96,7 +96,7 @@ def name_cluster_threshold(repo_root: Path) -> int:
         or raw < MIN_NAME_CLUSTER_THRESHOLD
     ):
         raise SpiceError(
-            "[tool.spice.policy].name_cluster_threshold must be an integer "
+            "[policy].name_cluster_threshold must be an integer "
             f">= {MIN_NAME_CLUSTER_THRESHOLD}"
         )
     return raw

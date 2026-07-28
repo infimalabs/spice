@@ -2,7 +2,7 @@
 
 The constitution's Python counterpart to the serve checkJs lane: it runs
 pyright over exactly the package roots `shape` resolves (explicit
-`[tool.spice.policy] package_roots`, else derived from the project's packaging
+`[policy] package_roots`, else derived from the project's packaging
 metadata), so it self-scopes like every other lane — a repo with no resolvable
 package contributes nothing. The flags are fixed and opinionated; the only
 seams are which roots the repo declares and, for non-standard virtualenv
@@ -88,7 +88,7 @@ def _configured_typecheck_interpreter(repo_root: Path) -> Path | None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise SpiceError(
-            f"[tool.spice.policy] {PYTHON_TYPECHECK_INTERPRETER_KEY} must be a "
+            f"[policy] {PYTHON_TYPECHECK_INTERPRETER_KEY} must be a "
             "non-empty Python interpreter path"
         )
     path = Path(raw.strip()).expanduser()

@@ -235,7 +235,7 @@ def test_consumer_inventory_derives_every_admitted_axis_from_live_users():
         "roles": "test and generated roles are classification datasets",
         "task-phases": "task phases are live allocator routing state",
         "configuration-layers": (
-            "system, pyproject, repository, and worktree are precedence metadata"
+            "system, repository, and worktree are precedence metadata"
         ),
     }
     assert WRAPPER_ROUTE_SCOPES.supported_axes == WRAPPER_SCOPES.supported_axes
@@ -284,7 +284,7 @@ def test_malformed_selector_uses_the_same_consumer_diagnostic(raw, detail):
     )
 
 
-def test_scopes_inline_leaf_replaces_completely_across_four_layers(
+def test_scopes_inline_leaf_replaces_completely_across_three_layers(
     tmp_path, monkeypatch
 ):
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
@@ -295,11 +295,6 @@ def test_scopes_inline_leaf_replaces_completely_across_four_layers(
         system_root / "spice.toml",
         "[policy.pre_commit_builtins.formatters]\n"
         'scopes = { paths = ["system"], drivers = ["codex"] }\n',
-    )
-    _write(
-        tmp_path / "pyproject.toml",
-        "[tool.spice.policy.pre_commit_builtins.formatters]\n"
-        'scopes = { drivers = ["claude"], phases = ["pre-commit"] }\n',
     )
     _write(
         tmp_path / "spice.toml",

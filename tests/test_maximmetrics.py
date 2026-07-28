@@ -45,9 +45,9 @@ from tests.test_reposcaffolding import init_quiet_empty_repo as _init_repo
 
 
 def _write_maxim_config(repo, *, name: str = "alpha") -> None:
-    (repo / "pyproject.toml").write_text(
+    (repo / "spice.toml").write_text(
         f"""
-[tool.spice.maxims.{name}]
+[maxims.{name}]
 words = ["{name}"]
 message = "{name.upper()} reminder."
 """.lstrip(),

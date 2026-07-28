@@ -74,9 +74,8 @@ def test_doctor_fails_dirty_worktree_with_investigation_command(tmp_path, monkey
 
 def test_doctor_reports_builtin_shadowing_mount_as_refused(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["pkg"]\n'
-        '[tool.spice.commands]\ntask = ["./scripts/task"]\n',
+    (repo / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\n[commands]\ntask = ["./scripts/task"]\n',
         encoding="utf-8",
     )
     install_hooks_for_repo(repo)
@@ -88,9 +87,7 @@ def test_doctor_reports_builtin_shadowing_mount_as_refused(tmp_path, monkeypatch
     assert report.failed
     assert mounts.status == "fail"
     assert "refused 1 mount(s)" in mounts.detail
-    assert (
-        f"commands (source=pyproject path={repo / 'pyproject.toml'})" in mounts.detail
-    )
+    assert f"commands (source=repository path={repo / 'spice.toml'})" in mounts.detail
     assert "entry 'task'" in mounts.detail
     assert "shadows a built-in spice command" in mounts.detail
 
@@ -535,10 +532,10 @@ def test_doctor_wrapper_seam_check_requires_dev_pytest_argv(tmp_path):
 def _wrapper_repo(repo: Path, pytest_argv: str) -> Path:
     repo.mkdir()
     _run(repo, "git", "init", "-b", "main")
-    (repo / "pyproject.toml").write_text(
-        "[tool.spice.agent]\n"
+    (repo / "spice.toml").write_text(
+        "[agent]\n"
         'wrappers = ["spice-dev"]\n'
-        "[tool.spice.wrappers.spice-dev.pytest]\n"
+        "[wrappers.spice-dev.pytest]\n"
         f"argv = {pytest_argv}\n",
         encoding="utf-8",
     )
@@ -561,23 +558,23 @@ def test_doctor_reports_file_loc_standing_debt_as_info_with_scopes_and_excludes(
     tmp_path,
 ):
     repo = _repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
+    (repo / "spice.toml").write_text(
         """
-        [tool.spice.policy]
+        [policy]
         package_roots = ["pkg"]
         exclude = ["generated/"]
 
-        [tool.spice.policy.limits]
+        [policy.limits]
         file_loc = 20
         file_bytes = 100000
 
-        [tool.spice.policy.flex]
+        [policy.flex]
         ratio = 1.0
 
-        [[tool.spice.policy.rules]]
+        [[policy.rules]]
         scopes = { paths = ["legacy/**"] }
 
-        [tool.spice.policy.rules.file_loc]
+        [policy.rules.file_loc]
         multiplier = 10.0
         """,
         encoding="utf-8",
@@ -619,22 +616,22 @@ def test_doctor_complexity_uses_staged_scan_with_scoped_bounds(
     monkeypatch,
 ):
     repo = _repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
+    (repo / "spice.toml").write_text(
         """
-        [tool.spice.policy]
+        [policy]
         package_roots = ["pkg"]
 
-        [tool.spice.policy.limits]
+        [policy.limits]
         routine_ccn = 5
         routine_length = 8
 
-        [tool.spice.policy.flex]
+        [policy.flex]
         ratio = 1.0
 
-        [[tool.spice.policy.rules]]
+        [[policy.rules]]
         scopes = { paths = ["legacy/**"] }
 
-        [tool.spice.policy.rules.routine_ccn]
+        [policy.rules.routine_ccn]
         multiplier = 2.0
         """,
         encoding="utf-8",
@@ -796,8 +793,8 @@ def _repo(tmp_path: Path) -> Path:
     repo.mkdir()
     (repo / "pkg").mkdir()
     (repo / "pkg" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (repo / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["pkg"]\n',
+    (repo / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\n',
         encoding="utf-8",
     )
     _run(repo, "git", "init", "-b", "main")

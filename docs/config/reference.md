@@ -1,12 +1,11 @@
 # Configuration Reference
 
-Spice configuration has exactly four scopes, in increasing precedence order:
+Spice configuration has exactly three scopes, in increasing precedence order:
 
 | Scope | Path | Behavior |
 | --- | --- | --- |
 | `system` | `<installed spice package>/spice.toml` | Installed defaults; writable only when that existing file is writable |
-| `pyproject` | `<repository>/pyproject.toml` | Tracked `[tool.spice.*]` tables |
-| `repository` | `<repository>/spice.toml` | Tracked plain Spice tables such as `[agent]` |
+| `repository` | `<repository>/spice.toml` | Tracked Spice tables such as `[agent]` |
 | `worktree` | `<worktree-git-dir>/.spice/config/spice.toml` | Local plain Spice tables for one worktree; structurally untracked |
 
 Managed runtime state has three ownership namespaces. Here,
@@ -81,7 +80,7 @@ test/generated roles remain classification datasets. Task phases remain live
 allocator routing state. `scopes.models` filters an entry against the effective
 configured worktree model; it never chooses a launch model. The `agent.model`
 and `tasks.phase_models.<driver>.<phase>.model` keys remain launch payload. The
-four configuration-layer names remain precedence metadata. None of those
+three configuration-layer names remain precedence metadata. None of those
 payload, dataset, routing, or layering concepts is accepted as a new `scopes`
 axis.
 
@@ -100,41 +99,40 @@ Configuration may still contain payload that initializes or influences those
 runtime models, such as `serve.default_lifetime`. That does not turn the live
 membership, lifetime, filter, origin, or task-phase fields into selector axes.
 
-The `pyproject` scope alone uses the `tool.spice` prefix:
-
-```toml
-[tool.spice.agent]
-model = "gpt-5.5"
-```
-
-The same value in `system`, `repository`, or `worktree` TOML uses its plain
-shape:
+Every source uses the same bare table shape:
 
 ```toml
 [agent]
 model = "gpt-5.5"
 ```
 
-`spice config show` prints all four parsed layers, their source paths, the
+`spice config show` prints all three parsed layers, their source paths, the
 effective mapping, and the winning source for every key as deterministic JSON.
 `spice config system` prints effective agent values and their provenance from
 the same layered view. Mutable commands default to `--scope worktree`; agent,
-personality, say, and judge settings also accept `system`, `pyproject`, and
-`repository`. `--clear` removes only that command's values from the selected
+personality, say, and judge settings also accept `system` and `repository`.
+`--clear` removes only that command's values from the selected
 scope, revealing the next earlier layer without changing it.
 
 All mutable commands use one structured TOML editor. It preserves unrelated
 tables, comments, ordering, and scalar types, validates the resulting document,
 and atomically replaces the selected file. A system write requires the installed
-`spice.toml` to exist and be writable; the other three scopes are created on
+`spice.toml` to exist and be writable; the other two scopes are created on
 demand. Invalid or unwritable mutations report `scope=<name> path=<path>` before
 changing bytes.
 
-The configuration migration is complete. Runtime code does not read or import
-`.spice/config/state.json`; an old file is ignored. Move any values that still
-matter into the worktree scope using `spice config`, then delete the JSON file.
-There is no compatibility scope name or JSON adapter. v0.30.0 also moved the
-plain worktree file from `<repository>/.spice/config/spice.toml` to
+Spice v0.30 dropped `[tool.spice]` repository configuration. A repository that
+still contains that table refuses configuration loading and names root
+`spice.toml` as its replacement. Migrate once by moving the contents of
+`[tool.spice]` into root `spice.toml` and removing the `tool.spice` prefix; for
+example, `[tool.spice.policy]` becomes `[policy]`. Runtime code never merges,
+unwraps, or assigns precedence to both shapes.
+
+Runtime code also does not read or import `.spice/config/state.json`; an old
+file is ignored. Move any values that still matter into
+the worktree scope using `spice config`, then delete the JSON file. There is no
+compatibility scope name or JSON adapter. v0.30 also moved the plain worktree
+file from `<repository>/.spice/config/spice.toml` to
 `<worktree-git-dir>/.spice/config/spice.toml`: an untracked predecessor is
 migrated once, while a tracked, repeated, or competing predecessor is refused
 and never honored.
@@ -156,7 +154,7 @@ search differently than the command as written. Install and protocol details
 live in
 [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
-## `[tool.spice.rtk]`
+## `[rtk]`
 
 RTK executable identity is a standard layered setting:
 
@@ -164,9 +162,9 @@ RTK executable identity is a standard layered setting:
 | --- | --- | --- |
 | `executable` | `"rtk"` | One trusted executable basename or absolute path. Relative paths, whitespace-delimited command strings, and argv lists are invalid. |
 
-The tracked form is `[tool.spice.rtk]`; system, repository, and worktree
-`spice.toml` files use `[rtk]`. Later scopes replace `rtk.executable` normally,
-and `spice config show` reports its winning scope and path. Resolution retains
+System, repository, and worktree `spice.toml` files all use `[rtk]`. Later
+scopes replace `rtk.executable` normally, and `spice config show` reports its
+winning scope and path. Resolution retains
 the exact value and performs no `which`, existence, or executable probe.
 Activation, Doctor, and `spice agent run` then invoke that exact identity.
 
@@ -261,7 +259,7 @@ not exist, uses the portable `spice-judge` adapter that ships with Spice. An
 explicit `bin` overrides this default on every platform. For each verdict Spice
 launches the exact argv `[configured_bin]`. `bin` selects which executable the
 enabled adjudication path launches; it does not by itself enable adjudication.
-The binary participates in the normal four-layer configuration precedence and
+The binary participates in the normal three-layer configuration precedence and
 accepts `--scope`; the `enabled` flag is intentionally worktree-local, so
 `--enable` and `--disable` require the default `--scope worktree`.
 
@@ -311,7 +309,7 @@ errors. During supervision, judge errors are logged and skip that maxim
 feedback without stopping transcript capture, steering, or tasks. Learning
 distillation likewise skips candidates whose judge call fails.
 
-## `[tool.spice.agent]`
+## `[agent]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -361,10 +359,10 @@ reference](https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions
 Plane](../design/ARCHITECTURE.md#lifecycle-plane), tracked by
 `FOUNDAT-1kCyNZT3`.
 
-## `[tool.spice.wrappers.<group>]`
+## `[wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
-with `[tool.spice.agent] wrappers = [...]`.
+with `[agent] wrappers = [...]`.
 
 | Entry shape | Meaning |
 | --- | --- |
@@ -382,18 +380,18 @@ configuration source, so a raw `rg` whose RTK candidate ends at `grep` remains
 native `rg`. The shared plain wrapper preserves Claude's BASIC-regexp authoring
 with `\|`; its Codex-scoped catch-all injects `-E`, with explicit matcher flags
 still winning.
-Naming `common` in a repo `[tool.spice.wrappers.common]` table replaces the whole
+Naming `common` in a repo `[wrappers.common]` table replaces the whole
 group atomically — routes do not concatenate, so an override must re-list every
 route it keeps — while omitting the table inherits this default and
 `wrappers = []` disables generation. Repo groups should otherwise wrap stable
 repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
-## `[tool.spice.commands]`
+## `[commands]`
 
 Mounted commands put repo tooling under the `spice` namespace.
 
 ```toml
-[tool.spice.commands]
+[commands]
 release = ["uv", "run", "python", "-m", "spice.release"]
 bench = "python -m myproj.bench"
 report.inspect = ["project-tool", "report", "inspect"]
@@ -408,7 +406,7 @@ For example, these entries are refused because the full paths already resolve
 to registered actions:
 
 ```toml
-[tool.spice.commands]
+[commands]
 "study.csharp-members" = "./scripts/csharp-members.sh"
 "dev.pre-commit" = "./scripts/pre-commit.sh"
 ```
@@ -416,14 +414,14 @@ to registered actions:
 This is allowed when no `spice study repo-tool` action is registered:
 
 ```toml
-[tool.spice.commands]
+[commands]
 "study.repo-tool" = ["project-tool", "study", "repo-tool"]
 ```
 
 Values are command strings or argv lists; remaining CLI arguments are passed
 through verbatim.
 
-## `[tool.spice.locks]`
+## `[locks]`
 
 Resource locks coordinate exclusive local resources such as editor instances,
 emulators, databases, license seats, or a fixed pool of sandbox shards. The
@@ -431,16 +429,16 @@ tracked table declares the resources; `spice lock run` holds one while a child
 command runs and releases it when that child exits.
 
 ```toml
-[tool.spice.locks]
+[locks]
 lock_contention_exit_code = 75
 chosen_shard_contention_exit_code = 76
 pool_exhaustion_exit_code = 77
 
-[tool.spice.locks.named.editor]
+[locks.named.editor]
 path = ".spice/locks/editor.lock"
 contention_exit_code = 75
 
-[tool.spice.locks.pools.android]
+[locks.pools.android]
 directory = ".spice/locks/android"
 shards = 3
 chosen_shard_contention_exit_code = 76
@@ -462,7 +460,7 @@ such as `--path`, `--directory`, `--shards`,
 `--lock-contention-exit-code`, `--chosen-shard-contention-exit-code`, and
 `--pool-exhaustion-exit-code` override the tracked defaults for that one run.
 
-## `[tool.spice.policy]`
+## `[policy]`
 
 The policy table extends the constitution. Defaults come from `spice/policy.py`.
 
@@ -498,28 +496,28 @@ Shell env-access patterns intentionally cover name-like parameters, not shell
 special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 `$-`, or `$_`.
 
-### `[tool.spice.policy.languages]`
+### `[policy.languages]`
 
 Suffix families for `complexity`, `magic`, `env`, and `c_grammar` scans.
 
-### `[tool.spice.policy.lockfiles]`
+### `[policy.lockfiles]`
 
 Generated lockfile `suffixes` and `names` exempt from file-shape pressure.
 
-### `[tool.spice.policy.file_shape]`
+### `[policy.file_shape]`
 
 `source_suffixes` selects files for LOC/byte pressure. `generated_patterns`
 exempts generated sources such as protobuf modules, minified bundles, and build
 outputs.
 
-### `[tool.spice.policy.env_access]`
+### `[policy.env_access]`
 
 `family_suffixes` maps language families to suffixes. `default_patterns` maps
 families to env-access regexes; custom pattern families must have suffixes.
 `baseline` points at existing `env-policy` findings. The env-name ledger only
 accounts for extractable literal names and scans tests like production.
 
-### `[tool.spice.policy.suite_seam]`
+### `[policy.suite_seam]`
 
 Per-lane verification is a subset twice over. An agent runs the tests that name
 the module it changed, and for a widely depended-on module that direct-import
@@ -540,7 +538,7 @@ starting and reports the measured wall clock afterwards, so a stale declaration
 is visible on every seam landing.
 
 ```toml
-[tool.spice.policy.suite_seam]
+[policy.suite_seam]
 seconds = 200
 run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
 paths = ["spice/tasks/tw.py", "spice/policy.py"]
@@ -585,7 +583,7 @@ A red suite here is a refusal to publish, not a lost merge. The integrated tree
 stays checked out, so the failures reported are the ones the branch would have
 taken; fix them, commit, and run `spice task done` again.
 
-### `[tool.spice.policy.csharp_unused_retention]`
+### `[policy.csharp_unused_retention]`
 
 Tracked declarations for C# members that are reached by framework convention
 rather than by direct C# references. The table only adds retained findings; the
@@ -593,7 +591,7 @@ built-in partial-declaration and attribute-retention defaults still apply when
 the table is absent or when no declaration matches.
 
 ```toml
-[tool.spice.policy.csharp_unused_retention]
+[policy.csharp_unused_retention]
 base_types = ["HostedServiceBase"]
 interfaces = ["IPluginModule"]
 attribute_names = ["ServiceEntryPointAttribute"]
@@ -614,23 +612,23 @@ Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 repo-root markdown `10000` chars plus `10000` per nested directory until
 `30000`, magic-number threshold `10`, and magic baselines against `HEAD`.
 
-### `[tool.spice.policy.limits]`
+### `[policy.limits]`
 
 Base caps: `file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
 `commit_message_wrap`, and `repo_truth_doc_chars`.
 
-### `[tool.spice.policy.flex]`
+### `[policy.flex]`
 
 Default `ratio` is `1.5`; explicit per-bound flex caps override it. Breaching
 flex makes the item sticky until it shrinks under the base cap.
 
-### `[tool.spice.policy.complexity]`
+### `[policy.complexity]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `hotspot_limit` | `20` | Default number of rows shown by `spice study complexity-hotspots` when `--limit` is omitted. |
 
-### `[tool.spice.policy.taste.words]`
+### `[policy.taste.words]`
 
 The authoritative built-in map is `policy.TASTE_WORD_SUGGESTIONS`. It feeds
 `spice study taste`, the staged pre-commit taste gate, and task-creation wording;
@@ -648,30 +646,30 @@ lowercase and assigns repository entries in TOML order. A matching normalized
 key replaces only that suggestion; new keys extend the map, and every other
 built-in entry remains active.
 
-### `[tool.spice.policy.markdown_depth_budget]`
+### `[policy.markdown_depth_budget]`
 
 Generated `repo_truth_doc_chars` scopes for tracked markdown: repo root gets
 `10000` chars, one nested directory `20000`, two nested directories `30000`,
 and deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to
-`[]` to replace generated rules with explicit `[[tool.spice.policy.rules]]`
+`[]` to replace generated rules with explicit `[[policy.rules]]`
 entries.
 `stem_pattern` optionally full-matches file stems; binary files are skipped.
 
-### `[tool.spice.policy.debt]`
+### `[policy.debt]`
 
 Allowed-finding counters, not size limits. Defaults are `0` for
 `reachability_test_only` and `assertion_free_tests`; non-zero values are
 explicit cleanup debt.
 
-### `[[tool.spice.policy.rules]]`
+### `[[policy.rules]]`
 
 Each policy rule is one payload with an inline universal selector:
 
 ```toml
-[[tool.spice.policy.rules]]
+[[policy.rules]]
 scopes = { paths = ["Docs"], extensions = [".md"] }
 
-[tool.spice.policy.rules.repo_truth_doc_chars]
+[policy.rules.repo_truth_doc_chars]
 min = 20000
 flex = 1.25
 ```
@@ -686,11 +684,11 @@ target `file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
 specificity chooses the winning applicable rule; repository-authored rules
 outrank generated markdown-depth rules.
 
-### `[tool.spice.policy.magic]`
+### `[policy.magic]`
 
 `examine_threshold` defaults to `10`; `baseline_ref` defaults to `HEAD`.
 
-### `[tool.spice.policy.commit_message]`
+### `[policy.commit_message]`
 
 `allowed_trailers` optionally limits Git trailer keys to a finite set;
 `blocked_trailers` optionally rejects specific keys. Both are unset by
@@ -722,7 +720,7 @@ whole-file findings to `reachability` and symbol findings to
 required non-empty strings. `test` is the test function name or `<module>`, and
 `target` is the private production symbol the test imports or reaches.
 
-## `[tool.spice.policy.pre_commit_builtins]`
+## `[policy.pre_commit_builtins]`
 
 Each built-in key may be:
 
@@ -731,7 +729,7 @@ Each built-in key may be:
 - A command-step table using `mount`, `run`, or `argv`.
 - `{ enabled = false }` to disable with an explicit table.
 
-## `[tool.spice.maxims.<bag>]`
+## `[maxims.<bag>]`
 
 Maxim bags extend or replace the live prose conscience.
 
@@ -742,7 +740,7 @@ Maxim bags extend or replace the live prose conscience.
 | `scopes` | `{}` (unconstrained) | Universal applicability selector. Maxim bags support the shared `drivers` axis; cite `spice maxim report` evidence before narrowing it. |
 
 ```toml
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route"]
 message = "Respond to the real event instead."
 scopes = { drivers = ["codex"] }
@@ -760,7 +758,7 @@ compaction epoch. A later compaction can make the same key eligible to publish
 again because the agent may have lost the earlier inbox steering, but the
 compaction count never changes the configured `message` text.
 
-## `[tool.spice.tasks]`
+## `[tasks]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -776,7 +774,7 @@ accepts `C,H,M,L,`; its urgency coefficients are 8.1, 6.0, 3.9, and 1.8.
 Critical and high SLA due dates are one day, medium is seven days, and low is
 thirty days.
 
-## `[tool.spice.tasks.phase_models.<driver>.<phase>]`
+## `[tasks.phase_models.<driver>.<phase>]`
 
 Per-driver, per-phase agent launch overrides. Each driver has its own model
 space, so the table is keyed by driver name (`claude` or `codex`) and then by
@@ -788,11 +786,11 @@ task phase (`design`, `plan`, `todo`, `verify`, `review`, `oops`).
 | `effort` | unset | Reasoning effort to launch with for the same phase. |
 
 ```toml
-[tool.spice.tasks.phase_models.claude.plan]
+[tasks.phase_models.claude.plan]
 model = "claude-opus-4-8"
 effort = "high"
 
-[tool.spice.tasks.phase_models.claude.todo]
+[tasks.phase_models.claude.todo]
 model = "claude-sonnet-5"
 ```
 
@@ -808,7 +806,7 @@ they are not applicability selectors. A `scopes.models` entry filters a
 consumer that declares model applicability and does not participate in lane or
 task allocation.
 
-## `[tool.spice.serve]`
+## `[serve]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |

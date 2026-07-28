@@ -736,7 +736,6 @@ def test_many_row_status_keeps_repo_and_config_resolution_constant(
     assert len(git_probes) == 2
     assert [source for source, _path in parsed] == [
         layers.SYSTEM_SOURCE,
-        layers.PYPROJECT_SOURCE,
         layers.REPOSITORY_SOURCE,
         layers.WORKTREE_SOURCE,
     ]

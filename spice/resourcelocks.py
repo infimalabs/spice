@@ -219,11 +219,11 @@ def _configured_named_locks(
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SpiceError("[tool.spice.locks.named] must be a table")
+        raise SpiceError("[locks.named] must be a table")
     locks: dict[str, NamedLockConfig] = {}
     for name, value in raw.items():
         if not isinstance(value, dict):
-            raise SpiceError(f"[tool.spice.locks.named.{name}] must be a table")
+            raise SpiceError(f"[locks.named.{name}] must be a table")
         lock_name = str(name)
         locks[lock_name] = NamedLockConfig(
             name=lock_name,
@@ -231,12 +231,12 @@ def _configured_named_locks(
                 repo_root,
                 value.get("path"),
                 LOCK_STATE_ROOT / f"{lock_name}.lock",
-                f"[tool.spice.locks.named.{lock_name}].path",
+                f"[locks.named.{lock_name}].path",
             ),
             contention_exit_code=_exit_code(
                 value.get("contention_exit_code"),
                 defaults.lock_contention,
-                f"[tool.spice.locks.named.{lock_name}].contention_exit_code",
+                f"[locks.named.{lock_name}].contention_exit_code",
             ),
         )
     return locks
@@ -248,11 +248,11 @@ def _configured_lock_pools(
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SpiceError("[tool.spice.locks.pools] must be a table")
+        raise SpiceError("[locks.pools] must be a table")
     pools: dict[str, LockPoolConfig] = {}
     for name, value in raw.items():
         if not isinstance(value, dict):
-            raise SpiceError(f"[tool.spice.locks.pools.{name}] must be a table")
+            raise SpiceError(f"[locks.pools.{name}] must be a table")
         pool_name = str(name)
         pools[pool_name] = LockPoolConfig(
             name=pool_name,
@@ -260,23 +260,22 @@ def _configured_lock_pools(
                 repo_root,
                 value.get("directory"),
                 LOCK_STATE_ROOT / pool_name,
-                f"[tool.spice.locks.pools.{pool_name}].directory",
+                f"[locks.pools.{pool_name}].directory",
             ),
             shards=_positive_int(
                 value.get("shards"),
                 1,
-                f"[tool.spice.locks.pools.{pool_name}].shards",
+                f"[locks.pools.{pool_name}].shards",
             ),
             chosen_shard_contention_exit_code=_exit_code(
                 value.get("chosen_shard_contention_exit_code"),
                 defaults.chosen_shard_contention,
-                "[tool.spice.locks.pools."
-                f"{pool_name}].chosen_shard_contention_exit_code",
+                f"[locks.pools.{pool_name}].chosen_shard_contention_exit_code",
             ),
             pool_exhaustion_exit_code=_exit_code(
                 value.get("pool_exhaustion_exit_code"),
                 defaults.pool_exhaustion,
-                f"[tool.spice.locks.pools.{pool_name}].pool_exhaustion_exit_code",
+                f"[locks.pools.{pool_name}].pool_exhaustion_exit_code",
             ),
         )
     return pools

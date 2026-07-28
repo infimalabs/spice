@@ -250,7 +250,7 @@ def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.shortcuts]
+[maxims.shortcuts]
 words = ["shortcut", "shortcuts"]
 message = "DO NOT take shortcuts; keep the direct route."
 """,
@@ -607,7 +607,7 @@ def test_repo_config_overrides_builtin_trigger_words(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.fallbacks]
+[maxims.fallbacks]
 words = ["detour"]
 """,
     )
@@ -651,7 +651,7 @@ def test_repo_config_declares_maxim_driver_scope(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route"]
 message = "DO NOT take the quiet route."
 scopes = { drivers = ["Codex", "codex"] }
@@ -683,12 +683,12 @@ def test_watchdog_filters_maxim_bags_by_active_driver(tmp_path, monkeypatch):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.codexonly]
+[maxims.codexonly]
 words = ["codex route"]
 message = "CODEX only reminder."
 scopes = { drivers = ["codex"] }
 
-[tool.spice.maxims.shared]
+[maxims.shared]
 words = ["shared route"]
 message = "Shared reminder."
 """,
@@ -724,7 +724,7 @@ def test_repo_config_rejects_unknown_maxim_driver_scope(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route"]
 message = "DO NOT take the quiet route."
 scopes = { drivers = ["codex", "ghost"] }
@@ -766,7 +766,7 @@ def test_worktree_disabled_maxim_bag_stops_publish_without_silencing_enabled_bag
         "[MAXIM] SECOND reminder.\n"
     ]
     subprocess.run(
-        ["git", "diff", "--exit-code", "--", "pyproject.toml"],
+        ["git", "diff", "--exit-code", "--", "spice.toml"],
         cwd=repo,
         capture_output=True,
         check=True,
@@ -779,7 +779,7 @@ def test_worktree_disabled_maxim_bag_is_local_to_one_linked_worktree(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route"]
 message = "DO NOT take the quiet route."
 """,
@@ -814,17 +814,17 @@ def test_watchdog_scopes_and_worktree_disable_compose_for_operator_behavior(
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.codexonly]
+[maxims.codexonly]
 words = ["codex route"]
 message = "CODEX scoped reminder."
 scopes = { drivers = ["codex"] }
 
-[tool.spice.maxims.claudeonly]
+[maxims.claudeonly]
 words = ["claude route"]
 message = "CLAUDE scoped reminder."
 scopes = { drivers = ["claude"] }
 
-[tool.spice.maxims.shared]
+[maxims.shared]
 words = ["shared route"]
 message = "Shared reminder."
 """,
@@ -869,7 +869,7 @@ message = "Shared reminder."
         "[MAXIM] CLAUDE scoped reminder. Shared reminder.\n"
     ]
     subprocess.run(
-        ["git", "diff", "--exit-code", "--", "pyproject.toml"],
+        ["git", "diff", "--exit-code", "--", "spice.toml"],
         cwd=repo,
         capture_output=True,
         check=True,
@@ -937,7 +937,7 @@ def test_repo_config_declares_phrase_trigger_key(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route", "soft landing"]
 message = "DO NOT take the quiet route."
 """,
@@ -960,7 +960,7 @@ def test_repo_config_rejects_non_alphabetic_phrase_trigger_key(tmp_path):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["falls-back"]
 message = "DO NOT take the quiet route."
 """,
@@ -1015,7 +1015,7 @@ def test_repo_config_declares_custom_mode_words_for_show_and_meta_judge(
     _write_pyproject(
         repo,
         f"""
-[tool.spice.maxims.modes]
+[maxims.modes]
 words = ["mode", "modes"]
 message = "{message}"
 """,
@@ -1058,7 +1058,7 @@ def test_maxim_show_quotes_phrase_trigger_keys(tmp_path, monkeypatch, capsys):
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.routes]
+[maxims.routes]
 words = ["quiet route", "detour"]
 message = "DO NOT take the quiet route."
 """,
@@ -1072,18 +1072,18 @@ message = "DO NOT take the quiet route."
 
 
 def _write_pyproject(repo: Path, text: str) -> None:
-    (repo / "pyproject.toml").write_text(text.strip() + "\n", encoding="utf-8")
+    (repo / "spice.toml").write_text(text.strip() + "\n", encoding="utf-8")
 
 
 def _write_dual_maxim_config(repo: Path) -> None:
     _write_pyproject(
         repo,
         """
-[tool.spice.maxims.first]
+[maxims.first]
 words = ["alpha"]
 message = "FIRST reminder."
 
-[tool.spice.maxims.second]
+[maxims.second]
 words = ["beta"]
 message = "SECOND reminder."
 """,

@@ -72,7 +72,7 @@ def test_maxim_trigger_match_records_source_family_and_reason(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.maxims.routes]
+        [maxims.routes]
         words = ["quiet route"]
         message = "Do not take the quiet route."
         """,
@@ -110,7 +110,7 @@ def test_positive_occurrence_after_negated_occurrence_still_matches(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.maxims.routes]
+        [maxims.routes]
         words = ["quiet route"]
         message = "Do not take the quiet route."
         """,
@@ -135,7 +135,7 @@ def test_hypothetical_trigger_word_remains_suspect(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.maxims.routes]
+        [maxims.routes]
         words = ["quiet route"]
         message = "Do not take the quiet route."
         """,
@@ -184,7 +184,7 @@ def test_project_and_routing_metadata_are_not_scanned(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.maxims.routes]
+        [maxims.routes]
         words = ["quiet route"]
         message = "Do not take the quiet route."
         """,
@@ -206,10 +206,10 @@ def test_config_overrides_taste_words_and_maxim_triggers(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.policy.taste.words]
+        [policy.taste.words]
         bespoke = "specific"
 
-        [tool.spice.maxims.routes]
+        [maxims.routes]
         words = ["quiet route"]
         message = "Do not take the quiet route."
         """,
@@ -241,7 +241,7 @@ def test_repo_task_wording_retains_exact_builtin_inflection(repo):
     _write_pyproject(
         repo,
         """
-        [tool.spice.policy.taste.words]
+        [policy.taste.words]
         bespoke = "specific"
         """,
     )
@@ -262,4 +262,4 @@ def test_repo_task_wording_retains_exact_builtin_inflection(repo):
 
 
 def _write_pyproject(path: Path, text: str) -> None:
-    path.joinpath("pyproject.toml").write_text(text, encoding="utf-8")
+    path.joinpath("spice.toml").write_text(text, encoding="utf-8")

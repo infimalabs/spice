@@ -219,10 +219,10 @@ def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     Judge-free is the deterministic default: a matched trigger bag publishes
     its ``[MAXIM]`` reminder directly, with no judge subprocess. An
     installation opts into local YES/NO adjudication by setting
-    ``[judge] enabled = true`` in any effective configuration layer -- a
-    committed ``pyproject.toml`` / ``spice.toml`` or the worktree-local config
-    -- so a repository can turn adjudication on for itself without changing the
-    packaged default that every other install inherits; any other value
+    ``[judge] enabled = true`` in any effective configuration layer -- the
+    tracked ``spice.toml`` or the worktree-local config -- so a repository can
+    turn adjudication on for itself without changing the packaged default that
+    every other install inherits; any other value
     (including an absent one) resolves to the judge-free default.
     """
     return _scalar(JUDGE_KEY, JUDGE_ENABLED_KEY, repo_root)
@@ -266,7 +266,7 @@ def configured_rtk_executable(repo_root: Path | None = None) -> str:
     if not isinstance(section, Mapping):
         raise _rtk_config_error(
             root,
-            SpiceError("[tool.spice.rtk] must be a table"),
+            SpiceError("[rtk] must be a table"),
             RTK_KEY,
         )
     raw = section.get(RTK_EXECUTABLE_KEY)
@@ -274,7 +274,7 @@ def configured_rtk_executable(repo_root: Path | None = None) -> str:
         raise _rtk_config_error(
             root,
             SpiceError(
-                "[tool.spice.rtk] executable must be one non-empty executable "
+                "[rtk] executable must be one non-empty executable "
                 "basename or absolute path"
             ),
             RTK_KEY,

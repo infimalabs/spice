@@ -46,7 +46,7 @@ const bumpTaskRevisionScript = [
 async function createFixtureRepository() {
   const repo = await fs.mkdtemp(path.join(os.tmpdir(), "spice-board-outage-"));
   await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: repo });
-  await fs.writeFile(path.join(repo, "pyproject.toml"), "[tool.spice]\n", "utf8");
+  await fs.writeFile(path.join(repo, "spice.toml"), "", "utf8");
   return repo;
 }
 

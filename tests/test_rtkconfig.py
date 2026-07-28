@@ -30,13 +30,7 @@ def test_each_rtk_configuration_layer_can_win_with_provenance(
 ) -> None:
     paths = _redirect_system_config(tmp_path, monkeypatch, "system-rtk")
     expected = "system-rtk"
-    if scope == layers.PYPROJECT_SOURCE:
-        expected = "pyproject-rtk"
-        _write(
-            paths[scope],
-            f'[tool.spice.rtk]\nexecutable = "{expected}"\n',
-        )
-    elif scope == layers.REPOSITORY_SOURCE:
+    if scope == layers.REPOSITORY_SOURCE:
         expected = "repository-rtk"
         _write(paths[scope], f'[rtk]\nexecutable = "{expected}"\n')
     elif scope == layers.WORKTREE_SOURCE:
@@ -57,10 +51,6 @@ def test_all_rtk_layers_resolve_in_declared_precedence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     paths = _redirect_system_config(tmp_path, monkeypatch, "system-rtk")
-    _write(
-        paths[layers.PYPROJECT_SOURCE],
-        '[tool.spice.rtk]\nexecutable = "pyproject-rtk"\n',
-    )
     _write(
         paths[layers.REPOSITORY_SOURCE],
         '[rtk]\nexecutable = "repository-rtk"\n',
@@ -186,7 +176,6 @@ def _redirect_system_config(
     monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     return {
         layers.SYSTEM_SOURCE: system_path,
-        layers.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
         layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
         layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
     }

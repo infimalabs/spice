@@ -22,7 +22,7 @@ RETENTION_POLICY_KEY = "csharp_unused_retention"
 RETENTION_BASE_TYPES_KEY = "base_types"
 RETENTION_INTERFACES_KEY = "interfaces"
 RETENTION_ATTRIBUTE_NAMES_KEY = "attribute_names"
-RETENTION_CONFIG_CONTEXT = f"[tool.spice.policy.{RETENTION_POLICY_KEY}]"
+RETENTION_CONFIG_CONTEXT = f"[policy.{RETENTION_POLICY_KEY}]"
 
 PRIVATE_BLOCKING_MODIFIERS = frozenset({"public", "protected", "internal"})
 TYPE_CONTEXT_DECLARATIONS = frozenset(

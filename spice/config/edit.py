@@ -12,7 +12,6 @@ from typing import Any
 
 from spice.config.layers import (
     CONFIG_SCOPE_NAMES,
-    PYPROJECT_SOURCE,
     REPOSITORY_SOURCE,
     SYSTEM_SOURCE,
     WORKTREE_SOURCE,
@@ -39,8 +38,6 @@ def config_scope_path(repo_root: Path, scope: str) -> Path:
     """Return the canonical TOML path for one explicit mutable scope."""
     if scope == SYSTEM_SOURCE:
         return runtime_spice_source() / "spice.toml"
-    if scope == PYPROJECT_SOURCE:
-        return repo_root / "pyproject.toml"
     if scope == REPOSITORY_SOURCE:
         return repo_root / "spice.toml"
     if scope == WORKTREE_SOURCE:
@@ -90,7 +87,7 @@ def _mutate_scope_section(
         raise SpiceError(
             f"cannot read configuration scope={scope} path={path}: {exc}"
         ) from exc
-    table = f"tool.spice.{key}" if scope == PYPROJECT_SOURCE else key
+    table = key
     if values:
         _apply_worktree_table(lines, table, values)
     elif clear_keys is None:

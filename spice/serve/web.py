@@ -101,7 +101,7 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
         else defaults.table("serve")
     )
     if not isinstance(raw_serve, Mapping):
-        error = SpiceError("[tool.spice.serve] must be a table")
+        error = SpiceError("[serve] must be a table")
         if repo_root is None:
             raise error
         raise contextualize_config_error(repo_root, error, "serve") from error
@@ -111,7 +111,7 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     brand_source = loaded.source_for("serve.brand") if loaded is not None else None
     configured_brand = _string(serve.get("brand"))
     if "brand" in serve and not configured_brand:
-        error = SpiceError("[tool.spice.serve] brand must be a non-empty string")
+        error = SpiceError("[serve] brand must be a non-empty string")
         if repo_root is None:
             raise error
         raise contextualize_config_error(repo_root, error, "serve", "brand") from error
@@ -125,9 +125,7 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     )
     raw_lifetime = _string(serve.get("default_lifetime"))
     if raw_lifetime not in VALID_LIFETIMES:
-        error = SpiceError(
-            "[tool.spice.serve] default_lifetime must name a valid lifetime"
-        )
+        error = SpiceError("[serve] default_lifetime must name a valid lifetime")
         if repo_root is None:
             raise error
         raise contextualize_config_error(

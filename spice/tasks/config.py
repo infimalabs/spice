@@ -114,12 +114,11 @@ def _reports_from_entries(
     reports: dict[str, tuple[str, str, str]] = {}
     for name, raw in entries.items():
         if not isinstance(raw, Mapping):
-            raise SpiceError(f"[tool.spice.tasks.reports] {name!r} must be a table")
+            raise SpiceError(f"[tasks.reports] {name!r} must be a table")
         unsupported = sorted(set(raw) - {"description", "filter", "sort"})
         if unsupported:
             raise SpiceError(
-                f"[tool.spice.tasks.reports.{name}] unsupported keys: "
-                f"{', '.join(unsupported)}"
+                f"[tasks.reports.{name}] unsupported keys: {', '.join(unsupported)}"
             )
         description = raw.get("description")
         report_filter = raw.get("filter")
@@ -133,7 +132,7 @@ def _reports_from_entries(
             or not sort
         ):
             raise SpiceError(
-                f"[tool.spice.tasks.reports.{name}] description, filter, and "
+                f"[tasks.reports.{name}] description, filter, and "
                 "sort must be non-empty strings"
             )
         reports[str(name)] = (description, report_filter, sort)
@@ -192,12 +191,12 @@ def _configured_hidden_stems(
     for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
-                "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
+                "[tasks].hidden_stems values omit the leading '.'; "
                 f"use {stem[len(HIDDEN_PROJECT_PREFIX) :]!r} instead of {stem!r}"
             )
         if not SEGMENT_RE.match(stem):
             raise SpiceError(
-                "[tool.spice.tasks].hidden_stems values must match "
+                "[tasks].hidden_stems values must match "
                 f"{PROJECT_SEGMENT_RULE_LABEL}; got {stem!r}"
             )
         if stem in approved_set:
@@ -265,7 +264,7 @@ def configured_reports(repo_root: Path) -> dict[str, tuple[str, str, str]]:
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
     """Tracked per-driver, per-phase launch override.
 
-    Read from ``[tool.spice.tasks.phase_models.<driver>.<phase>]``; {} when
+    Read from ``[tasks.phase_models.<driver>.<phase>]``; {} when
     the driver or phase has no entry, so an unmapped phase falls back to the
     driver's ordinary launch config.
     """
@@ -310,7 +309,7 @@ def _project_depth_bounds(table: dict[str, object]) -> tuple[int, int]:
     )
     if max_depth < min_depth:
         raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal "
+            "[tasks].project_max_depth must be greater than or equal "
             "to project_min_depth"
         )
     return min_depth, max_depth
@@ -321,7 +320,7 @@ def _configured_project_depth(table: dict[str, object], key: str, default: int) 
     if raw is None:
         return default
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
-        raise SpiceError(f"[tool.spice.tasks].{key} must be a positive integer")
+        raise SpiceError(f"[tasks].{key} must be a positive integer")
     return raw
 
 
