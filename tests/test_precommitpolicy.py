@@ -48,6 +48,9 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "repo shape",
     "staging",
     "repo docs",
+    "config key validity",
+    "config false disable",
+    "config tracked trust",
     "formatters",
     "local paths",
     "serve web typecheck",
@@ -71,6 +74,9 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "repo-shape",
     "staging",
     "repo-docs",
+    "config-key-validity",
+    "config-false-disable",
+    "config-tracked-trust",
     "formatters",
     "local-paths",
     "taste",
@@ -560,6 +566,9 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "repo shape",
         "staging",
         "repo docs",
+        "config key validity",
+        "config false disable",
+        "config tracked trust",
         "local paths",
         "serve web typecheck",
         "javascript unused",
@@ -1038,6 +1047,21 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
         precommit, "_run_repo_truth_doc_guard", lambda repo_root: record("repo docs")
     )
     monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_config_key_validity_gate",
+        lambda repo_root: record("config key validity"),
+    )
+    monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_false_disable_gate",
+        lambda repo_root: record("config false disable"),
+    )
+    monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_tracked_file_trust_gate",
+        lambda repo_root: record("config tracked trust"),
+    )
+    monkeypatch.setattr(
         precommit,
         "_run_python_format_guard",
         lambda repo_root, paths: record("formatters"),
@@ -1122,6 +1146,21 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     )
     monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_config_key_validity_gate",
+        lambda repo_root: None,
+    )
+    monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_false_disable_gate",
+        lambda repo_root: None,
+    )
+    monkeypatch.setattr(
+        precommit.configgovernance,
+        "run_tracked_file_trust_gate",
+        lambda repo_root: None,
+    )
     monkeypatch.setattr(
         precommit, "_run_python_format_guard", lambda repo_root, paths: None
     )
