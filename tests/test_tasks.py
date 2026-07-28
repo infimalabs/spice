@@ -1093,6 +1093,36 @@ def test_allocator_downstream_weight_outranks_tags_urgency_and_locality():
     assert [row["description"] for row in ordered] == ["wide", "narrow"]
 
 
+def test_allocator_keeps_self_review_as_a_last_resort_before_graph_rank():
+    self_review = _row(
+        "self review",
+        uuid="self-review",
+        project="task.alpha",
+        phase="review",
+        priority="C",
+        urgency=-90,
+    )
+    self_review["review_author"] = ACTOR_A
+    ordinary = _row(
+        "ordinary",
+        uuid="ordinary",
+        project="task.beta",
+        phase="todo",
+        priority="L",
+        urgency=2,
+    )
+
+    ordered = alloc.order(
+        [self_review, ordinary],
+        ACTOR_A,
+        [],
+        [],
+        graph_rows=[self_review, ordinary],
+    )
+
+    assert [row["description"] for row in ordered] == ["ordinary", "self review"]
+
+
 def test_alloc_classifies_oops_and_hidden_by_project_stem_alone():
     # Rows carry a project and nothing else -- no oops/hidden tags, no UDA.
     # Identity must ride the project stem alone.
