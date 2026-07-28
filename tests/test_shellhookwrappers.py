@@ -169,9 +169,13 @@ def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
         groups={"common": {"wrap": ["grep"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == expected_wrapper_lines(
-        "wrap", ["grep"]
-    )
+    with pytest.warns(UserWarning) as caught:
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == expected_wrapper_lines("wrap", ["grep"])
+    warning = str(caught[0].message)
+    assert "wrappers.common from repository" in warning
+    assert "drops packaged wrappers: grep, rtk" in warning
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
@@ -826,37 +830,44 @@ def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
     assert shellhook.render_agent_wrapper_lines(tmp_path) == []
 
 
-def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_selectors(tmp_path):
+def test_agent_wrapper_lines_rejects_path_selectors_as_shell_function_names(tmp_path):
     write_agent_wrapper_config(
         tmp_path,
         order=["shells"],
         groups={"shells": {"dash": ["/bin/sh", "sh"]}},
     )
 
-    with pytest.raises(SpiceError, match="requires the redirector stage"):
+    with pytest.raises(SpiceError, match="is not a shell function"):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
-def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_commands(tmp_path):
+def test_agent_wrapper_lines_renders_absolute_path_wrapper_commands(tmp_path):
+    executable = str(tmp_path / "Python Tools" / "python")
     write_agent_wrapper_config(
         tmp_path,
         order=["shells"],
-        groups={"shells": {"pytest": {"argv": ["/bin/python", "-m", "pytest"]}}},
+        groups={"shells": {"pytest": {"argv": [executable, "-m", "pytest"]}}},
     )
 
-    with pytest.raises(SpiceError, match="path wrapper command"):
-        shellhook.render_agent_wrapper_lines(tmp_path)
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        "",
+        "pytest() {",
+        f'  {shlex.quote(executable)} -m pytest "$@"',
+        "}",
+    ]
 
 
-def test_agent_wrapper_lines_fails_loudly_for_duplicate_wrapper_selectors(tmp_path):
+def test_later_wrapper_group_can_shadow_an_earlier_selector(tmp_path):
     write_agent_wrapper_config(
         tmp_path,
         order=["base", "shells"],
         groups={"base": {"wrap": ["sh"]}, "shells": {"dash": ["sh"]}},
     )
 
-    with pytest.raises(SpiceError, match="configured by both"):
-        shellhook.render_agent_wrapper_lines(tmp_path)
+    lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines.count("sh() {") == 2
+    assert lines[-4:] == ["", "sh() {", '  dash sh "$@"', "}"]
 
 
 def _write_match_wrapper_config(

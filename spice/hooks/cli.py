@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from spice import paths as spice_paths
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.cli.withdrawn import add_withdrawn_dry_run_argument
 from spice.errors import SpiceError
 from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
@@ -39,11 +45,33 @@ def configure_dev_parser(subparsers: Any) -> None:
     )
     actions = parser.add_subparsers(dest="dev_command", required=True)
 
-    actions.add_parser(
+    install_hooks = actions.add_parser(
         "install-hooks",
-        help="Install the spice-owned git hook shims.",
+        help="Plan or install the spice-owned git hook shims.",
         recovery_examples=("spice dev install-hooks",),
-    ).set_defaults(func=handle_dev)
+    )
+    install_hooks.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the ordered hook repair plan; bare invocation only previews.",
+    )
+    install_hooks.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the ordered hook repair plan as JSON without applying it.",
+    )
+    mark_authored_input(
+        install_hooks,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            mutation_args=("--apply",),
+        ),
+    )
+    install_hooks.set_defaults(func=handle_dev)
 
     pre_commit = actions.add_parser(
         "pre-commit",
@@ -54,6 +82,16 @@ def configure_dev_parser(subparsers: Any) -> None:
         "pre_commit_args",
         nargs=argparse.REMAINDER,
         help=argparse.SUPPRESS,
+    )
+    mark_authored_input(
+        pre_commit,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.HOOK_BACKEND,
+        ),
     )
     pre_commit.set_defaults(func=handle_dev)
 
@@ -85,6 +123,14 @@ def configure_dev_parser(subparsers: Any) -> None:
         action="store_true",
         help="Regenerate spice/serve/static/app.types.js from the wire schema.",
     )
+    mark_authored_input(
+        serve_web_types,
+        AuthoredInputInvocation(
+            reads=(EffectRead.AUTHORED_REPOSITORY,),
+            decision=MutationDecision.EXPLICIT_OPTION,
+            mutation_args=("--write",),
+        ),
+    )
     serve_web_types.set_defaults(func=handle_dev)
 
     actions.add_parser(
@@ -111,8 +157,13 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
     )
     init.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the ordered initialization plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the ordered initialization plan, optionally asserting its "
+            "digest; bare invocation only previews."
+        ),
     )
     add_withdrawn_dry_run_argument(init)
     init.add_argument(
@@ -121,6 +172,27 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         help="Emit the versioned initialization plan as JSON without applying it.",
     )
     _mark_receipt_writing(init)
+    mark_authored_input(
+        init,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            mutation_args=("--apply",),
+        ),
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+                EffectRead.OWNERSHIP_RECEIPT,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            sample_suffix=("--unapply",),
+            mutation_args=("--apply",),
+        ),
+    )
     init.set_defaults(func=handle_init)
 
     deinit = subparsers.add_parser(
@@ -130,8 +202,13 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
     )
     deinit.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the ordered reversal plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the ordered reversal plan, optionally asserting its digest; "
+            "bare invocation only previews."
+        ),
     )
     deinit.add_argument(
         "--json",
@@ -163,6 +240,17 @@ def _configure_commit_parsers(actions: Any) -> None:
         recovery_examples=("spice dev commit-msg .git/COMMIT_EDITMSG",),
     )
     commit_msg.add_argument("message_file", help="Path to the commit message file.")
+    mark_authored_input(
+        commit_msg,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_DOCUMENT,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.HOOK_BACKEND,
+            sample_suffix=("COMMIT_EDITMSG",),
+        ),
+    )
     commit_msg.set_defaults(func=handle_dev)
 
     reference_transaction = actions.add_parser(
@@ -183,6 +271,17 @@ def _configure_commit_parsers(actions: Any) -> None:
     doctor.add_argument(
         "--fix", action="store_true", help="Apply safe generated-state repairs."
     )
+    mark_authored_input(
+        doctor,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_REPOSITORY,
+                EffectRead.AUTHORED_CONFIGURATION,
+            ),
+            decision=MutationDecision.EXPLICIT_OPTION,
+            mutation_args=("--fix",),
+        ),
+    )
     doctor.set_defaults(func=handle_dev)
 
 
@@ -191,6 +290,7 @@ def handle_init(args: argparse.Namespace) -> int:
     if getattr(args, "unapply", None) is not None:
         return _handle_init_unapply(args)
 
+    from spice.commandplan import assert_plan_digest
     from spice.hooks.initplan import (
         InitializationMode,
         apply_initialization_plan,
@@ -205,18 +305,20 @@ def handle_init(args: argparse.Namespace) -> int:
         InitializationMode.GATES_ONLY if bool(args.gates) else InitializationMode.FULL
     )
     plan = plan_initialization(repo_root, mode)
-    if bool(args.apply) and bool(args.json):
+    apply_requested = args.apply is not None
+    if apply_requested and bool(args.json):
         raise SpiceError("`spice init --apply` cannot be combined with `--json`")
-    if not bool(args.apply):
+    payload = initialization_plan_payload(plan)
+    if not apply_requested:
         if bool(args.json):
-            print(
-                json.dumps(initialization_plan_payload(plan), indent=2, sort_keys=True)
-            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         for row in initialization_preview_rows(plan):
             print(row)
         return 0
 
+    expected_digest = args.apply if isinstance(args.apply, str) else None
+    assert_plan_digest(payload, expected_digest)
     apply_initialization_plan(plan, approve_repository_config=True)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
@@ -224,6 +326,7 @@ def handle_init(args: argparse.Namespace) -> int:
 
 
 def _handle_init_unapply(args: argparse.Namespace) -> int:
+    from spice.commandplan import assert_plan_digest
     from spice.hooks.deinitplan import (
         apply_deinitialization_plan,
         deinitialization_plan_payload,
@@ -232,16 +335,18 @@ def _handle_init_unapply(args: argparse.Namespace) -> int:
         plan_deinitialization,
     )
 
+    apply_requested = args.apply is not None
     if bool(args.gates):
         raise SpiceError(
             "`spice init --gates` cannot be combined with `--unapply`; "
             "the current receipt selects the reversal surface"
         )
-    if bool(args.apply) and bool(args.json):
+    if apply_requested and bool(args.json):
         raise SpiceError(
             "`spice init --unapply --apply` cannot be combined with `--json`"
         )
     plan = plan_deinitialization(init_repo_root())
+    payload = deinitialization_plan_payload(plan)
     asserted_digest = str(args.unapply)
     if asserted_digest and asserted_digest != plan.receipt_digest:
         raise SpiceError(
@@ -249,17 +354,15 @@ def _handle_init_unapply(args: argparse.Namespace) -> int:
             f"expected {asserted_digest}; "
             f"observed {plan.receipt_digest or '<none>'}"
         )
-    if not bool(args.apply):
+    if not apply_requested:
         if bool(args.json):
-            print(
-                json.dumps(
-                    deinitialization_plan_payload(plan), indent=2, sort_keys=True
-                )
-            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         for row in deinitialization_plan_rows(plan):
             print(row)
         return 0
+    expected_digest = args.apply if isinstance(args.apply, str) else None
+    assert_plan_digest(payload, expected_digest)
     report = apply_deinitialization_plan(plan)
     for row in deinitialization_report_rows(report):
         print(row)
@@ -313,9 +416,32 @@ def handle_dev(args: argparse.Namespace) -> int:
     repo_root = require_repo_root()
     command = args.dev_command
     if command == "install-hooks":
-        from spice.hooks.install import install_hooks_for_repo
+        from spice.hooks.initplan import (
+            apply_initialization_plan,
+            initialization_detail_rows,
+            initialization_plan_payload,
+            initialization_preview_rows,
+        )
+        from spice.hooks.install import plan_hook_installation
 
-        for row in install_hooks_for_repo(repo_root):
+        if bool(args.apply) and bool(args.json):
+            raise SpiceError(
+                "`spice dev install-hooks --apply` cannot be combined with `--json`"
+            )
+        plan = plan_hook_installation(repo_root)
+        if not bool(args.apply):
+            if bool(args.json):
+                print(
+                    json.dumps(
+                        initialization_plan_payload(plan), indent=2, sort_keys=True
+                    )
+                )
+                return 0
+            for row in initialization_preview_rows(plan):
+                print(row)
+            return 0
+        apply_initialization_plan(plan)
+        for row in initialization_detail_rows(plan, include_ready=False):
             print(row)
         return 0
     if command == "pre-commit":

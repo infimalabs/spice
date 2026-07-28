@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
+from spice.commandplan import command_plan_payload
 from spice.agent.lifecycle import (
     WORKTREE_SKILL_GITIGNORE_CONTENT,
     WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH,
@@ -296,27 +297,29 @@ def plan_initialization(
 
 def initialization_plan_payload(plan: InitializationPlan) -> dict[str, object]:
     """Return the versioned JSON shape consumed by preview clients."""
-    return {
-        "schema_version": plan.schema_version,
-        "plan_digest": initialization_plan_digest(plan),
-        "repository": str(plan.repo_root),
-        "mode": plan.mode.value,
-        "receipt_path": str(initialization_receipt_path(plan.repo_root)),
-        "operations": [
+    return command_plan_payload(
+        command="init",
+        metadata={
+            "repository": str(plan.repo_root),
+            "mode": plan.mode.value,
+            "receipt_path": str(initialization_receipt_path(plan.repo_root)),
+        },
+        operations=[
             {
-                "order": order,
-                **_operation_payload(operation),
+                **_plan_operation_payload(operation),
                 "will_change": operation.will_change,
             }
-            for order, operation in enumerate(plan.operations, start=1)
+            for operation in plan.operations
         ],
-    }
+    )
 
 
 def initialization_preview_rows(plan: InitializationPlan) -> list[str]:
     """Render every ordered file and Git-config transition without mutation."""
+    digest = str(initialization_plan_payload(plan)["plan_digest"])
     rows = [
-        f"initialization-plan schema={plan.schema_version} mode={plan.mode.value}",
+        f"initialization-plan schema={plan.schema_version} mode={plan.mode.value} "
+        f"digest={digest}",
         f"repository={plan.repo_root}",
         f"receipt={initialization_receipt_path(plan.repo_root)}",
     ]
@@ -380,41 +383,37 @@ def initialization_receipt_payload(
 
 def initialization_receipt_digest(receipt: InitializationReceipt) -> str:
     """Hash active receipt operations through the plan's canonical vocabulary."""
-    return _operation_sequence_digest(
-        receipt.repo_root,
-        receipt.mode,
-        receipt.plan_schema_version,
-        tuple(item.operation for item in receipt.operations if item.completed),
+    return initialization_plan_digest(
+        InitializationPlan(
+            repo_root=receipt.repo_root,
+            mode=receipt.mode,
+            schema_version=receipt.plan_schema_version,
+            operations=tuple(
+                item.operation for item in receipt.operations if item.completed
+            ),
+        )
     )
 
 
 def initialization_plan_digest(plan: InitializationPlan) -> str:
     """Hash a plan through the same normalized operation sequence as its receipt."""
-    return _operation_sequence_digest(
-        plan.repo_root,
-        plan.mode,
-        plan.schema_version,
-        plan.operations,
-    )
+    return _operation_sequence_digest(plan.operations)
 
 
 def _operation_sequence_digest(
-    repo_root: Path,
-    mode: InitializationMode,
-    plan_schema_version: int,
     operations: tuple[InitOperation, ...],
 ) -> str:
-    encoded = json.dumps(
-        {
-            "schema_version": plan_schema_version,
-            "repository": str(repo_root),
-            "mode": mode.value,
-            "operations": [_operation_payload(operation) for operation in operations],
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    payload = command_plan_payload(
+        command="init",
+        operations=[
+            {
+                **_plan_operation_payload(operation),
+                "will_change": operation.will_change,
+            }
+            for operation in operations
+        ],
+    )
+    return str(payload["plan_digest"])
 
 
 def initialization_receipt_record_payload(
@@ -854,6 +853,20 @@ def _operation_payload(operation: InitOperation) -> dict[str, object]:
         "previous_effective_value": operation.previous_effective_value,
         "introduced_parent_directories": list(operation.introduced_parent_directories),
         "introduced_scope_path": operation.introduced_scope_path,
+    }
+
+
+def _plan_operation_payload(operation: InitOperation) -> dict[str, object]:
+    return {
+        **_operation_payload(operation),
+        "observed_before": {
+            "value": operation.previous_value,
+            "mode": operation.previous_mode,
+        },
+        "intended_after": {
+            "value": operation.generated_value,
+            "mode": operation.generated_mode,
+        },
     }
 
 

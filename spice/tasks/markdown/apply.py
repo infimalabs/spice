@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from os import PathLike
 from typing import Any
 
+from spice.commandplan import command_plan_payload
 from spice.errors import SpiceError
 from spice.tasks import claimstate, config, create, identity, readiness, tw
 from spice.tasks.markdown.classifier import parse
@@ -105,36 +106,83 @@ class ApplyPlan:
     verbs: tuple[PlanVerb, ...]
 
     def report(self) -> str:
+        digest = str(self.payload()["plan_digest"])
         return "\n".join(
             [
                 f"root {self.root_handle}",
                 *(verb.render() for verb in self.verbs),
+                f"plan-digest {digest}",
                 "preview: no changes applied; pass --apply to execute",
             ]
         )
 
     def payload(self) -> dict[str, object]:
         """Return the stable ordered machine representation of this plan."""
-        return {
-            "schema_version": 1,
-            "project": self.project,
-            "origin": self.origin,
-            "root_handle": self.root_handle,
-            "operations": [
-                {
-                    "order": order,
-                    "kind": verb.kind,
-                    "slug": verb.slug,
-                    "handle": verb.handle,
-                    "field": verb.field,
-                    "target": verb.target,
-                    "line": verb.line,
-                    "code": verb.code,
-                    "message": verb.message,
-                }
-                for order, verb in enumerate(self.verbs, start=1)
-            ],
+        return command_plan_payload(
+            command="task ingest",
+            metadata={
+                "project": self.project,
+                "origin": self.origin,
+                "root_handle": self.root_handle,
+            },
+            operations=[_plan_verb_payload(self, verb) for verb in self.verbs],
+        )
+
+
+def _plan_verb_target(verb: PlanVerb) -> str:
+    if verb.kind == "created":
+        return verb.slug
+    if verb.target:
+        return verb.target
+    if verb.handle:
+        return verb.handle
+    if verb.slug:
+        return verb.slug
+    if verb.line is not None:
+        return f"line:{verb.line}"
+    return verb.kind
+
+
+def _plan_verb_payload(plan: ApplyPlan, verb: PlanVerb) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "kind": verb.kind,
+        "target": _plan_verb_target(verb),
+        "scope": "task-board",
+        "project": plan.project,
+        "origin": plan.origin,
+        "slug": verb.slug,
+        "field": verb.field,
+        "related_target": verb.target,
+        "line": verb.line,
+        "code": verb.code,
+        "message": verb.message,
+    }
+    if verb.kind != "created":
+        payload["handle"] = verb.handle
+    planned = next((item for item in plan.nodes if item.node.slug == verb.slug), None)
+    if planned is None:
+        return payload
+    if verb.kind == "created":
+        node = planned.node
+        parent_slug = (
+            plan.nodes[node.parent].node.slug if node.parent is not None else ""
+        )
+        payload["intended_node"] = {
+            "title": node.title,
+            "description": node.description(),
+            "acceptance": list(node.acceptance),
+            "priority": config.map_priority(node.priority or "none"),
+            "flow": list(_desired_flow(node, plan.project)),
+            "due": node.due,
+            "tags": list(_normalized_tags(node.tags)),
+            "annotations": list(planned.annotations),
+            "dependency_slugs": list(planned.dependency_slugs),
+            "parent_slug": parent_slug,
         }
+    elif verb.kind == "updated":
+        update = next(item for item in planned.updates if item.field == verb.field)
+        payload["intended_value"] = update.value
+    return payload
 
 
 def resolve_ingest_project(actor: str, project: str | None) -> str:

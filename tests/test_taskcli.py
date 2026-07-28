@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 from pathlib import Path
@@ -1189,6 +1190,34 @@ def test_task_artifact_prune_is_preview_until_apply(task_repo, tmp_path, capsys)
     assert f"would prune {handle} A1 prune-me.txt" in preview_output
     assert "preview true; pass --apply to remove" in preview_output
     assert "A1 prune-me.txt" in artifacts.list_artifacts(handle)
+
+    machine = _with_backend(
+        build_parser().parse_args(["task", "artifact", "prune", "--json"])
+    )
+    assert machine.func(machine) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "artifact_root_exists": True,
+        "older_than": None,
+        "operations": [
+            {
+                "action": "remove",
+                "artifact_id": "A1",
+                "name": "prune-me.txt",
+                "order": 1,
+                "task": handle,
+            }
+        ],
+        "schema_version": 1,
+        "skipped": [],
+    }
+    assert "A1 prune-me.txt" in artifacts.list_artifacts(handle)
+
+    conflicting = _with_backend(
+        build_parser().parse_args(["task", "artifact", "prune", "--apply", "--json"])
+    )
+    with pytest.raises(SpiceError, match="cannot be combined"):
+        conflicting.func(conflicting)
 
     apply = _with_backend(
         build_parser().parse_args(["task", "artifact", "prune", "--apply"])

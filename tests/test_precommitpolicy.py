@@ -577,6 +577,26 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
     ]
 
 
+def test_pre_commit_prints_every_disabled_builtin_on_every_run(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "spice.toml").write_text(
+        "[policy.pre_commit_builtins]\n"
+        "formatters = false\n"
+        '"magic-numbers" = { enabled = false }\n',
+        encoding="utf-8",
+    )
+    _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch)
+    expected = [
+        "pre-commit: disabled builtin formatters",
+        "pre-commit: disabled builtin magic-numbers",
+    ]
+
+    for _invocation in range(2):
+        assert precommit.handle_pre_commit(tmp_path) == 0
+        assert capsys.readouterr().out.splitlines() == expected
+
+
 def test_markdown_links_pre_commit_guard_reports_shared_board(tmp_path, monkeypatch):
     finding = precommit.links.MarkdownLinkCaseFinding(
         source_path=Path("docs/index.md"),

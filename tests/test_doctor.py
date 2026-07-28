@@ -148,6 +148,50 @@ def test_dev_doctor_parser_exposes_fix_flag():
     assert args.fix
 
 
+def test_doctor_requires_approval_for_tracked_disabled_builtins(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\n\n'
+        "[policy.pre_commit_builtins]\n"
+        "formatters = false\n"
+        '"magic-numbers" = { enabled = false }\n',
+        encoding="utf-8",
+    )
+    _run(repo, "git", "add", "spice.toml")
+    _run(repo, "git", "commit", "-m", "disable builtins")
+
+    report = doctor.run_doctor(repo)
+    unapproved = _check(report, "policy.pre-commit-builtins")
+
+    assert unapproved.required is True
+    assert unapproved.status == "fail"
+    assert "formatters" in unapproved.detail
+    assert "magic-numbers" in unapproved.detail
+    assert unapproved.command == "spice init --apply"
+
+    approve_repository_config(repo)
+    approved = doctor._pre_commit_builtin_disablement_check(repo)
+
+    assert approved.status == "ok"
+    assert "repository disablement approved" in approved.detail
+    assert "formatters, magic-numbers" in approved.detail
+
+
+def test_doctor_accepts_operator_owned_builtin_disablement_without_receipt(tmp_path):
+    repo = _repo(tmp_path)
+    path = edit.worktree_config_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "[policy.pre_commit_builtins]\nformatters = false\n",
+        encoding="utf-8",
+    )
+
+    check = doctor._pre_commit_builtin_disablement_check(repo)
+
+    assert check.status == "ok"
+    assert check.detail == "operator or packaged disabled builtin(s): formatters"
+
+
 @pytest.mark.parametrize(
     ("health", "expected_status"),
     [
@@ -221,12 +265,14 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
 
     assert {
         "rtk": _check(report, "tool.rtk").status,
+        "builtin_disablement": _check(report, "policy.pre-commit-builtins").status,
         "remaining_check": names[-1],
         "check_count": len(names),
     } == {
         "rtk": expected_rtk,
+        "builtin_disablement": "ok",
         "remaining_check": "env-name-ledger",
-        "check_count": 26,
+        "check_count": 27,
     }
 
 

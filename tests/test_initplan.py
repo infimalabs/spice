@@ -193,10 +193,36 @@ def test_human_and_json_preview_share_one_plan_and_leave_identical_bytes(tmp_pat
     assert human.stdout.splitlines() == initialization_preview_rows(plan)
     machine_payload = json.loads(machine.stdout)
     assert machine_payload == initialization_plan_payload(plan)
+    assert machine_payload["protocol"] == "spice.command-plan"
+    assert len(machine_payload["plan_digest"]) == OWNERSHIP_DIGEST_BYTES * 2
     assert [item["order"] for item in machine_payload["operations"]] == list(
         range(1, len(plan.operations) + 1)
     )
     assert (before, after_human, after_machine) == (before, before, before)
+
+
+def test_init_digest_refuses_when_repository_changes_after_preview(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    preview = initialization_plan_payload(plan_initialization(repo))
+    digest = str(preview["plan_digest"])
+    hook = repo / ".spice" / "hooks" / "pre-commit"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("#!/bin/sh\necho operator-change\n", encoding="utf-8")
+    before = hook.read_bytes()
+
+    result = subprocess.run(
+        [sys.executable, "-m", "spice", "init", f"--apply={digest}"],
+        check=False,
+        capture_output=True,
+        cwd=repo,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "stale command plan digest" in result.stderr
+    assert ".spice/hooks/pre-commit" in result.stderr
+    assert hook.read_bytes() == before
+    assert not initialization_receipt_path(repo).exists()
 
 
 def test_apply_appends_one_private_total_record_for_each_completed_operation(tmp_path):

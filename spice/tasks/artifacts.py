@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,83 @@ RETENTIONS = frozenset({"permanent", "prunable"})
 DEFAULT_RETENTION = "permanent"
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@dataclass(frozen=True)
+class ArtifactPruneTask:
+    """One completed task whose manifest contains prune operations."""
+
+    task_dir: Path
+    task: str
+    remaining: tuple[dict[str, Any], ...]
+    remove: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class ArtifactPruneSkip:
+    """One artifact-bearing task excluded by its current task status."""
+
+    task: str
+    status: str
+
+
+@dataclass(frozen=True)
+class ArtifactPrunePlan:
+    """Ordered, side-effect-free artifact retention decision."""
+
+    root_exists: bool
+    older_than: str | None
+    tasks: tuple[ArtifactPruneTask, ...]
+    skipped: tuple[ArtifactPruneSkip, ...]
+    schema_version: int = 1
+
+    def payload(self) -> dict[str, object]:
+        """Return the versioned machine representation of the human preview."""
+        operations: list[dict[str, object]] = []
+        for task in self.tasks:
+            for entry in task.remove:
+                operations.append(
+                    {
+                        "order": len(operations) + 1,
+                        "action": "remove",
+                        "task": task.task,
+                        "artifact_id": str(entry["id"]),
+                        "name": str(entry["name"]),
+                    }
+                )
+        return {
+            "schema_version": self.schema_version,
+            "artifact_root_exists": self.root_exists,
+            "older_than": self.older_than,
+            "operations": operations,
+            "skipped": [
+                {
+                    "order": order,
+                    "task": skip.task,
+                    "status": skip.status,
+                }
+                for order, skip in enumerate(self.skipped, start=1)
+            ],
+        }
+
+    def report(self, *, applied: bool) -> str:
+        """Render the established ordered preview or its applied result."""
+        if not self.root_exists:
+            return "no task artifacts"
+        action = "pruned" if applied else "would prune"
+        lines = [
+            f"{action} {task.task} {entry['id']} {entry['name']}"
+            for task in self.tasks
+            for entry in task.remove
+        ]
+        lines.extend(
+            f"skipped {skip.task}: status {skip.status}" for skip in self.skipped
+        )
+        if not lines:
+            return "no prunable artifacts"
+        if not applied and self.tasks:
+            lines.append("preview true; pass --apply to remove")
+        return "\n".join(lines)
 
 
 def add_artifact(
@@ -151,13 +229,19 @@ def render_artifact_lines(rendered: str) -> list[str]:
     return lines
 
 
-def prune_artifacts(*, older_than: str | None = None, apply: bool = False) -> str:
+def plan_artifact_prune(*, older_than: str | None = None) -> ArtifactPrunePlan:
+    """Inspect manifests and task state without removing artifact payloads."""
     root = artifact_root()
     if not root.is_dir():
-        return "no task artifacts"
+        return ArtifactPrunePlan(
+            root_exists=False,
+            older_than=older_than,
+            tasks=(),
+            skipped=(),
+        )
     cutoff = _cutoff(older_than) if older_than else None
-    pruned: list[str] = []
-    skipped: list[str] = []
+    tasks: list[ArtifactPruneTask] = []
+    skipped: list[ArtifactPruneSkip] = []
     for task_dir in sorted(path for path in root.iterdir() if path.is_dir()):
         manifest = _read_manifest(task_dir, task_dir.name)
         entries = _manifest_entries(manifest)
@@ -166,30 +250,41 @@ def prune_artifacts(*, older_than: str | None = None, apply: bool = False) -> st
         task_label = str(manifest.get("task") or task_dir.name)
         status = _task_status_for_dir(task_dir, task_label)
         if status != "completed":
-            skipped.append(f"skipped {task_label}: status {status}")
+            skipped.append(ArtifactPruneSkip(task=task_label, status=status))
             continue
         remaining: list[dict[str, Any]] = []
         to_remove: list[dict[str, Any]] = []
         for entry in entries:
             if _prune_candidate(entry, cutoff):
-                pruned.append(f"{task_label} {entry['id']} {entry['name']}")
                 to_remove.append(entry)
                 continue
             remaining.append(entry)
-        if apply and len(remaining) != len(entries):
-            for entry in to_remove:
-                _remove_payload_if_unreferenced(task_dir, entry, remaining)
-            _write_manifest(task_dir, task_label, remaining)
-    if apply and pruned:
+        if to_remove:
+            tasks.append(
+                ArtifactPruneTask(
+                    task_dir=task_dir,
+                    task=task_label,
+                    remaining=tuple(remaining),
+                    remove=tuple(to_remove),
+                )
+            )
+    return ArtifactPrunePlan(
+        root_exists=True,
+        older_than=older_than,
+        tasks=tuple(tasks),
+        skipped=tuple(skipped),
+    )
+
+
+def apply_artifact_prune_plan(plan: ArtifactPrunePlan) -> None:
+    """Apply one previously inspected artifact retention plan."""
+    for task in plan.tasks:
+        remaining = list(task.remaining)
+        for entry in task.remove:
+            _remove_payload_if_unreferenced(task.task_dir, entry, remaining)
+        _write_manifest(task.task_dir, task.task, remaining)
+    if plan.tasks:
         config.mark_task_backend_changed("artifact")
-    action = "pruned" if apply else "would prune"
-    lines = [f"{action} {item}" for item in pruned]
-    lines.extend(skipped)
-    if not lines:
-        return "no prunable artifacts"
-    if not apply and pruned:
-        lines.append("preview true; pass --apply to remove")
-    return "\n".join(lines)
 
 
 def artifact_root() -> Path:

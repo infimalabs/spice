@@ -9,7 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from spice.cli.effects import (
+    AuthoredInputInvocation,
+    EffectRead,
+    MutationDecision,
+    mark_authored_input,
+)
 from spice.cli.withdrawn import add_withdrawn_dry_run_argument
+from spice.commandplan import assert_plan_digest
 from spice.errors import SpiceError
 from spice.tasks import (
     alloc,
@@ -24,7 +31,7 @@ from spice.tasks import (
     sizing,
     wordingreview,
 )
-from spice.tasks.markdown.apply import ingest_path
+from spice.tasks.markdown.apply import execute_plan, ingest_path
 from spice.tasks.markdown.ledger import render_ledger
 from spice.tasks.graphs import handout as graphhandout
 
@@ -220,6 +227,22 @@ def _configure_artifact_parser(actions: Any) -> None:
     )
     prune.add_argument("--older-than")
     prune.add_argument("--apply", action="store_true")
+    prune.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the ordered artifact prune preview as JSON without applying it.",
+    )
+    mark_authored_input(
+        prune,
+        AuthoredInputInvocation(
+            reads=(
+                EffectRead.AUTHORED_CONFIGURATION,
+                EffectRead.TASK_BOARD,
+            ),
+            decision=MutationDecision.PREVIEW_APPLY,
+            mutation_args=("--apply",),
+        ),
+    )
     prune.set_defaults(func=handle)
 
 
@@ -432,8 +455,13 @@ def _configure_ingest_parser(actions: Any) -> None:
     )
     ingest.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the complete validated plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the complete validated plan, optionally asserting its digest; "
+            "bare invocation only previews."
+        ),
     )
     add_withdrawn_dry_run_argument(ingest)
     ingest.add_argument(
@@ -447,6 +475,15 @@ def _configure_ingest_parser(actions: Any) -> None:
         help=(
             "Foot-gun: derive sequential dependencies from numbered list "
             "position; defaults off, so prefer explicit After: declarations."
+        ),
+    )
+    mark_authored_input(
+        ingest,
+        AuthoredInputInvocation(
+            reads=(EffectRead.AUTHORED_DOCUMENT, EffectRead.TASK_BOARD),
+            decision=MutationDecision.PREVIEW_APPLY,
+            sample_suffix=("plan.md", "--project", "task.plan"),
+            mutation_args=("--apply",),
         ),
     )
     ingest.set_defaults(func=handle)
@@ -1100,17 +1137,22 @@ _DISPATCH = {
 
 
 def _ingest(args: argparse.Namespace) -> str:
-    if bool(args.apply) and bool(args.json):
+    apply_requested = args.apply is not None
+    if apply_requested and bool(args.json):
         raise SpiceError("`spice task ingest --apply` cannot be combined with `--json`")
     result = ingest_path(
         args.path,
         project=args.project,
         origin=args.origin,
-        apply=bool(args.apply),
+        apply=False,
         infer_ordered_dependencies=args.infer_ordered_dependencies,
     )
-    if isinstance(result, str):
-        return result
+    if isinstance(result, str):  # pragma: no cover - apply=False is plan-only
+        raise SpiceError("task ingest planner returned an applied result")
+    if apply_requested:
+        expected_digest = args.apply if isinstance(args.apply, str) else None
+        assert_plan_digest(result.payload(), expected_digest)
+        return execute_plan(result)
     if bool(args.json):
         return json.dumps(result.payload(), indent=2, sort_keys=True)
     return result.report()
@@ -1136,10 +1178,16 @@ def _artifact(args: argparse.Namespace) -> str:
     if action == "show":
         return artifacts.show_artifact(args.handle, args.artifact_id)
     if action == "prune":
-        return artifacts.prune_artifacts(
-            older_than=args.older_than,
-            apply=args.apply,
-        )
+        if bool(args.apply) and bool(args.json):
+            raise SpiceError(
+                "`spice task artifact prune --apply` cannot be combined with `--json`"
+            )
+        plan = artifacts.plan_artifact_prune(older_than=args.older_than)
+        if bool(args.json):
+            return json.dumps(plan.payload(), indent=2, sort_keys=True)
+        if bool(args.apply):
+            artifacts.apply_artifact_prune_plan(plan)
+        return plan.report(applied=bool(args.apply))
     raise SpiceError(f"unknown task artifact action {action!r}")
 
 

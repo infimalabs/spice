@@ -166,11 +166,13 @@ spice task next
 | Detect and watch existing agent sessions | `spice watch` |
 | Preview repository initialization | `spice init [--json]` |
 | Install constitution gates only | `spice init --gates --apply` |
+| Preview or repair Spice-owned Git hooks | `spice dev install-hooks [--json]` / `spice dev install-hooks --apply` |
 | Prepare steering and fleet surfaces | `spice init --apply` / `spice doctor` |
 | Safely reverse initialized state | `spice init --unapply [--json]` then `spice init --unapply=<receipt-digest> --apply` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Pull allocator work | `spice task next` |
+| Preview or apply artifact retention | `spice task artifact prune [--json]` / `spice task artifact prune --apply` |
 | Rehydrate context | `spice session briefing` |
 | Open the operator UI | `spice serve` |
 | Observe explicit session roots read-only | `spice watch <session-dir>...` |
