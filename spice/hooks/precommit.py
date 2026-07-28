@@ -128,10 +128,10 @@ class CommandStep:
 
 @dataclass(frozen=True)
 class DisabledBuiltinPreCommitStep:
-    """One configured built-in omission and its original configuration key."""
+    """One configured built-in omission and its exact disabling source path."""
 
     key: str
-    config_key: str
+    config_path: tuple[str, ...]
 
 
 def handle_pre_commit(repo_root: Path) -> int:
@@ -534,11 +534,22 @@ def disabled_builtin_pre_commit_steps(
     return tuple(
         DisabledBuiltinPreCommitStep(
             key=step.key,
-            config_key=source_keys.get(step.key, step.key),
+            config_path=_builtin_disablement_config_path(
+                source_keys.get(step.key, step.key),
+                normalized.get(step.key, False),
+            ),
         )
         for step in builtin_steps
         if _builtin_override_is_disabled(normalized.get(step.key, False))
     )
+
+
+def _builtin_disablement_config_path(
+    config_key: str,
+    raw: Any,
+) -> tuple[str, ...]:
+    path = ("policy", "pre_commit_builtins", config_key)
+    return (*path, "enabled") if isinstance(raw, dict) else path
 
 
 def _builtin_pre_commit_overrides(
