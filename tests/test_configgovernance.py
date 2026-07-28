@@ -75,6 +75,51 @@ def test_tracked_file_trust_gate_refuses_an_executable_root_without_a_guard(
         configgovernance.run_tracked_file_trust_gate(tmp_path)
 
 
+def test_tracked_file_trust_gate_follows_builtin_approval_relay(tmp_path, monkeypatch):
+    package = tmp_path / "spice"
+    package.mkdir()
+    (package / "precommit.py").write_text(
+        "def _require_command_step_approval(config_path):\n"
+        "    require_repository_config_approval(None, config_path, command='gate')\n"
+        "\n"
+        "def _configured_builtin_step(config_path):\n"
+        "    _require_command_step_approval(config_path)\n"
+        "\n"
+        "def _configured_builtin_steps():\n"
+        "    _configured_builtin_step(('policy', 'pre_commit_builtins'))\n"
+        "\n"
+        "def build_steps():\n"
+        "    return _configured_builtin_steps()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        trust,
+        "EXECUTABLE_REPOSITORY_CONFIG_PATHS",
+        (("policy", "pre_commit_builtins"),),
+    )
+
+    assert configgovernance.run_tracked_file_trust_gate(tmp_path) is None
+
+
+def test_tracked_file_trust_gate_refuses_an_unguarded_named_collection(
+    tmp_path, monkeypatch
+):
+    package = tmp_path / "spice"
+    package.mkdir()
+    (package / "precommit.py").write_text(
+        "def build_steps():\n    return _configured_builtin_steps()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        trust,
+        "EXECUTABLE_REPOSITORY_CONFIG_PATHS",
+        (("policy", "pre_commit_builtins"),),
+    )
+
+    with pytest.raises(SpiceError, match=r"missing=policy\.pre_commit_builtins"):
+        configgovernance.run_tracked_file_trust_gate(tmp_path)
+
+
 def test_approval_guard_refuses_a_path_absent_from_the_digest_inventory(tmp_path):
     with pytest.raises(SpiceError, match="absent from EXECUTABLE"):
         trust.require_repository_config_approval(

@@ -13,6 +13,7 @@ from spice.errors import SpiceError
 _FALSE_DISABLE_RESOLVERS = frozenset({"enabled_registry_entries", "effective_registry"})
 _APPROVAL_GUARD = "require_repository_config_approval"
 _COMMAND_STEP_COLLECTION = "_configured_command_steps"
+_BUILTIN_STEP_COLLECTION = "_configured_builtin_steps"
 _BUILTIN_STEP_CONFIGURATION = "_configured_builtin_step"
 
 
@@ -177,6 +178,7 @@ def _approval_guard_paths(
     declared: set[tuple[str, ...]],
 ) -> set[tuple[str, ...]]:
     prefixes: set[tuple[str, ...]] = set()
+    relay_names = _approval_relay_names(package_root)
     for _path, tree, constants in _parsed_package_sources(package_root):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -187,7 +189,7 @@ def _approval_guard_paths(
                 if prefix is not None:
                     prefixes.add(prefix)
                 continue
-            if name == _COMMAND_STEP_COLLECTION:
+            if name == _COMMAND_STEP_COLLECTION and name in relay_names:
                 config_key = next(
                     (
                         _string_value(keyword.value, constants)
@@ -199,7 +201,10 @@ def _approval_guard_paths(
                 if config_key is not None:
                     prefixes.add(("policy", config_key))
                 continue
-            if name == _BUILTIN_STEP_CONFIGURATION:
+            if name == _BUILTIN_STEP_COLLECTION and name in relay_names:
+                prefixes.add(("policy", "pre_commit_builtins"))
+                continue
+            if name == _BUILTIN_STEP_CONFIGURATION and name in relay_names:
                 config_path = next(
                     (
                         _path_prefix(keyword.value, constants)
@@ -220,3 +225,31 @@ def _approval_guard_paths(
             for prefix in prefixes
         )
     }
+
+
+def _approval_relay_names(package_root: Path) -> set[str]:
+    call_graph: dict[str, set[str]] = {}
+    for _path, tree, _constants in _parsed_package_sources(package_root):
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            call_graph.setdefault(node.name, set()).update(
+                _call_name(call)
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            )
+
+    relays = {
+        name
+        for name, called_names in call_graph.items()
+        if _APPROVAL_GUARD in called_names
+    }
+    while True:
+        expanded = {
+            name
+            for name, called_names in call_graph.items()
+            if called_names.intersection(relays)
+        }
+        if expanded.issubset(relays):
+            return relays
+        relays.update(expanded)
