@@ -244,8 +244,9 @@ other output, stderr, and exit status pass through exactly as ordinary mounted
 command output does.
 
 The document carries `schema_version`, `command`, `plan_digest`, and one ordered
-`operations` list. Every operation names its `kind`, `target`, and `scope`; an
-applicable `file` or `git-config` operation also carries total
+`operations` list. Every operation names its `kind`, `target`, `scope`, and
+optional digest-bound `executor` (default `spice`); an applicable `file` or
+`git-config` operation also carries total
 `observed_before` and `intended_after` states. The digest is SHA-256 over the
 schema version and complete normalized ordered list, so a one-operation plan
 and a fifty-operation plan use the same protocol:
@@ -260,6 +261,7 @@ and a fifty-operation plan use the same protocol:
     {
       "order": 1,
       "kind": "file",
+      "executor": "spice",
       "target": "generated.txt",
       "scope": "worktree-file",
       "observed_before": {"value": null, "mode": null},
@@ -269,15 +271,27 @@ and a fifty-operation plan use the same protocol:
 }
 ```
 
-Bare invocation prints the preview. `spice generate --apply=<sha256>` invokes
-the same mounted planner once, recomputes and verifies the document digest, and
-then Spice applies the operations itself. A changed authored input produces a
-different plan and refuses before any operation while naming the current
-ordered operations. Bare `--apply` uses the same path without asserting a
-previous digest. Mounted plans may use only the initialization operation
-vocabulary Spice can apply itself; an unknown operation kind refuses rather
-than being delegated back to the mounted executable. An operation explicitly
-marked `managed: false` is preflighted and preserved.
+Bare invocation prints the preview. For the default `spice` executor,
+`spice generate --apply=<sha256>` invokes the mounted planner once, recomputes
+and verifies the document digest, and then Spice applies the closed file and
+Git-config operation vocabulary itself. An unknown operation kind refuses
+rather than being delegated back to the mounted executable. An operation
+explicitly marked `managed: false` is preflighted and preserved.
+
+Commands that own effects outside that closed vocabulary put
+`executor: "command"` on every operation. Their digest-authorized apply first
+plans without effects, then Spice invokes the same configured argv for one
+authorized execution with the verified digest in a private environment
+assertion. The command replans and checks that assertion before acting. Mixed or
+unknown executors, stale digests, and bare command-owned `--apply` refuse before
+execution. Command-owned effects are not generically receipted or reversible.
+The repository's mounted `spice release` appliance uses this boundary for its
+validation, build, Git, registry, and GitHub operation vocabulary.
+
+A changed authored input produces a different plan and refuses before any
+operation while naming the current ordered operations. Bare `--apply` remains
+available to nondestructive Spice-owned plans without asserting a previous
+digest.
 
 Application appends a bounded write-ahead intent before each effect and a
 completion fact afterward to a mount-scoped JSONL receipt under the worktree

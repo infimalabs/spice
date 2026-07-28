@@ -19,6 +19,14 @@ from spice.commandplan import (
     parse_command_plan_document,
     plan_mounted_reversal,
 )
+from spice.commandownership import (
+    COMMAND_PLAN_EXECUTION_DIGEST_ENV,
+    COMMAND_PLAN_EXECUTOR,
+    MOUNTED_COMMAND_ENV,
+    SPICE_PLAN_EXECUTOR,
+    assert_command_owned_plan_digest,
+    command_plan_executor,
+)
 from spice.cli.parser import (
     BUILTIN_COMMANDS,
     CommandPathRegistration,
@@ -31,7 +39,6 @@ from spice.config.layers import contextualize_config_error, effective_commands
 from spice.config.trust import require_repository_config_approval
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
 VISIBLE_PROG_ENV = "SPICE_VISIBLE_PROG"  # env-policy: allow
 RUNTIME_PYTHON_ENV = "SPICE_RUNTIME_PYTHON"  # env-policy: allow
 
@@ -222,8 +229,11 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     if stderr:
         sys.stderr.write(stderr)
     document = parse_command_plan_document(stdout)
+    executor = SPICE_PLAN_EXECUTOR
     if document is not None:
-        assert_mounted_plan_digest(document, mount.repo_root, document.digest)
+        executor = command_plan_executor(document)
+        if executor == SPICE_PLAN_EXECUTOR:
+            assert_mounted_plan_digest(document, mount.repo_root, document.digest)
     if result.returncode != 0:
         if stdout:
             sys.stdout.write(stdout)
@@ -236,6 +246,19 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
+    if executor == COMMAND_PLAN_EXECUTOR:
+        assert_command_owned_plan_digest(document, request.apply_digest)
+        execution_env = dict(env)
+        execution_env[COMMAND_PLAN_EXECUTION_DIGEST_ENV] = document.digest
+        executed = run_parent_lifetime_command(
+            [*mount.argv, *args],
+            cwd=mount.repo_root,
+            env=execution_env,
+            capture_output=False,
+            text=True,
+            check=False,
+        )
+        return executed.returncode
     receipt = load_mounted_plan_receipt(mount.repo_root, mount.name)
     resuming_asserted_plan = (
         receipt is not None
