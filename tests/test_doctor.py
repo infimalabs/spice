@@ -308,20 +308,29 @@ def test_doctor_reports_single_spice_namespace_portion(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
     package = checkout / "spice"
     module = package / "hooks" / "doctor.py"
+    finder_path_hook = "__editable__.spice_harness-0.16.0.finder.__path_hook__"
     repo.mkdir()
     module.parent.mkdir(parents=True)
-    portions = doctor._spice_namespace_portions_from(
+    ordinary_cwd_portions = doctor._spice_namespace_portions_from(
         [
             package,
             package,
-            "__editable__.spice_harness-0.16.0.finder.__path_hook__",
+            finder_path_hook,
         ],
+        [module],
+    )
+    cwd_beneath_spice = tmp_path / "unrelated" / "spice" / "nested"
+    cwd_beneath_spice.mkdir(parents=True)
+    monkeypatch.chdir(cwd_beneath_spice)
+    portions = doctor._spice_namespace_portions_from(
+        [package, package, finder_path_hook],
         [module],
     )
     monkeypatch.setattr(doctor, "_spice_namespace_portions", lambda: portions)
 
     check = doctor._spice_namespace_portions_check(repo)
 
+    assert ordinary_cwd_portions == [checkout.resolve()]
     assert portions == [checkout.resolve()]
     assert check.status == "ok"
     assert f"single spice namespace portion -> {checkout.resolve()}" == check.detail

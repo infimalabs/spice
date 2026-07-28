@@ -331,10 +331,23 @@ def _spice_namespace_portions_from(
 ) -> list[Path]:
     portions: list[Path] = []
     for raw in (*package_paths, *module_paths):
-        portion = _spice_namespace_portion_from_path(Path(str(raw)))
+        path = _absolute_namespace_entry_path(raw)
+        if path is None:
+            continue
+        portion = _spice_namespace_portion_from_path(path)
         if portion is not None and portion not in portions:
             portions.append(portion)
     return portions
+
+
+def _absolute_namespace_entry_path(raw: object) -> Path | None:
+    if not isinstance(raw, (str, os.PathLike)):
+        return None
+    entry = os.fspath(raw)
+    if not isinstance(entry, str):
+        return None
+    path = Path(entry)
+    return path if path.is_absolute() else None
 
 
 def _spice_namespace_portion_from_path(path: Path) -> Path | None:
