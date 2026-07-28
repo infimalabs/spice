@@ -45,6 +45,7 @@ from spice.releasenotes import (
 from spice.releaseplan import (
     ReleasePlan,
     ReleasePlanOperation,
+    curated_notes_operation as _curated_notes_operation,
     github_publication_operations as _github_publication_operations,
     publication_operations as _publication_operations,
 )
@@ -364,6 +365,7 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             version = version_for_release_commit(version, release_commit)
         ensure_publish_release_commit_is_head(release_commit)
         operations = [
+            _curated_notes_operation(),
             ReleasePlanOperation(
                 "verify-installed-runtime",
                 "prove the independently installed CLI matches this release",
@@ -377,7 +379,7 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
             ReleasePlanOperation(
                 "build-and-probe", f"build and verify artifacts for {version}"
             ),
-            *_publication_operations(version),
+            *_publication_operations(version, check_notes=False),
         ]
     elif mode == "github":
         requested_version = args.version

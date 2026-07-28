@@ -168,6 +168,32 @@ def test_release_plan_digest_binds_source_commit_and_release_notes(
     assert third["plan_digest"] != fourth["plan_digest"]
 
 
+def test_publish_plan_checks_release_notes_before_expensive_gates(
+    tmp_path, monkeypatch
+):
+    notes = tmp_path / "curated.md"
+    notes.write_text("## Highlights\n\n- Curated.\n", encoding="utf-8")
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
+    monkeypatch.setattr(release, "current_version", lambda: "0.30.1")
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_target",
+        lambda version, target: "release-head",
+    )
+    monkeypatch.setattr(
+        release, "ensure_publish_release_commit_is_head", lambda commit: None
+    )
+    monkeypatch.setattr(release, "git", lambda *args: "source-head")
+    args = build_release_parser().parse_args(["publish", "--notes-file", str(notes)])
+
+    plan = release.plan_release(args, tmp_path)
+
+    assert [operation.action for operation in plan.operations[:2]] == [
+        "check-release-notes",
+        "verify-installed-runtime",
+    ]
+
+
 def test_release_docs_show_lane_release_workflow():
     release_doc = Path("docs/release.md").read_text(encoding="utf-8")
     release_section = release_doc.split("\n\n", 1)[1]
