@@ -197,9 +197,9 @@ def _load_config_sources(
     )
 
 
-def load_packaged_config() -> ConfigLayer:
-    """Load the required installed default layer from its canonical path."""
-    path = paths.runtime_spice_source() / "spice.toml"
+def load_packaged_config(path: Path | None = None) -> ConfigLayer:
+    """Load the required default layer from its installed or candidate path."""
+    path = path or paths.runtime_spice_source() / "spice.toml"
     values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
