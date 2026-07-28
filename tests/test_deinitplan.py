@@ -23,12 +23,19 @@ from spice.hooks.initplan import (
 )
 from spice.hooks.deinitplan import (
     DeinitOutcome,
+    DeinitializationReport,
     DeinitializationReceipt,
+    apply_deinitialization_plan,
+    deinitialization_plan_payload,
     load_deinitialization_receipt,
     deinitialization_receipt_path,
-    deinitialize_repository,
+    plan_deinitialization,
 )
 from spice.paths import git_common_dir, git_dir
+
+
+def _deinitialize(repo: Path) -> DeinitializationReport:
+    return apply_deinitialization_plan(plan_deinitialization(repo))
 
 
 def test_full_cli_round_trip_restores_whole_tree_and_git_config_identity(tmp_path):
@@ -37,10 +44,10 @@ def test_full_cli_round_trip_restores_whole_tree_and_git_config_identity(tmp_pat
     before_tree = _worktree_identity(repo)
     before_config = _git_config_identity(repo)
 
-    _run([sys.executable, "-m", "spice", "init", "--dry-run"], cwd=repo)
-    after_preview = (_worktree_identity(repo), _git_config_identity(repo))
     _run([sys.executable, "-m", "spice", "init"], cwd=repo)
-    _run([sys.executable, "-m", "spice", "deinit"], cwd=repo)
+    after_preview = (_worktree_identity(repo), _git_config_identity(repo))
+    _run([sys.executable, "-m", "spice", "init", "--apply"], cwd=repo)
+    _run([sys.executable, "-m", "spice", "deinit", "--apply"], cwd=repo)
     after_reversal = (_worktree_identity(repo), _git_config_identity(repo))
 
     assert (after_preview, after_reversal) == (
@@ -58,7 +65,7 @@ def test_round_trip_preserves_preexisting_empty_initialization_containers(tmp_pa
     before = (_worktree_identity(repo), _git_config_identity(repo))
 
     apply_initialization_plan(plan_initialization(repo))
-    deinitialize_repository(repo)
+    _deinitialize(repo)
 
     assert (_worktree_identity(repo), _git_config_identity(repo)) == before
 
@@ -75,9 +82,13 @@ def test_deinit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
     apply_initialization_plan(plan)
 
-    report = deinitialize_repository(repo)
+    preview = deinitialization_plan_payload(plan_deinitialization(repo))
+    report = _deinitialize(repo)
 
     assert report["status"] == "complete"
+    assert [item["predicted_outcome"] for item in preview["operations"]] == [
+        item["outcome"] for item in report["operations"]
+    ]
     assert [item["target"] for item in report["operations"]] == [
         operation.target for operation in reversed(plan.operations)
     ]
@@ -98,7 +109,7 @@ def test_deinit_restores_owned_files_modes_and_scoped_config_in_reverse_order(
     ) == (False, False, False, False)
 
     after_first = _tree_identity(repo)
-    repeated = deinitialize_repository(repo)
+    repeated = _deinitialize(repo)
 
     assert repeated == {
         "schema_version": 1,
@@ -119,7 +130,7 @@ def test_deinit_preserves_divergent_file_and_config_with_recovery_handles(tmp_pa
     hook.chmod(0o744)
     _git(repo, "config", "--worktree", "core.hooksPath", ".operator-hooks")
 
-    report = deinitialize_repository(repo)
+    report = _deinitialize(repo)
     residues = report["residues"]
 
     assert [(item["target"], item["outcome"]) for item in residues] == [
@@ -166,7 +177,7 @@ def test_common_config_ownership_moves_to_a_live_worktree_until_final_deinit(
         plan_initialization(secondary, InitializationMode.GATES_ONLY)
     )
 
-    first_report = deinitialize_repository(primary)
+    first_report = _deinitialize(primary)
     receiver = load_initialization_receipt(secondary)
     assert isinstance(receiver, InitializationReceipt)
     transferred = next(
@@ -185,7 +196,7 @@ def test_common_config_ownership_moves_to_a_live_worktree_until_final_deinit(
     ] == [("extensions.worktreeConfig", str(secondary.resolve()))]
     assert (transferred.previous_value, transferred.introduced) == (None, True)
 
-    second_report = deinitialize_repository(secondary)
+    second_report = _deinitialize(secondary)
 
     assert (
         _git_config_file(
@@ -220,7 +231,7 @@ def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
         interrupt_after_first_reversal,
     )
     with pytest.raises(RuntimeError, match="simulated interruption"):
-        deinitialize_repository(repo)
+        _deinitialize(repo)
 
     interrupted = load_deinitialization_receipt(repo)
     initialization = load_initialization_receipt(repo)
@@ -243,7 +254,7 @@ def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
         "write_deinitialization_receipt",
         real_write,
     )
-    report = deinitialize_repository(repo)
+    report = _deinitialize(repo)
 
     assert report["status"] == "complete"
     assert [item["target"] for item in report["operations"]] == [
@@ -255,7 +266,7 @@ def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
     ) == (False, False)
 
 
-def test_deinit_json_cli_emits_the_structured_report(tmp_path):
+def test_deinit_json_cli_emits_the_ordered_preview_without_reversal(tmp_path):
     repo = _git_init(tmp_path / "repo")
     apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
 
@@ -263,15 +274,14 @@ def test_deinit_json_cli_emits_the_structured_report(tmp_path):
         [sys.executable, "-m", "spice", "deinit", "--json"],
         cwd=repo,
     )
-    report = json.loads(completed.stdout)
+    plan = json.loads(completed.stdout)
 
     assert (
-        report["schema_version"],
-        report["status"],
-        report["repository"],
-        report["residues"],
-    ) == (1, "complete", str(repo.resolve()), [])
-    assert [item["target"] for item in report["operations"]] == [
+        plan["schema_version"],
+        plan["status"],
+        plan["repository"],
+    ) == (1, "preview", str(repo.resolve()))
+    assert [item["target"] for item in plan["operations"]] == [
         ".spice/.gitignore",
         "core.hooksPath",
         ".spice/hooks/commit-msg",
@@ -279,6 +289,10 @@ def test_deinit_json_cli_emits_the_structured_report(tmp_path):
         "core.bare",
         "extensions.worktreeConfig",
     ]
+    assert initialization_receipt_path(repo).exists()
+
+    _run([sys.executable, "-m", "spice", "deinit", "--apply"], cwd=repo)
+    assert not initialization_receipt_path(repo).exists()
 
 
 def _git_init(repo: Path) -> Path:

@@ -7,20 +7,23 @@ pushes the prepared release commit to `origin/main`.
 ```sh
 spice release check           # run the release gates only; bumps nothing
 spice release range           # preview latest-release-tag..HEAD before prepare
-spice release prepare minor   # bump, validate, commit, stop before publish
+spice release prepare minor   # preview bump, validation, and commit
+spice release prepare minor --apply
 spice release notes > /tmp/spice-release-notes.md
-spice release publish --notes-file /tmp/spice-release-notes.md
-spice release minor           # one-pass bump, validate, commit, publish
+spice release publish --notes-file /tmp/spice-release-notes.md --apply
+spice release minor           # preview one-pass bump, validation, and publish
+spice release minor --apply
 ```
 
 `spice release check` answers "would this tree pass a release?" without
 answering it destructively. It runs the same gate sequence a real release runs,
 against the version already in the tree, and then stops: nothing is bumped,
-committed, tagged, pushed, or published. It is the only mutation-free way to get
-that answer. `prepare` is not the safe rehearsal its name suggests, because it
-bumps the version and commits the bump before it stops. `check` and the release
-path share one gate body on purpose: a separate verification path would drift
-until it certified something the release does not actually run.
+committed, tagged, pushed, or published. Bare `minor`, `patch`, `prepare`,
+`publish`, and `github` also remain mutation-free: each renders its ordered
+release plan, while `--json` renders the same plan for machines. Only `--apply`
+runs that plan. `check` and the applied release path share one gate body on
+purpose: a separate verification path would drift until it certified something
+the release does not actually run.
 
 The first release gate is the installed-runtime boundary. A branch can contain
 passing lifecycle, task, and schema code while the fleet's editable `spice`

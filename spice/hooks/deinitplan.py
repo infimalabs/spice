@@ -84,6 +84,16 @@ class FileObservation:
     sha256: str | None
 
 
+@dataclass(frozen=True)
+class DeinitializationPlan:
+    """One side-effect-free, ordered prediction of receipt reversal."""
+
+    repo_root: Path
+    reversal: DeinitializationReceipt | None
+    operations: tuple[DeinitOperationState, ...]
+    schema_version: int = DEINIT_SCHEMA_VERSION
+
+
 class DeinitializationReportOperation(TypedDict):
     order: int
     kind: str
@@ -169,24 +179,111 @@ def deinitialization_receipt_payload(
     }
 
 
-def deinitialize_repository(repo_root: Path) -> DeinitializationReport:
-    """Reverse one initialization receipt and return its structured report."""
+def plan_deinitialization(repo_root: Path) -> DeinitializationPlan:
+    """Predict one complete reversal without creating receipts or mutating state."""
     resolved_root = repo_root.expanduser().resolve()
     reversal = load_deinitialization_receipt(resolved_root)
     if reversal is None:
         initialization = load_initialization_receipt(resolved_root)
         if initialization is None:
-            return _not_initialized_report(resolved_root)
+            return DeinitializationPlan(resolved_root, None, ())
         if initialization.repo_root != resolved_root:
             raise SpiceError(
                 "initialization receipt belongs to a different repository: "
                 f"{initialization.repo_root}"
             )
         reversal = _new_deinitialization_receipt(initialization)
-        write_deinitialization_receipt(reversal)
-        write_initialization_receipt(reversal.initialization)
 
     if reversal.repo_root != resolved_root:
+        raise SpiceError(
+            "deinitialization receipt belongs to a different repository: "
+            f"{reversal.repo_root}"
+        )
+    states = list(reversal.operations)
+    simulated = reversal
+    for position, state in enumerate(states):
+        if state.completed:
+            continue
+        operation = reversal.initialization.operations[
+            state.initialization_index
+        ].operation
+        states[position] = _predict_reverse_operation(
+            resolved_root,
+            operation,
+            state.initialization_index,
+            simulated,
+        )
+        simulated = replace(simulated, operations=tuple(states))
+    return DeinitializationPlan(resolved_root, reversal, tuple(states))
+
+
+def deinitialization_plan_payload(plan: DeinitializationPlan) -> dict[str, object]:
+    """Return the ordered machine representation of a reversal preview."""
+    operations = []
+    if plan.reversal is not None:
+        for order, state in enumerate(plan.operations, start=1):
+            operation = plan.reversal.initialization.operations[
+                state.initialization_index
+            ].operation
+            operations.append(
+                {
+                    "order": order,
+                    "kind": operation.kind.value,
+                    "target": operation.target,
+                    "scope": operation.scope.value,
+                    "predicted_outcome": (
+                        state.outcome.value if state.outcome is not None else None
+                    ),
+                    "observed_kind": state.observed_kind,
+                    "observed_value": state.observed_value,
+                    "observed_mode": state.observed_mode,
+                    "observed_sha256": state.observed_sha256,
+                    "shared_owner": state.shared_owner,
+                }
+            )
+    return {
+        "schema_version": plan.schema_version,
+        "repository": str(plan.repo_root),
+        "status": "preview" if plan.reversal is not None else "not-initialized",
+        "operations": operations,
+    }
+
+
+def deinitialization_plan_rows(plan: DeinitializationPlan) -> list[str]:
+    """Render a reversal preview in its exact receipt order."""
+    status = "preview" if plan.reversal is not None else "not-initialized"
+    rows = [
+        f"deinitialization-plan schema={plan.schema_version} "
+        f"status={status} repository={plan.repo_root}"
+    ]
+    if plan.reversal is None:
+        rows.append("preview: no changes applied; pass --apply to execute")
+        return rows
+    for order, state in enumerate(plan.operations, start=1):
+        operation = plan.reversal.initialization.operations[
+            state.initialization_index
+        ].operation
+        outcome = state.outcome.value if state.outcome is not None else "pending"
+        rows.append(f"{order}. {outcome} {operation.kind.value} {operation.target}")
+    rows.append("preview: no changes applied; pass --apply to execute")
+    return rows
+
+
+def apply_deinitialization_plan(
+    plan: DeinitializationPlan,
+) -> DeinitializationReport:
+    """Apply a reversal plan, preserving the receipt's resumable write boundary."""
+    if plan.reversal is None:
+        return _not_initialized_report(plan.repo_root)
+    reversal = load_deinitialization_receipt(plan.repo_root)
+    if reversal is None:
+        initialization = load_initialization_receipt(plan.repo_root)
+        if initialization is None:
+            return _not_initialized_report(plan.repo_root)
+        reversal = _new_deinitialization_receipt(initialization)
+        write_deinitialization_receipt(reversal)
+        write_initialization_receipt(reversal.initialization)
+    if reversal.repo_root != plan.repo_root:
         raise SpiceError(
             "deinitialization receipt belongs to a different repository: "
             f"{reversal.repo_root}"
@@ -202,7 +299,7 @@ def deinitialize_repository(repo_root: Path) -> DeinitializationReport:
             state.initialization_index
         ].operation
         states[position] = _reverse_operation(
-            resolved_root,
+            plan.repo_root,
             operation,
             state.initialization_index,
             reversal,
@@ -213,6 +310,72 @@ def deinitialize_repository(repo_root: Path) -> DeinitializationReport:
     reversal = replace(reversal, status=DeinitReceiptStatus.COMPLETE)
     write_deinitialization_receipt(reversal)
     return _finalize_deinitialization(reversal)
+
+
+def _predict_reverse_operation(
+    repo_root: Path,
+    operation: InitOperation,
+    initialization_index: int,
+    receipt: DeinitializationReceipt,
+) -> DeinitOperationState:
+    if operation.kind is InitOperationKind.FILE:
+        return _predict_file_operation(repo_root, operation, initialization_index)
+    return _predict_config_operation(
+        repo_root, operation, initialization_index, receipt
+    )
+
+
+def _predict_file_operation(
+    repo_root: Path,
+    operation: InitOperation,
+    initialization_index: int,
+) -> DeinitOperationState:
+    observed = _observe_file(repo_root / operation.target)
+    if not operation.managed:
+        outcome = DeinitOutcome.PRESERVED_UNMANAGED
+    elif _file_matches(observed, operation.previous_value, operation.previous_mode):
+        outcome = DeinitOutcome.ALREADY_RESTORED
+    elif not _file_matches(
+        observed, operation.generated_value, operation.generated_mode
+    ):
+        outcome = DeinitOutcome.RETAINED_DIVERGED
+    else:
+        outcome = DeinitOutcome.RESTORED
+    return _file_outcome(initialization_index, outcome, observed)
+
+
+def _predict_config_operation(
+    repo_root: Path,
+    operation: InitOperation,
+    initialization_index: int,
+    receipt: DeinitializationReceipt,
+) -> DeinitOperationState:
+    observed = git_config_file_get(operation.scope_path, operation.target)
+    shared_owner = None
+    if not operation.managed:
+        outcome = DeinitOutcome.PRESERVED_UNMANAGED
+    elif observed == operation.previous_value:
+        outcome = DeinitOutcome.ALREADY_RESTORED
+    elif observed != operation.generated_value:
+        outcome = DeinitOutcome.RETAINED_DIVERGED
+    elif operation.scope is InitOperationScope.COMMON_GIT_CONFIG:
+        owners = _other_common_owners(repo_root, operation)
+        if owners:
+            outcome = DeinitOutcome.RETAINED_SHARED
+            shared_owner = str(owners[0][0])
+        elif _retained_worktree_config_requires_common_setting(receipt):
+            outcome = DeinitOutcome.RETAINED_SHARED
+            shared_owner = str(repo_root)
+        else:
+            outcome = DeinitOutcome.RESTORED
+    else:
+        outcome = DeinitOutcome.RESTORED
+    return _config_outcome(
+        initialization_index,
+        outcome,
+        observed,
+        shared_owner=shared_owner,
+    )
 
 
 def deinitialization_report_rows(report: DeinitializationReport) -> list[str]:

@@ -106,14 +106,14 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         ),
     )
     init.add_argument(
-        "--dry-run",
+        "--apply",
         action="store_true",
-        help="Print the ordered initialization plan without changing the repository.",
+        help="Apply the ordered initialization plan; bare invocation only previews.",
     )
     init.add_argument(
         "--json",
         action="store_true",
-        help="With --dry-run, emit the versioned initialization plan as JSON.",
+        help="Emit the versioned initialization plan as JSON without applying it.",
     )
     init.set_defaults(func=handle_init)
 
@@ -122,9 +122,14 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         help="Reverse Spice-owned initialization state without overwriting edits.",
     )
     deinit.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the ordered reversal plan; bare invocation only previews.",
+    )
+    deinit.add_argument(
         "--json",
         action="store_true",
-        help="Emit the versioned reversal and residue report as JSON.",
+        help="Emit the versioned reversal plan as JSON without applying it.",
     )
     deinit.set_defaults(func=handle_deinit)
 
@@ -174,16 +179,16 @@ def handle_init(args: argparse.Namespace) -> int:
         InitializationMode.GATES_ONLY if bool(args.gates) else InitializationMode.FULL
     )
     plan = plan_initialization(repo_root, mode)
-    if bool(args.json) and not bool(args.dry_run):
-        raise SpiceError("`spice init --json` requires `--dry-run`")
-    if bool(args.dry_run):
+    if bool(args.apply) and bool(args.json):
+        raise SpiceError("`spice init --apply` cannot be combined with `--json`")
+    if not bool(args.apply):
         if bool(args.json):
             print(
                 json.dumps(initialization_plan_payload(plan), indent=2, sort_keys=True)
             )
-        else:
-            for row in initialization_preview_rows(plan):
-                print(row)
+            return 0
+        for row in initialization_preview_rows(plan):
+            print(row)
         return 0
 
     apply_initialization_plan(plan)
@@ -194,16 +199,30 @@ def handle_init(args: argparse.Namespace) -> int:
 
 def handle_deinit(args: argparse.Namespace) -> int:
     from spice.hooks.deinitplan import (
+        apply_deinitialization_plan,
+        deinitialization_plan_payload,
+        deinitialization_plan_rows,
         deinitialization_report_rows,
-        deinitialize_repository,
+        plan_deinitialization,
     )
 
-    report = deinitialize_repository(init_repo_root())
-    if bool(args.json):
-        print(json.dumps(report, indent=2, sort_keys=True))
-    else:
-        for row in deinitialization_report_rows(report):
+    if bool(args.apply) and bool(args.json):
+        raise SpiceError("`spice deinit --apply` cannot be combined with `--json`")
+    plan = plan_deinitialization(init_repo_root())
+    if not bool(args.apply):
+        if bool(args.json):
+            print(
+                json.dumps(
+                    deinitialization_plan_payload(plan), indent=2, sort_keys=True
+                )
+            )
+            return 0
+        for row in deinitialization_plan_rows(plan):
             print(row)
+        return 0
+    report = apply_deinitialization_plan(plan)
+    for row in deinitialization_report_rows(report):
+        print(row)
     return 0
 
 

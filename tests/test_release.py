@@ -1,5 +1,6 @@
 """Release command parsing and release-note highlights."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -54,6 +55,72 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     assert one_pass.bump == "minor"
 
 
+def test_release_human_and_json_preview_share_order_without_running_gates(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
+    monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
+    monkeypatch.setattr(release, "preview_bumped_version", lambda bump: "0.10.0")
+    monkeypatch.setattr(
+        release,
+        "run_release_gates",
+        lambda *args, **kwargs: pytest.fail("preview must not run release gates"),
+    )
+
+    assert release.handle_release(parser.parse_args(["prepare", "minor"])) == 0
+    human = capsys.readouterr().out.splitlines()
+    assert (
+        release.handle_release(parser.parse_args(["prepare", "minor", "--json"])) == 0
+    )
+    machine = json.loads(capsys.readouterr().out)
+
+    assert machine["version"] == "0.10.0"
+    assert [row.split(" ", 2)[1] for row in human if row[:1].isdigit()] == [
+        operation["action"] for operation in machine["operations"]
+    ]
+    assert human[-1] == "preview: no changes applied; pass --apply to execute"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ("minor",),
+        ("patch",),
+        ("prepare", "minor"),
+        ("publish",),
+        ("github",),
+    ),
+    ids=("minor", "patch", "prepare", "publish", "github"),
+)
+def test_every_mutating_release_verb_builds_an_ordered_plan(
+    argv, tmp_path, monkeypatch
+):
+    parser = build_release_parser()
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
+    monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
+    monkeypatch.setattr(release, "ensure_notes_file", lambda path: None)
+    monkeypatch.setattr(release, "preview_bumped_version", lambda bump: "0.10.0")
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(
+        release, "release_commit_for_target", lambda version, target: "release-head"
+    )
+    monkeypatch.setattr(
+        release, "ensure_publish_release_commit_is_head", lambda commit: None
+    )
+
+    plan = release.plan_release(parser.parse_args(list(argv)), tmp_path)
+    payload = plan.payload()
+
+    assert [item["order"] for item in payload["operations"]] == list(
+        range(1, len(plan.operations) + 1)
+    )
+    assert [row.split(" ", 2)[1] for row in plan.rows() if row[:1].isdigit()] == [
+        item["action"] for item in payload["operations"]
+    ]
+
+
 def test_release_docs_show_lane_release_workflow():
     release_doc = Path("docs/release.md").read_text(encoding="utf-8")
     release_section = release_doc.split("\n\n", 1)[1]
@@ -75,18 +142,18 @@ def test_release_docs_show_lane_release_workflow():
     assert release_commands == [
         "spice release check           # run the release gates only; bumps nothing",
         "spice release range           # preview latest-release-tag..HEAD before prepare",
-        "spice release prepare minor   # bump, validate, commit, stop before publish",
+        "spice release prepare minor   # preview bump, validation, and commit",
+        "spice release prepare minor --apply",
         "spice release notes > /tmp/spice-release-notes.md",
-        "spice release publish --notes-file /tmp/spice-release-notes.md",
-        "spice release minor           # one-pass bump, validate, commit, publish",
+        "spice release publish --notes-file /tmp/spice-release-notes.md --apply",
+        "spice release minor           # preview one-pass bump, validation, and publish",
+        "spice release minor --apply",
     ]
-    # The docs must keep naming the trap: `prepare` reads like a rehearsal and
-    # is not one, and `check` is the only action that answers the question
-    # without changing the tree.
     assert (
-        "It is the only mutation-free way to get that answer. `prepare` is not "
-        "the safe rehearsal its name suggests, because it bumps the version and "
-        "commits the bump before it stops." in normalized_section
+        "Bare `minor`, `patch`, `prepare`, `publish`, and `github` also remain "
+        "mutation-free: each renders its ordered release plan, while `--json` "
+        "renders the same plan for machines. Only `--apply` runs that plan."
+        in normalized_section
     )
     assert (
         "Before `prepare`, the bare `spice release range` command resolves the "
@@ -246,7 +313,7 @@ def test_release_commit_for_target_resolves_explicit_commitish(monkeypatch):
 
 def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monkeypatch):
     parser = build_release_parser()
-    args = parser.parse_args(["publish", "--release-commit", "HEAD"])
+    args = parser.parse_args(["publish", "--release-commit", "HEAD", "--apply"])
     calls = []
 
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
@@ -326,6 +393,9 @@ def test_every_gate_running_mode_reaches_the_gates_through_one_shared_body(
     monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
     monkeypatch.setattr(release, "bump_version", lambda bump: f"1.0.0-from-{bump}")
+    monkeypatch.setattr(
+        release, "preview_bumped_version", lambda bump: f"1.0.0-from-{bump}"
+    )
     monkeypatch.setattr(release, "clean_build_artifacts", reached_a_leaf_gate_directly)
     monkeypatch.setattr(release, "run_constitution_gate", reached_a_leaf_gate_directly)
     monkeypatch.setattr(release, "run_artifact_gate", reached_a_leaf_gate_directly)
@@ -349,7 +419,12 @@ def test_every_gate_running_mode_reaches_the_gates_through_one_shared_body(
 
     results = [
         release._handle_release_from_root(parser.parse_args(argv), tmp_path)
-        for argv in (["check"], ["publish"], ["prepare", "minor"], ["patch"])
+        for argv in (
+            ["check"],
+            ["publish", "--apply"],
+            ["prepare", "minor", "--apply"],
+            ["patch", "--apply"],
+        )
     ]
 
     assert results == [0, 0, 0, 0]
@@ -616,6 +691,7 @@ def test_prepare_artifacts_do_not_make_the_publish_handoff_dirty(tmp_path, monke
     )
     monkeypatch.setattr(release, "run_constitution_gate", lambda: None)
     monkeypatch.setattr(release, "bump_version", bump_version)
+    monkeypatch.setattr(release, "preview_bumped_version", lambda bump: "0.9.1")
     monkeypatch.setattr(release, "current_version", lambda: "0.9.1")
     monkeypatch.setattr(
         release,
@@ -627,12 +703,14 @@ def test_prepare_artifacts_do_not_make_the_publish_handoff_dirty(tmp_path, monke
 
     parser = build_release_parser()
     before = git_output("status", "--porcelain")
-    assert release.handle_release(parser.parse_args(["prepare", "patch"])) == 0
+    assert (
+        release.handle_release(parser.parse_args(["prepare", "patch", "--apply"])) == 0
+    )
     after_prepare = git_output("status", "--porcelain")
     assert (repo / "dist" / "spice_harness-0.9.1.tar.gz").is_file()
     assert (repo / "dist" / "spice_harness-0.9.1-py3-none-any.whl").is_file()
 
-    assert release.handle_release(parser.parse_args(["publish"])) == 0
+    assert release.handle_release(parser.parse_args(["publish", "--apply"])) == 0
 
     head = git_output("rev-parse", "HEAD")
     assert published == [("0.9.1", None, head)]

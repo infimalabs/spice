@@ -8,6 +8,7 @@ reference refuses instead of half-applying a document.
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 
@@ -176,7 +177,7 @@ def test_ambiguous_slug_names_family_handles(task_repo):
     )
 
 
-def test_dry_run_reports_dependency_postorder_and_keeps_board_identical(task_repo):
+def test_preview_reports_dependency_postorder_and_keeps_board_identical(task_repo):
     assert task_repo.is_dir()
     document = parse(
         "# Root\n"
@@ -188,17 +189,46 @@ def test_dry_run_reports_dependency_postorder_and_keeps_board_identical(task_rep
     )
     before = tw.export(["status:pending"])
 
-    report = apply.apply_document(
+    report = apply.plan_document(
         document,
         project="task.unit",
         origin=f"ack:{ACK_KEY}",
-        dry_run=True,
-    )
+    ).report()
 
     lines = report.splitlines()
     root_handle = lines[0].removeprefix("root ")
     assert lines[1].startswith("created child ")
     assert lines[2] == f"created root {root_handle}"
+    assert tw.export(["status:pending"]) == before
+
+
+def test_cli_json_ingest_preview_is_ordered_and_does_not_write_tasks(task_repo, capsys):
+    source = task_repo / "plan.md"
+    source.write_text(
+        "# Root\nAcceptance: complete\nFlow: todo\n",
+        encoding="utf-8",
+    )
+    before = tw.export(["status:pending"])
+    args = build_parser().parse_args(
+        [
+            "task",
+            "ingest",
+            str(source),
+            "--project",
+            "task.unit",
+            "--origin",
+            f"ack:{ACK_KEY}",
+            "--json",
+        ]
+    )
+
+    assert task_cli.handle(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["schema_version"] == 1
+    assert [item["order"] for item in payload["operations"]] == list(
+        range(1, len(payload["operations"]) + 1)
+    )
     assert tw.export(["status:pending"]) == before
 
 
@@ -248,6 +278,7 @@ def test_plan_equalizes_fields_appends_annotations_and_orders_verbs(task_repo):
         f"updated root {root} tags",
         f"updated root {root} annotations",
         "edge-added root -> child",
+        "preview: no changes applied; pass --apply to execute",
     ]
 
 
@@ -775,6 +806,7 @@ def test_cli_ingest_dash_and_ledger_run_the_task_document_dialect(
             "task.unit",
             "--origin",
             f"ack:{ACK_KEY}",
+            "--apply",
         ]
     )
 
@@ -857,6 +889,7 @@ def test_cli_ingest_numbered_dependencies_require_explicit_opt_in(
         "task.unit",
         "--origin",
         f"ack:{ACK_KEY}",
+        "--apply",
     ]
     if infer_ordered_dependencies:
         command.append("--infer-ordered-dependencies")
