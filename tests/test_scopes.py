@@ -291,33 +291,34 @@ def test_scopes_inline_leaf_replaces_completely_across_four_layers(
     monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     _write(
         system_root / "spice.toml",
-        '[feature.rule]\nscopes = { paths = ["system"], drivers = ["codex"] }\n',
+        "[policy.pre_commit_builtins.formatters]\n"
+        'scopes = { paths = ["system"], drivers = ["codex"] }\n',
     )
     _write(
         tmp_path / "pyproject.toml",
-        "[tool.spice.feature.rule]\n"
+        "[tool.spice.policy.pre_commit_builtins.formatters]\n"
         'scopes = { drivers = ["claude"], phases = ["pre-commit"] }\n',
     )
     _write(
         tmp_path / "spice.toml",
-        '[feature.rule]\nscopes = { paths = ["repository"], extensions = [".md"] }\n',
+        "[policy.pre_commit_builtins.formatters]\n"
+        'scopes = { paths = ["repository"], models = ["gpt"] }\n',
     )
     worktree = tmp_path / ".spice" / "config" / "spice.toml"
     _write(
         worktree,
-        '[feature.rule]\nscopes = { extensions = [".py"] }\n',
+        "[policy.pre_commit_builtins.formatters]\n"
+        'scopes = { models = ["gpt-worktree"] }\n',
     )
 
     loaded = layers.load_config(tmp_path)
+    path = "policy.pre_commit_builtins.formatters.scopes"
 
-    assert loaded.effective["feature"]["rule"]["scopes"] == {"extensions": (".py",)}
-    assert loaded.source_for("feature.rule.scopes") == loaded.layer(
-        layers.WORKTREE_SOURCE
-    )
-    assert loaded.source_for("feature.rule.scopes.extensions") == loaded.layer(
-        layers.WORKTREE_SOURCE
-    )
-    assert loaded.source_for("feature.rule.scopes.paths") is None
+    scopes = loaded.effective["policy"]["pre_commit_builtins"]["formatters"]["scopes"]
+    assert scopes == {"models": ("gpt-worktree",)}
+    assert loaded.source_for(path) == loaded.layer(layers.WORKTREE_SOURCE)
+    assert loaded.source_for(f"{path}.models") == loaded.layer(layers.WORKTREE_SOURCE)
+    assert loaded.source_for(f"{path}.paths") is None
 
 
 def test_rendered_driver_explanation_uses_normalized_actual_and_alternatives():
