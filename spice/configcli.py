@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.config import edit, layers, values
+from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
 from spice.paths import require_repo_root
 
@@ -136,6 +137,14 @@ def _add_scope_argument(parser: argparse.ArgumentParser) -> None:
         default=layers.WORKTREE_SOURCE,
         help="Configuration layer: system, repository, or worktree.",
     )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "Apply a system-scope change to the installed package; bare system "
+            "writes only preview. Other scopes already apply directly."
+        ),
+    )
 
 
 def handle_config(args: argparse.Namespace) -> int:
@@ -166,6 +175,13 @@ def _handle_set(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     key_path = edit.parse_dotted_key(str(args.key))
     value = edit.parse_toml_value(str(args.value))
+    _validate_set_leaf(repo_root, scope, key_path, value)
+    if _preview_system_mutation(
+        args,
+        repo_root,
+        f"set {'.'.join(key_path)}={json.dumps(value, sort_keys=True)}",
+    ):
+        return 0
     edit.set_scope_value(repo_root, scope, key_path, value)
     loaded = layers.load_config(repo_root)
     source = loaded.source_for(key_path)
@@ -193,6 +209,8 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
         _validate_say_clear(repo_root, scope)
+        if _preview_system_mutation(args, repo_root, "clear say"):
+            return 0
         edit.clear_scope_section(
             repo_root, scope, values.SAY_KEY, keys=values.SAY_MUTABLE_KEYS
         )
@@ -220,6 +238,12 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
         print(_say_config_summary(repo_root))
         return 0
     _validate_say_config(repo_root, scope, section)
+    if _preview_system_mutation(
+        args,
+        repo_root,
+        f"set say={json.dumps(section, sort_keys=True)}",
+    ):
+        return 0
     edit.set_scope_section(repo_root, scope, values.SAY_KEY, section)
     print(_say_config_summary(repo_root))
     return 0
@@ -231,6 +255,8 @@ def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
         keys = (values.JUDGE_BIN_KEY,)
         if scope == layers.WORKTREE_SOURCE:
             keys = (values.JUDGE_BIN_KEY, values.JUDGE_ENABLED_KEY)
+        if _preview_system_mutation(args, repo_root, "clear judge"):
+            return 0
         edit.clear_scope_section(repo_root, scope, values.JUDGE_KEY, keys=keys)
         print(f"judge {scope} config cleared")
         return 0
@@ -255,6 +281,12 @@ def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
                 "config judge requires --bin, --enable, or --disable",
             )
         )
+    if _preview_system_mutation(
+        args,
+        repo_root,
+        f"set judge={json.dumps(section, sort_keys=True)}",
+    ):
+        return 0
     edit.set_scope_section(repo_root, scope, values.JUDGE_KEY, section)
     print(f"judge_bin={values.configured_judge_bin(repo_root)}")
     print(f"judge_enabled={values.maxim_adjudication_enabled(repo_root)}")
@@ -264,6 +296,8 @@ def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
+        if _preview_system_mutation(args, repo_root, "clear agent"):
+            return 0
         edit.clear_scope_section(
             repo_root, scope, values.AGENT_KEY, keys=values.AGENT_LAUNCH_KEYS
         )
@@ -279,6 +313,12 @@ def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
     if not section:
         print(_agent_config_summary(repo_root))
         return 0
+    if _preview_system_mutation(
+        args,
+        repo_root,
+        f"set agent={json.dumps(section, sort_keys=True)}",
+    ):
+        return 0
     edit.set_scope_section(repo_root, scope, values.AGENT_KEY, section)
     print(_agent_config_summary(repo_root))
     return 0
@@ -287,6 +327,8 @@ def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
+        if _preview_system_mutation(args, repo_root, "clear agent.personality"):
+            return 0
         edit.clear_scope_section(
             repo_root,
             scope,
@@ -299,6 +341,12 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
         print(f"personality={values.configured_agent_personality(repo_root)}")
         print(_personality_driver_note(repo_root))
         return 0
+    if _preview_system_mutation(
+        args,
+        repo_root,
+        f"set agent.personality={json.dumps(str(args.value))}",
+    ):
+        return 0
     edit.set_scope_section(
         repo_root,
         scope,
@@ -308,6 +356,46 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
     print(f"personality={args.value}")
     print(_personality_driver_note(repo_root))
     return 0
+
+
+def _preview_system_mutation(
+    args: argparse.Namespace,
+    repo_root: Path,
+    change: str,
+) -> bool:
+    """Render the install-wide mutation boundary unless explicitly applied."""
+    if str(args.scope) != layers.SYSTEM_SOURCE or bool(getattr(args, "apply", False)):
+        return False
+    path = edit.config_scope_path(repo_root, layers.SYSTEM_SOURCE)
+    rows = (
+        f"configuration-plan scope=system action={args.config_action}",
+        f"path={path}",
+        f"change={change}",
+        (
+            "warning=system configuration modifies installed defaults for every "
+            "repository and is lost on reinstall"
+        ),
+        "preview: no changes applied; pass --apply to execute",
+    )
+    print("\n".join(rows))
+    return True
+
+
+def _validate_set_leaf(
+    repo_root: Path,
+    scope: str,
+    key_path: Sequence[str],
+    value: Any,
+) -> None:
+    """Validate the requested schema path before rendering it as an executable plan."""
+    candidate = value
+    for part in reversed(key_path):
+        candidate = {part: candidate}
+    validate_config_keys(
+        candidate,
+        source_name=scope,
+        source_path=edit.config_scope_path(repo_root, scope),
+    )
 
 
 def _personality_driver_note(repo_root: Path) -> str:
