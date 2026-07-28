@@ -16,7 +16,6 @@ from spice.agent.maximmetrics import (
 )
 from spice.agent.maxims import (
     ALL_MAXIM,
-    DEFAULT_PROMPT_TEMPLATE,
     MAXIM_PROPOSAL_EVIDENCE_RENDER_LIMIT,
     MAXIM_PROPOSAL_SOURCE_KEY_RENDER_LIMIT,
     META_MAXIMS,
@@ -34,6 +33,7 @@ from spice.agent.maxims import (
     maxim_proposal_themes,
     render_maxim_proposal_draft_stanza,
     render_maxim_proposal_evidence_text,
+    resolved_maxim_settings,
     resolved_maxim_bags,
     resolve_maxim,
     set_maxim_bag_disabled,
@@ -370,8 +370,9 @@ def run_maxim_proposals_cli(_args: argparse.Namespace) -> int:
     records = maxim_proposal_source_records(repo_root)
     print(
         render_maxim_proposals(
-            maxim_proposal_themes(records),
+            maxim_proposal_themes(records, repo_root=repo_root),
             existing_bags=resolved_maxim_bags(repo_root),
+            repo_root=repo_root,
         )
     )
     return 0
@@ -391,8 +392,9 @@ def run_maxim_file_proposals_cli(_args: argparse.Namespace) -> int:
         raise SpiceError("not inside a git worktree")
     records = maxim_proposal_source_records(repo_root)
     drafts = maxim_proposal_drafts(
-        maxim_proposal_themes(records),
+        maxim_proposal_themes(records, repo_root=repo_root),
         existing_bags=resolved_maxim_bags(repo_root),
+        repo_root=repo_root,
     )
     print(render_filed_maxim_proposal_tasks(file_maxim_proposal_tasks(drafts)))
     return 0
@@ -400,10 +402,11 @@ def run_maxim_file_proposals_cli(_args: argparse.Namespace) -> int:
 
 def maxim_propose_result(repo_root: Path) -> MaximProposeResult:
     records = maxim_proposal_source_records(repo_root)
-    themes = maxim_proposal_themes(records)
+    themes = maxim_proposal_themes(records, repo_root=repo_root)
     drafts = maxim_proposal_drafts(
         themes,
         existing_bags=resolved_maxim_bags(repo_root),
+        repo_root=repo_root,
     )
     return MaximProposeResult(
         source_count=len(records),
@@ -531,8 +534,11 @@ def render_maxim_proposals(
     themes: tuple[MaximProposalTheme, ...],
     *,
     existing_bags: Mapping[str, MaximBag] | None = None,
+    repo_root: Path | None = None,
 ) -> str:
-    drafts = maxim_proposal_drafts(themes, existing_bags=existing_bags)
+    drafts = maxim_proposal_drafts(
+        themes, existing_bags=existing_bags, repo_root=repo_root
+    )
     if not drafts:
         return "# maxim proposals: 0"
     rows = ["# maxim proposals: " + str(len(drafts))]
@@ -686,7 +692,7 @@ def _render_trigger_key(key: str) -> str:
 
 def _load_template(prompt_file: Path | None) -> str:
     if prompt_file is None:
-        return DEFAULT_PROMPT_TEMPLATE
+        return resolved_maxim_settings().prompt_template
     try:
         text = prompt_file.read_text(encoding="utf-8")
     except OSError as exc:

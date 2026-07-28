@@ -250,6 +250,40 @@ def test_claude_command_registers_playwright_mcp_server(tmp_path):
     assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
+def test_claude_command_layers_playwright_and_compaction_defaults(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "spice.toml").write_text(
+        """
+        [agent.playwright_mcp]
+        server_name = "configured-browser"
+        command = "configured-mcp"
+        args = ["--configured", "--headless"]
+
+        [agent.claude]
+        auto_compact_window_tokens = 123456
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+        model="haiku",
+    )
+    payload = json.loads(command[command.index("--mcp-config") + 1])
+
+    assert payload["mcpServers"]["configured-browser"]["command"] == "configured-mcp"
+    assert payload["mcpServers"]["configured-browser"]["args"][:2] == [
+        "--configured",
+        "--headless",
+    ]
+    assert claude_auto_compact_environment(tmp_path, base_env={}) == {
+        CLAUDE_AUTO_COMPACT_WINDOW_ENV: "123456"
+    }
+
+
 def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,

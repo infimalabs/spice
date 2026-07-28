@@ -370,6 +370,7 @@ def _task_filter_payload_rows(
     *,
     assignable_stems: set[str],
     visible_stems: set[str],
+    oops_stem: str,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     filters: list[dict[str, Any]] = []
     stems: dict[str, dict[str, Any]] = {}
@@ -389,7 +390,6 @@ def _task_filter_payload_rows(
         stems["waiting"] = _task_filter_system_stem(
             "waiting", waiting_count, "waitingTaskCount"
         )
-    oops_stem = task_config.project_stem(task_config.OOPS_PROJECT)
     for stem_name, count in sorted(hidden_counts.items()):
         count_field = "oopsTaskCount" if stem_name == oops_stem else None
         stems[stem_name] = _task_filter_system_stem(stem_name, count, count_field)
@@ -405,8 +405,9 @@ def _task_filter_inventory(
     catalog: dict[str, object],
 ) -> dict[str, Any]:
     assignable_stems = set(cast(list[str], catalog["approvedStems"]))
+    internal_stems = set(cast(list[str], catalog["internalStems"]))
     hidden_stems = set(cast(list[str], catalog["hiddenStems"]))
-    visible_stems = assignable_stems | set(task_config.INTERNAL_STEMS)
+    visible_stems = assignable_stems | internal_stems
     counts, waiting_count, hidden_counts = _task_filter_project_counts(
         rows,
         ready_uuids,
@@ -420,6 +421,7 @@ def _task_filter_inventory(
         hidden_counts,
         assignable_stems=assignable_stems,
         visible_stems=visible_stems,
+        oops_stem=cast(str, catalog["oopsHiddenStem"]),
     )
     return {
         "revision": observation.revision,

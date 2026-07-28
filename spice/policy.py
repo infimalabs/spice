@@ -56,7 +56,7 @@ TASTE_WORD_SUGGESTIONS: dict[str, str] = {
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
-# A repo widens the set in tracked `[policy] repo_truth_docs`.
+# A repo widens the set in tracked `[policy.repo_truth] docs`.
 REPO_TRUTH_DOC_LIMIT = defaults.integer("policy", "limits", "repo_truth_doc_chars")
 REPO_TRUTH_DOCS = defaults.strings("policy", "repo_truth", "docs")
 MARKDOWN_DEPTH_DOC_EXTENSIONS = defaults.strings(

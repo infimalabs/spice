@@ -11,9 +11,7 @@ from spice.flexstate import (
     FlexSliceClaim,
     render_flex_slice_claim_redirect,
 )
-from spice.policy import REPO_TRUTH_DOCS
 from spice.policyconfig import ResolvedPolicy, resolve_policy
-from spice.config.layers import config_string_list, effective_table
 from spice.studies import gates
 from spice.studies.walk import tracked_paths
 
@@ -34,10 +32,7 @@ class RepoTruthDocFinding:
 
 
 def repo_truth_docs(repo_root: Path) -> list[str]:
-    declared = config_string_list(
-        effective_table(repo_root, "policy").get("repo_truth_docs")
-    )
-    return declared or list(REPO_TRUTH_DOCS)
+    return list(resolve_policy(repo_root).repo_truth_docs)
 
 
 def repo_truth_doc_findings(

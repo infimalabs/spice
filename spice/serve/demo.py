@@ -25,7 +25,8 @@ from spice.config.edit import set_scope_section
 from spice.config.layers import WORKTREE_SOURCE
 from spice.errors import SpiceError
 from spice.process.git import run_git_command
-from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
+from spice.config.values import configured_serve_host, configured_serve_port
+from spice.serve.app import run_serve
 
 # A fixed, obviously-synthetic thread id keeps the seeded transcript path and
 # the rendered lane deterministic across runs (32 hex chars).
@@ -83,6 +84,8 @@ class DemoEnvironment:
 
 
 def configure_demo_parser(subparsers: Any) -> None:
+    default_host = configured_serve_host()
+    default_port = configured_serve_port()
     parser = subparsers.add_parser(
         "demo",
         help="Launch a zero-setup preview of the serve UI from a canned transcript.",
@@ -102,14 +105,14 @@ def configure_demo_parser(subparsers: Any) -> None:
     )
     parser.add_argument(
         "--host",
-        default=DEFAULT_SERVE_HOST,
-        help=f"Serve bind address. Default: {DEFAULT_SERVE_HOST}.",
+        default=default_host,
+        help=f"Serve bind address. Default: {default_host}.",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=DEFAULT_SERVE_PORT,
-        help=f"Serve bind port. Default: {DEFAULT_SERVE_PORT}.",
+        default=default_port,
+        help=f"Serve bind port. Default: {default_port}.",
     )
     parser.add_argument(
         "--seed-only",

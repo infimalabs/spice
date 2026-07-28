@@ -78,10 +78,10 @@ class MacOSSayBackend:
 @dataclass(frozen=True)
 class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
+    content_type: str
+    timeout: float
+    words_per_minute: int
     repo_root: Path | None = None
-    content_type: str = values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
-    timeout: float = values.DEFAULT_SAY_TIMEOUT_SECONDS
-    words_per_minute: int = values.DEFAULT_SAY_WORDS_PER_MINUTE
 
     def render(
         self,
@@ -195,11 +195,7 @@ def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
             repo_root=repo_root or repo_root_from_cwd(),
             content_type=values.configured_say_content_type(repo_root),
             timeout=values.configured_say_timeout(repo_root),
-            words_per_minute=(
-                values.DEFAULT_SAY_WORDS_PER_MINUTE
-                if configured is None
-                else configured
-            ),
+            words_per_minute=configured,
         )
     return MacOSSayBackend(repo_root)
 

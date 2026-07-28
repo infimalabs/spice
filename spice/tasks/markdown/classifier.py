@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from spice.tasks.config import APPROVED_PHASES
+from spice.tasks import config
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
     DOCUMENT_ROOT_SLUG,
@@ -559,7 +559,8 @@ class Parser:
             target.priority = normalized
         elif name == "flow":
             phases = [part.strip().lower() for part in value.split(",") if part.strip()]
-            invalid = [phase for phase in phases if phase not in APPROVED_PHASES]
+            approved_phases = config.resolved_task_config().approved_phases
+            invalid = [phase for phase in phases if phase not in approved_phases]
             if not phases:
                 invalid.append("")
             self.refusals.extend(f"invalid flow phase: {phase}" for phase in invalid)

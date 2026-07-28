@@ -17,15 +17,14 @@ from typing import cast
 from spice import defaults, policy
 from spice.config.layers import (
     contextualize_config_error,
-    effective_table,
     enabled_registry_entries,
 )
+from spice.config.values import layered_table
 from spice.errors import SpiceError
 from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
-FLEX_JITTER_BUCKETS = (FLEX_JITTER_PERCENT * 2) + 1
 
 
 @dataclass(frozen=True)
@@ -41,6 +40,7 @@ class PolicyLimits:
 @dataclass(frozen=True)
 class PolicyFlex:
     ratio: float
+    jitter_percent: int
     file_loc: int
     file_bytes: int
     routine_ccn: int
@@ -63,6 +63,19 @@ class PolicyDebt:
 class PolicyMarkdownDepthBudget:
     extensions: tuple[str, ...]
     stem_pattern: re.Pattern[str] | None = None
+
+
+@dataclass(frozen=True)
+class PolicyMarkdownDepth:
+    base_chars: int
+    max_bounded_chars: int
+
+
+@dataclass(frozen=True)
+class PolicyEnvironment:
+    allow_marker: str
+    default_name_patterns: tuple[str, ...]
+    self_path_suffix: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +102,7 @@ class PolicyFileShapePaths:
 class PolicyEnvAccess:
     family_suffixes: Mapping[str, tuple[str, ...]]
     default_patterns: Mapping[str, tuple[str, ...]]
+    finding_names: Mapping[str, str]
     baseline: str | None = None
 
 
@@ -172,6 +186,10 @@ class ResolvedPolicy:
     magic: PolicyMagic
     debt: PolicyDebt
     markdown_depth_budget: PolicyMarkdownDepthBudget
+    markdown_depth: PolicyMarkdownDepth
+    repo_truth_docs: tuple[str, ...]
+    boundary_underscore_pattern: str
+    environment: PolicyEnvironment
     languages: PolicyLanguages
     lockfiles: PolicyLockfiles
     file_shape_paths: PolicyFileShapePaths
@@ -232,6 +250,7 @@ class ResolvedPolicy:
                 scoped.flex_limit,
                 path,
                 self.flex_actor_id,
+                jitter_percent=self.flex.jitter_percent,
             ),
         )
 
@@ -254,12 +273,20 @@ class ResolvedPolicy:
             line_flex_limit=shape.line_flex_limit
             if shape.line_unlimited
             else jittered_flex_limit(
-                shape.line_limit, shape.line_flex_limit, path, self.flex_actor_id
+                shape.line_limit,
+                shape.line_flex_limit,
+                path,
+                self.flex_actor_id,
+                jitter_percent=self.flex.jitter_percent,
             ),
             byte_flex_limit=shape.byte_flex_limit
             if shape.byte_unlimited
             else jittered_flex_limit(
-                shape.byte_limit, shape.byte_flex_limit, path, self.flex_actor_id
+                shape.byte_limit,
+                shape.byte_flex_limit,
+                path,
+                self.flex_actor_id,
+                jitter_percent=self.flex.jitter_percent,
             ),
         )
 
@@ -329,125 +356,225 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         raise contextualize_config_error(repo_root, exc, "policy") from exc
 
 
-def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
-    raw_policy = effective_table(repo_root, "policy")
-    limits_table = _subtable(raw_policy, "limits")
-    limits = PolicyLimits(
+def _policy_limits(raw_policy: Mapping[str, object]) -> PolicyLimits:
+    table = _subtable(raw_policy, "limits")
+    return PolicyLimits(
         file_loc=_positive_int(
-            limits_table,
+            table,
             "file_loc",
             policy.FILE_LOC_LIMIT,
             "[policy.limits]",
         ),
         file_bytes=_positive_int(
-            limits_table,
+            table,
             "file_bytes",
             policy.FILE_BYTE_LIMIT,
             "[policy.limits]",
         ),
         routine_ccn=_positive_int(
-            limits_table,
+            table,
             "routine_ccn",
             policy.COMPLEXITY_MAX_CCN,
             "[policy.limits]",
         ),
         routine_length=_positive_int(
-            limits_table,
+            table,
             "routine_length",
             policy.COMPLEXITY_MAX_LENGTH,
             "[policy.limits]",
         ),
         commit_message_wrap=_positive_int(
-            limits_table,
+            table,
             "commit_message_wrap",
             policy.COMMIT_MESSAGE_WRAP_LIMIT,
             "[policy.limits]",
         ),
         repo_truth_doc_chars=_positive_int(
-            limits_table,
+            table,
             "repo_truth_doc_chars",
             policy.REPO_TRUTH_DOC_LIMIT,
             "[policy.limits]",
         ),
     )
-    flex_table = _subtable(raw_policy, "flex")
-    complexity_table = _subtable(raw_policy, "complexity")
-    ratio = _ratio(flex_table)
-    flex = PolicyFlex(
+
+
+def _policy_flex(raw_policy: Mapping[str, object], limits: PolicyLimits) -> PolicyFlex:
+    table = _subtable(raw_policy, "flex")
+    ratio = _ratio(table)
+    return PolicyFlex(
         ratio=ratio,
-        file_loc=_flex_value(flex_table, "file_loc", limits.file_loc, ratio),
-        file_bytes=_flex_value(flex_table, "file_bytes", limits.file_bytes, ratio),
-        routine_ccn=_flex_value(flex_table, "routine_ccn", limits.routine_ccn, ratio),
+        jitter_percent=_non_negative_int(
+            table,
+            "jitter_percent",
+            FLEX_JITTER_PERCENT,
+            "[policy.flex]",
+        ),
+        file_loc=_flex_value(table, "file_loc", limits.file_loc, ratio),
+        file_bytes=_flex_value(table, "file_bytes", limits.file_bytes, ratio),
+        routine_ccn=_flex_value(table, "routine_ccn", limits.routine_ccn, ratio),
         routine_length=_flex_value(
-            flex_table, "routine_length", limits.routine_length, ratio
+            table, "routine_length", limits.routine_length, ratio
         ),
     )
+
+
+def _policy_markdown_depth(
+    raw_policy: Mapping[str, object],
+) -> PolicyMarkdownDepth:
+    table = _subtable(raw_policy, "markdown_depth")
+    resolved = PolicyMarkdownDepth(
+        base_chars=_positive_int(
+            table,
+            "base_chars",
+            policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET,
+            "[policy.markdown_depth]",
+        ),
+        max_bounded_chars=_positive_int(
+            table,
+            "max_bounded_chars",
+            policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET,
+            "[policy.markdown_depth]",
+        ),
+    )
+    if resolved.max_bounded_chars < resolved.base_chars:
+        raise SpiceError(
+            "[policy.markdown_depth] max_bounded_chars must be "
+            "greater than or equal to base_chars"
+        )
+    return resolved
+
+
+def _policy_magic(raw_policy: Mapping[str, object]) -> PolicyMagic:
+    table = _subtable(raw_policy, "magic")
+    return PolicyMagic(
+        examine_threshold=_positive_int(
+            table,
+            "examine_threshold",
+            policy.MAGIC_EXAMINE_VALUE_THRESHOLD,
+            "[policy.magic]",
+        ),
+        baseline_ref=_non_empty_string(
+            table,
+            "baseline_ref",
+            policy.MAGIC_BASELINE_REF,
+            "[policy.magic]",
+        ),
+    )
+
+
+def _policy_debt(raw_policy: Mapping[str, object]) -> PolicyDebt:
+    table = _subtable(raw_policy, "debt")
+    return PolicyDebt(
+        reachability_test_only=_non_negative_int(
+            table,
+            "reachability_test_only",
+            policy.REACHABILITY_TEST_ONLY_LIMIT,
+            "[policy.debt]",
+        ),
+        assertion_free_tests=_non_negative_int(
+            table,
+            "assertion_free_tests",
+            policy.ASSERTION_FREE_TEST_LIMIT,
+            "[policy.debt]",
+        ),
+    )
+
+
+def _policy_environment(raw_policy: Mapping[str, object]) -> PolicyEnvironment:
+    table = _subtable(raw_policy, "env")
+    return PolicyEnvironment(
+        allow_marker=_non_empty_string(
+            table,
+            "allow_marker",
+            policy.ENV_POLICY_ALLOW_MARKER,
+            "[policy.env]",
+        ),
+        default_name_patterns=_string_tuple(
+            table,
+            "default_name_patterns",
+            policy.ENV_POLICY_DEFAULT_NAME_PATTERNS,
+            "[policy.env]",
+        ),
+        self_path_suffix=_non_empty_string(
+            table,
+            "self_path_suffix",
+            policy.ENV_POLICY_SELF_PATH_SUFFIX,
+            "[policy.env]",
+        ),
+    )
+
+
+def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
+    raw_policy = layered_table(repo_root, "policy")
+    limits = _policy_limits(raw_policy)
+    flex = _policy_flex(raw_policy, limits)
     markdown_depth_budget = _markdown_depth_budget(raw_policy)
-    magic_table = _subtable(raw_policy, "magic")
-    debt_table = _subtable(raw_policy, "debt")
+    markdown_depth = _policy_markdown_depth(raw_policy)
     return ResolvedPolicy(
         limits=limits,
         flex=flex,
         complexity_hotspot_limit=_positive_int(
-            complexity_table,
+            _subtable(raw_policy, "complexity"),
             "hotspot_limit",
             policy.COMPLEXITY_HOTSPOT_LIMIT,
             "[policy.complexity]",
         ),
-        magic=PolicyMagic(
-            examine_threshold=_positive_int(
-                magic_table,
-                "examine_threshold",
-                policy.MAGIC_EXAMINE_VALUE_THRESHOLD,
-                "[policy.magic]",
-            ),
-            baseline_ref=_non_empty_string(
-                magic_table,
-                "baseline_ref",
-                policy.MAGIC_BASELINE_REF,
-                "[policy.magic]",
-            ),
-        ),
-        debt=PolicyDebt(
-            reachability_test_only=_non_negative_int(
-                debt_table,
-                "reachability_test_only",
-                policy.REACHABILITY_TEST_ONLY_LIMIT,
-                "[policy.debt]",
-            ),
-            assertion_free_tests=_non_negative_int(
-                debt_table,
-                "assertion_free_tests",
-                policy.ASSERTION_FREE_TEST_LIMIT,
-                "[policy.debt]",
-            ),
-        ),
+        magic=_policy_magic(raw_policy),
+        debt=_policy_debt(raw_policy),
         markdown_depth_budget=markdown_depth_budget,
+        markdown_depth=markdown_depth,
+        repo_truth_docs=_string_tuple(
+            _subtable(raw_policy, "repo_truth"),
+            "docs",
+            policy.REPO_TRUTH_DOCS,
+            "[policy.repo_truth]",
+        ),
+        boundary_underscore_pattern=_non_empty_string(
+            _subtable(raw_policy, "package"),
+            "boundary_underscore_pattern",
+            policy.BOUNDARY_UNDERSCORE_PATTERN,
+            "[policy.package]",
+        ),
+        environment=_policy_environment(raw_policy),
         languages=_languages(raw_policy),
         lockfiles=_lockfiles(raw_policy),
         file_shape_paths=_file_shape_paths(raw_policy),
         env_access=_env_access(raw_policy),
         commit_message=_commit_message(raw_policy, limits),
         taste=_taste(raw_policy),
-        rules=_rules(raw_policy, markdown_depth_budget),
+        rules=_rules(raw_policy, markdown_depth_budget, markdown_depth),
         flex_actor_id=_worktree_flex_actor_id(repo_root),
     )
 
 
-def jittered_flex_limit(limit: int, flex_limit: int, path: Path, actor_id: str) -> int:
+def jittered_flex_limit(
+    limit: int,
+    flex_limit: int,
+    path: Path,
+    actor_id: str,
+    *,
+    jitter_percent: int = FLEX_JITTER_PERCENT,
+) -> int:
     if flex_limit <= limit:
         return flex_limit
     headroom = flex_limit - limit
-    jitter = int(headroom * _flex_jitter_percent(path, actor_id) / 100)
+    jitter = int(
+        headroom
+        * _flex_jitter_percent(path, actor_id, jitter_percent=jitter_percent)
+        / 100
+    )
     return max(limit, flex_limit + jitter)
 
 
-def _flex_jitter_percent(path: Path, actor_id: str) -> int:
+def _flex_jitter_percent(
+    path: Path, actor_id: str, *, jitter_percent: int = FLEX_JITTER_PERCENT
+) -> int:
     normalized_path = _normalized_flex_path(path)
     key = f"{normalized_path}\0{actor_id.strip()}".encode("utf-8")
     digest = hashlib.blake2b(key, digest_size=2).digest()
-    bucket = int.from_bytes(digest, "big") % FLEX_JITTER_BUCKETS
-    return bucket - FLEX_JITTER_PERCENT
+    buckets = (jitter_percent * 2) + 1
+    bucket = int.from_bytes(digest, "big") % buckets
+    return bucket - jitter_percent
 
 
 def _normalized_flex_path(path: Path) -> str:
@@ -604,6 +731,11 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
         policy.ENV_ACCESS_DEFAULT_PATTERNS,
         "[policy.env_access.default_patterns]",
     )
+    finding_names = _string_map(
+        _nested_subtable(table, "finding_names", "[policy.env_access]"),
+        policy.ENV_ACCESS_FINDING_NAMES,
+        "[policy.env_access.finding_names]",
+    )
     unknown_pattern_families = sorted(set(default_patterns) - set(family_suffixes))
     if unknown_pattern_families:
         listed = ", ".join(unknown_pattern_families)
@@ -615,6 +747,7 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
     return PolicyEnvAccess(
         family_suffixes=family_suffixes,
         default_patterns=default_patterns,
+        finding_names=finding_names,
         baseline=_optional_repo_relative_path(
             table,
             "baseline",
@@ -654,12 +787,15 @@ def _markdown_depth_budget(
 def _rules(
     raw_policy: Mapping[str, object],
     markdown_depth_budget: PolicyMarkdownDepthBudget,
+    markdown_depth: PolicyMarkdownDepth,
 ) -> tuple[PolicyRule, ...]:
     raw_rules = raw_policy.get(POLICY_RULES_KEY, [])
     if not isinstance(raw_rules, list):
         raise SpiceError("[policy] rules must be a list")
 
-    rules: list[PolicyRule] = list(_markdown_depth_rules(markdown_depth_budget))
+    rules: list[PolicyRule] = list(
+        _markdown_depth_rules(markdown_depth_budget, markdown_depth)
+    )
     seen_selectors: set[ScopeSelector] = set()
     for index, raw_rule in enumerate(raw_rules, start=1):
         context = f"[policy.rules][{index}]"
@@ -683,17 +819,20 @@ def _rules(
 
 def _markdown_depth_rules(
     dataset: PolicyMarkdownDepthBudget,
+    settings: PolicyMarkdownDepth,
 ) -> tuple[PolicyRule, ...]:
     rules: list[PolicyRule] = []
     if not dataset.extensions:
         return ()
     bounded_depth_count = (
-        policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET
-        // policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET
-    )
+        settings.max_bounded_chars + settings.base_chars - 1
+    ) // settings.base_chars
     for extension in dataset.extensions:
         for depth in range(bounded_depth_count):
-            budget = policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET * (depth + 1)
+            budget = min(
+                settings.base_chars * (depth + 1),
+                settings.max_bounded_chars,
+            )
             matcher = _markdown_depth_matcher(depth)
             rules.append(
                 _markdown_depth_rule(
@@ -1080,4 +1219,17 @@ def _string_tuple_map(
             if value not in values:
                 values.append(value)
         resolved[key] = tuple(values)
+    return resolved
+
+
+def _string_map(
+    table: Mapping[str, object],
+    default: Mapping[str, str],
+    context: str,
+) -> Mapping[str, str]:
+    resolved = dict(default)
+    for key, raw in table.items():
+        if not isinstance(raw, str) or not raw.strip():
+            raise SpiceError(f"{context} {key} must be a non-empty string")
+        resolved[str(key)] = raw.strip()
     return resolved

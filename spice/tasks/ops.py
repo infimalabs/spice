@@ -377,7 +377,7 @@ def _capture_default_title() -> str:
     subject = git_read(config.repo_root(), "log", "-1", "--format=%s")
     if not subject:
         return "Capture loose commit"
-    return subject[: create.TASK_TITLE_LIMIT].strip()
+    return subject[: create.task_title_limit()].strip()
 
 
 def capture(
@@ -386,7 +386,7 @@ def capture(
     title: str | None = None,
     project: str | None = None,
     description: str | None = None,
-    priority: str = config.DEFAULT_PRIORITY,
+    priority: str | None = None,
     complete: bool = False,
     validation: list[str] | None = None,
     origin: str | None = None,
@@ -442,7 +442,7 @@ def capture(
             title=(title or "").strip() or _capture_default_title(),
             description=description,
             project=project,
-            priority=priority,
+            priority=priority or config.resolved_task_config().default_priority,
             flow=None,
             tags=[],
             after=[],
@@ -1181,17 +1181,18 @@ def oops(
     tags: list[str] | None = None,
 ) -> str:
     severity = config.map_severity(severity)
+    settings = config.resolved_task_config()
     # Identity is the project string: a kind files under the .oops.<kind>
     # child board, and severity rides native priority alone.
     kind = kind.strip().lower()
-    project = f"{config.OOPS_PROJECT}.{kind}" if kind else config.OOPS_PROJECT
+    project = f"{settings.oops_project}.{kind}" if kind else settings.oops_project
     from spice.tasks import create
 
     handle = create.add_one(
         title=text,
         description=description or None,
         project=project,
-        priority=config.SEVERITY_PRIORITY[severity],
+        priority=settings.severity_priority[severity],
         flow=None,
         tags=list(tags or []),
         after=[],

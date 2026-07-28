@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from spice.config.values import configured_serve_host, configured_serve_port
 from spice.errors import SpiceError
 from spice.serve.app import (
-    DEFAULT_SERVE_HOST,
-    DEFAULT_SERVE_PORT,
     apply_serve_backends,
     guard_exposed_bind,
     run_serve,
@@ -37,20 +36,22 @@ from spice.serve.team.store import ServeTeamStore
 
 
 def configure_serve_parser(subparsers: Any) -> None:
+    default_host = configured_serve_host()
+    default_port = configured_serve_port()
     parser = subparsers.add_parser(
         "serve",
         help="Serve a localhost web UI for steering the repository's agents.",
     )
     parser.add_argument(
         "--host",
-        default=DEFAULT_SERVE_HOST,
-        help=f"Bind address. Default: {DEFAULT_SERVE_HOST}.",
+        default=default_host,
+        help=f"Bind address. Default: {default_host}.",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=DEFAULT_SERVE_PORT,
-        help=f"Bind port. Default: {DEFAULT_SERVE_PORT}.",
+        default=default_port,
+        help=f"Bind port. Default: {default_port}.",
     )
     parser.add_argument(
         "--allow-insecure-bind",
@@ -147,6 +148,8 @@ def configure_serve_parser(subparsers: Any) -> None:
 
 
 def configure_watch_parser(subparsers: Any) -> None:
+    default_host = configured_serve_host()
+    default_port = configured_serve_port()
     parser = subparsers.add_parser(
         "watch",
         help="Observe existing Codex or Claude session directories read-only.",
@@ -171,8 +174,8 @@ def configure_watch_parser(subparsers: Any) -> None:
             "existing session root."
         ),
     )
-    parser.add_argument("--host", default=DEFAULT_SERVE_HOST)
-    parser.add_argument("--port", type=int, default=DEFAULT_SERVE_PORT)
+    parser.add_argument("--host", default=default_host)
+    parser.add_argument("--port", type=int, default=default_port)
     parser.add_argument("--allow-insecure-bind", action="store_true")
     parser.add_argument("--auth-token", metavar="TOKEN")
     parser.add_argument(

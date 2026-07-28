@@ -13,7 +13,7 @@ from pathlib import Path
 from spice import resourcelocks
 from spice.cli.parser import build_parser
 from spice.locking import exclusive_lock, lock_fd_exclusive, unlock_fd
-from spice.resourcelocks import handle_lock
+from spice.resourcelocks import configured_lock_settings, handle_lock
 
 LOCK_CONTENTION_CODE = 71
 CHOSEN_SHARD_CONTENTION_CODE = 72
@@ -48,6 +48,24 @@ def test_lock_parser_exposes_run_and_status_commands():
     assert "Hold configured resource locks" in help_text
     assert "COMMAND" in run_help_text
     assert "Child command argv to run while the lock is held." in run_help_text
+
+
+def test_packaged_lock_state_root_reaches_default_resource_paths(tmp_path):
+    repo = _repo_with_locks(
+        tmp_path,
+        'state_root = "configured-locks"\n'
+        "[locks.named.editor]\n"
+        "[locks.pools.browser]\n"
+        "shards = 3\n",
+    )
+
+    settings = configured_lock_settings(repo)
+
+    assert settings.locks["editor"].path == repo / "configured-locks" / "editor.lock"
+    assert settings.pools["browser"].directory == (
+        repo / "configured-locks" / "browser"
+    )
+    assert settings.pools["browser"].shards == 3
 
 
 def test_lock_run_holds_configured_named_lock_for_child_lifetime(tmp_path, monkeypatch):

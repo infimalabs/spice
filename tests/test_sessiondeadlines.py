@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from spice import policy
 from spice.cli.parser import build_parser
 from spice.process.groups import (
     ProcessDeadlineExceeded,
@@ -114,6 +115,7 @@ def test_briefing_complexity_hung_provider_reports_current_analysis_input(
             suffixes=(".py",),
             ccn_threshold=20,
             length_threshold=80,
+            baseline_ref=policy.MAGIC_BASELINE_REF,
         )
 
     assert raised.value.phase == "briefing-complexity-current"

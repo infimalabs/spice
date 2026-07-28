@@ -16,6 +16,10 @@ from spice.configcli import handle_config
 
 SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
 SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
+SAY_WORDS_PER_MINUTE_OVERRIDE = 222
+CLAUDE_AUTO_COMPACT_WINDOW_OVERRIDE = 123_456
+JUDGE_TIMEOUT_OVERRIDE_SECONDS = 17.5
+SERVE_PORT_OVERRIDE = 9876
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 
@@ -86,6 +90,87 @@ def test_worktree_agent_layer_overrides_repository_defaults(tmp_path, monkeypatc
         "model": "gpt-worktree",
         "effort": "medium",
     }
+
+
+def test_packaged_scalar_families_reach_their_typed_consumers(tmp_path, monkeypatch):
+    (tmp_path / "spice.toml").write_text(
+        """
+        [say]
+        backend = "external"
+        backend_choices = ["say", "external"]
+        command = "speech-engine"
+        content_type = "audio/ogg"
+        words_per_minute = 222
+        timeout_seconds = 12.5
+
+        [agent]
+        personality = "friendly"
+        personality_choices = ["none", "friendly", "pragmatic"]
+
+        [agent.playwright_mcp]
+        server_name = "browser"
+        command = "browser-mcp"
+        args = ["--headless", "--isolated"]
+
+        [agent.claude]
+        default_model = "claude-configured"
+        auto_compact_window_tokens = 123456
+
+        [judge]
+        bin = "configured-judge"
+        portable_bin = "configured-portable-judge"
+        model = "configured-model"
+        model_command = ["model-runner", "configured-model"]
+        timeout_seconds = 17.5
+
+        [serve]
+        host = "127.0.0.9"
+        port = 9876
+
+        [inventory]
+        protocol_invariant = ["configured.inventory.probe"]
+        """,
+        encoding="utf-8",
+    )
+
+    assert values.configured_say_backend(tmp_path) == "external"
+    assert values.configured_say_command(tmp_path) == "speech-engine"
+    assert values.configured_say_content_type(tmp_path) == "audio/ogg"
+    assert (
+        values.configured_say_words_per_minute(tmp_path)
+        == SAY_WORDS_PER_MINUTE_OVERRIDE
+    )
+    assert values.configured_say_timeout(tmp_path) == SAY_TIMEOUT_OVERRIDE_SECONDS
+    assert values.configured_agent_personality(tmp_path) == "friendly"
+    assert (
+        values.configured_agent_model_for_driver(tmp_path, "claude")
+        == "claude-configured"
+    )
+    assert values.configured_playwright_mcp(tmp_path) == (
+        "browser",
+        "browser-mcp",
+        ("--headless", "--isolated"),
+    )
+    assert (
+        values.configured_claude_auto_compact_window(tmp_path)
+        == CLAUDE_AUTO_COMPACT_WINDOW_OVERRIDE
+    )
+    assert values.configured_judge_bin(tmp_path) == "configured-judge"
+    assert values.configured_judge_model(tmp_path) == "configured-model"
+    assert values.configured_judge_model_command(tmp_path) == (
+        "model-runner",
+        "configured-model",
+    )
+    assert values.configured_judge_timeout(tmp_path) == JUDGE_TIMEOUT_OVERRIDE_SECONDS
+    assert values.configured_serve_host(tmp_path) == "127.0.0.9"
+    assert values.configured_serve_port(tmp_path) == SERVE_PORT_OVERRIDE
+    monkeypatch.setattr(values, "repo_root_from_cwd", lambda: tmp_path)
+    serve_args = build_parser(include_mounted_epilog=False).parse_args(["serve"])
+    assert serve_args.host == "127.0.0.9"
+    assert serve_args.port == SERVE_PORT_OVERRIDE
+    assert values.config_overview(tmp_path)["effective"]["inventory"][
+        "protocol_invariant"
+    ] == ["configured.inventory.probe"]
 
 
 def test_config_overview_shows_layers_effective_values_and_provenance(
