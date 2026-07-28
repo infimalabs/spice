@@ -633,22 +633,26 @@ def test_dev_install_hooks_previews_json_and_applies_shared_plan(
     tmp_path, monkeypatch, capsys
 ):
     from spice.cli.parser import build_parser
-    from spice.hooks.initplan import initialization_plan_payload
+    from spice.hooks.initplan import (
+        initialization_plan_payload,
+        initialization_preview_rows,
+    )
     from spice.hooks.install import plan_hook_installation
 
     repo = _git_init(tmp_path / "repo")
     monkeypatch.chdir(repo)
     parser = build_parser()
-    expected = initialization_plan_payload(plan_hook_installation(repo))
+    plan = plan_hook_installation(repo)
+    expected = initialization_plan_payload(plan)
 
     preview = parser.parse_args(["dev", "install-hooks"])
     assert preview.func(preview) == 0
     preview_output = capsys.readouterr().out
+    assert preview_output.splitlines() == initialization_preview_rows(plan)
     expected_header = (
         f"initialization-plan schema=1 mode=full digest={expected['plan_digest']}"
     )
     assert preview_output.splitlines()[0] == expected_header
-    assert "preview: no changes applied; pass --apply to execute" in preview_output
     assert not hooks_dir(repo).exists()
 
     machine = parser.parse_args(["dev", "install-hooks", "--json"])

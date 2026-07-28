@@ -17,6 +17,7 @@ from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from spice.tasks import config as task_config
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
+    approved_spice_checkout,
     builtin_common_wrapper_lines,
     expected_python_module_wrapper_lines,
     expected_wrapper_lines,
@@ -394,8 +395,9 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
 
 
-def test_repo_spice_dev_wrapper_routes_pytest_through_dev_seam():
-    repo = Path(__file__).resolve().parents[1]
+def test_repo_spice_dev_wrapper_routes_pytest_through_dev_seam(tmp_path):
+    source = Path(__file__).resolve().parents[1]
+    repo = approved_spice_checkout(source, tmp_path / "repo")
 
     rendered = shellhook.render_agent_wrapper_lines(repo)
 
@@ -408,7 +410,8 @@ def test_repo_spice_dev_wrapper_routes_pytest_through_dev_seam():
     ]
 
 
-def test_repo_pytest_wrapper_word_yields_rtk_rewrite():
-    repo = Path(__file__).resolve().parents[1]
+def test_repo_pytest_wrapper_word_yields_rtk_rewrite(tmp_path):
+    source = Path(__file__).resolve().parents[1]
+    repo = approved_spice_checkout(source, tmp_path / "repo")
 
     assert "pytest" in shellhook.rtk_rewrite_yield_selectors(repo)

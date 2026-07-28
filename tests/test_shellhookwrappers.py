@@ -13,6 +13,7 @@ from spice.agent import shellhook
 from spice.errors import SpiceError
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
+    approved_spice_checkout,
     builtin_common_wrapper_lines,
     completed_process_detail,
     expected_project_common_with_pytest_wrapper_lines,
@@ -216,8 +217,9 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
     )
 
 
-def test_repository_common_wrapper_preserves_native_git_fidelity_routes():
-    lines = shellhook.render_agent_wrapper_lines(Path.cwd())
+def test_repository_common_wrapper_preserves_native_git_fidelity_routes(tmp_path):
+    repo = approved_spice_checkout(Path.cwd(), tmp_path / "repo")
+    lines = shellhook.render_agent_wrapper_lines(repo)
 
     assert '  if [ "${1-}" = git ]; then' in lines
     assert "        --first-parent|--check|--name-status|--name-only)" in lines
@@ -713,8 +715,9 @@ def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
     assert lines[0] != lines[1]
 
 
-def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
-    repo = Path(__file__).resolve().parents[1]
+def test_spice_checkout_maps_bare_pre_commit_to_dev_gate(tmp_path):
+    source = Path(__file__).resolve().parents[1]
+    repo = approved_spice_checkout(source, tmp_path / "repo")
     lines = shellhook.render_agent_wrapper_lines(repo)
 
     wrapper_start = lines.index("pre-commit() {")
@@ -805,10 +808,11 @@ def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
         encoding="utf-8",
     )
     tool.chmod(0o755)
+    repo = approved_spice_checkout(Path.cwd(), tmp_path / "repo")
     script = "\n".join(
         [
             "set -u",
-            *shellhook.render_agent_wrapper_lines(Path.cwd()),
+            *shellhook.render_agent_wrapper_lines(repo),
             "grep 'alpha|beta' source.txt",
             "grep -E 'alpha|beta' source.txt",
             "grep -F 'alpha|beta' source.txt",
