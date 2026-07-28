@@ -309,6 +309,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             payload,
             apply_requested=apply_requested,
             environ=os.environ,  # env-policy: allow
+            candidate_version=plan.version,
         ):
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0

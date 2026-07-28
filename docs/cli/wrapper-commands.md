@@ -289,10 +289,13 @@ The repository's mounted `spice release` appliance uses this boundary for its
 validation, build, Git, registry, and GitHub operation vocabulary.
 
 The internal execution-digest variable is also a capability sentinel. Its
-absence lets a candidate run through a pre-ownership installed parent using the
-former single self-owned apply path, which is necessary to publish the first
-compatible parent. New parents always send the sentinel and therefore always
-enforce the digest-authorized planning/execution split.
+absence never selects a generic fallback: the candidate reads the installed
+parent distribution version, and only parent `0.30.1` publishing candidate
+`0.30.2` may use the former single self-owned apply path. `0.30.2` is the named
+retirement boundary for that one forward bridge; every other missing or unknown
+capability refuses before effects. New parents always send the sentinel and
+therefore have exactly one current path: the digest-authorized
+planning/execution split.
 
 A changed authored input produces a different plan and refuses before any
 operation while naming the current ordered operations. Bare `--apply` remains
