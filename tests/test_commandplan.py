@@ -15,6 +15,7 @@ from spice.commandplan import (
     COMMAND_PLAN_PROTOCOL,
     PLAN_DIGEST_HEX_LENGTH,
     apply_mounted_plan,
+    assert_mounted_plan_digest,
     assert_plan_digest,
     command_plan_payload,
     parse_command_plan_document,
@@ -199,8 +200,13 @@ def test_mounted_plan_refuses_file_targets_outside_the_repository(tmp_path, targ
         apply_mounted_plan(document, tmp_path)
 
 
+@pytest.mark.parametrize(
+    "args",
+    ([], ["--apply=opaque", "--flag"]),
+    ids=("bare", "apply-shaped"),
+)
 def test_mounted_non_plan_output_and_exit_status_pass_through_unchanged(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, args
 ):
     observed: dict[str, object] = {}
 
@@ -214,13 +220,13 @@ def test_mounted_non_plan_output_and_exit_status_pass_through_unchanged(
     monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
     mount = MountedCommand(("probe",), ("project-tool",), tmp_path)
 
-    result = run_mounted_command(mount, ["--apply=opaque", "--flag"])
+    result = run_mounted_command(mount, args)
 
     captured = capsys.readouterr()
     assert result == 7
     assert captured.out == "ordinary output\n"
     assert captured.err == "warning\n"
-    assert observed["argv"] == ["project-tool", "--apply=opaque", "--flag"]
+    assert observed["argv"] == ["project-tool", *args]
     assert observed["capture_output"] is True
     assert observed["text"] is True
 
@@ -255,15 +261,116 @@ def test_mounted_plan_is_applied_by_spice_without_a_second_child_command(
     ]
 
 
+def test_mounted_nondestructive_creation_accepts_bare_apply(
+    tmp_path, monkeypatch, capsys
+):
+    document = _document(_file_operation("generated.txt"))
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(document.payload) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
+    mount = MountedCommand(("generate",), ("project-planner",), tmp_path)
+
+    assert run_mounted_command(mount, ["--apply"]) == 0
+
+    assert calls == [["project-planner", "--apply"]]
+    assert (tmp_path / "generated.txt").read_text(encoding="utf-8") == "generated\n"
+    assert f"digest={document.digest}" in capsys.readouterr().out
+
+
+def test_mounted_destructive_plan_requires_digest_before_the_first_write(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "victim.txt"
+    target.write_text("keep\n", encoding="utf-8")
+    target.chmod(FILE_MODE)
+    document = _document(
+        _file_operation(
+            "victim.txt",
+            before="keep\n",
+            before_mode=FILE_MODE,
+            after=None,
+            after_mode=None,
+        )
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(document.payload) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
+    mount = MountedCommand(("generate",), ("project-planner",), tmp_path)
+
+    with pytest.raises(SpiceError, match="destructive mounted command plan"):
+        run_mounted_command(mount, ["--apply"])
+
+    assert target.read_text(encoding="utf-8") == "keep\n"
+    assert run_mounted_command(mount, [f"--apply={document.digest}"]) == 0
+    assert not target.exists()
+    assert calls == [
+        ["project-planner", "--apply"],
+        ["project-planner", f"--apply={document.digest}"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    (
+        _file_operation(
+            "existing.txt",
+            before="before\n",
+            before_mode=FILE_MODE,
+            after="after\n",
+        ),
+        _file_operation(
+            "existing.txt",
+            before="same\n",
+            before_mode=FILE_MODE,
+            after="same\n",
+            after_mode=0o600,
+        ),
+        {
+            "kind": "git-config",
+            "target": "spice.fixture",
+            "scope": "worktree-git-config",
+            "observed_before": {"value": "before", "mode": None},
+            "intended_after": {"value": "after", "mode": None},
+        },
+    ),
+    ids=("file-value", "file-mode", "git-config-value"),
+)
+def test_every_mounted_existing_state_change_requires_a_digest(tmp_path, operation):
+    document = _document(operation)
+
+    with pytest.raises(SpiceError, match="existing state would change"):
+        assert_mounted_plan_digest(document, tmp_path, None)
+
+    assert_mounted_plan_digest(document, tmp_path, document.digest)
+
+
 def test_mounted_apply_replans_and_refuses_digest_after_authored_input_changes(
     tmp_path, monkeypatch, capsys
 ):
     authored = tmp_path / "authored.txt"
     authored.write_text("first\n", encoding="utf-8")
     calls: list[list[str]] = []
+    captures: list[bool] = []
 
     def fake_run(argv, **_kwargs):
         calls.append(argv)
+        captures.append(bool(_kwargs.get("capture_output")))
         payload = command_plan_payload(
             command="generate",
             operations=[
@@ -273,8 +380,6 @@ def test_mounted_apply_replans_and_refuses_digest_after_authored_input_changes(
                 )
             ],
         )
-        if not _kwargs.get("capture_output"):
-            print(json.dumps(payload))
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(payload) + "\n",
@@ -299,16 +404,48 @@ def test_mounted_apply_replans_and_refuses_digest_after_authored_input_changes(
         ["project-planner"],
         ["project-planner", f"--apply={preview.digest}"],
     ]
+    assert captures == [True, True]
 
 
-def test_protocol_marker_with_invalid_digest_refuses_instead_of_passing_through():
-    payload = command_plan_payload(
-        command="fixture", operations=[_file_operation("generated.txt")]
-    )
-    payload["plan_digest"] = "0" * len(str(payload["plan_digest"]))
+@pytest.mark.parametrize(
+    ("invalidity", "message"),
+    (
+        ("schema", "unsupported command plan"),
+        ("order", "order must be consecutive"),
+        ("operation-shape", "must contain exactly value and mode"),
+        ("digest", "invalid command plan digest"),
+    ),
+)
+def test_bare_mounted_protocol_claim_with_invalid_document_refuses(
+    tmp_path, monkeypatch, invalidity, message
+):
+    operation = _file_operation("generated.txt")
+    if invalidity == "operation-shape":
+        operation["observed_before"] = {"value": None}
+    payload = command_plan_payload(command="fixture", operations=[operation])
+    if invalidity == "schema":
+        payload["schema_version"] = 2
+    elif invalidity == "order":
+        payload["operations"][0]["order"] = 2
+    elif invalidity == "digest":
+        payload["plan_digest"] = "0" * len(str(payload["plan_digest"]))
+    calls: list[list[str]] = []
 
-    with pytest.raises(SpiceError, match="invalid command plan digest"):
-        parse_command_plan_document(json.dumps(payload))
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(payload) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
+    mount = MountedCommand(("generate",), ("project-planner",), tmp_path)
+
+    with pytest.raises(SpiceError, match=message):
+        run_mounted_command(mount, [])
+
+    assert calls == [["project-planner"]]
 
 
 def test_protocol_document_refuses_noncanonical_operation_order():

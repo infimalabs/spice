@@ -205,6 +205,32 @@ def assert_plan_digest(
     )
 
 
+def assert_mounted_plan_digest(
+    document: CommandPlanDocument,
+    repo_root: Path,
+    expected_digest: str | None,
+) -> None:
+    """Validate mounted operations and require a digest for destructive plans."""
+    operations = tuple(
+        _mounted_operation(operation, repo_root) for operation in document.operations
+    )
+    if expected_digest is None:
+        destructive = [
+            f"{order}:{operation.label}"
+            for order, operation in enumerate(operations, start=1)
+            if operation.managed
+            and operation.before != operation.after
+            and _state_exists(operation.before)
+        ]
+        if destructive:
+            raise SpiceError(
+                "destructive mounted command plan requires "
+                f"--apply={document.digest}; existing state would change: "
+                + ", ".join(destructive)
+            )
+    assert_plan_digest(document, expected_digest)
+
+
 def apply_mounted_plan(document: CommandPlanDocument, repo_root: Path) -> list[str]:
     """Apply a mounted plan's initialization-vocabulary operations in order."""
     operations = tuple(
@@ -294,6 +320,10 @@ def _state(value: Any, label: str) -> dict[str, Any]:
     ):
         raise SpiceError(f"mounted command plan {label}.mode must be 0..07777 or null")
     return state
+
+
+def _state_exists(state: Mapping[str, Any]) -> bool:
+    return state["value"] is not None or state["mode"] is not None
 
 
 def _mounted_operation(raw: Mapping[str, Any], repo_root: Path) -> _MountedOperation:
