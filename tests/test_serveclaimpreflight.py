@@ -45,6 +45,7 @@ def test_available_work_refreshes_and_refuses_unapproved_config_before_claim(
     candidates = [_ready_row("task-gated"), _ready_row("task-spare")]
     events: list[str] = []
     claims: list[tuple[str, str, object]] = []
+    launches: list[dict[str, object]] = []
     real_preflight = agentapi.preflight_automatic_agent_launch
 
     def observed_preflight(repo_root):
@@ -59,6 +60,11 @@ def test_available_work_refreshes_and_refuses_unapproved_config_before_claim(
         claims.append((task_uuid, actor, kwargs["site"]))
         return True
 
+    def launch(*_args, **kwargs):
+        events.append("start")
+        launches.append(kwargs)
+        return {"ok": True, "action": "start"}, HTTPStatus.OK
+
     monkeypatch.setattr(
         agentapi.alloc, "ordered_visible_ready_rows", lambda _actor: candidates
     )
@@ -69,10 +75,7 @@ def test_available_work_refreshes_and_refuses_unapproved_config_before_claim(
     monkeypatch.setattr(
         agentapi,
         "agent_ensure_response_payload",
-        lambda *_args, **_kwargs: (
-            events.append("start") or {"ok": True, "action": "start"},
-            HTTPStatus.OK,
-        ),
+        launch,
     )
 
     refused = agentapi.ensure_agent_for_available_work(
@@ -110,6 +113,7 @@ def test_available_work_refreshes_and_refuses_unapproved_config_before_claim(
             agentapi.claimstate.ClaimSite(repo.resolve(), "main", advanced),
         )
     ]
+    assert launches[0]["launch_preflighted"] is True
     assert started == {
         "ok": True,
         "action": "start",

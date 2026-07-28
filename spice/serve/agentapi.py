@@ -102,6 +102,7 @@ def agent_ensure_response_payload(
     fast_mode: bool = False,
     automatic: bool = False,
     launch_claim: LaunchClaim | None = None,
+    launch_preflighted: bool = False,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = ensure_agent(
@@ -111,6 +112,7 @@ def agent_ensure_response_payload(
             supervise_stdout=True,
             automatic=automatic,
             launch_claim=launch_claim,
+            launch_preflighted=launch_preflighted,
         )
     except AgentRestartRefusedError as exc:
         return (
@@ -388,6 +390,7 @@ def _dispatch_available_work_candidate(
             force_new=force_new,
             automatic=True,
             launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
+            launch_preflighted=True,
         )
     except Exception:
         claimstate.release_claim(task_uuid, actor)
