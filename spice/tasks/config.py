@@ -78,6 +78,12 @@ PRIORITY_URGENCY = {
     str(key): float(value)
     for key, value in defaults.table("tasks", "priority_urgency").items()
 }
+TASKWARRIOR_URGENCY = {
+    str(key): value
+    for key, value in defaults.table("tasks", "taskwarrior_urgency").items()
+}
+ALLOCATOR_BAND_WIDTH = defaults.number("tasks", "allocator_band_width")
+ALLOCATOR_ANTI_SELF_REVIEW = defaults.number("tasks", "allocator_anti_self_review")
 SEVERITY_PRIORITY = {
     str(key): str(value)
     for key, value in defaults.table("tasks", "severity_priority").items()
@@ -517,10 +523,16 @@ def materialize_task_backend(root: Path) -> Path:
             "confirmation=no",
             "verbose=nothing",
             "recurrence=no",
-            "# spice phase-review urgency: peer review rises fleet-wide.",
-            "urgency.uda.phase.review.coefficient=4.0",
-            "# spice priority urgency: critical remains distinct from high.",
+            "# spice native urgency: every dimension is deliberate; graph "
+            "position is ranked by the allocator.",
         ]
+        lines.extend(
+            f"urgency.{name}={value}" for name, value in TASKWARRIOR_URGENCY.items()
+        )
+        lines.append(
+            "# spice priority urgency: adjacent tiers stay wider than the "
+            "allocator comparison band."
+        )
         lines.extend(
             f"urgency.uda.priority.{priority}.coefficient={coefficient}"
             for priority, coefficient in PRIORITY_URGENCY.items()

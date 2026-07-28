@@ -184,6 +184,8 @@ claim_ttl_seconds = 3600
 claim_context_seconds = 300
 deferred_wait = "2099-01-01T00:00:00"
 oops_wait_seconds = 604800
+allocator_band_width = 2.0
+allocator_anti_self_review = -100.0
 
 [tasks.priority]
 critical = "C"
@@ -210,6 +212,22 @@ C = 8.1
 H = 6.0
 M = 3.9
 L = 1.8
+
+[tasks.taskwarrior_urgency]
+"active.coefficient" = 4.0
+"age.coefficient" = 2.0
+"age.max" = 365
+"annotations.coefficient" = 1.0
+"blocked.coefficient" = 0.0
+"blocking.coefficient" = 0.0
+"due.coefficient" = 12.0
+inherit = 0
+"project.coefficient" = 1.0
+"scheduled.coefficient" = 5.0
+"tags.coefficient" = 1.0
+"uda.phase.review.coefficient" = 4.0
+"user.tag.next.coefficient" = 15.0
+"waiting.coefficient" = -3.0
 
 [tasks.sla_due_seconds]
 C = 86400
