@@ -31,6 +31,14 @@ UNSUPPORTED_AGENT_STEER_COMMAND = "spice agent " + "steer"
 SCOPED_REWRITE_PROCESS_PID = 4242
 
 
+def static_shell_subprocess_environment() -> dict[str, str]:
+    env = os.environ.copy()  # env-policy: allow
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    env[shellhook.ZDOTDIR_ENV] = str(static_hook_dir)
+    env[shellhook.BASH_ENV_ENV] = str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+    return env
+
+
 def test_rtk_rewrite_protocol_accepts_current_result_pairs():
     responses = iter(
         [
@@ -493,17 +501,20 @@ def test_agent_run_preserves_native_rg_extended_regexp_results(
         repo_root=repo,
         rewrite_rtk=True,
     )
+    shell_env = static_shell_subprocess_environment()
     native = subprocess.run(
         [shell, "-c", f"command {raw}"],
         check=False,
         capture_output=True,
         text=True,
+        env=shell_env,
     )
     through_agent = subprocess.run(
         agent_command,
         check=False,
         capture_output=True,
         text=True,
+        env=shell_env,
     )
 
     assert agent_command == [shell, "-c", raw]
@@ -554,17 +565,20 @@ def test_agent_run_preserves_rg_only_flags_in_any_position(
         repo_root=repo,
         rewrite_rtk=True,
     )
+    shell_env = static_shell_subprocess_environment()
     native = subprocess.run(
         [shell, "-c", f"command {raw}"],
         check=False,
         capture_output=True,
         text=True,
+        env=shell_env,
     )
     through_agent = subprocess.run(
         agent_command,
         check=False,
         capture_output=True,
         text=True,
+        env=shell_env,
     )
 
     assert agent_command == [shell, "-c", raw]
