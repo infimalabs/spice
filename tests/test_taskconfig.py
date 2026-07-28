@@ -19,6 +19,8 @@ CUSTOM_CLAIM_CONTEXT_SECONDS = 234
 CUSTOM_OOPS_WAIT_SECONDS = 345
 CUSTOM_ALLOCATOR_ANTI_SELF_REVIEW = -222.0
 CUSTOM_SLA_DUE_SECONDS = 43_200
+SOURCE_PHASE_SLOT_COUNT = 8
+CWD_PHASE_SLOT_COUNT = 9
 
 
 def test_ensure_task_event_file_preserves_existing_event(tmp_path):
@@ -142,6 +144,55 @@ def test_packaged_task_table_reaches_runtime_consumers(tmp_path, monkeypatch):
     assert "secret" in config.hidden_stems()
     assert config.map_priority("urgent") == "U"
     assert config.map_severity("u") == "urgent"
+
+
+def test_materialized_backend_uses_one_explicit_source_root(tmp_path, monkeypatch):
+    source = _init_repo(tmp_path / "source")
+    cwd_repo = _init_repo(tmp_path / "cwd")
+    backend = tmp_path / "backend"
+    (source / "spice.toml").write_text(
+        "[tasks]\n"
+        'approved_phases = ["design", "plan", "todo", "verify", "review", "ship"]\n'
+        f"phase_slot_count = {SOURCE_PHASE_SLOT_COUNT}\n"
+        "\n"
+        "[tasks.priority_urgency]\n"
+        "S = 9.5\n",
+        encoding="utf-8",
+    )
+    (cwd_repo / "spice.toml").write_text(
+        "[tasks]\n"
+        'approved_phases = ["design", "plan", "todo", "verify", "review", "deploy"]\n'
+        f"phase_slot_count = {CWD_PHASE_SLOT_COUNT}\n"
+        "\n"
+        "[tasks.priority_urgency]\n"
+        "D = 10.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(cwd_repo)
+    source_settings = config.resolved_task_config(source)
+    cwd_settings = config.resolved_task_config(cwd_repo)
+
+    taskrc = config.materialize_task_backend(backend, source_root=source)
+    lines = taskrc.read_text(encoding="utf-8").splitlines()
+    phase_slots = {
+        int(match.group(1))
+        for line in lines
+        if (match := re.fullmatch(r"uda\.phase_(\d+)\.type=string", line))
+    }
+
+    assert config.uda_schema(source) == config.uda_schema(source_settings)
+    assert f"uda.phase.values={','.join(source_settings.approved_phases)}" in lines
+    assert f"uda.phase.values={','.join(cwd_settings.approved_phases)}" not in lines
+    assert phase_slots == set(range(source_settings.phase_slot_count))
+    assert phase_slots != set(range(cwd_settings.phase_slot_count))
+    assert (
+        f"uda.priority.values={','.join((*source_settings.priority_urgency, ''))}"
+        in lines
+    )
+    assert (
+        f"uda.priority.values={','.join((*cwd_settings.priority_urgency, ''))}"
+        not in lines
+    )
 
 
 def test_task_backend_override_requires_absolute_path(tmp_path, monkeypatch):
