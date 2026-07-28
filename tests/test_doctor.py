@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from itertools import permutations
 from pathlib import Path
 
 import pytest
@@ -204,36 +205,60 @@ def test_doctor_accepts_operator_owned_builtin_disablement_without_receipt(tmp_p
     assert check.detail == "operator or packaged disabled builtin(s): formatters"
 
 
-def test_doctor_traces_table_disablement_leaf_through_worktree_overlay(tmp_path):
+@pytest.mark.parametrize(
+    ("repository_spelling", "worktree_spelling"),
+    tuple(
+        permutations(
+            ("magic-numbers", "magic_numbers", "magic numbers"),
+            2,
+        )
+    ),
+)
+def test_doctor_traces_semantic_disablement_leaf_through_spelling_overlay(
+    tmp_path, repository_spelling, worktree_spelling
+):
     repo = _repo(tmp_path)
     (repo / "spice.toml").write_text(
         '[policy]\npackage_roots = ["pkg"]\n\n'
         "[policy.pre_commit_builtins]\n"
-        "formatters = { enabled = false }\n",
+        f"{json.dumps(repository_spelling)} = {{ enabled = false }}\n",
         encoding="utf-8",
     )
     _run(repo, "git", "add", "spice.toml")
-    _run(repo, "git", "commit", "-m", "disable formatter builtin")
+    _run(repo, "git", "commit", "-m", "disable magic-numbers builtin")
     path = edit.worktree_config_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "[policy.pre_commit_builtins.formatters]\n"
-        'label = "operator-owned sibling field"\n',
+        f"[policy.pre_commit_builtins.{json.dumps(worktree_spelling)}]\n"
+        'label = "operator-owned spelling sibling field"\n',
         encoding="utf-8",
     )
 
     loaded = layers.load_config(repo)
-    parent_path = ("policy", "pre_commit_builtins", "formatters")
-    assert loaded.source_for(parent_path).name == layers.WORKTREE_SOURCE
-    assert loaded.source_for((*parent_path, "enabled")).name == (
-        layers.REPOSITORY_SOURCE
+    repository_path = (
+        "policy",
+        "pre_commit_builtins",
+        repository_spelling,
+        "enabled",
     )
+    worktree_path = (
+        "policy",
+        "pre_commit_builtins",
+        worktree_spelling,
+        "label",
+    )
+    assert loaded.source_for(repository_path).name == (layers.REPOSITORY_SOURCE)
+    assert loaded.source_for(worktree_path).name == layers.WORKTREE_SOURCE
+    assert [
+        (entry.key, entry.config_path)
+        for entry in precommit.disabled_builtin_pre_commit_steps(repo)
+    ] == [("magic-numbers", repository_path)]
 
     unapproved = doctor._pre_commit_builtin_disablement_check(repo)
     assert unapproved.required is True
     assert unapproved.status == "fail"
     assert "repository disabled builtin(s)" in unapproved.detail
-    assert "formatters" in unapproved.detail
+    assert "magic-numbers" in unapproved.detail
 
     approve_repository_config(repo)
     approved = doctor._pre_commit_builtin_disablement_check(repo)
