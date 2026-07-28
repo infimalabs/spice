@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.cli.withdrawn import DRY_RUN_WITHDRAWAL_RELEASE
 from spice.commandplan import PLAN_DIGEST_HEX_LENGTH
 from spice.errors import SpiceError
 from spice.tasks import cli as task_cli
@@ -39,6 +41,37 @@ __all__ = ["task_repo"]
 
 def _actor() -> str:
     return tw.canonical_actor(tw.current_actor())
+
+
+def test_accepted_task_document_contract_tracks_live_ingest_cli():
+    contract = Path("docs/design/accepted/task-documents.md").read_text(
+        encoding="utf-8"
+    )
+    parser = build_parser()
+    command = [
+        "task",
+        "ingest",
+        "plan.md",
+        "--project",
+        "task.plan",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    ]
+
+    preview = parser.parse_args(command)
+    applying = parser.parse_args([*command, "--apply"])
+
+    assert preview.apply is None
+    assert applying.apply is True
+    assert "what bare `spice task ingest` does" in contract
+    assert "what `spice task ingest --apply[=<plan-digest>]` does" in contract
+    assert f"`--dry-run` was withdrawn in {DRY_RUN_WITHDRAWAL_RELEASE}" in contract
+    assert contract.count("`--dry-run`") == 2
+    assert "`--dry-run` prints the plan" not in contract
+    assert "`--dry-run` stops before execution" not in contract
+    assert "`spice/tasks/markdown.py`" not in contract
+    for module in ("apply.py", "classifier.py", "dialect.py", "ledger.py"):
+        assert f"`spice/tasks/markdown/{module}`" in contract
 
 
 def _family_task(

@@ -5,11 +5,12 @@ Status: implemented contract, 2026-07-12.
 A **task document** is a markdown file that projects a goal onto the task
 board as a fully connected dependency graph. Agents write task documents the
 way they write any markdown — on the fly, mid-conversation, in one pass — and
-pipe them in with `spice task ingest`. Piping the same document in again is a
-no-op. Piping in a *tweaked* document reconciles: new work is created,
-existing work is matched and preserved, new edges land, and nothing is ever
-deleted. The board remains authoritative the moment rows exist; documents are
-how graphs are born and grown, never how they are stored.
+preview them with `spice task ingest`; `--apply` lands the displayed plan.
+Applying the same document again is a no-op. Applying a *tweaked* document
+reconciles: new work is created, existing work is matched and preserved, new
+edges land, and nothing is ever deleted. The board remains authoritative the
+moment rows exist; documents are how graphs are born and grown, never how they
+are stored.
 
 There is exactly one dialect, governed by one asymmetry: **reading is
 forgiving, writing is strict.** Ingest accepts every unambiguous markdown
@@ -52,10 +53,13 @@ Every term below is used in exactly this sense throughout.
   Matching) and share the document's `(project, origin)` pair. Apply
   matches nodes against family rows only.
 - **Board** — the live task rows.
-- **Apply** — what `spice task ingest` does: compute a plan that makes the
-  family match the document, execute it, and report exactly what landed.
+- **Preview** — what bare `spice task ingest` does: compute and validate the
+  complete plan, print it, and leave the board unchanged.
+- **Apply** — what `spice task ingest --apply[=<plan-digest>]` does: recompute
+  the plan, optionally assert its digest, execute it, and report exactly what
+  landed.
 - **Plan** — the full set of apply verbs, computed and validated before any
-  write. `--dry-run` prints the plan and stops.
+  write. Preview and apply consume this same plan.
 - **Family edge** — an edge whose two endpoints are both family nodes: the
   only edges a document expresses and the only edges apply writes or
   diffs. Edges reaching rows outside the family belong to the board
@@ -398,17 +402,20 @@ the whole mechanism.
 
 ## Apply Semantics
 
-`spice task ingest PATH --project <project> [--origin <origin>]
+Bare `spice task ingest PATH --project <project> [--origin <origin>]
 [--infer-ordered-dependencies]` — with `-` reading stdin, because agents pipe —
-is **apply**: make the family match the document, creating what is missing,
-preserving what exists, touching nothing that work has settled, deleting
-nothing ever. The ordered-dependency flag defaults off and is deliberately
-labeled a foot-gun: unflagged ingest creates dependency edges only from
-containment and explicit in-document `After:` declarations.
+is **preview**: compute and print the complete validated plan without writing
+the board. Add `--apply[=<plan-digest>]` to execute that plan: make the family
+match the document, creating what is missing, preserving what exists, touching
+nothing that work has settled, and deleting nothing ever. The optional digest
+asserts the recomputed plan before execution. The ordered-dependency flag
+defaults off and is deliberately labeled a foot-gun: unflagged ingest creates
+dependency edges only from containment and explicit in-document `After:`
+declarations.
 
 ### The plan
 
-Apply computes a complete plan before writing anything:
+Ingest computes a complete plan before writing anything:
 
 1. Parse and validate the document.
 2. Resolve project and origin; load the family; match nodes to rows by
@@ -420,9 +427,12 @@ Apply computes a complete plan before writing anything:
    close a cycle through a chain that leaves the family). A cycle
    anywhere is a refusal — and when it runs through board-owned edges
    outside the family, the way out is the board verbs, not the document.
-5. Execute. Any refusal fires before the first write.
+5. Render the preview, or execute only when `--apply` supplies authority. Any
+   refusal fires before the first write.
 
-`--dry-run` stops before execution and prints the plan as a report.
+`--dry-run` was withdrawn in v0.30.0 when authored-input commands became
+previews by default. Invoke the command without it to preview, or use `--apply`
+to execute the plan.
 
 ### The board is the memory
 
@@ -711,7 +721,7 @@ The empty document is a refusal, not an empty graph.
 ```
 
 ```
-$ spice task ingest note.md --project task.login --origin ack:20260710T163000Z
+$ spice task ingest note.md --project task.login --origin ack:20260710T163000Z --apply
 root LOGIN-1kD2xPQr
 created ship-the-login-fix LOGIN-1kD2xPQr
 ```
@@ -889,7 +899,7 @@ inherited from the claim):
 ```
 
 ```
-$ spice task ingest plan.md
+$ spice task ingest plan.md --apply
 root IMPORT-1kD3Qb2n
 created reject-unknown-columns IMPORT-1kD3Qa8v
 created stream-rows-instead-of-slurping IMPORT-1kD3Qb1c
@@ -898,7 +908,7 @@ created q3-importer-hardening IMPORT-1kD3Qb2n
 
 Work proceeds; `reject-unknown-columns` gets claimed and completed. The
 agent learns streaming must wait for the column work, adds a criterion,
-and adds a new task — then pipes the tweaked document in again:
+and adds a new task — then applies the tweaked document again:
 
 ```markdown
 # Q3 importer hardening
@@ -922,7 +932,7 @@ edge-added q3-importer-hardening -> add-a-2gb-fixture-to-ci
 
 Nothing was deleted, nothing refused, the completed row matched as
 satisfied work, and the tweaks landed as verbs. This loop — generate,
-pipe, work, tweak, pipe — is the entire point.
+preview, apply, work, tweak, preview, apply — is the entire point.
 
 ### Loose rows and drift
 
@@ -1073,19 +1083,22 @@ its own node.
 
 ## Implementation Notes
 
-For the implementing battery, the seams are: `spice/tasks/markdown.py`
-(dialect, plan, apply), `spice/tasks/cli.py` (`ingest --dry-run`,
-`ledger`), family-scoped row matching in place of global board scans,
-and the family-edge domain rule in the diff. Origin resolution reuses the
-creation-path resolver; project inheritance from the active claim is new
-surface. Creation defaults (auto-due SLAs, default priority) must not
-fire for document-born rows — the document is the complete statement, and
-a default it did not state would drift on the next apply. Ledger export
-emits content annotations only: claim, review, and other system notes are
-runtime and stay off the page. Validation moves wholly into parse/plan;
-the settled check re-runs at write time (the truthful-report law); every
-refusal in the Refusals table gets a positive test asserting its message
-and its zero-write guarantee.
+For the implementing battery, the package seams are:
+`spice/tasks/markdown/classifier.py` (reading the dialect),
+`spice/tasks/markdown/dialect.py` (the document model and normalization),
+`spice/tasks/markdown/apply.py` (planning and application), and
+`spice/tasks/markdown/ledger.py` (normal-form export). `spice/tasks/cli.py`
+owns bare `ingest` preview, explicit `ingest --apply`, the v0.30.0
+`--dry-run` refusal, and `ledger`. Family-scoped row matching replaces global
+board scans, and the diff follows the family-edge domain rule. Origin resolution
+reuses the creation-path resolver; project inheritance from the active claim is
+new surface. Creation defaults (auto-due SLAs, default priority) must not fire
+for document-born rows — the document is the complete statement, and a default
+it did not state would drift on the next apply. Ledger export emits content
+annotations only: claim, review, and other system notes are runtime and stay off
+the page. Validation moves wholly into parse/plan; the settled check re-runs at
+write time (the truthful-report law); every refusal in the Refusals table gets a
+positive test asserting its message and its zero-write guarantee.
 
 Hazards already hit while validating this design, so the battery does
 not have to:
