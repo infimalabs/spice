@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.commandplan import PLAN_DIGEST_HEX_LENGTH
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
     RECEIPT_DIGEST_BYTES,
@@ -300,7 +301,9 @@ def test_init_unapply_json_emits_digest_and_applies_the_asserted_receipt(tmp_pat
     ) == ("spice.command-plan", 1, "preview", str(repo.resolve()))
     receipt_digest = plan["receipt_digest"]
     plan_digest = plan["plan_digest"]
+    assert plan["command"] == "init --unapply"
     assert len(bytes.fromhex(receipt_digest)) == RECEIPT_DIGEST_BYTES
+    assert len(plan_digest) == PLAN_DIGEST_HEX_LENGTH
     assert [item["target"] for item in plan["operations"]] == [
         ".spice/.gitignore",
         "core.hooksPath",
