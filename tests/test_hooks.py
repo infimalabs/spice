@@ -137,7 +137,7 @@ def test_policy_pre_commit_extensions_wait_for_staging_guard(tmp_path, monkeypat
     )
     _write_repo_file(repo, "src/main.cs", "class Program {}\n")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "initial")
+    _git(repo, "commit", "--no-verify", "-m", "initial")
     _write_repo_file(repo, "src/main.cs", "class Program { int staged; }\n")
     _git(repo, "add", "src/main.cs")
     _write_repo_file(
@@ -644,7 +644,9 @@ def test_dev_install_hooks_previews_json_and_applies_shared_plan(
     preview = parser.parse_args(["dev", "install-hooks"])
     assert preview.func(preview) == 0
     preview_output = capsys.readouterr().out
-    assert preview_output.startswith("initialization-plan schema=1 mode=full\n")
+    assert preview_output.startswith(
+        f"initialization-plan schema=1 mode=full digest={expected['plan_digest']}\n"
+    )
     assert "preview: no changes applied; pass --apply to execute" in preview_output
     assert not hooks_dir(repo).exists()
 
