@@ -9,8 +9,9 @@ import pytest
 
 import spice.agent.driver as agent_driver
 import spice.release as release
-from spice.errors import SpiceError
 from spice.cli.mounts import mounted_commands
+from spice.commandplan import PLAN_DIGEST_HEX_LENGTH
+from spice.errors import SpiceError
 from spice.release import (
     ReleaseRecord,
     build_release_parser,
@@ -63,6 +64,7 @@ def test_release_human_and_json_preview_share_order_without_running_gates(
     monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "ensure_release_preconditions", lambda root: None)
     monkeypatch.setattr(release, "preview_bumped_version", lambda bump: "0.10.0")
+    monkeypatch.setattr(release, "git", lambda *args: "source-head")
     monkeypatch.setattr(
         release,
         "run_release_gates",
@@ -103,6 +105,7 @@ def test_every_mutating_release_verb_builds_an_ordered_plan(
     monkeypatch.setattr(release, "ensure_notes_file", lambda path: None)
     monkeypatch.setattr(release, "preview_bumped_version", lambda bump: "0.10.0")
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(release, "git", lambda *args: "source-head")
     monkeypatch.setattr(
         release, "release_commit_for_target", lambda version, target: "release-head"
     )
@@ -113,12 +116,48 @@ def test_every_mutating_release_verb_builds_an_ordered_plan(
     plan = release.plan_release(parser.parse_args(list(argv)), tmp_path)
     payload = plan.payload()
 
+    assert payload["protocol"] == "spice.command-plan"
+    assert len(payload["plan_digest"]) == PLAN_DIGEST_HEX_LENGTH
     assert [item["order"] for item in payload["operations"]] == list(
         range(1, len(plan.operations) + 1)
     )
     assert [row.split(" ", 2)[1] for row in plan.rows() if row[:1].isdigit()] == [
         item["action"] for item in payload["operations"]
     ]
+
+
+def test_release_plan_digest_binds_source_commit_and_release_notes(
+    tmp_path, monkeypatch
+):
+    parser = build_release_parser()
+    notes = tmp_path / "notes.md"
+    notes.write_text("first notes\n", encoding="utf-8")
+    source_commit = "first-source"
+    release_target = "first-release"
+
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
+    monkeypatch.setattr(release, "ensure_notes_file", lambda path: None)
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(
+        release, "release_commit_for_target", lambda version, target: release_target
+    )
+    monkeypatch.setattr(
+        release, "ensure_publish_release_commit_is_head", lambda commit: None
+    )
+    monkeypatch.setattr(release, "git", lambda *args: source_commit)
+    args = parser.parse_args(["publish", "--notes-file", str(notes)])
+
+    first = release.plan_release(args, tmp_path).payload()
+    notes.write_text("second notes\n", encoding="utf-8")
+    second = release.plan_release(args, tmp_path).payload()
+    source_commit = "second-source"
+    third = release.plan_release(args, tmp_path).payload()
+    release_target = "second-release"
+    fourth = release.plan_release(args, tmp_path).payload()
+
+    assert first["plan_digest"] != second["plan_digest"]
+    assert second["plan_digest"] != third["plan_digest"]
+    assert third["plan_digest"] != fourth["plan_digest"]
 
 
 def test_release_docs_show_lane_release_workflow():
@@ -319,6 +358,7 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(release, "git", lambda *args: "source-head")
     monkeypatch.setattr(
         release,
         "release_commit_for_target",
@@ -392,6 +432,7 @@ def test_every_gate_running_mode_reaches_the_gates_through_one_shared_body(
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(release, "git", lambda *args: "source-head")
     monkeypatch.setattr(release, "bump_version", lambda bump: f"1.0.0-from-{bump}")
     monkeypatch.setattr(
         release, "preview_bumped_version", lambda bump: f"1.0.0-from-{bump}"

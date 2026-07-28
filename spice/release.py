@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.cli.mounts import RUNTIME_PYTHON_ENV
+from spice.commandplan import assert_plan_digest, command_plan_payload
 from spice.errors import SpiceError
 from spice.tasks import config as task_config
 from spice.process.tool import run_tool_command
@@ -74,33 +76,47 @@ class ReleasePlan:
     repository: Path
     action: str
     version: str
+    source_commit: str
+    notes_sha256: str | None
     release_commit: str | None
     notes_file: Path | None
     operations: tuple[ReleasePlanOperation, ...]
     schema_version: int = 1
 
     def payload(self) -> dict[str, object]:
-        return {
-            "schema_version": self.schema_version,
-            "repository": str(self.repository),
-            "action": self.action,
-            "version": self.version,
-            "release_commit": self.release_commit,
-            "notes_file": str(self.notes_file) if self.notes_file is not None else None,
-            "operations": [
+        return command_plan_payload(
+            command=f"release {self.action}",
+            metadata={
+                "repository": str(self.repository),
+                "action": self.action,
+                "version": self.version,
+                "source_commit": self.source_commit,
+                "notes_sha256": self.notes_sha256,
+                "release_commit": self.release_commit,
+                "notes_file": (
+                    str(self.notes_file) if self.notes_file is not None else None
+                ),
+            },
+            operations=[
                 {
-                    "order": order,
+                    "kind": operation.action,
+                    "target": operation.detail,
+                    "scope": "repository",
                     "action": operation.action,
                     "detail": operation.detail,
+                    "source_commit": self.source_commit,
+                    "notes_sha256": self.notes_sha256,
+                    "release_commit": self.release_commit,
                 }
-                for order, operation in enumerate(self.operations, start=1)
+                for operation in self.operations
             ],
-        }
+        )
 
     def rows(self) -> list[str]:
+        digest = str(self.payload()["plan_digest"])
         rows = [
             f"release-plan schema={self.schema_version} action={self.action} "
-            f"version={self.version}",
+            f"version={self.version} digest={digest}",
             f"repository={self.repository}",
         ]
         if self.release_commit is not None:
@@ -216,8 +232,13 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
 def _add_apply_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--apply",
-        action="store_true",
-        help="Execute the ordered plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Execute the ordered plan, optionally asserting its digest; "
+            "bare invocation only previews."
+        ),
     )
     parser.add_argument(
         "--json",
@@ -306,19 +327,22 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     if mode in {"prepare", "release", "publish", "github"}:
-        if bool(args.apply) and bool(args.json):
+        apply_requested = args.apply is not None
+        if apply_requested and bool(args.json):
             raise SpiceError(
                 f"`spice release {args.release_action} --apply` cannot be "
                 "combined with `--json`"
             )
         plan = plan_release(args, root)
-        if not bool(args.apply):
+        if not apply_requested:
             if bool(args.json):
                 print(json.dumps(plan.payload(), indent=2, sort_keys=True))
             else:
                 for row in plan.rows():
                     print(row)
             return 0
+        expected_digest = args.apply if isinstance(args.apply, str) else None
+        assert_plan_digest(plan.payload(), expected_digest)
         return apply_release_plan(args, root, plan)
 
     raise SpiceError(f"unknown release action {mode!r}")
@@ -393,10 +417,18 @@ def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
         repository=root.resolve(),
         action=str(args.release_action),
         version=version,
+        source_commit=git("-C", str(root), "rev-parse", "HEAD"),
+        notes_sha256=_release_notes_digest(getattr(args, "notes_file", None)),
         release_commit=release_commit,
         notes_file=getattr(args, "notes_file", None),
         operations=tuple(operations),
     )
+
+
+def _release_notes_digest(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
