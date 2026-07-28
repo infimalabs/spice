@@ -132,7 +132,7 @@ def _carried_predecessor(root: Path) -> Path:
 def _resolve_predecessor(root: Path, scratch: Path) -> Path:
     """Use the container carry or derive the same bounded wheel for host proof."""
     manifest_path = root / PRIOR_ARTIFACT_MANIFEST
-    if manifest_path.exists():
+    if manifest_path.exists() or manifest_path.is_symlink():
         return _carried_predecessor(root)
     derived_root = scratch / "host-predecessor"
     try:
