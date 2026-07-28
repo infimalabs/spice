@@ -165,12 +165,12 @@ def _configured_hidden_stems(
     for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
-                "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
+                "[tasks].hidden_stems values omit the leading '.'; "
                 f"use {stem[len(HIDDEN_PROJECT_PREFIX) :]!r} instead of {stem!r}"
             )
         if not SEGMENT_RE.match(stem):
             raise SpiceError(
-                "[tool.spice.tasks].hidden_stems values must match "
+                "[tasks].hidden_stems values must match "
                 f"{PROJECT_SEGMENT_RULE_LABEL}; got {stem!r}"
             )
         if stem in approved_set:
@@ -225,7 +225,7 @@ def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
     """Tracked per-driver, per-phase launch override.
 
-    Read from ``[tool.spice.tasks.phase_models.<driver>.<phase>]``; {} when
+    Read from ``[tasks.phase_models.<driver>.<phase>]``; {} when
     the driver or phase has no entry, so an unmapped phase falls back to the
     driver's ordinary launch config.
     """
@@ -270,7 +270,7 @@ def _project_depth_bounds(table: dict[str, object]) -> tuple[int, int]:
     )
     if max_depth < min_depth:
         raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal "
+            "[tasks].project_max_depth must be greater than or equal "
             "to project_min_depth"
         )
     return min_depth, max_depth
@@ -281,7 +281,7 @@ def _configured_project_depth(table: dict[str, object], key: str, default: int) 
     if raw is None:
         return default
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
-        raise SpiceError(f"[tool.spice.tasks].{key} must be a positive integer")
+        raise SpiceError(f"[tasks].{key} must be a positive integer")
     return raw
 
 

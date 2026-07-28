@@ -56,7 +56,7 @@ def _mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]
         path = mount_command_path(str(raw_name))
         if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
             raise SpiceError(
-                f"[tool.spice.commands] entry {raw_name!r} shadows a built-in "
+                f"[commands] entry {raw_name!r} shadows a built-in "
                 "spice command; pick another name"
             )
         registration = command_paths.get(path)
@@ -70,12 +70,12 @@ def _mount_shadow_error(name: str, registration: CommandPathRegistration) -> Spi
     action = "spice " + " ".join(registration.path)
     if registration.source == "extension":
         return SpiceError(
-            f"[tool.spice.commands] entry {name!r} shadows extension-provided "
+            f"[commands] entry {name!r} shadows extension-provided "
             f"spice action {action!r} from {registration.provider!r}; "
             "pick another name"
         )
     return SpiceError(
-        f"[tool.spice.commands] entry {name!r} shadows built-in "
+        f"[commands] entry {name!r} shadows built-in "
         f"spice action {action!r}; pick another name"
     )
 
@@ -84,7 +84,7 @@ def mount_command_path(raw_name: str) -> tuple[str, ...]:
     parts = tuple(raw_name.split("."))
     if not parts or any(not MOUNT_SEGMENT_RE.fullmatch(part) for part in parts):
         raise SpiceError(
-            f"[tool.spice.commands] entry {raw_name!r} must be dot-separated "
+            f"[commands] entry {raw_name!r} must be dot-separated "
             f"segments matching {MOUNT_SEGMENT_RE.pattern}"
         )
     return parts
@@ -97,11 +97,11 @@ def _mount_argv(name: str, raw: Any) -> tuple[str, ...]:
         argv = tuple(raw)
     else:
         raise SpiceError(
-            f"[tool.spice.commands] entry {name!r} must be a command string "
+            f"[commands] entry {name!r} must be a command string "
             "or a list of argv strings"
         )
     if not argv:
-        raise SpiceError(f"[tool.spice.commands] entry {name!r} is empty")
+        raise SpiceError(f"[commands] entry {name!r} is empty")
     return argv
 
 

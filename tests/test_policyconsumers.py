@@ -7,8 +7,8 @@ from spice.studies.magicnums import detect_magic_regressions
 
 
 def test_configured_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.lockfiles]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy.lockfiles]\n"
         'suffixes = [".customlock"]\n'
         'names = ["custom-lock.json"]\n',
         encoding="utf-8",
@@ -37,8 +37,8 @@ def test_configured_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
 
 
 def test_configured_file_shape_paths_select_custom_source_set(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.file_shape]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy.file_shape]\n"
         'source_suffixes = [".tmpl"]\n'
         'generated_patterns = ["generated/**"]\n',
         encoding="utf-8",
@@ -75,8 +75,8 @@ def test_configured_file_shape_paths_select_custom_source_set(tmp_path):
 
 
 def test_generated_paths_directory_exempts_file_shape_subtree(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\ngenerated_paths = ["generated"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\ngenerated_paths = ["generated"]\n',
         encoding="utf-8",
     )
     source_path = Path("src") / "large_source.py"
@@ -107,10 +107,8 @@ def test_generated_paths_directory_exempts_file_shape_subtree(tmp_path):
 
 
 def test_generated_double_star_pattern_matches_shape_and_file_shape(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
-        'package_roots = ["pkg"]\n'
-        'generated_paths = ["**/*_pb2.py"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\ngenerated_paths = ["**/*_pb2.py"]\n',
         encoding="utf-8",
     )
     generated_path = Path("pkg") / "proto" / "thing_pb2.py"
@@ -133,8 +131,8 @@ def test_generated_double_star_pattern_matches_shape_and_file_shape(tmp_path):
 
 
 def test_configured_magic_c_grammar_suffix_is_scanned(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.languages]\nmagic = [".wat"]\nc_grammar = [".wat"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.languages]\nmagic = [".wat"]\nc_grammar = [".wat"]\n',
         encoding="utf-8",
     )
     rel_path = Path("sample.wat")

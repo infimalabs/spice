@@ -113,14 +113,14 @@ def test_wrapper_group_direct_and_match_route_scopes_share_driver_selection(
     direct_name,
     direct_arg,
 ):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.agent]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[agent]\n"
         'wrappers = ["tools"]\n'
         "\n"
-        "[tool.spice.wrappers.tools]\n"
+        "[wrappers.tools]\n"
         'scopes = { drivers = ["CODEX", "claude"] }\n'
         "\n"
-        "[tool.spice.wrappers.tools.toolbox]\n"
+        "[wrappers.tools.toolbox]\n"
         'argv = ["toolbox"]\n'
         'scopes = { drivers = ["claude", "codex"] }\n'
         "match = [\n"
@@ -130,11 +130,11 @@ def test_wrapper_group_direct_and_match_route_scopes_share_driver_selection(
         'scopes = { drivers = ["claude"] } },\n'
         "]\n"
         "\n"
-        "[tool.spice.wrappers.tools.codex-only]\n"
+        "[wrappers.tools.codex-only]\n"
         'argv = ["runner", "codex"]\n'
         'scopes = { drivers = ["codex"] }\n'
         "\n"
-        "[tool.spice.wrappers.tools.claude-only]\n"
+        "[wrappers.tools.claude-only]\n"
         'argv = ["runner", "claude"]\n'
         'scopes = { drivers = ["claude"] }\n',
         encoding="utf-8",
@@ -854,14 +854,14 @@ def _write_match_wrapper_config(
     repo: Path, *, argv: str, match: str | None = None, extra: str | None = None
 ) -> None:
     lines = [
-        "[tool.spice.agent]",
+        "[agent]",
         'wrappers = ["tools"]',
         "",
-        "[tool.spice.wrappers.tools.toolbox]",
+        "[wrappers.tools.toolbox]",
         f"argv = {argv}",
     ]
     if match is not None:
         lines.append(f"match = {match}")
     if extra is not None:
         lines.append(extra)
-    (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (repo / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")

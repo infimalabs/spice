@@ -55,8 +55,8 @@ FAR_TESTS = (
 
 
 def _write_seam_project(root: Path, source: str, *, seconds: int = 3) -> None:
-    (root / "pyproject.toml").write_text(
-        "[tool.spice.policy.suite_seam]\n"
+    (root / "spice.toml").write_text(
+        "[policy.suite_seam]\n"
         f"seconds = {seconds}\n"
         f'run = ["{sys.executable}", "-m", "pytest", "-q", "tests"]\n'
         f'paths = ["{SEAM}"]\n',
@@ -218,8 +218,8 @@ def test_the_suite_command_keeps_repeated_argv_tokens(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     _write_seam_project(root, UNCHANGED_SEAM_SOURCE)
-    (root / "pyproject.toml").write_text(
-        "[tool.spice.policy.suite_seam]\n"
+    (root / "spice.toml").write_text(
+        "[policy.suite_seam]\n"
         'run = ["pytest", "-p", "no:randomly", "-p", "no:cacheprovider"]\n'
         f'paths = ["{SEAM}"]\n',
         encoding="utf-8",
@@ -246,8 +246,8 @@ def test_the_suite_runs_as_its_own_top_level_command(tmp_path, monkeypatch):
         f"print('marker=' + os.environ.get({env_name!r}, 'cleared'));"  # env-policy: allow
         "raise SystemExit(1)"
     )
-    (root / "pyproject.toml").write_text(
-        "[tool.spice.policy.suite_seam]\n"
+    (root / "spice.toml").write_text(
+        "[policy.suite_seam]\n"
         f'run = ["{sys.executable}", "-c", "{probe}"]\n'
         f'paths = ["{SEAM}"]\n',
         encoding="utf-8",

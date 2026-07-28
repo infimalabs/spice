@@ -178,15 +178,14 @@ def configured_internal_couplings(repo_root: Path) -> frozenset[InternalCoupling
         return frozenset()
     if not isinstance(raw, list):
         raise SpiceError(
-            f"[tool.spice.policy] {INTERNAL_COUPLINGS_KEY} must be a list of "
-            "coupling tables"
+            f"[policy] {INTERNAL_COUPLINGS_KEY} must be a list of coupling tables"
         )
 
     couplings: list[InternalCouplingKey] = []
     for index, item in enumerate(raw, start=1):
         context = f"{INTERNAL_COUPLINGS_KEY}[{index}]"
         if not isinstance(item, dict):
-            raise SpiceError(f"[tool.spice.policy] {context} must be a table")
+            raise SpiceError(f"[policy] {context} must be a table")
         coupling = (
             _internal_coupling_field(item, "path", context=context),
             _internal_coupling_field(item, "test", context=context),
@@ -249,9 +248,7 @@ def _internal_coupling_field(
 ) -> str:
     raw = item.get(field)
     if not isinstance(raw, str) or not raw.strip():
-        raise SpiceError(
-            f"[tool.spice.policy] {context}.{field} must be a non-empty string"
-        )
+        raise SpiceError(f"[policy] {context}.{field} must be a non-empty string")
     return raw.strip()
 
 
@@ -261,21 +258,20 @@ def _configured_assertion_helpers(repo_root: Path) -> frozenset[str]:
         return frozenset()
     if not isinstance(raw, list):
         raise SpiceError(
-            f"[tool.spice.policy] {ASSERTION_HELPERS_KEY} must be a list of "
-            "callable names"
+            f"[policy] {ASSERTION_HELPERS_KEY} must be a list of callable names"
         )
 
     helpers: list[str] = []
     for index, item in enumerate(raw, start=1):
         if not isinstance(item, str):
             raise SpiceError(
-                f"[tool.spice.policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
+                f"[policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
                 "a callable name string"
             )
         name = item.strip()
         if not name or not _ASSERTION_HELPER_NAME_RE.fullmatch(name):
             raise SpiceError(
-                f"[tool.spice.policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
+                f"[policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
                 f"a leaf or dotted callable name: {item!r}"
             )
         if name not in helpers:

@@ -73,7 +73,7 @@ That thesis gives spice five planes.
 8. **One coherent UI.** Lanes, occupants, fusing, filters, lifetime controls,
    badges, and speech share one protocol and visual language.
 
-9. **Mounted commands unify repo tooling.** `[tool.spice.commands]` mounts
+9. **Mounted commands unify repo tooling.** `[commands]` mounts
    repo commands under `spice <name> ...`; built-in verbs and registered
    actions win at every depth, shadowing fails loudly, and dotted mounts extend
    built-in verbs only with novel action names.

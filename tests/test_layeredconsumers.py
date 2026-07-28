@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spice.config import values
+from spice.config import layers, values
 from spice.agent.maxims import configured_maxim
 from spice.agent.shellhook import (
     configured_agent_wrapper_definitions,
@@ -20,7 +20,7 @@ from spice.resourcelocks import configured_lock_settings
 from spice.serve.web import serve_branding
 from spice.tasks import config as task_config
 
-PROJECT_FILE_BYTES = 222
+SYSTEM_FILE_BYTES = 222
 REPOSITORY_FILE_LOC = 333
 REPOSITORY_LOCK_EXIT_CODE = 72
 
@@ -50,49 +50,55 @@ def _stand_up_fixture_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     becomes the permanent ``repo_root_from_cwd`` of whichever module loads next.
     """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    system_root = tmp_path / "installed-spice"
+    system_root.mkdir()
+    (system_root / "spice.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     monkeypatch.chdir(tmp_path)
 
 
 def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeypatch):
     _stand_up_fixture_repo(tmp_path, monkeypatch)
-    (tmp_path / "pyproject.toml").write_text(
+    (tmp_path / "installed-spice" / "spice.toml").write_text(
         """
-        [project]
-        name = "fixture"
-
-        [tool.spice.policy.limits]
+        [policy.limits]
         file_loc = 111
         file_bytes = 222
 
-        [tool.spice.policy.pre_commit_builtins]
+        [policy.pre_commit_builtins]
         complexity = false
 
-        [tool.spice.tasks]
-        stems = ["projectstem"]
+        [tasks]
+        stems = ["systemstem"]
 
-        [tool.spice.agent]
-        model = "project-model"
+        [agent]
+        model = "system-model"
         wrappers = ["custom"]
 
-        [tool.spice.wrappers.custom.echo]
-        argv = ["echo", "project"]
+        [wrappers.custom.echo]
+        argv = ["echo", "system"]
 
-        [tool.spice.commands]
-        layered-check = ["echo", "project"]
+        [commands]
+        layered-check = ["echo", "system"]
 
-        [tool.spice.locks]
+        [locks]
         lock_contention_exit_code = 71
 
-        [tool.spice.locks.named.tool]
+        [locks.named.tool]
         path = ".spice/tool.lock"
 
-        [tool.spice.serve]
-        brand = "Project Brand"
+        [serve]
+        brand = "System Brand"
+        default_lifetime = "Drive"
 
-        [tool.spice.maxims.sample]
+        [maxims.sample]
         words = ["sample"]
-        message = "project message"
+        message = "system message"
         """,
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\n',
         encoding="utf-8",
     )
     (tmp_path / "spice.toml").write_text(
@@ -129,7 +135,7 @@ def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeyp
 
     policy = resolve_policy(tmp_path)
     assert policy.limits.file_loc == REPOSITORY_FILE_LOC
-    assert policy.limits.file_bytes == PROJECT_FILE_BYTES
+    assert policy.limits.file_bytes == SYSTEM_FILE_BYTES
     assert "repostem" in task_config.approved_stems()
     assert values.configured_agent_model(tmp_path) == "repository-model"
     wrappers, _sources = configured_agent_wrapper_definitions(tmp_path)

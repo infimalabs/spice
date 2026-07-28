@@ -1,7 +1,7 @@
 """Resolved layered policy overlay.
 
 ``spice.policy`` remains the built-in constitution. Effective ``policy``
-values come from the canonical four-layer configuration, and malformed
+values come from the canonical three-layer configuration, and malformed
 configuration fails loudly with the offending key and source.
 """
 
@@ -333,37 +333,37 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
             limits_table,
             "file_loc",
             policy.FILE_LOC_LIMIT,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
         file_bytes=_positive_int(
             limits_table,
             "file_bytes",
             policy.FILE_BYTE_LIMIT,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
         routine_ccn=_positive_int(
             limits_table,
             "routine_ccn",
             policy.COMPLEXITY_MAX_CCN,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
         routine_length=_positive_int(
             limits_table,
             "routine_length",
             policy.COMPLEXITY_MAX_LENGTH,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
         commit_message_wrap=_positive_int(
             limits_table,
             "commit_message_wrap",
             policy.COMMIT_MESSAGE_WRAP_LIMIT,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
         repo_truth_doc_chars=_positive_int(
             limits_table,
             "repo_truth_doc_chars",
             policy.REPO_TRUTH_DOC_LIMIT,
-            "[tool.spice.policy.limits]",
+            "[policy.limits]",
         ),
     )
     flex_table = _subtable(raw_policy, "flex")
@@ -388,20 +388,20 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
             complexity_table,
             "hotspot_limit",
             policy.COMPLEXITY_HOTSPOT_LIMIT,
-            "[tool.spice.policy.complexity]",
+            "[policy.complexity]",
         ),
         magic=PolicyMagic(
             examine_threshold=_positive_int(
                 magic_table,
                 "examine_threshold",
                 policy.MAGIC_EXAMINE_VALUE_THRESHOLD,
-                "[tool.spice.policy.magic]",
+                "[policy.magic]",
             ),
             baseline_ref=_non_empty_string(
                 magic_table,
                 "baseline_ref",
                 policy.MAGIC_BASELINE_REF,
-                "[tool.spice.policy.magic]",
+                "[policy.magic]",
             ),
         ),
         debt=PolicyDebt(
@@ -409,13 +409,13 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
                 debt_table,
                 "reachability_test_only",
                 policy.REACHABILITY_TEST_ONLY_LIMIT,
-                "[tool.spice.policy.debt]",
+                "[policy.debt]",
             ),
             assertion_free_tests=_non_negative_int(
                 debt_table,
                 "assertion_free_tests",
                 policy.ASSERTION_FREE_TEST_LIMIT,
-                "[tool.spice.policy.debt]",
+                "[policy.debt]",
             ),
         ),
         markdown_depth_budget=markdown_depth_budget,
@@ -468,11 +468,11 @@ def _taste(raw_policy: Mapping[str, object]) -> PolicyTaste:
     raw_words = table.get("words")
     if raw_words is not None:
         if not isinstance(raw_words, Mapping):
-            raise SpiceError("[tool.spice.policy.taste] words must be a table")
+            raise SpiceError("[policy.taste] words must be a table")
         for key, value in raw_words.items():
             if not isinstance(key, str) or not isinstance(value, str):
                 raise SpiceError(
-                    "[tool.spice.policy.taste] words entries must be string -> string"
+                    "[policy.taste] words entries must be string -> string"
                 )
             words[key.lower()] = value
     return PolicyTaste(words=words)
@@ -488,13 +488,13 @@ def _commit_message(
             table,
             "allowed_trailers",
             policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS,
-            "[tool.spice.policy.commit_message]",
+            "[policy.commit_message]",
         ),
         blocked_trailers=_optional_trailer_key_set(
             table,
             "blocked_trailers",
             policy.COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS,
-            "[tool.spice.policy.commit_message]",
+            "[policy.commit_message]",
         ),
     )
 
@@ -521,28 +521,28 @@ def _languages(raw_policy: Mapping[str, object]) -> PolicyLanguages:
             table,
             "complexity",
             policy.COMPLEXITY_SUFFIXES,
-            "[tool.spice.policy.languages]",
+            "[policy.languages]",
             suffixes=True,
         ),
         magic=_string_tuple(
             table,
             "magic",
             policy.MAGIC_SUFFIXES,
-            "[tool.spice.policy.languages]",
+            "[policy.languages]",
             suffixes=True,
         ),
         env=_string_tuple(
             table,
             "env",
             policy.ENV_SUFFIXES,
-            "[tool.spice.policy.languages]",
+            "[policy.languages]",
             suffixes=True,
         ),
         c_grammar=_string_tuple(
             table,
             "c_grammar",
             policy.C_GRAMMAR_SUFFIXES,
-            "[tool.spice.policy.languages]",
+            "[policy.languages]",
             suffixes=True,
         ),
     )
@@ -555,14 +555,14 @@ def _lockfiles(raw_policy: Mapping[str, object]) -> PolicyLockfiles:
             table,
             "suffixes",
             policy.FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
-            "[tool.spice.policy.lockfiles]",
+            "[policy.lockfiles]",
             suffixes=True,
         ),
         names=_string_tuple(
             table,
             "names",
             policy.FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
-            "[tool.spice.policy.lockfiles]",
+            "[policy.lockfiles]",
         ),
     )
 
@@ -574,14 +574,14 @@ def _file_shape_paths(raw_policy: Mapping[str, object]) -> PolicyFileShapePaths:
             table,
             "source_suffixes",
             policy.FILE_SHAPE_SOURCE_SUFFIXES,
-            "[tool.spice.policy.file_shape]",
+            "[policy.file_shape]",
             suffixes=True,
         ),
         generated_patterns=_string_tuple(
             table,
             "generated_patterns",
             policy.FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
-            "[tool.spice.policy.file_shape]",
+            "[policy.file_shape]",
         ),
     )
 
@@ -589,23 +589,23 @@ def _file_shape_paths(raw_policy: Mapping[str, object]) -> PolicyFileShapePaths:
 def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
     table = _subtable(raw_policy, "env_access")
     family_suffixes = _string_tuple_map(
-        _nested_subtable(table, "family_suffixes", "[tool.spice.policy.env_access]"),
+        _nested_subtable(table, "family_suffixes", "[policy.env_access]"),
         policy.ENV_ACCESS_FAMILY_SUFFIXES,
-        "[tool.spice.policy.env_access.family_suffixes]",
+        "[policy.env_access.family_suffixes]",
         suffixes=True,
     )
     default_patterns = _string_tuple_map(
-        _nested_subtable(table, "default_patterns", "[tool.spice.policy.env_access]"),
+        _nested_subtable(table, "default_patterns", "[policy.env_access]"),
         policy.ENV_ACCESS_DEFAULT_PATTERNS,
-        "[tool.spice.policy.env_access.default_patterns]",
+        "[policy.env_access.default_patterns]",
     )
     unknown_pattern_families = sorted(set(default_patterns) - set(family_suffixes))
     if unknown_pattern_families:
         listed = ", ".join(unknown_pattern_families)
         raise SpiceError(
-            "[tool.spice.policy.env_access.default_patterns] unknown family "
+            "[policy.env_access.default_patterns] unknown family "
             f"{listed}; declare suffixes in "
-            "[tool.spice.policy.env_access.family_suffixes]"
+            "[policy.env_access.family_suffixes]"
         )
     return PolicyEnvAccess(
         family_suffixes=family_suffixes,
@@ -613,7 +613,7 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
         baseline=_optional_repo_relative_path(
             table,
             "baseline",
-            "[tool.spice.policy.env_access]",
+            "[policy.env_access]",
         ),
     )
 
@@ -627,7 +627,7 @@ def _markdown_depth_budget(
         listed = ", ".join(unknown)
         expected = ", ".join(MARKDOWN_DEPTH_BUDGET_KEYS)
         raise SpiceError(
-            "[tool.spice.policy.markdown_depth_budget] unknown key(s): "
+            "[policy.markdown_depth_budget] unknown key(s): "
             f"{listed}; expected {expected}"
         )
     return PolicyMarkdownDepthBudget(
@@ -635,13 +635,13 @@ def _markdown_depth_budget(
             table,
             "extensions",
             policy.MARKDOWN_DEPTH_DOC_EXTENSIONS,
-            "[tool.spice.policy.markdown_depth_budget]",
+            "[policy.markdown_depth_budget]",
             suffixes=True,
         ),
         stem_pattern=_optional_regex(
             table,
             "stem_pattern",
-            "[tool.spice.policy.markdown_depth_budget]",
+            "[policy.markdown_depth_budget]",
         ),
     )
 
@@ -652,12 +652,12 @@ def _rules(
 ) -> tuple[PolicyRule, ...]:
     raw_rules = raw_policy.get(POLICY_RULES_KEY, [])
     if not isinstance(raw_rules, list):
-        raise SpiceError("[tool.spice.policy] rules must be a list")
+        raise SpiceError("[policy] rules must be a list")
 
     rules: list[PolicyRule] = list(_markdown_depth_rules(markdown_depth_budget))
     seen_selectors: set[ScopeSelector] = set()
     for index, raw_rule in enumerate(raw_rules, start=1):
-        context = f"[tool.spice.policy.rules][{index}]"
+        context = f"[policy.rules][{index}]"
         if not isinstance(raw_rule, dict):
             raise SpiceError(f"{context} must be a rule table")
         rule_table = cast(Mapping[str, object], raw_rule)
@@ -916,7 +916,7 @@ def _subtable(raw_policy: Mapping[str, object], key: str) -> Mapping[str, object
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SpiceError(f"[tool.spice.policy.{key}] must be a table")
+        raise SpiceError(f"[policy.{key}] must be a table")
     return cast(Mapping[str, object], raw)
 
 
@@ -956,10 +956,10 @@ def _non_negative_int(
 def _ratio(table: Mapping[str, object]) -> float:
     raw = table.get("ratio", policy.FLEX_NUMERATOR / policy.FLEX_DENOMINATOR)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        raise SpiceError("[tool.spice.policy.flex] ratio must be a number >= 1.0")
+        raise SpiceError("[policy.flex] ratio must be a number >= 1.0")
     value = float(raw)
     if value < 1.0:
-        raise SpiceError("[tool.spice.policy.flex] ratio must be a number >= 1.0")
+        raise SpiceError("[policy.flex] ratio must be a number >= 1.0")
     return value
 
 
@@ -967,12 +967,9 @@ def _flex_value(table: Mapping[str, object], key: str, base: int, ratio: float) 
     raw = table.get(key)
     if raw is None:
         return int(base * ratio)
-    value = _positive_int(table, key, base, "[tool.spice.policy.flex]")
+    value = _positive_int(table, key, base, "[policy.flex]")
     if value < base:
-        raise SpiceError(
-            f"[tool.spice.policy.flex] {key} must be >= "
-            f"[tool.spice.policy.limits] {key}"
-        )
+        raise SpiceError(f"[policy.flex] {key} must be >= [policy.limits] {key}")
     return value
 
 

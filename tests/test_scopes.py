@@ -234,7 +234,7 @@ def test_consumer_inventory_derives_every_admitted_axis_from_live_users():
         "roles": "test and generated roles are classification datasets",
         "task-phases": "task phases are live allocator routing state",
         "configuration-layers": (
-            "system, pyproject, repository, and worktree are precedence metadata"
+            "system, repository, and worktree are precedence metadata"
         ),
     }
     assert WRAPPER_ROUTE_SCOPES.supported_axes == WRAPPER_SCOPES.supported_axes
@@ -295,8 +295,7 @@ def test_scopes_inline_leaf_replaces_completely_across_four_layers(
     )
     _write(
         tmp_path / "pyproject.toml",
-        "[tool.spice.feature.rule]\n"
-        'scopes = { drivers = ["claude"], phases = ["pre-commit"] }\n',
+        '[feature.rule]\nscopes = { drivers = ["claude"], phases = ["pre-commit"] }\n',
     )
     _write(
         tmp_path / "spice.toml",

@@ -15,7 +15,7 @@ The initial axes come from live entry-applicability consumers:
 
 Command heads and flags remain wrapper-routing payload.  Language families and
 test/generated roles remain classification datasets.  Task phases remain live
-routing state, and system/pyproject/repository/worktree names remain layering
+routing state, and system/repository/worktree names remain layering
 metadata.  None of those concepts is a selector axis.
 """
 
@@ -131,7 +131,7 @@ NON_SELECTOR_CONCEPTS: Mapping[str, str] = MappingProxyType(
         "roles": "test and generated roles are classification datasets",
         "task-phases": "task phases are live allocator routing state",
         "configuration-layers": (
-            "system, pyproject, repository, and worktree are precedence metadata"
+            "system, repository, and worktree are precedence metadata"
         ),
     }
 )

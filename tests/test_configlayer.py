@@ -19,13 +19,7 @@ def test_each_configuration_layer_can_win_independently(tmp_path, monkeypatch, s
         f'[agent]\nmodel = "{"system-only" if scope == "system" else "system-base"}"\n',
     )
     expected_model = "system-only"
-    if scope == layers.PYPROJECT_SOURCE:
-        expected_model = "pyproject-only"
-        _write(
-            tmp_path / "pyproject.toml",
-            f'[tool.spice.agent]\nmodel = "{expected_model}"\n',
-        )
-    elif scope == layers.REPOSITORY_SOURCE:
+    if scope == layers.REPOSITORY_SOURCE:
         expected_model = "repository-only"
         _write(tmp_path / "spice.toml", f'agent.model = "{expected_model}"\n')
     elif scope == layers.WORKTREE_SOURCE:
@@ -48,7 +42,6 @@ def test_parse_error_names_the_exact_layer_and_path(tmp_path, monkeypatch, scope
     monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
     paths = {
         layers.SYSTEM_SOURCE: system_root / "spice.toml",
-        layers.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
         layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
         layers.WORKTREE_SOURCE: tmp_path / ".spice" / "config" / "spice.toml",
     }
@@ -63,7 +56,7 @@ def test_parse_error_names_the_exact_layer_and_path(tmp_path, monkeypatch, scope
     )
 
 
-def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
+def test_loader_exposes_three_immutable_layers_and_leaf_provenance(
     tmp_path, monkeypatch
 ):
     packaged = tmp_path / "installed-spice"
@@ -86,21 +79,24 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
         """
         [project]
         name = "fixture"
-
-        [tool.spice.agent]
+        """,
+    )
+    _write(
+        tmp_path / "spice.toml",
+        """
+        [agent]
         effort = "high"
+        wrappers = []
 
-        [tool.spice.policy.limits]
+        [policy.limits]
         file_loc = 200
         """,
     )
-    _write(tmp_path / "spice.toml", "agent.wrappers = []\n")
 
     loaded = layers.load_config(tmp_path)
 
     assert tuple(layer.name for layer in loaded.layers) == (
         layers.SYSTEM_SOURCE,
-        layers.PYPROJECT_SOURCE,
         layers.REPOSITORY_SOURCE,
         layers.WORKTREE_SOURCE,
     )
@@ -119,7 +115,7 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
         layers.REPOSITORY_SOURCE
     )
     assert loaded.source_for("policy.limits.file_loc") == loaded.layer(
-        layers.PYPROJECT_SOURCE
+        layers.REPOSITORY_SOURCE
     )
     assert isinstance(loaded.effective, MappingProxyType)
     assert isinstance(loaded.effective["agent"], MappingProxyType)
@@ -132,9 +128,9 @@ def test_unchanged_layers_parse_once_and_reload_after_source_revision(
     packaged.mkdir()
     monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: packaged)
     system_path = packaged / "spice.toml"
-    project_path = tmp_path / "pyproject.toml"
+    repository_path = tmp_path / "spice.toml"
     _write(system_path, '[agent]\nmodel = "system"\n')
-    _write(project_path, '[tool.spice.agent]\nmodel = "first"\n')
+    _write(repository_path, '[agent]\nmodel = "first"\n')
     parsed: list[Path] = []
     read_toml = layers._read_toml
 
@@ -148,12 +144,11 @@ def test_unchanged_layers_parse_once_and_reload_after_source_revision(
     models = [
         layers.load_config(tmp_path).effective["agent"]["model"] for _ in range(repeats)
     ]
-    _write(project_path, '[tool.spice.agent]\nmodel = "second"\n')
+    _write(repository_path, '[agent]\nmodel = "second"\n')
     models.append(layers.load_config(tmp_path).effective["agent"]["model"])
     source_paths = [
         system_path,
-        project_path,
-        tmp_path / "spice.toml",
+        repository_path,
         tmp_path / ".spice" / "config" / "spice.toml",
     ]
 
@@ -184,25 +179,19 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         """,
     )
     _write(
-        tmp_path / "pyproject.toml",
-        """
-        [tool.spice.wrappers.common.rtk]
-        executable = "configured-rtk"
-
-        [[tool.spice.policy.internal_couplings]]
-        path = "project.py"
-        test = "test_project"
-        target = "_project"
-        """,
-    )
-    _write(
         tmp_path / "spice.toml",
         """
         [wrappers.common.rtk]
+        executable = "configured-rtk"
         argv = ["repo-rtk"]
 
         [policy]
         mode = { level = 2 }
+
+        [[policy.internal_couplings]]
+        path = "project.py"
+        test = "test_project"
+        target = "_project"
         """,
     )
     _write(
@@ -235,12 +224,48 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
     assert loaded.source_for("policy.mode") == loaded.layer(layers.WORKTREE_SOURCE)
 
 
+def test_tool_spice_table_refuses_with_owning_release_and_replacement(tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    replacement = tmp_path / "spice.toml"
+    _write(
+        pyproject,
+        """
+        [project]
+        name = "fixture"
+
+        [tool.spice.agent]
+        model = "retired"
+        """,
+    )
+    _write(replacement, '[agent]\nmodel = "current"\n')
+    before = replacement.read_bytes()
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome == {
+        "state": "rejected",
+        "message": (
+            f"v0.30 dropped [tool.spice] configuration from {pyproject}; "
+            f"move that table's contents to {replacement} and remove the "
+            "tool.spice prefix"
+        ),
+    }
+    assert replacement.read_bytes() == before
+
+
+def test_unrelated_malformed_pyproject_is_not_a_configuration_source(tmp_path):
+    _write(tmp_path / "pyproject.toml", "not valid TOML = [\n")
+    _write(tmp_path / "spice.toml", '[agent]\nmodel = "repository"\n')
+
+    assert layers.load_config(tmp_path).effective["agent"]["model"] == "repository"
+
+
 def test_contextualization_preserves_table_grammar_and_repository_source(tmp_path):
     _write(tmp_path / "spice.toml", 'serve = "invalid"\n')
 
     contextual = layers.contextualize_config_error(
         tmp_path,
-        SpiceError("[tool.spice.serve] must be a table"),
+        SpiceError("[serve] must be a table"),
         "serve",
     )
 
@@ -255,7 +280,7 @@ def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
 
     contextual = layers.contextualize_config_error(
         tmp_path,
-        SpiceError("[tool.spice.serve] brand must be a non-empty string"),
+        SpiceError("[serve] brand must be a non-empty string"),
         "serve",
         "brand",
     )

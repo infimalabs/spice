@@ -28,9 +28,7 @@ from tests.test_extensionhelpers import (
 
 def _repo_with_commands(tmp_path, body: str):
     (tmp_path / ".git").mkdir()
-    (tmp_path / "pyproject.toml").write_text(
-        f"[tool.spice.commands]\n{body}\n", encoding="utf-8"
-    )
+    (tmp_path / "spice.toml").write_text(f"[commands]\n{body}\n", encoding="utf-8")
     return tmp_path
 
 
@@ -76,7 +74,7 @@ def test_study_mount_shadowing_builtin_action_fails_loudly(tmp_path):
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert f"commands (source=repository path={repo / 'spice.toml'})" in message
     assert "'study.csharp-members' shadows" in message
     assert "spice action 'spice study csharp-members'" in message
 
@@ -87,7 +85,7 @@ def test_dev_mount_shadowing_builtin_action_fails_loudly(tmp_path):
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert f"commands (source=repository path={repo / 'spice.toml'})" in message
     assert "'dev.pre-commit' shadows" in message
     assert "spice action 'spice dev pre-commit'" in message
 
@@ -110,7 +108,7 @@ def test_mount_shadowing_extension_study_action_fails_loudly(tmp_path, monkeypat
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert f"commands (source=repository path={repo / 'spice.toml'})" in message
     assert "'study.toy-study' shadows" in message
     assert "extension-provided spice action 'spice study toy-study'" in message
     assert "spice-extension-fixture" in message
@@ -235,9 +233,9 @@ def test_wrapper_command_contract_is_linked_from_readme():
     assert "spice agent run -- <cmd>" in readme
     assert "docs/cli/wrapper-commands.md" in readme
     assert "spice agent run -- <cmd>" in contract
-    assert "[tool.spice.commands]" in contract
+    assert "[commands]" in contract
     assert "RTK rewrite routing" in contract
     assert 'spice agent run -- <shell> -c "<original command>"' in contract
     assert 'wrappers = ["common", "repo-tools"]' in contract
-    assert "[tool.spice.wrappers.common]" in contract
-    assert "[tool.spice.wrappers.repo-tools]" in contract
+    assert "[wrappers.common]" in contract
+    assert "[wrappers.repo-tools]" in contract

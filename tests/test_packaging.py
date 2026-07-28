@@ -137,7 +137,7 @@ def test_design_documents_single_install_runtime_model():
 def test_config_documents_runtime_model_as_non_configurable():
     config = (PROJECT_ROOT / "CONFIG.md").read_text(encoding="utf-8")
     runtime_section = config.split("## Runtime Model", maxsplit=1)[1].split(
-        "## `[tool.spice.agent]`", maxsplit=1
+        "## `[agent]`", maxsplit=1
     )[0]
     runtime_text = _collapsed(runtime_section)
 

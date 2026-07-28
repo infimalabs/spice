@@ -115,9 +115,9 @@ def test_python_unused_classifies_top_level_symbols_and_runtime_bindings(tmp_pat
 
 def test_python_unused_configured_package_module_uses_main_execution_root(tmp_path):
     _write_python_unused_repo(tmp_path)
-    pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        pyproject.read_text(encoding="utf-8")
+    repository_config = tmp_path / "spice.toml"
+    repository_config.write_text(
+        repository_config.read_text(encoding="utf-8")
         + "package = ['python', '-m', 'spice.commandpkg']\n",
         encoding="utf-8",
     )
@@ -190,9 +190,11 @@ def _write_python_unused_repo(root: Path) -> None:
         "name = 'python-unused-fixture'\n"
         "version = '1.0.0'\n"
         "[project.scripts]\n"
-        "fixture = 'spice.entrypoint:entry_main'\n"
-        "[tool.spice.commands]\n"
-        "mounted = ['python', '-m', 'spice.commandmod']\n",
+        "fixture = 'spice.entrypoint:entry_main'\n",
+        encoding="utf-8",
+    )
+    (root / "spice.toml").write_text(
+        "[commands]\nmounted = ['python', '-m', 'spice.commandmod']\n",
         encoding="utf-8",
     )
     (root / "spice" / "cli" / "entry.py").write_text(

@@ -15,14 +15,17 @@ from spice.errors import SpiceError
 from spice.scopes import SCOPES_KEY
 
 SYSTEM_SOURCE = "system"
-PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
-_CONFIG_ERROR_TABLE_RE = re.compile(r"^\[tool\.spice(?:\.([^\]]+))?\]")
+_CONFIG_ERROR_TABLE_RE = re.compile(r"^\[(?:tool\.spice\.)?([^\]]+)\]")
 _CONFIG_ERROR_CANDIDATE_RE = re.compile(r"^[ .]([A-Za-z0-9_-]+)")
+_RETIRED_PYPROJECT_TABLE_RE = re.compile(
+    r"^\s*\[\[?\s*tool\.spice(?:[.\]\s])",
+    re.MULTILINE,
+)
+_RETIRED_PYPROJECT_RELEASE = "v0.30"
 CONFIG_SCOPE_NAMES = (
     SYSTEM_SOURCE,
-    PYPROJECT_SOURCE,
     REPOSITORY_SOURCE,
     WORKTREE_SOURCE,
 )
@@ -59,7 +62,7 @@ class LayeredConfig:
         return self.sources.get(parts)
 
 
-_ConfigSource = tuple[str, Path, bool]
+_ConfigSource = tuple[str, Path]
 _ConfigRevision = tuple[int, int, int, int, int, int] | None
 # Cached values are immutable. Concurrent cold reads may redundantly build the
 # same revision, but either complete value is safe to publish and config reads
@@ -67,28 +70,25 @@ _ConfigRevision = tuple[int, int, int, int, int, int] | None
 _CONFIG_CACHE: dict[
     tuple[Path, ...], tuple[tuple[_ConfigRevision, ...], LayeredConfig]
 ] = {}
+_RETIRED_PYPROJECT_REVISIONS: dict[Path, _ConfigRevision] = {}
 
 
 def load_config(repo_root: Path) -> LayeredConfig:
-    """Load four immutable TOML layers, reusing them while sources are unchanged."""
+    """Load three immutable TOML layers, reusing them while sources are unchanged."""
+    _reject_retired_pyproject_config(repo_root)
     specifications: tuple[_ConfigSource, ...] = (
         (
             SYSTEM_SOURCE,
             paths.runtime_spice_source() / "spice.toml",
-            False,
         ),
-        (PYPROJECT_SOURCE, repo_root / "pyproject.toml", True),
-        (REPOSITORY_SOURCE, repo_root / "spice.toml", False),
+        (REPOSITORY_SOURCE, repo_root / "spice.toml"),
         (
             WORKTREE_SOURCE,
             paths.state_dir(repo_root) / "config" / "spice.toml",
-            False,
         ),
     )
-    revisions = tuple(
-        _config_revision(name, path) for name, path, _pyproject in specifications
-    )
-    cache_key = tuple(path for _name, path, _pyproject in specifications)
+    revisions = tuple(_config_revision(name, path) for name, path in specifications)
+    cache_key = tuple(path for _name, path in specifications)
     cached = _CONFIG_CACHE.get(cache_key)
     if cached is not None and cached[0] == revisions:
         return cached[1]
@@ -121,12 +121,10 @@ def _load_config_sources(
 ) -> LayeredConfig:
     parsed: list[dict[str, Any]] = []
     layers: list[ConfigLayer] = []
-    for name, path, pyproject in specifications:
+    for name, path in specifications:
         values, present = _read_toml(path, name)
         if name == SYSTEM_SOURCE and not present:
             raise SpiceError(f"packaged configuration is missing: {path}")
-        if pyproject:
-            values = _pyproject_spice_table(values)
         parsed.append(values)
         layers.append(
             ConfigLayer(
@@ -267,12 +265,27 @@ def _read_toml(path: Path, source_name: str) -> tuple[dict[str, Any], bool]:
     return loaded, True
 
 
-def _pyproject_spice_table(values: Mapping[str, Any]) -> dict[str, Any]:
-    tool = values.get("tool")
-    if not isinstance(tool, Mapping):
-        return {}
-    spice = tool.get("spice")
-    return dict(spice) if isinstance(spice, Mapping) else {}
+def _reject_retired_pyproject_config(repo_root: Path) -> None:
+    """Refuse the one retired repository shape without loading it as a layer."""
+    path = repo_root / "pyproject.toml"
+    try:
+        revision = _config_revision("retired-pyproject", path)
+    except SpiceError:
+        return
+    if revision is None or _RETIRED_PYPROJECT_REVISIONS.get(path) == revision:
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if _RETIRED_PYPROJECT_TABLE_RE.search(text):
+        replacement = repo_root / "spice.toml"
+        raise SpiceError(
+            f"{_RETIRED_PYPROJECT_RELEASE} dropped [tool.spice] configuration "
+            f"from {path}; move that table's contents to {replacement} and remove "
+            "the tool.spice prefix"
+        )
+    _RETIRED_PYPROJECT_REVISIONS[path] = revision
 
 
 def _merge_mapping(

@@ -250,7 +250,7 @@ def file_maxim_proposal_tasks(
                 (
                     "Human triage decides whether to merge, revise, or reject "
                     "this proposed maxim; filing this task must not modify "
-                    "pyproject.toml or install maxim config."
+                    "spice.toml or install maxim config."
                 )
             ],
             wait=None,
@@ -312,7 +312,7 @@ def maxim_proposal_task_description(draft: MaximProposalDraft) -> str:
 def render_maxim_proposal_draft_stanza(draft: MaximProposalDraft) -> str:
     return "\n".join(
         [
-            f"[tool.spice.maxims.{_render_toml_key(draft.bag_name)}]",
+            f"[maxims.{_render_toml_key(draft.bag_name)}]",
             f"words = {_render_toml_string_array(draft.words)}",
             f"message = {_render_toml_string(draft.message)}",
         ]
@@ -725,12 +725,12 @@ def _load_configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
     for raw_name, raw_config in effective_table(root, "maxims").items():
         name = _normalize_bag_name(raw_name)
         if not isinstance(raw_config, dict):
-            raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")
+            raise SpiceError(f"[maxims.{name}] must be a table")
         unsupported = sorted(set(raw_config) - _MAXIM_BAG_CONFIG_KEYS)
         if unsupported:
             expected = ", ".join(sorted(_MAXIM_BAG_CONFIG_KEYS))
             raise SpiceError(
-                f"[tool.spice.maxims.{name}] unsupported keys: "
+                f"[maxims.{name}] unsupported keys: "
                 f"{', '.join(unsupported)}; expected: {expected}"
             )
         bags[name] = MaximBag(
@@ -794,7 +794,7 @@ def _validate_disabled_maxim_bag_names(
 def _normalize_bag_name(raw: Any) -> str:
     name = str(raw or "").strip().casefold()
     if not name:
-        raise SpiceError("[tool.spice.maxims] bag names must be non-empty")
+        raise SpiceError("[maxims] bag names must be non-empty")
     return name
 
 
@@ -803,20 +803,19 @@ def _configured_words(
 ) -> frozenset[str]:
     if "words" not in raw_config:
         if base is None:
-            raise SpiceError(f"[tool.spice.maxims.{name}] requires words")
+            raise SpiceError(f"[maxims.{name}] requires words")
         return base.words
     words = []
     for word in config_string_list(raw_config.get("words")):
         normalized = _normalize_trigger_key(word)
         if not _MAXIM_KEY_RE.fullmatch(normalized):
             raise SpiceError(
-                f"[tool.spice.maxims.{name}] words must be alphabetic phrases; "
-                f"got {word!r}"
+                f"[maxims.{name}] words must be alphabetic phrases; got {word!r}"
             )
         if normalized not in words:
             words.append(normalized)
     if not words:
-        raise SpiceError(f"[tool.spice.maxims.{name}] words must be non-empty")
+        raise SpiceError(f"[maxims.{name}] words must be non-empty")
     return frozenset(words)
 
 
@@ -835,11 +834,11 @@ def _configured_message(
     raw = raw_config.get("message")
     if raw is None:
         if base is None:
-            raise SpiceError(f"[tool.spice.maxims.{name}] requires message")
+            raise SpiceError(f"[maxims.{name}] requires message")
         return base.message
     message = str(raw or "").strip()
     if not message:
-        raise SpiceError(f"[tool.spice.maxims.{name}] message must be non-empty")
+        raise SpiceError(f"[maxims.{name}] message must be non-empty")
     return message
 
 
