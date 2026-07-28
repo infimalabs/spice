@@ -31,6 +31,27 @@ SEALED_DIRECTORY_MODE = 0o500
 READABLE_DIRECTORY_MODE = 0o700
 
 
+def test_agent_guidance_routes_authority_gate_refusals_to_the_operator():
+    skill = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+    doctrine = (Path(__file__).resolve().parents[1] / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## Operator Decision Boundaries" in skill
+    assert "refusals to\nsurface, not speed bumps to log or route around" in skill
+    assert "current\n  configuration digest may execute" in skill
+    assert "Do not\n  run `spice init --apply`" in skill
+    assert "current ordered plan may mutate\n  operator-authored state" in skill
+    assert "Do not add `--apply`" in skill
+    assert "unless the operator explicitly decides" in skill
+    assert (
+        "[spice skill](spice/agent/SKILL.md#operator-decision-boundaries)" in doctrine
+    )
+    assert "single source of truth" in doctrine
+    assert "do not replace either authority decision with a local" in doctrine
+    assert "a `spice task oops`, or a route around the gate" in doctrine
+
+
 def _undecodable_packaged_skill(tmp_path, monkeypatch):
     """Point the packaged-source lookup at bytes this process cannot decode.
 

@@ -15,6 +15,7 @@ from spice.hooks.initplan import (
     InitializationMode,
     apply_initialization_plan,
     initialization_receipt_path,
+    initialization_receipt_payload,
     load_initialization_receipt,
     plan_initialization,
 )
@@ -66,7 +67,12 @@ def test_untracked_initialization_receipt_migrates_once_then_refuses(tmp_path):
     canonical = initialization_receipt_path(repo)
     withdrawn = repo / INITIALIZATION_RECEIPT_PATH.withdrawn_relative
     withdrawn.parent.mkdir(parents=True, exist_ok=True)
-    canonical.replace(withdrawn)
+    canonical.unlink()
+    withdrawn.write_text(
+        json.dumps(initialization_receipt_payload(expected), indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
 
     loaded = load_initialization_receipt(repo)
 
@@ -81,6 +87,31 @@ def test_untracked_initialization_receipt_migrates_once_then_refuses(tmp_path):
         match=rf"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE}.*already been migrated",
     ):
         load_initialization_receipt(repo)
+
+
+def test_git_dir_receipt_document_migrates_forward_to_jsonl_once(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    expected = apply_initialization_plan(
+        plan_initialization(repo, InitializationMode.GATES_ONLY)
+    )
+    log = initialization_receipt_path(repo)
+    document = log.with_name("init-receipt.json")
+    log.unlink()
+    document.write_text(
+        json.dumps(initialization_receipt_payload(expected), indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_initialization_receipt(repo)
+
+    assert loaded == expected
+    assert log.is_file()
+    assert not document.exists()
+    assert all(
+        isinstance(json.loads(line), dict)
+        for line in log.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def test_clone_shipping_each_withdrawn_path_never_honors_either(tmp_path):
@@ -205,10 +236,10 @@ def test_operator_state_paths_are_distinct_for_linked_worktrees(tmp_path):
         git_dir(linked) / ".spice" / "config" / "spice.toml"
     )
     assert initialization_receipt_path(primary) == (
-        git_dir(primary) / ".spice" / "init-receipt.json"
+        git_dir(primary) / ".spice" / "init-receipt.jsonl"
     )
     assert initialization_receipt_path(linked) == (
-        git_dir(linked) / ".spice" / "init-receipt.json"
+        git_dir(linked) / ".spice" / "init-receipt.jsonl"
     )
     assert edit.worktree_config_path(primary) != edit.worktree_config_path(linked)
     assert initialization_receipt_path(primary) != initialization_receipt_path(linked)

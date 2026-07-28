@@ -18,9 +18,10 @@ Bias hard toward action. Spice is a fully autonomous project where nearly
 everything is reversible, and the constraints that actually matter are encoded
 as automation — gates, hooks, and the allocator — that will stop you if you
 cross them. Prefer asking forgiveness over permission: decide and act rather
-than stalling an irreversible-looking step for a confirmation it does not need.
-Hit a speed bump? Log it (`spice task oops`) or propose a variation and power
-through — do not block. Over-caution is itself a workflow cost.
+than stalling an irreversible-looking step for a confirmation it does not need,
+except at the operator decision boundaries below. For an ordinary speed bump,
+log it (`spice task oops`) or propose a variation and power through — do not
+block. Over-caution is itself a workflow cost.
 
 Before sending any assistant prose, run these commands in this order using the
 `spice` command directly. The wrapper and static shell hooks own source-checkout
@@ -49,7 +50,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   shell interaction means you miss live messages and wake cold. Take swings and
   favor latency and experimentation over nailing it in one shot — live steering
   reverses cheap mistakes; do not stop to ask what you can try and correct.
-- Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
+- Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Outside the operator decision boundaries below, power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
 - Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering and RTK rewrite routing before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
@@ -68,6 +69,25 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - Keep going while progress is real. After you claim work, complete a phase, or
   receive a review assignment, continue with the selected task, its board, and
   task notes instead of treating this skill as a standing user demand.
+
+## Operator Decision Boundaries
+
+Two automation stops transfer authority to the operator. They are refusals to
+surface, not speed bumps to log or route around:
+
+- An executable repository-configuration refusal asks whether the current
+  configuration digest may execute the named configuration path and command.
+  Hand back the complete refusal, including the digest and command words. Do not
+  run `spice init --apply` to create the approval receipt unless the operator
+  explicitly decides to approve that exact current configuration.
+- An authored-input apply gate asks whether the current ordered plan may mutate
+  operator-authored state. Hand back the complete preview or stale-plan
+  refusal, including its operations and plan digest. Do not add `--apply` (or
+  substitute a new digest) unless the operator explicitly decides to apply that
+  exact current plan.
+
+Stop only the refused path while that decision is outstanding; continue any
+independent allocator work that does not cross it.
 
 ## Prompt Boundary
 
