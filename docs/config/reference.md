@@ -540,11 +540,3 @@ task allocation.
 | `valid_lifetimes` | Accepted lane-lifetime vocabulary. |
 | `host` | Default bind host for `spice serve`, `spice watch`, and `spice demo`. |
 | `port` | Default bind port for those serve surfaces. |
-
-## `[inventory]`
-
-The inventory table is packaged self-description consumed by default-governance
-checks. `toml_static` names configuration families backed by frozen exported
-bases; `platform_derived`, `driver_derived`, and `protocol_invariant` list
-exports whose values come from their named runtime class instead of one TOML
-leaf. It is not a repository customization surface.
