@@ -120,11 +120,14 @@ means `spice`, preserving the original mounted-plan vocabulary:
   those opaque effects.
 
 The parent advertises this ownership handshake with the empty internal
-execution-digest variable on the planning pass. Its absence identifies a
-pre-ownership installed parent; a newer candidate then retains the former
-single self-owned apply path only as the bootstrap needed to publish the first
-compatible parent. Once the installed parent advertises the handshake, explicit
-digest authorization and the two-pass boundary are mandatory.
+execution-digest variable on the planning pass. Absence is not a generic legacy
+default: the candidate positively reads the installed parent distribution
+version, and only parent `0.30.1` publishing candidate `0.30.2` may retain the
+former single self-owned apply path. This is one forward transition whose named
+retirement boundary is `0.30.2`; every other missing/unknown capability or
+candidate version refuses before effects. Once the parent advertises the
+handshake, explicit digest authorization and the two-pass boundary are the only
+current command-owned path.
 
 Unknown or mixed executors refuse. A command cannot switch ownership without
 changing every operation and therefore the plan digest. This second ownership

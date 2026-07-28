@@ -11,12 +11,16 @@ from unittest.mock import patch
 
 import pytest
 
+import spice.commandownership as commandownership
 import spice.release as release
 from spice.cli.mounts import MountedCommand, run_mounted_command
 from spice.commandownership import (
     COMMAND_PLAN_EXECUTION_DIGEST_ENV,
     COMMAND_PLAN_EXECUTOR,
+    LEGACY_COMMAND_OWNER_CANDIDATE_VERSION,
+    LEGACY_COMMAND_OWNER_PARENT_VERSION,
     MOUNTED_COMMAND_ENV,
+    MOUNTED_RUNTIME_PYTHON_ENV,
     defer_command_owned_apply,
 )
 from spice.commandplan import command_plan_payload
@@ -268,4 +272,61 @@ def test_candidate_release_can_bootstrap_through_a_pre_ownership_parent(
         payload,
         apply_requested=True,
         environ=legacy_environ,
+        candidate_version=LEGACY_COMMAND_OWNER_CANDIDATE_VERSION,
+        legacy_parent_version=LEGACY_COMMAND_OWNER_PARENT_VERSION,
     )
+
+
+def test_bootstrap_positively_probes_the_installed_parent_version(
+    tmp_path, monkeypatch
+):
+    _mount, _effects, _calls = _release_mount(tmp_path, monkeypatch)
+    args = release.build_release_parser().parse_args(["prepare", "patch"])
+    payload = release.plan_release(args, tmp_path).payload()
+    probes = []
+
+    def probe(command, **kwargs):
+        probes.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="0.30.1\n", stderr="")
+
+    monkeypatch.setattr(commandownership, "run_tool_command", probe)
+
+    assert not defer_command_owned_apply(
+        payload,
+        apply_requested=True,
+        environ={
+            MOUNTED_COMMAND_ENV: "1",
+            MOUNTED_RUNTIME_PYTHON_ENV: "/installed/python",
+        },
+        candidate_version="0.30.2",
+    )
+    assert probes[0][0][:3] == ["/installed/python", "-I", "-c"]
+    assert probes[0][1]["policy"] == "release"
+
+
+@pytest.mark.parametrize(
+    ("parent_version", "candidate_version"),
+    (
+        ("0.30.0", "0.30.2"),
+        ("0.30.1", "0.30.3"),
+        ("0.30.2", "0.30.3"),
+    ),
+)
+def test_missing_owner_capability_refuses_outside_the_one_release_bridge(
+    tmp_path,
+    monkeypatch,
+    parent_version,
+    candidate_version,
+):
+    _mount, _effects, _calls = _release_mount(tmp_path, monkeypatch)
+    args = release.build_release_parser().parse_args(["prepare", "patch"])
+    payload = release.plan_release(args, tmp_path).payload()
+
+    with pytest.raises(SpiceError, match="only supported forward bootstrap"):
+        defer_command_owned_apply(
+            payload,
+            apply_requested=True,
+            environ={MOUNTED_COMMAND_ENV: "1"},
+            candidate_version=candidate_version,
+            legacy_parent_version=parent_version,
+        )
