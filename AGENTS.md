@@ -15,6 +15,14 @@ rules apply to the agents working here.
 - `spice session briefing` is the primary rehydration product after a renewal
   or compaction. Trust machine-readable artifacts over chat memory.
 
+## Operator decision boundaries
+
+- The packaged [spice skill](spice/agent/SKILL.md#operator-decision-boundaries)
+  is the single source of truth for executable repository-configuration
+  approval and authored-input apply-gate refusals. Follow its exact handoff to
+  the operator; do not replace either authority decision with a local
+  paraphrase, a `spice task oops`, or a route around the gate.
+
 ## Steering and ACKs
 
 - Operator steering arrives as inbox items. Reading does not retire them;

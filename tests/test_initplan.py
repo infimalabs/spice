@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -16,20 +18,30 @@ from spice.hooks.initplan import (
     InitOperation,
     InitOperationKind,
     InitOperationScope,
+    InitReceiptEvent,
     INIT_RECEIPT_MODE,
     OWNERSHIP_DIGEST_BYTES,
+    RECEIPT_RECORD_MAX_BYTES,
     InitReceiptStatus,
     InitializationMode,
     InitializationPlan,
+    InitializationReceiptRecord,
+    append_initialization_receipt_record,
     apply_initialization_plan,
+    encode_initialization_receipt_record,
     git_config_file_get,
+    initialization_plan_digest,
     initialization_plan_payload,
     initialization_preview_rows,
+    initialization_receipt_digest,
     initialization_receipt_path,
-    initialization_receipt_payload,
+    initialization_receipt_record_payload,
     load_initialization_receipt,
+    load_initialization_receipt_records,
     plan_initialization,
 )
+
+OPEN_MODE_DEFAULT = 0o777
 
 
 def test_git_config_file_get_distinguishes_present_absent_and_failure(tmp_path):
@@ -213,16 +225,28 @@ def test_init_digest_refuses_when_repository_changes_after_preview(tmp_path):
     assert not initialization_receipt_path(repo).exists()
 
 
-def test_apply_writes_complete_private_receipt_with_every_planned_field(tmp_path):
+def test_apply_appends_one_private_total_record_for_each_completed_operation(tmp_path):
     repo = _git_init(tmp_path / "repo")
     plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
 
     receipt = apply_initialization_plan(plan)
     receipt_path = initialization_receipt_path(repo)
-    stored = json.loads(receipt_path.read_text(encoding="utf-8"))
+    records = load_initialization_receipt_records(repo)
+    stored = tuple(
+        json.loads(line)
+        for line in receipt_path.read_text(encoding="utf-8").splitlines()
+    )
 
     assert receipt.status is InitReceiptStatus.COMPLETE
-    assert stored == initialization_receipt_payload(receipt)
+    assert stored == tuple(
+        initialization_receipt_record_payload(record) for record in records
+    )
+    assert len(records) == len(plan.operations)
+    assert {record.event for record in records} == {InitReceiptEvent.APPLY}
+    assert tuple(record.operation_index for record in records) == tuple(
+        range(len(plan.operations))
+    )
+    assert {record.operation_count for record in records} == {len(plan.operations)}
     assert stat.S_IMODE(receipt_path.stat().st_mode) == INIT_RECEIPT_MODE
     assert tuple(
         (
@@ -251,6 +275,7 @@ def test_apply_writes_complete_private_receipt_with_every_planned_field(tmp_path
         )
         for operation in plan.operations
     )
+    assert initialization_receipt_digest(receipt) == initialization_plan_digest(plan)
 
 
 def test_repeated_apply_preserves_the_complete_receipt_and_repository_bytes(tmp_path):
@@ -263,6 +288,27 @@ def test_repeated_apply_preserves_the_complete_receipt_and_repository_bytes(tmp_
 
     assert second == first
     assert (after_first, after_second) == (after_first, after_first)
+
+
+def test_repository_config_approval_appends_one_replayable_fact(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
+    path = initialization_receipt_path(repo)
+    prefix = path.read_bytes()
+    before = load_initialization_receipt_records(repo)
+
+    approved = apply_initialization_plan(
+        plan_initialization(repo, InitializationMode.GATES_ONLY),
+        approve_repository_config=True,
+    )
+
+    records = load_initialization_receipt_records(repo)
+    replayed = load_initialization_receipt(repo)
+    assert path.read_bytes().startswith(prefix)
+    assert len(records) == len(before) + 1
+    assert records[-1].event is InitReceiptEvent.APPROVAL
+    assert records[-1].approved_repository_config_digest is not None
+    assert replayed == approved
 
 
 def test_gates_receipt_promotes_to_full_without_losing_first_introduction(tmp_path):
@@ -291,23 +337,47 @@ def test_gates_receipt_promotes_to_full_without_losing_first_introduction(tmp_pa
 
 
 def test_apply_resumes_incomplete_receipt_and_preserves_original_file_provenance(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
+    import spice.hooks.initplan as initplan
+
     repo = _git_init(tmp_path / "repo")
     hook = repo / ".spice/hooks/pre-commit"
     hook.parent.mkdir(parents=True)
     hook.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
     hook.chmod(0o700)
-    first = apply_initialization_plan(plan_initialization(repo))
-    receipt_path = initialization_receipt_path(repo)
-    interrupted = initialization_receipt_payload(first)
-    interrupted["status"] = InitReceiptStatus.APPLYING.value
-    for operation in interrupted["operations"]:
-        if operation["target"] == ".spice/hooks/pre-commit":
-            operation["completed"] = False
-    receipt_path.write_text(
-        json.dumps(interrupted, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    plan = plan_initialization(repo)
+    real_append = initplan.append_initialization_receipt_record
+    appends = 0
+
+    def interrupt_after_third_completion(record, *, encoded=None):
+        nonlocal appends
+        real_append(record, encoded=encoded)
+        appends += 1
+        if appends == 3:
+            raise RuntimeError("simulated interruption")
+
+    monkeypatch.setattr(
+        initplan,
+        "append_initialization_receipt_record",
+        interrupt_after_third_completion,
+    )
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        apply_initialization_plan(plan)
+
+    interrupted_records = load_initialization_receipt_records(repo)
+    interrupted = load_initialization_receipt(repo)
+    assert interrupted is not None
+    assert interrupted.status is InitReceiptStatus.APPLYING
+    assert tuple(record.operation.target for record in interrupted_records) == tuple(
+        operation.target for operation in plan.operations[:3]
+    )
+    assert {item.completed for item in interrupted.operations} == {True}
+
+    monkeypatch.setattr(
+        initplan,
+        "append_initialization_receipt_record",
+        real_append,
     )
     hook.unlink()
 
@@ -327,6 +397,140 @@ def test_apply_resumes_incomplete_receipt_and_preserves_original_file_provenance
     )
     assert hook.read_text(encoding="utf-8") == pre_commit.generated_value
     assert stat.S_IMODE(hook.stat().st_mode) == pre_commit.generated_mode
+
+
+def test_receipt_append_uses_one_bounded_unbuffered_o_append_write(
+    tmp_path, monkeypatch
+):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
+    record = InitializationReceiptRecord(
+        repo_root=repo.resolve(),
+        mode=plan.mode,
+        plan_schema_version=plan.schema_version,
+        event=InitReceiptEvent.APPLY,
+        operation_index=0,
+        operation_count=len(plan.operations),
+        operation=plan.operations[0],
+    )
+    real_open = os.open
+    real_write = os.write
+    opened_flags: list[int] = []
+    writes: list[bytes] = []
+    receipt_path = initialization_receipt_path(repo)
+
+    def observed_open(path, flags, mode=OPEN_MODE_DEFAULT):
+        if Path(path) == receipt_path:
+            opened_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    def observed_write(descriptor, payload):
+        writes.append(payload)
+        return real_write(descriptor, payload)
+
+    def refuse_receipt_rebuild(*_args, **_kwargs):
+        raise AssertionError("receipt append must not use temporary replacement")
+
+    monkeypatch.setattr("spice.hooks.initplan.os.open", observed_open)
+    monkeypatch.setattr("spice.hooks.initplan.os.write", observed_write)
+    monkeypatch.setattr(
+        "spice.hooks.initplan.atomic_write_text",
+        refuse_receipt_rebuild,
+    )
+
+    encoded = encode_initialization_receipt_record(record)
+    append_initialization_receipt_record(record, encoded=encoded)
+
+    assert len(opened_flags) == 1
+    assert opened_flags[0] & os.O_APPEND
+    assert writes == [encoded]
+
+
+def test_oversized_receipt_record_refuses_before_creating_the_log(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
+    oversized = replace(
+        plan.operations[0],
+        generated_value="x" * RECEIPT_RECORD_MAX_BYTES,
+    )
+    record = InitializationReceiptRecord(
+        repo_root=repo.resolve(),
+        mode=plan.mode,
+        plan_schema_version=plan.schema_version,
+        event=InitReceiptEvent.APPLY,
+        operation_index=0,
+        operation_count=len(plan.operations),
+        operation=oversized,
+    )
+
+    with pytest.raises(
+        SpiceError,
+        match="receipt record exceeds encoded byte bound",
+    ):
+        append_initialization_receipt_record(record)
+
+    assert not initialization_receipt_path(repo).exists()
+
+
+def test_concurrent_process_appends_preserve_every_complete_record(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    operation_count = len(
+        plan_initialization(repo, InitializationMode.GATES_ONLY).operations
+    )
+    script = """
+import sys
+from pathlib import Path
+from spice.hooks.initplan import (
+    InitReceiptEvent,
+    InitializationMode,
+    InitializationReceiptRecord,
+    append_initialization_receipt_record,
+    plan_initialization,
+)
+repo = Path(sys.argv[1]).resolve()
+index = int(sys.argv[2])
+plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
+append_initialization_receipt_record(
+    InitializationReceiptRecord(
+        repo_root=repo,
+        mode=plan.mode,
+        plan_schema_version=plan.schema_version,
+        event=InitReceiptEvent.APPLY,
+        operation_index=index,
+        operation_count=len(plan.operations),
+        operation=plan.operations[index],
+    )
+)
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, str(repo), str(index)],
+            cwd=Path(__file__).parents[1],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for index in range(operation_count)
+    ]
+    failures = [
+        (process.returncode, stdout, stderr)
+        for process in processes
+        for stdout, stderr in [process.communicate()]
+        if process.returncode != 0
+    ]
+
+    assert failures == []
+    path = initialization_receipt_path(repo)
+    lines = path.read_bytes().splitlines(keepends=True)
+    records = load_initialization_receipt_records(repo)
+    receipt = load_initialization_receipt(repo)
+
+    assert len(lines) == operation_count
+    assert all(line.endswith(b"\n") for line in lines)
+    assert all(isinstance(json.loads(line), dict) for line in lines)
+    assert {record.operation_index for record in records} == set(range(operation_count))
+    assert receipt is not None
+    assert receipt.status is InitReceiptStatus.COMPLETE
 
 
 def test_custom_common_hooks_path_is_preserved_as_effective_prior_state(tmp_path):

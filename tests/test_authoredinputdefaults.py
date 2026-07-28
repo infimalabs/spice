@@ -97,8 +97,8 @@ def test_live_authored_input_mutation_decision_matches_effect_driving_reads(
         explicit = live.root_parser.parse_args(
             [*live.invocation_argv, *contract.mutation_args]
         )
-        assert not bare.apply
-        assert explicit.apply is True
+        assert bare.apply in (None, False)
+        assert explicit.apply not in (None, False)
         return
 
     assert not hasattr(bare, "apply")

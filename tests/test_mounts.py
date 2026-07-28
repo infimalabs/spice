@@ -206,7 +206,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("VIRTUAL_ENV", "/tmp/foreign-venv")
 
-    def fake_run(argv, *, cwd, env, check):
+    def fake_run(argv, *, cwd, env, capture_output, text, check):
         captured["argv"] = tuple(argv)
         captured["cwd"] = cwd
         captured["env"] = {
@@ -216,8 +216,10 @@ def test_run_mounted_command_exports_visible_spice_identity(
             RUNTIME_PYTHON_ENV: env.get(RUNTIME_PYTHON_ENV),
             VISIBLE_PROG_ENV: env.get(VISIBLE_PROG_ENV),
         }
+        captured["capture_output"] = capture_output
+        captured["text"] = text
         captured["check"] = check
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
     mount = MountedCommand(
@@ -237,6 +239,8 @@ def test_run_mounted_command_exports_visible_spice_identity(
             RUNTIME_PYTHON_ENV: sys.executable,
             VISIBLE_PROG_ENV: "spice report inspect",
         },
+        "capture_output": True,
+        "text": True,
         "check": False,
     }
 

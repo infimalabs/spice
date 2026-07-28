@@ -12,7 +12,7 @@ from typing import Any
 
 from spice.commandplan import (
     apply_mounted_plan,
-    assert_plan_digest,
+    assert_mounted_plan_digest,
     parse_command_plan_document,
 )
 from spice.cli.parser import (
@@ -177,14 +177,6 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     # release evidence can prove what ordinary fleet commands actually import.
     env[RUNTIME_PYTHON_ENV] = sys.executable
     requested, digest = _mounted_apply_request(args)
-    if not requested:
-        result = run_parent_lifetime_command(
-            [*mount.argv, *args],
-            cwd=mount.repo_root,
-            env=env,
-            check=False,
-        )
-        return result.returncode
     result = run_parent_lifetime_command(
         [*mount.argv, *args],
         cwd=mount.repo_root,
@@ -197,16 +189,22 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     stderr = str(getattr(result, "stderr", "") or "")
     if stderr:
         sys.stderr.write(stderr)
+    document = parse_command_plan_document(stdout)
+    if document is not None:
+        assert_mounted_plan_digest(document, mount.repo_root, document.digest)
     if result.returncode != 0:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
-    document = parse_command_plan_document(stdout)
     if document is None:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
-    assert_plan_digest(document, digest)
+    if not requested:
+        if stdout:
+            sys.stdout.write(stdout)
+        return result.returncode
+    assert_mounted_plan_digest(document, mount.repo_root, digest)
     applied = apply_mounted_plan(document, mount.repo_root)
     print(f"applied command-plan digest={document.digest} operations={len(applied)}")
     for order, label in enumerate(applied, start=1):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,7 +47,7 @@ INITIALIZATION_RECEIPT_PATH = OperatorStatePath(
     key="initialization-receipt",
     label="initialization receipt",
     withdrawn_relative=Path(STATE_DIRNAME) / "init-receipt.json",
-    canonical_relative=Path("init-receipt.json"),
+    canonical_relative=Path("init-receipt.jsonl"),
 )
 
 
@@ -62,6 +63,7 @@ def prepare_operator_state_path(
     declared: OperatorStatePath,
     *,
     canonical_path: Path | None = None,
+    migrate: Callable[[Path, Path], None] | None = None,
 ) -> Path:
     """Move one untracked predecessor once, or refuse a withdrawn path.
 
@@ -105,7 +107,10 @@ def prepare_operator_state_path(
 
     try:
         canonical.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(withdrawn, canonical)
+        if migrate is None:
+            os.replace(withdrawn, canonical)
+        else:
+            migrate(withdrawn, canonical)
         fsync_directory(canonical.parent)
         fsync_directory(withdrawn.parent)
         atomic_write_json(

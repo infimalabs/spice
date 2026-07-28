@@ -99,6 +99,32 @@ def test_hostile_tracked_custom_pre_commit_step_refuses_before_execution(
     assert not marker.exists()
 
 
+def test_mixed_spelling_overlay_preserves_replacement_command_approval_source(tmp_path):
+    repo = _repository(tmp_path / "repo")
+    command = ("replacement-tool", "--write")
+    _commit_config(
+        repo,
+        "[policy.pre_commit_builtins]\n"
+        f'"magic-numbers" = {{ run = {json.dumps(command)} }}\n',
+    )
+    worktree = operator_state_path(repo, WORKTREE_CONFIG_PATH)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    worktree.write_text(
+        "[policy.pre_commit_builtins.magic_numbers]\n"
+        'label = "operator sibling label"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError, match="has no operator approval") as raised:
+        precommit.pre_commit_steps(repo, [])
+
+    assert "policy.pre_commit_builtins.magic-numbers.run" in str(raised.value)
+    _approve_repository_config(repo)
+    configured = precommit.pre_commit_steps(repo, [])
+    replacement = next(step for step in configured if step.key == "magic-numbers")
+    assert replacement.label == "operator sibling label"
+
+
 def test_approval_is_per_repository_digest_and_reprompts_after_change(tmp_path):
     repo = _repository(tmp_path / "source")
     command = ("tool", "first")

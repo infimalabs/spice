@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol, TypeVar
@@ -51,6 +52,7 @@ from spice.config.layers import (
     contextualize_config_error,
     effective_table,
     enabled_registry_entries,
+    load_config,
 )
 from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
@@ -132,6 +134,21 @@ class DisabledBuiltinPreCommitStep:
 
     key: str
     config_path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _BuiltinPreCommitOverrides:
+    """Canonical effective overrides and each winning raw configuration path."""
+
+    values: dict[str, Any]
+    config_paths: dict[tuple[str, ...], tuple[str, ...]]
+
+    def config_path(self, key: str, *field_path: str) -> tuple[str, ...]:
+        semantic_path = (key, *field_path)
+        return self.config_paths.get(
+            semantic_path,
+            ("policy", "pre_commit_builtins", key, *field_path),
+        )
 
 
 def handle_pre_commit(repo_root: Path) -> int:
@@ -502,8 +519,10 @@ def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
 def _configured_builtin_steps(
     repo_root: Path, builtin_steps: list[PreCommitStep]
 ) -> list[PreCommitStep]:
-    normalized, source_keys = _builtin_pre_commit_overrides(repo_root, builtin_steps)
-    overrides = enabled_registry_entries(normalized, "policy", "pre_commit_builtins")
+    resolved = _builtin_pre_commit_overrides(repo_root, builtin_steps)
+    overrides = enabled_registry_entries(
+        resolved.values, "policy", "pre_commit_builtins"
+    )
 
     configured: list[PreCommitStep] = []
     for step in builtin_steps:
@@ -514,10 +533,10 @@ def _configured_builtin_steps(
             repo_root,
             step,
             replacement,
-            config_path=(
-                "policy",
-                "pre_commit_builtins",
-                source_keys[step.key],
+            config_path=_builtin_override_config_path(
+                resolved,
+                step.key,
+                replacement,
             ),
         )
         if configured_step is not None:
@@ -530,61 +549,144 @@ def disabled_builtin_pre_commit_steps(
 ) -> tuple[DisabledBuiltinPreCommitStep, ...]:
     """Return every effective false-disable in canonical gate order."""
     builtin_steps = _builtin_pre_commit_steps(repo_root, [])
-    normalized, source_keys = _builtin_pre_commit_overrides(repo_root, builtin_steps)
+    resolved = _builtin_pre_commit_overrides(repo_root, builtin_steps)
     return tuple(
         DisabledBuiltinPreCommitStep(
             key=step.key,
             config_path=_builtin_disablement_config_path(
-                source_keys.get(step.key, step.key),
-                normalized.get(step.key, False),
+                resolved,
+                step.key,
+                resolved.values.get(step.key, False),
             ),
         )
         for step in builtin_steps
-        if _builtin_override_is_disabled(normalized.get(step.key, False))
+        if _builtin_override_is_disabled(resolved.values.get(step.key, False))
     )
 
 
 def _builtin_disablement_config_path(
-    config_key: str,
+    resolved: _BuiltinPreCommitOverrides,
+    key: str,
     raw: Any,
 ) -> tuple[str, ...]:
-    path = ("policy", "pre_commit_builtins", config_key)
-    return (*path, "enabled") if isinstance(raw, dict) else path
+    return (
+        resolved.config_path(key, "enabled")
+        if isinstance(raw, dict)
+        else resolved.config_path(key)
+    )
 
 
 def _builtin_pre_commit_overrides(
     repo_root: Path,
     builtin_steps: list[PreCommitStep],
-) -> tuple[dict[str, Any], dict[str, str]]:
-    policy = effective_table(repo_root, "policy")
-    raw_overrides = policy.get("pre_commit_builtins")
-    if raw_overrides is None:
-        return (
-            {step.key: True for step in builtin_steps},
-            {step.key: step.key for step in builtin_steps},
-        )
-    if not isinstance(raw_overrides, dict):
-        raise SpiceError(
-            "[policy] pre_commit_builtins must be a table of "
-            "built-in pre-commit step overrides"
-        )
-
+) -> _BuiltinPreCommitOverrides:
     by_key = {step.key: step for step in builtin_steps}
-    normalized: dict[str, Any] = {}
-    source_keys: dict[str, str] = {}
-    for raw_key, raw_value in raw_overrides.items():
-        key = _normalize_step_key(raw_key)
-        normalized[key] = raw_value
-        source_keys[key] = str(raw_key)
-    unknown = sorted(key for key in normalized if key not in by_key)
-    if unknown:
-        known = ", ".join(step.key for step in builtin_steps)
-        listed = ", ".join(unknown)
-        raise SpiceError(
-            "[policy.pre_commit_builtins] unknown step(s): "
-            f"{listed}; known steps: {known}"
-        )
-    return normalized, source_keys
+    normalized: dict[str, Any] = {step.key: True for step in builtin_steps}
+    config_paths: dict[tuple[str, ...], tuple[str, ...]] = {}
+    for layer in load_config(repo_root).layers:
+        policy = layer.values.get("policy")
+        if not isinstance(policy, Mapping):
+            continue
+        raw_overrides = policy.get("pre_commit_builtins")
+        if raw_overrides is None:
+            continue
+        if not isinstance(raw_overrides, Mapping):
+            raise SpiceError(
+                "[policy] pre_commit_builtins must be a table of "
+                "built-in pre-commit step overrides"
+            )
+        layer_entries: dict[str, tuple[str, Any]] = {}
+        for raw_key, raw_value in raw_overrides.items():
+            raw_name = str(raw_key)
+            key = _normalize_step_key(raw_name)
+            previous = layer_entries.get(key)
+            if previous is not None:
+                raise SpiceError(
+                    "[policy.pre_commit_builtins] "
+                    f"{layer.name} source declares equivalent builtin "
+                    f"spellings {previous[0]!r} and {raw_name!r} for {key!r}"
+                )
+            layer_entries[key] = (raw_name, raw_value)
+        unknown = sorted(key for key in layer_entries if key not in by_key)
+        if unknown:
+            known = ", ".join(step.key for step in builtin_steps)
+            listed = ", ".join(unknown)
+            raise SpiceError(
+                "[policy.pre_commit_builtins] unknown step(s): "
+                f"{listed}; known steps: {known}"
+            )
+        for key, (raw_name, raw_value) in layer_entries.items():
+            _merge_builtin_override(
+                normalized,
+                key,
+                raw_value,
+                semantic_path=(key,),
+                config_path=("policy", "pre_commit_builtins", raw_name),
+                config_paths=config_paths,
+            )
+    return _BuiltinPreCommitOverrides(normalized, config_paths)
+
+
+def _merge_builtin_override(
+    destination: dict[str, Any],
+    key: str,
+    incoming: Any,
+    *,
+    semantic_path: tuple[str, ...],
+    config_path: tuple[str, ...],
+    config_paths: dict[tuple[str, ...], tuple[str, ...]],
+) -> None:
+    if isinstance(incoming, Mapping):
+        config_paths[semantic_path] = config_path
+        previous = destination.get(key)
+        if not isinstance(previous, dict):
+            _forget_builtin_config_paths(config_paths, semantic_path)
+            config_paths[semantic_path] = config_path
+            previous = {}
+            destination[key] = previous
+        for raw_child, child_value in incoming.items():
+            child = str(raw_child)
+            _merge_builtin_override(
+                previous,
+                child,
+                child_value,
+                semantic_path=(*semantic_path, child),
+                config_path=(*config_path, child),
+                config_paths=config_paths,
+            )
+        return
+    _forget_builtin_config_paths(config_paths, semantic_path)
+    destination[key] = _mutable_config_value(incoming)
+    config_paths[semantic_path] = config_path
+
+
+def _forget_builtin_config_paths(
+    config_paths: dict[tuple[str, ...], tuple[str, ...]],
+    prefix: tuple[str, ...],
+) -> None:
+    for path in tuple(config_paths):
+        if path[: len(prefix)] == prefix:
+            del config_paths[path]
+
+
+def _mutable_config_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _mutable_config_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_mutable_config_value(item) for item in value]
+    return value
+
+
+def _builtin_override_config_path(
+    resolved: _BuiltinPreCommitOverrides,
+    key: str,
+    raw: Any,
+) -> tuple[str, ...]:
+    if isinstance(raw, dict):
+        for field in ("mount", "run", "argv"):
+            if field in raw:
+                return resolved.config_path(key, field)
+    return resolved.config_path(key)
 
 
 def _builtin_override_is_disabled(raw: Any) -> bool:
