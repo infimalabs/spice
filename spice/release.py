@@ -1288,7 +1288,8 @@ def print_prepare_instructions(version: str) -> None:
         "the draft already includes collapsed task-level details — replace the "
         "Highlights placeholder, drop the draft banner, keep the details section, "
         "then run "
-        f"spice release publish --notes-file /tmp/spice-release-{version}-notes.md"
+        f"spice release publish --notes-file /tmp/spice-release-{version}-notes.md "
+        "--apply"
     )
 
 

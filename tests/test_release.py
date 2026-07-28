@@ -1,6 +1,7 @@
 """Release command parsing and release-note highlights."""
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -54,6 +55,20 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     assert preview.release_commit == "refs/remotes/origin/main"
     assert one_pass.release_mode == "release"
     assert one_pass.bump == "minor"
+
+
+def test_prepare_instructions_handoff_applies_publish(capsys):
+    release.print_prepare_instructions("0.30.0")
+
+    output = capsys.readouterr().out
+    publish_command = output.rsplit("then run ", maxsplit=1)[1].strip()
+    publish_argv = shlex.split(publish_command)
+    publish = build_release_parser().parse_args(publish_argv[2:])
+
+    assert publish_argv[:2] == ["spice", "release"]
+    assert publish.release_mode == "publish"
+    assert publish.notes_file == Path("/tmp/spice-release-0.30.0-notes.md")
+    assert publish.apply is True
 
 
 def test_release_human_and_json_preview_share_order_without_running_gates(
