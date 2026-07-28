@@ -279,10 +279,19 @@ vocabulary Spice can apply itself; an unknown operation kind refuses rather
 than being delegated back to the mounted executable. An operation explicitly
 marked `managed: false` is preflighted and preserved.
 
-The same normalized document can be reversed by swapping total before/after
-states and reversing operation order. Durable receipt selection and the
-operator-facing `--unapply` flag are specified separately; callers never pass
-a receipt path through this mounted-command seam.
+Successful application appends one bounded JSONL fact per completed operation
+to a mount-scoped receipt under the worktree Git directory. The receipt reuses
+the plan's normalized operation records and digest; the mounted child does not
+write or know its path.
+
+`spice generate --unapply` reads that authoritative receipt and previews its
+ownership-aware reverse plan without invoking the mounted child.
+`--unapply=<receipt-digest>` asserts the selected receipt, while
+`--apply=<plan-digest>` independently asserts and applies the recomputed reverse
+plan. Clean reversal removes the inactive receipt. An interrupted apply or
+unapply resumes from the durable operation prefix, divergent state is retained
+with a recovery record, and explicitly unmanaged state remains untouched.
+Callers never pass a receipt path through this mounted-command seam.
 
 ### Execution context: mount vs gate step
 
