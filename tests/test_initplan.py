@@ -166,21 +166,25 @@ def test_gates_only_plan_uses_the_same_model_for_its_bounded_surface(tmp_path):
     )
 
 
-def test_human_and_json_dry_run_share_one_plan_and_leave_identical_bytes(tmp_path):
+def test_human_and_json_preview_share_one_plan_and_leave_identical_bytes(tmp_path):
     repo = _git_init(tmp_path / "repo")
     plan = plan_initialization(repo)
     before = _tree_identity(repo)
 
-    human = _run([sys.executable, "-m", "spice", "init", "--dry-run"], cwd=repo)
+    human = _run([sys.executable, "-m", "spice", "init"], cwd=repo)
     after_human = _tree_identity(repo)
     machine = _run(
-        [sys.executable, "-m", "spice", "init", "--dry-run", "--json"],
+        [sys.executable, "-m", "spice", "init", "--json"],
         cwd=repo,
     )
     after_machine = _tree_identity(repo)
 
     assert human.stdout.splitlines() == initialization_preview_rows(plan)
-    assert json.loads(machine.stdout) == initialization_plan_payload(plan)
+    machine_payload = json.loads(machine.stdout)
+    assert machine_payload == initialization_plan_payload(plan)
+    assert [item["order"] for item in machine_payload["operations"]] == list(
+        range(1, len(plan.operations) + 1)
+    )
     assert (before, after_human, after_machine) == (before, before, before)
 
 

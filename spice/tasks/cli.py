@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -400,9 +401,10 @@ def _configure_task_mutation_parsers(actions: Any) -> None:
 def _configure_ingest_parser(actions: Any) -> None:
     ingest = actions.add_parser(
         "ingest",
-        help="Apply a markdown task document to its project and origin family.",
+        help="Plan a markdown task document for its project and origin family.",
         description=(
-            "Apply a markdown task document to its project and origin family."
+            "Plan a markdown task document for its project and origin family; "
+            "bare invocation previews without writing tasks."
         ),
         epilog=(
             "Example: spice task ingest plan.md --project task.plan "
@@ -428,9 +430,14 @@ def _configure_ingest_parser(actions: Any) -> None:
         ),
     )
     ingest.add_argument(
-        "--dry-run",
+        "--apply",
         action="store_true",
-        help="Print the complete validated apply plan without writing tasks.",
+        help="Apply the complete validated plan; bare invocation only previews.",
+    )
+    ingest.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the complete validated plan as JSON without applying it.",
     )
     ingest.add_argument(
         "--infer-ordered-dependencies",
@@ -1041,13 +1048,7 @@ _DISPATCH = {
     "handout": lambda a: graphhandout.generate(a.output, ceiling=a.ceiling),
     "ledger": _ledger,
     "artifact": lambda a: _artifact(a),
-    "ingest": lambda a: ingest_path(
-        a.path,
-        project=a.project,
-        origin=a.origin,
-        dry_run=a.dry_run,
-        infer_ordered_dependencies=a.infer_ordered_dependencies,
-    ),
+    "ingest": lambda a: _ingest(a),
     "done": lambda a: ops.done(
         a.handle,
         validation=list(a.validation),
@@ -1094,6 +1095,23 @@ _DISPATCH = {
         origin=a.origin,
     ),
 }
+
+
+def _ingest(args: argparse.Namespace) -> str:
+    if bool(args.apply) and bool(args.json):
+        raise SpiceError("`spice task ingest --apply` cannot be combined with `--json`")
+    result = ingest_path(
+        args.path,
+        project=args.project,
+        origin=args.origin,
+        apply=bool(args.apply),
+        infer_ordered_dependencies=args.infer_ordered_dependencies,
+    )
+    if isinstance(result, str):
+        return result
+    if bool(args.json):
+        return json.dumps(result.payload(), indent=2, sort_keys=True)
+    return result.report()
 
 
 # Work-driving packets carry the occasional rtk-feeding nudge (emitted only

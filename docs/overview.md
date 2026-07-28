@@ -94,7 +94,7 @@ That loop needs more than chat. It needs:
 spice's own gate demands assertion density, rejects assertion-free tests, runs
 integration paths against real binaries such as Git and Taskwarrior, and treats
 module and symbol reachability as zero-tolerance production wiring checks. The
-same self-passing constitution is what `spice init` installs elsewhere.
+same self-passing constitution is what `spice init --apply` installs elsewhere.
 
 The constitution applies to itself. File and routine shape limits, env-literal
 policy, magic-number ratchets, reachability gates, private-internals checks, and
@@ -143,8 +143,8 @@ the default starting point.
 | --- | --- | --- | --- |
 | **Watch** | Existing Claude Code or Codex sessions; run `spice watch` for automatic primary detection and a paste-ready target, or pass known roots with `spice watch <session-dir> [<session-dir> ...]`. Detection ranks session root > config > CLI, then Codex > Claude for ties, and prints the decision. | Read-only operator/browser transcript observation with no repo binding, hooks, shell takeover, steering, or task plane. | Add **retrospect** when the observed agent needs to read and understand its own past. |
 | **Retrospect** | An existing Claude Code or Codex transcript; run `spice session briefing` for the ambient agent, or `spice session briefing <thread-id-or-transcript>` for an explicit subject. | Read-only agent self-understanding through briefing and session forensics, with no repo binding, hooks, steering, or task plane. | Add **gates** when a recurring finding should become enforced policy. |
-| **Gates** | A Git repository and the installed `spice` CLI; run `spice init --gates`. | Pre-commit and commit-message enforcement, including sticky-flex hysteresis limits, regression-only magic-number ratchets against `HEAD`, taste policy, and configured extensions. No agent skill, wrapper, task plane, or fleet reference guard is installed. | Add **steer** when automated policy can identify a problem but an operator needs to correct agent behavior while it happens. |
-| **Steer** | A gates-proven repository plus one agent worth directing; run full `spice init`, bind it with `spice agent ensure`, open `spice serve`, and keep the lane in **Steer** lifetime. | One manually routed lane with live transcript, durable inbox steering, and semantic ACKs; task allocation is not yet the operating posture. | Add the **fleet** when work must be selected, routed, or reviewed across multiple lanes. |
+| **Gates** | A Git repository and the installed `spice` CLI; preview with `spice init --gates`, then run `spice init --gates --apply`. | Pre-commit and commit-message enforcement, including sticky-flex hysteresis limits, regression-only magic-number ratchets against `HEAD`, taste policy, and configured extensions. No agent skill, wrapper, task plane, or fleet reference guard is installed. | Add **steer** when automated policy can identify a problem but an operator needs to correct agent behavior while it happens. |
+| **Steer** | A gates-proven repository plus one agent worth directing; preview full initialization with `spice init`, apply it with `spice init --apply`, bind it with `spice agent ensure`, open `spice serve`, and keep the lane in **Steer** lifetime. | One manually routed lane with live transcript, durable inbox steering, and semantic ACKs; task allocation is not yet the operating posture. | Add the **fleet** when work must be selected, routed, or reviewed across multiple lanes. |
 | **Fleet** | A successful steered lane, Taskwarrior, and work that benefits from coordination; use `spice task next` and Serve **Drive/Drain** lifetimes. | The full task plane, worktree-bound lanes, team routing, phase-boundary Git synchronization, and review flow. | Stay here while coordination pays for its overhead; this is the top tier. |
 
 The ladder is additive in operating posture, not a demand to install everything

@@ -109,33 +109,33 @@ install no hooks, and add no steering or task plane. Add **Gates** when a
 recurring finding should become enforced policy.
 
 **Gates** add pre-commit and commit-message enforcement to a Git repository.
-Everything from here writes to the repository:
+Preview first, then explicitly apply:
 
 ```sh
 cd /path/to/your/repo
-spice init --gates --dry-run  # previews every file, mode, and Git-config change
-spice init --gates      # writes to the repo: constitution gates only
+spice init --gates          # previews every file, mode, and Git-config change
+spice init --gates --apply  # writes to the repo: constitution gates only
 ```
 
 This installs the `pre-commit` constitution (sticky-flex limits, regression-only
 magic-number ratchets, taste policy, and configured extensions) plus
 commit-message hygiene, with no task plane, shell wrapper, agent skill, or fleet
 reference guard. Commit normally to run the gates, or invoke the staged gate
-directly with `spice dev pre-commit`. Add `--json` to either dry-run form for
+directly with `spice dev pre-commit`. Add `--json` to either preview form for
 the same ordered operations as a versioned machine-readable plan. Apply stores
 its interruption-safe ownership receipt under `.spice/init-receipt.json`.
-Run `spice deinit` to reverse that receipt in exact reverse order. Spice restores
-only files, modes, and scoped Git values that still match its recorded output;
-`spice deinit --json` reports edited or shared values with a Git-private
-recovery handle.
+Run `spice deinit` to preview reversal of that receipt in exact reverse order,
+then `spice deinit --apply` to execute it. Spice restores only files, modes, and
+scoped Git values that still match its recorded output; `spice deinit --json`
+emits the ordered machine plan, including predicted edited or shared residues.
 
-**Steer** materializes the full steering and fleet surfaces. `spice init` writes
-the agent skill, shell wrapper, and steering surfaces into the repo, and
-`spice doctor` verifies them:
+**Steer** materializes the full steering and fleet surfaces. `spice init`
+previews the agent skill, shell wrapper, and steering surfaces;
+`spice init --apply` writes them, and `spice doctor` verifies them:
 
 ```sh
-spice init --dry-run  # previews steering + fleet initialization
-spice init      # writes to the repo: steering + fleet surfaces
+spice init          # previews steering + fleet initialization
+spice init --apply  # writes to the repo: steering + fleet surfaces
 spice doctor
 ```
 
@@ -152,10 +152,10 @@ spice task next
 | Surface | Command |
 | --- | --- |
 | Detect and watch existing agent sessions | `spice watch` |
-| Preview repository initialization | `spice init --dry-run [--json]` |
-| Install constitution gates only | `spice init --gates` |
-| Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
-| Safely reverse initialized state | `spice deinit [--json]` |
+| Preview repository initialization | `spice init [--json]` |
+| Install constitution gates only | `spice init --gates --apply` |
+| Prepare steering and fleet surfaces | `spice init --apply` / `spice doctor` |
+| Safely reverse initialized state | `spice deinit [--json]` then `spice deinit --apply` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Pull allocator work | `spice task next` |
@@ -243,4 +243,4 @@ through the repository's mounted `spice release` command.
 
 Work in progress toward a standalone, releasable product. The loop described
 here is real, exercised daily, and guarded by the same constitution that
-`spice init` installs elsewhere.
+`spice init --apply` installs elsewhere.

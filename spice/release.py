@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import json
 import os
 import re
 import shutil
@@ -58,6 +59,62 @@ class InstalledCliSource:
     tree: str
 
 
+@dataclass(frozen=True)
+class ReleasePlanOperation:
+    """One ordered release action described without executing it."""
+
+    action: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class ReleasePlan:
+    """A complete operator-readable plan for one mutating release verb."""
+
+    repository: Path
+    action: str
+    version: str
+    release_commit: str | None
+    notes_file: Path | None
+    operations: tuple[ReleasePlanOperation, ...]
+    schema_version: int = 1
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "repository": str(self.repository),
+            "action": self.action,
+            "version": self.version,
+            "release_commit": self.release_commit,
+            "notes_file": str(self.notes_file) if self.notes_file is not None else None,
+            "operations": [
+                {
+                    "order": order,
+                    "action": operation.action,
+                    "detail": operation.detail,
+                }
+                for order, operation in enumerate(self.operations, start=1)
+            ],
+        }
+
+    def rows(self) -> list[str]:
+        rows = [
+            f"release-plan schema={self.schema_version} action={self.action} "
+            f"version={self.version}",
+            f"repository={self.repository}",
+        ]
+        if self.release_commit is not None:
+            rows.append(f"release-commit={self.release_commit}")
+        if self.notes_file is not None:
+            rows.append(f"notes-file={self.notes_file}")
+        rows.extend(
+            f"{order}. {operation.action} {operation.detail}"
+            for order, operation in enumerate(self.operations, start=1)
+        )
+        rows.append("preview: no changes applied; pass --apply to execute")
+        return rows
+
+
 SIGINT_EXIT_CODE = 130
 INSTALLED_CLI_PROBE_SCRIPT = (
     "from pathlib import Path;"
@@ -73,8 +130,8 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
             "Prepare, publish, and summarize spice releases from a clean "
             "synchronized worktree. check, notes, and range only read the "
             "tree: they never bump, commit, tag, push, or publish. minor, "
-            "patch, prepare, publish, and github all mutate -- prepare bumps "
-            "the version and commits it, so it is not a rehearsal."
+            "patch, prepare, publish, and github preview an ordered plan by "
+            "default and mutate only with --apply."
         ),
     )
     actions = parser.add_subparsers(dest="release_action", required=True)
@@ -91,14 +148,16 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     for bump in BUMP_CHOICES:
         one_pass = actions.add_parser(
             bump,
-            help=f"Bump {bump}, validate, commit, push, and publish.",
+            help=f"Plan a {bump} bump, validation, commit, push, and publish.",
         )
+        _add_apply_options(one_pass)
         one_pass.set_defaults(func=handle_release, release_mode="release", bump=bump)
 
     prepare = actions.add_parser(
-        "prepare", help="Bump, validate, and commit without publishing."
+        "prepare", help="Plan a bump, validation, and commit without publishing."
     )
     prepare.add_argument("bump", choices=BUMP_CHOICES)
+    _add_apply_options(prepare)
     prepare.set_defaults(func=handle_release, release_mode="prepare")
 
     notes = actions.add_parser(
@@ -137,6 +196,7 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
             "builds artifacts from the current worktree."
         ),
     )
+    _add_apply_options(publish)
     publish.set_defaults(func=handle_release, release_mode="publish")
 
     github = actions.add_parser(
@@ -148,8 +208,22 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
         "--release-commit",
         help="Commit-ish to tag and use as the release notes target.",
     )
+    _add_apply_options(github)
     github.set_defaults(func=handle_release, release_mode="github")
     return parser
+
+
+def _add_apply_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute the ordered plan; bare invocation only previews.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the ordered plan as JSON without applying it.",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,23 +253,6 @@ def handle_release(args: argparse.Namespace) -> int:
 
 def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
     mode = str(args.release_mode)
-    if mode not in {"notes", "range"}:
-        ensure_clean_worktree(root)
-    if mode in {"release", "publish", "github"}:
-        ensure_notes_file(getattr(args, "notes_file", None))
-
-    if mode in {"prepare", "release"}:
-        ensure_release_preconditions(root)
-        version = run_release_gates(root, lambda: bump_version(str(args.bump)))
-        run(["git", "add", "pyproject.toml", "uv.lock"])
-        run(["git", "commit", "-m", f"release: bump to {version}"])
-        if mode == "prepare":
-            print_prepare_instructions(version)
-            run(["git", "status", "--short", "--branch"])
-            return 0
-        publish_release(version, getattr(args, "notes_file", None))
-        return 0
-
     if mode == "notes":
         if args.version is None and args.release_commit is None:
             version = current_version()
@@ -240,6 +297,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     if mode == "check":
+        ensure_clean_worktree(root)
         version = run_release_gates(root, current_version)
         print(
             f"release gates passed for {version}; nothing was bumped, "
@@ -247,29 +305,161 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         )
         return 0
 
-    if mode == "publish":
+    if mode in {"prepare", "release", "publish", "github"}:
+        if bool(args.apply) and bool(args.json):
+            raise SpiceError(
+                f"`spice release {args.release_action} --apply` cannot be "
+                "combined with `--json`"
+            )
+        plan = plan_release(args, root)
+        if not bool(args.apply):
+            if bool(args.json):
+                print(json.dumps(plan.payload(), indent=2, sort_keys=True))
+            else:
+                for row in plan.rows():
+                    print(row)
+            return 0
+        return apply_release_plan(args, root, plan)
+
+    raise SpiceError(f"unknown release action {mode!r}")
+
+
+def plan_release(args: argparse.Namespace, root: Path) -> ReleasePlan:
+    """Build the ordered plan for a mutating release action without mutation."""
+    mode = str(args.release_mode)
+    ensure_clean_worktree(root)
+    if mode in {"release", "publish", "github"}:
+        ensure_notes_file(getattr(args, "notes_file", None))
+
+    release_commit: str | None = None
+    if mode in {"prepare", "release"}:
+        ensure_release_preconditions(root)
+        version = preview_bumped_version(str(args.bump))
+        operations = [
+            ReleasePlanOperation(
+                "verify-installed-source",
+                "prove the independently installed CLI carries this tree",
+            ),
+            ReleasePlanOperation(
+                "clean-artifacts", "remove stale build and dist trees"
+            ),
+            ReleasePlanOperation(
+                "run-constitution", "run Python, Ruff, and browser release gates"
+            ),
+            ReleasePlanOperation(
+                "bump-version", f"rewrite pyproject.toml and uv.lock to {version}"
+            ),
+            ReleasePlanOperation(
+                "build-and-probe", f"build and verify artifacts for {version}"
+            ),
+            ReleasePlanOperation("stage-version", "stage pyproject.toml and uv.lock"),
+            ReleasePlanOperation(
+                "commit-version", f"commit release: bump to {version}"
+            ),
+        ]
+        if mode == "release":
+            operations.extend(_publication_operations(version))
+    elif mode == "publish":
         version = current_version()
         release_commit = release_commit_for_target(
             version, getattr(args, "release_commit", None)
         )
         ensure_publish_release_commit_is_head(release_commit)
-        run_release_gates(root, lambda: version)
-        publish_release(
-            version, getattr(args, "notes_file", None), release_commit=release_commit
-        )
-        return 0
-
-    if mode == "github":
+        operations = [
+            ReleasePlanOperation(
+                "verify-installed-source",
+                "prove the independently installed CLI carries this tree",
+            ),
+            ReleasePlanOperation(
+                "clean-artifacts", "remove stale build and dist trees"
+            ),
+            ReleasePlanOperation(
+                "run-constitution", "run Python, Ruff, and browser release gates"
+            ),
+            ReleasePlanOperation(
+                "build-and-probe", f"build and verify artifacts for {version}"
+            ),
+            *_publication_operations(version),
+        ]
+    elif mode == "github":
         version = str(args.version or current_version())
         release_commit = release_commit_for_target(
             version, getattr(args, "release_commit", None)
         )
-        publish_github_release(
-            version, getattr(args, "notes_file", None), release_commit=release_commit
+        operations = list(_github_publication_operations(version))
+    else:
+        raise SpiceError(f"cannot plan non-mutating release action {mode!r}")
+    return ReleasePlan(
+        repository=root.resolve(),
+        action=str(args.release_action),
+        version=version,
+        release_commit=release_commit,
+        notes_file=getattr(args, "notes_file", None),
+        operations=tuple(operations),
+    )
+
+
+def _publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
+    return (
+        ReleasePlanOperation(
+            "check-publish", f"dry-run upload artifacts for {version}"
+        ),
+        ReleasePlanOperation("push-main", "push HEAD to origin/main"),
+        ReleasePlanOperation("publish-package", f"upload spice-harness {version}"),
+        ReleasePlanOperation("wait-for-pypi", f"wait for PyPI to report {version}"),
+        *_github_publication_operations(version),
+    )
+
+
+def _github_publication_operations(version: str) -> tuple[ReleasePlanOperation, ...]:
+    return (
+        ReleasePlanOperation("create-tag", f"create v{version} when absent"),
+        ReleasePlanOperation("push-tag", f"push v{version} to origin"),
+        ReleasePlanOperation(
+            "create-github-release", f"publish release v{version} when absent"
+        ),
+    )
+
+
+def apply_release_plan(args: argparse.Namespace, root: Path, plan: ReleasePlan) -> int:
+    """Execute a previously rendered release plan through the canonical seams."""
+    mode = str(args.release_mode)
+    if mode in {"prepare", "release"}:
+        version = run_release_gates(root, lambda: bump_version(str(args.bump)))
+        if version != plan.version:
+            raise SpiceError(
+                f"release plan expected version {plan.version}, bump produced {version}"
+            )
+        run(["git", "add", "pyproject.toml", "uv.lock"])
+        run(["git", "commit", "-m", f"release: bump to {version}"])
+        if mode == "prepare":
+            print_prepare_instructions(version)
+            run(["git", "status", "--short", "--branch"])
+            return 0
+        publish_release(version, getattr(args, "notes_file", None))
+        return 0
+    if mode == "publish":
+        release_commit = plan.release_commit
+        if release_commit is None:
+            raise SpiceError("publish plan is missing its release commit")
+        run_release_gates(root, lambda: plan.version)
+        publish_release(
+            plan.version,
+            getattr(args, "notes_file", None),
+            release_commit=release_commit,
         )
         return 0
-
-    raise SpiceError(f"unknown release action {mode!r}")
+    if mode == "github":
+        release_commit = plan.release_commit
+        if release_commit is None:
+            raise SpiceError("GitHub plan is missing its release commit")
+        publish_github_release(
+            plan.version,
+            getattr(args, "notes_file", None),
+            release_commit=release_commit,
+        )
+        return 0
+    raise SpiceError(f"cannot apply non-mutating release action {mode!r}")
 
 
 def repo_root() -> Path:
@@ -509,6 +699,22 @@ def current_version() -> str:
 def bump_version(bump: str) -> str:
     return run(
         ["uv", "version", "--bump", bump, "--no-sync", "--short"],
+        capture=True,
+    ).stdout.strip()
+
+
+def preview_bumped_version(bump: str) -> str:
+    """Resolve the version a bump would write without changing project files."""
+    return run(
+        [
+            "uv",
+            "version",
+            "--bump",
+            bump,
+            "--dry-run",
+            "--no-sync",
+            "--short",
+        ],
         capture=True,
     ).stdout.strip()
 

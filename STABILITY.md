@@ -50,6 +50,10 @@ Effect count, destructiveness, and reversibility do not choose the default.
 There are no per-verb exceptions: if the reads below predict the wrong answer,
 the criterion or the read classification must change.
 
+For `init`, `deinit`, `task ingest`, and the publishing release verbs, bare
+invocation renders the human plan, `--json` renders the same ordered plan for
+machines, and `--apply` is the only mutation instruction.
+
 | Mutating verb or invocation | Effect-driving reads | Classification |
 | --- | --- | --- |
 | `spice init`; `spice deinit` | The repository and Git configuration being reconciled, plus the ownership receipt for reversal | Authored input |

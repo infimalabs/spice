@@ -136,15 +136,16 @@ def test_task_list_parse_error_points_to_limit_example(capsys):
     assert "spice task list --limit 20" in error
 
 
-def test_task_document_cli_help_names_apply_stdin_dry_run_and_family_export(capsys):
+def test_task_document_cli_help_names_preview_apply_json_and_family_export(capsys):
     parser = build_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["task", "ingest", "--help"])
     ingest_help = capsys.readouterr().out
-    assert "Apply a markdown task document" in ingest_help
+    assert "Plan a markdown task document" in ingest_help
     assert "Markdown path, or - to read standard input." in ingest_help
-    assert "--dry-run" in ingest_help
+    assert "--apply" in ingest_help
+    assert "--json" in ingest_help
     assert "--origin ORIGIN" in ingest_help
     assert "--infer-ordered-dependencies" in ingest_help
     assert "Foot-gun: derive sequential dependencies" in ingest_help
@@ -1090,7 +1091,7 @@ def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
     assert f"spice task artifact show {handle} A1" in shown
 
 
-def test_task_artifact_prune_is_dry_run_until_apply(task_repo, tmp_path, capsys):
+def test_task_artifact_prune_is_preview_until_apply(task_repo, tmp_path, capsys):
     handle = create.add(
         "Prune completed artifact",
         project="task.unit",
@@ -1121,11 +1122,11 @@ def test_task_artifact_prune_is_dry_run_until_apply(task_repo, tmp_path, capsys)
     capsys.readouterr()
     ops.done(handle, validation=["single-phase task completed for prune"])
 
-    dry_run = _with_backend(build_parser().parse_args(["task", "artifact", "prune"]))
-    assert dry_run.func(dry_run) == 0
-    dry_output = capsys.readouterr().out
-    assert f"would prune {handle} A1 prune-me.txt" in dry_output
-    assert "dry_run true; pass --apply to remove" in dry_output
+    preview = _with_backend(build_parser().parse_args(["task", "artifact", "prune"]))
+    assert preview.func(preview) == 0
+    preview_output = capsys.readouterr().out
+    assert f"would prune {handle} A1 prune-me.txt" in preview_output
+    assert "preview true; pass --apply to remove" in preview_output
     assert "A1 prune-me.txt" in artifacts.list_artifacts(handle)
 
     apply = _with_backend(
