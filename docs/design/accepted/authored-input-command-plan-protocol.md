@@ -140,7 +140,8 @@ observed-before and intended-after state needed for ownership-aware reversal.
 Repository executable-configuration approval is carried on newly completed
 operation records. If every initialization operation is already complete, a
 distinct approval fact is appended against an unchanged active operation
-context; no prior receipt record is rewritten.
+context; no prior receipt record is rewritten. Approval metadata does not alter
+the active operation sequence used as reversal authority.
 Reversal walks completed apply records in strict reverse order and appends its
 own completion outcomes. A completed clean reversal removes the now-inactive
 receipt log; an interrupted reversal resumes from its durable prefix without a

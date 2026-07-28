@@ -11,8 +11,9 @@ from spice.hooks.initplan import (
 
 def approve_repository_config(repo: Path) -> None:
     """Apply fixture gates and append the repository-config approval fact."""
+    resolved = repo.expanduser().resolve()
     plan = plan_initialization(
-        repo.expanduser().resolve(),
+        resolved,
         InitializationMode.GATES_ONLY,
         include_agent_skill=False,
     )
