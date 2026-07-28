@@ -11,6 +11,15 @@ from pathlib import Path
 from typing import Any
 
 
+def parse_pyproject(text: str) -> dict[str, Any]:
+    """Parsed `pyproject.toml` text, or {} when malformed."""
+    try:
+        loaded = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def read_pyproject(repo_root: Path) -> dict[str, Any]:
     """The whole parsed `pyproject.toml`, or {} when missing/malformed."""
     pyproject = repo_root / "pyproject.toml"

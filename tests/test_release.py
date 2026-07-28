@@ -9,6 +9,11 @@ import pytest
 
 import spice.agent.driver as agent_driver
 import spice.release as release
+from spice.commandownership import (
+    COMMAND_PLAN_EXECUTION_DIGEST_ENV,
+    MOUNTED_COMMAND_ENV,
+    MOUNTED_RUNTIME_PYTHON_ENV,
+)
 from spice.errors import SpiceError
 from spice.release import (
     ReleaseRecord,
@@ -781,6 +786,27 @@ def test_hermetic_wheel_env_preserves_process_environment(monkeypatch):
         "PYTHONPATH": "/some/worktree",
         "VIRTUAL_ENV": "/some/venv",
     }
+
+
+def test_release_subprocesses_do_not_inherit_mounted_execution_authority(
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setenv(MOUNTED_COMMAND_ENV, "1")
+    monkeypatch.setenv(COMMAND_PLAN_EXECUTION_DIGEST_ENV, "authorized")
+    monkeypatch.setenv(MOUNTED_RUNTIME_PYTHON_ENV, "/installed/python")
+    monkeypatch.setattr(
+        release,
+        "run_tool_command",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    release.run(["nested-tool"])
+
+    child_env = calls[0][1]["env"]
+    assert MOUNTED_COMMAND_ENV not in child_env
+    assert COMMAND_PLAN_EXECUTION_DIGEST_ENV not in child_env
+    assert child_env[MOUNTED_RUNTIME_PYTHON_ENV] == "/installed/python"
 
 
 def test_release_highlight_rewrites_commit_subjects_into_sentences():
