@@ -130,11 +130,24 @@ def _copy_package_source(destination: Path) -> None:
 
 def _write_fixture_layers(root: Path) -> None:
     root.mkdir()
+    _run(
+        ["git", "init", "-q", "-b", "main"],
+        cwd=root,
+        timeout=PROBE_TIMEOUT_SECONDS,
+    )
     (root / "spice.toml").write_text(
         '[agent]\nmodel = "repository-model"\n\n[serve]\nbrand = "Repository Brand"\n',
         encoding="utf-8",
     )
-    worktree = root / ".spice" / "config" / "spice.toml"
+    completed = _run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=root,
+        timeout=PROBE_TIMEOUT_SECONDS,
+    )
+    git_directory = Path(completed.stdout.strip())
+    if not git_directory.is_absolute():
+        git_directory = root / git_directory
+    worktree = git_directory / ".spice" / "config" / "spice.toml"
     worktree.parent.mkdir(parents=True)
     worktree.write_text(
         '[agent]\neffort = "high"\n\n[serve]\nbrand = "Worktree Brand"\n',

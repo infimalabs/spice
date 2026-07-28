@@ -16,6 +16,8 @@ from spice.config import edit, layers, values
 from spice.configcli import handle_config
 from spice.errors import SpiceError
 
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
+
 
 def test_packaged_rtk_default_is_the_bare_executable(tmp_path: Path) -> None:
     assert values.DEFAULT_RTK_EXECUTABLE == "rtk"
@@ -127,19 +129,42 @@ def test_malformed_rtk_identity_reports_winning_source(
 def test_rtk_resolution_trusts_identity_without_availability_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def unexpected_probe(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("RTK resolution must not probe executable availability")
+    configured = "/missing/by-contract/rtk"
+    real_subprocess_run = subprocess.run
+    real_path_exists = Path.exists
 
-    monkeypatch.setattr(shutil, "which", unexpected_probe)
-    monkeypatch.setattr(subprocess, "run", unexpected_probe)
-    monkeypatch.setattr(os.path, "exists", unexpected_probe)
-    monkeypatch.setattr(Path, "exists", unexpected_probe)
+    def reject_configured_probe(candidate: object, *_args: object, **_kwargs: object):
+        if str(candidate) == configured:
+            raise AssertionError(
+                "RTK resolution must not probe executable availability"
+            )
+        return None
+
+    def allow_unrelated_command(*args: object, **kwargs: object):
+        argv = args[0] if args else kwargs.get("args", ())
+        if configured in tuple(str(part) for part in argv):
+            raise AssertionError(
+                "RTK resolution must not probe executable availability"
+            )
+        return real_subprocess_run(*args, **kwargs)
+
+    def allow_unrelated_path(path: Path) -> bool:
+        if str(path) == configured:
+            raise AssertionError(
+                "RTK resolution must not probe executable availability"
+            )
+        return real_path_exists(path)
+
+    monkeypatch.setattr(shutil, "which", reject_configured_probe)
+    monkeypatch.setattr(subprocess, "run", allow_unrelated_command)
+    monkeypatch.setattr(os.path, "exists", reject_configured_probe)
+    monkeypatch.setattr(Path, "exists", allow_unrelated_path)
     _write(
         tmp_path / "spice.toml",
-        '[rtk]\nexecutable = "/missing/by-contract/rtk"\n',
+        f'[rtk]\nexecutable = "{configured}"\n',
     )
 
-    assert values.configured_rtk_executable(tmp_path) == "/missing/by-contract/rtk"
+    assert values.configured_rtk_executable(tmp_path) == configured
 
 
 def _redirect_system_config(

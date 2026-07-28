@@ -39,6 +39,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
     "hook": {"spice/hooks/precommit.py:_run_python_format_guard:capture=true"},
     "probe": {
         "spice/agent/driver.py:operator_color_scheme:capture=true",
+        # Doctor's required Taskwarrior version check is a bounded availability probe.
         "spice/hooks/doctor.py:_taskwarrior_check:capture=true",
         "spice/studies/subsumption.py:_require_coverage_dependencies:capture=true",
         "spice/tasks/ops.py:rtk_usage_nudge:capture=true",

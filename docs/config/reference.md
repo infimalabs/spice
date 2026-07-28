@@ -6,7 +6,7 @@ Spice configuration has exactly three scopes, in increasing precedence order:
 | --- | --- | --- |
 | `system` | `<installed spice package>/spice.toml` | Installed defaults; writable only when that existing file is writable |
 | `repository` | `<repository>/spice.toml` | Tracked Spice tables such as `[agent]` |
-| `worktree` | `<repository>/.spice/config/spice.toml` | Local plain Spice tables for one worktree |
+| `worktree` | `<worktree-git-dir>/.spice/config/spice.toml` | Local plain Spice tables for one worktree; structurally untracked |
 
 Managed runtime state has three ownership namespaces. Here,
 `<worktree-git-dir>` is the path reported by `git rev-parse --git-dir` for the
@@ -15,9 +15,9 @@ current worktree, while `<git-common>` is the path reported by
 
 | Namespace | Ownership | Examples |
 | --- | --- | --- |
-| `<repository>/.spice` | Worktree-visible configuration and generated integration surfaces | Worktree `spice.toml`, Git hook shims, inbox files |
+| `<repository>/.spice` | Deliberately visible live and generated integration surfaces | Git hook shims, inbox files, learning records, browser artifacts |
 | `<git-common>/.spice` | Managed state shared by every worktree of the repository | Task backend by default, team state, ACKs, maxim metrics, attachments, task artifacts, flex claims |
-| `<worktree-git-dir>/.spice` | Managed state owned by one worktree/lane | Agent runtime, sticky constitution state, disabled-maxim state |
+| `<worktree-git-dir>/.spice` | Managed state and operator-owned input for one worktree/lane | Worktree configuration, initialization receipt, agent runtime, sticky constitution state, disabled-maxim state |
 
 An explicit absolute `SPICE_TASK_BACKEND` redirects task configuration,
 TaskChampion storage, and team state. It does not redirect repository-owned ACK
@@ -130,8 +130,12 @@ unwraps, or assigns precedence to both shapes.
 
 Runtime code also does not read or import `.spice/config/state.json`; an old
 file is ignored. Move any values that still matter into
-`.spice/config/spice.toml` using the plain tables above, then delete the JSON
-file. There is no compatibility scope name or JSON adapter.
+the worktree scope using `spice config`, then delete the JSON file. There is no
+compatibility scope name or JSON adapter. v0.30 also moved the plain worktree
+file from `<repository>/.spice/config/spice.toml` to
+`<worktree-git-dir>/.spice/config/spice.toml`: an untracked predecessor is
+migrated once, while a tracked, repeated, or competing predecessor is refused
+and never honored.
 
 ## Runtime Model
 
@@ -232,7 +236,8 @@ spice config judge --enable
 spice config judge --disable
 ```
 
-`--enable` stores `[judge].enabled = true` in `.spice/config/spice.toml`;
+`--enable` stores `[judge].enabled = true` in the Git-private worktree
+configuration file;
 `--disable` restores the judge-free default. Any value other than a true flag
 (`true`, `1`, `yes`, `on`) — including an absent one — resolves to judge-free.
 When adjudication is enabled, each matched bag is sampled against its maxim: a
@@ -246,15 +251,15 @@ Configure the judge binary in the default worktree scope with:
 spice config judge --bin /path/to/judge
 ```
 
-This stores `[judge].bin` in `.spice/config/spice.toml`. The value is one
-executable path or `PATH` name, not a shell command or argv list. When unset,
-the default is keyed to the platform: macOS uses the Apple Foundation Models
-`afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the
-portable `spice-judge` adapter that ships with Spice. An explicit `bin`
-overrides this default on every platform. For each verdict Spice launches the
-exact argv `[configured_bin]`. `bin` selects which executable the enabled
-adjudication path launches; it does not by itself enable adjudication. The
-binary participates in the normal three-layer configuration precedence and
+This stores `[judge].bin` in the Git-private worktree configuration file. The
+value is one executable path or `PATH` name, not a shell command or argv list.
+When unset, the default is keyed to the platform: macOS uses the Apple
+Foundation Models `afm-cli` binary; every other platform, where `afm-cli` does
+not exist, uses the portable `spice-judge` adapter that ships with Spice. An
+explicit `bin` overrides this default on every platform. For each verdict Spice
+launches the exact argv `[configured_bin]`. `bin` selects which executable the
+enabled adjudication path launches; it does not by itself enable adjudication.
+The binary participates in the normal three-layer configuration precedence and
 accepts `--scope`; the `enabled` flag is intentionally worktree-local, so
 `--enable` and `--disable` require the default `--scope worktree`.
 
