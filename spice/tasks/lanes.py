@@ -52,7 +52,7 @@ def _filter_term(raw: Any) -> str:
         return f"project:{config.validate_project(project)}"
     if value.startswith("phase:"):
         phase = value.split(":", 1)[1]
-        if phase not in config.APPROVED_PHASES:
+        if phase not in config.resolved_task_config().approved_phases:
             raise SpiceError(f"route phase filter term has unknown phase: {value!r}")
         return value
     if TAG_TERM_RE.match(value):

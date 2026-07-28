@@ -1100,7 +1100,11 @@ def _run_env_policy_guard(repo_root: Path, paths: list[Path]) -> None:
         paths, root=repo_root, suffixes=resolved.languages.env
     )
     if findings:
-        raise SpiceError(envpolicy.render_env_policy_board(findings))
+        raise SpiceError(
+            envpolicy.render_env_policy_board(
+                findings, allow_marker=resolved.environment.allow_marker
+            )
+        )
 
 
 def _run_env_name_ledger_guard(repo_root: Path) -> None:

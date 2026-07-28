@@ -69,7 +69,7 @@ def flow_args(phases: list[str]) -> list[str]:
 
 def phases_of(row: Mapping[str, Any]) -> list[str]:
     phases: list[str] = []
-    for i in range(config.PHASE_SLOT_COUNT):
+    for i in range(config.resolved_task_config().phase_slot_count):
         value = str(row.get(f"phase_{i}") or "").strip()
         if not value:
             break
@@ -132,8 +132,9 @@ def claim_meta(
     at_dt = datetime.now(UTC)
     at = _iso(at_dt)
     until = _iso(at_dt + timedelta(seconds=resolved_lease_seconds))
-    start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
-    end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
+    context_seconds = config.resolved_task_config().claim_context_seconds
+    start = _iso(at_dt - timedelta(seconds=context_seconds))
+    end = _iso(at_dt + timedelta(seconds=context_seconds))
     explicit_context = tw.canonical_actor(context_thread or "")
     ambient = None if explicit_context else ambient_thread()
     if explicit_context:
@@ -181,7 +182,7 @@ def _validated_claim_meta(args: list[str]) -> list[str]:
 
 def _resolved_claim_lease_seconds(lease_seconds: float | None) -> float:
     resolved = (
-        float(config.CLAIM_TTL_SECONDS)
+        float(config.resolved_task_config().claim_ttl_seconds)
         if lease_seconds is None
         else float(lease_seconds)
     )

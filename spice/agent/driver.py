@@ -743,7 +743,13 @@ def claude_auto_compact_environment(
         return {}
     if CLAUDE_AUTO_COMPACT_WINDOW_ENV in base_env:
         return {}
-    return {CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(CLAUDE_AUTO_COMPACT_WINDOW_TOKENS)}
+    from spice.config.values import configured_claude_auto_compact_window
+
+    return {
+        CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(
+            configured_claude_auto_compact_window(repo_root)
+        )
+    }
 
 
 def claude_settings_json(
@@ -1109,13 +1115,13 @@ def shell_word_end(text: str, start: int) -> int:
 
 
 def playwright_mcp_config_overrides(repo_root: Path) -> list[str]:
+    from spice.config.values import configured_playwright_mcp
+
+    server_name, command, _base_args = configured_playwright_mcp(repo_root)
     return [
+        (f"mcp_servers.{server_name}.command={json.dumps(command)}"),
         (
-            f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.command="
-            f"{json.dumps(PLAYWRIGHT_MCP_COMMAND)}"
-        ),
-        (
-            f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.args="
+            f"mcp_servers.{server_name}.args="
             f"{json.dumps(playwright_mcp_args(repo_root), separators=(',', ':'))}"
         ),
     ]
@@ -1129,10 +1135,13 @@ def claude_mcp_config_json(repo_root: Path) -> str:
     server name, command, and args so both drivers expose an identical
     `playwright` server for the activation browser-validation contract.
     """
+    from spice.config.values import configured_playwright_mcp
+
+    server_name, command, _base_args = configured_playwright_mcp(repo_root)
     config = {
         "mcpServers": {
-            PLAYWRIGHT_MCP_SERVER_NAME: {
-                "command": PLAYWRIGHT_MCP_COMMAND,
+            server_name: {
+                "command": command,
                 "args": playwright_mcp_args(repo_root),
             }
         }
@@ -1141,7 +1150,10 @@ def claude_mcp_config_json(repo_root: Path) -> str:
 
 
 def playwright_mcp_args(repo_root: Path) -> list[str]:
-    args: list[str] = list(PLAYWRIGHT_MCP_ARGS)
+    from spice.config.values import configured_playwright_mcp
+
+    _server_name, _command, base_args = configured_playwright_mcp(repo_root)
+    args: list[str] = list(base_args)
     config_path = write_playwright_mcp_config(repo_root)
     args.extend(["--config", str(config_path)])
     return args

@@ -56,7 +56,7 @@ TOML_STATIC_NORMALIZERS: dict[str, Callable[[object], object]] = {
 TOML_STATIC_EXPORT_PATHS = {
     "spice.config.values.SAY_BACKEND_CHOICES": "say.backend_choices",
     "spice.config.values.DEFAULT_SAY_BACKEND": "say.backend",
-    "spice.config.values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.external_content_type",
+    "spice.config.values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.content_type",
     "spice.config.values.DEFAULT_SAY_WORDS_PER_MINUTE": "say.words_per_minute",
     "spice.config.values.DEFAULT_SAY_TIMEOUT_SECONDS": "say.timeout_seconds",
     "spice.config.values.AGENT_PERSONALITY_CHOICES": "agent.personality_choices",

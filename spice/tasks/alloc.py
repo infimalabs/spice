@@ -37,9 +37,10 @@ class BriefingTaskSnapshot:
 
 
 def actor_overrides(actor: str, route: dict[str, Any] | None) -> list[str]:
+    settings = config.resolved_task_config()
     return [
         "rc.urgency.uda.review_author."
-        f"{actor}.coefficient={config.ALLOCATOR_ANTI_SELF_REVIEW}",
+        f"{actor}.coefficient={settings.allocator_anti_self_review}",
         *lanes.rc_overrides(route),
     ]
 
@@ -87,7 +88,9 @@ def _dependency_uuids(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _priority_score(row: dict[str, Any]) -> float:
-    return config.PRIORITY_URGENCY.get(str(row.get("priority") or ""), 0.0)
+    return config.resolved_task_config().priority_urgency.get(
+        str(row.get("priority") or ""), 0.0
+    )
 
 
 def _is_self_review(row: dict[str, Any], actor: str) -> bool:
@@ -151,6 +154,7 @@ def order(
     walks this order, so a lost claim race falls through to the next row.
     """
     ref = last_cell(claimed_rows)
+    settings = config.resolved_task_config()
     crowded = peer_cells(actor, active_rows)
     ranks = _graph_ranks(ready, graph_rows if graph_rows is not None else ready)
 
@@ -168,7 +172,7 @@ def order(
         in_band = (
             _urgency(r)
             >= group_tops[(self_review, effective_priority, downstream_weight)]
-            - config.ALLOCATOR_BAND_WIDTH
+            - settings.allocator_band_width
         )
         return (
             self_review,
@@ -193,9 +197,10 @@ def is_hidden(row: dict[str, Any]) -> bool:
 
 def oops_rows() -> list[dict[str, Any]]:
     """Deferred oops items carry a far-future wait, so they are `waiting`."""
+    oops_project = config.resolved_task_config().oops_project
     return [
         r
-        for r in tw.export([f"project:{config.OOPS_PROJECT}"])
+        for r in tw.export([f"project:{oops_project}"])
         if str(r.get("status")) in ("pending", "waiting") and is_oops(r)
     ]
 

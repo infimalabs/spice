@@ -10,7 +10,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-from spice.config.values import configured_agent_driver, configured_rtk_executable
+from spice.config.values import (
+    configured_agent_driver,
+    configured_rtk_executable,
+    layered_table,
+)
 from spice.config.layers import (
     SYSTEM_SOURCE,
     contextualize_config_error,
@@ -344,7 +348,7 @@ def _selected_agent_wrapper_groups(
     repo_root: Path,
 ) -> tuple[_SelectedAgentWrapperGroup, ...]:
     """Resolve the ordered wrapper-group universe for every shell consumer."""
-    agent_settings = effective_table(repo_root, "agent")
+    agent_settings = layered_table(repo_root, "agent")
     if AGENT_WRAPPERS_KEY not in agent_settings:
         raise SpiceError(
             f"spice shell hook: effective agent configuration requires "

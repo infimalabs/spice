@@ -552,8 +552,8 @@ def test_repo_doc_guard_uses_actor_path_jittered_flex_ceiling(tmp_path):
     _write_repo_file(
         repo,
         "spice.toml",
-        "[policy]\n"
-        'repo_truth_docs = ["AGENTS.md"]\n'
+        "[policy.repo_truth]\n"
+        'docs = ["AGENTS.md"]\n'
         "\n"
         "[policy.limits]\n"
         f"repo_truth_doc_chars = {JITTER_DOC_BASE_LIMIT}\n"

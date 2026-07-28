@@ -12,6 +12,7 @@ import pytest
 from spice.agent import judgeadapter
 
 EXPLICIT_TIMEOUT_SECONDS = 12.5
+LAYERED_TIMEOUT_SECONDS = 19.5
 
 
 @pytest.mark.parametrize(
@@ -40,6 +41,26 @@ def test_resolve_model_command_defaults_to_documented_runner(monkeypatch):
 def test_resolve_model_command_honors_override(monkeypatch):
     monkeypatch.setenv(judgeadapter.JUDGE_MODEL_COMMAND_ENV, "ollama run mistral")
     assert judgeadapter.resolve_model_command() == ["ollama", "run", "mistral"]
+
+
+def test_resolvers_use_layered_judge_command_and_timeout(tmp_path, monkeypatch):
+    (tmp_path / "spice.toml").write_text(
+        """
+        [judge]
+        model_command = ["configured-runner", "configured-model"]
+        timeout_seconds = 19.5
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(judgeadapter, "repo_root_from_cwd", lambda: tmp_path)
+    monkeypatch.delenv(judgeadapter.JUDGE_MODEL_COMMAND_ENV, raising=False)
+    monkeypatch.delenv(judgeadapter.JUDGE_TIMEOUT_ENV, raising=False)
+
+    assert judgeadapter.resolve_model_command() == [
+        "configured-runner",
+        "configured-model",
+    ]
+    assert judgeadapter.resolve_timeout() == LAYERED_TIMEOUT_SECONDS
 
 
 def test_resolve_timeout_default_disable_and_value(monkeypatch):

@@ -25,6 +25,12 @@ import sys
 from collections.abc import Sequence
 
 from spice import defaults
+from spice.config.values import (
+    configured_judge_model,
+    configured_judge_model_command,
+    configured_judge_timeout,
+)
+from spice.paths import repo_root_from_cwd
 
 JUDGE_MODEL_COMMAND_ENV = "SPICE_JUDGE_MODEL_CMD"  # env-policy: allow
 JUDGE_TIMEOUT_ENV = "SPICE_JUDGE_TIMEOUT"  # env-policy: allow
@@ -48,7 +54,7 @@ def resolve_model_command() -> list[str]:
     override = os.environ.get(JUDGE_MODEL_COMMAND_ENV, "").strip()  # env-policy: allow
     if override:
         return shlex.split(override)
-    return list(DEFAULT_MODEL_COMMAND)
+    return list(configured_judge_model_command(repo_root_from_cwd()))
 
 
 def resolve_timeout() -> float | None:
@@ -60,7 +66,7 @@ def resolve_timeout() -> float | None:
     """
     raw = os.environ.get(JUDGE_TIMEOUT_ENV, "").strip()  # env-policy: allow
     if not raw:
-        return DEFAULT_TIMEOUT_SECONDS
+        return configured_judge_timeout(repo_root_from_cwd())
     value = float(raw)
     return value if value > 0 else None
 
@@ -107,9 +113,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             check=False,
         )
     except FileNotFoundError:
+        model = configured_judge_model(repo_root_from_cwd())
         print(
             f"spice-judge: judge model command {command[0]!r} not found. Install "
-            f"Ollama and run `ollama pull {DEFAULT_JUDGE_MODEL}`, set "
+            f"Ollama and run `ollama pull {model}`, set "
             f"{JUDGE_MODEL_COMMAND_ENV} to another conforming argv, or set an explicit "
             "[judge] bin.",
             file=sys.stderr,

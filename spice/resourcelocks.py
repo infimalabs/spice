@@ -18,7 +18,8 @@ from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
 from spice.process.tool import run_parent_lifetime_command
-from spice.config.layers import effective_context, effective_table
+from spice.config.layers import effective_context
+from spice.config.values import layered_table
 
 DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(
     "locks", "lock_contention_exit_code"
@@ -139,7 +140,13 @@ def handle_lock(args: argparse.Namespace) -> int:
 
 
 def configured_lock_settings(repo_root: Path) -> LockSettings:
-    table = effective_table(repo_root, "locks")
+    table = layered_table(repo_root, "locks")
+    state_root = _config_path(
+        repo_root,
+        table.get("state_root"),
+        LOCK_STATE_ROOT,
+        "[locks].state_root",
+    )
     defaults = LockExitCodes(
         lock_contention=_exit_code(
             table.get("lock_contention_exit_code"),
@@ -158,8 +165,12 @@ def configured_lock_settings(repo_root: Path) -> LockSettings:
         ),
     )
     return LockSettings(
-        locks=_configured_named_locks(repo_root, table.get("named"), defaults),
-        pools=_configured_lock_pools(repo_root, table.get("pools"), defaults),
+        locks=_configured_named_locks(
+            repo_root, table.get("named"), defaults, state_root
+        ),
+        pools=_configured_lock_pools(
+            repo_root, table.get("pools"), defaults, state_root
+        ),
     )
 
 
@@ -214,7 +225,10 @@ def lock_status_records(settings: LockSettings) -> list[dict[str, Any]]:
 
 
 def _configured_named_locks(
-    repo_root: Path, raw: object, defaults: LockExitCodes
+    repo_root: Path,
+    raw: object,
+    defaults: LockExitCodes,
+    state_root: Path,
 ) -> dict[str, NamedLockConfig]:
     if raw is None:
         return {}
@@ -230,7 +244,7 @@ def _configured_named_locks(
             path=_config_path(
                 repo_root,
                 value.get("path"),
-                LOCK_STATE_ROOT / f"{lock_name}.lock",
+                state_root / f"{lock_name}.lock",
                 f"[locks.named.{lock_name}].path",
             ),
             contention_exit_code=_exit_code(
@@ -243,7 +257,10 @@ def _configured_named_locks(
 
 
 def _configured_lock_pools(
-    repo_root: Path, raw: object, defaults: LockExitCodes
+    repo_root: Path,
+    raw: object,
+    defaults: LockExitCodes,
+    state_root: Path,
 ) -> dict[str, LockPoolConfig]:
     if raw is None:
         return {}
@@ -259,7 +276,7 @@ def _configured_lock_pools(
             directory=_config_path(
                 repo_root,
                 value.get("directory"),
-                LOCK_STATE_ROOT / pool_name,
+                state_root / pool_name,
                 f"[locks.pools.{pool_name}].directory",
             ),
             shards=_positive_int(

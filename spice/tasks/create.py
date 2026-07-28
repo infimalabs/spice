@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
+from spice.policyconfig import resolve_policy
+from spice.paths import repo_root_from_cwd
 from spice.tasks import claimstate, config, identity, projectsubs, tw, wording
 from spice.tasks.git import boundaries
 
@@ -38,7 +40,9 @@ class TaskAddBatchRequest:
     project: str | None
     acceptance: tuple[str, ...]
     description: str | None = None
-    priority: str = config.DEFAULT_PRIORITY
+    priority: str = field(
+        default_factory=lambda: config.resolved_task_config().default_priority
+    )
     flow: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     after: tuple[str, ...] = ()
@@ -93,12 +97,22 @@ def detect_suspect_wording(
     )
 
 
+def task_title_limit() -> int:
+    root = repo_root_from_cwd()
+    return (
+        resolve_policy(root).limits.commit_message_wrap
+        if root is not None
+        else TASK_TITLE_LIMIT
+    )
+
+
 def _task_title(title: str, *, context: str = "") -> str:
     value = title.strip()
-    if len(value) > TASK_TITLE_LIMIT:
+    limit = task_title_limit()
+    if len(value) > limit:
         raise SpiceError(
             f"{context}task title is {len(value)} chars; keep task titles at "
-            f"{TASK_TITLE_LIMIT} chars or less and move detail into "
+            f"{limit} chars or less and move detail into "
             "--description"
         )
     return value
@@ -127,14 +141,14 @@ def _resolved_wait(*, wait: str | None, deferred: bool, claim: bool) -> str | No
         raise SpiceError("task add --deferred cannot be combined with --wait")
     if claim:
         raise SpiceError("task add --deferred cannot be combined with --claim")
-    return config.DEFERRED_WAIT
+    return config.resolved_task_config().deferred_wait
 
 
 def _creation_wait(*, wait: str | None, project: str, incepted: str) -> str | None:
     if not config.is_oops_project(project):
         return wait
     waiting_at = identity.incepted_datetime(incepted) + timedelta(
-        seconds=config.OOPS_WAIT_SECONDS
+        seconds=config.resolved_task_config().oops_wait_seconds
     )
     return tw.canonical_utc(waiting_at)
 
@@ -289,8 +303,9 @@ def sla_due_args(
     SLA measures time on the allocator, not time spent deferred."""
     if due:
         return [f"due:{due}"]
-    if auto_due and mapped_priority in config.SLA_DUE_SECONDS:
-        return [f"due:{tw.future_utc(config.SLA_DUE_SECONDS[mapped_priority])}"]
+    sla_due_seconds = config.resolved_task_config().sla_due_seconds
+    if auto_due and mapped_priority in sla_due_seconds:
+        return [f"due:{tw.future_utc(sla_due_seconds[mapped_priority])}"]
     return []
 
 
@@ -332,7 +347,7 @@ def _build_add_args(
             mapped_priority,
             auto_due=(
                 auto_due
-                and wait != config.DEFERRED_WAIT
+                and wait != config.resolved_task_config().deferred_wait
                 and not config.is_oops_project(resolved_project)
             ),
         )
@@ -614,7 +629,7 @@ def add(
     *,
     description: str | None = None,
     project: str | None = None,
-    priority: str = config.DEFAULT_PRIORITY,
+    priority: str | None = None,
     flow: list[str] | None = None,
     tags: list[str] | None = None,
     after: list[str] | None = None,
@@ -632,7 +647,7 @@ def add(
         title=title,
         description=description,
         project=project,
-        priority=priority,
+        priority=priority or config.resolved_task_config().default_priority,
         flow=flow,
         tags=tags or [],
         after=after or [],
@@ -742,7 +757,10 @@ def _batch_request_from_fields(fields: BatchFields) -> TaskAddBatchRequest:
         title=_batch_field(fields, "title"),
         description=_batch_field(fields, "description") or None,
         project=_batch_field(fields, "project") or None,
-        priority=_batch_field(fields, "priority") or config.DEFAULT_PRIORITY,
+        priority=(
+            _batch_field(fields, "priority")
+            or config.resolved_task_config().default_priority
+        ),
         flow=_batch_csv_fields(fields, "flow"),
         tags=_batch_csv_fields(fields, "tags"),
         after=_batch_csv_fields(fields, "after"),

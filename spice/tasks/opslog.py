@@ -41,8 +41,15 @@ CONTRACT_PROPERTIES = frozenset(
         "review_finding",
         "review_note",
     }
-    | {f"phase_{slot}" for slot in range(config.PHASE_SLOT_COUNT)}
 )
+
+
+def contract_properties() -> frozenset[str]:
+    return CONTRACT_PROPERTIES | {
+        f"phase_{slot}"
+        for slot in range(config.resolved_task_config().phase_slot_count)
+    }
+
 
 VALUE_PREVIEW_CHARS = 60
 REQUIRED_OPERATIONS_COLUMNS = frozenset({"id", "uuid", "data"})
@@ -231,7 +238,7 @@ def contract_mutations_since(
         if update is None:
             continue
         prop = str(update.get("property") or "")
-        if prop not in CONTRACT_PROPERTIES:
+        if prop not in contract_properties():
             continue
         mutations.append(
             ContractMutation(

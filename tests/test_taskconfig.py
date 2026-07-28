@@ -14,6 +14,12 @@ from spice.serve.team.store import team_database_path
 from spice.tasks import config, render, tw
 from tests.test_reposcaffolding import init_empty_repo as _init_repo
 
+CUSTOM_CLAIM_TTL_SECONDS = 1234
+CUSTOM_CLAIM_CONTEXT_SECONDS = 234
+CUSTOM_OOPS_WAIT_SECONDS = 345
+CUSTOM_ALLOCATOR_ANTI_SELF_REVIEW = -222.0
+CUSTOM_SLA_DUE_SECONDS = 43_200
+
 
 def test_ensure_task_event_file_preserves_existing_event(tmp_path):
     config.mark_task_backend_changed("unit", root=tmp_path)
@@ -41,6 +47,101 @@ def test_default_backend_root_is_shared_hidden_spice_dir(tmp_path, monkeypatch):
     assert team_database_path(target) == (
         git_common_dir(target) / ".spice" / "data" / TEAM_DATABASE_FILENAME
     )
+
+
+def test_packaged_task_table_reaches_runtime_consumers(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    (repo / "spice.toml").write_text(
+        """
+        [tasks]
+        base_stems = ["task", "serve", "agent", "custom"]
+        internal_stems = ["agent", "serve"]
+        hidden_stems = ["incidents", "guidance", "secret"]
+        oops_hidden_stem = "incidents"
+        maxim_proposal_hidden_stem = "guidance"
+        approved_phases = ["design", "plan", "todo", "verify", "review", "ship"]
+        phase_slot_count = 8
+        default_flow = ["plan", "todo", "review"]
+        private_default_flow = ["plan", "todo"]
+        oops_default_flow = ["plan", "review"]
+        default_priority = "high"
+        severities = ["low", "medium", "high", "critical", "urgent"]
+        project_min_depth = 1
+        project_max_depth = 4
+        claim_ttl_seconds = 1234
+        claim_context_seconds = 234
+        deferred_wait = "2098-01-01T00:00:00"
+        oops_wait_seconds = 345
+        allocator_band_width = 3.5
+        allocator_anti_self_review = -222.0
+
+        [tasks.priority]
+        urgent = "U"
+
+        [tasks.priority_urgency]
+        U = 9.5
+
+        [tasks.taskwarrior_urgency]
+        "configured.coefficient" = 6.5
+
+        [tasks.severity_priority]
+        urgent = "U"
+
+        [tasks.severity_shorthands]
+        u = "urgent"
+
+        [tasks.sla_due_seconds]
+        U = 43200
+
+        [tasks.reports.oready]
+        description = "configured ready queue"
+        filter = "status:pending +CONFIGURED"
+        sort = "priority-"
+
+        [tasks.analytics]
+        commands = ["configured.history"]
+        """,
+        encoding="utf-8",
+    )
+
+    resolved = config.resolved_task_config(repo)
+
+    assert resolved.base_stems == ("task", "serve", "agent", "custom")
+    assert resolved.internal_stems == ("agent", "serve")
+    assert resolved.hidden_stems == ("incidents", "guidance", "secret")
+    assert resolved.oops_project == ".incidents"
+    assert resolved.maxim_proposal_project == ".guidance"
+    assert resolved.approved_phases[-1] == "ship"
+    assert resolved.phase_slot_count == 8
+    assert resolved.default_flow == ("plan", "todo", "review")
+    assert resolved.private_default_flow == ("plan", "todo")
+    assert resolved.oops_default_flow == ("plan", "review")
+    assert resolved.default_priority == "high"
+    assert resolved.severities[-1] == "urgent"
+    assert resolved.claim_ttl_seconds == CUSTOM_CLAIM_TTL_SECONDS
+    assert resolved.claim_context_seconds == CUSTOM_CLAIM_CONTEXT_SECONDS
+    assert resolved.deferred_wait == "2098-01-01T00:00:00"
+    assert resolved.oops_wait_seconds == CUSTOM_OOPS_WAIT_SECONDS
+    assert resolved.allocator_band_width == 3.5
+    assert resolved.allocator_anti_self_review == CUSTOM_ALLOCATOR_ANTI_SELF_REVIEW
+    assert resolved.priority["urgent"] == "U"
+    assert resolved.priority_urgency["U"] == 9.5
+    assert resolved.taskwarrior_urgency["configured.coefficient"] == 6.5
+    assert resolved.severity_priority["urgent"] == "U"
+    assert resolved.severity_shorthands["u"] == "urgent"
+    assert resolved.sla_due_seconds["U"] == CUSTOM_SLA_DUE_SECONDS
+    assert resolved.reports["oready"] == (
+        "configured ready queue",
+        "status:pending +CONFIGURED",
+        "priority-",
+    )
+    assert resolved.analytics_commands == ("configured.history",)
+    assert config.project_depth_bounds() == (1, 4)
+    assert "custom" in config.approved_stems()
+    assert "secret" in config.hidden_stems()
+    assert config.map_priority("urgent") == "U"
+    assert config.map_severity("u") == "urgent"
 
 
 def test_task_backend_override_requires_absolute_path(tmp_path, monkeypatch):

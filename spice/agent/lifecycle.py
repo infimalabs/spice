@@ -115,7 +115,7 @@ from spice.agent.watchdog import (
 from spice.config.values import (
     DEFAULT_AGENT_PERSONALITY,
     configured_agent_effort,
-    configured_agent_model,
+    configured_agent_model_for_driver,
     configured_agent_personality,
 )
 from spice.errors import SpiceError
@@ -328,7 +328,9 @@ def _prepare_launch(
     launch_fast_mode = fast_mode and FAST_MODE_LAUNCH_KNOB in honors
     phase_launch = _claimed_task_phase_launch(repo_root, driver.name, status)
     model = driver.resolve_model(
-        model or phase_launch.get("model", "") or configured_agent_model(repo_root)
+        model
+        or phase_launch.get("model", "")
+        or configured_agent_model_for_driver(repo_root, driver.name)
     )
     reasoning_effort = (
         reasoning_effort

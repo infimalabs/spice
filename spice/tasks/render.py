@@ -191,7 +191,7 @@ def _incepted_context_window(row: dict[str, Any]) -> tuple[str, str] | None:
     if not identity.INCEPTED_RE.match(raw):
         return None
     instant = identity.incepted_datetime(raw)
-    span = timedelta(seconds=config.CLAIM_CONTEXT_SECONDS)
+    span = timedelta(seconds=config.resolved_task_config().claim_context_seconds)
     return _iso_for_render(instant - span), _iso_for_render(instant + span)
 
 
@@ -737,18 +737,19 @@ def render_doctor_report() -> tuple[str, list[str]]:
         if count > 1:
             problems.append(f"actor {actor} has {count} active claims")
     reports = config.configured_reports(config.repo_root())
+    settings = config.resolved_task_config()
     lines = [
         f"backend {config.backend_root()}",
         f"taskrc {config.taskrc_path()}",
         f"rows {len(rows)} pending {len(pending)}",
         f"stale claims {len(alloc.stale_rows())}",
         f"reports {' '.join(reports)}",
-        f"analytics {' '.join(config.ANALYTICS_COMMANDS)}",
+        f"analytics {' '.join(settings.analytics_commands)}",
         public_task_project_depth_label(),
         f"assignable stems {' '.join(config.assignable_stems())}",
-        f"internal stems {' '.join(config.INTERNAL_STEMS)}",
+        f"internal stems {' '.join(settings.internal_stems)}",
         f"hidden stems {' '.join(config.hidden_stems())}",
-        f"approved phases {' '.join(config.APPROVED_PHASES)}",
+        f"approved phases {' '.join(settings.approved_phases)}",
     ]
     if problems:
         lines.append(f"PROBLEMS ({len(problems)}):")

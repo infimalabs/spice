@@ -36,6 +36,45 @@ MAXIM_CORPUS_RECALL_FLOOR = 1.0
 MAXIM_CORPUS_FALSE_POSITIVE_RATE_CEILING = 0.0
 
 
+def test_packaged_maxim_tables_reach_runtime_consumers(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "spice.toml").write_text(
+        """
+        [maxim]
+        max_attempts = 3
+        parallel_judges = 1
+        proposal_min_recurrence = 4
+        proposal_draft_max_words = 5
+        prompt_lines = ['CUSTOM "{maxim}" / "{statement}"']
+
+        [maxims.polling]
+        words = ["configured poll"]
+        message = "configured polling guidance"
+        """,
+        encoding="utf-8",
+    )
+
+    settings = maxims.resolved_maxim_settings(repo)
+    replies = iter(("unclear", "still unclear", "YES"))
+    verdict = maxims.evaluate_maxim(
+        "configured maxim",
+        "configured statement",
+        backend=lambda _prompt: next(replies),
+        repo_root=repo,
+    )
+    bags = maxims.resolved_maxim_bags(repo)
+
+    assert settings.max_attempts == 3
+    assert settings.parallel_judges == 1
+    assert settings.proposal_min_recurrence == 4
+    assert settings.proposal_draft_max_words == 5
+    assert settings.prompt_lines == ('CUSTOM "{maxim}" / "{statement}"',)
+    assert verdict.attempts == ("unclear", "still unclear", "YES")
+    assert verdict.prompt == 'CUSTOM "configured maxim" / "configured statement"\n'
+    assert bags["polling"].words == frozenset({"configured poll"})
+    assert bags["polling"].message == "configured polling guidance"
+
+
 @dataclass(frozen=True)
 class _MaximCorpusCase:
     maxim_name: str

@@ -719,7 +719,7 @@ def _configure_capture_parser(actions: Any) -> None:
     capture.add_argument("--title")
     capture.add_argument("--project")
     capture.add_argument("--description", action="append", default=[])
-    capture.add_argument("--priority", default=config.DEFAULT_PRIORITY)
+    capture.add_argument("--priority", default=None)
     capture.add_argument(
         "--done",
         action="store_true",
@@ -828,7 +828,7 @@ def _configure_add_content_arguments(add: Any) -> None:
     )
     add.add_argument(
         "--priority",
-        default=config.DEFAULT_PRIORITY,
+        default=None,
         help="Native Taskwarrior priority: critical/high/medium/low/none or C/H/M/L.",
     )
     add.add_argument(
@@ -1201,7 +1201,7 @@ def _depends(args: argparse.Namespace) -> str:
 
 def _reclaim(args: argparse.Namespace) -> str:
     lease_seconds = (
-        float(config.CLAIM_TTL_SECONDS)
+        float(config.resolved_task_config().claim_ttl_seconds)
         if args.lease_seconds is None
         else args.lease_seconds
     )
