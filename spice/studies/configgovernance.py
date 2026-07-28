@@ -8,8 +8,14 @@ from pathlib import Path
 
 from spice import paths
 from spice.config import layers, schema, trust
+from spice.config.pyproject import pyproject_table, read_pyproject
 from spice.errors import SpiceError
 
+_DISTRIBUTION_NAME = "spice-harness"
+_SOURCE_CHECKOUT_SENTINELS = (
+    Path("config") / "layers.py",
+    Path("studies") / "configgovernance.py",
+)
 _FALSE_DISABLE_RESOLVERS = frozenset({"enabled_registry_entries", "effective_registry"})
 _APPROVAL_GUARD = "require_repository_config_approval"
 _COMMAND_STEP_COLLECTION = "_configured_command_steps"
@@ -19,9 +25,9 @@ _BUILTIN_STEP_CONFIGURATION = "_configured_builtin_step"
 
 def run_config_key_validity_gate(repo_root: Path) -> None:
     """Validate every active layer and the required packaged source."""
-    packaged_path = repo_root / "spice" / "spice.toml"
-    if packaged_path.is_file():
-        layers.load_packaged_config(packaged_path)
+    candidate = _repository_package_source_root(repo_root)
+    if candidate is not None:
+        layers.load_packaged_config(candidate / "spice.toml")
     else:
         layers.load_packaged_config()
     layers.load_config(repo_root)
@@ -79,8 +85,20 @@ def _render_paths(paths: list[tuple[str, ...]]) -> str:
 
 
 def _package_source_root(repo_root: Path) -> Path:
-    candidate = repo_root.expanduser().resolve() / "spice"
-    return candidate if candidate.is_dir() else paths.runtime_spice_source()
+    return _repository_package_source_root(repo_root) or paths.runtime_spice_source()
+
+
+def _repository_package_source_root(repo_root: Path) -> Path | None:
+    resolved = repo_root.expanduser().resolve()
+    project = pyproject_table(read_pyproject(resolved), "project")
+    candidate = resolved / "spice"
+    if project.get("name") != _DISTRIBUTION_NAME:
+        return None
+    if not all(
+        (candidate / sentinel).is_file() for sentinel in _SOURCE_CHECKOUT_SENTINELS
+    ):
+        return None
+    return candidate
 
 
 @cache
