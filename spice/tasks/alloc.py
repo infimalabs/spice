@@ -1,9 +1,10 @@
 """Allocator policy for `task next`: graph rank, stickiness, anti-affinity.
 
-Effective priority ranks first: a prerequisite inherits the highest priority
-it transitively unblocks. Among rows of equal effective priority, downstream
-weight ranks the row that releases more of the graph first. Only then does the
-allocator use native urgency, peer spread, and movement as locality tie-breaks.
+After the existing anti-self-review eligibility class, effective priority ranks
+first: a prerequisite inherits the highest priority it transitively unblocks.
+Among rows of equal effective priority, downstream weight ranks the row that
+releases more of the graph first. Only then does the allocator use native
+urgency, peer spread, and movement as locality tie-breaks.
 
 A review the actor authored is not excluded from the candidate set; the
 anti-self-review coefficient drops its urgency far below ordinary work, so the
@@ -89,6 +90,10 @@ def _priority_score(row: dict[str, Any]) -> float:
     return config.PRIORITY_URGENCY.get(str(row.get("priority") or ""), 0.0)
 
 
+def _is_self_review(row: dict[str, Any], actor: str) -> bool:
+    return str(row.get("review_author") or "") == actor
+
+
 def _graph_ranks(
     candidates: list[dict[str, Any]],
     graph_rows: list[dict[str, Any]],
@@ -139,10 +144,11 @@ def order(
 ) -> list[dict[str, Any]]:
     """Rank candidates best-first without letting locality override the graph.
 
-    Effective priority and downstream weight are actor-independent primary
-    keys. Within rows equal on both, native urgency defines a narrow comparison
-    band, then peer spread and movement provide locality. ``next`` walks this
-    order, so a lost claim race falls through to the next row.
+    Self-authored reviews remain the last-resort eligibility class. Within each
+    class, effective priority and downstream weight are actor-independent
+    primary keys. Rows equal on both use native urgency to define a narrow
+    comparison band, then peer spread and movement provide locality. ``next``
+    walks this order, so a lost claim race falls through to the next row.
     """
     ref = last_cell(claimed_rows)
     crowded = peer_cells(actor, active_rows)
@@ -151,19 +157,21 @@ def order(
     def graph_rank(row: dict[str, Any]) -> tuple[float, int]:
         return ranks.get(_row_uuid(row), (_priority_score(row), 0))
 
-    group_tops: dict[tuple[float, int], float] = {}
+    group_tops: dict[tuple[bool, float, int], float] = {}
     for row in ready:
-        rank = graph_rank(row)
-        group_tops[rank] = max(group_tops.get(rank, float("-inf")), _urgency(row))
+        group = (_is_self_review(row, actor), *graph_rank(row))
+        group_tops[group] = max(group_tops.get(group, float("-inf")), _urgency(row))
 
-    def key(r: dict[str, Any]) -> tuple[float, int, int, bool, int, float]:
+    def key(r: dict[str, Any]) -> tuple[bool, float, int, int, bool, int, float]:
         effective_priority, downstream_weight = graph_rank(r)
+        self_review = _is_self_review(r, actor)
         in_band = (
             _urgency(r)
-            >= group_tops[(effective_priority, downstream_weight)]
+            >= group_tops[(self_review, effective_priority, downstream_weight)]
             - config.ALLOCATOR_BAND_WIDTH
         )
         return (
+            self_review,
             -effective_priority,
             -downstream_weight,
             0 if in_band else 1,
