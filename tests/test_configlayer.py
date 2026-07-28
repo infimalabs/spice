@@ -330,18 +330,25 @@ def test_unknown_key_reports_the_highest_precedence_layer_that_defines_it(tmp_pa
     assert f"agent.modle (source=worktree path={worktree})" in outcome["message"]
 
 
-def test_tool_spice_table_refuses_with_owning_release_and_replacement(tmp_path):
+@pytest.mark.parametrize(
+    "retired_config",
+    (
+        '[tool.spice.agent]\nmodel = "retired"\n',
+        '[tool."spice".agent]\nmodel = "retired"\n',
+        '["tool"."spice".agent]\nmodel = "retired"\n',
+        'tool.spice.agent.model = "retired"\n',
+        'tool = { spice = { agent = { model = "retired" } } }\n',
+        '[[tool.spice]]\nagent = { model = "retired" }\n',
+    ),
+)
+def test_tool_spice_table_refuses_with_owning_release_and_replacement(
+    tmp_path, retired_config
+):
     pyproject = tmp_path / "pyproject.toml"
     replacement = tmp_path / "spice.toml"
     _write(
         pyproject,
-        """
-        [project]
-        name = "fixture"
-
-        [tool.spice.agent]
-        model = "retired"
-        """,
+        f'{retired_config}\n[project]\nname = "fixture"\n',
     )
     _write(replacement, '[agent]\nmodel = "current"\n')
     before = replacement.read_bytes()
@@ -357,6 +364,19 @@ def test_tool_spice_table_refuses_with_owning_release_and_replacement(tmp_path):
         ),
     }
     assert replacement.read_bytes() == before
+
+
+def test_table_header_text_inside_a_pyproject_string_does_not_refuse(tmp_path):
+    _write(
+        tmp_path / "pyproject.toml",
+        'description = """\n[tool.spice.agent]\nmodel = "example"\n"""\n',
+    )
+    _write(tmp_path / "spice.toml", '[agent]\nmodel = "repository"\n')
+
+    loaded = layers.load_config(tmp_path)
+
+    assert loaded.effective["agent"]["model"] == "repository"
+    assert tuple(layer.name for layer in loaded.layers) == layers.CONFIG_SCOPE_NAMES
 
 
 def test_unrelated_malformed_pyproject_is_not_a_configuration_source(tmp_path):

@@ -20,10 +20,6 @@ REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
 _CONFIG_ERROR_TABLE_RE = re.compile(r"^\[(?:tool\.spice\.)?([^\]]+)\]")
 _CONFIG_ERROR_CANDIDATE_RE = re.compile(r"^[ .]([A-Za-z0-9_-]+)")
-_RETIRED_PYPROJECT_TABLE_RE = re.compile(
-    r"^\s*\[\[?\s*tool\.spice(?:[.\]\s])",
-    re.MULTILINE,
-)
 _RETIRED_PYPROJECT_RELEASE = "v0.30"
 CONFIG_SCOPE_NAMES = (
     SYSTEM_SOURCE,
@@ -318,7 +314,7 @@ def _reject_retired_pyproject_config(repo_root: Path) -> None:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return
-    if _RETIRED_PYPROJECT_TABLE_RE.search(text):
+    if _retired_pyproject_has_spice_table(text):
         replacement = repo_root / "spice.toml"
         raise SpiceError(
             f"{_RETIRED_PYPROJECT_RELEASE} dropped [tool.spice] configuration "
@@ -326,6 +322,23 @@ def _reject_retired_pyproject_config(repo_root: Path) -> None:
             "the tool.spice prefix"
         )
     _RETIRED_PYPROJECT_REVISIONS[path] = revision
+
+
+def _retired_pyproject_has_spice_table(text: str) -> bool:
+    """Recognize the retired table semantically without returning its values."""
+    try:
+        values = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+    tool = values.get("tool")
+    if not isinstance(tool, Mapping):
+        return False
+    spice_table = tool.get("spice")
+    return isinstance(spice_table, Mapping) or (
+        isinstance(spice_table, list)
+        and bool(spice_table)
+        and all(isinstance(entry, Mapping) for entry in spice_table)
+    )
 
 
 def _merge_mapping(

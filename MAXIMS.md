@@ -37,7 +37,7 @@ Trigger bags should fire often enough to catch drift, but not anchor the judge
 to one accidental phrase. Use whole words and small phrase families:
 
 ```toml
-[tool.spice.maxims.polling]
+[maxims.polling]
 words = ["poll", "polling", "sleep", "retry loop"]
 message = "DO NOT add polling, busy-waits, or retry loops to paper over timing; react to the real signal or restructure the flow so the wait is unnecessary."
 ```
