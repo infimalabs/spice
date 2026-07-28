@@ -14,6 +14,7 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.tasks.git import boundaries, merging, plumbing
+from tests.test_permissionhelpers import REQUIRES_MODE_BIT_DENIAL
 from tests.test_taskgitsync import (
     ACTOR_A,
     _configure_git_identity,
@@ -182,6 +183,7 @@ def test_tree_move_does_not_follow_cache_directory_symlink(tmp_path: Path) -> No
     [boundaries.prepare_for_claim, boundaries.fast_forward_if_safe],
     ids=["prepare-for-claim", "fast-forward-if-safe"],
 )
+@REQUIRES_MODE_BIT_DENIAL
 def test_tree_move_survives_denied_cache_cleanup_and_reports_it(
     tmp_path: Path, tree_move: TreeMove
 ) -> None:
@@ -215,6 +217,7 @@ def test_tree_move_survives_denied_cache_cleanup_and_reports_it(
     }
 
 
+@REQUIRES_MODE_BIT_DENIAL
 def test_head_advance_completes_when_cache_cleanup_is_denied(tmp_path: Path) -> None:
     repo = _seed_package_baseline(tmp_path, OLD_MODULE_SOURCE)
     old_head = _git_out(repo, "rev-parse", "HEAD")
@@ -248,6 +251,7 @@ def test_head_advance_completes_when_cache_cleanup_is_denied(tmp_path: Path) -> 
     }
 
 
+@REQUIRES_MODE_BIT_DENIAL
 def test_conflict_materialization_completes_when_cache_cleanup_is_denied(
     tmp_path: Path,
 ) -> None:
