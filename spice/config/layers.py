@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Any
 
 from spice import paths
+from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
 from spice.scopes import SCOPES_KEY
 
@@ -150,6 +151,13 @@ def _load_config_sources(
             )
         )
 
+    for layer, values in reversed(tuple(zip(layers, parsed, strict=True))):
+        validate_config_keys(
+            values,
+            source_name=layer.name,
+            source_path=layer.path,
+        )
+
     effective: dict[str, Any] = {}
     sources: dict[tuple[str, ...], ConfigLayer] = {}
     for layer, values in zip(layers, parsed, strict=True):
@@ -167,6 +175,7 @@ def load_packaged_config() -> ConfigLayer:
     values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
+    validate_config_keys(values, source_name=SYSTEM_SOURCE, source_path=path)
     return ConfigLayer(
         name=SYSTEM_SOURCE,
         path=path,

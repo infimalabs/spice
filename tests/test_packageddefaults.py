@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 from spice import defaultinventory, defaults, paths
-from spice.config import layers, values
+from spice.config import layers, schema, values
 from spice.config.layers import SYSTEM_SOURCE, load_packaged_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +64,18 @@ def test_every_declared_static_family_exists_in_packaged_configuration():
         "wrappers",
     }
     assert families <= set(defaults.packaged_values())
+
+
+def test_every_packaged_key_round_trips_through_the_configuration_schema():
+    path = PROJECT_ROOT / "spice" / "spice.toml"
+    packaged = tomllib.loads(path.read_text(encoding="utf-8"))
+
+    schema.validate_config_keys(
+        packaged,
+        source_name=SYSTEM_SOURCE,
+        source_path=path,
+    )
+    assert set(packaged) == set(schema.CONFIG_SCHEMA.children)
 
 
 def test_setuptools_package_data_and_built_wheel_ship_only_runtime_config(tmp_path):

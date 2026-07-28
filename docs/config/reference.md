@@ -43,6 +43,13 @@ a removal spelling. A new packaged named-entry registry must declare this
 contract and prove its consumer returns the same disabled answer before the
 configuration gate accepts it.
 
+Every Spice table is checked against the structural configuration schema
+before layers merge. An unknown structural key refuses with its dotted path
+and winning source layer, and suggests the nearest known sibling when the edit
+distance is small. Data-keyed maps such as command paths, wrapper names, lock
+names, maxim bags, and policy word maps remain open while their fixed nested
+fields are checked.
+
 ### Universal applicability selectors
 
 Configurable entries express applicability with one inline selector:
