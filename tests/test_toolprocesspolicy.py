@@ -45,9 +45,9 @@ EXPECTED_TOOL_POLICY_CALLERS = {
         "spice/tasks/ops.py:rtk_usage_nudge:capture=true",
     },
     "release": {
-        "spice/release.py:_is_ancestor:capture=true",
         "spice/release.py:github_release_url:capture=true",
         "spice/release.py:run:capture=capture",
+        "spice/releasenotes.py:is_ancestor:capture=true",
         "spice/tasks/graphs/handout.py:generate:capture=true",
     },
     "study": {"spice/studies/mutations.py:_collect_test_nodeids:capture=true"},

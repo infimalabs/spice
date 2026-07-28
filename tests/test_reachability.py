@@ -589,8 +589,16 @@ def test_exhaust_task_specs_add_decision_metadata_for_each_finding():
     )
 
 
-def test_reachability_merges_default_allowlist(tmp_path):
-    _write_reachability_repo(tmp_path, "import spice.release\n", module_name="release")
+def test_reachability_traverses_the_mounted_release_production_root(tmp_path):
+    _write_reachability_repo(
+        tmp_path,
+        "import spice.releaseidentity\n",
+        module_name="releaseidentity",
+    )
+    (tmp_path / "spice" / "release.py").write_text(
+        "from spice import releaseidentity\n",
+        encoding="utf-8",
+    )
 
     assert scan_reachability(tmp_path) == []
 
