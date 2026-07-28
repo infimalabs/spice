@@ -50,6 +50,7 @@ HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
 INIT_RECEIPT_MODE = 0o600
 DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
+RECEIPT_DIGEST_BYTES = 32
 FILE_MODE_MAX = 0o7777
 
 
@@ -328,6 +329,16 @@ def initialization_receipt_payload(
     }
 
 
+def initialization_receipt_digest(receipt: InitializationReceipt) -> str:
+    """Hash the complete normalized receipt used as unapply authority."""
+    encoded = json.dumps(
+        initialization_receipt_payload(receipt),
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
     path = prepare_operator_state_path(repo_root, INITIALIZATION_RECEIPT_PATH)
     try:
@@ -348,13 +359,13 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
     """Apply one plan with an atomically updated receipt after every operation."""
     if (git_dir(plan.repo_root) / DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
-            "run `spice deinit` to resume the interrupted deinitialization; "
+            "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
         )
     existing = load_initialization_receipt(plan.repo_root)
     if existing is not None and existing.status is InitReceiptStatus.DEINITIALIZING:
         raise SpiceError(
-            "run `spice deinit` to resume the interrupted deinitialization; "
+            "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
         )
     receipt = _receipt_for_plan(plan, existing)

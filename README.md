@@ -125,10 +125,13 @@ directly with `spice dev pre-commit`. Add `--json` to either preview form for
 the same ordered operations as a versioned machine-readable plan. Apply stores
 its interruption-safe ownership receipt under
 `<worktree-git-dir>/.spice/init-receipt.json`, outside the tracked work tree.
-Run `spice deinit` to preview reversal of that receipt in exact reverse order,
-then `spice deinit --apply` to execute it. Spice restores only files, modes, and
-scoped Git values that still match its recorded output; `spice deinit --json`
-emits the ordered machine plan, including predicted edited or shared residues.
+Run `spice init --unapply` to preview reversal of that receipt in exact reverse
+order, then `spice init --unapply --apply` to execute it. The preview includes
+the current receipt digest; pass it as `--unapply=<receipt-digest>` to assert
+that exact authority before applying. Spice restores only files, modes, and
+scoped Git values that still match its recorded output. Add `--json` to the
+unapply preview for the ordered machine plan, including the receipt digest and
+predicted edited or shared residues.
 
 **Steer** materializes the full steering and fleet surfaces. `spice init`
 previews the agent skill, shell wrapper, and steering surfaces;
@@ -156,7 +159,7 @@ spice task next
 | Preview repository initialization | `spice init [--json]` |
 | Install constitution gates only | `spice init --gates --apply` |
 | Prepare steering and fleet surfaces | `spice init --apply` / `spice doctor` |
-| Safely reverse initialized state | `spice deinit [--json]` then `spice deinit --apply` |
+| Safely reverse initialized state | `spice init --unapply [--json]` then `spice init --unapply=<receipt-digest> --apply` |
 | Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Pull allocator work | `spice task next` |

@@ -22,6 +22,7 @@ from spice.hooks.initplan import (
     InitReceiptStatus,
     InitializationReceipt,
     initialization_receipt_from_payload,
+    initialization_receipt_digest,
     initialization_receipt_path,
     initialization_receipt_payload,
     git_config_file_get,
@@ -90,6 +91,7 @@ class DeinitializationPlan:
 
     repo_root: Path
     reversal: DeinitializationReceipt | None
+    receipt_digest: str | None
     operations: tuple[DeinitOperationState, ...]
     schema_version: int = DEINIT_SCHEMA_VERSION
 
@@ -186,13 +188,16 @@ def plan_deinitialization(repo_root: Path) -> DeinitializationPlan:
     if reversal is None:
         initialization = load_initialization_receipt(resolved_root)
         if initialization is None:
-            return DeinitializationPlan(resolved_root, None, ())
+            return DeinitializationPlan(resolved_root, None, None, ())
         if initialization.repo_root != resolved_root:
             raise SpiceError(
                 "initialization receipt belongs to a different repository: "
                 f"{initialization.repo_root}"
             )
+        receipt_digest = initialization_receipt_digest(initialization)
         reversal = _new_deinitialization_receipt(initialization)
+    else:
+        receipt_digest = initialization_receipt_digest(reversal.initialization)
 
     if reversal.repo_root != resolved_root:
         raise SpiceError(
@@ -214,7 +219,12 @@ def plan_deinitialization(repo_root: Path) -> DeinitializationPlan:
             simulated,
         )
         simulated = replace(simulated, operations=tuple(states))
-    return DeinitializationPlan(resolved_root, reversal, tuple(states))
+    return DeinitializationPlan(
+        resolved_root,
+        reversal,
+        receipt_digest,
+        tuple(states),
+    )
 
 
 def deinitialization_plan_payload(plan: DeinitializationPlan) -> dict[str, object]:
@@ -245,6 +255,7 @@ def deinitialization_plan_payload(plan: DeinitializationPlan) -> dict[str, objec
         "schema_version": plan.schema_version,
         "repository": str(plan.repo_root),
         "status": "preview" if plan.reversal is not None else "not-initialized",
+        "receipt_digest": plan.receipt_digest,
         "operations": operations,
     }
 
@@ -253,12 +264,13 @@ def deinitialization_plan_rows(plan: DeinitializationPlan) -> list[str]:
     """Render a reversal preview in its exact receipt order."""
     status = "preview" if plan.reversal is not None else "not-initialized"
     rows = [
-        f"deinitialization-plan schema={plan.schema_version} "
+        f"unapply-plan schema={plan.schema_version} "
         f"status={status} repository={plan.repo_root}"
     ]
     if plan.reversal is None:
         rows.append("preview: no changes applied; pass --apply to execute")
         return rows
+    rows.append(f"receipt-digest={plan.receipt_digest}")
     for order, state in enumerate(plan.operations, start=1):
         operation = plan.reversal.initialization.operations[
             state.initialization_index
@@ -273,9 +285,26 @@ def apply_deinitialization_plan(
     plan: DeinitializationPlan,
 ) -> DeinitializationReport:
     """Apply a reversal plan, preserving the receipt's resumable write boundary."""
+    current_reversal = load_deinitialization_receipt(plan.repo_root)
+    current_initialization = (
+        current_reversal.initialization
+        if current_reversal is not None
+        else load_initialization_receipt(plan.repo_root)
+    )
+    current_digest = (
+        initialization_receipt_digest(current_initialization)
+        if current_initialization is not None
+        else None
+    )
+    if current_digest != plan.receipt_digest:
+        raise SpiceError(
+            "initialization receipt changed after unapply planning: "
+            f"expected {plan.receipt_digest or '<none>'}; "
+            f"observed {current_digest or '<none>'}"
+        )
     if plan.reversal is None:
         return _not_initialized_report(plan.repo_root)
-    reversal = load_deinitialization_receipt(plan.repo_root)
+    reversal = current_reversal
     if reversal is None:
         initialization = load_initialization_receipt(plan.repo_root)
         if initialization is None:
@@ -379,9 +408,7 @@ def _predict_config_operation(
 
 
 def deinitialization_report_rows(report: DeinitializationReport) -> list[str]:
-    rows = [
-        f"deinitialization status={report['status']} repository={report['repository']}"
-    ]
+    rows = [f"unapply status={report['status']} repository={report['repository']}"]
     for item in report["operations"]:
         row = f"{item['outcome']} {item['kind']} {item['target']}"
         recovery = item["recovery_handle"]

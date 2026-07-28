@@ -1,5 +1,6 @@
 """Executable inventory for authored-input mutation defaults."""
 
+import argparse
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -43,7 +44,7 @@ MUTATING_VERBS = (
         (EffectRead.AUTHORED_REPOSITORY, EffectRead.AUTHORED_CONFIGURATION),
     ),
     MutatingVerb(
-        ("deinit",),
+        ("init", "--unapply"),
         (
             EffectRead.AUTHORED_REPOSITORY,
             EffectRead.AUTHORED_CONFIGURATION,
@@ -98,3 +99,42 @@ def test_mutating_verb_default_is_derived_from_effect_driving_reads(
 
     assert _derived_default(verb.reads) == observed_default
     assert explicit.apply is True
+
+
+def test_receipt_writers_and_unapply_verbs_are_the_same_live_parser_set() -> None:
+    parsers = dict(
+        (
+            *_command_parsers(build_parser()),
+            *(
+                (("release", *path), parser)
+                for path, parser in _command_parsers(build_release_parser())
+            ),
+        )
+    )
+    receipt_writers = {
+        path
+        for path, parser in parsers.items()
+        if parser.get_default("writes_receipt") is True
+    }
+    unapply_verbs = {
+        path
+        for path, parser in parsers.items()
+        if any("--unapply" in action.option_strings for action in parser._actions)
+    }
+
+    assert (receipt_writers, unapply_verbs) == ({("init",)}, {("init",)})
+
+
+def _command_parsers(
+    parser: argparse.ArgumentParser,
+    prefix: tuple[str, ...] = (),
+) -> tuple[tuple[tuple[str, ...], argparse.ArgumentParser], ...]:
+    commands: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = []
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, child in action.choices.items():
+            path = (*prefix, name)
+            commands.append((path, child))
+            commands.extend(_command_parsers(child, path))
+    return tuple(commands)
