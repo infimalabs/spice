@@ -340,6 +340,10 @@ def test_agent_run_routes_python_module_wrapper_through_uv(tmp_path, monkeypatch
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
     )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "test_probe.py").write_text(
         "import sys\n\n\ndef test_probe():\n"
         "    print(f'probe-executable={sys.executable}')\n",

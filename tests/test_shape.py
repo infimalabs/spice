@@ -290,7 +290,10 @@ def test_run_python_typecheck_resolves_imports_from_repo_venv(tmp_path, monkeypa
 
 
 def test_run_python_typecheck_noops_without_targets(tmp_path):
-    (tmp_path / "spice.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n',
+        encoding="utf-8",
+    )
 
     assert run_python_typecheck(tmp_path) is None
 

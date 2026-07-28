@@ -24,10 +24,11 @@ def test_policy_test_paths_override_pytest_and_default_with_multi_root_glob(tmp_
     unity_tests = tmp_path / "Assets" / "Game" / "Tests"
     unity_tests.mkdir(parents=True)
     (tmp_path / "spice.toml").write_text(
-        "[policy]\n"
-        'test_paths = ["specs", "Assets/**/Tests"]\n'
-        "[tool.pytest.ini_options]\n"
-        'testpaths = ["pytest_tests"]\n',
+        '[policy]\ntest_paths = ["specs", "Assets/**/Tests"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["pytest_tests"]\n',
         encoding="utf-8",
     )
 
