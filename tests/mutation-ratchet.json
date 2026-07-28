@@ -1,24 +1,29 @@
 {
   "modules": {
     "spice/config/layers.py": {
-      "killed": 13,
+      "killed": 18,
       "mutants": 20,
-      "score": 0.65,
-      "survived": 7,
+      "score": 0.9,
+      "survived": 2,
       "timed_out": 0
     }
   },
   "standing": {
     "equivalentMutants": [
       {
-        "mutationIndex": 10,
+        "mutationIndex": 13,
         "path": "spice/config/layers.py",
-        "reason": "zip strictness is equivalent because parsed values and layers are appended together in the same loop"
+        "reason": "reversed validation zip strictness is equivalent because parsed values and layers are appended together in the same loop"
+      },
+      {
+        "mutationIndex": 14,
+        "path": "spice/config/layers.py",
+        "reason": "merge zip strictness is equivalent because parsed values and layers are appended together in the same loop"
       }
     ],
     "lowInformationMutants": [
       {
-        "mutationIndex": 11,
+        "mutationIndex": 16,
         "path": "spice/config/layers.py",
         "reason": "invalid Path multiplication aborts the suite before pytest can attribute the kill to an individual node ID"
       }
