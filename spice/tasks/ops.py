@@ -7,6 +7,7 @@ Taskwarrior.
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from spice.config.values import configured_rtk_executable
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.hooks import install as hook_install
 from spice.hooks import precommit
@@ -136,6 +138,11 @@ def rtk_usage_nudge() -> str | None:
         return None
     try:
         rtk_executable = configured_rtk_executable(repo_root)
+        require_repository_config_approval(
+            repo_root,
+            ("rtk", "executable"),
+            command=shlex.join((rtk_executable, "gain", "--project", "-f", "json")),
+        )
         completed = run_tool_command(
             [rtk_executable, "gain", "--project", "-f", "json"],
             policy="probe",

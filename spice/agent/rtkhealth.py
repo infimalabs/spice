@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.config import values
+from spice.config.trust import require_repository_config_approval
 from spice.agent.rtkrewrite import (
     RTK_REWRITE_MATCH_EXIT_CODE,
     RTK_REWRITE_SUCCESS_EXIT_CODES,
 )
+from spice.paths import repo_root_from_cwd
 
 RTK_MINIMUM_VERSION = (0, 42, 4)
 RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
@@ -78,6 +80,13 @@ def probe_rtk_health(
 ) -> RtkHealth:
     """Probe the configured executable exactly and always return a health state."""
     executable = values.configured_rtk_executable(repo_root)
+    resolved_root = repo_root or repo_root_from_cwd()
+    if resolved_root is not None:
+        require_repository_config_approval(
+            resolved_root,
+            ("rtk", "executable"),
+            command=shlex.join((executable, "--version")),
+        )
     runner = run or subprocess.run
     version_result, launch_detail = _run_probe(runner, [executable, "--version"])
     if version_result is None:

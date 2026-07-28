@@ -20,6 +20,7 @@ from spice.configcli import handle_config
 from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.serve import audio
+from tests.test_configtrusthelpers import approve_repository_config
 
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
@@ -322,6 +323,7 @@ def test_infinite_layered_speech_timeout_renders_with_finite_default(
         '[say]\nbackend = "external"\ncommand = "tts-engine"\ntimeout_seconds = inf\n',
         encoding="utf-8",
     )
+    approve_repository_config(tmp_path)
     seen: dict[str, object] = {}
 
     def fake_run(args, **kwargs):

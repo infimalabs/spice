@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from spice.config import values
+from spice.config.trust import require_repository_config_approval
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_thread_state_dir
 from spice.errors import SpiceError
+from spice.paths import repo_root_from_cwd
 
 RTK_REWRITE_SUBCOMMAND = "rewrite"
 RTK_CANONICAL_EXECUTABLE = "rtk"
@@ -63,6 +65,14 @@ def rewrite_command_text(
         if rtk_executable is None
         else rtk_executable
     )
+    command = [executable, RTK_REWRITE_SUBCOMMAND, "--", *args]
+    resolved_root = repo_root or repo_root_from_cwd()
+    if rtk_executable is None and resolved_root is not None:
+        require_repository_config_approval(
+            resolved_root,
+            ("rtk", "executable"),
+            command=shlex.join(command),
+        )
     runner = run or subprocess.run
     run_kwargs: dict[str, Any] = {
         "capture_output": True,
@@ -73,7 +83,7 @@ def rewrite_command_text(
         run_kwargs["env"] = dict(env)
     try:
         completed = runner(
-            [executable, RTK_REWRITE_SUBCOMMAND, "--", *args],
+            command,
             **run_kwargs,
         )
     except OSError as exc:
