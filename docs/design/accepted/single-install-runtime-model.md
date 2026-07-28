@@ -48,6 +48,15 @@ surfaces; the runtime is a deliberate, separately-managed deployment. Editing a
 worker is always safe. Updating the server is an explicit reinstall/redeploy
 step, not an accident of `cd`.
 
+A live `spice serve` also treats that deployment as one indivisible runtime.
+It records the installed interpreter, console entry point, distribution
+metadata, and packaged `spice.toml` identities before accepting requests. If a
+`uv tool install --reinstall` replaces any of them, a request at the boundary
+gets a retryable 503 instead of entering a half-removed package. Serve stops,
+waits until the replacement interpreter can import and validate its packaged
+configuration, then reexecs the original command on the same process and port.
+This applies in both registry-to-editable and editable-to-registry directions.
+
 ## Deployment Evidence Boundary
 
 A change landed on a branch has **no fleet effect** until the installed CLI

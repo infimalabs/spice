@@ -9,6 +9,7 @@ import json
 import mimetypes
 import os
 import subprocess
+import sys
 from concurrent.futures import Future
 from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
@@ -86,6 +87,11 @@ from spice.serve.observer import (
     observer_lane_signature,
     observer_messages_payload,
 )
+from spice.serve.runtimeinstall import (
+    RuntimeInstallation,
+    restart_replaced_runtime,
+    start_runtime_replacement_watch,
+)
 from spice.serve.team.store import (
     AuthorityStoreSupersededError,
     ServeTeamStore,
@@ -160,6 +166,7 @@ class ServeState:
         auth_token: str | None = None,
         observer: ObserverRegistry | None = None,
         team_store: ServeTeamStore | None = None,
+        runtime_installation: RuntimeInstallation | None = None,
     ) -> None:
         if observer is not None and team_store is not None:
             raise ValueError("observer mode cannot use a team store")
@@ -185,6 +192,10 @@ class ServeState:
         self.lifecycle_decision_authority: LifecycleDecisionAuthority | None = None
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self.lifecycle_reconciler: LifecycleReconciler | None = None
+        self.runtime_installation = runtime_installation
+        self.runtime_replacement = Event()
+        self.runtime_replacement_lock = Lock()
+        self.serve_loop_started = Event()
         # Assigned once the server exists, which is after this. Serving is what
         # a superseded store ends, so until there is a server to stop there is
         # nothing for the store to interrupt.
@@ -205,6 +216,33 @@ class ServeState:
             if self._team_store is not None
             else None
         )
+
+    def runtime_was_replaced(self) -> bool:
+        """Latch and stop before a request enters a replaced installation."""
+        installation = self.runtime_installation
+        if installation is None or installation.is_current():
+            return False
+        self.stop_for_runtime_replacement()
+        return True
+
+    def stop_for_runtime_replacement(self) -> None:
+        """Request one coherent stop so the caller can enter the new runtime."""
+        with self.runtime_replacement_lock:
+            if self.runtime_replacement.is_set():
+                return
+            self.runtime_replacement.set()
+        print(
+            "spice serve: runtime installation changed; "
+            "stopping before mixed code can serve",
+            flush=True,
+        )
+        stop = self.stop_serving
+        if stop is not None and self.serve_loop_started.is_set():
+            Thread(
+                target=stop,
+                name="spice-serve-runtime-replacement",
+                daemon=True,
+            ).start()
 
     def _stop_serving_superseded_store(
         self, error: AuthorityStoreSupersededError
@@ -409,10 +447,12 @@ def run_serve(args: argparse.Namespace) -> int:
         observer = discover_observer_sessions(list(args.session_dirs))
         for error in observer.errors:
             print(f"spice watch: {error}")
+    runtime_installation = RuntimeInstallation.capture()
     state = ServeState(
         anchor_root=anchor_root,
         auth_token=auth_token,
         observer=observer,
+        runtime_installation=runtime_installation,
     )
     server = _ServeHttpServer((args.host, args.port), _ServeHandler, state)
     # The same stop `--until` uses, reached from the same place: a store that
@@ -422,6 +462,11 @@ def run_serve(args: argparse.Namespace) -> int:
     state.stop_serving = server.shutdown
     watch_stop = Event()
     watch_thread = start_exit_file_watch(server, args, stop_event=watch_stop)
+    runtime_watch_thread = start_runtime_replacement_watch(
+        runtime_installation,
+        stop_event=watch_stop,
+        on_replacement=state.stop_for_runtime_replacement,
+    )
     lifecycle_reconciler = start_lifecycle_reconciler(state)
     available_work_watch = start_available_work_watch(state)
     bound_host, bound_port = server.server_address[:2]
@@ -433,7 +478,9 @@ def run_serve(args: argparse.Namespace) -> int:
     if observer is not None:
         print(f"spice watch: sessions={len(observer.sessions)} read_only=true")
     try:
-        server.serve_forever()
+        if not state.runtime_replacement.is_set():
+            state.serve_loop_started.set()
+            server.serve_forever()
     except KeyboardInterrupt:
         print("\nspice serve: interrupted")
     finally:
@@ -447,10 +494,13 @@ def run_serve(args: argparse.Namespace) -> int:
         server.server_close()
         if watch_thread is not None:
             watch_thread.join(timeout=SERVE_UNTIL_WATCHER_JOIN_SECONDS)
+        runtime_watch_thread.join(timeout=SERVE_UNTIL_WATCHER_JOIN_SECONDS)
         if available_work_watch is not None:
             available_work_watch.join()
         if lifecycle_reconciler is not None:
             join_lifecycle_reconciler(lifecycle_reconciler)
+    if state.runtime_replacement.is_set():
+        restart_replaced_runtime(sys.argv[1:])
     return 0
 
 
@@ -590,6 +640,10 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             if not self.parse_request():
+                return
+            if self.state.runtime_was_replaced():
+                self._send_runtime_restarting()
+                self.wfile.flush()
                 return
             method_name = "do_" + self.command
             if not hasattr(self, method_name):
@@ -1112,6 +1166,18 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_header("WWW-Authenticate", 'Bearer realm="spice serve"')
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_runtime_restarting(self) -> None:
+        body = b"spice serve runtime was replaced; restarting\n"
+        self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Retry-After", "1")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
 
     def _read_payload(self) -> dict[str, Any]:
         try:
