@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -176,7 +174,7 @@ def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_set(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     key_path = edit.parse_dotted_key(str(args.key))
-    value = _parse_set_value(str(args.value))
+    value = edit.parse_toml_value(str(args.value))
     _validate_set_leaf(repo_root, scope, key_path, value)
     if _preview_system_mutation(
         args,
@@ -428,32 +426,6 @@ _CONFIG_ACTIONS = {
     "agent": _handle_agent,
     "personality": _handle_personality,
 }
-
-_TOML_NUMBER_RE = re.compile(
-    r"^[+-]?(?:inf|nan|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|"
-    r"(?:\d[\d_]*)(?:\.[\d_]+)?(?:[eE][+-]?[\d_]+)?)$"
-)
-
-
-def _parse_set_value(raw: str) -> Any:
-    stripped = raw.strip()
-    structured = (
-        stripped in {"true", "false"}
-        or stripped.startswith(('"', "'", "[", "{"))
-        or _TOML_NUMBER_RE.fullmatch(stripped) is not None
-    )
-    if not structured:
-        return raw
-    try:
-        parsed = tomllib.loads(f"value = {stripped}")["value"]
-    except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML configuration value {raw!r}: {exc}") from exc
-    if isinstance(parsed, (str, bool, int, float, list, dict)):
-        return parsed
-    raise SpiceError(
-        f"unsupported TOML configuration value {raw!r}; "
-        "expected a string, boolean, number, array, or inline table"
-    )
 
 
 def _config_value_at(values: Mapping[str, Any], path: Sequence[str]) -> Any:

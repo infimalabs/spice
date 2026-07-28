@@ -52,6 +52,7 @@ from spice.config.layers import (
     effective_table,
     enabled_registry_entries,
 )
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.process.git import run_git_command
@@ -502,10 +503,12 @@ def _configured_builtin_steps(
         )
 
     by_key = {step.key: step for step in builtin_steps}
-    normalized = {
-        _normalize_step_key(raw_key): raw_value
-        for raw_key, raw_value in raw_overrides.items()
-    }
+    normalized: dict[str, Any] = {}
+    source_keys: dict[str, str] = {}
+    for raw_key, raw_value in raw_overrides.items():
+        key = _normalize_step_key(raw_key)
+        normalized[key] = raw_value
+        source_keys[key] = str(raw_key)
     unknown = sorted(key for key in normalized if key not in by_key)
     if unknown:
         known = ", ".join(step.key for step in builtin_steps)
@@ -521,19 +524,33 @@ def _configured_builtin_steps(
         if step.key not in overrides:
             continue
         replacement = overrides[step.key]
-        configured_step = _configured_builtin_step(repo_root, step, replacement)
+        configured_step = _configured_builtin_step(
+            repo_root,
+            step,
+            replacement,
+            config_path=(
+                "policy",
+                "pre_commit_builtins",
+                source_keys[step.key],
+            ),
+        )
         if configured_step is not None:
             configured.append(configured_step)
     return configured
 
 
 def _configured_builtin_step(
-    repo_root: Path, step: PreCommitStep, raw: Any
+    repo_root: Path,
+    step: PreCommitStep,
+    raw: Any,
+    *,
+    config_path: tuple[str, ...],
 ) -> PreCommitStep | None:
     if raw is True:
         return step
     if isinstance(raw, str):
         command = _mounted_command_step(repo_root, raw)
+        _require_command_step_approval(repo_root, config_path, command)
         return _command_pre_commit_step(step.key, command)
     if not isinstance(raw, dict):
         raise SpiceError(
@@ -546,6 +563,7 @@ def _configured_builtin_step(
         command = _command_step_from_table(
             repo_root, raw, default_label=step.label, context=step.key
         )
+        _require_command_step_approval(repo_root, config_path, command)
         return _command_pre_commit_step(step.key, command)
     label = _label_from_table(raw, default=step.label, context=step.key)
     return PreCommitStep(step.key, label, step.action)
@@ -596,6 +614,11 @@ def _configured_command_steps(
                 f"[policy] {config_key} entries must be mounted command "
                 "names or { label = ..., run = [...] } tables"
             )
+        _require_command_step_approval(
+            repo_root,
+            ("policy", config_key),
+            command,
+        )
         paths = _scoped_staged_paths(
             scope,
             staged,
@@ -626,6 +649,18 @@ def _command_pre_commit_step(key: str, command: CommandStep) -> PreCommitStep:
     )
 
 
+def _require_command_step_approval(
+    repo_root: Path,
+    config_path: tuple[str, ...],
+    command: CommandStep,
+) -> None:
+    require_repository_config_approval(
+        repo_root,
+        config_path,
+        command=shlex.join(command.argv),
+    )
+
+
 def _mounted_command_step(repo_root: Path, name: str) -> CommandStep:
     label = name.strip()
     if not label:
@@ -636,6 +671,11 @@ def _mounted_command_step(repo_root: Path, name: str) -> CommandStep:
         raise SpiceError(
             f"[policy] pre-commit command {label!r} is not declared in [commands]"
         )
+    require_repository_config_approval(
+        repo_root,
+        ("commands", *path),
+        command=shlex.join(argv),
+    )
     return CommandStep(
         label=label,
         argv=argv,

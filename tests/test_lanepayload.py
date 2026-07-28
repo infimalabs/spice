@@ -882,13 +882,11 @@ def _reset_task_board_observation():
         taskboard._task_board_builds.clear()
 
 
-def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
-    seen: list[list[str]] = []
-
-    def fake_export(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
-        seen.append(args)
-        assert args == ["status.any:"]
-        return [
+def test_task_filter_inventory_reports_open_assignable_tasks():
+    observation = taskboard.TaskBoardObservation(
+        backend_identity="inventory-shape",
+        revision=FIXTURE_GENERATION,
+        rows=(
             {"uuid": "ready-serve-a", "project": "serve.ui"},
             {"uuid": "ready-serve-b", "project": "serve.ui"},
             {
@@ -928,17 +926,11 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
                 "status": "pending",
                 "wait": "20990101T000000Z",
             },
-        ]
-
-    monkeypatch.setattr(
-        tw,
-        "export",
-        fake_export,
+        ),
     )
-    inventory = taskboard.open_task_board_projection().task_filter_inventory
+    inventory = taskboard.open_task_board_projection(observation).task_filter_inventory
     filters = {item["name"]: item for item in inventory["filters"]}
     stems = {item["name"]: item for item in inventory["primaryStems"]}
-    assert seen == [["status.any:"]]
     assert inventory["openTaskCount"] == 6
     assert filters["serve.ui"] == {
         "name": "serve.ui",
