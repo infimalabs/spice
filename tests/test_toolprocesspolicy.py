@@ -26,6 +26,7 @@ EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
     "spice/process/groups.py:_posix_process_group_has_live_member:run",
     "spice/process/groups.py:run_bounded_process_group:Popen",
     "spice/process/tool.py:run_parent_lifetime_command:run",
+    "spice/serve/runtimeinstall.py:restart_replaced_runtime:run",
     "spice/tasks/tw.py:run:run",
 }
 EXPECTED_TOOL_POLICY_CALLERS = {

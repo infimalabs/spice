@@ -14,7 +14,11 @@ import time
 from http import HTTPStatus
 from pathlib import Path
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.serve import app
+from spice.serve import runtimeinstall
 from spice.serve.runtimeinstall import RuntimeInstallation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +101,36 @@ def test_replaced_runtime_request_returns_retryable_response_before_config_load(
     assert response.getheader("Retry-After") == "1"
     assert body == "spice serve runtime was replaced; restarting\n"
     assert state.runtime_replacement.is_set() is True
+
+
+def test_runtime_watch_startup_error_uses_named_cleanup_deadline(
+    monkeypatch,
+) -> None:
+    join_timeouts: list[float | None] = []
+
+    class StartupErrorThread:
+        def __init__(self, *, target, args, name, daemon):
+            del target, name, daemon
+            self.args = args
+
+        def start(self) -> None:
+            _, _, activated, startup_errors, _ = self.args
+            startup_errors.append(RuntimeError("watch registration failed"))
+            activated.set()
+
+        def join(self, timeout=None) -> None:
+            join_timeouts.append(timeout)
+
+    monkeypatch.setattr(runtimeinstall, "Thread", StartupErrorThread)
+
+    with pytest.raises(SpiceError, match="watch registration failed"):
+        runtimeinstall.start_runtime_replacement_watch(
+            RuntimeInstallation(markers=()),
+            stop_event=threading.Event(),
+            on_replacement=lambda: None,
+        )
+
+    assert join_timeouts == [runtimeinstall.RUNTIME_WATCH_STARTUP_JOIN_TIMEOUT_SECONDS]
 
 
 def test_live_serve_reexecs_across_wheel_editable_wheel_replacements(
