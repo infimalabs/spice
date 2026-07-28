@@ -397,6 +397,7 @@ def ensure_agent(
     supervise_stdout: bool = True,
     automatic: bool = False,
     launch_claim: LaunchClaim | None = None,
+    launch_preflighted: bool = False,
 ) -> AgentEnsureResult:
     if launch_claim is not None and not supervise_stdout:
         raise SpiceError(
@@ -454,6 +455,7 @@ def ensure_agent(
             fast_mode=launch.fast_mode,
             supervise_stdout=supervise_stdout,
             launch_claim=launch_claim,
+            sync_before_start=not launch_preflighted,
         )
         return AgentEnsureResult(
             action=launch.action,
@@ -496,6 +498,7 @@ def start_agent(
     fast_mode: bool,
     supervise_stdout: bool,
     launch_claim: LaunchClaim | None,
+    sync_before_start: bool = True,
 ) -> Path:
     # This shared boundary covers both launch modes. It intentionally runs in
     # the globally installed parent before the detached ``python -m spice``
@@ -503,7 +506,8 @@ def start_agent(
     # fast-forward-quiet-advance activation uses: it never raises and never
     # mangles the tree, so an unsafe checkout still launches the agent that can
     # reconcile it rather than dying pre-start.
-    boundaries.fast_forward_if_safe(repo_root)
+    if sync_before_start:
+        boundaries.fast_forward_if_safe(repo_root)
     log_path = next_agent_log_path(repo_root)
     if supervise_stdout:
         supervisor = spawn_agent_supervisor(
