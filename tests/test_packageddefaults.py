@@ -108,45 +108,118 @@ def test_installed_and_layered_loaders_use_the_same_packaged_path(tmp_path):
     assert layered.values == packaged.values
 
 
-def test_default_export_inventory_resolves_every_python_export_and_toml_leaf():
-    assert values.default_classifications() == (
-        defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION
+def _default_inventory_findings() -> list[str]:
+    """Return every violation enforced by the exported-default inventory gate."""
+    findings: list[str] = []
+    inventory = defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION
+    if values.default_classifications() != inventory:
+        findings.append("public classification export drift")
+
+    unknown = sorted(set(inventory.values()) - defaultinventory.CLASSIFICATIONS)
+    findings.extend(
+        f"unknown classification: {classification}" for classification in unknown
     )
-    assert set(defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION.values()) == (
-        defaultinventory.CLASSIFICATIONS
-    )
+
     for (
         export,
         classification,
-    ) in defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION.items():
+    ) in inventory.items():
         module_name, attribute = export.rsplit(".", maxsplit=1)
         module = importlib.import_module(module_name)
-        assert hasattr(module, attribute), export
-        if classification == defaultinventory.TOML_STATIC:
-            assert export in defaultinventory.TOML_STATIC_EXPORT_PATHS
-    assert _static_default_mismatches() == []
+        if not hasattr(module, attribute):
+            findings.append(f"missing export: {export}")
+        if (
+            classification == defaultinventory.TOML_STATIC
+            and export not in defaultinventory.TOML_STATIC_EXPORT_PATHS
+        ):
+            findings.append(f"missing TOML path: {export}")
+
+    findings.extend(
+        f"value drift: {export}"
+        for export, _runtime, _packaged in _static_default_mismatches()
+    )
+    return findings
+
+
+def test_default_export_inventory_resolves_every_python_export_and_toml_leaf():
+    assert _default_inventory_findings() == []
 
 
 def test_static_default_gate_fails_when_a_python_constant_drifts(monkeypatch):
     export = "spice.config.values.DEFAULT_SAY_BACKEND"
     monkeypatch.setattr(values, "DEFAULT_SAY_BACKEND", "drifted")
 
-    assert _static_default_mismatches() == [
-        (export, "drifted", defaults.value("say", "backend"))
+    assert _default_inventory_findings() == [f"value drift: {export}"]
+
+
+def test_default_inventory_gate_rejects_public_classification_export_drift(
+    monkeypatch,
+):
+    monkeypatch.setattr(values, "default_classifications", dict)
+
+    assert _default_inventory_findings() == ["public classification export drift"]
+
+
+def test_default_inventory_gate_rejects_an_unknown_classification(monkeypatch):
+    export = "spice.config.values.DEFAULT_SAY_BACKEND"
+    monkeypatch.setitem(
+        defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION,
+        export,
+        "unmeasured-derived",
+    )
+
+    assert _default_inventory_findings() == [
+        "unknown classification: unmeasured-derived"
     ]
 
 
-def test_every_module_level_default_constant_is_classified():
-    classified = set(defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION)
-    discovered = _module_level_default_exports()
+def test_default_inventory_gate_rejects_a_missing_export_attribute(monkeypatch):
+    export = "spice.config.values.MISSING_DEFAULT"
+    monkeypatch.setitem(
+        defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION,
+        export,
+        defaultinventory.PROTOCOL_INVARIANT,
+    )
 
-    assert discovered <= classified, (
+    assert _default_inventory_findings() == [f"missing export: {export}"]
+
+
+def test_default_inventory_gate_rejects_a_static_export_without_a_path(monkeypatch):
+    export = "spice.config.values.default_judge_bin"
+    monkeypatch.setitem(
+        defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION,
+        export,
+        defaultinventory.TOML_STATIC,
+    )
+
+    assert _default_inventory_findings() == [f"missing TOML path: {export}"]
+
+
+@pytest.mark.parametrize(
+    "export",
+    tuple(defaultinventory.TOML_STATIC_NORMALIZERS),
+    ids=lambda export: export.rsplit(".", maxsplit=1)[-1],
+)
+def test_default_inventory_gate_rejects_drift_behind_each_normalizer(
+    monkeypatch, export
+):
+    module_name, attribute = export.rsplit(".", maxsplit=1)
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module, attribute, "deliberately-drifted")
+
+    assert _default_inventory_findings() == [f"value drift: {export}"]
+
+
+def test_every_module_level_default_constant_is_classified():
+    unclassified = _unclassified_default_exports()
+
+    assert unclassified == set(), (
         "module-level default constants missing from default inventory: "
-        + ", ".join(sorted(discovered - classified))
+        + ", ".join(sorted(unclassified))
     )
 
 
-def test_reverse_default_gate_discovers_every_authored_default_shape(tmp_path):
+def test_reverse_default_gate_rejects_every_authored_default_shape(tmp_path):
     source_root = tmp_path / "spice"
     source_root.mkdir()
     (source_root / "sample.py").write_text(
@@ -156,7 +229,7 @@ def test_reverse_default_gate_discovers_every_authored_default_shape(tmp_path):
         encoding="utf-8",
     )
 
-    assert _module_level_default_exports(source_root) == {
+    assert _unclassified_default_exports(source_root) == {
         "spice.sample.DEFAULT_LEFT",
         "spice.sample.DEFAULT_RIGHT",
         "spice.sample.NAMED_WITHOUT_DEFAULT_PREFIX",
@@ -202,6 +275,14 @@ def _module_level_default_exports(
                     ):
                         exports.add(f"{module}.{name}")
     return exports
+
+
+def _unclassified_default_exports(
+    source_root: Path = PROJECT_ROOT / "spice",
+) -> set[str]:
+    return _module_level_default_exports(source_root) - set(
+        defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION
+    )
 
 
 def _uses_packaged_default(node: ast.stmt) -> bool:
