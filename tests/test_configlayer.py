@@ -358,6 +358,11 @@ def test_contextualization_preserves_table_grammar_and_repository_source(tmp_pat
     )
 
 
+def test_registry_resolver_refuses_an_undeclared_false_disable_contract():
+    with pytest.raises(SpiceError, match="does not declare false-disable semantics"):
+        layers.enabled_registry_entries({"sample": False}, "future", "registry")
+
+
 def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
     worktree = tmp_path / ".spice" / "config" / "spice.toml"
     _write(worktree, '[serve]\nbrand = ""\n')

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from spice import defaults
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
@@ -114,6 +115,7 @@ def repo_truth_doc_violations(repo: Path) -> list[str]:
 
 def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
     actual = [step.key for step in precommit._builtin_pre_commit_steps(tmp_path, [])]
+    packaged = list(defaults.table("policy", "pre_commit_builtins"))
     missing = [key for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS if key not in actual]
     unexpected = [key for key in actual if key not in EXPECTED_BUILTIN_PRE_COMMIT_KEYS]
     assert actual == EXPECTED_BUILTIN_PRE_COMMIT_KEYS, (
@@ -121,6 +123,10 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
         f"unexpected guard(s): {unexpected or 'none'}. A gate may not be removed, "
         "renamed, or added without updating EXPECTED_BUILTIN_PRE_COMMIT_KEYS in the "
         "same commit."
+    )
+    assert packaged == actual, (
+        "every built-in pre-commit step must have a packaged registry entry so "
+        "the shared false-disable resolver can remove it"
     )
 
 
