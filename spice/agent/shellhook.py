@@ -367,6 +367,7 @@ def _selected_agent_wrapper_groups(
         )
         raw_group = enabled_definitions.get(group_name)
         if raw_group is None and group_name in definitions:
+            _warn_dropped_packaged_wrappers(repo_root, group_name, {})
             continue
         from_extension = raw_group is None and group_name in extension_entries
         if from_extension:

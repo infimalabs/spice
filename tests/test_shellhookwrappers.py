@@ -178,6 +178,26 @@ def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
     assert "drops packaged wrappers: grep, rtk" in warning
 
 
+def test_agent_wrapper_lines_disabled_common_warns_every_packaged_wrapper_dropped(
+    tmp_path,
+):
+    write_agent_wrapper_config(
+        tmp_path,
+        order=None,
+        groups={"common": False},
+    )
+
+    with pytest.warns(UserWarning) as caught:
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == []
+    warning = str(caught[0].message)
+    assert warning == (
+        "spice shell hook: wrappers.common from repository replaces the packaged "
+        "wrapper group and drops packaged wrappers: grep, rtk"
+    )
+
+
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
     write_agent_wrapper_config(
         tmp_path,
