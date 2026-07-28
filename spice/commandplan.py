@@ -99,6 +99,7 @@ class _MountedOperation:
 
 
 class MountedReceiptEvent(StrEnum):
+    APPLY_INTENT = "apply-intent"
     APPLY = "apply"
     UNAPPLY = "unapply"
 
@@ -113,7 +114,7 @@ class MountedReversalOutcome(StrEnum):
 
 @dataclass(frozen=True)
 class MountedReceiptRecord:
-    """One durable mounted-plan completion fact in shared operation vocabulary."""
+    """One durable mounted-plan intent or completion fact."""
 
     repo_root: Path
     receipt_id: str
@@ -137,11 +138,14 @@ class MountedPlanReceipt:
     plan_digest: str
     operation_count: int
     operations: tuple[dict[str, Any], ...]
+    pending_apply: MountedReceiptRecord | None
     reversals: tuple[MountedReceiptRecord, ...]
 
     @property
     def complete(self) -> bool:
-        return len(self.operations) == self.operation_count
+        return (
+            len(self.operations) == self.operation_count and self.pending_apply is None
+        )
 
     @property
     def reversing(self) -> bool:
@@ -490,12 +494,14 @@ def apply_receipted_mounted_plan(
         plan_digest = receipt.plan_digest
         operation_count = receipt.operation_count
         completed = len(receipt.operations)
+        pending_apply = receipt.pending_apply
     else:
         pending_raw = document.operations
         command = document.command
         plan_digest = document.digest
         operation_count = len(document.operations)
         completed = 0
+        pending_apply = None
     mounted = tuple(
         _mounted_operation(operation, resolved_root) for operation in pending_raw
     )
@@ -503,9 +509,40 @@ def apply_receipted_mounted_plan(
         _assert_observed_state(resolved_root, operation)
 
     applied: list[str] = []
+    if pending_apply is not None:
+        operation = _mounted_operation(pending_apply.operation, resolved_root)
+        completion = MountedReceiptRecord(
+            repo_root=resolved_root,
+            receipt_id=receipt_id,
+            command=command,
+            plan_digest=plan_digest,
+            event=MountedReceiptEvent.APPLY,
+            operation_index=pending_apply.operation_index,
+            operation_count=operation_count,
+            operation=pending_apply.operation,
+        )
+        encoded_completion = encode_mounted_receipt_record(completion)
+        _complete_started_mounted_operation(resolved_root, operation)
+        append_mounted_receipt_record(
+            completion,
+            encoded=encoded_completion,
+        )
+        applied.append(operation.outcome_label)
+
+    started = completed + (1 if pending_apply is not None else 0)
     for offset, operation in enumerate(mounted):
-        index = completed + offset
-        record = MountedReceiptRecord(
+        index = started + offset
+        intent = MountedReceiptRecord(
+            repo_root=resolved_root,
+            receipt_id=receipt_id,
+            command=command,
+            plan_digest=plan_digest,
+            event=MountedReceiptEvent.APPLY_INTENT,
+            operation_index=index,
+            operation_count=operation_count,
+            operation=pending_raw[offset],
+        )
+        completion = MountedReceiptRecord(
             repo_root=resolved_root,
             receipt_id=receipt_id,
             command=command,
@@ -515,9 +552,14 @@ def apply_receipted_mounted_plan(
             operation_count=operation_count,
             operation=pending_raw[offset],
         )
-        encoded = encode_mounted_receipt_record(record)
+        encoded_intent = encode_mounted_receipt_record(intent)
+        encoded_completion = encode_mounted_receipt_record(completion)
+        append_mounted_receipt_record(intent, encoded=encoded_intent)
         _apply_operation(resolved_root, operation)
-        append_mounted_receipt_record(record, encoded=encoded)
+        append_mounted_receipt_record(
+            completion,
+            encoded=encoded_completion,
+        )
         applied.append(operation.outcome_label)
     return applied
 
@@ -759,6 +801,7 @@ def _replay_mounted_receipt(
         raise ValueError("mounted receipt has no records")
     first = records[0]
     operations: list[dict[str, Any]] = []
+    pending_apply: MountedReceiptRecord | None = None
     reversals: list[MountedReceiptRecord] = []
     for record in records:
         if (
@@ -769,23 +812,55 @@ def _replay_mounted_receipt(
             or record.operation_count != first.operation_count
         ):
             raise SpiceError("mounted command receipt mixes operation contexts")
+        if record.event is MountedReceiptEvent.APPLY_INTENT:
+            if reversals:
+                raise SpiceError(
+                    "mounted command receipt applies after reversal started"
+                )
+            if pending_apply is not None:
+                raise SpiceError(
+                    "mounted command receipt starts an operation before "
+                    "completing its prior intent"
+                )
+            expected_index = len(operations)
+            if record.operation_index != expected_index:
+                raise SpiceError(
+                    "mounted command receipt apply intent is not consecutive: "
+                    f"expected {expected_index}, observed {record.operation_index}"
+                )
+            if record.operation.get("order") != expected_index + 1:
+                raise SpiceError(
+                    "mounted command receipt apply intent order is not consecutive"
+                )
+            pending_apply = record
+            continue
         if record.event is MountedReceiptEvent.APPLY:
             if reversals:
                 raise SpiceError(
                     "mounted command receipt applies after reversal started"
                 )
+            if pending_apply is None:
+                raise SpiceError(
+                    "mounted command receipt completes an operation without "
+                    "a durable intent"
+                )
             expected_index = len(operations)
             if record.operation_index != expected_index:
                 raise SpiceError(
-                    "mounted command receipt apply prefix is not consecutive: "
+                    "mounted command receipt apply completion is not consecutive: "
                     f"expected {expected_index}, observed {record.operation_index}"
                 )
-            if record.operation.get("order") != expected_index + 1:
+            if record.operation != pending_apply.operation:
                 raise SpiceError(
-                    "mounted command receipt apply operation order is not consecutive"
+                    "mounted command receipt apply completion changed its intent"
                 )
+            pending_apply = None
             operations.append(record.operation)
             continue
+        if pending_apply is not None:
+            raise SpiceError(
+                "mounted command receipt reverses an incomplete apply intent"
+            )
         if len(operations) != first.operation_count:
             raise SpiceError(
                 "mounted command receipt reverses an incomplete apply prefix"
@@ -808,6 +883,7 @@ def _replay_mounted_receipt(
         plan_digest=first.plan_digest,
         operation_count=first.operation_count,
         operations=tuple(operations),
+        pending_apply=pending_apply,
         reversals=tuple(reversals),
     )
     if receipt.complete and receipt.digest != receipt.plan_digest:
@@ -828,32 +904,48 @@ def _receipt_pending_operations(
             f"receipt is active; recorded={receipt.plan_digest} "
             f"observed={document.digest}"
         )
-    completed = len(receipt.operations)
+    recorded = (
+        *receipt.operations,
+        *(
+            (receipt.pending_apply.operation,)
+            if receipt.pending_apply is not None
+            else ()
+        ),
+    )
+    completed = len(recorded)
     if (
         receipt.plan_digest == document.digest
         and receipt.operation_count == len(document.operations)
-        and receipt.operations == document.operations[:completed]
+        and recorded == document.operations[:completed]
     ):
         return document.operations[completed:]
 
     completed_by_identity = {
-        _operation_identity(operation): operation for operation in receipt.operations
+        _operation_identity(operation): operation for operation in recorded
     }
     pending: list[dict[str, Any]] = []
+    pending_identity = (
+        _operation_identity(receipt.pending_apply.operation)
+        if receipt.pending_apply is not None
+        else None
+    )
     for operation in document.operations:
-        prior = completed_by_identity.get(_operation_identity(operation))
+        identity = _operation_identity(operation)
+        prior = completed_by_identity.get(identity)
         if prior is None:
             pending.append(operation)
             continue
-        observed = _state(operation.get("observed_before"), "observed_before")
-        intended = _state(operation.get("intended_after"), "intended_after")
-        completed_after = _state(prior.get("intended_after"), "intended_after")
-        if observed != completed_after or intended != completed_after:
+        if not _replanned_operation_matches_receipt(
+            operation,
+            prior,
+            receipt.repo_root,
+            allow_before=identity == pending_identity,
+        ):
             raise SpiceError(
-                f"mounted command {receipt.receipt_id!r} replanned a completed "
+                f"mounted command {receipt.receipt_id!r} replanned a receipted "
                 f"operation incompatibly: {_operation_label(operation)}"
             )
-    candidate = tuple(_normalize_operations([*receipt.operations, *pending]))
+    candidate = tuple(_normalize_operations([*recorded, *pending]))
     if (
         len(candidate) != receipt.operation_count
         or command_plan_digest(candidate) != receipt.plan_digest
@@ -864,6 +956,30 @@ def _receipt_pending_operations(
             f"observed={document.digest}"
         )
     return candidate[completed:]
+
+
+def _replanned_operation_matches_receipt(
+    operation: Mapping[str, Any],
+    prior: Mapping[str, Any],
+    repo_root: Path,
+    *,
+    allow_before: bool,
+) -> bool:
+    current = _mounted_operation(operation, repo_root)
+    recorded = _mounted_operation(prior, repo_root)
+    if (
+        allow_before
+        and current.before == recorded.before
+        and current.after == recorded.after
+        and current.managed == recorded.managed
+    ):
+        return True
+    effective_after = recorded.after if recorded.managed else recorded.before
+    if current.before != effective_after:
+        return False
+    if recorded.managed:
+        return current.managed and current.after == effective_after
+    return not current.managed and current.after == recorded.after
 
 
 def _operation_identity(operation: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -929,6 +1045,23 @@ def _observe_mounted_operation(
         if operation.kind == "file"
         else _git_config_state(repo_root, operation.scope, operation.target)
     )
+
+
+def _complete_started_mounted_operation(
+    repo_root: Path,
+    operation: _MountedOperation,
+) -> None:
+    effective_after = operation.after if operation.managed else operation.before
+    observed = _observe_mounted_operation(repo_root, operation)
+    if observed == effective_after:
+        return
+    if not operation.managed or observed != operation.before:
+        raise SpiceError(
+            "mounted command operation diverged after its durable apply intent: "
+            f"{operation.label}; before={operation.before!r} "
+            f"after={effective_after!r} observed={observed!r}"
+        )
+    _apply_operation(repo_root, operation)
 
 
 def _write_mounted_recovery(plan: MountedReversalPlan) -> Path:

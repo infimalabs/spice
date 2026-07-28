@@ -15,6 +15,7 @@ from spice.cli.mounts import MountedCommand, run_mounted_command
 from spice.cli.parser import build_parser
 from spice.commandplan import (
     COMMAND_PLAN_PROTOCOL,
+    MountedReceiptEvent,
     PLAN_DIGEST_HEX_LENGTH,
     apply_receipted_mounted_plan,
     assert_mounted_plan_digest,
@@ -29,6 +30,8 @@ from spice.release import build_release_parser
 
 FILE_MODE = 0o640
 PRIVATE_FILE_MODE = 0o600
+RECEIPT_FACTS_PER_OPERATION = 2
+EXPECTED_PLANNER_CALLS = 2
 
 
 def _file_operation(
@@ -579,9 +582,17 @@ def test_multi_operation_mounted_receipt_round_trips_bytes_modes_and_git_config(
     capsys.readouterr()
 
     receipt_path = mounted_command_receipt_path(tmp_path, mount.name)
-    encoded_records = receipt_path.read_text(encoding="utf-8").splitlines()
-    assert len(encoded_records) == len(document.operations)
-    assert [json.loads(encoded)["operation"] for encoded in encoded_records] == list(
+    records = [
+        json.loads(encoded)
+        for encoded in receipt_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(records) == RECEIPT_FACTS_PER_OPERATION * len(document.operations)
+    assert [record["event"] for record in records] == [
+        event
+        for _operation in document.operations
+        for event in ("apply-intent", "apply")
+    ]
+    assert [record["operation"] for record in records[1::2]] == list(
         document.operations
     )
     assert existing.read_text(encoding="utf-8") == "generated-after\n"
@@ -668,6 +679,8 @@ def test_mounted_apply_and_unapply_resume_from_durable_operation_prefixes(
     receipt = load_mounted_plan_receipt(tmp_path, mount.name)
     assert receipt is not None
     assert len(receipt.operations) == 1
+    assert receipt.pending_apply is not None
+    assert receipt.pending_apply.operation_index == 1
     assert (tmp_path / "first.txt").is_file()
     assert not (tmp_path / "second.txt").exists()
 
@@ -711,6 +724,157 @@ def test_mounted_apply_and_unapply_resume_from_durable_operation_prefixes(
     )
     assert not (tmp_path / "first.txt").exists()
     assert not mounted_command_receipt_path(tmp_path, mount.name).exists()
+
+
+def _mounted_resume_document(repo_root, existing):
+    current_file = {
+        "value": existing.read_text(encoding="utf-8"),
+        "mode": stat.S_IMODE(existing.stat().st_mode),
+    }
+    operations = (
+        {
+            "kind": "file",
+            "target": "existing.txt",
+            "scope": "worktree-file",
+            "observed_before": current_file,
+            "intended_after": {"value": "generated-after\n", "mode": FILE_MODE},
+        },
+        {
+            "kind": "git-config",
+            "target": "extensions.worktreeConfig",
+            "scope": "common-git-config",
+            "observed_before": commandplan_module._git_config_state(
+                repo_root,
+                "common-git-config",
+                "extensions.worktreeConfig",
+            ),
+            "intended_after": {"value": "true", "mode": None},
+        },
+        {
+            "kind": "git-config",
+            "target": "spice.fixture",
+            "scope": "worktree-git-config",
+            "observed_before": commandplan_module._git_config_state(
+                repo_root,
+                "worktree-git-config",
+                "spice.fixture",
+            ),
+            "intended_after": {"value": "mounted", "mode": None},
+        },
+    )
+    return _document(*operations)
+
+
+def _interrupt_receipt_completion(
+    monkeypatch,
+    failed_operation_index,
+    applied_targets,
+):
+    real_apply = commandplan_module._apply_operation
+
+    def record_apply(repo_root, operation):
+        applied_targets.append((operation.kind, operation.target))
+        return real_apply(repo_root, operation)
+
+    real_append = commandplan_module.append_mounted_receipt_record
+    fail_completion = True
+
+    def interrupt_completion(record, *, encoded=None):
+        nonlocal fail_completion
+        if (
+            fail_completion
+            and record.event is MountedReceiptEvent.APPLY
+            and record.operation_index == failed_operation_index
+        ):
+            fail_completion = False
+            raise SpiceError("simulated receipt completion failure after effect")
+        return real_append(record, encoded=encoded)
+
+    monkeypatch.setattr(commandplan_module, "_apply_operation", record_apply)
+    monkeypatch.setattr(
+        commandplan_module,
+        "append_mounted_receipt_record",
+        interrupt_completion,
+    )
+
+
+@pytest.mark.parametrize(
+    "failed_operation_index",
+    (0, 1),
+    ids=("first-operation", "after-durable-prefix"),
+)
+def test_mounted_apply_recovers_effect_completed_before_receipt_completion(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    failed_operation_index,
+):
+    _init_repo(tmp_path)
+    existing = tmp_path / "existing.txt"
+    existing.write_text("operator-before\n", encoding="utf-8")
+    existing.chmod(PRIVATE_FILE_MODE)
+    calls: list[list[str]] = []
+    initial = _mounted_resume_document(tmp_path, existing)
+
+    def stateful_planner(argv, **_kwargs):
+        calls.append(argv)
+        document = _mounted_resume_document(tmp_path, existing)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(document.payload) + "\n",
+            stderr="",
+        )
+
+    applied_targets: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "spice.cli.mounts.run_parent_lifetime_command",
+        stateful_planner,
+    )
+    _interrupt_receipt_completion(
+        monkeypatch,
+        failed_operation_index,
+        applied_targets,
+    )
+    mount = MountedCommand(("configure",), ("project-planner",), tmp_path)
+
+    with pytest.raises(SpiceError, match="completion failure after effect"):
+        run_mounted_command(mount, [f"--apply={initial.digest}"])
+    interrupted = load_mounted_plan_receipt(tmp_path, mount.name)
+    assert interrupted is not None
+    assert interrupted.pending_apply is not None
+    assert interrupted.pending_apply.operation_index == failed_operation_index
+
+    assert run_mounted_command(mount, [f"--apply={initial.digest}"]) == 0
+    capsys.readouterr()
+    receipt = load_mounted_plan_receipt(tmp_path, mount.name)
+    assert receipt is not None
+    assert receipt.complete
+    assert applied_targets == [
+        ("file", "existing.txt"),
+        ("git-config", "extensions.worktreeConfig"),
+        ("git-config", "spice.fixture"),
+    ]
+
+    assert run_mounted_command(mount, [f"--unapply={receipt.digest}"]) == 0
+    reverse = parse_command_plan_document(capsys.readouterr().out)
+    assert reverse is not None
+    assert (
+        run_mounted_command(
+            mount,
+            [
+                f"--unapply={receipt.digest}",
+                f"--apply={reverse.digest}",
+            ],
+        )
+        == 0
+    )
+
+    assert existing.read_text(encoding="utf-8") == "operator-before\n"
+    assert stat.S_IMODE(existing.stat().st_mode) == PRIVATE_FILE_MODE
+    assert _git_config(tmp_path, "extensions.worktreeConfig") is None
+    assert _git_config(tmp_path, "spice.fixture", worktree=True) is None
+    assert not mounted_command_receipt_path(tmp_path, mount.name).exists()
+    assert len(calls) == EXPECTED_PLANNER_CALLS
 
 
 def test_mounted_unapply_preserves_divergent_and_unmanaged_state(
