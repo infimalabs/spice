@@ -64,6 +64,10 @@ EXECUTABLE_REPOSITORY_CAPABILITIES = tuple(
 )
 
 
+class RepositoryConfigApprovalRequiredError(SpiceError):
+    """Tracked executable configuration needs an operator-owned approval."""
+
+
 @dataclass(frozen=True)
 class RepositoryConfigApproval:
     """The complete executable surface and its effective approval state."""
@@ -214,7 +218,7 @@ def require_repository_config_approval(
         return
     dotted = ".".join(path)
     reason = approval.refusal or "has no operator approval"
-    raise SpiceError(
+    raise RepositoryConfigApprovalRequiredError(
         "repository executable configuration "
         f"{dotted} from {source.path} {reason}; refusing command {command}; "
         f"run `spice init --apply` in {resolved_root} to approve exact capability "

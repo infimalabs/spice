@@ -153,6 +153,7 @@ def test_release_range_mode_is_read_only_and_prints_listing(
         "release_commit_for_target",
         lambda version, target: seen.append((version, target)) or "resolved-main",
     )
+    monkeypatch.setattr(release, "release_version_at_commit", lambda commit: "0.3.0")
     monkeypatch.setattr(
         release,
         "release_range_for_version",
@@ -196,7 +197,7 @@ def test_bare_release_range_mode_uses_head_and_unreleased_renderer(
     assert capsys.readouterr().out == "unreleased range\n"
 
 
-def test_range_with_explicit_commit_keeps_versioned_resolver(
+def test_range_with_explicit_commit_derives_version_from_target_tree(
     tmp_path, monkeypatch, capsys
 ):
     parser = build_release_parser()
@@ -214,6 +215,11 @@ def test_range_with_explicit_commit_keeps_versioned_resolver(
     )
     monkeypatch.setattr(
         release,
+        "release_version_at_commit",
+        lambda commit: seen.append(("version", commit)) or "0.19.0",
+    )
+    monkeypatch.setattr(
+        release,
         "release_range_for_version",
         lambda version, commit: (
             seen.append(("range", version, commit)) or "versioned range\n"
@@ -225,7 +231,8 @@ def test_range_with_explicit_commit_keeps_versioned_resolver(
     assert result == 0
     assert seen == [
         ("target", "0.20.0", "main"),
-        ("range", "0.20.0", "resolved-main"),
+        ("version", "resolved-main"),
+        ("range", "0.19.0", "resolved-main"),
     ]
     assert capsys.readouterr().out == "versioned range\n"
 

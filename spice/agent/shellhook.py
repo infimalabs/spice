@@ -23,6 +23,7 @@ from spice.config.layers import (
     load_config,
 )
 from spice.config.trust import require_repository_config_approval
+from spice.config.trust import RepositoryConfigApprovalRequiredError
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_WRAPPER_ENTRY_POINT_GROUP,
@@ -242,6 +243,10 @@ def is_generated_shell_hook_path(value: str) -> bool:
 def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
     try:
         return _render_agent_wrapper_lines(repo_root)
+    except RepositoryConfigApprovalRequiredError:
+        # This refusal already names its exact source path, command, and digest.
+        # Preserve its type so automatic launch can stop before task assignment.
+        raise
     except SpiceError as exc:
         raise contextualize_config_error(repo_root, exc, "wrappers") from exc
 
