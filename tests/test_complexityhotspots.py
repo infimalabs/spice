@@ -24,8 +24,8 @@ def test_complexity_hotspot_rows_rank_by_ccn_then_length_then_nloc():
 def test_complexity_hotspots_cli_uses_configured_default_limit(
     tmp_path, monkeypatch, capsys
 ):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.complexity]\nhotspot_limit = 1\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.complexity]\nhotspot_limit = 1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
@@ -47,8 +47,8 @@ def test_complexity_hotspots_cli_uses_configured_default_limit(
 
 
 def test_complexity_hotspots_cli_limit_overrides_config(tmp_path, monkeypatch, capsys):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.complexity]\nhotspot_limit = 1\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.complexity]\nhotspot_limit = 1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
@@ -74,8 +74,8 @@ def test_complexity_hotspots_cli_limit_overrides_config(tmp_path, monkeypatch, c
 def test_complexity_hotspots_cli_uses_configured_complexity_suffixes(
     tmp_path, monkeypatch, capsys
 ):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.languages]\ncomplexity = [".wat"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.languages]\ncomplexity = [".wat"]\n',
         encoding="utf-8",
     )
     seen: dict[str, object] = {}

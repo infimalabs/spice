@@ -35,8 +35,8 @@ def test_env_policy_defaults_still_apply(tmp_path):
 
 
 def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         'env_name_patterns = ["MYPROJ_[A-Z0-9_]+", "ENGINE_[A-Z0-9_]+", "DEPLOY_TARGET"]\n',
         encoding="utf-8",
     )
@@ -58,8 +58,8 @@ def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):
 
 
 def test_env_policy_allow_marker_guidance_applies_to_repo_patterns(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_name_patterns = ["MYPROJ_[A-Z0-9_]+"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_name_patterns = ["MYPROJ_[A-Z0-9_]+"]\n',
         encoding="utf-8",
     )
     env_name = "MYPROJ_" + "AUTH_TOKEN"
@@ -125,8 +125,8 @@ def test_env_access_gate_on_by_default_flags_env_access(tmp_path):
 
 
 def test_env_access_gate_opt_out_disables_access_findings(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_access_gate = false\n", encoding="utf-8"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\nenv_access_gate = false\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     # env-policy: allow
@@ -137,9 +137,8 @@ def test_env_access_gate_opt_out_disables_access_findings(tmp_path):
 
 
 def test_env_access_baseline_grandfathers_existing_findings_only(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access]\n"
-        'baseline = "tools/spice/env-policy-baseline.json"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access]\nbaseline = "tools/spice/env-policy-baseline.json"\n',
         encoding="utf-8",
     )
     baseline = tmp_path / "tools" / "spice" / "env-policy-baseline.json"
@@ -181,9 +180,8 @@ def test_env_access_baseline_grandfathers_existing_findings_only(tmp_path):
 
 
 def test_env_access_baseline_missing_file_raises(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access]\n"
-        'baseline = "tools/spice/missing-env-baseline.json"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access]\nbaseline = "tools/spice/missing-env-baseline.json"\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -196,8 +194,8 @@ def test_env_access_baseline_missing_file_raises(tmp_path):
 
 
 def test_env_access_baseline_path_must_be_repo_relative(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.env_access]\nbaseline = "../outside.json"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access]\nbaseline = "../outside.json"\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -243,17 +241,16 @@ def test_env_policy_cli_writes_baseline_for_current_findings(
     ]
     assert "wrote 1 baseline entry" in capsys.readouterr().out
 
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access]\n"
-        'baseline = "tools/spice/env-policy-baseline.json"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access]\nbaseline = "tools/spice/env-policy-baseline.json"\n',
         encoding="utf-8",
     )
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
 def test_env_access_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_access_gate = true\n", encoding="utf-8"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\nenv_access_gate = true\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
@@ -272,8 +269,8 @@ def test_env_access_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
 
 
 def test_env_access_gate_respects_waiver(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_access_gate = true\n", encoding="utf-8"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\nenv_access_gate = true\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
@@ -284,8 +281,8 @@ def test_env_access_gate_respects_waiver(tmp_path):
 
 
 def test_env_access_gate_rejects_non_boolean_flag(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_access_gate = "yes"\n', encoding="utf-8"
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_access_gate = "yes"\n', encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
@@ -312,9 +309,8 @@ def test_env_access_gate_flags_python_putenv_and_unsetenv(tmp_path):
 
 
 def test_env_access_default_patterns_configures_a_family(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access.default_patterns]\n"
-        'csharp = ["ProjectEnv\\\\.Read"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access.default_patterns]\ncsharp = ["ProjectEnv\\\\.Read"]\n',
         encoding="utf-8",
     )
     path = tmp_path / "Sample.cs"
@@ -333,14 +329,14 @@ def test_env_access_default_patterns_configures_a_family(tmp_path):
 
 
 def test_env_access_config_adds_custom_family(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.languages]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy.languages]\n"
         'env = [".foo"]\n'
         "\n"
-        "[tool.spice.policy.env_access.family_suffixes]\n"
+        "[policy.env_access.family_suffixes]\n"
         'custom = [".foo"]\n'
         "\n"
-        "[tool.spice.policy.env_access.default_patterns]\n"
+        "[policy.env_access.default_patterns]\n"
         'custom = ["CUSTOMENV\\\\.read"]\n',
         encoding="utf-8",
     )
@@ -440,8 +436,8 @@ def test_env_access_gate_ignores_shell_special_parameters(tmp_path):
 
 
 def test_env_access_matchers_are_family_scoped(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access.default_patterns]\nshell = ['\\$[A-Z_]+']\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.env_access.default_patterns]\nshell = ['\\$[A-Z_]+']\n",
         encoding="utf-8",
     )
     # `$FOO` is a shell idiom only: it must fire on .sh but never on .py.
@@ -456,8 +452,8 @@ def test_env_access_matchers_are_family_scoped(tmp_path):
 
 
 def test_env_access_default_patterns_invalid_regex_raises(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access.default_patterns]\nlua = ['os.getenv(']\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.env_access.default_patterns]\nlua = ['os.getenv(']\n",
         encoding="utf-8",
     )  # env-policy: allow
     (tmp_path / "sample.lua").write_text(
@@ -469,8 +465,8 @@ def test_env_access_default_patterns_invalid_regex_raises(tmp_path):
 
 
 def test_env_access_default_patterns_unknown_family_raises(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.env_access.default_patterns]\nrust = ["env::var"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access.default_patterns]\nrust = ["env::var"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
@@ -480,8 +476,8 @@ def test_env_access_default_patterns_unknown_family_raises(tmp_path):
 
 
 def test_env_access_default_patterns_non_table_raises(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.env_access]\ndefault_patterns = ["nope"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.env_access]\ndefault_patterns = ["nope"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
@@ -507,8 +503,8 @@ def test_env_access_gate_flags_lua_os_getenv_by_default(tmp_path):
 def test_env_access_default_patterns_registers_lua_colon_accessor(tmp_path):
     # The consuming project's bespoke runtime accessor is method-style and not a
     # universal idiom, so it is registered via config, scoped to Lua.
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access.default_patterns]\nlua = ['\\w+:GetEnv\\(']\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.env_access.default_patterns]\nlua = ['\\w+:GetEnv\\(']\n",
         encoding="utf-8",
     )
     (tmp_path / "runtime.lua").write_text(
@@ -553,8 +549,8 @@ def test_env_access_gate_javascript_matcher_is_scoped(tmp_path):
 
 
 def test_env_name_ledger_flags_unaccounted_literal_env_names(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_names = ["FAKEENV_PORT"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_names = ["FAKEENV_PORT"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -573,8 +569,8 @@ def test_env_name_ledger_flags_unaccounted_literal_env_names(tmp_path):
 
 
 def test_env_name_ledger_flags_stale_declared_env_names(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_names = ["HOME", "OLD_ENV"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_names = ["HOME", "OLD_ENV"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -590,8 +586,8 @@ def test_env_name_ledger_flags_stale_declared_env_names(tmp_path):
 
 
 def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_names = ["APP_MODE", "HOME", "FAKEENV_PORT", "FAKEENV_TLS"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_names = ["APP_MODE", "HOME", "FAKEENV_PORT", "FAKEENV_TLS"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -619,9 +615,7 @@ def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
 def test_env_name_ledger_holds_test_files_to_the_same_standard(tmp_path):
     # Tests are not exempt: an env name referenced only in a test file is still
     # required in the manifest, exactly like production source.
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_names = []\n", encoding="utf-8"
-    )
+    (tmp_path / "spice.toml").write_text("[policy]\nenv_names = []\n", encoding="utf-8")
     test_dir = tmp_path / "tests"
     test_dir.mkdir()
     (test_dir / "test_env_usage.py").write_text(

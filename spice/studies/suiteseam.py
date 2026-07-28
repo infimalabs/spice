@@ -10,7 +10,7 @@ tree exists exactly once: after the task merge is materialized and before it
 is pushed.
 
 So the gate lives there. A repo names the far-reaching paths under
-``[tool.spice.policy.suite_seam]``; a task whose footprint touches one runs
+``[policy.suite_seam]``; a task whose footprint touches one runs
 ``run`` -- the whole suite -- against the merged tree, and a red suite refuses
 the publish. A task that touches nothing declared matches nothing and runs
 nothing, so an ordinary landing keeps its own wall clock, and no commit
@@ -362,7 +362,7 @@ def _suite_seam_config(repo_root: Path) -> tuple[tuple[str, ...], tuple[str, ...
         return (), (), 0
     if not isinstance(raw, dict):
         raise SpiceError(
-            f"[tool.spice.policy.{SUITE_SEAM_KEY}] must be a table with "
+            f"[policy.{SUITE_SEAM_KEY}] must be a table with "
             f"{SUITE_SEAM_PATHS_KEY!r} and {SUITE_SEAM_RUN_KEY!r}"
         )
     seams = tuple(
@@ -372,7 +372,7 @@ def _suite_seam_config(repo_root: Path) -> tuple[tuple[str, ...], tuple[str, ...
     argv = _configured_argv(raw.get(SUITE_SEAM_RUN_KEY))
     if seams and not argv:
         raise SpiceError(
-            f"[tool.spice.policy.{SUITE_SEAM_KEY}] declares {SUITE_SEAM_PATHS_KEY} "
+            f"[policy.{SUITE_SEAM_KEY}] declares {SUITE_SEAM_PATHS_KEY} "
             f"but no {SUITE_SEAM_RUN_KEY} command to cover them"
         )
     return seams, argv, _configured_seconds(raw.get(SUITE_SEAM_SECONDS_KEY))
@@ -384,13 +384,12 @@ def _configured_argv(raw: Any) -> tuple[str, ...]:
         return ()
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise SpiceError(
-            f"[tool.spice.policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_RUN_KEY} must be an "
-            "argv list"
+            f"[policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_RUN_KEY} must be an argv list"
         )
     argv = tuple(str(item).strip() for item in raw)
     if any(not item for item in argv):
         raise SpiceError(
-            f"[tool.spice.policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_RUN_KEY} entries must "
+            f"[policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_RUN_KEY} entries must "
             "be non-empty strings"
         )
     return argv
@@ -401,7 +400,7 @@ def _configured_seconds(raw: Any) -> int:
         return 0
     if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
         raise SpiceError(
-            f"[tool.spice.policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_SECONDS_KEY} must be a "
+            f"[policy.{SUITE_SEAM_KEY}] {SUITE_SEAM_SECONDS_KEY} must be a "
             "positive whole number of seconds"
         )
     return raw

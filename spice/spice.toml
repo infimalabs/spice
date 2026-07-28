@@ -1,5 +1,5 @@
 # Installed static defaults. Repository and worktree layers override these
-# values through the canonical four-layer configuration loader.
+# values through the canonical three-layer configuration loader.
 
 [say]
 backend = "say"
@@ -90,6 +90,30 @@ jitter_percent = 5
 
 [policy.complexity]
 hotspot_limit = 20
+
+[policy.pre_commit_builtins]
+"merge-integrity" = true
+"plan-phase" = true
+"repo-shape" = true
+staging = true
+"repo-docs" = true
+formatters = true
+"local-paths" = true
+taste = true
+"serve-web-typecheck" = true
+"javascript-unused" = true
+"python-typecheck" = true
+"env-policy" = true
+"env-name-ledger" = true
+"file-shape" = true
+complexity = true
+"magic-numbers" = true
+"markdown-links" = true
+reachability = true
+"symbol-reachability" = true
+"python-unused" = true
+"assertion-free-tests" = true
+"private-internals" = true
 
 [policy.taste.words]
 'hallucinat*' = "confabulate"

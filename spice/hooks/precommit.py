@@ -47,7 +47,11 @@ from spice.config.values import (
     AGENT_MODEL_KEY,
     effective_agent_config,
 )
-from spice.config.layers import contextualize_config_error, effective_table
+from spice.config.layers import (
+    contextualize_config_error,
+    effective_table,
+    enabled_registry_entries,
+)
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.process.git import run_git_command
@@ -493,30 +497,30 @@ def _configured_builtin_steps(
         return builtin_steps
     if not isinstance(raw_overrides, dict):
         raise SpiceError(
-            "[tool.spice.policy] pre_commit_builtins must be a table of "
+            "[policy] pre_commit_builtins must be a table of "
             "built-in pre-commit step overrides"
         )
 
     by_key = {step.key: step for step in builtin_steps}
-    overrides = {
+    normalized = {
         _normalize_step_key(raw_key): raw_value
         for raw_key, raw_value in raw_overrides.items()
     }
-    unknown = sorted(key for key in overrides if key not in by_key)
+    unknown = sorted(key for key in normalized if key not in by_key)
     if unknown:
         known = ", ".join(step.key for step in builtin_steps)
         listed = ", ".join(unknown)
         raise SpiceError(
-            "[tool.spice.policy.pre_commit_builtins] unknown step(s): "
+            "[policy.pre_commit_builtins] unknown step(s): "
             f"{listed}; known steps: {known}"
         )
+    overrides = enabled_registry_entries(normalized, "policy", "pre_commit_builtins")
 
     configured: list[PreCommitStep] = []
     for step in builtin_steps:
-        replacement = overrides.get(step.key)
-        if replacement is None:
-            configured.append(step)
+        if step.key not in overrides:
             continue
+        replacement = overrides[step.key]
         configured_step = _configured_builtin_step(repo_root, step, replacement)
         if configured_step is not None:
             configured.append(configured_step)
@@ -528,14 +532,12 @@ def _configured_builtin_step(
 ) -> PreCommitStep | None:
     if raw is True:
         return step
-    if raw is False:
-        return None
     if isinstance(raw, str):
         command = _mounted_command_step(repo_root, raw)
         return _command_pre_commit_step(step.key, command)
     if not isinstance(raw, dict):
         raise SpiceError(
-            f"[tool.spice.policy.pre_commit_builtins] {step.key!r} must be "
+            f"[policy.pre_commit_builtins] {step.key!r} must be "
             "true, false, a mounted command name, or a replacement table"
         )
     if raw.get("enabled") is False:
@@ -573,7 +575,7 @@ def _configured_command_steps(
     if raw_steps is None:
         return []
     if not isinstance(raw_steps, list):
-        raise SpiceError(f"[tool.spice.policy] {config_key} must be a list")
+        raise SpiceError(f"[policy] {config_key} must be a list")
     agent_config = effective_agent_config(repo_root)
     steps: list[PreCommitStep] = []
     for index, raw in enumerate(raw_steps, start=1):
@@ -591,7 +593,7 @@ def _configured_command_steps(
             scope = PRE_COMMIT_STEP_SCOPES.parse(raw.get(SCOPES_KEY))
         else:
             raise SpiceError(
-                f"[tool.spice.policy] {config_key} entries must be mounted command "
+                f"[policy] {config_key} entries must be mounted command "
                 "names or { label = ..., run = [...] } tables"
             )
         paths = _scoped_staged_paths(
@@ -627,13 +629,12 @@ def _command_pre_commit_step(key: str, command: CommandStep) -> PreCommitStep:
 def _mounted_command_step(repo_root: Path, name: str) -> CommandStep:
     label = name.strip()
     if not label:
-        raise SpiceError("[tool.spice.policy] mounted pre-commit command is empty")
+        raise SpiceError("[policy] mounted pre-commit command is empty")
     path = mount_command_path(label)
     argv = mounted_commands(repo_root).get(path)
     if argv is None:
         raise SpiceError(
-            f"[tool.spice.policy] pre-commit command {label!r} is not declared "
-            "in [tool.spice.commands]"
+            f"[policy] pre-commit command {label!r} is not declared in [commands]"
         )
     return CommandStep(
         label=label,
@@ -1056,7 +1057,7 @@ def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) ->
         raise SpiceError(
             f"{board}\n"
             f"reachability: {count} test-only finding(s) exceed "
-            "[tool.spice.policy.debt] "
+            "[policy.debt] "
             f"reachability_test_only={debt_limit}; 0 means clean, non-zero is "
             "explicit drainable cleanup debt - findings are not reachable "
             "from production roots, so wire each in or delete-both "
@@ -1100,7 +1101,7 @@ def _run_assertion_free_test_guard(repo_root: Path) -> None:
         raise SpiceError(
             f"{board}\n"
             f"assertion-free-tests: {count} test(s) exceed "
-            "[tool.spice.policy.debt] "
+            "[policy.debt] "
             f"assertion_free_tests={debt_limit}; 0 means clean, non-zero is "
             "explicit drainable cleanup debt - add assertions or lower "
             "configured debt after cleanup"
@@ -1128,7 +1129,7 @@ def _run_private_internal_coupling_guard(repo_root: Path) -> None:
                 f"private-internals: {len(offenders)} coupling(s) are not "
                 "allowlisted; add a public seam and switch the test to it, or "
                 "— only if the test genuinely must observe an internal — add a "
-                "justified entry to [tool.spice.policy].internal_couplings"
+                "justified entry to [policy].internal_couplings"
             )
         if stale:
             details.append(testquality.render_stale_internal_couplings(stale))

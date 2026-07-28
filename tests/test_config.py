@@ -48,24 +48,24 @@ def _redirect_system_config(tmp_path, monkeypatch):
     return system_path
 
 
-def test_pyproject_agent_layer_provides_launch_defaults(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
+def test_repository_agent_layer_provides_launch_defaults(tmp_path):
+    (tmp_path / "spice.toml").write_text(
+        '[agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
 
     assert values.configured_agent_model(tmp_path) == "gpt-project"
     assert values.configured_agent_effort(tmp_path) == "low"
-    assert layers.layer_table(tmp_path, layers.PYPROJECT_SOURCE, "agent") == {
+    assert layers.layer_table(tmp_path, layers.REPOSITORY_SOURCE, "agent") == {
         "model": "gpt-project",
         "effort": "low",
     }
 
 
-def test_worktree_agent_layer_overrides_pyproject_defaults(tmp_path, monkeypatch):
+def test_worktree_agent_layer_overrides_repository_defaults(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
     edit.set_scope_section(
@@ -91,8 +91,8 @@ def test_config_overview_shows_layers_effective_values_and_provenance(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
     edit.set_scope_section(
@@ -105,13 +105,13 @@ def test_config_overview_shows_layers_effective_values_and_provenance(
     overview = values.config_overview(tmp_path)
 
     assert tuple(overview["layers"]) == layers.CONFIG_SCOPE_NAMES
-    assert overview["layers"]["pyproject"]["path"] == str(tmp_path / "pyproject.toml")
+    assert overview["layers"]["repository"]["path"] == str(tmp_path / "spice.toml")
     assert overview["layers"]["worktree"]["values"] == {"agent": {"effort": "medium"}}
     assert overview["effective"]["agent"]["model"] == "gpt-project"
     assert overview["effective"]["agent"]["effort"] == "medium"
     assert overview["provenance"]["agent.model"] == {
-        "scope": "pyproject",
-        "path": str(tmp_path / "pyproject.toml"),
+        "scope": "repository",
+        "path": str(tmp_path / "spice.toml"),
     }
     assert overview["provenance"]["agent.effort"] == {
         "scope": "worktree",
@@ -139,7 +139,6 @@ def test_config_agent_reveals_shipped_defaults_without_config(
     assert result == 0
     assert (
         capsys.readouterr().out == "agent system driver=- model=- effort=-\n"
-        "agent pyproject driver=- model=- effort=-\n"
         "agent repository driver=- model=- effort=-\n"
         "agent worktree driver=- model=- effort=-\n"
         "agent effective driver=codex model=gpt-5.5 effort=xhigh\n"
@@ -167,8 +166,8 @@ def test_config_system_renders_effective_agent_config_read_only(
 ):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
 
@@ -181,18 +180,18 @@ def test_config_system_renders_effective_agent_config_read_only(
         "model": "gpt-project",
         "effort": "low",
     }
-    assert rendered["provenance"]["agent.model"]["scope"] == "pyproject"
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["pyproject.toml"]
+    assert rendered["provenance"]["agent.model"]["scope"] == "repository"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["spice.toml"]
 
 
-def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
+def test_config_agent_writes_repository_scope(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
     result = handle_config(
         argparse.Namespace(
             config_action="agent",
-            scope="pyproject",
+            scope="repository",
             clear=False,
             model="gpt-project",
             effort="high",
@@ -200,14 +199,13 @@ def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
     )
 
     assert result == 0
-    assert layers.layer_table(tmp_path, layers.PYPROJECT_SOURCE, "agent") == {
+    assert layers.layer_table(tmp_path, layers.REPOSITORY_SOURCE, "agent") == {
         "model": "gpt-project",
         "effort": "high",
     }
     assert (
         capsys.readouterr().out == "agent system driver=- model=- effort=-\n"
-        "agent pyproject driver=- model=gpt-project effort=high\n"
-        "agent repository driver=- model=- effort=-\n"
+        "agent repository driver=- model=gpt-project effort=high\n"
         "agent worktree driver=- model=- effort=-\n"
         "agent effective driver=codex model=gpt-project effort=high\n"
     )
@@ -234,7 +232,6 @@ def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
     }
     assert (
         capsys.readouterr().out == "agent system driver=- model=- effort=-\n"
-        "agent pyproject driver=- model=- effort=-\n"
         "agent repository driver=- model=- effort=-\n"
         "agent worktree driver=- model=gpt-worktree effort=low\n"
         "agent effective driver=codex model=gpt-worktree effort=low\n"
@@ -260,14 +257,13 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
     assert values.configured_agent_driver(tmp_path) == "claude"
     assert (
         capsys.readouterr().out == "agent system driver=- model=- effort=-\n"
-        "agent pyproject driver=- model=- effort=-\n"
         "agent repository driver=- model=- effort=-\n"
         "agent worktree driver=claude model=- effort=-\n"
         "agent effective driver=claude model=claude-opus-4-8 effort=xhigh\n"
     )
 
 
-def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
+def test_three_scope_precedence_clears_to_reveal_each_earlier_layer(
     tmp_path, monkeypatch, capsys
 ):
     _redirect_system_config(tmp_path, monkeypatch)
@@ -276,7 +272,6 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
     parser = build_parser()
     scope_layers = (
         ("system", 110, "system-agent", "low"),
-        ("pyproject", 120, "pyproject-agent", "medium"),
         ("repository", 130, "repository-agent", "high"),
         ("worktree", 140, "worktree-agent", "xhigh"),
     )
@@ -309,7 +304,7 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
         )
 
     observed = []
-    for scope in ("worktree", "repository", "pyproject"):
+    for scope in ("worktree", "repository"):
         observed.append(
             (
                 values.configured_say_words_per_minute(tmp_path),
@@ -332,7 +327,6 @@ def test_four_scope_precedence_clears_to_reveal_each_earlier_layer(
     assert observed == [
         (140, "worktree-agent", "xhigh"),
         (130, "repository-agent", "high"),
-        (120, "pyproject-agent", "medium"),
         (110, "system-agent", "low"),
     ]
     capsys.readouterr()
@@ -426,7 +420,7 @@ def test_config_help_names_exact_scope_vocabulary():
 
     for action in ("agent", "personality", "say", "judge"):
         help_text = config_actions.choices[action].format_help()
-        assert "{system,pyproject,repository,worktree}" in help_text
+        assert "{system,repository,worktree}" in help_text
 
 
 def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeypatch):
@@ -554,6 +548,58 @@ def test_config_say_writes_external_backend(tmp_path, monkeypatch, capsys):
     )
 
 
+@pytest.mark.parametrize(
+    ("section", "key", "invalid", "choices", "load"),
+    (
+        (
+            values.SAY_KEY,
+            values.SAY_BACKEND_KEY,
+            "whispered",
+            values.SAY_BACKEND_CHOICES,
+            values.configured_say_backend,
+        ),
+        (
+            values.AGENT_KEY,
+            values.AGENT_PERSONALITY_KEY,
+            "reckless",
+            values.AGENT_PERSONALITY_CHOICES,
+            values.configured_agent_personality,
+        ),
+    ),
+)
+def test_out_of_set_choice_refuses_with_key_value_and_valid_set(
+    tmp_path, section, key, invalid, choices, load
+):
+    config_path = tmp_path / "spice.toml"
+    config_path.write_text(
+        f'[{section}]\n{key} = "{invalid}"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        load(tmp_path)
+
+    valid = ", ".join(repr(choice) for choice in choices)
+    assert str(exc_info.value) == (
+        f"{section}.{key} (source=repository path={config_path}): "
+        f"has invalid value {invalid!r}; expected one of {valid}"
+    )
+
+
+def test_every_choice_coercion_path_rejects_instead_of_substituting_its_default():
+    policies = {
+        path: policy for path, policy in values.SCALAR_SCHEMA.items() if policy.choices
+    }
+
+    assert tuple(policies) == (
+        (values.SAY_KEY, values.SAY_BACKEND_KEY),
+        (values.AGENT_KEY, values.AGENT_PERSONALITY_KEY),
+    )
+    for path, policy in policies.items():
+        with pytest.raises(SpiceError, match="invalid value '__outside_valid_set__'"):
+            policy.coerce("__outside_valid_set__", policy, path)
+
+
 def test_config_say_rejects_external_backend_without_command(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
@@ -616,9 +662,9 @@ def test_repository_say_validation_accepts_command_from_earlier_scope(
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     edit.set_scope_section(
         tmp_path,
-        layers.PYPROJECT_SOURCE,
+        layers.SYSTEM_SOURCE,
         values.SAY_KEY,
-        {values.SAY_COMMAND_KEY: "earlier-project-command"},
+        {values.SAY_COMMAND_KEY: "earlier-system-command"},
     )
     parser = build_parser()
 
@@ -639,7 +685,7 @@ def test_repository_say_validation_accepts_command_from_earlier_scope(
 
     assert outcome.state == "applied"
     assert values.configured_say_backend(tmp_path) == "external"
-    assert values.configured_say_command(tmp_path) == "earlier-project-command"
+    assert values.configured_say_command(tmp_path) == "earlier-system-command"
 
 
 def test_clearing_worktree_say_rejects_invalid_revealed_stack_without_writing(
@@ -807,32 +853,21 @@ def test_maxim_adjudication_off_by_default_and_opt_in_toggles_it(tmp_path):
 
 def test_maxim_adjudication_honors_committed_config_layers(tmp_path, monkeypatch):
     _redirect_system_config(tmp_path, monkeypatch)
-    # A committed pyproject or spice.toml layer turns adjudication on for the
-    # whole repository, so an install (like spice itself) can enable the judge
-    # without editing an uncommitted worktree-local config.
-    committed_modes = {}
-    for scope in (layers.PYPROJECT_SOURCE, layers.REPOSITORY_SOURCE):
-        edit.set_scope_section(
-            tmp_path,
-            scope,
-            values.JUDGE_KEY,
-            {values.JUDGE_ENABLED_KEY: True},
-        )
-        committed_modes[scope] = (
-            "adjudicated"
-            if values.maxim_adjudication_enabled(tmp_path)
-            else "judge-free"
-        )
-        edit.clear_scope_section(tmp_path, scope, values.JUDGE_KEY)
-
-    # The highest-precedence worktree layer still wins, so a local override can
-    # switch adjudication back off even when a committed layer enabled it.
+    # A committed spice.toml turns adjudication on for the whole repository,
+    # so an install (like spice itself) can enable the judge without editing an
+    # uncommitted worktree-local config.
     edit.set_scope_section(
         tmp_path,
-        layers.PYPROJECT_SOURCE,
+        layers.REPOSITORY_SOURCE,
         values.JUDGE_KEY,
         {values.JUDGE_ENABLED_KEY: True},
     )
+    committed_mode = (
+        "adjudicated" if values.maxim_adjudication_enabled(tmp_path) else "judge-free"
+    )
+
+    # The highest-precedence worktree layer still wins, so a local override can
+    # switch adjudication back off even when a committed layer enabled it.
     edit.set_scope_section(
         tmp_path,
         layers.WORKTREE_SOURCE,
@@ -841,16 +876,13 @@ def test_maxim_adjudication_honors_committed_config_layers(tmp_path, monkeypatch
     )
 
     assert {
-        "committed": committed_modes,
+        "committed": committed_mode,
         "worktree_override": (
             "adjudicated"
             if values.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
         ),
     } == {
-        "committed": {
-            layers.PYPROJECT_SOURCE: "adjudicated",
-            layers.REPOSITORY_SOURCE: "adjudicated",
-        },
+        "committed": "adjudicated",
         "worktree_override": "judge-free",
     }

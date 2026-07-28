@@ -6,7 +6,8 @@ projects live transcript facts and attachments, and exposes the controls needed
 to steer or audit a running session.
 
 The serve header and browser title default to `[project].name` from
-`pyproject.toml`; set `[tool.spice.serve] brand = "Name"` to override them.
+`pyproject.toml`; set `[serve] brand = "Name"` in root `spice.toml` to override
+them.
 
 Binding `spice serve` to `0.0.0.0` or another wildcard address intentionally
 degrades the WebSocket Origin guard: any Host on the bound port is compatible,
@@ -119,5 +120,5 @@ Every operator send carries a lane lifetime:
 - **Drive** auto-subscribes to task projects the team creates or claims.
 - **Drain** dissolves the task boundary so all assignable work is visible.
 
-Tracked defaults live in `[tool.spice.serve] default_lifetime`; see
+Tracked defaults live in `[serve] default_lifetime`; see
 [../CONFIG.md](../CONFIG.md).

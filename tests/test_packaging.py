@@ -94,6 +94,12 @@ def test_uv_tool_install_contract_declares_spice_console_script():
     assert data["project"]["scripts"]["spice"] == "spice.cli.entry:main"
 
 
+def test_project_metadata_declares_taskwarrior_three_for_task_plane():
+    description = _pyproject_data()["project"]["description"]
+
+    assert "task plane requires Taskwarrior 3" in description
+
+
 def test_sdist_includes_browser_validation_inputs():
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
@@ -119,6 +125,18 @@ def test_readme_documents_single_install_runtime_model():
     assert "pip install spice-harness" not in install_section
     assert "editable main tree is the server deployment" in install_text
     assert "worktrees remain operated trees" in install_text
+    assert "Taskwarrior 3 or newer is required for the task plane" in install_text
+
+
+def test_entry_ladder_places_taskwarrior_requirement_at_fleet():
+    overview = (PROJECT_ROOT / "docs" / "overview.md").read_text(encoding="utf-8")
+    ladder = overview.split("## Entry Ladder", maxsplit=1)[1].split(
+        "## Honest Feedback", maxsplit=1
+    )[0]
+    ladder_text = _collapsed(ladder)
+
+    assert "**Fleet** | A successful steered lane, Taskwarrior 3 or newer" in ladder
+    assert "Watch, Retrospect, and Gates do not require Taskwarrior" in ladder_text
 
 
 def test_design_documents_single_install_runtime_model():
@@ -137,7 +155,7 @@ def test_design_documents_single_install_runtime_model():
 def test_config_documents_runtime_model_as_non_configurable():
     config = (PROJECT_ROOT / "CONFIG.md").read_text(encoding="utf-8")
     runtime_section = config.split("## Runtime Model", maxsplit=1)[1].split(
-        "## `[tool.spice.agent]`", maxsplit=1
+        "## `[agent]`", maxsplit=1
     )[0]
     runtime_text = _collapsed(runtime_section)
 
@@ -146,6 +164,8 @@ def test_config_documents_runtime_model_as_non_configurable():
     assert "`uv tool install -e /path/to/spice-main`" in runtime_section
     assert "editable main tree the server deployment" in runtime_text
     assert "Worker worktrees are operated trees" in runtime_text
+    assert "Taskwarrior 3 or newer is a separate system requirement" in runtime_text
+    assert "not a Python package or per-repo setting" in runtime_text
 
 
 def test_primary_runtime_docs_do_not_describe_per_tree_runtime_magic():

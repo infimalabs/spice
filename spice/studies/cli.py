@@ -1063,7 +1063,7 @@ def _private_internal_task_specs(
             project="tests.quality",
             tags=("test-quality", "private-internals", "cleanup"),
             acceptance=(
-                f"Remove stale [tool.spice.policy] internal_couplings entry for "
+                f"Remove stale [policy] internal_couplings entry for "
                 f"{path} {test_name} {target}, or restore the reviewed coupling if "
                 "it is still required.",
             ),

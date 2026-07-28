@@ -888,17 +888,17 @@ def test_complexity_peer_claim_redirects_routine_board(tmp_path, monkeypatch):
 
 def test_repo_doc_peer_claim_redirects_guard_error(tmp_path):
     repo = _init_repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (repo / "spice.toml").write_text(
+        "[policy]\n"
         'repo_truth_docs = ["AGENTS.md"]\n'
         "\n"
-        "[tool.spice.policy.limits]\n"
+        "[policy.limits]\n"
         "repo_truth_doc_chars = 5\n"
         "\n"
-        "[tool.spice.policy.flex]\n"
+        "[policy.flex]\n"
         "ratio = 1.5\n"
         "\n"
-        "[tool.spice.policy.markdown_depth_budget]\n"
+        "[policy.markdown_depth_budget]\n"
         "extensions = []\n",
         encoding="utf-8",
     )
@@ -971,17 +971,17 @@ def test_repo_doc_sticky_latch_holds_in_flex_band_until_under_base(tmp_path):
 
 def _init_repo_with_doc_policy(tmp_path: Path) -> Path:
     repo = _init_repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (repo / "spice.toml").write_text(
+        "[policy]\n"
         'repo_truth_docs = ["AGENTS.md"]\n'
         "\n"
-        "[tool.spice.policy.limits]\n"
+        "[policy.limits]\n"
         "repo_truth_doc_chars = 5\n"
         "\n"
-        "[tool.spice.policy.flex]\n"
+        "[policy.flex]\n"
         "ratio = 1.5\n"
         "\n"
-        "[tool.spice.policy.markdown_depth_budget]\n"
+        "[policy.markdown_depth_budget]\n"
         "extensions = []\n",
         encoding="utf-8",
     )

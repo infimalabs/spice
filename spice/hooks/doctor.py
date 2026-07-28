@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
-from collections.abc import Iterable, Mapping
 import os
+import re
 import shlex
 import shutil
 import subprocess
+import sys
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -54,6 +55,8 @@ from spice.studies.walk import staged_paths as staged_gate_paths
 from spice.studies.walk import tracked_paths
 
 DoctorStatus = str
+TASKWARRIOR_REQUIRED_MAJOR = 3
+TASKWARRIOR_VERSION_PATTERN = re.compile(r"\b(?P<version>\d+(?:\.\d+)+)\b")
 
 
 @dataclass(frozen=True)
@@ -244,7 +247,12 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
-        ("tool.taskwarrior", "task", True, "required for the task control plane"),
+        (
+            "tool.taskwarrior",
+            "task",
+            True,
+            "Taskwarrior 3 is required for the task control plane",
+        ),
         ("tool.judge", configured_judge_bin(repo_root), judge_opted_in, judge_note),
         ("tool.tts", tts_binary, False, tts_note),
         ("tool.ruff", "ruff", True, "pre-commit formatter/linter"),
@@ -252,7 +260,9 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         ("tool.npm", "npm", serve_web_present, npm_note),
     ):
         located = find_tool(binary)
-        if located:
+        if located and label == "tool.taskwarrior":
+            check = _taskwarrior_check(located)
+        elif located:
             detail = f"{binary} -> {located}; {note}"
             check = _ok(label, detail, "which " + binary, required=required)
         elif required:
@@ -262,6 +272,58 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
             check = _skip(label, detail, "spice dev doctor")
         checks.append(check)
     return checks
+
+
+def _taskwarrior_check(executable: str) -> DoctorCheck:
+    command = [executable, "--version"]
+    rendered_command = shlex.join(command)
+    requirement = "Taskwarrior 3 is required for the task control plane"
+    try:
+        result = run_tool_command(
+            command,
+            policy="probe",
+            operation="probe Taskwarrior version",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, SpiceError) as exc:
+        return _fail(
+            "tool.taskwarrior",
+            f"Taskwarrior version probe failed: {exc}; {requirement}",
+            rendered_command,
+        )
+    if result.returncode != 0:
+        return _fail(
+            "tool.taskwarrior",
+            f"Taskwarrior version probe failed: {_command_problem(result)}; "
+            f"{requirement}",
+            rendered_command,
+        )
+    output = "\n".join(
+        part.strip() for part in (result.stdout, result.stderr) if part and part.strip()
+    )
+    match = TASKWARRIOR_VERSION_PATTERN.search(output)
+    if match is None:
+        return _fail(
+            "tool.taskwarrior",
+            f"could not parse Taskwarrior version from {output!r}; {requirement}",
+            rendered_command,
+        )
+    version = match.group("version")
+    if int(version.split(".", maxsplit=1)[0]) < TASKWARRIOR_REQUIRED_MAJOR:
+        return _fail(
+            "tool.taskwarrior",
+            f"Taskwarrior {version} is below required Taskwarrior 3 for the "
+            "task control plane",
+            rendered_command,
+        )
+    return _ok(
+        "tool.taskwarrior",
+        f"task -> {executable}; Taskwarrior {version} satisfies the Taskwarrior "
+        "3 requirement for the task control plane",
+        rendered_command,
+    )
 
 
 def _rtk_check(repo_root: Path) -> DoctorCheck:

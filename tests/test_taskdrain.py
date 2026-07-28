@@ -39,10 +39,10 @@ def task_repo(tmp_path, monkeypatch):
 
 
 def test_drain_phase_boundary_sees_configured_assignable_stem(task_repo, monkeypatch):
-    (task_repo / "pyproject.toml").write_text(
-        '[tool.spice.tasks]\nstems = ["paintball"]\n', encoding="utf-8"
+    (task_repo / "spice.toml").write_text(
+        '[tasks]\nstems = ["paintball"]\n', encoding="utf-8"
     )
-    _run(task_repo, "git", "add", "pyproject.toml")
+    _run(task_repo, "git", "add", "spice.toml")
     _run(task_repo, "git", "commit", "-m", "configure paintball stem")
     ServeTeamStore().create_team(
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],

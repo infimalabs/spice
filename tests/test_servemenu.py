@@ -225,13 +225,8 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
         '"defaultLifetime": "Drive", "version":' in project_html
     )
 
-    pyproject.write_text(
-        (
-            '[project]\nname = "mission-control"\n\n'
-            "[tool.spice.serve]\n"
-            'brand = "Ops Console"\n'
-            'default_lifetime = "Steer"\n'
-        ),
+    (tmp_path / "spice.toml").write_text(
+        '[serve]\nbrand = "Ops Console"\ndefault_lifetime = "Steer"\n',
         encoding="utf-8",
     )
 

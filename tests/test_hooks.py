@@ -67,11 +67,11 @@ def test_mounted_pre_commit_step_carries_mount_env_but_raw_does_not(
     monkeypatch.delenv(VISIBLE_PROG_ENV, raising=False)
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.commands]\n"
+        "spice.toml",
+        "[commands]\n"
         f"checkit = {_argv_toml(sys.executable, str(recorder), 'mountarg')}\n"
         "\n"
-        "[tool.spice.policy]\n"
+        "[policy]\n"
         "pre_commit = [\n"
         '  "checkit",\n'
         '  { label = "raw", '
@@ -99,8 +99,8 @@ def test_policy_formatter_extensions_restage_rewritten_staged_paths(
     formatter = _write_staged_formatter(tmp_path, "class Program { }\n")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy]\n"
+        "spice.toml",
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "cs formatter", '
         f"run = {_argv_toml(sys.executable, str(formatter))}, "
@@ -125,8 +125,8 @@ def test_policy_pre_commit_extensions_wait_for_staging_guard(tmp_path, monkeypat
     recorder = _write_staged_paths_recorder(tmp_path)
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy]\n"
+        "spice.toml",
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "cs", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'cs')}, "
@@ -153,8 +153,8 @@ def test_policy_exclude_filters_staged_and_tracked_walks(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy]\n"
+        "spice.toml",
+        "[policy]\n"
         'exclude = ["Assets/Engine/Scripts/Generated/Codegen/", '
         '"toolbox/codegen/generated/*.py"]\n',
     )
@@ -175,7 +175,7 @@ def test_policy_exclude_filters_staged_and_tracked_walks(tmp_path):
     assert "toolbox/codegen/generated/service.py" not in tracked
     assert "toolbox/codegen/generated/README.md" in staged
     assert "src/app.py" in staged
-    assert "pyproject.toml" in staged
+    assert "spice.toml" in staged
 
 
 def test_file_shape_guard_excludes_generated_lockfiles_but_keeps_source_pressure(
@@ -203,12 +203,12 @@ def test_file_shape_guard_reads_configured_bounds(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy.limits]\n"
+        "spice.toml",
+        "[policy.limits]\n"
         "file_loc = 2\n"
         "file_bytes = 100000\n"
         "\n"
-        "[tool.spice.policy.flex]\n"
+        "[policy.flex]\n"
         "ratio = 1.0\n",
     )
     _write_repo_file(repo, "src/app.py", "a = 1\nb = 2\nc = 3\n")
@@ -222,12 +222,12 @@ def test_complexity_guard_reads_configured_bounds(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy.limits]\n"
+        "spice.toml",
+        "[policy.limits]\n"
         "routine_ccn = 2\n"
         "routine_length = 20\n"
         "\n"
-        "[tool.spice.policy.flex]\n"
+        "[policy.flex]\n"
         "ratio = 1.0\n",
     )
     _write_repo_file(repo, "src/app.py", "def run():\n    return 1\n")
@@ -253,8 +253,8 @@ def test_complexity_guard_reads_configured_language_scope(tmp_path, monkeypatch)
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        '[tool.spice.policy.languages]\ncomplexity = [".toy"]\n',
+        "spice.toml",
+        '[policy.languages]\ncomplexity = [".toy"]\n',
     )
     _write_repo_file(repo, "src/app.toy", "function run() {}\n")
     _git(repo, "add", ".")
@@ -279,8 +279,8 @@ def test_policy_exclude_filters_renames_but_not_partially_staged_guard(tmp_path)
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        '[tool.spice.policy]\nexclude = ["generated/"]\n',
+        "spice.toml",
+        '[policy]\nexclude = ["generated/"]\n',
     )
     _write_repo_file(repo, "src/old.py", "print('old')\n")
     _git(repo, "add", ".")
@@ -300,8 +300,8 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        '[tool.spice.policy]\nexclude = ["generated/"]\n',
+        "spice.toml",
+        '[policy]\nexclude = ["generated/"]\n',
     )
     _write_repo_file(repo, "generated/service.py", "print('generated')\n")
     _write_repo_file(repo, "src/app.py", "print('kept')\n")
@@ -344,7 +344,7 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     for paths in seen.values():
         assert "generated/service.py" not in paths
         assert "src/app.py" in paths
-        assert "pyproject.toml" in paths
+        assert "spice.toml" in paths
 
 
 def test_local_path_policy_flags_absolute_macos_user_path_marker(tmp_path):

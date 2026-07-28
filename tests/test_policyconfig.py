@@ -113,10 +113,10 @@ def test_jittered_flex_limit_is_stable_bounded_and_actor_scoped():
 
 
 def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         """
-        [tool.spice.policy.taste.words]
+        [policy.taste.words]
         Smell = ""
         just = "reword"
         Whitelisting = "permission-listing"
@@ -137,10 +137,10 @@ def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
 
 
 def test_policy_resolver_applies_each_bound_override(tmp_path):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         """
-        [tool.spice.policy.limits]
+        [policy.limits]
         file_loc = 10
         file_bytes = 100
         routine_ccn = 5
@@ -148,48 +148,48 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         commit_message_wrap = 72
         repo_truth_doc_chars = 6000
 
-        [tool.spice.policy.flex]
+        [policy.flex]
         ratio = 2.0
         file_loc = 15
         file_bytes = 150
         routine_ccn = 7
         routine_length = 9
 
-        [tool.spice.policy.complexity]
+        [policy.complexity]
         hotspot_limit = 7
 
-        [tool.spice.policy.magic]
+        [policy.magic]
         examine_threshold = 12
         baseline_ref = "origin/main"
 
-        [tool.spice.policy.debt]
+        [policy.debt]
         reachability_test_only = 2
         assertion_free_tests = 3
 
-        [tool.spice.policy.languages]
+        [policy.languages]
         complexity = [".py"]
         magic = [".py", ".js"]
         env = [".sh"]
         c_grammar = [".c"]
 
-        [tool.spice.policy.lockfiles]
+        [policy.lockfiles]
         suffixes = [".lockx"]
         names = ["npm-lock.json"]
 
-        [tool.spice.policy.file_shape]
+        [policy.file_shape]
         source_suffixes = [".tmpl"]
         generated_patterns = ["generated/**"]
 
-        [tool.spice.policy.env_access]
+        [policy.env_access]
         baseline = "tools/spice/env-policy-baseline.json"
 
-        [tool.spice.policy.env_access.family_suffixes]
+        [policy.env_access.family_suffixes]
         python = [".py", ".pyi"]
 
-        [tool.spice.policy.env_access.default_patterns]
+        [policy.env_access.default_patterns]
         python = ['Env\\.read']
 
-        [tool.spice.policy.commit_message]
+        [policy.commit_message]
         allowed_trailers = ["Task", "Reviewed-By"]
         """,
     )
@@ -233,16 +233,16 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
 
 
 def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         """
-        [tool.spice.policy.limits]
+        [policy.limits]
         file_loc = 10
         file_bytes = 100
         routine_ccn = 5
         routine_length = 8
 
-        [tool.spice.policy.flex]
+        [policy.flex]
         ratio = 2.0
         routine_length = 20
         """,
@@ -261,36 +261,36 @@ def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
     [
         (
             """
-            [tool.spice.policy.limits]
+            [policy.limits]
             file_loc = "large"
             """,
-            r"policy\.limits\.file_loc \(source=pyproject path=.*pyproject\.toml\)",
+            r"policy\.limits\.file_loc \(source=repository path=.*spice\.toml\)",
         ),
         (
             """
-            [tool.spice.policy.magic]
+            [policy.magic]
             examine_threshold = 0
             """,
-            r"policy\.magic\.examine_threshold \(source=pyproject path=.*pyproject\.toml\)",
+            r"policy\.magic\.examine_threshold \(source=repository path=.*spice\.toml\)",
         ),
         (
             """
-            [tool.spice.policy.magic]
+            [policy.magic]
             baseline_ref = ""
             """,
-            r"policy\.magic\.baseline_ref \(source=pyproject path=.*pyproject\.toml\)",
+            r"policy\.magic\.baseline_ref \(source=repository path=.*spice\.toml\)",
         ),
         (
             """
-            [tool.spice.policy.complexity]
+            [policy.complexity]
             hotspot_limit = 0
             """,
-            r"policy\.complexity\.hotspot_limit \(source=pyproject path=.*pyproject\.toml\)",
+            r"policy\.complexity\.hotspot_limit \(source=repository path=.*spice\.toml\)",
         ),
     ],
 )
 def test_policy_resolver_names_invalid_config_key(tmp_path, body, expected):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         body,
     )
@@ -300,26 +300,26 @@ def test_policy_resolver_names_invalid_config_key(tmp_path, body, expected):
 
 
 def test_policy_resolver_names_invalid_debt_key(tmp_path):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         """
-        [tool.spice.policy.debt]
+        [policy.debt]
         reachability_test_only = -1
         """,
     )
 
     with pytest.raises(
         SpiceError,
-        match=r"policy\.debt\.reachability_test_only \(source=pyproject path=.*pyproject\.toml\)",
+        match=r"policy\.debt\.reachability_test_only \(source=repository path=.*spice\.toml\)",
     ):
         resolve_policy(tmp_path)
 
 
 def test_policy_resolver_allows_explicit_co_authored_by_trailer(tmp_path):
-    _write_pyproject(
+    _write_repository_config(
         tmp_path,
         """
-        [tool.spice.policy.commit_message]
+        [policy.commit_message]
         allowed_trailers = ["Task", "Co-Authored-By"]
         """,
     )
@@ -336,7 +336,7 @@ def test_config_reference_mentions_tracked_policy_keys():
         encoding="utf-8"
     )
     expected = [
-        "[tool.spice.policy]",
+        "[policy]",
         "package_roots",
         "name_cluster_threshold",
         "exclude",
@@ -353,40 +353,40 @@ def test_config_reference_mentions_tracked_policy_keys():
         "pre_commit",
         "pre_commit_success",
         "pre_commit_builtins",
-        "[tool.spice.policy.limits]",
+        "[policy.limits]",
         "file_loc",
         "file_bytes",
         "routine_ccn",
         "routine_length",
         "commit_message_wrap",
         "repo_truth_doc_chars",
-        "[tool.spice.policy.flex]",
+        "[policy.flex]",
         "ratio",
-        "[tool.spice.policy.complexity]",
+        "[policy.complexity]",
         "hotspot_limit",
-        "[tool.spice.policy.magic]",
+        "[policy.magic]",
         "examine_threshold",
         "baseline_ref",
-        "[tool.spice.policy.debt]",
+        "[policy.debt]",
         "reachability_test_only",
         "assertion_free_tests",
-        "[tool.spice.policy.commit_message]",
+        "[policy.commit_message]",
         "allowed_trailers",
-        "[tool.spice.policy.languages]",
+        "[policy.languages]",
         "c_grammar",
-        "[tool.spice.policy.lockfiles]",
+        "[policy.lockfiles]",
         "suffixes",
         "names",
-        "[tool.spice.policy.file_shape]",
+        "[policy.file_shape]",
         "source_suffixes",
         "generated_patterns",
-        "[tool.spice.policy.env_access]",
+        "[policy.env_access]",
         "family_suffixes",
         "default_patterns",
-        "[tool.spice.policy.markdown_depth_budget]",
+        "[policy.markdown_depth_budget]",
         "extensions",
         "stem_pattern",
-        "[[tool.spice.policy.rules]]",
+        "[[policy.rules]]",
         "scopes = { paths",
         "multiplier",
         "min",
@@ -410,5 +410,5 @@ def test_config_reference_mentions_tracked_policy_keys():
     assert missing == []
 
 
-def _write_pyproject(root: Path, text: str) -> None:
-    (root / "pyproject.toml").write_text(text, encoding="utf-8")
+def _write_repository_config(root: Path, text: str) -> None:
+    (root / "spice.toml").write_text(text, encoding="utf-8")

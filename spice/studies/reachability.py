@@ -71,7 +71,7 @@ PRODUCTION_ROOTS = (
 # dead-tested (e.g., backwards-compat stubs, dynamic dispatch via string keys).
 # Entries are dotted module paths within the spice package.
 REACHABILITY_ALLOWLIST: tuple[str, ...] = (
-    "spice.release",  # mounted command from [tool.spice.commands]
+    "spice.release",  # mounted command from [commands]
 )
 
 # Allowlist for production symbols that look test-only to static analysis but
@@ -228,9 +228,7 @@ def _configured_reachability_providers(
     if raw_providers is None:
         return []
     if not isinstance(raw_providers, list):
-        raise SpiceError(
-            f"[tool.spice.policy] {REACHABILITY_PROVIDERS_KEY} must be a list"
-        )
+        raise SpiceError(f"[policy] {REACHABILITY_PROVIDERS_KEY} must be a list")
 
     normalized_staged = _relative_staged_paths(repo_root, staged_paths)
     providers: list[ReachabilityProvider] = []
@@ -238,12 +236,12 @@ def _configured_reachability_providers(
     for index, raw in enumerate(raw_providers, start=1):
         context = f"{REACHABILITY_PROVIDERS_KEY}[{index}]"
         if not isinstance(raw, dict):
-            raise SpiceError(f"[tool.spice.policy] {context} must be a provider table")
+            raise SpiceError(f"[policy] {context} must be a provider table")
         _validate_provider_keys(raw, context=context)
         command = _command_provider_from_table(raw, context=context)
         if command.name in seen_names:
             raise SpiceError(
-                f"[tool.spice.policy] {context}: duplicate reachability provider "
+                f"[policy] {context}: duplicate reachability provider "
                 f"name {command.name!r}"
             )
         seen_names.add(command.name)

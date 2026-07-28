@@ -137,4 +137,4 @@ def _mounted_commands_epilog() -> str | None:
     names = mounted_command_names()
     if not names:
         return None
-    return "mounted commands (from [tool.spice.commands]): " + ", ".join(names)
+    return "mounted commands (from [commands]): " + ", ".join(names)

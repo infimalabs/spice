@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from spice import defaults
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
@@ -114,6 +115,7 @@ def repo_truth_doc_violations(repo: Path) -> list[str]:
 
 def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
     actual = [step.key for step in precommit._builtin_pre_commit_steps(tmp_path, [])]
+    packaged = list(defaults.table("policy", "pre_commit_builtins"))
     missing = [key for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS if key not in actual]
     unexpected = [key for key in actual if key not in EXPECTED_BUILTIN_PRE_COMMIT_KEYS]
     assert actual == EXPECTED_BUILTIN_PRE_COMMIT_KEYS, (
@@ -121,6 +123,10 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
         f"unexpected guard(s): {unexpected or 'none'}. A gate may not be removed, "
         "renamed, or added without updating EXPECTED_BUILTIN_PRE_COMMIT_KEYS in the "
         "same commit."
+    )
+    assert packaged == actual, (
+        "every built-in pre-commit step must have a packaged registry entry so "
+        "the shared false-disable resolver can remove it"
     )
 
 
@@ -138,7 +144,7 @@ def test_config_reference_documents_pre_commit_keys_and_taste_contract():
     ]
 
     assert documented == EXPECTED_BUILTIN_PRE_COMMIT_KEYS
-    assert "### `[tool.spice.policy.taste.words]`" in text
+    assert "### `[policy.taste.words]`" in text
     assert "gate-only pre-commit built-in" in text
     assert "`policy.TASTE_WORD_SUGGESTIONS`" in text
     assert "whole word" in text
@@ -230,8 +236,8 @@ def _write_two_coupling_repo(root):
 
 def test_private_internal_guard_allows_configured_internal_coupling(tmp_path):
     _write_coupling_repo(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "internal_couplings = [\n"
         '  { path = "tests/test_foo.py", test = "<module>", '
         'target = "spice.foo._secret" },\n'
@@ -244,8 +250,8 @@ def test_private_internal_guard_allows_configured_internal_coupling(tmp_path):
 
 def test_private_internal_guard_still_fails_unlisted_coupling(tmp_path):
     _write_two_coupling_repo(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "internal_couplings = [\n"
         '  { path = "tests/test_foo.py", test = "<module>", '
         'target = "spice.foo._secret" },\n'
@@ -267,8 +273,8 @@ def test_private_internal_guard_reports_stale_configured_coupling(tmp_path):
     (tmp_path / "tests" / "test_foo.py").write_text(
         "def test_public():\n    assert 1 == 1\n", encoding="utf-8"
     )
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "internal_couplings = [\n"
         '  { path = "tests/test_foo.py", test = "<module>", '
         'target = "spice.foo._secret" },\n'
@@ -319,8 +325,8 @@ def test_default_repo_truth_docs_apply_without_configuration(tmp_path):
 
 
 def test_declared_repo_truth_docs_override_the_default(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nrepo_truth_docs = ["AGENTS.md", "TESTING.md"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nrepo_truth_docs = ["AGENTS.md", "TESTING.md"]\n',
         encoding="utf-8",
     )
     assert repo_truth_docs(tmp_path) == ["AGENTS.md", "TESTING.md"]
@@ -342,11 +348,11 @@ def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
 
 
 def test_doc_cap_reads_configured_limit_when_markdown_default_is_replaced(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.limits]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy.limits]\n"
         "repo_truth_doc_chars = 12\n"
         "\n"
-        "[tool.spice.policy.markdown_depth_budget]\n"
+        "[policy.markdown_depth_budget]\n"
         "extensions = []\n",
         encoding="utf-8",
     )
@@ -474,24 +480,24 @@ def test_file_shape_guard_leaves_tracked_markdown_to_repo_doc_budget(tmp_path):
 
 
 def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         'repo_truth_docs = ["AGENTS.md", "docs/STRICT.md", "wide/WIDE.md", "skip/SKIP.md"]\n'
         "\n"
-        "[tool.spice.policy.limits]\n"
+        "[policy.limits]\n"
         "repo_truth_doc_chars = 20\n"
         "\n"
-        "[[tool.spice.policy.rules]]\n"
+        "[[policy.rules]]\n"
         'scopes = { paths = ["docs/**"] }\n'
-        "[tool.spice.policy.rules.repo_truth_doc_chars]\n"
+        "[policy.rules.repo_truth_doc_chars]\n"
         "max = 5\n"
         "\n"
-        "[[tool.spice.policy.rules]]\n"
+        "[[policy.rules]]\n"
         'scopes = { paths = ["wide/**"] }\n'
-        "[tool.spice.policy.rules.repo_truth_doc_chars]\n"
+        "[policy.rules.repo_truth_doc_chars]\n"
         "multiplier = 2.0\n"
         "\n"
-        "[[tool.spice.policy.rules]]\n"
+        "[[policy.rules]]\n"
         'scopes = { paths = ["skip/**"] }\n'
         "unlimited = true\n",
         encoding="utf-8",
@@ -511,11 +517,11 @@ def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
 
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):
     recorder = _write_recorder(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.commands]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[commands]\n"
         f"fmt-cs = {_argv_toml(sys.executable, str(recorder), 'fmt-cs')}\n"
         "\n"
-        "[tool.spice.policy]\n"
+        "[policy]\n"
         "pre_commit = [\n"
         '  "fmt-cs",\n'
         '  { label = "assets", '
@@ -537,8 +543,8 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
     tmp_path, monkeypatch
 ):
     recorder = _write_recorder(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.pre_commit_builtins]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy.pre_commit_builtins]\n"
         "formatters = false\n"
         '"magic-numbers" = { label = "custom magic", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'custom magic')} }}\n",
@@ -596,8 +602,8 @@ def test_markdown_links_pre_commit_guard_reports_shared_board(tmp_path, monkeypa
 
 
 def test_policy_pre_commit_failure_reports_the_step_label(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         'pre_commit = [{ label = "assets", '
         f"run = {_argv_toml(sys.executable, '-c', _failure_program())} }}]\n",
         encoding="utf-8",
@@ -617,8 +623,8 @@ def test_policy_pre_commit_success_extensions_run_after_gate_passes(
     tmp_path, monkeypatch
 ):
     recorder = _write_recorder(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "assets", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'assets')}, "
@@ -654,7 +660,7 @@ def test_assertion_free_test_guard_fails_above_default_zero_debt(tmp_path):
     message = str(exc_info.value)
     assert "assertion-free-tests: 1 test(s)" in message
     assert "test_empty.py:1 test_empty" in message
-    assert "[tool.spice.policy.debt] assertion_free_tests=0" in message
+    assert "[policy.debt] assertion_free_tests=0" in message
     assert "0 means clean" in message
 
 
@@ -664,8 +670,8 @@ def test_assertion_free_test_guard_allows_configured_debt_baseline(tmp_path):
     (test_dir / "test_empty.py").write_text(
         "def test_empty():\n    value = 1\n", encoding="utf-8"
     )
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.debt]\nassertion_free_tests = 1\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.debt]\nassertion_free_tests = 1\n",
         encoding="utf-8",
     )
 
@@ -711,8 +717,8 @@ def test_reachability_guard_fails_on_configured_module_provider_finding(tmp_path
         ]
     )
     provider.write_text(f"print({payload!r})\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
@@ -728,7 +734,7 @@ def test_reachability_guard_fails_on_configured_module_provider_finding(tmp_path
     assert "reachability: 1 test-only finding(s)" in message
     assert "provider: javascript" in message
     assert "subject: web.dead_widget" in message
-    assert "[tool.spice.policy.debt] reachability_test_only=0" in message
+    assert "[policy.debt] reachability_test_only=0" in message
     assert "0 means clean" in message
 
 
@@ -751,15 +757,15 @@ def test_reachability_guard_reports_configured_debt_when_exceeded(tmp_path):
         ]
     )
     provider.write_text(f"print({payload!r})\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
         'scopes = { paths = ["web/**/*.js"] } },\n'
         "]\n"
         "\n"
-        "[tool.spice.policy.debt]\n"
+        "[policy.debt]\n"
         "reachability_test_only = 1\n",
         encoding="utf-8",
     )
@@ -769,7 +775,7 @@ def test_reachability_guard_reports_configured_debt_when_exceeded(tmp_path):
 
     message = str(exc_info.value)
     assert "reachability: 2 test-only finding(s)" in message
-    assert "[tool.spice.policy.debt] reachability_test_only=1" in message
+    assert "[policy.debt] reachability_test_only=1" in message
     assert "explicit drainable cleanup debt" in message
 
 
@@ -788,8 +794,8 @@ def test_symbol_reachability_guard_fails_on_configured_symbol_provider_finding(
         ]
     )
     provider.write_text(f"print({payload!r})\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "reachability_providers = [\n"
         '  { name = "javascript", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
@@ -828,8 +834,8 @@ def test_policy_pre_commit_success_extensions_wait_for_clean_gate(
     tmp_path, monkeypatch
 ):
     recorder = _write_recorder(tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "assets", '
         f"run = {_argv_toml(sys.executable, '-c', _failure_program())} }},\n"
@@ -856,8 +862,8 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
     recorder = _write_staged_paths_recorder(tmp_path)
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy]\n"
+        "spice.toml",
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "cs", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'cs')}, "
@@ -879,7 +885,7 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
     rows = (tmp_path / "staged-paths.txt").read_text(encoding="utf-8").splitlines()
     assert rows == [
         "cs:src/main.cs",
-        "always:docs/readme.md|pyproject.toml|src/main.cs",
+        "always:docs/readme.md|spice.toml|src/main.cs",
     ]
 
 
@@ -891,11 +897,12 @@ def test_policy_pre_commit_combined_scopes_select_layered_agent_context(
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.agent]\n"
+        "spice.toml",
+        "[agent]\n"
         'model = "GPT-COMBINED"\n'
+        'driver = "codex"\n'
         "\n"
-        "[tool.spice.policy]\n"
+        "[policy]\n"
         "pre_commit = [\n"
         '  { label = "combined", '
         f"run = {_argv_toml(sys.executable, str(recorder), 'combined')}, "
@@ -915,7 +922,6 @@ def test_policy_pre_commit_combined_scopes_select_layered_agent_context(
         f"run = {_argv_toml(sys.executable, str(recorder), 'all-contexts')} }},\n"
         "]\n",
     )
-    _write_repo_file(repo, "spice.toml", '[agent]\ndriver = "codex"\n')
     _write_repo_file(repo, "src/main.py", "answer = 42\n")
     _git(repo, "add", ".")
     _patch_pre_commit_builtin_noops(monkeypatch)
@@ -925,10 +931,10 @@ def test_policy_pre_commit_combined_scopes_select_layered_agent_context(
     rows = (tmp_path / "staged-paths.txt").read_text(encoding="utf-8").splitlines()
     assert rows == [
         "combined:src/main.py",
-        "all-paths:pyproject.toml|spice.toml|src/main.py",
+        "all-paths:spice.toml|src/main.py",
         "all-drivers:src/main.py",
         "all-models:src/main.py",
-        "all-contexts:pyproject.toml|spice.toml|src/main.py",
+        "all-contexts:spice.toml|src/main.py",
     ]
 
 
@@ -1148,16 +1154,16 @@ def _latch_probe_repo(tmp_path: Path) -> Path:
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy.limits]\n"
+        "spice.toml",
+        "[policy.limits]\n"
         f"file_loc = {LATCH_PROBE_BASE_LOC}\n"
         f"file_bytes = {LATCH_PROBE_BYTE_LOC}\n"
         "\n"
-        "[tool.spice.policy.flex]\n"
+        "[policy.flex]\n"
         f"ratio = {LATCH_PROBE_FLEX_RATIO}\n"
         "\n"
-        "[[tool.spice.policy.rules]]\n"
-        'scopes = { paths = ["pyproject.toml"] }\n'
+        "[[policy.rules]]\n"
+        'scopes = { paths = ["spice.toml"] }\n'
         "unlimited = true\n",
     )
     _write_repo_file(repo, "big.py", "line\n" * LATCH_PROBE_BREACH_LINES)
