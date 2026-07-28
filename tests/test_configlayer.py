@@ -1,5 +1,6 @@
 """Layered TOML configuration loading and merge law."""
 
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType
 
@@ -155,6 +156,83 @@ def test_loader_exposes_three_immutable_layers_and_leaf_provenance(
     )
     assert isinstance(loaded.effective, MappingProxyType)
     assert isinstance(loaded.effective["agent"], MappingProxyType)
+
+
+def test_layer_records_are_frozen():
+    layer = layers.ConfigLayer(
+        layers.SYSTEM_SOURCE,
+        None,
+        MappingProxyType({}),
+        False,
+    )
+    loaded = layers.LayeredConfig(
+        (layer,),
+        MappingProxyType({}),
+        MappingProxyType({}),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(layer, "present", True)
+    with pytest.raises(FrozenInstanceError):
+        setattr(loaded, "layers", ())
+
+
+def test_non_worktree_operator_state_failure_is_not_suppressed(tmp_path, monkeypatch):
+    def refuse_operator_state(*_args, **_kwargs):
+        raise SpiceError("operator state is unreadable")
+
+    monkeypatch.setattr(layers, "operator_state_path", refuse_operator_state)
+
+    with pytest.raises(SpiceError, match="operator state is unreadable"):
+        layers.load_config(tmp_path)
+
+
+def test_source_outside_worktree_has_explicit_absent_worktree_layer(
+    tmp_path, monkeypatch
+):
+    def report_not_worktree(*_args, **_kwargs):
+        raise SpiceError("not inside a git worktree")
+
+    monkeypatch.setattr(layers, "operator_state_path", report_not_worktree)
+
+    loaded = layers.load_config(tmp_path)
+    worktree = loaded.layer(layers.WORKTREE_SOURCE)
+
+    assert worktree.path is None
+    assert worktree.values == {}
+    assert worktree.present is False
+
+
+def test_packaged_config_records_present_source(tmp_path):
+    path = tmp_path / "packaged.toml"
+    _write(path, '[agent]\nmodel = "packaged"\n')
+
+    packaged = layers.load_packaged_config(path)
+
+    assert packaged.path == path
+    assert packaged.present is True
+
+
+def test_enabled_registry_entries_remove_only_literal_false():
+    entries = {
+        "disabled": False,
+        "enabled": True,
+        "configured": {"argv": ["tool"]},
+    }
+
+    assert layers.enabled_registry_entries(entries, "commands") == {
+        "enabled": True,
+        "configured": {"argv": ["tool"]},
+    }
+
+
+def test_config_string_list_rejects_scalar_sequences_and_deduplicates():
+    assert layers.config_string_list("agent") == []
+    assert layers.config_string_list(b"agent") == []
+    assert layers.config_string_list(["first", "", "first", "second"]) == [
+        "first",
+        "second",
+    ]
 
 
 def test_unchanged_layers_parse_once_and_reload_after_source_revision(
