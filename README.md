@@ -123,10 +123,11 @@ commit-message hygiene, with no task plane, shell wrapper, agent skill, or fleet
 reference guard. Commit normally to run the gates, or invoke the staged gate
 directly with `spice dev pre-commit`. Add `--json` to either dry-run form for
 the same ordered operations as a versioned machine-readable plan. Apply stores
-its interruption-safe ownership receipt under `.spice/init-receipt.json`.
-Run `spice deinit` to reverse that receipt in exact reverse order. Spice restores
-only files, modes, and scoped Git values that still match its recorded output;
-`spice deinit --json` reports edited or shared values with a Git-private
+its interruption-safe ownership receipt under
+`<worktree-git-dir>/.spice/init-receipt.json`, outside the tracked work tree.
+Run `spice deinit` to reverse that receipt in exact reverse order. Spice
+restores only files, modes, and scoped Git values that still match its recorded
+output; `spice deinit --json` reports edited or shared values with a Git-private
 recovery handle.
 
 **Steer** materializes the full steering and fleet surfaces. `spice init` writes

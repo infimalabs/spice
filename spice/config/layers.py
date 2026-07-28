@@ -13,6 +13,11 @@ from typing import Any
 from spice import paths
 from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
+from spice.operatorstate import (
+    WORKTREE_CONFIG_PATH,
+    operator_state_path,
+    prepare_operator_state_path,
+)
 from spice.scopes import SCOPES_KEY
 
 SYSTEM_SOURCE = "system"
@@ -47,7 +52,7 @@ class ConfigLayer:
     """One immutable parsed source in the configuration precedence chain."""
 
     name: str
-    path: Path
+    path: Path | None
     values: Mapping[str, Any]
     present: bool
 
@@ -73,34 +78,59 @@ class LayeredConfig:
         return self.sources.get(parts)
 
 
-_ConfigSource = tuple[str, Path, bool]
+_ConfigSource = tuple[str, Path | None, bool]
 _ConfigRevision = tuple[int, int, int, int, int, int] | None
 # Cached values are immutable. Concurrent cold reads may redundantly build the
 # same revision, but either complete value is safe to publish and config reads
 # never acquire a process-wide mutex.
 _CONFIG_CACHE: dict[
-    tuple[Path, ...], tuple[tuple[_ConfigRevision, ...], LayeredConfig]
+    tuple[Path | None, ...], tuple[tuple[_ConfigRevision, ...], LayeredConfig]
 ] = {}
+_WORKTREE_CONFIG_PATH_CACHE: dict[tuple[Path, Path | None], Path] = {}
 
 
 def load_config(repo_root: Path) -> LayeredConfig:
     """Load four immutable TOML layers, reusing them while sources are unchanged."""
+    resolved_root = repo_root.expanduser().resolve()
+    if not resolved_root.exists():
+        worktree_config = None
+    else:
+        try:
+            path_key = (resolved_root, paths.state_backend_root())
+            worktree_config = _WORKTREE_CONFIG_PATH_CACHE.get(path_key)
+            if worktree_config is None:
+                worktree_config = operator_state_path(
+                    resolved_root, WORKTREE_CONFIG_PATH
+                )
+                _WORKTREE_CONFIG_PATH_CACHE[path_key] = worktree_config
+            worktree_config = prepare_operator_state_path(
+                resolved_root,
+                WORKTREE_CONFIG_PATH,
+                canonical_path=worktree_config,
+            )
+        except SpiceError as exc:
+            if str(exc) != "not inside a git worktree":
+                raise
+            # A source tree outside Git has no worktree identity and therefore
+            # no worktree layer. No visible `.spice` substitute is read.
+            worktree_config = None
     specifications: tuple[_ConfigSource, ...] = (
         (
             SYSTEM_SOURCE,
             paths.runtime_spice_source() / "spice.toml",
             False,
         ),
-        (PYPROJECT_SOURCE, repo_root / "pyproject.toml", True),
-        (REPOSITORY_SOURCE, repo_root / "spice.toml", False),
+        (PYPROJECT_SOURCE, resolved_root / "pyproject.toml", True),
+        (REPOSITORY_SOURCE, resolved_root / "spice.toml", False),
         (
             WORKTREE_SOURCE,
-            paths.state_dir(repo_root) / "config" / "spice.toml",
+            worktree_config,
             False,
         ),
     )
     revisions = tuple(
-        _config_revision(name, path) for name, path, _pyproject in specifications
+        _config_revision(name, path) if path is not None else None
+        for name, path, _pyproject in specifications
     )
     cache_key = tuple(path for _name, path, _pyproject in specifications)
     cached = _CONFIG_CACHE.get(cache_key)
@@ -136,7 +166,7 @@ def _load_config_sources(
     parsed: list[dict[str, Any]] = []
     layers: list[ConfigLayer] = []
     for name, path, pyproject in specifications:
-        values, present = _read_toml(path, name)
+        values, present = _read_toml(path, name) if path is not None else ({}, False)
         if name == SYSTEM_SOURCE and not present:
             raise SpiceError(f"packaged configuration is missing: {path}")
         if pyproject:
@@ -152,6 +182,8 @@ def _load_config_sources(
         )
 
     for layer, values in reversed(tuple(zip(layers, parsed, strict=True))):
+        if layer.path is None:
+            continue
         validate_config_keys(
             values,
             source_name=layer.name,

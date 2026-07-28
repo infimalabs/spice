@@ -27,8 +27,9 @@ Spice actually introduced.
 - **Apply records a durable ownership receipt.** For each operation, apply
   records the previous value, the generated value, an ownership digest, the
   scope, the mode, and per-operation completion. The receipt
-  (`.spice/init-receipt.json`, mode `0600`) is durable enough to resume or
-  reverse an interrupted run.
+  (`<worktree-git-dir>/.spice/init-receipt.json`, mode `0600`) is durable
+  enough to resume or reverse an interrupted run without becoming tracked
+  worktree content.
 - **Deinit reverses in strict reverse order, owning only what it owns.**
   `spice deinit` walks the receipt back-to-front. It restores a generated file
   only when the on-disk bytes still match what apply generated, and restores a

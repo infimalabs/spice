@@ -225,6 +225,7 @@ paths = [
     "spice/hooks/commitmsg.py",
     "spice/locking.py",
     "spice/mail/steeringkey.py",
+    "spice/operatorstate.py",
     "spice/pathmatch.py",
     "spice/paths.py",
     "spice/policy.py",
