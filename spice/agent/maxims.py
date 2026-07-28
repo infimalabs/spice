@@ -33,7 +33,7 @@ from spice.scopes import MAXIM_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 from spice.config.layers import (
     config_string_list,
     contextualize_config_error,
-    effective_table,
+    effective_registry,
 )
 
 DEFAULT_MAX_ATTEMPTS = defaults.integer("maxim", "max_attempts")
@@ -722,7 +722,7 @@ def _configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
 
 def _load_configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
     bags: dict[str, MaximBag] = {}
-    for raw_name, raw_config in effective_table(root, "maxims").items():
+    for raw_name, raw_config in effective_registry(root, "maxims").items():
         name = _normalize_bag_name(raw_name)
         if not isinstance(raw_config, dict):
             raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")

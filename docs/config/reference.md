@@ -34,6 +34,15 @@ Every inline `scopes = { ... }` selector is also one atomic leaf: a later
 configuration layer replaces the complete selector instead of inheriting
 individual axes from earlier layers.
 
+Registry-shaped tables share one removal rule. In `commands`, `maxims`,
+`policy.pre_commit_builtins`, `policy.taste.words`, `tasks.reports`, the
+`wrappers` group registry, and the entry registry inside each wrapper group, a
+literal boolean `false` at a later scope disables that named inherited entry.
+Empty strings, lists, and tables retain their domain-specific meanings; none is
+a removal spelling. A new packaged named-entry registry must declare this
+contract and prove its consumer returns the same disabled answer before the
+configuration gate accepts it.
+
 ### Universal applicability selectors
 
 Configurable entries express applicability with one inline selector:
@@ -364,9 +373,8 @@ still winning.
 Naming `common` in a repo `[tool.spice.wrappers.common]` table replaces the whole
 group atomically — routes do not concatenate, so an override must re-list every
 route it keeps — while omitting the table inherits this default and
-`wrappers = []` disables generation. A `false` group or entry disables that
-inherited name explicitly. Repo groups should otherwise wrap stable repo-owned
-tools (see [wrapper commands](../cli/wrapper-commands.md)).
+`wrappers = []` disables generation. Repo groups should otherwise wrap stable
+repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
@@ -705,7 +713,6 @@ required non-empty strings. `test` is the test function name or `<module>`, and
 Each built-in key may be:
 
 - `true` to keep the default.
-- `false` to disable it.
 - A mounted command name to replace it.
 - A command-step table using `mount`, `run`, or `argv`.
 - `{ enabled = false }` to disable with an explicit table.
