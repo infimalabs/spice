@@ -290,27 +290,27 @@ prompt_lines = [
 
 [maxims.polling]
 words = ["delay", "delayed", "delaying", "delays", "poll", "polled", "polling", "polls", "sleep", "sleeping", "sleeps", "slept"]
-message = "😊 Respond to the real event, signal, or completion notification through a blocking call, watcher, or callback, or else restructure the flow so nothing remains to be awaited at all!"
+message = "🌶️ Respond to the real event, signal, or completion notification through a blocking call, watcher, or callback, or else restructure the flow so nothing remains to be awaited at all!"
 
 [maxims.fallbacks]
 words = ["fall back", "fall backs", "fallback", "fallbacks", "falls back"]
-message = "😊 Commit to a single deterministic path and let violated assumptions fail loudly and immediately, reserving an explicit default or documented resolver order strictly for what the contract names outright!"
+message = "🌶️ Commit to a single deterministic path and let violated assumptions fail loudly and immediately, reserving an explicit default or documented resolver order strictly for what the contract names outright!"
 
 [maxims.backwards-compat]
 words = ["compatibilities", "compatibility", "compatible"]
-message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
+message = "🌶️ Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
 
 [maxims.shims]
 words = ["shim", "shimmed", "shimming", "shims"]
-message = "😊 Replace the old shape outright, delete it completely, and route every caller straight to the new shape's real interface!"
+message = "🌶️ Replace the old shape outright, delete it completely, and route every caller straight to the new shape's real interface!"
 
 [maxims.aliases]
 words = ["alias", "aliased", "aliases", "aliasing"]
-message = "😊 Rename in place, update every reference immediately, and let the changeover happen in one clean move so exactly one name survives!"
+message = "🌶️ Rename in place, update every reference immediately, and let the changeover happen in one clean move so exactly one name survives!"
 
 [maxims.legacy]
 words = ["legacy", "legacies"]
-message = "😊 Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
+message = "🌶️ Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
 
 [serve]
 brand = "spice"
