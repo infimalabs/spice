@@ -750,7 +750,14 @@ Each built-in key may be:
 - `true` to keep the default.
 - A mounted command name to replace it.
 - A command-step table using `mount`, `run`, or `argv`.
-- `{ enabled = false }` to disable with an explicit table.
+- `false` or `{ enabled = false }` to disable.
+
+Every pre-commit invocation prints each disabled built-in by name. A disablement
+from tracked repository configuration is covered by the executable-configuration
+digest approved through `spice init --apply`; `spice doctor` reports a required
+failure until that current approval receipt exists. Git-dir operator-owned
+disablements are already explicit operator intent and do not require a
+repository approval receipt.
 
 ## `[maxims.<bag>]`
 

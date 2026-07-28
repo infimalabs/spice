@@ -19,7 +19,8 @@ from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.lifecycle import packaged_skill_path
 from spice.agent.shellhook import rtk_rewrite_yield_selectors
 from spice.cli.entry import is_spice_checkout
-from spice.config.layers import effective_table
+from spice.config.layers import REPOSITORY_SOURCE, effective_table, load_config
+from spice.config.trust import repository_config_approval
 from spice.config.edit import git_worktree_config_get
 from spice.config.values import (
     configured_judge_bin,
@@ -121,6 +122,7 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _wrapper_seam_check(repo_root),
         _skill_check(repo_root),
         _policy_check(repo_root),
+        _pre_commit_builtin_disablement_check(repo_root),
         _mounted_commands_check(repo_root),
         _git_clean_check(repo_root),
         _hooks_check(repo_root),
@@ -698,6 +700,55 @@ def _policy_check(repo_root: Path) -> DoctorCheck:
         )
     listed = ", ".join(root.relative_to(repo_root).as_posix() for root in roots)
     return _ok("policy.package-roots", listed, "spice study shape")
+
+
+def _pre_commit_builtin_disablement_check(repo_root: Path) -> DoctorCheck:
+    from spice.hooks import precommit
+
+    name = "policy.pre-commit-builtins"
+    command = "spice init --apply"
+    try:
+        disabled = precommit.disabled_builtin_pre_commit_steps(repo_root)
+    except SpiceError as exc:
+        return _fail(name, str(exc), "spice config show")
+    if not disabled:
+        return _ok(name, "all builtins enabled", "spice config show")
+
+    loaded = load_config(repo_root)
+    repository_disabled = tuple(
+        entry
+        for entry in disabled
+        if (
+            source := loaded.source_for(
+                ("policy", "pre_commit_builtins", entry.config_key)
+            )
+        )
+        is not None
+        and source.name == REPOSITORY_SOURCE
+    )
+    disabled_names = ", ".join(entry.key for entry in disabled)
+    if repository_disabled:
+        approval = repository_config_approval(repo_root)
+        if not approval.approved:
+            unapproved_names = ", ".join(entry.key for entry in repository_disabled)
+            return _fail(
+                name,
+                "repository disabled builtin(s) without current operator "
+                f"approval: {unapproved_names}; all disabled: {disabled_names}",
+                command,
+            )
+        return _ok(
+            name,
+            f"disabled builtin(s): {disabled_names}; repository disablement "
+            "approved; "
+            f"digest={approval.digest}",
+            command,
+        )
+    return _ok(
+        name,
+        f"operator or packaged disabled builtin(s): {disabled_names}",
+        "spice config show",
+    )
 
 
 def _git_clean_check(repo_root: Path) -> DoctorCheck:
