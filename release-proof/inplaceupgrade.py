@@ -343,6 +343,62 @@ def _store_versions(paths: dict[str, Path], names: tuple[str, ...]) -> dict[str,
     return {name: _team_store_version(paths[name]) for name in names}
 
 
+def _validated_authority_versions(
+    payload: object,
+    *,
+    label: str,
+) -> dict[str, int]:
+    expected = set(UPGRADE_AUTHORITY_STATE)
+    if not isinstance(payload, dict) or set(payload) != expected:
+        resolved = sorted(payload) if isinstance(payload, dict) else payload
+        raise RehearsalError(
+            f"{label} authority version inventory drifted: "
+            f"expected={sorted(expected)!r} resolved={resolved!r}"
+        )
+    versions: dict[str, int] = {}
+    for name, value in payload.items():
+        if type(value) is not int or value < 1:
+            raise RehearsalError(
+                f"{label} authority version is invalid for {name}: {value!r}"
+            )
+        versions[str(name)] = value
+    return versions
+
+
+def _authority_version_evidence(
+    predecessor: object,
+    candidate: object,
+    installed: object,
+) -> dict[str, dict[str, int]]:
+    predecessor_versions = _validated_authority_versions(
+        predecessor,
+        label="predecessor",
+    )
+    candidate_versions = _validated_authority_versions(candidate, label="candidate")
+    installed_versions = _validated_authority_versions(installed, label="installed")
+    mismatches = [
+        (
+            f"{name} predecessor={predecessor_versions[name]} "
+            f"candidate={candidate_versions[name]} "
+            f"installed={installed_versions[name]}"
+        )
+        for name in UPGRADE_AUTHORITY_STATE
+        if installed_versions[name] != candidate_versions[name]
+    ]
+    if mismatches:
+        raise RehearsalError(
+            "the installed upgrade did not reach the candidate authority schema: "
+            + "; ".join(mismatches)
+        )
+    return {
+        name: {
+            "from": predecessor_versions[name],
+            "to": installed_versions[name],
+        }
+        for name in UPGRADE_AUTHORITY_STATE
+    }
+
+
 def _authority_facts(payload: object, *, written: bool) -> dict[str, dict[str, object]]:
     if not isinstance(payload, dict) or set(payload) != set(UPGRADE_AUTHORITY_STATE):
         resolved = sorted(payload) if isinstance(payload, dict) else payload
@@ -419,6 +475,7 @@ class _UpgradeSeed(NamedTuple):
 class _UpgradeWrites(NamedTuple):
     paths: dict[str, Path]
     facts: dict[str, dict[str, object]]
+    declared_versions: dict[str, int]
     tasks: list[str]
 
 
@@ -603,6 +660,17 @@ def _upgrade_installed_package(
                 f"installed path changed across the upgrade for {name}: "
                 f"{prior_path} -> {current_paths[name]}"
             )
+    declared_versions = _validated_authority_versions(
+        run_installed_probe(
+            seed.python,
+            root,
+            seed.repository,
+            "authority-versions",
+            seed.environment,
+            failures,
+        ),
+        label="candidate",
+    )
     upgraded_facts = _authority_facts(
         run_installed_probe(
             seed.python,
@@ -622,7 +690,12 @@ def _upgrade_installed_package(
         "Write state after the in-place upgrade",
         failures,
     )
-    return _UpgradeWrites(paths=current_paths, facts=upgraded_facts, tasks=tasks)
+    return _UpgradeWrites(
+        paths=current_paths,
+        facts=upgraded_facts,
+        declared_versions=declared_versions,
+        tasks=tasks,
+    )
 
 
 def _finalize_in_place_upgrade(
@@ -658,16 +731,11 @@ def _finalize_in_place_upgrade(
         after_identity,
     )
     after_versions = _store_versions(writes.paths, UPGRADE_AUTHORITY_STATE)
-    unchanged_versions = [
-        name
-        for name in UPGRADE_AUTHORITY_STATE
-        if seed.versions[name] == after_versions[name]
-    ]
-    if unchanged_versions:
-        raise RehearsalError(
-            "the upgraded install ran no forward authority migration for "
-            + ", ".join(unchanged_versions)
-        )
+    authority_versions = _authority_version_evidence(
+        seed.versions,
+        writes.declared_versions,
+        after_versions,
+    )
     _require_upgrade_tasks(
         seed,
         [*seed.tasks, *writes.tasks],
@@ -681,10 +749,7 @@ def _finalize_in_place_upgrade(
             "store": UPGRADE_TEAM_STORE,
         },
         "authority": writes.facts,
-        "authorityVersions": {
-            name: {"from": seed.versions[name], "to": after_versions[name]}
-            for name in UPGRADE_AUTHORITY_STATE
-        },
+        "authorityVersions": authority_versions,
         "excluded": list(UPGRADE_EXCLUDED_STATE),
         "exclusionReasons": UPGRADE_EXCLUSION_REASONS,
         "paths": {name: str(path) for name, path in writes.paths.items()},

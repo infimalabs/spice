@@ -23,6 +23,19 @@ MAXIM_BAG = "upgrade-proof"
 MAXIM_DRIVER = "codex"
 
 
+def _authority_schema_versions() -> dict[str, int]:
+    """Report the authority versions declared by this installed runtime."""
+    from spice.agent.maximmetrics import MAXIM_METRICS_SCHEMA_VERSION
+    from spice.mail.ackschema import ACK_STATE_SCHEMA_VERSION
+    from spice.serve.team.schema import TEAM_AUTHORITY_SCHEMA_VERSION
+
+    return {
+        "spiceacks.sqlite3": ACK_STATE_SCHEMA_VERSION,
+        "spicemaxims.sqlite3": MAXIM_METRICS_SCHEMA_VERSION,
+        "spiceteams.sqlite3": TEAM_AUTHORITY_SCHEMA_VERSION,
+    }
+
+
 def _authority_seed(repository: Path) -> dict[str, object]:
     from spice.agent.maximmetrics import (
         MAXIM_EVENT_PUBLISHED,
@@ -233,12 +246,20 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "action",
-        choices=("seed-authority", "verify-authority", "paths", "projection"),
+        choices=(
+            "authority-versions",
+            "seed-authority",
+            "verify-authority",
+            "paths",
+            "projection",
+        ),
     )
     parser.add_argument("--repository", required=True, type=Path)
     arguments = parser.parse_args()
     repository = arguments.repository.resolve(strict=True)
-    if arguments.action == "seed-authority":
+    if arguments.action == "authority-versions":
+        evidence = _authority_schema_versions()
+    elif arguments.action == "seed-authority":
         evidence = _authority_seed(repository)
     elif arguments.action == "verify-authority":
         evidence = _authority_verify_and_write(repository)
