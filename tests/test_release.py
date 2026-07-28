@@ -619,6 +619,34 @@ def test_registry_install_without_direct_url_matches_the_tagged_release(
     assert "candidate tag v0.30.0" in output
     assert "installed spice-harness==0.30.0" in output
 
+    ran = []
+    monkeypatch.setattr(release, "repo_root", lambda: candidate)
+    monkeypatch.setattr(
+        release,
+        "clean_build_artifacts",
+        lambda root: ran.append(("clean", root)),
+    )
+    monkeypatch.setattr(
+        release,
+        "run_constitution_gate",
+        lambda: ran.append("constitution"),
+    )
+    monkeypatch.setattr(release, "current_version", lambda: "0.30.0")
+    monkeypatch.setattr(
+        release,
+        "run_artifact_gate",
+        lambda version: ran.append(("artifact", version)),
+    )
+
+    check = build_release_parser().parse_args(["check"])
+    assert release.handle_release(check) == 0
+    assert ran == [
+        ("clean", candidate),
+        "constitution",
+        ("artifact", "0.30.0"),
+    ]
+    assert "release gates passed for 0.30.0" in capsys.readouterr().out
+
 
 def test_registry_install_refuses_an_untagged_candidate(tmp_path, monkeypatch):
     payload = "# released payload\n"
