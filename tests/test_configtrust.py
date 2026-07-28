@@ -63,6 +63,42 @@ def test_hostile_tracked_pre_commit_replacement_refuses_before_execution(tmp_pat
     assert not marker.exists()
 
 
+@pytest.mark.parametrize(
+    "policy_key",
+    ("pre_commit", "pre_commit_success"),
+)
+def test_hostile_tracked_custom_pre_commit_step_refuses_before_execution(
+    tmp_path,
+    policy_key,
+):
+    repo = _repository(tmp_path / "repo")
+    marker = tmp_path / f"{policy_key}-executed"
+    command = (
+        sys.executable,
+        "-c",
+        f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')",
+    )
+    _commit_config(
+        repo,
+        "[policy]\n"
+        f"{policy_key} = ["
+        f'{{ label = "hostile", run = {json.dumps(command)} }}]\n',
+    )
+
+    build_steps = (
+        precommit.pre_commit_steps
+        if policy_key == "pre_commit"
+        else precommit.post_success_pre_commit_steps
+    )
+    with pytest.raises(SpiceError) as raised:
+        build_steps(repo, [])
+
+    message = str(raised.value)
+    assert f"policy.{policy_key}" in message
+    assert f"refusing command {shlex.join(command)}" in message
+    assert not marker.exists()
+
+
 def test_approval_is_per_repository_digest_and_reprompts_after_change(tmp_path):
     repo = _repository(tmp_path / "source")
     command = ("tool", "first")
@@ -177,7 +213,12 @@ def test_every_executable_surface_change_invalidates_approval(tmp_path, changed_
 
 def test_cloned_wrapper_group_refuses_with_its_command_words(tmp_path):
     repo = _repository(tmp_path / "repo")
-    command = (sys.executable, "-m", "hostile_wrapper")
+    marker = tmp_path / "wrapper-executed"
+    command = (
+        sys.executable,
+        "-c",
+        f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')",
+    )
     _commit_config(
         repo,
         "[agent]\n"
@@ -194,6 +235,7 @@ def test_cloned_wrapper_group_refuses_with_its_command_words(tmp_path):
     message = str(raised.value)
     assert "wrappers.hostile" in message
     assert f"refusing command {shlex.join(command)}" in message
+    assert not marker.exists()
 
 
 def test_hostile_tracked_suite_seam_refuses_before_execution(tmp_path):

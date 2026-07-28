@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -33,6 +34,16 @@ def init_git_repo(repo: Path) -> None:
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def approved_spice_checkout(source: Path, target: Path) -> Path:
+    """Build an isolated Git fixture with this checkout's trusted wrapper config."""
+    target.mkdir()
+    write_spice_product_shape(target)
+    shutil.copyfile(source / "spice.toml", target / "spice.toml")
+    init_git_repo(target)
+    approve_repository_config(target)
+    return target
 
 
 def write_fake_rewriting_rtk(repo: Path) -> Path:
