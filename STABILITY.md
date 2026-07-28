@@ -19,6 +19,25 @@ and assume anything unlisted is internal unless another document says otherwise.
 | Static browser modules | Internal | `spice/serve/static/app.*.js` files are frameworkless implementation modules. Tests document invariants, but module boundaries are not public APIs. |
 | Supervisor internals | Internal | Watchdog, side-channel, lifecycle state files, and process supervision details may change as long as the public agent/session/task contracts remain true. |
 
+## Configuration governance
+
+Three built-in constitution gates enforce the mechanically knowable
+configuration properties. `config-key-validity` validates every active source
+against the structural schema. `config-false-disable` proves every declared
+named-entry registry is schema-real, removes literal `false` through the shared
+resolver, and has a live production consumer through that resolver.
+`config-tracked-trust` proves every declared repository-executable root is
+schema-real, included in the approval digest inventory, and represented by a
+production approval guard. The approval guard itself refuses any path absent
+from that digest inventory.
+
+Semantic classification remains a review responsibility: a new configuration
+surface must be identified as a disableable named-entry registry, executable
+repository input, both, or neither. Review must also verify the live consumer
+checks the shared resolver or approval immediately before it uses the value.
+Once those classifications and consumers are declared, the gates prevent
+schema, inventory, and call-site drift.
+
 ## Mutating command defaults
 
 For this contract, a mutation changes persistent repository or harness
