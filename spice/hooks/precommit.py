@@ -126,9 +126,19 @@ class CommandStep:
     visible_prog: str | None = None
 
 
+@dataclass(frozen=True)
+class DisabledBuiltinPreCommitStep:
+    """One configured built-in omission and its original configuration key."""
+
+    key: str
+    config_key: str
+
+
 def handle_pre_commit(repo_root: Path) -> int:
     failures: list[PreCommitFailure] = []
     paths = staged_paths(repo_root)
+    for disabled in disabled_builtin_pre_commit_steps(repo_root):
+        print(f"pre-commit: disabled builtin {disabled.key}")
     staging_verified = False
     # A sticky latch records what a landed commit must live with, so it persists
     # only once every step below has accepted this run. A rejected run leaves the
@@ -492,10 +502,56 @@ def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
 def _configured_builtin_steps(
     repo_root: Path, builtin_steps: list[PreCommitStep]
 ) -> list[PreCommitStep]:
+    normalized, source_keys = _builtin_pre_commit_overrides(repo_root, builtin_steps)
+    overrides = enabled_registry_entries(normalized, "policy", "pre_commit_builtins")
+
+    configured: list[PreCommitStep] = []
+    for step in builtin_steps:
+        if step.key not in overrides:
+            continue
+        replacement = overrides[step.key]
+        configured_step = _configured_builtin_step(
+            repo_root,
+            step,
+            replacement,
+            config_path=(
+                "policy",
+                "pre_commit_builtins",
+                source_keys[step.key],
+            ),
+        )
+        if configured_step is not None:
+            configured.append(configured_step)
+    return configured
+
+
+def disabled_builtin_pre_commit_steps(
+    repo_root: Path,
+) -> tuple[DisabledBuiltinPreCommitStep, ...]:
+    """Return every effective false-disable in canonical gate order."""
+    builtin_steps = _builtin_pre_commit_steps(repo_root, [])
+    normalized, source_keys = _builtin_pre_commit_overrides(repo_root, builtin_steps)
+    return tuple(
+        DisabledBuiltinPreCommitStep(
+            key=step.key,
+            config_key=source_keys.get(step.key, step.key),
+        )
+        for step in builtin_steps
+        if _builtin_override_is_disabled(normalized.get(step.key, False))
+    )
+
+
+def _builtin_pre_commit_overrides(
+    repo_root: Path,
+    builtin_steps: list[PreCommitStep],
+) -> tuple[dict[str, Any], dict[str, str]]:
     policy = effective_table(repo_root, "policy")
     raw_overrides = policy.get("pre_commit_builtins")
     if raw_overrides is None:
-        return builtin_steps
+        return (
+            {step.key: True for step in builtin_steps},
+            {step.key: step.key for step in builtin_steps},
+        )
     if not isinstance(raw_overrides, dict):
         raise SpiceError(
             "[policy] pre_commit_builtins must be a table of "
@@ -517,26 +573,11 @@ def _configured_builtin_steps(
             "[policy.pre_commit_builtins] unknown step(s): "
             f"{listed}; known steps: {known}"
         )
-    overrides = enabled_registry_entries(normalized, "policy", "pre_commit_builtins")
+    return normalized, source_keys
 
-    configured: list[PreCommitStep] = []
-    for step in builtin_steps:
-        if step.key not in overrides:
-            continue
-        replacement = overrides[step.key]
-        configured_step = _configured_builtin_step(
-            repo_root,
-            step,
-            replacement,
-            config_path=(
-                "policy",
-                "pre_commit_builtins",
-                source_keys[step.key],
-            ),
-        )
-        if configured_step is not None:
-            configured.append(configured_step)
-    return configured
+
+def _builtin_override_is_disabled(raw: Any) -> bool:
+    return raw is False or (isinstance(raw, dict) and raw.get("enabled") is False)
 
 
 def _configured_builtin_step(
