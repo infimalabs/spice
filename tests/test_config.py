@@ -548,6 +548,58 @@ def test_config_say_writes_external_backend(tmp_path, monkeypatch, capsys):
     )
 
 
+@pytest.mark.parametrize(
+    ("section", "key", "invalid", "choices", "load"),
+    (
+        (
+            values.SAY_KEY,
+            values.SAY_BACKEND_KEY,
+            "whispered",
+            values.SAY_BACKEND_CHOICES,
+            values.configured_say_backend,
+        ),
+        (
+            values.AGENT_KEY,
+            values.AGENT_PERSONALITY_KEY,
+            "reckless",
+            values.AGENT_PERSONALITY_CHOICES,
+            values.configured_agent_personality,
+        ),
+    ),
+)
+def test_out_of_set_choice_refuses_with_key_value_and_valid_set(
+    tmp_path, section, key, invalid, choices, load
+):
+    config_path = tmp_path / "spice.toml"
+    config_path.write_text(
+        f'[{section}]\n{key} = "{invalid}"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        load(tmp_path)
+
+    valid = ", ".join(repr(choice) for choice in choices)
+    assert str(exc_info.value) == (
+        f"{section}.{key} (source=repository path={config_path}): "
+        f"has invalid value {invalid!r}; expected one of {valid}"
+    )
+
+
+def test_every_choice_coercion_path_rejects_instead_of_substituting_its_default():
+    policies = {
+        path: policy for path, policy in values.SCALAR_SCHEMA.items() if policy.choices
+    }
+
+    assert tuple(policies) == (
+        (values.SAY_KEY, values.SAY_BACKEND_KEY),
+        (values.AGENT_KEY, values.AGENT_PERSONALITY_KEY),
+    )
+    for path, policy in policies.items():
+        with pytest.raises(SpiceError, match="invalid value '__outside_valid_set__'"):
+            policy.coerce("__outside_valid_set__", policy, path)
+
+
 def test_config_say_rejects_external_backend_without_command(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
