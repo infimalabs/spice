@@ -52,116 +52,19 @@ distance is small. Data-keyed maps such as command paths, wrapper names, lock
 names, maxim bags, and policy word maps remain open while their fixed nested
 fields are checked.
 
-### Universal applicability selectors
+## Packaged defaults
 
-Configurable entries express applicability with one inline selector:
+The machine-readable
+[packaged-default manifest](packaged-defaults.toml) documents every exact key
+and value in the installed system layer. A test compares its complete parsed
+tree with `spice/spice.toml`, so runtime and documentation must change
+together. Repository and worktree layers apply the single layering and
+registry-removal contracts above.
 
-```toml
-scopes = { paths = ["spice/**", "tests/**"], drivers = ["codex"], models = ["gpt-5.5"] }
-```
-
-Values within one axis are alternatives (OR), different axes are simultaneous
-requirements (AND), and absent axes are unconstrained. Normalization,
-validation, specificity, matching, and explanations come from the shared
-selector model; `paths` uses the canonical repository path matcher. Each
-consumer declares the axes it can evaluate, and a malformed or unsupported
-axis produces the same diagnostic naming that consumer and its supported set.
-An empty `scopes = {}` leaf explicitly clears inherited applicability.
-
-The initial admitted axes are grounded in current applicability consumers:
-
-| Axis | Current applicability consumers | Value contract |
-| --- | --- | --- |
-| `paths` | Policy rules, study providers, pre-commit command steps | Repository-relative PATHPOL glob-or-subtree selectors |
-| `drivers` | Wrappers, wrapper routes, maxim bags, pre-commit command steps | Registered agent driver names |
-| `models` | Pre-commit command steps | Normalized effective worktree model identifiers |
-| `phases` | Pre-commit command steps | `pre-commit` or `pre-commit-success` |
-| `extensions` | Policy rules | File suffixes beginning with `.` |
-
-Command heads and flags remain wrapper-routing payload. Language families and
-test/generated roles remain classification datasets. Task phases remain live
-allocator routing state. `scopes.models` filters an entry against the effective
-configured worktree model; it never chooses a launch model. The `agent.model`
-and `tasks.phase_models.<driver>.<phase>.model` keys remain launch payload. The
-three configuration-layer names remain precedence metadata. None of those
-payload, dataset, routing, or layering concepts is accepted as a new `scopes`
-axis.
-
-Lane and task routing use similarly named fields, but they are live control
-plane predicates rather than configurable entry applicability:
-
-| Runtime field or vocabulary | Classification | Why it is not `scopes` |
-| --- | --- | --- |
-| Team `members` (`agent_id` / `team_id`) | Live team membership | Membership records which worktree-bound actors currently form a lane; it changes through compose, split, merge, and renewal events. |
-| `lifetime = Steer | Drive | Drain` | Lifetime lens | The selected lifetime reinterprets durable route state: manual pins, all stored subscriptions, or every assignable stem. It does not select configuration entries. |
-| `task_filter_entries`, route `filter` / `manual`, and `project:<stem>` / `phase:<phase>` / `+tag` terms | Allocator project filters | These are Taskwarrior query predicates derived from current team state and task projects. They control queue visibility, not whether a configuration entry applies. |
-| Private `project:agent.<actor>.task` and `origin_thread.is:<actor>` terms | Origin visibility | These terms preserve an actor's private work and provenance visibility across Drive/Drain routing. They are computed per actor and task row. |
-| Task-row `phase` | Allocator lifecycle state | This phase advances as work is done; only the separately named pre-commit command-step phase is configuration applicability. |
-
-Configuration may still contain payload that initializes or influences those
-runtime models, such as `serve.default_lifetime`. That does not turn the live
-membership, lifetime, filter, origin, or task-phase fields into selector axes.
-
-Every source uses the same bare table shape:
-
-```toml
-[agent]
-model = "gpt-5.5"
-```
-
-`spice config show` prints all three parsed layers, their source paths, the
-effective mapping, and the winning source for every key as deterministic JSON.
-`spice config system` prints effective agent values and their provenance from
-the same layered view. Mutable commands default to `--scope worktree`; agent,
-personality, say, and judge settings also accept `system` and `repository`.
-`--clear` removes only that command's values from the selected
-scope, revealing the next earlier layer without changing it. A mutation with
-`--scope system` previews the exact installed package path and change; pass
-`--apply` to write it. The preview warns that reinstalling Spice replaces this
-installed file and loses the change.
-
-`spice config set <dotted-key> <value> [--scope <scope>]` exposes every leaf in
-the loader schema, including settings without a specialized convenience flag.
-Bare text is a string; `true`, `false`, numbers, TOML arrays, and inline tables
-retain their types. Quote the whole shell argument when a typed value contains
-spaces, and quote an individual TOML key segment when its name contains a dot:
-
-```console
-spice config set say.timeout_seconds 180
-spice config set policy.repo_truth.docs '["AGENTS.md", "CONTRIBUTING.md"]' --scope repository
-spice config set 'tasks.taskwarrior_urgency."age.coefficient"' 2.5 --scope repository
-spice config set commands.audit false
-```
-
-The last form is the explicit removal value for a named entry in a registry
-that declares false-disable behavior. The setter prints the selected value, the
-effective value, and its winning scope and path; `spice config show` exposes the
-same `false` leaf and provenance even though registry consumers omit the
-disabled entry.
-
-All mutable commands use one structured TOML editor. It preserves unrelated
-tables, comments, ordering, and value types, validates the complete prospective
-layer through the same key schema as the loader, and atomically replaces the
-selected file. A system write requires the installed `spice.toml` to exist and
-be writable as well as explicit `--apply`; the other two scopes are created on
-demand and continue to apply directly. Invalid or unwritable mutations report
-`scope=<name> path=<path>` before changing bytes.
-
-Spice v0.30 dropped `[tool.spice]` repository configuration. A repository that
-still contains that table refuses configuration loading and names root
-`spice.toml` as its replacement. Migrate once by moving the contents of
-`[tool.spice]` into root `spice.toml` and removing the `tool.spice` prefix; for
-example, `[tool.spice.policy]` becomes `[policy]`. Runtime code never merges,
-unwraps, or assigns precedence to both shapes.
-
-Runtime code also does not read or import `.spice/config/state.json`; an old
-file is ignored. Move any values that still matter into
-the worktree scope using `spice config`, then delete the JSON file. There is no
-compatibility scope name or JSON adapter. v0.30 also moved the plain worktree
-file from `<repository>/.spice/config/spice.toml` to
-`<worktree-git-dir>/.spice/config/spice.toml`: an untracked predecessor is
-migrated once, while a tracked, repeated, or competing predecessor is refused
-and never honored.
+Selector axes, live routing distinctions, mutation commands, and v0.30
+migration refusals live in the
+[layers and routing companion](layers-and-routing.md). They all use the layer
+and removal rules above.
 
 ## Runtime Model
 
@@ -210,7 +113,24 @@ deadline; network fetch and push default to 30 seconds. Set
 deadlines for unusually slow repositories. Expiry fails loudly with the exact
 git argv instead of retaining the task boundary indefinitely.
 
-## Linux Speech with `espeak-ng`
+## `[say]`
+
+The packaged `say` table selects the speech backend and bounds every speech
+process:
+
+| Key | Meaning |
+| --- | --- |
+| `backend` | Active backend name; it must occur in `backend_choices`. |
+| `backend_choices` | Valid backend vocabulary. |
+| `content_type` | Media type returned by the external-command backend. |
+| `words_per_minute` | Base rate scaled by the listener's UI rate. |
+| `timeout_seconds` | Positive process deadline for speech rendering. |
+
+Repository and worktree configuration may additionally set `command` for the
+external backend and `voice` for macOS `say`; those optional keys have no
+packaged value.
+
+### Linux speech with `espeak-ng`
 
 Speech configuration is worktree-local by default. On Debian or Ubuntu, install
 the `espeak-ng` package and verify the executable before configuring spice:
@@ -249,7 +169,15 @@ printf 'spice speech check' | espeak-ng --stdout > /tmp/spice-speech-check.wav
 file /tmp/spice-speech-check.wav
 ```
 
-## Maxim Judge Binary
+## `[judge]`
+
+| Key | Meaning |
+| --- | --- |
+| `bin` | macOS judge executable; an explicit layered value wins on every platform. |
+| `portable_bin` | Judge executable selected off macOS while `bin` still comes from the system layer. |
+| `model` | Model named in portable-adapter setup diagnostics. |
+| `model_command` | Default argv used by the portable adapter. |
+| `timeout_seconds` | Default per-verdict deadline used by the portable adapter. |
 
 Maxim adjudication is off by default. When a trigger bag matches sampled prose,
 Spice publishes its `[MAXIM]` reminder directly, launching no judge subprocess
@@ -337,12 +265,20 @@ distillation likewise skips candidates whose judge call fails.
 
 ## `[agent]`
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `model` | driver default | Project-wide desired agent model. Worktree config and explicit launch flags can override it. |
-| `effort` | driver default | Project-wide desired reasoning effort. Codex and Claude map this through their driver seams. |
-| `driver` | `codex` | Project-wide agent driver, currently `codex` or `claude`. `SPICE_AGENT_DRIVER` and worktree config can override it. |
-| `wrappers` | `["common"]` | Ordered wrapper groups loaded into agent shells. Use `[]` to disable configured wrapper functions. |
+| Key | Meaning |
+| --- | --- |
+| `personality` | Desired Codex personality. |
+| `personality_choices` | Valid personality vocabulary. |
+| `wrappers` | Ordered wrapper groups loaded into agent shells; an empty list selects none. |
+| `playwright_mcp.server_name` | MCP server registration name shared by Codex and Claude. |
+| `playwright_mcp.command` | Executable used to launch the Playwright MCP server. |
+| `playwright_mcp.args` | Base argv before Spice appends its generated browser configuration. |
+| `claude.default_model` | Claude model used when no layered `agent.model` or explicit launch model exists. |
+| `claude.auto_compact_window_tokens` | Claude auto-compaction window exported at launch. |
+
+Repository and worktree configuration may additionally set `model`, `effort`,
+and `driver`. These optional launch overrides have no packaged value; the
+active driver supplies their fallback.
 
 Agent personality defaults to the worktree scope through `spice config
 personality`; pass `--scope system` or `--scope repository` to set it in
@@ -356,61 +292,12 @@ and `spice config personality` names the active driver's answer as it writes the
 value. A launch asked for a knob its driver cannot carry reports the knob on the
 `spice agent ensure` output rather than dropping it quietly.
 
-### Supervised Claude tool boundary
-
-Spice is the sole task control plane in supervised Claude lanes. Every
-`claude --print` launch therefore places these exact bare names in
-`permissions.deny`:
-
-```text
-Task, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskOutput, TaskStop
-```
-
-Bare denies remove the tool definitions from Claude's model context before the
-launch's `bypassPermissions` mode is evaluated; this is a model-context
-boundary, not merely a rejected-call policy. `Task` is retained as the accepted
-older name for `Agent`. Spice deliberately inventories every name instead of
-making a generic built-in-name wildcard part of its contract, so any new
-Task-prefixed Claude built-in requires an explicit inventory and test update.
-Future Claude-tool emulation must be built on top of Spice tasks and is outside
-this boundary.
-
-The inventory was last checked on 2026-07-12 with installed Claude Code
-2.1.201 against Anthropic's [tools
-reference](https://code.claude.com/docs/en/tools-reference), [TypeScript SDK
-reference](https://code.claude.com/docs/en/agent-sdk/typescript#agent), and
-[permission evaluation
-reference](https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated).
-`Monitor` has a separate process-lifecycle rationale under the [Lifecycle
-Plane](../design/ARCHITECTURE.md#lifecycle-plane), tracked by
-`FOUNDAT-1kCyNZT3`.
-
 ## `[wrappers.<group>]`
 
-Wrapper groups define shell functions for agent-owned commands. Select groups
-with `[agent] wrappers = [...]`.
-
-| Entry shape | Meaning |
-| --- | --- |
-| `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
-| `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
-| `selector = { scopes = { drivers = ["codex"] }, argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Wrapper groups and individual `match` routes accept the same `scopes.drivers` selector. |
-
-RTK rewrite selection happens inside `spice agent run`. The built-in `common`
-group supplies only the finite post-selection command-shape transformations:
-rg-only grep flags to `rg`, native find predicates to `find`, diagnostic git
-flags to `git`, a Codex-scoped head-only route that injects `-E` into
-`rtk grep`, and one plain `grep` wrapper shared by both drivers. Every selected
-direct wrapper whose argv head is not RTK owns its command word regardless of
-configuration source, so a raw `rg` whose RTK candidate ends at `grep` remains
-native `rg`. The shared plain wrapper preserves Claude's BASIC-regexp authoring
-with `\|`; its Codex-scoped catch-all injects `-E`, with explicit matcher flags
-still winning.
-Naming `common` in a repo `[wrappers.common]` table replaces the whole
-group atomically — routes do not concatenate, so an override must re-list every
-route it keeps — while omitting the table inherits this default and
-`wrappers = []` disables generation. Repo groups should otherwise wrap stable
-repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
+RTK rewrite selection happens inside `spice agent run`; wrapper entry shapes,
+driver scopes, command ownership, the `common` group, and the supervised Claude
+tool boundary are documented in the
+[layers and routing companion](layers-and-routing.md#wrappersgroup).
 
 ## `[commands]`
 
@@ -454,6 +341,15 @@ emulators, databases, license seats, or a fixed pool of sandbox shards. The
 tracked table declares the resources; `spice lock run` holds one while a child
 command runs and releases it when that child exits.
 
+| Key | Meaning |
+| --- | --- |
+| `lock_contention_exit_code` | Default exit code when a named lock is held. |
+| `chosen_shard_contention_exit_code` | Default exit code when a specifically requested pool shard is held. |
+| `pool_exhaustion_exit_code` | Default exit code when no pool shard is free. |
+| `state_root` | Repository-relative root for derived named-lock and pool paths. |
+| `named.<name>` | Named-lock registry; entries accept `path` and `contention_exit_code`. |
+| `pools.<name>` | Pool registry; entries accept `directory`, `shards`, `chosen_shard_contention_exit_code`, and `pool_exhaustion_exit_code`. |
+
 ```toml
 [locks]
 lock_contention_exit_code = 75
@@ -488,7 +384,9 @@ such as `--path`, `--directory`, `--shards`,
 
 ## `[policy]`
 
-The policy table extends the constitution. Defaults come from `spice/policy.py`.
+The policy table extends the constitution. Exact defaults come from the
+packaged manifest above; `spice.policy` exports frozen base values only for
+resolver and compatibility seams.
 
 `exclude`, `generated_paths`, `test_paths`, language suffix families, and
 generated-file patterns are domain datasets rather than entry selectors.
@@ -522,245 +420,21 @@ Shell env-access patterns intentionally cover name-like parameters, not shell
 special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 `$-`, or `$_`.
 
-### `[policy.languages]`
+Detailed dataset, rule, suite-seam, taste, commit-message, and built-in gate
+contracts live in the [policy configuration companion](policy.md). The
+packaged-default manifest remains the authority for their exact default values.
 
-Suffix families for `complexity`, `magic`, `env`, and `c_grammar` scans.
+## `[maxim]`
 
-### `[policy.lockfiles]`
+The singular table controls maxim judging and proposal generation:
 
-Generated lockfile `suffixes` and `names` exempt from file-shape pressure.
-
-### `[policy.file_shape]`
-
-`source_suffixes` selects files for LOC/byte pressure. `generated_patterns`
-exempts generated sources such as protobuf modules, minified bundles, and build
-outputs.
-
-### `[policy.env_access]`
-
-`family_suffixes` maps language families to suffixes. `default_patterns` maps
-families to env-access regexes; custom pattern families must have suffixes.
-`baseline` points at existing `env-policy` findings. The env-name ledger only
-accounts for extractable literal names and scans tests like production.
-
-### `[policy.suite_seam]`
-
-Per-lane verification is a subset twice over. An agent runs the tests that name
-the module it changed, and for a widely depended-on module that direct-import
-view understates the real reach by an order of magnitude. It then runs that
-subset against its own pinned baseline, which the other lanes have moved since.
-Both gaps close only on the integrated tree, so this gate runs there: after
-`spice task done` merges the task onto the baseline and before it pushes.
-
-`paths` lists the repository paths whose reach is the whole suite. A task whose
-footprint touches one runs `run` -- the whole suite -- against the merged tree,
-and a red suite refuses the publish with the merge left in the tree to fix. A
-task that touches nothing declared matches nothing and runs nothing, so only the
-landings that need the coverage pay for it, and no commit pays at all.
-
-`run` is an argv list, kept in order and with repeats intact. Optional `seconds`
-is the cost the repository accepts when the gate fires; the gate prints it before
-starting and reports the measured wall clock afterwards, so a stale declaration
-is visible on every seam landing.
-
-```toml
-[policy.suite_seam]
-seconds = 200
-run = ["spice", "dev", "pytest", "-q", "--ignore=tests/browser"]
-paths = ["spice/tasks/tw.py", "spice/policy.py"]
-```
-
-Choose `paths` by measurement rather than by feel: a path belongs here when it
-is transitively reachable from most of the test suite, which is the condition
-that makes a lane's own subset misleading. `spice study suite-seam-reach` is
-that measurement, and it fixes the terms the answer turns on -- a test module
-is a collected `test_*.py` file under the configured test roots, and reach
-follows imports wherever they appear, including inside function bodies. It
-ranks every package module by how many test modules reach it, alongside how
-many name it directly, so a candidate is compared against the whole ordering
-rather than judged alone. The angle-bracketed fields below are filled from the
-live graph:
-
-```console
-$ spice study suite-seam-reach --limit 30
-suite-seam-reach: <declared> declared module(s) of <package-modules>, reached by at least <floor> of <test-modules> test module(s)
-suite-seam-reach: <widest-undeclared-path> leads the undeclared rest at <reach>, so the band is <verdict>
-  <reach> reached <direct-imports> imported  <package-path> [declared]
-  ...
-```
-
-The command's two header lines are the decision. The first reports the reach
-of the narrowest module in the declared band; the second reports the widest
-module left out. When the first is greater than the second, the declaration
-names a group the import graph already separates. The command is the source of
-these point-in-time figures, which change as tests and imports change, and
-exits non-zero when the break closes. `--json` emits the same ranking for a
-repository that wants to consume it.
-
-A repository that gates on this should assert the result rather than restate
-it. In this one,
-`tests/test_suiteseam.py::test_this_repository_declares_exactly_the_widest_reaching_modules`
-requires the declared paths to occupy the leading slots of that ranking and the
-boundary below them to be a strict break, so a path added by feel, or a module
-that grows into the band without being declared, fails the suite with the
-ranking in hand.
-
-A red suite here is a refusal to publish, not a lost merge. The integrated tree
-stays checked out, so the failures reported are the ones the branch would have
-taken; fix them, commit, and run `spice task done` again.
-
-### `[policy.csharp_unused_retention]`
-
-Tracked declarations for C# members that are reached by framework convention
-rather than by direct C# references. The table only adds retained findings; the
-built-in partial-declaration and attribute-retention defaults still apply when
-the table is absent or when no declaration matches.
-
-```toml
-[policy.csharp_unused_retention]
-base_types = ["HostedServiceBase"]
-interfaces = ["IPluginModule"]
-attribute_names = ["ServiceEntryPointAttribute"]
-```
-
-For example, a dependency-injection container may instantiate every class
-derived from `HostedServiceBase`, while a plugin host may discover classes that
-implement `IPluginModule`. Private methods and fields inside those types are
-reported as retained with reasons such as
-`configured_base_type:HostedServiceBase` or
-`configured_interface:IPluginModule`. Attribute names match with or without the
-`Attribute` suffix, so `[ServiceEntryPoint]` can match
-`ServiceEntryPointAttribute` and records
-`configured_attribute:ServiceEntryPointAttribute`.
-
-Policy constants enforced by default: files `1000` LOC / `80000` bytes with
-`1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
-repo-root markdown `10000` chars plus `10000` per nested directory until
-`30000`, magic-number threshold `10`, and magic baselines against `HEAD`.
-
-### `[policy.limits]`
-
-Base caps: `file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
-`commit_message_wrap`, and `repo_truth_doc_chars`.
-
-### `[policy.flex]`
-
-Default `ratio` is `1.5`; explicit per-bound flex caps override it. Breaching
-flex makes the item sticky until it shrinks under the base cap.
-
-### `[policy.complexity]`
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `hotspot_limit` | `20` | Default number of rows shown by `spice study complexity-hotspots` when `--limit` is omitted. |
-
-### `[policy.taste.words]`
-
-The authoritative built-in map is `policy.TASTE_WORD_SUGGESTIONS`. It feeds
-`spice study taste`, the staged pre-commit taste gate, and task-creation wording;
-file scans cover tracked `.md`, `.txt`, and `.rst` prose. The defaults include
-explicit singular, plural, past-participle, and gerund suggestions for
-`allowlist`, `allowlists`, `allowlisted`, and `allowlisting`, plus `blocklist`,
-`blocklists`, `blocklisted`, and `blocklisting`.
-
-A bare key matches one whole word case-insensitively. Only a trailing `*` opts
-into stem matching and covers every word-character suffix. Values are the exact
-suggestions shown to the user; an empty value means remove or rephrase.
-
-The resolver starts from the built-in map, then normalizes repository keys to
-lowercase and assigns repository entries in TOML order. A matching normalized
-key replaces only that suggestion; new keys extend the map, and every other
-built-in entry remains active.
-
-### `[policy.markdown_depth_budget]`
-
-Generated `repo_truth_doc_chars` scopes for tracked markdown: repo root gets
-`10000` chars, one nested directory `20000`, two nested directories `30000`,
-and deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to
-`[]` to replace generated rules with explicit `[[policy.rules]]`
-entries.
-`stem_pattern` optionally full-matches file stems; binary files are skipped.
-
-### `[policy.debt]`
-
-Allowed-finding counters, not size limits. Defaults are `0` for
-`reachability_test_only` and `assertion_free_tests`; non-zero values are
-explicit cleanup debt.
-
-### `[[policy.rules]]`
-
-Each policy rule is one payload with an inline universal selector:
-
-```toml
-[[policy.rules]]
-scopes = { paths = ["Docs"], extensions = [".md"] }
-
-[policy.rules.repo_truth_doc_chars]
-min = 20000
-flex = 1.25
-```
-
-`paths` uses the canonical PATHPOL glob-or-subtree contract without a
-policy-only matcher variant; `extensions` composes with it through the universal
-AND-across rule. Flat rule keys apply to every numeric bound; named sub-tables
-target `file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
-`commit_message_wrap`, or `repo_truth_doc_chars`. Settings accept `multiplier`,
-`min`, `max`, `unlimited = true`, and optional `flex`. A nested
-`magic.examine_threshold` overrides magic-number scanning. Universal selector
-specificity chooses the winning applicable rule; repository-authored rules
-outrank generated markdown-depth rules.
-
-### `[policy.magic]`
-
-`examine_threshold` defaults to `10`; `baseline_ref` defaults to `HEAD`.
-
-### `[policy.commit_message]`
-
-`allowed_trailers` optionally limits Git trailer keys to a finite set;
-`blocked_trailers` optionally rejects specific keys. Both are unset by
-default, so every trailer -- including `Co-Authored-By` -- rides through.
-When a configured policy would reject the attribution trailer
-(`Co-Authored-By`), spice also disables the native driver's attribution so it
-never emits a trailer the commit-msg gate then rejects.
-
-Command-step tables accept:
-
-`label`, `mount`, `run`/`argv`, `scopes`, `formatter`, and `enabled`.
-`pre_commit` steps receive `SPICE_STAGED_PATHS`; mounted steps also receive
-`SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG`. `scopes.paths` narrows the
-staged-path set with the universal PATHPOL contract, while `scopes.phases`
-selects `pre-commit` or `pre-commit-success`. `scopes.drivers` and
-`scopes.models` select the effective configured worktree driver and model. All
-four axes compose through the universal AND rule; omitting any axis means all
-values on that axis.
-
-Reachability provider tables accept `name`, `run`, and optional
-`scopes = { paths = [...] }`. `name` must not be `python`. During staged scans,
-the universal selector both decides applicability and narrows
-`SPICE_STAGED_PATHS`; full scans run every configured provider. Providers write
-JSON findings with `kind`, `subject`, `path`, and `imported_by`; `kind` routes
-whole-file findings to `reachability` and symbol findings to
-`symbol-reachability`.
-
-`internal_couplings` entries accept `path`, `test`, and `target`; all are
-required non-empty strings. `test` is the test function name or `<module>`, and
-`target` is the private production symbol the test imports or reaches.
-
-## `[policy.pre_commit_builtins]`
-
-Each built-in key may be:
-
-- `true` to keep the default.
-- A mounted command name to replace it.
-- A command-step table using `mount`, `run`, or `argv`.
-- `false` or `{ enabled = false }` to disable.
-
-Every pre-commit invocation prints each disabled built-in by name. A disablement
-from tracked repository configuration is covered by the executable-configuration
-digest approved through `spice init --apply`; `spice doctor` reports a required
-failure until that current approval receipt exists. Git-dir operator-owned
-disablements are already explicit operator intent and do not require a
-repository approval receipt.
+| Key | Meaning |
+| --- | --- |
+| `max_attempts` | Maximum ambiguous judge replies before a maxim check fails. |
+| `parallel_judges` | Number of concurrent verdicts used by any-violation evaluation. |
+| `proposal_min_recurrence` | Minimum recurring ACK evidence required to form a proposal theme. |
+| `proposal_draft_max_words` | Maximum trigger phrases retained in a generated proposal draft. |
+| `prompt_lines` | Ordered prompt framings shuffled for the default judge template. |
 
 ## `[maxims.<bag>]`
 
@@ -793,25 +467,44 @@ compaction count never changes the configured `message` text.
 
 ## `[tasks]`
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `stems` | `[]` plus built-ins `task`, `serve`, `agent` | Additional public project stems. Stems use lowercase letters, digits, and underscores. `agent` is internal and not allocator assignable. |
-| `hidden_stems` | `[]` plus built-in `oops` | Additional hidden system project stems. Values omit the leading dot, so `scratch` defines addressable `.scratch` projects. Hidden projects use the private `todo` flow, are reserved for system-created rows, and are excluded from normal boards and lane assignment. |
-| `flows` | `{}` | Per-stem phase lists. Approved phases are `design`, `plan`, `todo`, `verify`, and `review`; the default public flow is `todo -> review`. Hidden system projects use the private `todo` flow. |
-| `project_min_depth` | `2` | Minimum dotted project depth for public tasks. |
-| `project_max_depth` | `3` | Maximum dotted project depth for public tasks. |
+| Key | Meaning |
+| --- | --- |
+| `base_stems` | Built-in public and internal project-stem vocabulary. |
+| `internal_stems` | System-owned stems excluded from lane assignment. |
+| `hidden_stems` | System-owned hidden stems, written without the leading dot. |
+| `oops_hidden_stem` | Hidden stem used for tooling-friction triage. |
+| `maxim_proposal_hidden_stem` | Hidden stem used for maxim-proposal triage. |
+| `approved_phases` | Valid task phase vocabulary. |
+| `phase_slot_count` | Number of phase UDA slots generated in Taskwarrior configuration. |
+| `default_flow` | Phase sequence for ordinary public tasks. |
+| `private_default_flow` | Phase sequence for private and non-oops hidden tasks. |
+| `oops_default_flow` | Phase sequence for oops triage tasks. |
+| `default_priority` | Long-form priority selected when creation omits one. |
+| `severities` | Valid tooling-friction severity vocabulary. |
+| `project_min_depth`, `project_max_depth` | Inclusive dotted-depth bounds for public task projects. |
+| `claim_ttl_seconds` | Default claim lease duration. |
+| `claim_context_seconds` | Transcript window captured on each side of a claim instant. |
+| `deferred_wait` | Durable wait timestamp for deliberately deferred work. |
+| `oops_wait_seconds` | Initial wait duration for newly captured oops work. |
+| `allocator_band_width` | Native-urgency distance within which locality may rank allocator candidates. |
+| `allocator_anti_self_review` | Taskwarrior urgency coefficient penalizing self-authored reviews. |
+| `priority` | Long-form priority aliases to Taskwarrior priority letters. |
+| `severity_priority` | Severity-to-priority mapping for oops tasks. |
+| `severity_shorthands` | Single-letter severity aliases. |
+| `priority_urgency` | Taskwarrior urgency coefficients for priority letters. |
+| `taskwarrior_urgency` | Native Taskwarrior urgency coefficients used in generated taskrc files. |
+| `sla_due_seconds` | Due-date offsets keyed by priority letter. |
+| `reports.<name>` | Named report registry; each entry requires `description`, `filter`, and `sort`. |
+| `analytics.commands` | Taskwarrior analytics command names exposed by diagnostics. |
 
-Priority aliases are fixed: `critical -> C`, `high -> H`, `medium -> M`,
-`low -> L`, and `none` clears priority. The generated Taskwarrior priority UDA
-accepts `C,H,M,L,`; its urgency coefficients are 8.1, 6.0, 3.9, and 1.8.
-Critical and high SLA due dates are one day, medium is seven days, and low is
-thirty days.
+Repositories may additionally declare `stems`, `flows`, and `phase_models`.
+Those extension registries have no packaged entries.
 
 ## `[tasks.phase_models.<driver>.<phase>]`
 
 Per-driver, per-phase agent launch overrides. Each driver has its own model
 space, so the table is keyed by driver name (`claude` or `codex`) and then by
-task phase (`design`, `plan`, `todo`, `verify`, `review`, `oops`).
+task phase (`design`, `plan`, `todo`, `verify`, or `review`).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -840,7 +533,18 @@ task allocation.
 
 ## `[serve]`
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `brand` | `[project].name` or `spice` | Header and browser-title brand for `spice serve`. |
-| `default_lifetime` | `Drive` | Initial serve lane lifetime: `Steer` uses manual filters, `Drive` auto-subscribes to projects the team creates or claims, and `Drain` dissolves the task boundary so all assignable work is visible. |
+| Key | Meaning |
+| --- | --- |
+| `brand` | Fallback header and browser-title brand; a repository project name may replace the packaged value. |
+| `default_lifetime` | Initial serve lane lifetime: `Steer` uses manual filters, `Drive` auto-subscribes to projects the team creates or claims, and `Drain` dissolves the task boundary so all assignable work is visible. |
+| `valid_lifetimes` | Accepted lane-lifetime vocabulary. |
+| `host` | Default bind host for `spice serve`, `spice watch`, and `spice demo`. |
+| `port` | Default bind port for those serve surfaces. |
+
+## `[inventory]`
+
+The inventory table is packaged self-description consumed by default-governance
+checks. `toml_static` names configuration families backed by frozen exported
+bases; `platform_derived`, `driver_derived`, and `protocol_invariant` list
+exports whose values come from their named runtime class instead of one TOML
+leaf. It is not a repository customization surface.

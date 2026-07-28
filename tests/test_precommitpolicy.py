@@ -139,8 +139,9 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
 
 
 def test_config_reference_documents_pre_commit_keys_and_taste_contract():
-    text = (PROJECT_ROOT / "docs" / "config" / "reference.md").read_text(
-        encoding="utf-8"
+    text = "\n".join(
+        (PROJECT_ROOT / "docs" / "config" / name).read_text(encoding="utf-8")
+        for name in ("reference.md", "policy.md")
     )
     builtins_row = next(
         line
@@ -152,7 +153,7 @@ def test_config_reference_documents_pre_commit_keys_and_taste_contract():
     ]
 
     assert documented == EXPECTED_BUILTIN_PRE_COMMIT_KEYS
-    assert "### `[policy.taste.words]`" in text
+    assert "## `[policy.taste.words]`" in text
     assert "gate-only pre-commit built-in" in text
     assert "`policy.TASTE_WORD_SUGGESTIONS`" in text
     assert "whole word" in text
