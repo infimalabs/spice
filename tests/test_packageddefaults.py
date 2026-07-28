@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import shutil
 import subprocess
@@ -41,8 +42,73 @@ def test_default_export_inventory_resolves_every_python_export_and_toml_leaf():
         module = importlib.import_module(module_name)
         assert hasattr(module, attribute), export
         if classification == defaultinventory.TOML_STATIC:
-            path = defaultinventory.TOML_STATIC_EXPORT_PATHS[export].split(".")
-            assert defaults.value(*path) is not None
+            assert export in defaultinventory.TOML_STATIC_EXPORT_PATHS
+    assert _static_default_mismatches() == []
+
+
+def test_static_default_gate_fails_when_a_python_constant_drifts(monkeypatch):
+    export = "spice.config.values.DEFAULT_SAY_BACKEND"
+    monkeypatch.setattr(values, "DEFAULT_SAY_BACKEND", "drifted")
+
+    assert _static_default_mismatches() == [
+        (export, "drifted", defaults.value("say", "backend"))
+    ]
+
+
+def test_every_module_level_default_constant_is_classified():
+    classified = set(defaultinventory.EXPORTED_DEFAULT_CLASSIFICATION)
+    discovered = _module_level_default_exports()
+
+    assert discovered <= classified, (
+        "module-level default constants missing from default inventory: "
+        + ", ".join(sorted(discovered - classified))
+    )
+
+
+def test_reverse_default_gate_discovers_a_new_module_constant(tmp_path):
+    source_root = tmp_path / "spice"
+    source_root.mkdir()
+    (source_root / "sample.py").write_text(
+        "DEFAULT_UNINVENTORIED = 1\n", encoding="utf-8"
+    )
+
+    assert _module_level_default_exports(source_root) == {
+        "spice.sample.DEFAULT_UNINVENTORIED"
+    }
+
+
+def _static_default_mismatches() -> list[tuple[str, object, object]]:
+    mismatches = []
+    for export, path_text in defaultinventory.TOML_STATIC_EXPORT_PATHS.items():
+        module_name, attribute = export.rsplit(".", maxsplit=1)
+        runtime = getattr(importlib.import_module(module_name), attribute)
+        packaged = defaults.value(*path_text.split("."))
+        normalizer = defaultinventory.TOML_STATIC_NORMALIZERS.get(export)
+        normalized_runtime = normalizer(runtime) if normalizer else runtime
+        normalized_packaged = normalizer(packaged) if normalizer else packaged
+        if normalized_runtime != normalized_packaged:
+            mismatches.append((export, runtime, packaged))
+    return mismatches
+
+
+def _module_level_default_exports(
+    source_root: Path = PROJECT_ROOT / "spice",
+) -> set[str]:
+    exports = set()
+    for path in source_root.rglob("*.py"):
+        module_parts = path.with_suffix("").relative_to(source_root.parent).parts
+        if module_parts[-1] == "__init__":
+            module_parts = module_parts[:-1]
+        module = ".".join(module_parts)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            targets = node.targets if isinstance(node, ast.Assign) else ()
+            if isinstance(node, ast.AnnAssign):
+                targets = (node.target,)
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id.startswith("DEFAULT_"):
+                    exports.add(f"{module}.{target.id}")
+    return exports
 
 
 def test_every_declared_static_family_exists_in_packaged_configuration():
