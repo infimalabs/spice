@@ -1206,6 +1206,7 @@ class _ExplicitSendRace:
         self.target = target
         self.published = threading.Event()
         self.release_direct_send = threading.Event()
+        self.direct_finished = threading.Event()
         self.background_submitted = threading.Event()
         self.background_finished = threading.Event()
         self.agent_started = threading.Event()
@@ -1277,9 +1278,14 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     assert reconciler is not None
 
     def send_directly() -> None:
-        race.direct_result["response"] = work_tree_send_response_payload(
-            state, target, {"text": "use my explicit restart grant"}
-        )
+        try:
+            race.direct_result["response"] = work_tree_send_response_payload(
+                state, target, {"text": "use my explicit restart grant"}
+            )
+        except BaseException as exc:
+            race.direct_result["error"] = exc
+        finally:
+            race.direct_finished.set()
 
     def evaluate_in_background() -> None:
         watch = launch.AvailableWorkWatch(state, events_path=tmp_path / "task-events")
@@ -1311,8 +1317,13 @@ def test_explicit_send_keeps_its_restart_grant_during_background_evaluation(
     assert race.background_submitted.wait(timeout=EXPLICIT_SEND_STEP_SECONDS) is True
     assert race.background_finished.is_set() is False
     race.release_direct_send.set()
-    direct_thread.join(timeout=EXPLICIT_SEND_STEP_SECONDS)
-    background_thread.join(timeout=EXPLICIT_SEND_STEP_SECONDS)
+    assert race.direct_finished.wait(timeout=EXPLICIT_SEND_RELEASE_SECONDS) is True
+    assert race.background_finished.wait(timeout=EXPLICIT_SEND_RELEASE_SECONDS) is True
+    direct_thread.join()
+    background_thread.join()
+    error = race.direct_result.get("error")
+    if isinstance(error, BaseException):
+        raise error
 
     response, status = race.direct_result["response"]
     assert status == HTTPStatus.OK

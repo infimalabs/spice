@@ -50,6 +50,7 @@ HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
 INIT_RECEIPT_MODE = 0o600
 DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
+RECEIPT_DIGEST_BYTES = 32
 FILE_MODE_MAX = 0o7777
 
 
@@ -134,6 +135,7 @@ class InitializationReceipt:
     plan_schema_version: int
     status: InitReceiptStatus
     operations: tuple[InitReceiptOperation, ...]
+    approved_repository_config_digest: str | None = None
     schema_version: int = 1
 
 
@@ -318,6 +320,9 @@ def initialization_receipt_payload(
         "repository": str(receipt.repo_root),
         "mode": receipt.mode.value,
         "status": receipt.status.value,
+        "approved_repository_config_digest": (
+            receipt.approved_repository_config_digest
+        ),
         "operations": [
             {
                 **_operation_payload(receipt_operation.operation),
@@ -326,6 +331,16 @@ def initialization_receipt_payload(
             for receipt_operation in receipt.operations
         ],
     }
+
+
+def initialization_receipt_digest(receipt: InitializationReceipt) -> str:
+    """Hash the complete normalized receipt used as unapply authority."""
+    encoded = json.dumps(
+        initialization_receipt_payload(receipt),
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
@@ -344,20 +359,35 @@ def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None
         raise SpiceError(f"invalid initialization receipt {path}: {exc}") from exc
 
 
-def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
+def apply_initialization_plan(
+    plan: InitializationPlan,
+    *,
+    approve_repository_config: bool = False,
+) -> InitializationReceipt:
     """Apply one plan with an atomically updated receipt after every operation."""
     if (git_dir(plan.repo_root) / DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
-            "run `spice deinit` to resume the interrupted deinitialization; "
+            "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
         )
     existing = load_initialization_receipt(plan.repo_root)
     if existing is not None and existing.status is InitReceiptStatus.DEINITIALIZING:
         raise SpiceError(
-            "run `spice deinit` to resume the interrupted deinitialization; "
+            "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
         )
-    receipt = _receipt_for_plan(plan, existing)
+    approved_digest = (
+        existing.approved_repository_config_digest if existing is not None else None
+    )
+    if approve_repository_config:
+        from spice.config.trust import repository_executable_config_digest
+
+        approved_digest = repository_executable_config_digest(plan.repo_root)
+    receipt = _receipt_for_plan(
+        plan,
+        existing,
+        approved_repository_config_digest=approved_digest,
+    )
     plan_by_key = {
         _operation_key(operation): operation for operation in plan.operations
     }
@@ -516,6 +546,12 @@ def _required_ownership_digest(value: object) -> str:
     return digest
 
 
+def _optional_ownership_digest(value: object) -> str | None:
+    if value is None:
+        return None
+    return _required_ownership_digest(value)
+
+
 def _operation_from_payload(payload: dict[str, object]) -> InitOperation:
     return InitOperation(
         kind=InitOperationKind(_required_string(payload["kind"])),
@@ -583,6 +619,9 @@ def initialization_receipt_from_payload(
         plan_schema_version=plan_schema_version,
         status=status,
         operations=tuple(operations),
+        approved_repository_config_digest=_optional_ownership_digest(
+            payload.get("approved_repository_config_digest")
+        ),
         schema_version=_required_int(payload["schema_version"]),
     )
 
@@ -596,6 +635,8 @@ def _operation_key(
 def _receipt_for_plan(
     plan: InitializationPlan,
     existing: InitializationReceipt | None,
+    *,
+    approved_repository_config_digest: str | None,
 ) -> InitializationReceipt:
     if existing is None:
         return InitializationReceipt(
@@ -607,6 +648,7 @@ def _receipt_for_plan(
                 InitReceiptOperation(operation=operation, completed=False)
                 for operation in plan.operations
             ),
+            approved_repository_config_digest=approved_repository_config_digest,
         )
     if existing.repo_root != plan.repo_root:
         raise SpiceError(
@@ -644,6 +686,7 @@ def _receipt_for_plan(
         plan_schema_version=plan.schema_version,
         status=InitReceiptStatus.APPLYING,
         operations=tuple(merged),
+        approved_repository_config_digest=approved_repository_config_digest,
     )
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import shlex
 import string
 import subprocess
 from collections import Counter
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from spice import defaults
+from spice.config.trust import require_repository_config_approval
 from spice.config.values import configured_judge_bin
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
@@ -924,6 +926,13 @@ def judge_cli_backend(
 ) -> str:
     """Send ``prompt`` to the judge binary over stdin and return its stdout."""
     binary = judge_bin or configured_judge_bin()
+    repo_root = repo_root_from_cwd()
+    if judge_bin is None and repo_root is not None:
+        require_repository_config_approval(
+            repo_root,
+            ("judge", "bin"),
+            command=shlex.join((binary,)),
+        )
     try:
         completed = run(
             [binary],

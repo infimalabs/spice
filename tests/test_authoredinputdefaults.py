@@ -1,5 +1,6 @@
 """Executable inventory for authored-input mutation defaults."""
 
+import argparse
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -45,7 +46,7 @@ MUTATING_VERBS = (
         (EffectRead.AUTHORED_REPOSITORY, EffectRead.AUTHORED_CONFIGURATION),
     ),
     MutatingVerb(
-        ("deinit",),
+        ("init", "--unapply"),
         (
             EffectRead.AUTHORED_REPOSITORY,
             EffectRead.AUTHORED_CONFIGURATION,
@@ -131,3 +132,42 @@ def test_withdrawn_dry_run_refuses_with_release_and_replacement(
     assert f"`--dry-run` was withdrawn in {DRY_RUN_WITHDRAWAL_RELEASE}" in captured.err
     assert "invoke the command without it to preview" in captured.err
     assert "use `--apply` to execute the plan" in captured.err
+
+
+def test_receipt_writers_and_unapply_verbs_are_the_same_live_parser_set() -> None:
+    parsers = dict(
+        (
+            *_command_parsers(build_parser()),
+            *(
+                (("release", *path), parser)
+                for path, parser in _command_parsers(build_release_parser())
+            ),
+        )
+    )
+    receipt_writers = {
+        path
+        for path, parser in parsers.items()
+        if parser.get_default("writes_receipt") is True
+    }
+    unapply_verbs = {
+        path
+        for path, parser in parsers.items()
+        if any("--unapply" in action.option_strings for action in parser._actions)
+    }
+
+    assert (receipt_writers, unapply_verbs) == ({("init",)}, {("init",)})
+
+
+def _command_parsers(
+    parser: argparse.ArgumentParser,
+    prefix: tuple[str, ...] = (),
+) -> tuple[tuple[tuple[str, ...], argparse.ArgumentParser], ...]:
+    commands: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = []
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, child in action.choices.items():
+            path = (*prefix, name)
+            commands.append((path, child))
+            commands.extend(_command_parsers(child, path))
+    return tuple(commands)
