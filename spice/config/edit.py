@@ -27,6 +27,7 @@ from spice.process.git import run_git_command
 from spice.paths import atomic_write_text, runtime_spice_source
 
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
+_TOML_ARRAY_TABLE_RE = re.compile(r"^\s*\[\[([^\[\]]+)\]\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(
     r"""^\s*((?:"(?:\\.|[^"])*"|'[^']*'|[A-Za-z0-9_-]+))\s*="""
 )
@@ -127,6 +128,9 @@ def _mutate_scope_section(
         ) from exc
     table = key
     if values:
+        table_path = (table,) if isinstance(table, str) else table
+        for leaf in values:
+            _remove_array_table_values(lines, (*table_path, str(leaf)))
         _apply_worktree_table(lines, table, values)
     elif clear_keys is None:
         _remove_worktree_table(lines, table)
@@ -195,6 +199,20 @@ def _remove_table_keys(
     ]
 
 
+def _remove_array_table_values(lines: list[str], target: tuple[str, ...]) -> None:
+    """Remove every array-table record replaced by one assignment value."""
+    index = 0
+    while index < len(lines):
+        header = _toml_header(lines[index])
+        if header != (target, True):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(lines) and _toml_header(lines[end]) is None:
+            end += 1
+        del lines[index:end]
+
+
 def _toml_inline_comment(line: str) -> str:
     """Return a TOML comment outside quoted strings, including its ``#``."""
     basic = False
@@ -228,21 +246,26 @@ def _toml_table_bounds(
     expected = (table,) if isinstance(table, str) else table
     start: int | None = None
     for index, line in enumerate(lines):
-        name = _toml_table_name(line)
-        if name == expected:
+        header = _toml_header(line)
+        if header == (expected, False):
             start = index
             continue
-        if start is not None and name is not None:
+        if start is not None and header is not None:
             return start, index
     return (start, len(lines)) if start is not None else (None, None)
 
 
-def _toml_table_name(line: str) -> tuple[str, ...] | None:
-    match = _TOML_TABLE_RE.match(line)
+def _toml_header(line: str) -> tuple[tuple[str, ...], bool] | None:
+    match = _TOML_ARRAY_TABLE_RE.match(line)
+    is_array = match is not None
+    if match is None:
+        match = _TOML_TABLE_RE.match(line)
     if match is None:
         return None
     try:
-        parsed = tomllib.loads(f"[{match.group(1)}]\n")
+        brackets = "[[" if is_array else "["
+        closing = "]]" if is_array else "]"
+        parsed = tomllib.loads(f"{brackets}{match.group(1)}{closing}\n")
     except tomllib.TOMLDecodeError:
         return None
     path: list[str] = []
@@ -250,7 +273,11 @@ def _toml_table_name(line: str) -> tuple[str, ...] | None:
     while isinstance(value, Mapping) and len(value) == 1:
         part, value = next(iter(value.items()))
         path.append(str(part))
-    return tuple(path) if isinstance(value, Mapping) and not value else None
+    if is_array and isinstance(value, list) and value == [{}]:
+        return tuple(path), True
+    if not is_array and isinstance(value, Mapping) and not value:
+        return tuple(path), False
+    return None
 
 
 def _toml_assignment_key(line: str) -> str | None:
@@ -274,7 +301,9 @@ def _toml_table_header(table: str | tuple[str, ...]) -> str:
 
 
 def _toml_key(key: str) -> str:
-    return key if _TOML_BARE_KEY_RE.fullmatch(key) else json.dumps(key)
+    return (
+        key if _TOML_BARE_KEY_RE.fullmatch(key) else json.dumps(key, ensure_ascii=False)
+    )
 
 
 def _toml_scalar(value: Any) -> str:
@@ -293,7 +322,7 @@ def _toml_scalar(value: Any) -> str:
         return f"{{ {body} }}"
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
-    return json.dumps(str(value))
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def git_worktree_config_get(repo_root: Path, key: str) -> str | None:

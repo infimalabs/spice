@@ -232,6 +232,63 @@ def test_config_set_writes_a_typed_schema_leaf_and_reports_provenance(
     }
 
 
+def test_config_set_replaces_existing_array_table_records(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    config_path = tmp_path / "spice.toml"
+    config_path.write_text(
+        "[policy]\n"
+        'exclude = ["keep"]\n\n'
+        "[[policy.internal_couplings]]\n"
+        'path = "old-a.py"\n'
+        'test = "test_old_a"\n'
+        'target = "_old_a"\n\n'
+        "[[policy.internal_couplings]]\n"
+        'path = "old-b.py"\n'
+        'test = "test_old_b"\n'
+        'target = "_old_b"\n\n'
+        "[serve]\n"
+        'brand = "unchanged"\n',
+        encoding="utf-8",
+    )
+    replacement = '[{ path = "new.py", test = "test_new", target = "_new" }]'
+
+    handle_config(
+        build_parser().parse_args(
+            [
+                "config",
+                "set",
+                "policy.internal_couplings",
+                replacement,
+                "--scope",
+                "repository",
+            ]
+        )
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    parsed = tomllib.loads(text)
+    assert "[[policy.internal_couplings]]" not in text
+    assert parsed["policy"]["internal_couplings"] == [
+        {"path": "new.py", "test": "test_new", "target": "_new"}
+    ]
+    assert parsed["policy"]["exclude"] == ["keep"]
+    assert parsed["serve"] == {"brand": "unchanged"}
+    capsys.readouterr()
+
+
+def test_config_set_preserves_non_ascii_bare_strings(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    handle_config(build_parser().parse_args(["config", "set", "serve.brand", "🌶️"]))
+
+    text = edit.worktree_config_path(tmp_path).read_text(encoding="utf-8")
+    assert 'brand = "🌶️"' in text
+    assert tomllib.loads(text)["serve"]["brand"] == "🌶️"
+    capsys.readouterr()
+
+
 def test_config_set_rejects_an_unknown_key_before_mutating_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     config_path = tmp_path / "spice.toml"
