@@ -16,6 +16,7 @@ from spice.cli.mounts import (
     VISIBLE_PROG_ENV,
     find_mounted_command,
     mounted_commands,
+    resolve_mounted_commands,
     run_mounted_command,
 )
 from spice.cli.parser import BUILTIN_COMMANDS, build_parser
@@ -62,37 +63,77 @@ def test_dotted_mount_names_require_valid_segments(tmp_path):
         mounted_commands(repo)
 
 
-def test_top_level_mount_shadowing_builtin_fails_loudly(tmp_path):
+def test_top_level_mount_shadowing_builtin_is_refused_without_hiding_siblings(
+    tmp_path,
+):
+    repo = _repo_with_commands(
+        tmp_path,
+        'task = "./scripts/task.sh"\nprobe = "./scripts/probe.sh"',
+    )
+
+    resolution = resolve_mounted_commands(repo)
+
+    assert resolution.commands == {("probe",): ("./scripts/probe.sh",)}
+    assert len(resolution.refusals) == 1
+    assert (
+        f"commands (source=pyproject path={repo / 'pyproject.toml'})"
+        in (resolution.refusals[0])
+    )
+    assert "entry 'task'" in resolution.refusals[0]
+    assert "shadows a built-in" in resolution.refusals[0]
+    assert mounted_commands(repo) == {("probe",): ("./scripts/probe.sh",)}
+
+
+@pytest.mark.parametrize("command", BUILTIN_COMMANDS)
+def test_builtin_help_survives_top_level_mount_shadowing(
+    tmp_path, monkeypatch, command
+):
     repo = _repo_with_commands(tmp_path, 'task = "./scripts/task.sh"')
-    with pytest.raises(SpiceError, match="shadows a built-in"):
-        mounted_commands(repo)
+    monkeypatch.setattr("spice.cli.mounts.repo_root_from_cwd", lambda: repo)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_entry._dispatch([command, "--help"])
+
+    assert exc_info.value.code == 0
 
 
-def test_study_mount_shadowing_builtin_action_fails_loudly(tmp_path):
+def test_top_level_help_survives_top_level_mount_shadowing(tmp_path, monkeypatch):
+    repo = _repo_with_commands(tmp_path, 'task = "./scripts/task.sh"')
+    monkeypatch.setattr("spice.cli.mounts.repo_root_from_cwd", lambda: repo)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_entry._dispatch(["--help"])
+
+    assert exc_info.value.code == 0
+
+
+def test_study_mount_shadowing_builtin_action_is_refused(tmp_path):
     repo = _repo_with_commands(
         tmp_path, '"study.csharp-members" = "./scripts/csharp-members.sh"'
     )
-    with pytest.raises(SpiceError) as exc_info:
-        mounted_commands(repo)
+    resolution = resolve_mounted_commands(repo)
 
-    message = str(exc_info.value)
+    assert resolution.commands == {}
+    assert len(resolution.refusals) == 1
+    message = resolution.refusals[0]
     assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
     assert "'study.csharp-members' shadows" in message
     assert "spice action 'spice study csharp-members'" in message
 
 
-def test_dev_mount_shadowing_builtin_action_fails_loudly(tmp_path):
+def test_dev_mount_shadowing_builtin_action_is_refused(tmp_path):
     repo = _repo_with_commands(tmp_path, '"dev.pre-commit" = "./scripts/pre-commit.sh"')
-    with pytest.raises(SpiceError) as exc_info:
-        mounted_commands(repo)
+    resolution = resolve_mounted_commands(repo)
 
-    message = str(exc_info.value)
+    assert resolution.commands == {}
+    assert len(resolution.refusals) == 1
+    message = resolution.refusals[0]
     assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
     assert "'dev.pre-commit' shadows" in message
     assert "spice action 'spice dev pre-commit'" in message
 
 
-def test_mount_shadowing_extension_study_action_fails_loudly(tmp_path, monkeypatch):
+def test_mount_shadowing_extension_study_action_is_refused(tmp_path, monkeypatch):
     _, distribution = build_fixture_distribution(tmp_path)
     monkeypatch.setattr(
         extension_loader.metadata,
@@ -106,10 +147,11 @@ def test_mount_shadowing_extension_study_action_fails_loudly(tmp_path, monkeypat
     )
     repo = _repo_with_commands(tmp_path, '"study.toy-study" = "./scripts/toy-study.sh"')
 
-    with pytest.raises(SpiceError) as exc_info:
-        mounted_commands(repo)
+    resolution = resolve_mounted_commands(repo)
 
-    message = str(exc_info.value)
+    assert resolution.commands == {}
+    assert len(resolution.refusals) == 1
+    message = resolution.refusals[0]
     assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
     assert "'study.toy-study' shadows" in message
     assert "extension-provided spice action 'spice study toy-study'" in message

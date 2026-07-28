@@ -72,6 +72,29 @@ def test_doctor_fails_dirty_worktree_with_investigation_command(tmp_path, monkey
     assert "cmd: git status --short" in report.render()
 
 
+def test_doctor_reports_builtin_shadowing_mount_as_refused(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["pkg"]\n'
+        '[tool.spice.commands]\ntask = ["./scripts/task"]\n',
+        encoding="utf-8",
+    )
+    install_hooks_for_repo(repo)
+    _patch_non_hook_checks(monkeypatch)
+
+    report = doctor.run_doctor(repo)
+
+    mounts = _check(report, "commands.mounts")
+    assert report.failed
+    assert mounts.status == "fail"
+    assert "refused 1 mount(s)" in mounts.detail
+    assert (
+        f"commands (source=pyproject path={repo / 'pyproject.toml'})" in mounts.detail
+    )
+    assert "entry 'task'" in mounts.detail
+    assert "shadows a built-in spice command" in mounts.detail
+
+
 def test_doctor_warns_about_executable_default_hooks_shadowed_by_spice(
     tmp_path, monkeypatch
 ):
@@ -204,7 +227,7 @@ def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
     } == {
         "rtk": expected_rtk,
         "remaining_check": "env-name-ledger",
-        "check_count": 25,
+        "check_count": 26,
     }
 
 
