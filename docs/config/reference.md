@@ -382,8 +382,10 @@ report.inspect = ["project-tool", "report", "inspect"]
 Keys are dot-separated command paths with lowercase/digit/hyphen segments.
 Mounts cannot shadow built-in or extension-provided `spice` actions at any
 depth. Dotted mounts under built-in verbs are allowed when the full command path
-is a novel action name. For example, these fail because the full paths already
-resolve to registered actions:
+is a novel action name. Collisions are refused individually and reported by
+`spice doctor`; built-in commands and valid sibling mounts remain available.
+For example, these entries are refused because the full paths already resolve
+to registered actions:
 
 ```toml
 [tool.spice.commands]
