@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -34,6 +35,7 @@ BROWSER_VALIDATION_FILES = (
     "tests/browser/serve_task_card_live_smoke.js",
     "tests/browser/serve_team_metrics_smoke.js",
 )
+CURRENT_DOC_SPELLING_GATE = PROJECT_ROOT / "scripts/check-current-doc-spellings"
 
 
 def _pyproject_data():
@@ -137,6 +139,84 @@ def test_entry_ladder_places_taskwarrior_requirement_at_fleet():
 
     assert "**Fleet** | A successful steered lane, Taskwarrior 3 or newer" in ladder
     assert "Watch, Retrospect, and Gates do not require Taskwarrior" in ladder_text
+    assert "records worktree-local approval" in ladder_text
+    assert "another clone or worktree records its own approval" in ladder_text
+
+
+def test_current_documentation_spelling_gate_is_configured_and_clean():
+    with (PROJECT_ROOT / "spice.toml").open("rb") as handle:
+        repository_config = tomllib.load(handle)
+    steps = repository_config["policy"]["pre_commit"]
+
+    assert steps == [
+        {
+            "label": "current documentation spellings",
+            "run": ["scripts/check-current-doc-spellings"],
+            "scopes": {
+                "paths": [
+                    "README.md",
+                    "DESIGN.md",
+                    "CONFIG.md",
+                    "STABILITY.md",
+                    "docs/cli/wrapper-commands.md",
+                    "docs/config/reference.md",
+                    "docs/overview.md",
+                    "docs/release.md",
+                    "scripts/check-current-doc-spellings",
+                    "spice.toml",
+                ]
+            },
+        }
+    ]
+    completed = subprocess.run(
+        [str(CURRENT_DOC_SPELLING_GATE)],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+
+
+def test_current_documentation_spelling_gate_fails_on_every_withdrawn_surface(
+    tmp_path,
+):
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    readme = tmp_path / "README.md"
+    readme.write_text("Run `spice init` to preview.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+
+    clean = subprocess.run(
+        [str(CURRENT_DOC_SPELLING_GATE), "README.md"],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert clean.returncode == 0
+
+    for withdrawn in (
+        "spice init --dry-run",
+        "spice deinit",
+        ".spice/init-receipt.json",
+        "[tool.spice.agent]",
+    ):
+        readme.write_text(f"{withdrawn}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+        refused = subprocess.run(
+            [str(CURRENT_DOC_SPELLING_GATE), "README.md"],
+            cwd=tmp_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert refused.returncode == 1
+        assert "current documentation names a withdrawn spelling" in refused.stderr
+        assert "README.md:1" in refused.stderr
+        assert withdrawn in refused.stderr
 
 
 def test_design_documents_single_install_runtime_model():

@@ -7,12 +7,12 @@ and assume anything unlisted is internal unless another document says otherwise.
 | Surface | Status | Build-on guidance |
 | --- | --- | --- |
 | Inbox file format and ACK protocol | Stable | Durable inbox items, UTC keys, priority/note fields, pending readout, and transcript `ACK <key>: ...` retirement are core protocol. Integrators can build tooling that writes operator steering and watches semantic ACKs. |
-| Constitution constants and hook policy | Stable | Policy limits, flex/sticky behavior, repo-shape checks, env-literal inventory, magic-number ratchet, and commit-message rules are executable doctrine. Changes should be explicit contract changes, not silent drift. |
+| Constitution constants and hook policy | Stable | Policy limits, flex/sticky behavior, repo-shape checks, env-literal inventory, magic-number ratchet, and commit-message rules are executable doctrine. Every disabled built-in is printed by the gate; a tracked disablement also requires current `spice init --apply` approval. Changes should be explicit contract changes, not silent drift. |
 | Extension import surface | Stable | Entry points in `spice.drivers`, `spice.studies`, and `spice.wrappers` run in the installed spice process and may use spice modules needed to implement those extension contracts. Underscored names remain private. |
-| Command coupling channel | Stable | Repository tools couple to spice through mounted commands, tracked root `spice.toml` config, `spice lock`, and JSON study/task/session command output instead of importing spice from an operated repository environment. |
+| Command coupling channel | Stable | Repository tools couple to spice through mounted commands, tracked root `spice.toml` config, `spice lock`, JSON study/task/session command output, and the versioned `spice.command-plan` mounted-command protocol instead of importing spice from an operated repository environment. Bare mounted planners preview; `--apply[=<plan-digest>]` is the mutation boundary. |
 | Agent bootstrap contract | Stable | Worktree skill invocation, `spice agent activation`, `spice session briefing`, and task-board rehydration are the supported prompt-boundary path. |
-| Release commands | Stable enough | `spice release prepare`, `notes`, `publish`, and `github` are operator-facing commands. Minor output changes are possible, but the workflow contract should remain intact. |
-| Task allocator CLI | Settling | Handles, phases, claims, review flow, and `spice task next` are real operating surfaces. Script against command output cautiously; prefer the CLI over direct Taskwarrior storage. |
+| Release commands | Stable enough | `spice release prepare`, `notes`, `publish`, and `github` are operator-facing commands. Bare authored-input release verbs render their ordered plan; only `--apply` mutates or publishes. Minor output changes are possible, but the workflow contract should remain intact. |
+| Task allocator CLI | Settling | Handles, phases, claims, review flow, and `spice task next` are real operating surfaces. Allocator mutations remain direct-intent operations that apply immediately and keep driving through phase boundaries. Script against command output cautiously; prefer the CLI over direct Taskwarrior storage. |
 | Session forensics | Settling | `spice session briefing`, `phases`, and `messages` are supported for agent rehydration and review. Deeper analytics families may still be renamed or split. |
 | Serve lane UI and live bus | In motion | Lane rendering, WebSocket message shapes, browser payload details, and task-drain refresh behavior are active product surfaces, not stable extension APIs. Use them through `spice serve` rather than depending on wire details. |
 | Team API and store schema | In motion | Fused teams, lane membership, revisions, metric attribution, and renewal lineage are still being shaped. Expect schema and command changes. |
@@ -86,10 +86,11 @@ derives every preview/apply, explicit-option, and hook-backend case from that
 metadata, and independently checks every live `--fix`, `--write*`, and
 `--create-tasks` option against the classification.
 
-Beginning with v0.30.0, `--dry-run` is withdrawn from `spice init` and
-`spice task ingest`. Those commands refuse the old spelling with the owning
-release and direct operators to bare invocation for preview or `--apply` for
-execution; they never accept both spellings in one invocation.
+Beginning with v0.30.0, the former explicit preview option is withdrawn from
+`spice init` and `spice task ingest`. Those commands refuse that old option
+with the owning release and direct operators to bare invocation for preview or
+`--apply` for execution; they never accept old and current mutation options in
+one invocation.
 
 | Mutating verb or invocation | Effect-driving reads | Classification |
 | --- | --- | --- |
