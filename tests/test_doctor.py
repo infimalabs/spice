@@ -10,7 +10,7 @@ import pytest
 
 from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RtkHealth
-from spice.hooks import doctor
+from spice.hooks import doctor, precommit
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.paths import shared_state_root, worktree_state_root
 from spice.studies.walk import staged_paths, tracked_paths
@@ -160,6 +160,18 @@ def test_doctor_requires_approval_for_tracked_disabled_builtins(tmp_path):
     _run(repo, "git", "add", "spice.toml")
     _run(repo, "git", "commit", "-m", "disable builtins")
 
+    disabled = precommit.disabled_builtin_pre_commit_steps(repo)
+    assert [(entry.key, entry.config_path) for entry in disabled] == [
+        (
+            "formatters",
+            ("policy", "pre_commit_builtins", "formatters"),
+        ),
+        (
+            "magic-numbers",
+            ("policy", "pre_commit_builtins", "magic-numbers", "enabled"),
+        ),
+    ]
+
     report = doctor.run_doctor(repo)
     unapproved = _check(report, "policy.pre-commit-builtins")
 
@@ -190,6 +202,43 @@ def test_doctor_accepts_operator_owned_builtin_disablement_without_receipt(tmp_p
 
     assert check.status == "ok"
     assert check.detail == "operator or packaged disabled builtin(s): formatters"
+
+
+def test_doctor_traces_table_disablement_leaf_through_worktree_overlay(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\n\n'
+        "[policy.pre_commit_builtins]\n"
+        "formatters = { enabled = false }\n",
+        encoding="utf-8",
+    )
+    _run(repo, "git", "add", "spice.toml")
+    _run(repo, "git", "commit", "-m", "disable formatter builtin")
+    path = edit.worktree_config_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "[policy.pre_commit_builtins.formatters]\n"
+        'label = "operator-owned sibling field"\n',
+        encoding="utf-8",
+    )
+
+    loaded = layers.load_config(repo)
+    parent_path = ("policy", "pre_commit_builtins", "formatters")
+    assert loaded.source_for(parent_path).name == layers.WORKTREE_SOURCE
+    assert loaded.source_for((*parent_path, "enabled")).name == (
+        layers.REPOSITORY_SOURCE
+    )
+
+    unapproved = doctor._pre_commit_builtin_disablement_check(repo)
+    assert unapproved.required is True
+    assert unapproved.status == "fail"
+    assert "repository disabled builtin(s)" in unapproved.detail
+    assert "formatters" in unapproved.detail
+
+    approve_repository_config(repo)
+    approved = doctor._pre_commit_builtin_disablement_check(repo)
+    assert approved.status == "ok"
+    assert "repository disablement approved" in approved.detail
 
 
 @pytest.mark.parametrize(

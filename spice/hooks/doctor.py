@@ -718,12 +718,7 @@ def _pre_commit_builtin_disablement_check(repo_root: Path) -> DoctorCheck:
     repository_disabled = tuple(
         entry
         for entry in disabled
-        if (
-            source := loaded.source_for(
-                ("policy", "pre_commit_builtins", entry.config_key)
-            )
-        )
-        is not None
+        if (source := loaded.source_for(entry.config_path)) is not None
         and source.name == REPOSITORY_SOURCE
     )
     disabled_names = ", ".join(entry.key for entry in disabled)
