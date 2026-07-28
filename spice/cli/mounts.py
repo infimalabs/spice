@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -11,9 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from spice.commandplan import (
-    apply_mounted_plan,
+    apply_mounted_reversal,
+    apply_receipted_mounted_plan,
     assert_mounted_plan_digest,
+    load_mounted_plan_receipt,
     parse_command_plan_document,
+    plan_mounted_reversal,
 )
 from spice.cli.parser import (
     BUILTIN_COMMANDS,
@@ -51,6 +55,14 @@ class MountedCommand:
 class MountedCommandResolution:
     commands: dict[tuple[str, ...], tuple[str, ...]]
     refusals: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MountedPlanRequest:
+    apply_requested: bool
+    apply_digest: str | None
+    unapply_requested: bool
+    receipt_digest: str | None
 
 
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
@@ -176,7 +188,27 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     # the parent interpreter as the independently installed runtime identity so
     # release evidence can prove what ordinary fleet commands actually import.
     env[RUNTIME_PYTHON_ENV] = sys.executable
-    requested, digest = _mounted_apply_request(args)
+    request = _mounted_plan_request(args)
+    if request.unapply_requested:
+        plan = plan_mounted_reversal(
+            mount.repo_root,
+            mount.name,
+            request.receipt_digest,
+        )
+        if not request.apply_requested:
+            print(json.dumps(plan.document.payload, sort_keys=True))
+            return 0
+        report = apply_mounted_reversal(plan, request.apply_digest)
+        print(
+            "unapplied command-plan "
+            f"receipt={report.receipt_digest or '<none>'} "
+            f"operations={len(report.outcomes)}"
+        )
+        for order, label in enumerate(report.outcomes, start=1):
+            print(f"{order}. {label}")
+        if report.recovery_path is not None:
+            print(f"recovery={report.recovery_path}")
+        return 0
     result = run_parent_lifetime_command(
         [*mount.argv, *args],
         cwd=mount.repo_root,
@@ -200,31 +232,52 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
-    if not requested:
+    if not request.apply_requested:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
-    assert_mounted_plan_digest(document, mount.repo_root, digest)
-    applied = apply_mounted_plan(document, mount.repo_root)
+    receipt = load_mounted_plan_receipt(mount.repo_root, mount.name)
+    resuming_asserted_plan = (
+        receipt is not None
+        and not receipt.complete
+        and request.apply_digest == receipt.plan_digest
+    )
+    assert_mounted_plan_digest(
+        document,
+        mount.repo_root,
+        document.digest if resuming_asserted_plan else request.apply_digest,
+    )
+    applied = apply_receipted_mounted_plan(document, mount.repo_root, mount.name)
     print(f"applied command-plan digest={document.digest} operations={len(applied)}")
     for order, label in enumerate(applied, start=1):
         print(f"{order}. {label}")
     return result.returncode
 
 
-def _mounted_apply_request(args: list[str]) -> tuple[bool, str | None]:
-    requests = [
+def _mounted_plan_request(args: list[str]) -> MountedPlanRequest:
+    option_args = args[: args.index("--") if "--" in args else len(args)]
+    apply = [
         argument.partition("=")
-        for argument in args[: args.index("--") if "--" in args else len(args)]
+        for argument in option_args
         if argument == "--apply" or argument.startswith("--apply=")
     ]
-    if len(requests) > 1:
+    unapply = [
+        argument.partition("=")
+        for argument in option_args
+        if argument == "--unapply" or argument.startswith("--unapply=")
+    ]
+    if len(apply) > 1:
         raise SpiceError("mounted command accepts --apply at most once")
-    if not requests:
-        return False, None
-    argument, separator, digest = requests[0]
-    _ = argument
-    return True, digest if separator else None
+    if len(unapply) > 1:
+        raise SpiceError("mounted command accepts --unapply at most once")
+    apply_digest = apply[0][2] if apply and apply[0][1] else None
+    receipt_digest = unapply[0][2] if unapply and unapply[0][1] else None
+    return MountedPlanRequest(
+        apply_requested=bool(apply),
+        apply_digest=apply_digest,
+        unapply_requested=bool(unapply),
+        receipt_digest=receipt_digest,
+    )
 
 
 def mounted_command_names() -> list[str]:
