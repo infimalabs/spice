@@ -15,6 +15,7 @@ from spice.agent.maxims import judge_cli_backend
 from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.shellhook import render_agent_wrapper_lines
 from spice.cli.mounts import MountedCommand, run_mounted_command
+from spice.cli.parser import build_parser
 from spice.config import values
 from spice.config.trust import (
     repository_config_approval,
@@ -105,10 +106,9 @@ def test_init_apply_records_the_current_repository_approval(
     _commit_config(repo, '[commands]\nprobe = ["tool", "first"]\n')
     monkeypatch.chdir(repo)
 
-    assert (
-        handle_init(SimpleNamespace(gates=True, apply=True, json=False, unapply=None))
-        == 0
-    )
+    args = build_parser().parse_args(["init", "--gates", "--apply"])
+
+    assert handle_init(args) == 0
 
     assert repository_config_approval(repo).approved
     assert "ready: git commit | spice dev pre-commit" in capsys.readouterr().out

@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RtkHealth
 from spice.hooks import doctor
@@ -13,7 +15,6 @@ from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.paths import shared_state_root, worktree_state_root
 from spice.studies.walk import staged_paths, tracked_paths
 from tests.test_configtrusthelpers import approve_repository_config
-import pytest
 
 
 def test_doctor_renders_supported_state_roots_for_linked_worktrees(tmp_path):
