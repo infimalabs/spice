@@ -23,16 +23,25 @@ An effect-driving read is an input whose contents can change the operations a
 verb plans or the payload it applies.
 
 - A bare mutating verb **previews** when any effect-driving read is semantic
-  input authored by the operator: a document, configuration or manifest, or a
-  repository tree the verb will rewrite or publish.
+  input authored by the operator: a document, configuration or manifest, or
+  repository content the verb semantically interprets to decide what it will
+  rewrite or publish.
 - A bare mutating verb **applies** when all effects are specified by command-line
   intent, board state, live runtime state, and approved standing policy.
 - Reads used only to locate a target, check a precondition, preserve unrelated
-  content, copy caller-selected bytes opaquely, or parameterize an already
-  approved action do not make that input an authored operand.
+  content, copy bytes or publish a selected Git tree opaquely, or parameterize
+  an already approved action do not make that input an authored operand.
+- Batch records whose grammar is equivalent to argv are command-line intent.
+  Transporting an authored document through standard input does not change its
+  provenance.
 - An explicit mutation option such as `--fix`, `--write-*`, or
   `--create-tasks` is already an apply instruction. The criterion does not
   require another gate around those existing forms.
+- Invocation through a Git or agent hook supplies command-line intent for the
+  backend, but does not change a semantic payload's provenance or make the
+  backend inherit the parent's mutation-default classification. A backend that
+  only validates or vetoes the parent mutation has no mutation-default decision
+  of its own.
 
 This is the criterion published in `STABILITY.md`. If it predicts the wrong
 default, change the criterion or the effect-driving-read classification rather
