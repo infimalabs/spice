@@ -114,12 +114,31 @@ personality, say, and judge settings also accept `system` and `repository`.
 `--clear` removes only that command's values from the selected
 scope, revealing the next earlier layer without changing it.
 
+`spice config set <dotted-key> <value> [--scope <scope>]` exposes every leaf in
+the loader schema, including settings without a specialized convenience flag.
+Bare text is a string; `true`, `false`, numbers, TOML arrays, and inline tables
+retain their types. Quote the whole shell argument when a typed value contains
+spaces, and quote an individual TOML key segment when its name contains a dot:
+
+```console
+spice config set say.timeout_seconds 180
+spice config set policy.repo_truth.docs '["AGENTS.md", "CONTRIBUTING.md"]' --scope repository
+spice config set 'tasks.taskwarrior_urgency."age.coefficient"' 2.5 --scope repository
+spice config set commands.audit false
+```
+
+The last form is the explicit removal value for a named entry in a registry
+that declares false-disable behavior. The setter prints the selected value, the
+effective value, and its winning scope and path; `spice config show` exposes the
+same `false` leaf and provenance even though registry consumers omit the
+disabled entry.
+
 All mutable commands use one structured TOML editor. It preserves unrelated
-tables, comments, ordering, and scalar types, validates the resulting document,
-and atomically replaces the selected file. A system write requires the installed
-`spice.toml` to exist and be writable; the other two scopes are created on
-demand. Invalid or unwritable mutations report `scope=<name> path=<path>` before
-changing bytes.
+tables, comments, ordering, and value types, validates the complete prospective
+layer through the same key schema as the loader, and atomically replaces the
+selected file. A system write requires the installed `spice.toml` to exist and
+be writable; the other two scopes are created on demand. Invalid or unwritable
+mutations report `scope=<name> path=<path>` before changing bytes.
 
 Spice v0.30 dropped `[tool.spice]` repository configuration. A repository that
 still contains that table refuses configuration loading and names root

@@ -186,6 +186,189 @@ def test_config_system_renders_effective_agent_config_read_only(
     assert sorted(path.name for path in tmp_path.iterdir()) == before
 
 
+def test_config_set_writes_a_typed_schema_leaf_and_reports_provenance(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        build_parser().parse_args(
+            [
+                "config",
+                "set",
+                "policy.internal_couplings",
+                '[{ path = "spice/config.py", test = "tests/test_config.py", '
+                'target = "_config" }]',
+                "--scope",
+                "repository",
+            ]
+        )
+    )
+
+    assert result == 0
+    expected = [
+        {
+            "path": "spice/config.py",
+            "test": "tests/test_config.py",
+            "target": "_config",
+        }
+    ]
+    assert (
+        layers.layer_table(tmp_path, layers.REPOSITORY_SOURCE, "policy")[
+            "internal_couplings"
+        ]
+        == expected
+    )
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered == {
+        "effective": expected,
+        "key": "policy.internal_couplings",
+        "provenance": {
+            "path": str(tmp_path / "spice.toml"),
+            "scope": "repository",
+        },
+        "scope": "repository",
+        "value": expected,
+    }
+
+
+def test_config_set_rejects_an_unknown_key_before_mutating_bytes(tmp_path, monkeypatch):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    config_path = tmp_path / "spice.toml"
+    config_path.write_text("[policy.limits]\nfile_loc = 200\n", encoding="utf-8")
+    before = config_path.read_bytes()
+
+    with pytest.raises(SpiceError) as exc_info:
+        handle_config(
+            build_parser().parse_args(
+                [
+                    "config",
+                    "set",
+                    "policy.limits.file_lco",
+                    "300",
+                    "--scope",
+                    "repository",
+                ]
+            )
+        )
+
+    assert str(exc_info.value) == (
+        "unknown configuration key policy.limits.file_lco "
+        f"(source=repository path={config_path}); "
+        "did you mean policy.limits.file_loc?"
+    )
+    assert config_path.read_bytes() == before
+
+
+def test_config_set_false_disables_an_inherited_entry_with_visible_provenance(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    (tmp_path / "spice.toml").write_text(
+        '[commands]\naudit = ["echo", "audit"]\n',
+        encoding="utf-8",
+    )
+
+    handle_config(
+        build_parser().parse_args(["config", "set", "commands.audit", "false"])
+    )
+
+    assert layers.layer_table(tmp_path, layers.WORKTREE_SOURCE, "commands") == {
+        "audit": False
+    }
+    assert layers.effective_commands(tmp_path) == {}
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["value"] is False
+    assert rendered["effective"] is False
+    assert rendered["provenance"] == {
+        "path": str(edit.worktree_config_path(tmp_path)),
+        "scope": "worktree",
+    }
+    overview = values.config_overview(tmp_path)
+    assert overview["effective"]["commands"]["audit"] is False
+    assert overview["provenance"]["commands.audit"] == rendered["provenance"]
+
+
+def test_config_set_preserves_a_quoted_dynamic_key_segment(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    handle_config(
+        build_parser().parse_args(
+            [
+                "config",
+                "set",
+                'tasks.taskwarrior_urgency."age.coefficient"',
+                "2.5",
+                "--scope",
+                "repository",
+            ]
+        )
+    )
+
+    assert layers.layer_table(
+        tmp_path,
+        layers.REPOSITORY_SOURCE,
+        "tasks",
+        "taskwarrior_urgency",
+    ) == {"age.coefficient": 2.5}
+    assert '"age.coefficient" = 2.5' in (tmp_path / "spice.toml").read_text(
+        encoding="utf-8"
+    )
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["value"] == 2.5
+    assert rendered["provenance"]["scope"] == "repository"
+
+
+@pytest.mark.parametrize(
+    ("key", "raw_value", "expected"),
+    (
+        ("say.backend", "say", "say"),
+        ("say.command", "tts", "tts"),
+        ("say.content_type", "audio/wav", "audio/wav"),
+        ("say.voice", "Alex", "Alex"),
+        ("say.words_per_minute", "190", 190),
+        ("say.timeout_seconds", "12.5", 12.5),
+        ("judge.bin", "judge", "judge"),
+        ("judge.enabled", "false", False),
+        ("agent.model", "gpt", "gpt"),
+        ("agent.effort", "high", "high"),
+        ("agent.driver", "codex", "codex"),
+        ("agent.personality", "friendly", "friendly"),
+    ),
+)
+def test_every_specialized_clearable_leaf_is_generic_settable(
+    tmp_path, monkeypatch, capsys, key, raw_value, expected
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    handle_config(build_parser().parse_args(["config", "set", key, raw_value]))
+
+    section, leaf = key.split(".")
+    assert (
+        layers.layer_table(tmp_path, layers.WORKTREE_SOURCE, section)[leaf] == expected
+    )
+    capsys.readouterr()
+
+
+def test_generic_set_closes_the_say_timeout_set_and_clear_gap(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    parser = build_parser()
+    handle_config(parser.parse_args(["config", "set", "say.timeout_seconds", "12.5"]))
+
+    assert values.configured_say_timeout(tmp_path) == SAY_TIMEOUT_OVERRIDE_SECONDS
+
+    handle_config(parser.parse_args(["config", "say", "--clear"]))
+
+    assert "timeout_seconds" not in layers.layer_table(
+        tmp_path, layers.WORKTREE_SOURCE, "say"
+    )
+    capsys.readouterr()
+
+
 def test_config_agent_writes_repository_scope(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
@@ -420,7 +603,7 @@ def test_config_help_names_exact_scope_vocabulary():
         if isinstance(action, argparse._SubParsersAction)
     )
 
-    for action in ("agent", "personality", "say", "judge"):
+    for action in ("set", "agent", "personality", "say", "judge"):
         help_text = config_actions.choices[action].format_help()
         assert "{system,repository,worktree}" in help_text
 
@@ -781,8 +964,8 @@ def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
         "# keep this header\n"
-        "[custom]\n"
-        "flag = true\n\n"
+        "[serve]\n"
+        'brand = "spice"\n\n'
         "[say]\n"
         'voice = "Alex"\n'
         "words_per_minute = 150 # operator rate\n",
@@ -801,7 +984,7 @@ def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
     assert "words_per_minute = 200 # operator rate" in text
     parsed = tomllib.loads(text)
     assert parsed["say"] == {"voice": "Alex", "words_per_minute": 200}
-    assert parsed["custom"] == {"flag": True}
+    assert parsed["serve"] == {"brand": "spice"}
 
 
 def test_clear_scope_section_preserves_unrelated_tables(tmp_path):
