@@ -102,6 +102,8 @@ def write_agent_wrapper_config(
                 + "]"
             )
     (repo / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if repo_root_from_cwd(repo) == repo.resolve():
+        approve_repository_config(repo)
 
 
 def toml_key(value: str) -> str:
