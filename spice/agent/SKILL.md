@@ -76,10 +76,13 @@ Two automation stops transfer authority to the operator. They are refusals to
 surface, not speed bumps to log or route around:
 
 - An executable repository-configuration refusal asks whether the current
-  configuration digest may execute the named configuration path and command.
-  Hand back the complete refusal, including the digest and command words. Do not
-  run `spice init --apply` to create the approval receipt unless the operator
-  explicitly decides to approve that exact current configuration.
+  capability digest may execute the named configuration path and command. Hand
+  back the complete refusal, including the digest, provenance reason, and
+  command words. Do not run `spice init --apply` to create an exact approval,
+  or apply a `spice config trust grant` / `revoke` plan, unless the operator
+  explicitly decides to authorize that exact current plan. A fetched ref,
+  successful task publication, Serve launch, assignment, or agent action is
+  evidence at most and never supplies that operator decision.
 - An authored-input apply gate asks whether the current ordered plan may mutate
   operator-authored state. Hand back the complete preview or stale-plan
   refusal, including its operations and plan digest. Do not add `--apply` (or

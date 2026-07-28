@@ -24,9 +24,9 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from threading import Condition, Event, Thread
+from threading import Event, Thread
 from typing import Any, cast
 
 from spice.agent.driver import (
@@ -36,10 +36,54 @@ from spice.agent.driver import (
     driver_for,
 )
 from spice.agent.identity import canonical_thread_id, uuid_thread_id
-from spice.agent.shadow import ensure_origin_head
+from spice.agent.agentmodel import (
+    AgentEnsureResult as AgentEnsureResult,
+    AgentOutOfCreditsError as AgentOutOfCreditsError,
+    AgentRestartRefusedError as AgentRestartRefusedError,
+    LaunchClaim as LaunchClaim,
+    PreparedLaunch as PreparedLaunch,
+    agent_startup_error as agent_startup_error,
+    attachable_thread_id as _attachable_thread_id,
+    build_agent_state as build_agent_state,
+    claimed_task_phase_launch as _claimed_task_phase_launch,
+    next_agent_log_path as _next_agent_log_path,
+    requested_launch_knobs as _requested_launch_knobs,
+    supervisor_command_from_json as supervisor_command_from_json,
+    touch_agent_state as touch_agent_state,
+)
+from spice.agent.startpreflight import (
+    require_no_pending_authority_migration as _require_no_pending_authority_migration,
+)
+from spice.agent.promptskill import (
+    available_skill_path as available_skill_path,
+    prompt_skill_invocation_path as prompt_skill_invocation_path,
+    resolve_agent_prompt_skill_path as resolve_agent_prompt_skill_path,
+)
 from spice.agent.paths import (
-    agent_state_dir,
+    agent_state_dir as agent_state_dir,
     agent_thread_state_dir,
+)
+from spice.agent.shadow import ensure_origin_head
+from spice.agent.supervisorwatch import (
+    CLAIM_RENEWAL_QUIET_REASONS as CLAIM_RENEWAL_QUIET_REASONS,
+    CLAIM_RENEWAL_TERMINAL_REASONS as CLAIM_RENEWAL_TERMINAL_REASONS,
+    LANE_UNCAPTURED_NUDGE as LANE_UNCAPTURED_NUDGE,
+    SUPERVISOR_CLAIM_LEASE_SECONDS as SUPERVISOR_CLAIM_LEASE_SECONDS,
+    SUPERVISOR_CLAIM_RENEWAL_SECONDS as SUPERVISOR_CLAIM_RENEWAL_SECONDS,
+    SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS as SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS,
+    SUPERVISOR_LANE_WATCH_SECONDS as SUPERVISOR_LANE_WATCH_SECONDS,
+    SUPERVISOR_UNCAPTURED_NUDGE_SECONDS as SUPERVISOR_UNCAPTURED_NUDGE_SECONDS,
+    SupervisorLaneSignal as SupervisorLaneSignal,
+    flag_uncaptured_lane as _flag_uncaptured_lane_impl,
+    notice_contract_mutations as _notice_contract_mutations,
+    renew_held_claim as _renew_held_claim_impl,
+    renew_supervised_claim as _renew_supervised_claim_impl,
+    report_contract_watch_error as _report_contract_watch_error,
+    supervised_claim_lease_seconds as _supervised_claim_lease_seconds_impl,
+    transition_agent_startup_state as _transition_agent_startup_state,
+    watch_agent_startup,
+    watch_supervised_lane,
+    worktree_dirty,
 )
 from spice.agent.launchhistory import (  # noqa: F401 - lifecycle public surface
     LAUNCH_OUTCOMES_FILE,
@@ -91,7 +135,6 @@ from spice.agent.lifecyclebinding import (  # noqa: F401 - lifecycle public surf
     agent_state_path,
     agent_status,
     agent_supervisor_environment,
-    available_skill_path as _available_skill_path,
     bind_ambient_agent_thread,
     git_tracks_relative_path,
     materialize_worktree_skill,
@@ -113,7 +156,6 @@ from spice.agent.watchdog import (
     startup_signal_for_supervised_thread,
 )
 from spice.config.values import (
-    DEFAULT_AGENT_PERSONALITY,
     configured_agent_effort,
     configured_agent_model_for_driver,
     configured_agent_personality,
@@ -150,111 +192,69 @@ AGENT_FAILURE_STARTUP_STALLED = AGENT_STARTUP_STALLED
 AGENT_FAILURE_CONFIG_APPROVAL_REQUIRED = "config-approval-required"
 
 
-class AgentOutOfCreditsError(SpiceError):
-    """Agent driver reported a credit/usage-limit startup failure."""
+def _worktree_dirty(repo_root: Path) -> bool:
+    return worktree_dirty(repo_root)
 
 
-class AgentRestartRefusedError(SpiceError):
-    """Automatic restart refused: recent supervised launches keep dying young."""
-
-    def __init__(self, message: str, *, refusal: dict[str, Any]) -> None:
-        super().__init__(message)
-        self.refusal = refusal
-
-
-@dataclass(frozen=True)
-class AgentEnsureResult:
-    action: str
-    status: AgentStatus
-    command: list[str]
-    prompt: str
-    log_path: Path | None
-    # Knobs this launch was asked for that its driver has no seam to carry.
-    # Empty on a launch that asked for nothing the driver cannot do.
-    unhonored_launch_knobs: tuple[str, ...] = ()
+def _flag_uncaptured_lane(repo_root: Path, thread_id: str, log_path: Path) -> None:
+    _flag_uncaptured_lane_impl(
+        repo_root,
+        thread_id,
+        log_path,
+        dirty=_worktree_dirty,
+    )
 
 
-def _requested_launch_knobs(
-    *, personality: str | None, resolved_personality: str, fast_mode: bool
-) -> tuple[str, ...]:
-    """The launch knobs this call actually asks for, past the shipped defaults.
-
-    A model and an effort always resolve to something, so neither is an ask. An
-    explicit personality argument is an ask whatever its value — naming the
-    shipped default still buys nothing on a driver without the seam, which is
-    the surprise worth reporting — while a configured personality is an ask only
-    where it departs from that default, so an untouched config does not make
-    every launch on every driver noisy. Fast mode is off until somebody turns
-    it on.
-    """
-    requested = []
-    if personality or resolved_personality != DEFAULT_AGENT_PERSONALITY:
-        requested.append(PERSONALITY_LAUNCH_KNOB)
-    if fast_mode:
-        requested.append(FAST_MODE_LAUNCH_KNOB)
-    return tuple(requested)
+def _supervised_claim_lease_seconds(repo_root: Path, thread_id: str) -> float:
+    return _supervised_claim_lease_seconds_impl(
+        repo_root,
+        thread_id,
+        read_state=read_agent_state,
+    )
 
 
-@dataclass(frozen=True)
-class LaunchClaim:
-    """The task a launch reserved for its agent, and the actor holding it.
+def _renew_held_claim(
+    repo_root: Path,
+    thread_id: str,
+    held: dict[str, str],
+) -> Any:
+    return _renew_held_claim_impl(
+        repo_root,
+        thread_id,
+        held,
+        lease_resolver=_supervised_claim_lease_seconds,
+    )
 
-    The reservation is taken before the process exists, so both halves travel
-    into the supervisor together: it is the only surface that sees the launch
-    end, and handing the row back has to name the row and its owner exactly.
-    """
 
-    uuid: str
-    actor: str
+def _renew_supervised_claim(
+    repo_root: Path,
+    thread_id: str,
+    log_path: Path,
+    reported: dict[str, str],
+    contract_cursors: dict[str, int],
+    held: dict[str, str],
+) -> None:
+    _renew_supervised_claim_impl(
+        repo_root,
+        thread_id,
+        log_path,
+        reported,
+        contract_cursors,
+        held,
+        renew_held=_renew_held_claim,
+        notice=_notice_contract_mutations,
+        report=_report_contract_watch_error,
+    )
 
 
-def _claimed_task_phase_launch(
-    repo_root: Path, driver_name: str, status: AgentStatus
-) -> dict[str, str]:
-    """Model/effort override from the phase of this worktree's claimed task.
-
-    {} when no task is claimed, the task backend is unavailable, or the
-    phase has no configured override — the caller falls through to its
-    ordinary launch config in every one of those cases.
-    """
-    if not status.thread_id:
-        return {}
-    try:
-        from spice.tasks.claimstate import active_claim_phase
-
-        phase = active_claim_phase(status.thread_id)
-    except SpiceError:
-        return {}
-    if not phase:
-        return {}
-    from spice.tasks.config import phase_launch_overrides
-
-    return phase_launch_overrides(repo_root, driver_name, phase)
+def next_agent_log_path(repo_root: Path) -> Path:
+    return _next_agent_log_path(repo_root, timestamp=utc_now())
 
 
 def agent_ensure_lock(repo_root: Path):
     return _agent_ensure_lock(
         repo_root, timeout_seconds=AGENT_ENSURE_LOCK_TIMEOUT_SECONDS
     )
-
-
-@dataclass(frozen=True)
-class PreparedLaunch:
-    """Everything one launch resolves to, decided before a process exists.
-
-    Resolved once, under the ensure-lock, so the dry run reports exactly what a
-    real start would run. `unhonored_knobs` names what the caller asked for that
-    this driver has no launch-time seam for: those values are withheld here
-    rather than handed to a driver body that would ignore them.
-    """
-
-    action: str
-    command: list[str]
-    resume_thread_id: str
-    model: str
-    reasoning_effort: str
-    fast_mode: bool
-    unhonored_knobs: tuple[str, ...]
 
 
 def _refuse_restart_after_rapid_deaths(repo_root: Path) -> None:
@@ -300,19 +300,6 @@ def preflight_automatic_agent_launch(repo_root: Path) -> boundaries.SyncResult:
 
     render_shell_runtime_wrapper_lines(repo_root)
     return sync
-
-
-def _attachable_thread_id(driver: AgentDriver, repo_root: Path, thread_id: str) -> str:
-    """`thread_id` if a `--resume` of it can attach here, else no thread at all.
-
-    A bound thread with no conversation this worktree can resume (a reset, a
-    superseded id, a pointer crisscrossed from another lane) dies on startup and,
-    left bound, bricks every retry into the same loop. Dropping the id starts a
-    fresh thread instead, so the lane self-heals.
-    """
-    if thread_id and not driver.thread_resumable_here(repo_root, thread_id):
-        return ""
-    return thread_id
 
 
 def _prepare_launch(
@@ -467,25 +454,6 @@ def ensure_agent(
         )
 
 
-def _require_no_pending_authority_migration(repo_root: Path) -> None:
-    """Keep every launch surface out of a store's pending migration window."""
-    from spice.serve.team.store import (
-        LANE_SCHEMA_RECORD_HORIZON_HOURS,
-        pending_authority_migration,
-        team_database_path,
-    )
-
-    pending = pending_authority_migration(team_database_path(repo_root))
-    if pending is None:
-        return
-    raise SpiceError(
-        "refusing to start an agent while team authority schema migration "
-        f"{pending.source_version} -> {pending.target_version} is pending; "
-        "the migration clears this signal once the older lanes drain, and an "
-        f"abandoned signal expires after {LANE_SCHEMA_RECORD_HORIZON_HOURS} hours"
-    )
-
-
 def start_agent(
     repo_root: Path,
     *,
@@ -547,44 +515,6 @@ def start_agent(
     )
     reap_process_when_done(process, repo_root=repo_root)
     return log_path
-
-
-def next_agent_log_path(repo_root: Path) -> Path:
-    stamp = utc_now().replace(":", "").replace("-", "")
-    return agent_state_dir(repo_root) / f"{stamp}.log"
-
-
-def build_agent_state(
-    *,
-    process: subprocess.Popen[str],
-    action: str,
-    command: list[str],
-    driver: str,
-    model: str,
-    reasoning_effort: str,
-    thread_id: str,
-    prompt_skill_path: Path,
-    log_path: Path,
-    fast_mode: bool,
-    startup_status: str = AGENT_STARTUP_READY,
-) -> dict[str, Any]:
-    return {
-        "pid": process.pid,
-        "process_group_id": process.pid,
-        "started_at": utc_now(),
-        "mode": action,
-        "command": command,
-        "driver": driver,
-        "model": model,
-        "reasoning_effort": reasoning_effort,
-        "thread_id": thread_id,
-        "prompt_skill_path": str(prompt_skill_path),
-        "log_path": str(log_path),
-        "fast_mode": fast_mode,
-        "startup_status": startup_status,
-        "ready_at": utc_now() if startup_status == AGENT_STARTUP_READY else "",
-        "startup_failure": "",
-    }
 
 
 def spawn_agent_supervisor(
@@ -695,299 +625,6 @@ def agent_state_matches_startup_log(
     return actual == settled
 
 
-# A low-frequency check, not a spinner: the operator asked the supervisor to
-# notice ~every 30-60s when its bound agent is holding no task yet the worktree
-# is dirty -- uncaptured work that cannot land until a task is claimed.
-SUPERVISOR_LANE_WATCH_SECONDS = 20.0
-SUPERVISOR_UNCAPTURED_NUDGE_SECONDS = 45.0
-# A supervisor-owned handoff claim starts with three watch beats: enough for a
-# launch to prove health without letting a child that never comes up strand the
-# row. Once startup reaches READY, healthy renewal promotes the claim to five
-# beats. Its worst-case floor after a normal watch interval then stays above the
-# CLI's critical band, while supervisor death still returns the row after a
-# bounded number of missed beats.
-SUPERVISOR_CLAIM_RENEWAL_SECONDS = SUPERVISOR_LANE_WATCH_SECONDS
-SUPERVISOR_CLAIM_LEASE_SECONDS = 3.0 * SUPERVISOR_CLAIM_RENEWAL_SECONDS
-SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS = 5.0 * SUPERVISOR_CLAIM_RENEWAL_SECONDS
-LANE_UNCAPTURED_NUDGE = (
-    "your worktree has uncommitted or uncaptured changes but you hold no "
-    "claimed task -- work cannot land without one. Claim a task before "
-    "editing further, or fold the changes in with spice task capture."
-)
-CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
-CLAIM_RENEWAL_TERMINAL_REASONS = frozenset(
-    {
-        "claim_ended",
-        "claimed_by_other",
-        "completed",
-        "deleted",
-        "different_worktree",
-        "missing",
-    }
-)
-
-
-class SupervisorLaneSignal:
-    """One blocking wakeup surface for claim events, cadence, and shutdown."""
-
-    def __init__(self) -> None:
-        self._condition = Condition()
-        self._generation = 0
-        self._observed_generation = 0
-        self._stopped = False
-
-    def notify(self) -> None:
-        with self._condition:
-            self._generation += 1
-            self._condition.notify_all()
-
-    def stop(self) -> None:
-        with self._condition:
-            self._stopped = True
-            self._condition.notify_all()
-
-    def wait_for_event(self, timeout: float) -> bool:
-        """Block until an event or timeout; return whether shutdown was requested."""
-        with self._condition:
-            if self._generation != self._observed_generation:
-                self._observed_generation = self._generation
-                return self._stopped
-            self._condition.wait_for(
-                lambda: self._stopped or self._generation != self._observed_generation,
-                timeout=max(0.0, timeout),
-            )
-            self._observed_generation = self._generation
-            return self._stopped
-
-
-# Supervisor-side git probes run on the lane-watch loop; a wedged git binary must
-# not stall progress, so each rides the probe door's budget and reports the safe
-# "no signal" answer on expiry (tree treated as clean; path treated as untracked).
-def _worktree_dirty(repo_root: Path) -> bool:
-    result = git_probe(repo_root, "status", "--porcelain")
-    return result.returncode == 0 and result.stdout.strip() != ""
-
-
-def _flag_uncaptured_lane(repo_root: Path, thread_id: str, log_path: Path) -> None:
-    """Surface a nudge when the bound agent holds no task but the tree is dirty."""
-    from spice.agent.watchdog import publish_supervisor_feedback
-    from spice.tasks.claimstate import active_claim
-
-    if not thread_id or active_claim(thread_id) is not None:
-        return
-    if not _worktree_dirty(repo_root):
-        return
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        publish_supervisor_feedback(
-            repo_root, log_handle, "lane.uncaptured", message=LANE_UNCAPTURED_NUDGE
-        )
-
-
-def _claim_renewal_report_key(result: Any) -> str:
-    return "\0".join(
-        str(part)
-        for part in (
-            getattr(result, "reason", ""),
-            getattr(result, "handle", ""),
-            getattr(result, "detail", ""),
-        )
-    )
-
-
-def _supervised_claim_lease_seconds(repo_root: Path, thread_id: str) -> float:
-    """Keep startup claims short, then promote the confirmed healthy holder."""
-    state = read_agent_state(repo_root)
-    state_thread_id = canonical_thread_id(state.get("thread_id"))
-    if (
-        state_thread_id == canonical_thread_id(thread_id)
-        and str(state.get("startup_status") or "") == AGENT_STARTUP_READY
-    ):
-        return SUPERVISOR_HEALTHY_CLAIM_LEASE_SECONDS
-    return SUPERVISOR_CLAIM_LEASE_SECONDS
-
-
-def _renew_held_claim(repo_root: Path, thread_id: str, held: dict[str, str]) -> Any:
-    """Renew the exact row last held, so a claim that moved names its new owner.
-
-    An actor-keyed lookup cannot see a claim that left the lane: it finds
-    nothing, which is indistinguishable from a lane that never claimed anything,
-    and that silence is what lets a working agent keep editing a row it no
-    longer owns. Naming the row is what turns the same event into
-    `claimed_by_other` carrying the peer that took it. The fallback keeps a
-    freshly claimed row renewed on the very beat it is taken.
-    """
-    from spice.tasks import claimstate
-
-    try:
-        lease_seconds = _supervised_claim_lease_seconds(repo_root, thread_id)
-        witness = claimstate.read_claim_witness(repo_root, thread_id)
-    except (OSError, SpiceError) as exc:
-        return claimstate.ClaimRenewalResult(
-            False,
-            "backend_error",
-            handle=held.get("handle", ""),
-            detail=str(exc),
-            uuid=held.get("uuid", ""),
-        )
-    if witness is not None:
-        held.clear()
-        if witness.active:
-            held.update({"handle": witness.handle, "uuid": witness.uuid})
-    # The public prefix may change, but its incepted suffix is the durable row
-    # identity accepted by ``identity.resolve``; keep the UUID separately for
-    # witness retirement after a terminal result.
-    target = held.get("handle") or held.get("uuid", "")
-    result = claimstate.renew_claim(
-        handle=target or None,
-        actor=thread_id,
-        lease_seconds=lease_seconds,
-    )
-    if target and not result.renewed and result.reason == "no_active_claim":
-        result = claimstate.renew_claim(
-            actor=thread_id,
-            lease_seconds=lease_seconds,
-        )
-        if not result.renewed and result.reason == "no_active_claim":
-            result = replace(
-                result,
-                reason="claim_ended",
-                handle=held.get("handle", ""),
-                uuid=held.get("uuid", ""),
-            )
-    if result.renewed:
-        held.clear()
-        held.update({"handle": result.handle, "uuid": result.uuid})
-    elif target and not result.uuid:
-        result = replace(
-            result,
-            handle=result.handle or held.get("handle", ""),
-            uuid=held.get("uuid", ""),
-        )
-    return result
-
-
-def _renew_supervised_claim(
-    repo_root: Path,
-    thread_id: str,
-    log_path: Path,
-    reported: dict[str, str],
-    contract_cursors: dict[str, int],
-    held: dict[str, str],
-) -> None:
-    """Best-effort claim TTL renewal for the agent this supervisor owns."""
-    if not thread_id:
-        return
-    from spice.agent.watchdog import publish_supervisor_feedback
-    from spice.tasks import claimstate
-
-    result = _renew_held_claim(repo_root, thread_id, held)
-    if result.renewed:
-        reported.pop("claim_renewal", None)
-        try:
-            _notice_contract_mutations(
-                repo_root, thread_id, result, contract_cursors, log_path
-            )
-        except SpiceError as exc:
-            _report_contract_watch_error(
-                repo_root, result, log_path, reported, detail=str(exc)
-            )
-        else:
-            reported.pop("contract_watch", None)
-        return
-    if result.reason in CLAIM_RENEWAL_QUIET_REASONS:
-        return
-    report_key = _claim_renewal_report_key(result)
-    if reported.get("claim_renewal") != report_key:
-        reported["claim_renewal"] = report_key
-        state = claimstate.claim_renewal_state(result)
-        detail = f" detail={result.detail}" if result.detail else ""
-        with log_path.open("a", encoding="utf-8") as log_handle:
-            log_handle.write(
-                f"spice claim renewal {state}: "
-                f"reason={result.reason} handle={result.handle or '-'}{detail}\n"
-            )
-            log_handle.flush()
-            publish_supervisor_feedback(
-                repo_root,
-                log_handle,
-                f"claim.renewal-{state}",
-                reason=result.reason,
-                handle=result.handle,
-                detail=result.detail,
-            )
-    if result.reason in CLAIM_RENEWAL_TERMINAL_REASONS and result.uuid:
-        claimstate.retire_claim_witness(
-            repo_root,
-            thread_id,
-            uuid=result.uuid,
-            handle=result.handle,
-        )
-        held.clear()
-
-
-def _notice_contract_mutations(
-    repo_root: Path,
-    thread_id: str,
-    result: Any,
-    contract_cursors: dict[str, int],
-    log_path: Path,
-) -> None:
-    """One renewal-cadence notice naming claimed-task contract fields that moved."""
-    from spice.agent.watchdog import publish_supervisor_feedback
-    from spice.tasks import opslog
-
-    uuid = str(getattr(result, "uuid", "") or "")
-    if not uuid:
-        return
-    if uuid not in contract_cursors:
-        contract_cursors.clear()
-        contract_cursors[uuid] = opslog.claim_baseline_id(uuid, thread_id)
-    cursor, mutations = opslog.contract_mutations_since(uuid, contract_cursors[uuid])
-    contract_cursors[uuid] = cursor
-    if not mutations:
-        return
-    notice = opslog.render_notice(mutations)
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        log_handle.write(f"spice claim contract changed: {result.handle} {notice}\n")
-        log_handle.flush()
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "claim.contract-changed",
-            handle=result.handle,
-            fields=",".join(item.property for item in mutations),
-            detail=notice,
-        )
-
-
-def _report_contract_watch_error(
-    repo_root: Path,
-    result: Any,
-    log_path: Path,
-    reported: dict[str, str],
-    *,
-    detail: str,
-) -> None:
-    """Publish one feedback item per distinct operations-log watch failure."""
-    from spice.agent.watchdog import publish_supervisor_feedback
-
-    if reported.get("contract_watch") == detail:
-        return
-    reported["contract_watch"] = detail
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        log_handle.write(
-            f"spice claim contract watch failed: {result.handle or '-'} {detail}\n"
-        )
-        log_handle.flush()
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "claim.contract-watch-error",
-            handle=result.handle,
-            detail=detail,
-        )
-
-
 def _watch_supervised_lane(
     repo_root: Path,
     thread_id: str,
@@ -995,51 +632,15 @@ def _watch_supervised_lane(
     process: subprocess.Popen[str],
     lane_signal: SupervisorLaneSignal,
 ) -> None:
-    next_uncaptured_nudge = time.monotonic()
-    reported: dict[str, str] = {}
-    contract_cursors: dict[str, int] = {}
-    # Scoped to the child's life, which is the exact span of "actively working".
-    held: dict[str, str] = {}
-    while True:
-        if process.poll() is not None:
-            return
-        now = time.monotonic()
-        try:
-            _renew_supervised_claim(
-                repo_root, thread_id, log_path, reported, contract_cursors, held
-            )
-            if now >= next_uncaptured_nudge:
-                _flag_uncaptured_lane(repo_root, thread_id, log_path)
-                next_uncaptured_nudge = now + SUPERVISOR_UNCAPTURED_NUDGE_SECONDS
-        except Exception:  # best-effort watch: never take down the supervisor
-            pass
-        # Pace the next beat against this one's start, not its end. Sleeping a
-        # full interval *after* the work would make the period grow with backend
-        # latency, so the heartbeat would slow down exactly when a loaded host
-        # makes each renewal expensive -- and the lease, a fixed multiple of the
-        # interval, would lapse under the holder while it is still working.
-        idle = SUPERVISOR_CLAIM_RENEWAL_SECONDS - (time.monotonic() - now)
-        if lane_signal.wait_for_event(max(0.0, idle)):
-            return
-
-
-def _transition_agent_startup_state(
-    repo_root: Path,
-    process: subprocess.Popen[str],
-    *,
-    startup_status: str,
-    ready_at: str = "",
-    startup_failure: str = "",
-) -> bool:
-    """Update startup state only while this supervisor still owns the binding."""
-    state = read_agent_state(repo_root)
-    if state_int(state.get("pid")) != process.pid:
-        return False
-    state["startup_status"] = startup_status
-    state["ready_at"] = ready_at
-    state["startup_failure"] = startup_failure
-    write_agent_state(repo_root, state)
-    return True
+    watch_supervised_lane(
+        repo_root,
+        thread_id,
+        log_path,
+        process,
+        lane_signal,
+        renew=_renew_supervised_claim,
+        flag=_flag_uncaptured_lane,
+    )
 
 
 def _watch_agent_startup(
@@ -1052,43 +653,17 @@ def _watch_agent_startup(
     grace_seconds: float = FIRST_ACTIVITY_GRACE_SECONDS,
     compacting_seconds: float = COMPACTING_GRACE_SECONDS,
 ) -> None:
-    outcome = signal.wait(grace_seconds, compacting_seconds=compacting_seconds)
-    if outcome == "activity":
-        if process.poll() is None:
-            _transition_agent_startup_state(
-                repo_root,
-                process,
-                startup_status=AGENT_STARTUP_READY,
-                ready_at=utc_now(),
-            )
-        return
-    if outcome == "finished":
-        return
-    if process.poll() is not None:
-        return
-    if outcome == "compacting-timeout":
-        detail = (
-            "agent startup stalled: compaction never settled within "
-            f"{compacting_seconds:g}s"
-        )
-    else:
-        detail = (
-            "agent startup stalled: no driver-defined first activity within "
-            f"{grace_seconds:g}s"
-        )
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        log_handle.write(f"{detail}\n")
-        log_handle.flush()
-    stalled.set()
-    try:
-        terminate_process_group(process)
-    finally:
-        _transition_agent_startup_state(
-            repo_root,
-            process,
-            startup_status=AGENT_STARTUP_STALLED,
-            startup_failure=detail,
-        )
+    watch_agent_startup(
+        repo_root,
+        process,
+        log_path,
+        signal,
+        stalled,
+        grace_seconds=grace_seconds,
+        compacting_seconds=compacting_seconds,
+        transition=_transition_agent_startup_state,
+        terminate=terminate_process_group,
+    )
 
 
 def launch_claim_from_args(args: argparse.Namespace) -> LaunchClaim | None:
@@ -1286,27 +861,6 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
     return int(exit_code or 0)
 
 
-def supervisor_command_from_json(raw: str) -> list[str]:
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SpiceError(f"invalid supervisor command JSON: {exc}") from exc
-    if not isinstance(loaded, list) or not all(
-        isinstance(item, str) for item in loaded
-    ):
-        raise SpiceError("supervisor command JSON must be a list of strings")
-    return loaded
-
-
-def resolve_agent_prompt_skill_path(
-    repo_root: Path,
-) -> Path:
-    located = available_skill_path(repo_root, required=True)
-    if located is None:
-        raise SpiceError("missing spice skill")
-    return located
-
-
 def spawn_agent(
     command: list[str], *, cwd: Path, log_path: Path
 ) -> subprocess.Popen[str]:
@@ -1347,23 +901,6 @@ def require_started_process(
     )
 
 
-def agent_startup_error(
-    repo_root: Path | None,
-    *,
-    exit_code: int,
-    message: str,
-    detail: str,
-) -> SpiceError:
-    rendered = f"{message}: {detail}" if detail else message
-    if (
-        repo_root is not None
-        and agent_process_failure_kind(repo_root, exit_code=exit_code, output=detail)
-        == AGENT_FAILURE_OUT_OF_CREDITS
-    ):
-        return AgentOutOfCreditsError(rendered)
-    return SpiceError(rendered)
-
-
 def reap_process_when_done(
     process: subprocess.Popen[str], *, repo_root: Path | None = None
 ) -> None:
@@ -1379,42 +916,10 @@ def reap_process_when_done(
     ).start()
 
 
-def touch_agent_state(repo_root: Path) -> None:
-    try:
-        path = agent_state_path(repo_root)
-        if path.exists():
-            path.touch()
-    except (OSError, SpiceError):
-        pass
-
-
 def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:
     return driver_for(repo_root).skill_invocation_prompt(
         prompt_skill_invocation_path(repo_root, skill_path)
     )
-
-
-def available_skill_path(repo_root: Path, *, required: bool) -> Path | None:
-    """The skill for launch and activation, which never choose their own source.
-
-    The packaged source is deliberately not resolved here. Passing one would
-    make this module a second place that answers "which packaged skill?", and
-    the callee already answers it; the two would then agree only by accident,
-    and which one a caller got would depend on the entry point it happened to
-    reach. `spice.tasks.git.boundaries` is the one caller that does choose,
-    passing a checkout-local source explicitly because its contract names that
-    override outright.
-    """
-    return _available_skill_path(repo_root, required=required)
-
-
-def prompt_skill_invocation_path(repo_root: Path, skill_path: Path) -> Path:
-    if not skill_path.is_absolute():
-        return skill_path
-    try:
-        return skill_path.resolve().relative_to(repo_root.resolve())
-    except ValueError:
-        return skill_path
 
 
 def import_agent(

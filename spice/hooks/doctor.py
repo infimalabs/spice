@@ -20,7 +20,7 @@ from spice.agent.lifecycle import packaged_skill_path
 from spice.agent.shellhook import rtk_rewrite_yield_selectors
 from spice.cli.entry import is_spice_checkout
 from spice.config.layers import REPOSITORY_SOURCE, effective_table, load_config
-from spice.config.trust import repository_config_approval
+from spice.config.trust import repository_config_path_approval
 from spice.config.edit import git_worktree_config_get
 from spice.config.values import (
     configured_judge_bin,
@@ -723,20 +723,35 @@ def _pre_commit_builtin_disablement_check(repo_root: Path) -> DoctorCheck:
     )
     disabled_names = ", ".join(entry.key for entry in disabled)
     if repository_disabled:
-        approval = repository_config_approval(repo_root)
-        if not approval.approved:
-            unapproved_names = ", ".join(entry.key for entry in repository_disabled)
+        approvals = tuple(
+            (
+                entry,
+                repository_config_path_approval(repo_root, entry.config_path),
+            )
+            for entry in repository_disabled
+        )
+        unapproved = tuple(
+            (entry, approval) for entry, approval in approvals if not approval.approved
+        )
+        if unapproved:
+            unapproved_names = ", ".join(entry.key for entry, _approval in unapproved)
+            refusal = "; ".join(
+                approval.refusal or "has no operator approval"
+                for _entry, approval in unapproved
+            )
             return _fail(
                 name,
                 "repository disabled builtin(s) without current operator "
-                f"approval: {unapproved_names}; all disabled: {disabled_names}",
+                f"approval: {unapproved_names}; {refusal}; "
+                f"all disabled: {disabled_names}",
                 command,
             )
+        digests = ",".join(sorted({approval.digest for _entry, approval in approvals}))
         return _ok(
             name,
             f"disabled builtin(s): {disabled_names}; repository disablement "
             "approved; "
-            f"digest={approval.digest}",
+            f"capability-digest={digests}",
             command,
         )
     return _ok(

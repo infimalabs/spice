@@ -13,6 +13,10 @@ from pathlib import Path
 import pytest
 
 from spice.agent.lifecycle import WORKTREE_SKILL_RELATIVE_PATH
+from spice.config.trust import (
+    plan_exact_repository_config_approval,
+    repository_trust_log_path,
+)
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
     InitOperation,
@@ -180,6 +184,7 @@ def test_gates_only_plan_uses_the_same_model_for_its_bounded_surface(tmp_path):
 def test_human_and_json_preview_share_one_plan_and_leave_identical_bytes(tmp_path):
     repo = _git_init(tmp_path / "repo")
     plan = plan_initialization(repo)
+    repository_config_approval = plan_exact_repository_config_approval(repo)
     before = _tree_identity(repo)
 
     human = _run([sys.executable, "-m", "spice", "init"], cwd=repo)
@@ -190,20 +195,29 @@ def test_human_and_json_preview_share_one_plan_and_leave_identical_bytes(tmp_pat
     )
     after_machine = _tree_identity(repo)
 
-    assert human.stdout.splitlines() == initialization_preview_rows(plan)
+    assert human.stdout.splitlines() == initialization_preview_rows(
+        plan,
+        repository_config_approval=repository_config_approval,
+    )
     machine_payload = json.loads(machine.stdout)
-    assert machine_payload == initialization_plan_payload(plan)
+    assert machine_payload == initialization_plan_payload(
+        plan,
+        repository_config_approval=repository_config_approval,
+    )
     assert machine_payload["protocol"] == "spice.command-plan"
     assert len(machine_payload["plan_digest"]) == OWNERSHIP_DIGEST_BYTES * 2
     assert [item["order"] for item in machine_payload["operations"]] == list(
-        range(1, len(plan.operations) + 1)
+        range(1, len(plan.operations) + 2)
     )
     assert (before, after_human, after_machine) == (before, before, before)
 
 
 def test_init_digest_refuses_when_repository_changes_after_preview(tmp_path):
     repo = _git_init(tmp_path / "repo")
-    preview = initialization_plan_payload(plan_initialization(repo))
+    preview = initialization_plan_payload(
+        plan_initialization(repo),
+        repository_config_approval=plan_exact_repository_config_approval(repo),
+    )
     digest = str(preview["plan_digest"])
     hook = repo / ".spice" / "hooks" / "pre-commit"
     hook.parent.mkdir(parents=True)
@@ -223,6 +237,44 @@ def test_init_digest_refuses_when_repository_changes_after_preview(tmp_path):
     assert ".spice/hooks/pre-commit" in result.stderr
     assert hook.read_bytes() == before
     assert not initialization_receipt_path(repo).exists()
+
+
+def test_init_digest_binds_exact_repository_config_approval(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    config = repo / "spice.toml"
+    config.write_text('[commands]\nprobe = ["printf", "first"]\n', encoding="utf-8")
+    plan = plan_initialization(repo)
+    approval = plan_exact_repository_config_approval(repo)
+    preview = initialization_plan_payload(
+        plan,
+        repository_config_approval=approval,
+    )
+    operations = preview["operations"]
+    assert isinstance(operations, list)
+    approval_operation = operations[-1]
+    assert isinstance(approval_operation, dict)
+    digest = str(preview["plan_digest"])
+
+    assert approval_operation["kind"] == "repository-config-approval"
+    assert approval_operation["scope"] == "common-git-state"
+    assert approval_operation["target"] == str(repository_trust_log_path(repo))
+    intended_after = approval_operation["intended_after"]
+    assert isinstance(intended_after, dict)
+    assert intended_after["capability_digests"] == dict(approval.capability_digests)
+
+    config.write_text('[commands]\nprobe = ["printf", "second"]\n', encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", "spice", "init", f"--apply={digest}"],
+        check=False,
+        capture_output=True,
+        cwd=repo,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "stale command plan digest" in result.stderr
+    assert not initialization_receipt_path(repo).exists()
+    assert not repository_trust_log_path(repo).exists()
 
 
 def test_apply_appends_one_private_total_record_for_each_completed_operation(tmp_path):
@@ -299,7 +351,7 @@ def test_repository_config_approval_appends_one_replayable_fact(tmp_path):
 
     approved = apply_initialization_plan(
         plan_initialization(repo, InitializationMode.GATES_ONLY),
-        approve_repository_config=True,
+        repository_config_approval=plan_exact_repository_config_approval(repo),
     )
 
     records = load_initialization_receipt_records(repo)
