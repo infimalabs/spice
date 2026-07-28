@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from spice.commandplan import (
+    apply_mounted_plan,
+    assert_plan_digest,
+    parse_command_plan_document,
+)
 from spice.cli.parser import (
     BUILTIN_COMMANDS,
     CommandPathRegistration,
@@ -165,10 +170,57 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     # the parent interpreter as the independently installed runtime identity so
     # release evidence can prove what ordinary fleet commands actually import.
     env[RUNTIME_PYTHON_ENV] = sys.executable
+    requested, digest = _mounted_apply_request(args)
+    if not requested:
+        result = run_parent_lifetime_command(
+            [*mount.argv, *args],
+            cwd=mount.repo_root,
+            env=env,
+            check=False,
+        )
+        return result.returncode
     result = run_parent_lifetime_command(
-        [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
+        [*mount.argv, *args],
+        cwd=mount.repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    stdout = str(getattr(result, "stdout", "") or "")
+    stderr = str(getattr(result, "stderr", "") or "")
+    if stderr:
+        sys.stderr.write(stderr)
+    if result.returncode != 0:
+        if stdout:
+            sys.stdout.write(stdout)
+        return result.returncode
+    document = parse_command_plan_document(stdout)
+    if document is None:
+        if stdout:
+            sys.stdout.write(stdout)
+        return result.returncode
+    assert_plan_digest(document, digest)
+    applied = apply_mounted_plan(document, mount.repo_root)
+    print(f"applied command-plan digest={document.digest} operations={len(applied)}")
+    for order, label in enumerate(applied, start=1):
+        print(f"{order}. {label}")
     return result.returncode
+
+
+def _mounted_apply_request(args: list[str]) -> tuple[bool, str | None]:
+    requests = [
+        argument.partition("=")
+        for argument in args[: args.index("--") if "--" in args else len(args)]
+        if argument == "--apply" or argument.startswith("--apply=")
+    ]
+    if len(requests) > 1:
+        raise SpiceError("mounted command accepts --apply at most once")
+    if not requests:
+        return False, None
+    argument, separator, digest = requests[0]
+    _ = argument
+    return True, digest if separator else None
 
 
 def mounted_command_names() -> list[str]:

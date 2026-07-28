@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from spice.commandplan import assert_plan_digest
 from spice.errors import SpiceError
 from spice.tasks import (
     alloc,
@@ -23,7 +24,7 @@ from spice.tasks import (
     sizing,
     wordingreview,
 )
-from spice.tasks.markdown.apply import ingest_path
+from spice.tasks.markdown.apply import execute_plan, ingest_path
 from spice.tasks.markdown.ledger import render_ledger
 from spice.tasks.graphs import handout as graphhandout
 
@@ -431,8 +432,13 @@ def _configure_ingest_parser(actions: Any) -> None:
     )
     ingest.add_argument(
         "--apply",
-        action="store_true",
-        help="Apply the complete validated plan; bare invocation only previews.",
+        nargs="?",
+        const=True,
+        metavar="PLAN_DIGEST",
+        help=(
+            "Apply the complete validated plan, optionally asserting its digest; "
+            "bare invocation only previews."
+        ),
     )
     ingest.add_argument(
         "--json",
@@ -1098,17 +1104,22 @@ _DISPATCH = {
 
 
 def _ingest(args: argparse.Namespace) -> str:
-    if bool(args.apply) and bool(args.json):
+    apply_requested = args.apply is not None
+    if apply_requested and bool(args.json):
         raise SpiceError("`spice task ingest --apply` cannot be combined with `--json`")
     result = ingest_path(
         args.path,
         project=args.project,
         origin=args.origin,
-        apply=bool(args.apply),
+        apply=False,
         infer_ordered_dependencies=args.infer_ordered_dependencies,
     )
-    if isinstance(result, str):
-        return result
+    if isinstance(result, str):  # pragma: no cover - apply=False is plan-only
+        raise SpiceError("task ingest planner returned an applied result")
+    if apply_requested:
+        expected_digest = args.apply if isinstance(args.apply, str) else None
+        assert_plan_digest(result.payload(), expected_digest)
+        return execute_plan(result)
     if bool(args.json):
         return json.dumps(result.payload(), indent=2, sort_keys=True)
     return result.report()

@@ -12,6 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
 
+from spice.commandplan import command_plan_payload
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
     INIT_RECEIPT_MODE,
@@ -221,16 +222,33 @@ def deinitialization_plan_payload(plan: DeinitializationPlan) -> dict[str, objec
     """Return the ordered machine representation of a reversal preview."""
     operations = []
     if plan.reversal is not None:
-        for order, state in enumerate(plan.operations, start=1):
+        for state in plan.operations:
             operation = plan.reversal.initialization.operations[
                 state.initialization_index
             ].operation
+            restores = state.outcome in {
+                DeinitOutcome.RESTORED,
+                DeinitOutcome.ALREADY_RESTORED,
+            }
             operations.append(
                 {
-                    "order": order,
                     "kind": operation.kind.value,
                     "target": operation.target,
                     "scope": operation.scope.value,
+                    "observed_before": {
+                        "value": state.observed_value,
+                        "mode": state.observed_mode,
+                    },
+                    "intended_after": {
+                        "value": (
+                            operation.previous_value
+                            if restores
+                            else state.observed_value
+                        ),
+                        "mode": (
+                            operation.previous_mode if restores else state.observed_mode
+                        ),
+                    },
                     "predicted_outcome": (
                         state.outcome.value if state.outcome is not None else None
                     ),
@@ -241,20 +259,23 @@ def deinitialization_plan_payload(plan: DeinitializationPlan) -> dict[str, objec
                     "shared_owner": state.shared_owner,
                 }
             )
-    return {
-        "schema_version": plan.schema_version,
-        "repository": str(plan.repo_root),
-        "status": "preview" if plan.reversal is not None else "not-initialized",
-        "operations": operations,
-    }
+    return command_plan_payload(
+        command="deinit",
+        operations=operations,
+        metadata={
+            "repository": str(plan.repo_root),
+            "status": "preview" if plan.reversal is not None else "not-initialized",
+        },
+    )
 
 
 def deinitialization_plan_rows(plan: DeinitializationPlan) -> list[str]:
     """Render a reversal preview in its exact receipt order."""
     status = "preview" if plan.reversal is not None else "not-initialized"
+    digest = str(deinitialization_plan_payload(plan)["plan_digest"])
     rows = [
         f"deinitialization-plan schema={plan.schema_version} "
-        f"status={status} repository={plan.repo_root}"
+        f"status={status} repository={plan.repo_root} digest={digest}"
     ]
     if plan.reversal is None:
         rows.append("preview: no changes applied; pass --apply to execute")
