@@ -16,6 +16,7 @@ from spice.agent import lifecycle, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
+    approved_spice_checkout,
     expected_python_module_wrapper_lines,
     expected_wrapper_lines,
     init_git_repo,
@@ -488,7 +489,8 @@ def test_agent_run_preserves_native_rg_extended_regexp_results(
     pattern = r"^(alpha|beta)+-gamma?$"
     raw = f"rg -n {shlex.quote(pattern)} {shlex.quote(str(fixture))}"
     rewritten = f"rtk grep -n {shlex.quote(pattern)} {shlex.quote(str(fixture))}"
-    repo = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[1]
+    repo = approved_spice_checkout(source, tmp_path / "repo")
     monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
     monkeypatch.setattr(
         wrap,
@@ -552,7 +554,8 @@ def test_agent_run_preserves_rg_only_flags_in_any_position(
         raw_words = ["rg", "alpha", str(fixture), rg_flag]
     raw = shlex.join(raw_words)
     rewritten = shlex.join(["rtk", "grep", *raw_words[1:]])
-    repo = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[1]
+    repo = approved_spice_checkout(source, tmp_path / "repo")
     monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
     monkeypatch.setattr(
         wrap,

@@ -97,7 +97,7 @@ def test_live_authored_input_mutation_decision_matches_effect_driving_reads(
         explicit = live.root_parser.parse_args(
             [*live.invocation_argv, *contract.mutation_args]
         )
-        assert bare.apply is False
+        assert not bare.apply
         assert explicit.apply is True
         return
 
