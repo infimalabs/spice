@@ -33,6 +33,67 @@ ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 REQUESTED_LEASE_SECONDS = 600.0
 
 
+@pytest.mark.parametrize(
+    ("action", "argv"),
+    (
+        ("next", ["task", "next"]),
+        ("claim", ["task", "claim", "TASK-1k4Q5gJw"]),
+        ("reclaim", ["task", "reclaim", "TASK-1k4Q5gJw"]),
+        (
+            "done",
+            [
+                "task",
+                "done",
+                "TASK-1k4Q5gJw",
+                "--validation",
+                "tests passed",
+            ],
+        ),
+    ),
+)
+def test_hot_loop_bare_invocation_dispatches_immediately(
+    monkeypatch, capsys, action, argv
+):
+    dispatched: list[argparse.Namespace] = []
+    monkeypatch.setitem(
+        task_cli._DISPATCH,
+        action,
+        lambda args: dispatched.append(args) or f"{action} applied",
+    )
+    monkeypatch.setattr(ops, "rtk_usage_nudge", lambda: None)
+    args = build_parser().parse_args(argv)
+
+    result = args.func(args)
+
+    assert result == 0
+    assert dispatched == [args]
+    assert capsys.readouterr().out == f"{action} applied\n"
+
+
+def test_stability_classifies_hot_loop_and_opaque_integration_as_direct_intent():
+    stability = Path("STABILITY.md").read_text(encoding="utf-8")
+    row = next(
+        line
+        for line in stability.splitlines()
+        if "`spice task next`" in line and line.endswith("| Direct intent |")
+    )
+
+    assert all(
+        f"`{command}`" in row
+        for command in (
+            "spice task next",
+            "done",
+            "claim",
+            "reclaim",
+        )
+    )
+    assert (
+        "repository tree selected for integration or publication is transferred "
+        "opaquely" in row
+    )
+    assert row.endswith("| Direct intent |")
+
+
 @pytest.fixture
 def task_repo(tmp_path, monkeypatch):
     if shutil.which("task") is None:
