@@ -12,6 +12,7 @@ import pytest
 from spice import defaults
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.paths import write_agent_thread_pointer
+from spice.config import edit
 from spice.errors import SpiceError
 from spice.flexstate import (
     FLEX_SLICE_CLAIM_TTL_SECONDS,
@@ -595,6 +596,62 @@ def test_pre_commit_prints_every_disabled_builtin_on_every_run(
     for _invocation in range(2):
         assert precommit.handle_pre_commit(tmp_path) == 0
         assert capsys.readouterr().out.splitlines() == expected
+
+
+def test_pre_commit_uses_one_semantic_builtin_across_layer_spellings(
+    tmp_path, monkeypatch, capsys
+):
+    repo = _git_init(tmp_path / "repo")
+    (repo / "spice.toml").write_text(
+        '[policy.pre_commit_builtins]\n"magic-numbers" = { enabled = false }\n',
+        encoding="utf-8",
+    )
+    worktree = edit.worktree_config_path(repo)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    worktree.write_text(
+        '[policy.pre_commit_builtins.magic_numbers]\nlabel = "operator sibling"\n',
+        encoding="utf-8",
+    )
+    events = _patch_pre_commit_builtin_recorders(repo, monkeypatch)
+
+    assert precommit.handle_pre_commit(repo) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "pre-commit: disabled builtin magic-numbers"
+    ]
+    assert "magic numbers" not in events.read_text(encoding="utf-8").splitlines()
+
+
+def test_pre_commit_refuses_duplicate_semantic_builtin_names_in_one_layer(tmp_path):
+    (tmp_path / "spice.toml").write_text(
+        "[policy.pre_commit_builtins]\n"
+        '"magic-numbers" = false\n'
+        "magic_numbers = false\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError, match="equivalent builtin spellings"):
+        precommit.disabled_builtin_pre_commit_steps(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ("magic-numbers", "magic_numbers", "magic numbers"),
+)
+def test_scalar_disable_retains_its_exact_entry_spelling(tmp_path, spelling):
+    (tmp_path / "spice.toml").write_text(
+        f"[policy.pre_commit_builtins]\n{json.dumps(spelling)} = false\n",
+        encoding="utf-8",
+    )
+
+    disabled = precommit.disabled_builtin_pre_commit_steps(tmp_path)
+
+    magic_numbers = next(step for step in disabled if step.key == "magic-numbers")
+    assert magic_numbers.config_path == (
+        "policy",
+        "pre_commit_builtins",
+        spelling,
+    )
 
 
 def test_markdown_links_pre_commit_guard_reports_shared_board(tmp_path, monkeypatch):
