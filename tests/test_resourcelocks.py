@@ -359,13 +359,14 @@ def test_lock_status_json_surfaces_holder_metadata(tmp_path, monkeypatch, capsys
     ]
 
 
-def test_lock_status_marks_malformed_nonempty_metadata_unknown(tmp_path):
-    lock_path = tmp_path / "editor.lock"
-    lock_path.write_text("{malformed", encoding="utf-8")
+def test_lock_status_marks_every_nonempty_malformed_metadata_unknown(tmp_path):
+    states = []
+    for index, payload in enumerate((b"{malformed", b" \n", b"\xff")):
+        lock_path = tmp_path / f"{index}.lock"
+        lock_path.write_bytes(payload)
+        states.append(resourcelocks._lock_state(lock_path))
 
-    state = resourcelocks._lock_state(lock_path)
-
-    assert state == ("unknown", None)
+    assert states == [("unknown", None)] * 3
 
 
 def test_config_reference_documents_resource_locks():
