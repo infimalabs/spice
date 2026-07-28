@@ -344,7 +344,7 @@ def config_overview(repo_root: Path) -> dict[str, Any]:
     return {
         "layers": {
             layer.name: {
-                "path": str(layer.path),
+                "path": str(layer.path) if layer.path is not None else None,
                 "present": layer.present,
                 "values": _json_value(layer.values),
             }
@@ -352,7 +352,10 @@ def config_overview(repo_root: Path) -> dict[str, Any]:
         },
         "effective": _json_value(loaded.effective),
         "provenance": {
-            ".".join(path): {"scope": layer.name, "path": str(layer.path)}
+            ".".join(path): {
+                "scope": layer.name,
+                "path": str(layer.path) if layer.path is not None else None,
+            }
             for path, layer in sorted(loaded.sources.items())
         },
     }

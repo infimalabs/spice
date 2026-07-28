@@ -52,7 +52,8 @@ That thesis gives spice five planes.
    new supported CLI is another driver value, not a broad mode split.
 
 2. **Defaults have scopes.** Tracked project defaults set clone-wide launch
-   policy; `.spice/config/spice.toml` carries worktree overrides; flags win.
+   policy; `<worktree-git-dir>/.spice/config/spice.toml` carries worktree
+   overrides outside the tracked work tree; flags win.
 
 3. **Opinions are configuration with teeth.** Policy defaults are the opinion;
    repo overrides belong in tracked config, and bad config fails loudly.

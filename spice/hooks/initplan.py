@@ -23,6 +23,11 @@ from spice.agent.lifecycle import (
     packaged_skill_path,
 )
 from spice.errors import SpiceError
+from spice.operatorstate import (
+    INITIALIZATION_RECEIPT_PATH,
+    operator_state_path,
+    prepare_operator_state_path,
+)
 from spice.paths import STATE_DIRNAME, atomic_write_text, git_common_dir, git_dir
 from spice.process.git import run_git_command
 
@@ -42,7 +47,6 @@ STATE_GITIGNORE_CONTENT = (
     "*\n"
 )
 HOOKS_PATH = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
-INIT_RECEIPT_RELATIVE_PATH = Path(STATE_DIRNAME) / "init-receipt.json"
 INIT_RECEIPT_MODE = 0o600
 DEINIT_RECEIPT_FILENAME = "spice-deinit-receipt.json"
 OWNERSHIP_DIGEST_BYTES = 32
@@ -250,7 +254,7 @@ def initialization_plan_payload(plan: InitializationPlan) -> dict[str, object]:
         "schema_version": plan.schema_version,
         "repository": str(plan.repo_root),
         "mode": plan.mode.value,
-        "receipt_path": INIT_RECEIPT_RELATIVE_PATH.as_posix(),
+        "receipt_path": str(initialization_receipt_path(plan.repo_root)),
         "operations": [
             {**_operation_payload(operation), "will_change": operation.will_change}
             for operation in plan.operations
@@ -263,7 +267,7 @@ def initialization_preview_rows(plan: InitializationPlan) -> list[str]:
     rows = [
         f"initialization-plan schema={plan.schema_version} mode={plan.mode.value}",
         f"repository={plan.repo_root}",
-        f"receipt={INIT_RECEIPT_RELATIVE_PATH.as_posix()}",
+        f"receipt={initialization_receipt_path(plan.repo_root)}",
     ]
     for index, operation in enumerate(plan.operations, start=1):
         state = (
@@ -298,7 +302,7 @@ def initialization_preview_rows(plan: InitializationPlan) -> list[str]:
 
 
 def initialization_receipt_path(repo_root: Path) -> Path:
-    return repo_root.expanduser().resolve() / INIT_RECEIPT_RELATIVE_PATH
+    return operator_state_path(repo_root, INITIALIZATION_RECEIPT_PATH)
 
 
 def initialization_receipt_payload(
@@ -321,7 +325,7 @@ def initialization_receipt_payload(
 
 
 def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None:
-    path = initialization_receipt_path(repo_root)
+    path = prepare_operator_state_path(repo_root, INITIALIZATION_RECEIPT_PATH)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

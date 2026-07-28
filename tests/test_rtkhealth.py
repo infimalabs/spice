@@ -11,6 +11,8 @@ import pytest
 from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RTK_FIDELITY_PROBE, probe_rtk_health
 
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
+
 FIDELITY_REWRITE = "rtk grep --count -E al+pha -"
 
 

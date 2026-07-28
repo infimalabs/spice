@@ -5,8 +5,10 @@ from types import MappingProxyType
 
 import pytest
 
-from spice.config import layers
+from spice.config import edit, layers
 from spice.errors import SpiceError
+
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 
 @pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
@@ -31,7 +33,7 @@ def test_each_configuration_layer_can_win_independently(tmp_path, monkeypatch, s
     elif scope == layers.WORKTREE_SOURCE:
         expected_model = "worktree-only"
         _write(
-            tmp_path / ".spice" / "config" / "spice.toml",
+            edit.worktree_config_path(tmp_path),
             f'agent.model = "{expected_model}"\n',
         )
 
@@ -50,7 +52,7 @@ def test_parse_error_names_the_exact_layer_and_path(tmp_path, monkeypatch, scope
         layers.SYSTEM_SOURCE: system_root / "spice.toml",
         layers.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
         layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
-        layers.WORKTREE_SOURCE: tmp_path / ".spice" / "config" / "spice.toml",
+        layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
     }
     _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
     _write(paths[scope], "broken = [\n")
@@ -154,7 +156,7 @@ def test_unchanged_layers_parse_once_and_reload_after_source_revision(
         system_path,
         project_path,
         tmp_path / "spice.toml",
-        tmp_path / ".spice" / "config" / "spice.toml",
+        edit.worktree_config_path(tmp_path),
     ]
 
     assert models == ["first"] * repeats + ["second"]
@@ -250,7 +252,7 @@ def test_contextualization_preserves_table_grammar_and_repository_source(tmp_pat
 
 
 def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
-    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    worktree = edit.worktree_config_path(tmp_path)
     _write(worktree, '[serve]\nbrand = ""\n')
 
     contextual = layers.contextualize_config_error(

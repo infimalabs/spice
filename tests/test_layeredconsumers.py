@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spice.config import values
+from spice.config import edit, values
 from spice.agent.maxims import configured_maxim
 from spice.agent.shellhook import (
     configured_agent_wrapper_definitions,
@@ -149,19 +149,23 @@ def test_repository_spice_toml_overrides_every_consumer_domain(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize(
-    ("source_name", "relative_path"),
+    "source_name",
     [
-        ("repository", Path("spice.toml")),
-        ("worktree", Path(".spice/config/spice.toml")),
+        "repository",
+        "worktree",
     ],
 )
 @pytest.mark.parametrize(("domain", "configured"), INVALID_DOMAIN_CONFIGS.items())
 def test_invalid_layered_consumer_value_reports_winning_key_source_and_path(
-    tmp_path, monkeypatch, source_name, relative_path, domain, configured
+    tmp_path, monkeypatch, source_name, domain, configured
 ):
     _stand_up_fixture_repo(tmp_path, monkeypatch)
     config_text, effective_key = configured
-    source_path = tmp_path / relative_path
+    source_path = (
+        tmp_path / "spice.toml"
+        if source_name == "repository"
+        else edit.worktree_config_path(tmp_path)
+    )
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(config_text, encoding="utf-8")
 

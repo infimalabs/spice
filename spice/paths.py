@@ -61,6 +61,11 @@ def set_state_backend(root: str | None) -> None:
     )
 
 
+def state_backend_root() -> Path | None:
+    """Return the active total-state redirect, when this process has one."""
+    return _state_backend_override
+
+
 def _worktree_backend_key(repo_root: Path) -> str:
     # Never consults git: scratch-backed processes may point at roots that are
     # not worktrees at all. The resolved path is the identity.
@@ -200,9 +205,12 @@ def worktree_state_root(repo_root: Path) -> Path:
 def worktree_runtime_state_root(repo_root: Path) -> Path:
     """Mutable worktree-visible state, redirected with the total backend.
 
-    Worktree configuration and hook shims remain operator-authored inputs at
-    ``<worktree>/.spice``. Runtime outputs that normally share that visible
-    namespace must use this resolver so ``spice serve --backend`` owns them.
+    Live steering, learning records, and browser artifacts intentionally remain
+    visible at ``<worktree>/.spice``. Runtime outputs that share that namespace
+    use this resolver so ``spice serve --backend`` owns them. Operator-authored
+    durable state belongs under :func:`worktree_state_root`; generated hook
+    shims are the one worktree-visible input surface and construct their target
+    through the initialization planner.
     """
     if _state_backend_override is not None:
         return (
@@ -235,10 +243,6 @@ def worktree_state_path(repo_root: Path, relative: str | Path) -> Path:
 
 def shared_attachment_root(repo_root: Path) -> Path:
     return shared_state_path(repo_root, SHARED_ATTACHMENT_DIR)
-
-
-def state_dir(repo_root: Path) -> Path:
-    return repo_root / STATE_DIRNAME
 
 
 def runtime_spice_source() -> Path:

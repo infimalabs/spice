@@ -21,6 +21,8 @@ from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.serve import audio
 
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
+
 ESPEAK_TEST_SAMPLE_RATE = 8000
 LONG_MESSAGE_FLOOR_SECONDS = 60.0
 # Rate multipliers a listener can pick in the UI, either side of unscaled.

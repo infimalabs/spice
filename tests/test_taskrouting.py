@@ -731,7 +731,9 @@ def test_many_row_status_keeps_repo_and_config_resolution_constant(
     status = render.render_status()
 
     assert "waiting 0" in status.splitlines()
-    assert len(git_probes) == 1
+    # One probe resolves the repository root and one resolves this worktree's
+    # Git directory for its private configuration layer. Row count adds none.
+    assert len(git_probes) == 2
     assert [source for source, _path in parsed] == [
         layers.SYSTEM_SOURCE,
         layers.PYPROJECT_SOURCE,

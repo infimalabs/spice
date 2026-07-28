@@ -34,7 +34,6 @@ from spice.paths import (
     git_common_dir,
     runtime_spice_source,
     shared_state_root,
-    state_dir,
     worktree_state_root,
 )
 from spice.policyconfig import resolve_policy
@@ -77,7 +76,10 @@ class DoctorReport:
 
     def render(self) -> str:
         lines = ["spice doctor", f"  repo_root={self.repo_root}"]
-        lines.append(f"  worktree_config_state_root={state_dir(self.repo_root)}")
+        lines.append(
+            "  worktree_config_state_root="
+            f"{worktree_state_root(self.repo_root) / 'config'}"
+        )
         lines.append(f"  shared_state_root={shared_state_root(self.repo_root)}")
         lines.append(f"  worktree_state_root={worktree_state_root(self.repo_root)}")
         for fix in self.fixes:

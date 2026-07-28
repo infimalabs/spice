@@ -16,6 +16,7 @@ from spice.configcli import handle_config
 
 SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
 SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,7 @@ def test_config_system_renders_effective_agent_config_read_only(
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
+    before = sorted(path.name for path in tmp_path.iterdir())
 
     result = handle_config(build_parser().parse_args(["config", "system"]))
 
@@ -182,7 +184,7 @@ def test_config_system_renders_effective_agent_config_read_only(
         "effort": "low",
     }
     assert rendered["provenance"]["agent.model"]["scope"] == "pyproject"
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["pyproject.toml"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == before
 
 
 def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
