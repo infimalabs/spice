@@ -46,6 +46,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
         "spice/tasks/ops.py:rtk_usage_nudge:capture=true",
     },
     "release": {
+        "spice/commandownership.py:_mounted_parent_version:capture=true",
         "spice/release.py:github_release_url:capture=true",
         "spice/release.py:run:capture=capture",
         "spice/releasenotes.py:is_ancestor:capture=true",

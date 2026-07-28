@@ -450,6 +450,34 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     ]
 
 
+@pytest.mark.parametrize(
+    "pyproject",
+    (
+        "not = [valid",
+        "[project]\nversion = 3\n",
+        "[build-system]\nrequires = []\n",
+    ),
+)
+def test_release_version_at_commit_refuses_invalid_project_metadata(
+    monkeypatch,
+    pyproject,
+):
+    monkeypatch.setattr(release, "git", lambda *args: pyproject)
+
+    with pytest.raises(SpiceError, match="has no valid project.version"):
+        release.release_version_at_commit("release-commit")
+
+
+def test_release_version_at_commit_reads_existing_pyproject_seam(monkeypatch):
+    monkeypatch.setattr(
+        release,
+        "git",
+        lambda *args: '[project]\nname = "spice-harness"\nversion = "0.30.2"\n',
+    )
+
+    assert release.release_version_at_commit("release-commit") == "0.30.2"
+
+
 def test_release_apply_refuses_untouched_generated_notes_before_publication(
     tmp_path, monkeypatch
 ):

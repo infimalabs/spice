@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import tomllib
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -24,7 +23,12 @@ from spice.cli.effects import (
     mark_authored_input,
 )
 from spice.commandplan import assert_plan_digest
-from spice.commandownership import defer_command_owned_apply
+from spice.commandownership import (
+    COMMAND_PLAN_EXECUTION_DIGEST_ENV,
+    MOUNTED_COMMAND_ENV,
+    defer_command_owned_apply,
+)
+from spice.config.pyproject import parse_pyproject, pyproject_table
 from spice.errors import SpiceError
 from spice.process.tool import run_tool_command
 from spice.releaseidentity import (
@@ -793,13 +797,8 @@ def short_commit(commit: str) -> str:
 
 def release_version_at_commit(release_commit: str) -> str:
     """Read the package version from the exact tree the release will name."""
-    try:
-        pyproject = tomllib.loads(git("show", f"{release_commit}:pyproject.toml"))
-        version = pyproject["project"]["version"]
-    except (KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
-        raise SpiceError(
-            f"release commit {release_commit} has no valid project.version"
-        ) from exc
+    pyproject = parse_pyproject(git("show", f"{release_commit}:pyproject.toml"))
+    version = pyproject_table(pyproject, "project").get("version")
     if not isinstance(version, str) or not version:
         raise SpiceError(
             f"release commit {release_commit} has no valid project.version"
@@ -980,6 +979,9 @@ def run(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    child_env = dict(os.environ if env is None else env)  # env-policy: allow
+    child_env.pop(MOUNTED_COMMAND_ENV, None)
+    child_env.pop(COMMAND_PLAN_EXECUTION_DIGEST_ENV, None)
     return run_tool_command(
         command,
         policy="release",
@@ -988,7 +990,7 @@ def run(
         check=True,
         cwd=cwd,
         text=True,
-        env=env,
+        env=child_env,
     )
 
 
