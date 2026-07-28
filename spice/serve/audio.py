@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Protocol
 
 from spice.config import values
+from spice.config.trust import require_repository_config_approval
+from spice.paths import repo_root_from_cwd
 from spice.process.groups import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
@@ -76,6 +78,7 @@ class MacOSSayBackend:
 @dataclass(frozen=True)
 class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
+    repo_root: Path | None = None
     content_type: str = values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
     timeout: float = values.DEFAULT_SAY_TIMEOUT_SECONDS
     words_per_minute: int = values.DEFAULT_SAY_WORDS_PER_MINUTE
@@ -88,8 +91,15 @@ class ExternalCommandSpeechBackend:
     ) -> SpeechAudio:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
+        command = self._rated_command(rate_multiplier)
+        if self.repo_root is not None:
+            require_repository_config_approval(
+                self.repo_root,
+                ("say", "command"),
+                command=shlex.join(command),
+            )
         result = run_bounded_process_group(
-            self._rated_command(rate_multiplier),
+            command,
             input_data=prepare_say_text(text).encode("utf-8"),
             timeout_seconds=self.timeout,
             phase="serve-speech-external",
@@ -182,6 +192,7 @@ def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
         configured = values.configured_say_words_per_minute(repo_root)
         return ExternalCommandSpeechBackend(
             command=command,
+            repo_root=repo_root or repo_root_from_cwd(),
             content_type=values.configured_say_content_type(repo_root),
             timeout=values.configured_say_timeout(repo_root),
             words_per_minute=(

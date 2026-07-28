@@ -19,6 +19,7 @@ from spice.studies.suiteseam import (
     suite_seam_reach,
 )
 from spice.tasks.git import boundaries, plumbing
+from tests.test_configtrusthelpers import approve_repository_config
 from tests.test_taskgitsync import _configure_git_identity, _git, _init_repo, _run
 
 SEAM = "core/tw.py"
@@ -87,6 +88,7 @@ def _lane_on_a_baseline(tmp_path: Path) -> tuple[Path, Path]:
     _write_seam_project(repo, UNCHANGED_SEAM_SOURCE)
     _run(repo, "git", "add", "-A")
     _run(repo, "git", "commit", "-m", "seam and the tests that name it")
+    approve_repository_config(repo)
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
     _run(repo, "git", "remote", "set-head", "origin", "--auto")

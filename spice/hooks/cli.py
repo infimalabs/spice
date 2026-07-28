@@ -214,7 +214,7 @@ def handle_init(args: argparse.Namespace) -> int:
             print(row)
         return 0
 
-    apply_initialization_plan(plan)
+    apply_initialization_plan(plan, approve_repository_config=True)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
     return 0

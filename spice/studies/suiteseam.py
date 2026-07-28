@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.config.layers import config_string_list, effective_table
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.pathmatch import matches_repo_path_or_ancestor, normalize_repo_path
 from spice.process.tool import run_tool_command
@@ -257,6 +258,11 @@ def run_suite_seam_gate(
     plan = suite_seam_plan(repo_root, footprint)
     if not plan.argv:
         return SuiteSeamOutcome(plan=plan, elapsed_seconds=0.0, returncode=0, output="")
+    require_repository_config_approval(
+        repo_root,
+        ("policy", "suite_seam", "run"),
+        command=shlex.join(plan.argv),
+    )
     print(f"suite seam: {plan.reason}")
     for match in plan.matches:
         print(f"suite seam:   {match}")
