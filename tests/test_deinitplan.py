@@ -303,15 +303,15 @@ def test_separate_reverse_document_migrates_completed_prefix_into_shared_log(
         operations=(plan.operations[0], *plan.reversal.operations[1:]),
     )
     withdrawn = deinitialization_receipt_path(repo)
-    withdrawn.write_text(
+    document_content = (
         json.dumps(
             deinitialization_receipt_payload(legacy),
             indent=2,
             sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
+    withdrawn.write_text(document_content, encoding="utf-8")
 
     migrated = load_deinitialization_receipt(repo)
     records = load_initialization_receipt_records(repo)
@@ -328,6 +328,46 @@ def test_separate_reverse_document_migrates_completed_prefix_into_shared_log(
     assert not withdrawn.exists()
     assert records[-1].event is InitReceiptEvent.UNAPPLY
     assert records[-1].operation_index == legacy.operations[0].initialization_index
+
+    withdrawn.write_text(document_content, encoding="utf-8")
+    with pytest.raises(
+        SpiceError,
+        match="separate reversal receipt.*already been migrated",
+    ):
+        load_deinitialization_receipt(repo)
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ("receipt", "initialization"),
+)
+def test_separate_reverse_document_refuses_another_repository_before_append(
+    tmp_path, mismatch
+):
+    repo = _git_init(tmp_path / "repo")
+    other = _git_init(tmp_path / "other")
+    apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
+    plan = plan_deinitialization(repo)
+    assert isinstance(plan.reversal, DeinitializationReceipt)
+    payload = deinitialization_receipt_payload(plan.reversal)
+    if mismatch == "receipt":
+        payload["repository"] = str(other.resolve())
+    else:
+        initialization = payload["initialization_receipt"]
+        assert isinstance(initialization, dict)
+        initialization["repository"] = str(other.resolve())
+    withdrawn = deinitialization_receipt_path(repo)
+    withdrawn.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    before = initialization_receipt_path(repo).read_bytes()
+
+    with pytest.raises(
+        SpiceError,
+        match="receipt repository does not match this worktree",
+    ):
+        load_deinitialization_receipt(repo)
+
+    assert initialization_receipt_path(repo).read_bytes() == before
+    assert not initialization_receipt_path(other).exists()
 
 
 def test_init_unapply_json_emits_digest_and_applies_the_asserted_receipt(tmp_path):

@@ -27,12 +27,15 @@ from spice.agent.lifecycle import (
 from spice.errors import SpiceError
 from spice.operatorstate import (
     INITIALIZATION_RECEIPT_PATH,
+    OPERATOR_STATE_MIGRATION_SCHEMA_VERSION,
     OPERATOR_STATE_RELOCATION_RELEASE,
+    operator_state_migration_marker,
     operator_state_path,
     prepare_operator_state_path,
 )
 from spice.paths import (
     STATE_DIRNAME,
+    atomic_write_json,
     atomic_write_text,
     fsync_directory,
     git_common_dir,
@@ -493,6 +496,9 @@ def append_initialization_receipt_record(
         ) from exc
     chmod_after_close = not hasattr(os, "fchmod")
     try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SpiceError(f"initialization receipt is not a regular file: {path}")
         if not chmod_after_close:
             os.fchmod(descriptor, INIT_RECEIPT_MODE)
         written = os.write(descriptor, payload)
@@ -1094,12 +1100,18 @@ def _prepare_initialization_receipt_log(repo_root: Path) -> Path:
     """Perform the v0.30.0 document-to-log migration once, then return JSONL."""
     canonical = initialization_receipt_path(repo_root)
     predecessor = canonical.with_name(WITHDRAWN_INIT_RECEIPT_FILENAME)
+    marker = operator_state_migration_marker(repo_root, INITIALIZATION_RECEIPT_PATH)
     if predecessor.exists() or predecessor.is_symlink():
-        if canonical.exists() or canonical.is_symlink():
+        if (
+            marker.exists()
+            or marker.is_symlink()
+            or canonical.exists()
+            or canonical.is_symlink()
+        ):
             raise SpiceError(
                 f"remove {predecessor}; initialization receipt document was "
-                f"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE} and the "
-                f"append-only log already exists at {canonical}"
+                f"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE} and has "
+                f"already been migrated; use the append-only log at {canonical}"
             )
         if predecessor.is_symlink() or not predecessor.is_file():
             raise SpiceError(
@@ -1113,6 +1125,23 @@ def _prepare_initialization_receipt_log(repo_root: Path) -> Path:
             expected_repo_root=repo_root,
         )
         fsync_directory(canonical.parent)
+        try:
+            atomic_write_json(
+                marker,
+                {
+                    "schema_version": OPERATOR_STATE_MIGRATION_SCHEMA_VERSION,
+                    "release": OPERATOR_STATE_RELOCATION_RELEASE,
+                    "kind": INITIALIZATION_RECEIPT_PATH.key,
+                    "withdrawn_path": str(predecessor),
+                    "canonical_path": str(canonical),
+                },
+                write_if_changed=True,
+            )
+        except OSError as exc:
+            raise SpiceError(
+                "could not record initialization receipt document migration "
+                f"from {predecessor} to {canonical}: {exc}"
+            ) from exc
 
     return prepare_operator_state_path(
         repo_root,

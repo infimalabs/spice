@@ -97,11 +97,11 @@ def test_git_dir_receipt_document_migrates_forward_to_jsonl_once(tmp_path):
     log = initialization_receipt_path(repo)
     document = log.with_name("init-receipt.json")
     log.unlink()
-    document.write_text(
+    document_content = (
         json.dumps(initialization_receipt_payload(expected), indent=2, sort_keys=True)
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
+    document.write_text(document_content, encoding="utf-8")
 
     loaded = load_initialization_receipt(repo)
 
@@ -112,6 +112,15 @@ def test_git_dir_receipt_document_migrates_forward_to_jsonl_once(tmp_path):
         isinstance(json.loads(line), dict)
         for line in log.read_text(encoding="utf-8").splitlines()
     )
+    assert operator_state_migration_marker(repo, INITIALIZATION_RECEIPT_PATH).is_file()
+
+    log.unlink()
+    document.write_text(document_content, encoding="utf-8")
+    with pytest.raises(
+        SpiceError,
+        match=rf"withdrawn in {OPERATOR_STATE_RELOCATION_RELEASE}.*already been migrated",
+    ):
+        load_initialization_receipt(repo)
 
 
 def test_clone_shipping_each_withdrawn_path_never_honors_either(tmp_path):

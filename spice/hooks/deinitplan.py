@@ -34,14 +34,18 @@ from spice.hooks.initplan import (
     load_initialization_receipt,
     load_initialization_receipt_records,
 )
-from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
-from spice.paths import atomic_write_text, fsync_directory, git_dir
+from spice.operatorstate import (
+    OPERATOR_STATE_MIGRATION_SCHEMA_VERSION,
+    OPERATOR_STATE_RELOCATION_RELEASE,
+)
+from spice.paths import atomic_write_json, atomic_write_text, fsync_directory, git_dir
 from spice.process.git import run_git_command
 
 DEINIT_SCHEMA_VERSION = 1
 RECOVERY_DIRNAME = "spice-deinit-recovery"
 RECOVERY_DIGEST_LENGTH = 16
 HASH_CHUNK_BYTES = 1024 * 1024
+DEINIT_RECEIPT_MIGRATION_KEY = "deinitialization-receipt-document"
 
 
 class DeinitReceiptStatus(StrEnum):
@@ -218,8 +222,15 @@ def deinitialization_receipt_payload(
 def _migrate_deinitialization_receipt_document(repo_root: Path) -> None:
     """Append completed reverse facts from the withdrawn document, then remove it."""
     path = deinitialization_receipt_path(repo_root)
+    marker = _deinitialization_receipt_migration_marker(repo_root)
     if not path.exists() and not path.is_symlink():
         return
+    if marker.exists() or marker.is_symlink():
+        raise SpiceError(
+            f"remove {path}; separate reversal receipt was withdrawn in "
+            f"{OPERATOR_STATE_RELOCATION_RELEASE} and has already been migrated; "
+            f"use the append-only log at {initialization_receipt_path(repo_root)}"
+        )
     if path.is_symlink() or not path.is_file():
         raise SpiceError(
             f"remove {path}; separate reversal receipt was withdrawn in "
@@ -242,6 +253,18 @@ def _migrate_deinitialization_receipt_document(repo_root: Path) -> None:
         raise SpiceError(
             f"could not migrate withdrawn deinitialization receipt {path}: {exc}"
         ) from exc
+    resolved_root = repo_root.expanduser().resolve()
+    if (
+        receipt.repo_root != resolved_root
+        or receipt.initialization.repo_root != resolved_root
+    ):
+        raise SpiceError(
+            f"could not migrate withdrawn deinitialization receipt {path}: "
+            "receipt repository does not match this worktree "
+            f"(receipt={receipt.repo_root}, "
+            f"initialization={receipt.initialization.repo_root}, "
+            f"worktree={resolved_root})"
+        )
     existing = {
         record.operation_index
         for record in load_initialization_receipt_records(repo_root)
@@ -256,10 +279,29 @@ def _migrate_deinitialization_receipt_document(repo_root: Path) -> None:
     try:
         path.unlink()
         fsync_directory(path.parent)
+        atomic_write_json(
+            marker,
+            {
+                "schema_version": OPERATOR_STATE_MIGRATION_SCHEMA_VERSION,
+                "release": OPERATOR_STATE_RELOCATION_RELEASE,
+                "kind": DEINIT_RECEIPT_MIGRATION_KEY,
+                "withdrawn_path": str(path),
+                "canonical_path": str(initialization_receipt_path(repo_root)),
+            },
+            write_if_changed=True,
+        )
     except OSError as exc:
         raise SpiceError(
             f"could not retire deinitialization receipt {path}: {exc}"
         ) from exc
+
+
+def _deinitialization_receipt_migration_marker(repo_root: Path) -> Path:
+    return (
+        initialization_receipt_path(repo_root).parent
+        / "migrations"
+        / f"{OPERATOR_STATE_RELOCATION_RELEASE}-{DEINIT_RECEIPT_MIGRATION_KEY}.json"
+    )
 
 
 def _unapply_record(
