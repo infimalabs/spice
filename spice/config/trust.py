@@ -33,6 +33,10 @@ EXECUTABLE_REPOSITORY_CONFIG_PATHS = (
 )
 
 
+class RepositoryConfigApprovalRequiredError(SpiceError):
+    """Tracked executable configuration needs an operator-owned approval."""
+
+
 @dataclass(frozen=True)
 class RepositoryConfigApproval:
     """The current executable digest and its worktree-local approval state."""
@@ -117,7 +121,7 @@ def require_repository_config_approval(
         f"(approved={approval.approved_digest} current={approval.digest})"
     )
     dotted = ".".join(path)
-    raise SpiceError(
+    raise RepositoryConfigApprovalRequiredError(
         "repository executable configuration "
         f"{dotted} from {source.path} {state}; refusing command {command}; "
         f"run `spice init --apply` in {resolved_root} to approve digest "

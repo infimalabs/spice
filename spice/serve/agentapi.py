@@ -12,6 +12,7 @@ from typing import Any, Callable, Sequence, TypeAlias
 from spice.agent.driver import driver_for
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import (
+    AGENT_FAILURE_CONFIG_APPROVAL_REQUIRED,
     AGENT_FAILURE_OUT_OF_CREDITS,
     AGENT_FAILURE_RESTART_REFUSED,
     AgentEnsureResult,
@@ -23,7 +24,9 @@ from spice.agent.lifecycle import (
     agent_status,
     ensure_agent,
     launch_refusal,
+    preflight_automatic_agent_launch,
 )
+from spice.config.trust import RepositoryConfigApprovalRequiredError
 from spice.mail.inbox import (
     deadletter_inbox_item,
     inbox_item_key,
@@ -122,6 +125,14 @@ def agent_ensure_response_payload(
         return (
             agent_ensure_failure_payload(exc, failure=AGENT_FAILURE_OUT_OF_CREDITS),
             HTTPStatus.PAYMENT_REQUIRED,
+        )
+    except RepositoryConfigApprovalRequiredError as exc:
+        return (
+            agent_ensure_failure_payload(
+                exc,
+                failure=AGENT_FAILURE_CONFIG_APPROVAL_REQUIRED,
+            ),
+            HTTPStatus.PRECONDITION_REQUIRED,
         )
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         return agent_ensure_failure_payload(exc), HTTPStatus.INTERNAL_SERVER_ERROR
@@ -333,45 +344,87 @@ def ensure_agent_for_available_work(
             retry_seconds=retry_seconds,
         ):
             return _available_work_skip("retry-wait")
-        chosen = candidates[0]
-        task_uuid = identity.uuid_of(chosen)
-        handle = identity.render_handle(chosen)
-        site = claimstate.ClaimSite(
-            worktree=target.repo_root.resolve(),
-            branch=target.branch
-            or git_read(target.repo_root, "branch", "--show-current"),
-            head=git_read(target.repo_root, "rev-parse", "HEAD"),
+        return _dispatch_available_work_candidate(
+            target,
+            actor=actor,
+            chosen=candidates[0],
+            fast_mode=fast_mode,
+            force_new=force_new,
         )
-        claimed = claimstate.do_claim(
-            task_uuid,
-            actor,
-            site=site,
-            context_thread=actor,
-            lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
-            guard_unclaimed=True,
+
+
+def _dispatch_available_work_candidate(
+    target: WorktreeTarget,
+    *,
+    actor: str,
+    chosen: dict[str, Any],
+    fast_mode: bool,
+    force_new: bool,
+) -> dict[str, Any]:
+    task_uuid = identity.uuid_of(chosen)
+    handle = identity.render_handle(chosen)
+    refusal = _available_work_preflight_failure(target, task_handle=handle)
+    if refusal is not None:
+        return refusal
+    site = claimstate.ClaimSite(
+        worktree=target.repo_root.resolve(),
+        branch=target.branch or git_read(target.repo_root, "branch", "--show-current"),
+        head=git_read(target.repo_root, "rev-parse", "HEAD"),
+    )
+    claimed = claimstate.do_claim(
+        task_uuid,
+        actor,
+        site=site,
+        context_thread=actor,
+        lease_seconds=SUPERVISOR_CLAIM_LEASE_SECONDS,
+        guard_unclaimed=True,
+    )
+    if not claimed:
+        return _available_work_skip("claim-lost", task_handle=handle)
+    try:
+        payload, _status = agent_ensure_response_payload(
+            target,
+            fast_mode=fast_mode,
+            force_new=force_new,
+            automatic=True,
+            launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
         )
-        if not claimed:
-            return _available_work_skip("claim-lost", task_handle=handle)
-        try:
-            payload, _status = agent_ensure_response_payload(
-                target,
-                fast_mode=fast_mode,
-                force_new=force_new,
-                automatic=True,
-                launch_claim=LaunchClaim(uuid=task_uuid, actor=actor),
-            )
-        except Exception:
-            claimstate.release_claim(task_uuid, actor)
-            raise
-        payload.update({"trigger": "available-work", "taskHandle": handle})
-        if payload.get("ok") is False:
-            # The launch was attempted and refused -- out of credits, or the
-            # restart guard. Releasing its claim is a new READY transition;
-            # release_claim stamps that durable origin for the next watcher
-            # evaluation, and answers separately for the row and its witness.
-            release = claimstate.release_claim(task_uuid, actor)
-            payload["claimReleased"] = release.released
-        return payload
+    except Exception:
+        claimstate.release_claim(task_uuid, actor)
+        raise
+    payload.update({"trigger": "available-work", "taskHandle": handle})
+    if payload.get("ok") is False:
+        # The launch was attempted and refused -- out of credits, or the
+        # restart guard. Releasing its claim is a new READY transition;
+        # release_claim stamps that durable origin for the next watcher
+        # evaluation, and answers separately for the row and its witness.
+        release = claimstate.release_claim(task_uuid, actor)
+        payload["claimReleased"] = release.released
+    return payload
+
+
+def _available_work_preflight_failure(
+    target: WorktreeTarget, *, task_handle: str
+) -> dict[str, Any] | None:
+    try:
+        preflight_automatic_agent_launch(target.repo_root)
+    except AgentRestartRefusedError as exc:
+        payload = agent_ensure_failure_payload(
+            exc,
+            failure=AGENT_FAILURE_RESTART_REFUSED,
+            refusal=exc.refusal,
+        )
+    except RepositoryConfigApprovalRequiredError as exc:
+        payload = agent_ensure_failure_payload(
+            exc,
+            failure=AGENT_FAILURE_CONFIG_APPROVAL_REQUIRED,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        payload = agent_ensure_failure_payload(exc)
+    else:
+        return None
+    payload.update({"trigger": "available-work", "taskHandle": task_handle})
+    return payload
 
 
 def available_work_queue_age_seconds(row: dict[str, Any], *, now: datetime) -> float:

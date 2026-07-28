@@ -147,6 +147,7 @@ STARTUP_WATCH_JOIN_SECONDS = (
 AGENT_FAILURE_OUT_OF_CREDITS = "out-of-credits"
 AGENT_FAILURE_RESTART_REFUSED = "restart-refused"
 AGENT_FAILURE_STARTUP_STALLED = AGENT_STARTUP_STALLED
+AGENT_FAILURE_CONFIG_APPROVAL_REQUIRED = "config-approval-required"
 
 
 class AgentOutOfCreditsError(SpiceError):
@@ -274,6 +275,31 @@ def _refuse_restart_after_rapid_deaths(repo_root: Path) -> None:
         "unless an operator starts the agent explicitly",
         refusal=refusal,
     )
+
+
+def preflight_automatic_agent_launch(repo_root: Path) -> boundaries.SyncResult:
+    """Refresh and validate a lane before Serve reserves work for it.
+
+    Available-work dispatch used to claim first and discover launch refusals
+    afterward. A repository fast-forward can change executable configuration,
+    so that ordering repeatedly assigned and released the same task while each
+    failed spawn left an empty pre-supervisor log. Run the same safe launch
+    refresh first, then render the shell configuration the supervisor will
+    install. The render is the exact executable-config approval boundary; a
+    refusal therefore reaches Serve before any task or launch state changes.
+    """
+    if (
+        git_probe(repo_root, "rev-parse", "--is-inside-work-tree").stdout.strip()
+        != "true"
+    ):
+        return boundaries.SyncResult(notes=["skipped:not-a-worktree"])
+    _require_no_pending_authority_migration(repo_root)
+    ensure_origin_head(repo_root)
+    sync = boundaries.fast_forward_if_safe(repo_root)
+    from spice.agent.shellhook import render_shell_runtime_wrapper_lines
+
+    render_shell_runtime_wrapper_lines(repo_root)
+    return sync
 
 
 def _attachable_thread_id(driver: AgentDriver, repo_root: Path, thread_id: str) -> str:
@@ -596,6 +622,7 @@ def spawn_agent_supervisor(
     ]
     if fast_mode:
         supervisor_command.append("--fast-mode")
+    environment = agent_supervisor_environment(repo_root)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_handle = log_path.open("ab")
     try:
@@ -605,7 +632,7 @@ def spawn_agent_supervisor(
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            env=agent_supervisor_environment(repo_root),
+            env=environment,
             **popen_new_process_group_kwargs(),
         )
         return cast(subprocess.Popen[str], process)
