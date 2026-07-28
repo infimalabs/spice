@@ -797,6 +797,35 @@ def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatc
     assert command[command.index("--command-json") + 1] == '["codex","exec","prompt"]'
 
 
+def test_spawn_agent_supervisor_refusal_does_not_create_an_empty_log(
+    tmp_path, monkeypatch
+):
+    """A parent-side launch refusal has no process and therefore no launch log."""
+    log_path = tmp_path / "supervised.log"
+    refusal = SpiceError("repository configuration is not approved")
+
+    def refuse_environment(_repo_root):
+        raise refusal
+
+    monkeypatch.setattr(lifecycle, "agent_supervisor_environment", refuse_environment)
+
+    with pytest.raises(SpiceError) as raised:
+        lifecycle.spawn_agent_supervisor(
+            tmp_path,
+            action="start",
+            command=["codex", "exec", "prompt"],
+            model="gpt-test",
+            reasoning_effort="medium",
+            resume_thread_id="",
+            log_path=log_path,
+            fast_mode=False,
+            launch_claim=None,
+        )
+
+    assert raised.value is refusal
+    assert not log_path.exists()
+
+
 def test_supervisor_command_carries_the_launch_claim_to_the_supervisor(
     tmp_path, monkeypatch
 ):
