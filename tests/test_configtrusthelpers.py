@@ -2,27 +2,19 @@
 
 from pathlib import Path
 
-from spice.config.trust import repository_executable_config_digest
 from spice.hooks.initplan import (
     InitializationMode,
-    InitializationReceipt,
-    InitReceiptStatus,
-    write_initialization_receipt,
+    apply_initialization_plan,
+    plan_initialization,
 )
 
 
 def approve_repository_config(repo: Path) -> None:
-    """Write the completed approval fact without installing fixture hooks."""
+    """Apply fixture gates and append the repository-config approval fact."""
     resolved = repo.expanduser().resolve()
-    write_initialization_receipt(
-        InitializationReceipt(
-            repo_root=resolved,
-            mode=InitializationMode.GATES_ONLY,
-            plan_schema_version=1,
-            status=InitReceiptStatus.COMPLETE,
-            operations=(),
-            approved_repository_config_digest=(
-                repository_executable_config_digest(resolved)
-            ),
-        )
+    plan = plan_initialization(
+        resolved,
+        InitializationMode.GATES_ONLY,
+        include_agent_skill=False,
     )
+    apply_initialization_plan(plan, approve_repository_config=True)
