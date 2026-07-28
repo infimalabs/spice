@@ -8,6 +8,40 @@ import pytest
 from spice.config import edit, layers
 from spice.errors import SpiceError
 
+INHERITED_TABLE_CONFIG = """
+[policy.limits]
+file_loc = 100
+
+[wrappers.common.rtk]
+argv = ["rtk"]
+
+[maxims.polling]
+words = ["poll"]
+message = "Do not poll."
+
+[tasks.reports.oready]
+description = "ready"
+filter = "+READY"
+sort = "urgency-"
+"""
+TABLE_REPLACEMENT_CASES = (
+    ("policy", "policy = {value}\n"),
+    ("policy.limits", "[policy]\nlimits = {value}\n"),
+    ("wrappers.common", "[wrappers]\ncommon = {value}\n"),
+    ("maxims.polling", "[maxims]\npolling = {value}\n"),
+    ("tasks.reports.oready", "[tasks.reports]\noready = {value}\n"),
+)
+TABLE_REPLACEMENT_SCALARS = (
+    ("false", True),
+    ("true", False),
+    ('"strict"', False),
+    ("7", False),
+    ("7.5", False),
+    ('["strict"]', False),
+    ("1979-05-27T07:32:00Z", False),
+)
+REENABLED_FILE_LOC = 300
+
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 
@@ -186,8 +220,8 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         [wrappers.common.rtk]
         argv = ["repo-rtk"]
 
-        [policy]
-        suite_seam = { seconds = 2 }
+        [policy.suite_seam]
+        seconds = 2
 
         [[policy.internal_couplings]]
         path = "project.py"
@@ -201,8 +235,8 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         [wrappers.common.rtk]
         match = []
 
-        [policy]
-        suite_seam = ["worktree"]
+        [policy.suite_seam]
+        paths = ["worktree"]
         """,
     )
 
@@ -210,7 +244,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
 
     assert loaded.effective["wrappers"]["common"]["rtk"] == {"match": ()}
     assert loaded.effective["policy"] == {
-        "suite_seam": ("worktree",),
+        "suite_seam": {"paths": ("worktree",), "seconds": 2},
         "internal_couplings": (
             {
                 "path": "project.py",
@@ -222,9 +256,65 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
     assert loaded.source_for("wrappers.common.rtk.match") == loaded.layer(
         layers.WORKTREE_SOURCE
     )
-    assert loaded.source_for("policy.suite_seam") == loaded.layer(
+    assert loaded.source_for("policy.suite_seam.paths") == loaded.layer(
         layers.WORKTREE_SOURCE
     )
+
+
+@pytest.mark.parametrize(
+    ("table_path", "document"),
+    TABLE_REPLACEMENT_CASES,
+    ids=tuple(case[0] for case in TABLE_REPLACEMENT_CASES),
+)
+@pytest.mark.parametrize(
+    ("scalar", "accepted"),
+    TABLE_REPLACEMENT_SCALARS,
+    ids=tuple(case[0] for case in TABLE_REPLACEMENT_SCALARS),
+)
+def test_scalar_for_inherited_table_fuzz_accepts_only_false_or_spice_error(
+    tmp_path, monkeypatch, table_path, document, scalar, accepted
+):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
+    system_path = system_root / "spice.toml"
+    repository_path = tmp_path / "spice.toml"
+    _write(system_path, INHERITED_TABLE_CONFIG)
+    _write(repository_path, document.format(value=scalar))
+
+    if accepted:
+        loaded = layers.load_config(tmp_path)
+        value = loaded.effective
+        for segment in table_path.split("."):
+            value = value[segment]
+        assert value is False
+        assert loaded.source_for(table_path) == loaded.layer(layers.REPOSITORY_SOURCE)
+        return
+
+    with pytest.raises(SpiceError) as exc_info:
+        layers.load_config(tmp_path)
+
+    message = str(exc_info.value)
+    assert f"configuration table {table_path}" in message
+    assert f"source=system path={system_path}" in message
+    assert f"source=repository path={repository_path}" in message
+
+
+def test_table_can_reenable_after_false_disable(tmp_path, monkeypatch):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
+    _write(system_root / "spice.toml", "[policy.limits]\nfile_loc = 100\n")
+    _write(tmp_path / "spice.toml", "policy = false\n")
+    _write(
+        edit.worktree_config_path(tmp_path),
+        f"[policy.limits]\nfile_loc = {REENABLED_FILE_LOC}\n",
+    )
+
+    loaded = layers.load_config(tmp_path)
+
+    assert loaded.effective["policy"]["limits"]["file_loc"] == REENABLED_FILE_LOC
+    assert loaded.source_for("policy") == loaded.layer(layers.WORKTREE_SOURCE)
 
 
 @pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
@@ -388,7 +478,13 @@ def test_unrelated_malformed_pyproject_is_not_a_configuration_source(tmp_path):
     assert layers.load_config(tmp_path).effective["agent"]["model"] == "repository"
 
 
-def test_contextualization_preserves_table_grammar_and_repository_source(tmp_path):
+def test_contextualization_preserves_table_grammar_and_repository_source(
+    tmp_path, monkeypatch
+):
+    packaged = tmp_path / "runtime"
+    packaged.mkdir()
+    _write(packaged / "spice.toml", "")
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: packaged)
     _write(tmp_path / "spice.toml", 'serve = "invalid"\n')
 
     contextual = layers.contextualize_config_error(

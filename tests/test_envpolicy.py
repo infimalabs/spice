@@ -483,7 +483,11 @@ def test_env_access_default_patterns_non_table_raises(tmp_path):
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
 
     with pytest.raises(
-        SpiceError, match=r"policy\.env_access\.default_patterns .*: must be a table"
+        SpiceError,
+        match=(
+            r"configuration table policy\.env_access\.default_patterns "
+            r".* cannot be replaced by list .* use false to disable"
+        ),
     ):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
