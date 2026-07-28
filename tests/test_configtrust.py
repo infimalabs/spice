@@ -460,7 +460,12 @@ def _approve_repository_config(repo: Path) -> None:
         InitializationMode.GATES_ONLY,
         include_agent_skill=False,
     )
-    apply_initialization_plan(plan, approve_repository_config=True)
+    from spice.config.trust import plan_exact_repository_config_approval
+
+    apply_initialization_plan(
+        plan,
+        repository_config_approval=plan_exact_repository_config_approval(repo),
+    )
 
 
 def _repository(path: Path) -> Path:

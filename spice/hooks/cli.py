@@ -291,6 +291,7 @@ def handle_init(args: argparse.Namespace) -> int:
         return _handle_init_unapply(args)
 
     from spice.commandplan import assert_plan_digest
+    from spice.config.trust import plan_exact_repository_config_approval
     from spice.hooks.initplan import (
         InitializationMode,
         apply_initialization_plan,
@@ -301,6 +302,7 @@ def handle_init(args: argparse.Namespace) -> int:
     )
 
     repo_root = init_repo_root()
+    repository_config_approval = plan_exact_repository_config_approval(repo_root)
     mode = (
         InitializationMode.GATES_ONLY if bool(args.gates) else InitializationMode.FULL
     )
@@ -308,18 +310,27 @@ def handle_init(args: argparse.Namespace) -> int:
     apply_requested = args.apply is not None
     if apply_requested and bool(args.json):
         raise SpiceError("`spice init --apply` cannot be combined with `--json`")
-    payload = initialization_plan_payload(plan)
+    payload = initialization_plan_payload(
+        plan,
+        repository_config_approval=repository_config_approval,
+    )
     if not apply_requested:
         if bool(args.json):
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
-        for row in initialization_preview_rows(plan):
+        for row in initialization_preview_rows(
+            plan,
+            repository_config_approval=repository_config_approval,
+        ):
             print(row)
         return 0
 
     expected_digest = args.apply if isinstance(args.apply, str) else None
     assert_plan_digest(payload, expected_digest)
-    apply_initialization_plan(plan, approve_repository_config=True)
+    apply_initialization_plan(
+        plan,
+        repository_config_approval=repository_config_approval,
+    )
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
     return 0

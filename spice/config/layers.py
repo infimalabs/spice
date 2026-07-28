@@ -318,6 +318,22 @@ def contextualize_config_error(
     return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
 
 
+def parse_config_text(
+    text: str,
+    *,
+    source_name: str,
+    source_path: str,
+) -> dict[str, Any]:
+    """Parse one in-memory TOML configuration through the canonical seam."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(
+            "invalid TOML for configuration "
+            f"source={source_name} path={source_path}: {exc}"
+        ) from exc
+
+
 def _read_toml(path: Path, source_name: str) -> tuple[dict[str, Any], bool]:
     try:
         with path.open("rb") as handle:
