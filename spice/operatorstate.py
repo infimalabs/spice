@@ -9,6 +9,7 @@ as untracked upgrade inputs, moved once, and then refused.
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,6 +73,12 @@ def prepare_operator_state_path(
     resolved_root = repo_root.expanduser().resolve()
     canonical = canonical_path or operator_state_path(resolved_root, declared)
     withdrawn = resolved_root / declared.withdrawn_relative
+    _refuse_symlinked_withdrawn_path(
+        resolved_root,
+        withdrawn,
+        declared,
+        canonical,
+    )
     if not withdrawn.exists() and not withdrawn.is_symlink():
         return canonical
 
@@ -118,6 +125,35 @@ def prepare_operator_state_path(
             f"could not migrate {declared.label} from {withdrawn} to {canonical}: {exc}"
         ) from exc
     return canonical
+
+
+def _refuse_symlinked_withdrawn_path(
+    repo_root: Path,
+    withdrawn: Path,
+    declared: OperatorStatePath,
+    canonical: Path,
+) -> None:
+    """Inspect every withdrawn-path component without following redirects."""
+    current = repo_root
+    for component in declared.withdrawn_relative.parts:
+        current /= component
+        try:
+            mode = current.lstat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            return
+        except OSError as exc:
+            raise SpiceError(
+                f"could not inspect withdrawn {declared.label} path {withdrawn} "
+                f"for {OPERATOR_STATE_RELOCATION_RELEASE} migration: {exc}"
+            ) from exc
+        if not stat.S_ISLNK(mode):
+            continue
+        role = "path" if current == withdrawn else "ancestor"
+        raise SpiceError(
+            f"remove {current}; {declared.label} path {withdrawn} was withdrawn in "
+            f"{OPERATOR_STATE_RELOCATION_RELEASE} and cannot be migrated because "
+            f"its {role} {current} is a symlink; use {canonical}"
+        )
 
 
 def operator_state_migration_marker(
