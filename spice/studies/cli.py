@@ -25,13 +25,7 @@ from spice.extensions import (
 )
 from spice.paths import require_repo_root
 from spice.policyconfig import resolve_policy
-from spice.policy import (
-    COMPLEXITY_MAX_CCN,
-    COMPLEXITY_MAX_LENGTH,
-    FILE_BYTE_LIMIT,
-    FILE_LOC_LIMIT,
-    JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS,
-)
+from spice.policy import JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS
 from spice.studies import (
     complexity,
     csharpmembers,
@@ -90,9 +84,9 @@ def _configure_file_loc_parser(actions: Any) -> None:
         default=None,
         help="Scan files changed against this git ref instead of all tracked files.",
     )
-    file_loc.add_argument("--limit", type=int, default=FILE_LOC_LIMIT)
+    file_loc.add_argument("--limit", type=int, default=None)
     file_loc.add_argument("--flex-limit", type=int, default=None)
-    file_loc.add_argument("--byte-limit", type=int, default=FILE_BYTE_LIMIT)
+    file_loc.add_argument("--byte-limit", type=int, default=None)
     file_loc.add_argument("--byte-flex-limit", type=int, default=None)
 
 
@@ -100,10 +94,8 @@ def _configure_complexity_parser(actions: Any) -> None:
     complexity_parser = _add_study_action(
         actions, "complexity", "Routine CCN/length pressure via lizard."
     )
-    complexity_parser.add_argument("--max-ccn", type=int, default=COMPLEXITY_MAX_CCN)
-    complexity_parser.add_argument(
-        "--max-length", type=int, default=COMPLEXITY_MAX_LENGTH
-    )
+    complexity_parser.add_argument("--max-ccn", type=int, default=None)
+    complexity_parser.add_argument("--max-length", type=int, default=None)
     complexity_parser.add_argument(
         "--baseline-ref",
         default=None,
@@ -614,6 +606,10 @@ def _study_shape(args: argparse.Namespace, root: Path) -> int:
 
 def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
     resolved = resolve_policy(root)
+    limit = args.limit if args.limit is not None else resolved.limits.file_loc
+    byte_limit = (
+        args.byte_limit if args.byte_limit is not None else resolved.limits.file_bytes
+    )
     paths = _changed_or_tracked_paths(args, root)
     scan = (
         fileloc.scan_staged_loc_violations
@@ -626,9 +622,9 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
     )
     scan_kwargs = {
         "root": root,
-        "limit": args.limit,
+        "limit": limit,
         "flex_limit_value": args.flex_limit,
-        "byte_limit": args.byte_limit,
+        "byte_limit": byte_limit,
         "byte_flex_limit_value": args.byte_flex_limit,
         "source_suffixes": resolved.file_shape_paths.source_suffixes,
         "generated_patterns": generated_patterns,
@@ -643,9 +639,9 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         _print_study_json(
             args.study_action,
             findings=findings,
-            lineLimit=args.limit,
+            lineLimit=limit,
             lineFlexLimit=args.flex_limit,
-            byteLimit=args.byte_limit,
+            byteLimit=byte_limit,
             byteFlexLimit=args.byte_flex_limit,
             baselineRef=args.baseline_ref,
             staged=args.staged,
@@ -654,9 +650,9 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
     print(
         fileloc.render_loc_board(
             findings,
-            limit=args.limit,
+            limit=limit,
             flex_limit_value=args.flex_limit,
-            byte_limit=args.byte_limit,
+            byte_limit=byte_limit,
             byte_flex_limit_value=args.byte_flex_limit,
         )
     )
@@ -665,11 +661,17 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
 
 def _study_complexity(args: argparse.Namespace, root: Path) -> int:
     resolved = resolve_policy(root)
+    max_ccn = args.max_ccn if args.max_ccn is not None else resolved.limits.routine_ccn
+    max_length = (
+        args.max_length
+        if args.max_length is not None
+        else resolved.limits.routine_length
+    )
     findings = complexity.scan_staged_complexity_violations(
         _changed_or_tracked_paths(args, root),
         root=root,
-        max_ccn=args.max_ccn,
-        max_length=args.max_length,
+        max_ccn=max_ccn,
+        max_length=max_length,
         ccn_flex_limit_value=args.ccn_flex_limit,
         length_flex_limit_value=args.length_flex_limit,
         suffixes=resolved.languages.complexity,
@@ -679,8 +681,8 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
         _print_study_json(
             args.study_action,
             findings=findings,
-            maxCcn=args.max_ccn,
-            maxLength=args.max_length,
+            maxCcn=max_ccn,
+            maxLength=max_length,
             ccnFlexLimit=args.ccn_flex_limit,
             lengthFlexLimit=args.length_flex_limit,
             baselineRef=args.baseline_ref,
@@ -690,8 +692,8 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
     print(
         complexity.render_complexity_board(
             findings,
-            max_ccn=args.max_ccn,
-            max_length=args.max_length,
+            max_ccn=max_ccn,
+            max_length=max_length,
         )
     )
     return 1 if findings else 0
@@ -864,7 +866,12 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     if args.emit_json:
         _print_study_json(args.study_action, findings=findings)
         return 1 if findings else 0
-    print(envpolicy.render_env_policy_board(findings))
+    print(
+        envpolicy.render_env_policy_board(
+            findings,
+            allow_marker=resolve_policy(root).environment.allow_marker,
+        )
+    )
     return 1 if findings else 0
 
 

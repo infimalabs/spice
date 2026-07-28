@@ -24,17 +24,13 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.policy import (
-    ENV_ACCESS_FINDING_NAMES,
     ENV_POLICY_ALLOW_MARKER,
-    ENV_POLICY_DEFAULT_NAME_PATTERNS,
-    ENV_POLICY_SELF_PATH_SUFFIX,
 )
 from spice.policyconfig import resolve_policy
 from spice.config.layers import config_string_list, effective_table
 from spice.studies.walk import is_excluded_path
 
 # This module necessarily names the patterns it polices; it is self-waived.
-SELF_PATH_SUFFIX = ENV_POLICY_SELF_PATH_SUFFIX
 ENV_NAME_LEDGER_UNACCOUNTED = "unaccounted"
 ENV_NAME_LEDGER_STALE = "stale"
 _ENV_NAME_LITERAL_PATTERN = r"[A-Z_][A-Z0-9_]*"
@@ -150,14 +146,16 @@ def scan_env_policy(
             rel_path, repo_root=root
         ):
             continue
-        if rel_path.as_posix().endswith(SELF_PATH_SUFFIX):
+        if rel_path.as_posix().endswith(resolved.environment.self_path_suffix):
             continue
         abs_path = root / rel_path
         if not abs_path.exists():
             continue
         access = access_matchers.get(rel_path.suffix, ())
         text = abs_path.read_text(encoding="utf-8", errors="replace")
-        waived_lines = _waived_line_numbers(text)
+        waived_lines = _waived_line_numbers(
+            text, marker=resolved.environment.allow_marker
+        )
         for line_number, line in enumerate(text.splitlines(), start=1):
             if line_number in waived_lines:
                 continue
@@ -311,7 +309,7 @@ def collect_env_name_references(
             rel_path, repo_root=root
         ):
             continue
-        if rel_path.as_posix().endswith(SELF_PATH_SUFFIX):
+        if rel_path.as_posix().endswith(resolved.environment.self_path_suffix):
             continue
         abs_path = root / rel_path
         if not abs_path.exists():
@@ -321,7 +319,11 @@ def collect_env_name_references(
         for line_number, line in enumerate(text.splitlines(), start=1):
             names = set(_literal_env_names_from_access_line(language, line))
             names.update(_literal_env_names_from_declaration_line(line))
-            names.update(_literal_env_names_from_context_line(line))
+            names.update(
+                _literal_env_names_from_context_line(
+                    line, marker=resolved.environment.allow_marker
+                )
+            )
             for matcher in (*watchlist_matchers, *exact_matchers):
                 names.update(match.group("name") for match in matcher.finditer(line))
             for name in sorted(name for name in names if _is_ledger_env_name(name)):
@@ -366,8 +368,10 @@ def _literal_env_names_from_access_line(family: str | None, line: str) -> set[st
     return set()
 
 
-def _literal_env_names_from_context_line(line: str) -> set[str]:
-    if not (_ENV_CONTEXT_PATTERN.search(line) or ENV_POLICY_ALLOW_MARKER in line):
+def _literal_env_names_from_context_line(
+    line: str, *, marker: str = ENV_POLICY_ALLOW_MARKER
+) -> set[str]:
+    if not (_ENV_CONTEXT_PATTERN.search(line) or marker in line):
         return set()
     return {match.group("name") for match in _ENV_CONTEXT_NAME_PATTERN.finditer(line)}
 
@@ -417,17 +421,17 @@ def _shell_env_names_from_access_line(line: str) -> set[str]:
     return names
 
 
-def _waived_line_numbers(text: str) -> set[int]:
+def _waived_line_numbers(
+    text: str, *, marker: str = ENV_POLICY_ALLOW_MARKER
+) -> set[int]:
     lines = text.splitlines()
     marker_lines = {
-        line_number
-        for line_number, line in enumerate(lines, start=1)
-        if ENV_POLICY_ALLOW_MARKER in line
+        line_number for line_number, line in enumerate(lines, start=1) if marker in line
     }
     standalone_marker_lines = {
         line_number
         for line_number, line in enumerate(lines, start=1)
-        if _standalone_waiver_line(line)
+        if _standalone_waiver_line(line, marker=marker)
     }
     waived = set(marker_lines)
     for start, end in _statement_spans(lines):
@@ -438,9 +442,11 @@ def _waived_line_numbers(text: str) -> set[int]:
     return waived
 
 
-def _standalone_waiver_line(line: str) -> bool:
+def _standalone_waiver_line(
+    line: str, *, marker: str = ENV_POLICY_ALLOW_MARKER
+) -> bool:
     stripped = line.strip()
-    return ENV_POLICY_ALLOW_MARKER in stripped and (
+    return marker in stripped and (
         stripped.startswith("#") or stripped.startswith("//")
     )
 
@@ -531,7 +537,9 @@ def env_name_patterns(repo_root: Path) -> list[str]:
     declared = config_string_list(
         effective_table(repo_root, "policy").get("env_name_patterns")
     )
-    patterns: list[str] = list(ENV_POLICY_DEFAULT_NAME_PATTERNS)
+    patterns: list[str] = list(
+        resolve_policy(repo_root).environment.default_name_patterns
+    )
     patterns.extend(pattern for pattern in declared if pattern not in patterns)
     return patterns
 
@@ -596,11 +604,14 @@ def env_access_matchers(
         resolved = resolve_policy(repo_root).env_access
         family_suffixes = resolved.family_suffixes
         default_patterns = resolved.default_patterns
+        finding_names = resolved.finding_names
+    else:
+        finding_names = resolve_policy(repo_root).env_access.finding_names
     by_suffix: dict[str, list[EnvAccessMatcher]] = {}
     for family, patterns in env_access_default_patterns(
         repo_root, default_patterns=default_patterns
     ).items():
-        name = ENV_ACCESS_FINDING_NAMES.get(family, f"{family} env access")
+        name = finding_names.get(family, f"{family} env access")
         family_matchers = [
             EnvAccessMatcher(
                 pattern=_compile_access_pattern(family, pattern), name=name
@@ -632,12 +643,14 @@ def _first_access_name(access: Iterable[EnvAccessMatcher], line: str) -> str | N
     return None
 
 
-def render_env_policy_board(findings: list[EnvPolicyFinding]) -> str:
+def render_env_policy_board(
+    findings: list[EnvPolicyFinding], *, allow_marker: str = ENV_POLICY_ALLOW_MARKER
+) -> str:
     if not findings:
         return "env-policy: ok"
     lines = [
         f"env-policy: {len(findings)} undeclared environment literal(s); "
-        f"add `# {ENV_POLICY_ALLOW_MARKER}` (or move the read behind a "
+        f"add `# {allow_marker}` (or move the read behind a "
         "declared seam)"
     ]
     for finding in findings:

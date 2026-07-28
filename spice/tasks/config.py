@@ -14,7 +14,9 @@ import re
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from spice import defaults
 from spice.errors import SpiceError
@@ -145,6 +147,188 @@ _REPORT_COLUMNS = "id,project,phase,priority,urgency,claim_by,description"
 _REPORT_LABELS = "ID,Project,Phase,Pri,Urg,Claim,Description"
 
 
+@dataclass(frozen=True)
+class ResolvedTaskConfig:
+    base_stems: tuple[str, ...]
+    internal_stems: tuple[str, ...]
+    hidden_stems: tuple[str, ...]
+    oops_hidden_stem: str
+    maxim_proposal_hidden_stem: str
+    approved_phases: tuple[str, ...]
+    phase_slot_count: int
+    default_flow: tuple[str, ...]
+    private_default_flow: tuple[str, ...]
+    oops_default_flow: tuple[str, ...]
+    default_priority: str
+    severities: tuple[str, ...]
+    deferred_wait: str
+    oops_wait_seconds: int
+    allocator_band_width: float
+    allocator_anti_self_review: float
+    priority: dict[str, str]
+    priority_urgency: dict[str, float]
+    taskwarrior_urgency: dict[str, Any]
+    severity_priority: dict[str, str]
+    severity_shorthands: dict[str, str]
+    sla_due_seconds: dict[str, int]
+    claim_ttl_seconds: int
+    claim_context_seconds: int
+    reports: dict[str, tuple[str, str, str]]
+    analytics_commands: tuple[str, ...]
+
+    @property
+    def oops_project(self) -> str:
+        return f".{self.oops_hidden_stem}"
+
+    @property
+    def maxim_proposal_project(self) -> str:
+        return f".{self.maxim_proposal_hidden_stem}"
+
+
+def resolved_task_config(repo_root: Path | None = None) -> ResolvedTaskConfig:
+    from spice.config.layers import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root if repo_root is not None else repo_root_from_cwd()
+    table = _tasks_config_table(root)
+    try:
+        reports = (
+            configured_reports(root) if root is not None else _required_reports(table)
+        )
+        return _resolve_task_config(table, reports=reports)
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
+
+
+def _resolve_task_config(
+    table: dict[str, object],
+    *,
+    reports: dict[str, tuple[str, str, str]] | None = None,
+) -> ResolvedTaskConfig:
+    return ResolvedTaskConfig(
+        base_stems=_required_strings(table, "base_stems"),
+        internal_stems=_required_strings(table, "internal_stems"),
+        hidden_stems=_required_strings(table, "hidden_stems"),
+        oops_hidden_stem=_required_string(table, "oops_hidden_stem"),
+        maxim_proposal_hidden_stem=_required_string(
+            table, "maxim_proposal_hidden_stem"
+        ),
+        approved_phases=_required_strings(table, "approved_phases"),
+        phase_slot_count=_required_positive_int(table, "phase_slot_count"),
+        default_flow=_required_strings(table, "default_flow"),
+        private_default_flow=_required_strings(table, "private_default_flow"),
+        oops_default_flow=_required_strings(table, "oops_default_flow"),
+        default_priority=_required_string(table, "default_priority"),
+        severities=_required_strings(table, "severities"),
+        deferred_wait=_required_string(table, "deferred_wait"),
+        oops_wait_seconds=_required_positive_int(table, "oops_wait_seconds"),
+        allocator_band_width=_required_number(table, "allocator_band_width"),
+        allocator_anti_self_review=_required_number(
+            table, "allocator_anti_self_review"
+        ),
+        priority=_required_string_map(table, "priority"),
+        priority_urgency=_required_number_map(table, "priority_urgency"),
+        taskwarrior_urgency=_required_value_map(table, "taskwarrior_urgency"),
+        severity_priority=_required_string_map(table, "severity_priority"),
+        severity_shorthands=_required_string_map(table, "severity_shorthands"),
+        sla_due_seconds=_required_integer_map(table, "sla_due_seconds"),
+        claim_ttl_seconds=_required_positive_int(table, "claim_ttl_seconds"),
+        claim_context_seconds=_required_positive_int(table, "claim_context_seconds"),
+        reports=reports if reports is not None else _required_reports(table),
+        analytics_commands=_required_strings(
+            _required_table(table, "analytics"), "commands"
+        ),
+    )
+
+
+def _required_table(table: dict[str, object], key: str) -> dict[str, object]:
+    raw = table.get(key)
+    if not isinstance(raw, dict):
+        raise SpiceError(f"[tasks].{key} must be a table")
+    return raw
+
+
+def _required_string(table: dict[str, object], key: str) -> str:
+    raw = table.get(key)
+    if not isinstance(raw, str) or not raw.strip():
+        raise SpiceError(f"[tasks].{key} must be a non-empty string")
+    return raw.strip()
+
+
+def _required_strings(table: dict[str, object], key: str) -> tuple[str, ...]:
+    raw = table.get(key)
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) and item.strip() for item in raw
+    ):
+        raise SpiceError(f"[tasks].{key} must be a list of non-empty strings")
+    return tuple(dict.fromkeys(item.strip() for item in raw))
+
+
+def _required_positive_int(table: dict[str, object], key: str) -> int:
+    raw = table.get(key)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise SpiceError(f"[tasks].{key} must be a positive integer")
+    return raw
+
+
+def _required_number(table: dict[str, object], key: str) -> float:
+    raw = table.get(key)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise SpiceError(f"[tasks].{key} must be numeric")
+    return float(raw)
+
+
+def _required_value_map(table: dict[str, object], key: str) -> dict[str, object]:
+    return {str(name): value for name, value in _required_table(table, key).items()}
+
+
+def _required_string_map(table: dict[str, object], key: str) -> dict[str, str]:
+    raw = _required_value_map(table, key)
+    if not all(isinstance(value, str) for value in raw.values()):
+        raise SpiceError(f"[tasks].{key} values must be strings")
+    return {name: str(value) for name, value in raw.items()}
+
+
+def _required_number_map(table: dict[str, object], key: str) -> dict[str, float]:
+    raw = _required_value_map(table, key)
+    if not all(
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        for value in raw.values()
+    ):
+        raise SpiceError(f"[tasks].{key} values must be numeric")
+    return {name: float(cast(int | float, value)) for name, value in raw.items()}
+
+
+def _required_integer_map(table: dict[str, object], key: str) -> dict[str, int]:
+    raw = _required_value_map(table, key)
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool) for value in raw.values()
+    ):
+        raise SpiceError(f"[tasks].{key} values must be integers")
+    return {name: cast(int, value) for name, value in raw.items()}
+
+
+def _required_reports(
+    table: dict[str, object],
+) -> dict[str, tuple[str, str, str]]:
+    reports: dict[str, tuple[str, str, str]] = {}
+    for name, raw in _required_table(table, "reports").items():
+        if not isinstance(raw, dict) or not all(
+            isinstance(raw.get(key), str) for key in ("description", "filter", "sort")
+        ):
+            raise SpiceError(
+                f"[tasks.reports.{name}] requires string description, filter, and sort"
+            )
+        reports[str(name)] = (
+            str(raw["description"]),
+            str(raw["filter"]),
+            str(raw["sort"]),
+        )
+    return reports
+
+
 def private_project(actor: str) -> str:
     alnum_actor = re.sub(r"[^0-9a-z]", "", actor.lower())
     return f"agent.{alnum_actor}.task"
@@ -156,7 +340,7 @@ def approved_stems() -> tuple[str, ...]:
 
 def _approved_stems(table: dict[str, object]) -> tuple[str, ...]:
     extras = _configured_extra_stems(table)
-    merged: list[str] = list(BASE_APPROVED_STEMS)
+    merged: list[str] = list(_resolve_task_config(table).base_stems)
     for stem in extras:
         if stem not in merged:
             merged.append(stem)
@@ -164,11 +348,14 @@ def _approved_stems(table: dict[str, object]) -> tuple[str, ...]:
 
 
 def assignable_stems() -> tuple[str, ...]:
-    return _assignable_stems(approved_stems())
+    settings = resolved_task_config()
+    return _assignable_stems(approved_stems(), settings.internal_stems)
 
 
-def _assignable_stems(stems: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(stem for stem in stems if stem not in INTERNAL_STEMS)
+def _assignable_stems(
+    stems: tuple[str, ...], internal_stems: tuple[str, ...]
+) -> tuple[str, ...]:
+    return tuple(stem for stem in stems if stem not in internal_stems)
 
 
 def _configured_extra_stems(table: dict[str, object]) -> tuple[str, ...]:
@@ -240,12 +427,10 @@ def _configured_per_stem_flows(
 
 def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
-    from spice.config.layers import effective_table
+    from spice.config.values import layered_table
 
     root = repo_root or repo_root_from_cwd()
-    if root is None:
-        return {}
-    return effective_table(root, "tasks")
+    return layered_table(root, "tasks")
 
 
 def configured_reports(repo_root: Path) -> dict[str, tuple[str, str, str]]:
@@ -325,10 +510,11 @@ def _configured_project_depth(table: dict[str, object], key: str, default: int) 
 
 
 def map_priority(raw: str) -> str:
+    settings = resolved_task_config()
     value = (raw or "").strip()
-    if value.upper() in PRIORITY_URGENCY:
+    if value.upper() in settings.priority_urgency:
         return value.upper()
-    mapped = PRIORITY_MAP.get(value.lower())
+    mapped = settings.priority.get(value.lower())
     if mapped is None:
         raise SpiceError(
             f"invalid priority {raw!r} (use critical/high/medium/low/none or C/H/M/L)"
@@ -337,10 +523,11 @@ def map_priority(raw: str) -> str:
 
 
 def map_severity(raw: str) -> str:
+    settings = resolved_task_config()
     value = (raw or "medium").strip()
-    if value.lower() in SEVERITY_SHORTHANDS:
-        return SEVERITY_SHORTHANDS[value.lower()]
-    if value.lower() in SEVERITIES:
+    if value.lower() in settings.severity_shorthands:
+        return settings.severity_shorthands[value.lower()]
+    if value.lower() in settings.severities:
         return value.lower()
     raise SpiceError(
         f"invalid severity {raw!r} (use critical/high/medium/low or C/H/M/L)"
@@ -530,17 +717,18 @@ def mark_task_backend_changed(
 
 def uda_schema() -> dict[str, dict[str, str]]:
     """Map of UDA name -> dotted-config fragments (type, optional values)."""
-    enum = ",".join(APPROVED_PHASES)
+    settings = resolved_task_config()
+    enum = ",".join(settings.approved_phases)
     schema: dict[str, dict[str, str]] = {}
     schema["incepted"] = {"type": _STRING, "label": "Incepted"}
     schema["priority"] = {
         "type": _STRING,
         "label": "Priority",
-        "values": ",".join((*PRIORITY_URGENCY, "")),
+        "values": ",".join((*settings.priority_urgency, "")),
     }
     schema["phase"] = {"type": _STRING, "label": "Phase", "values": enum}
     schema["phase_i"] = {"type": "numeric", "label": "PhaseIndex"}
-    for i in range(PHASE_SLOT_COUNT):
+    for i in range(settings.phase_slot_count):
         schema[f"phase_{i}"] = {"type": _STRING, "label": f"Phase{i}", "values": enum}
     for name in (*_CLAIM, *_REVIEW, *_TASK_DOCUMENT, *_EVIDENCE):
         schema[name] = {"type": _STRING, "label": name}
@@ -556,6 +744,7 @@ def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> 
     selected_source_root = source_root.resolve() if source_root else repo_root()
     selected_data_dir = data_dir(selected_root)
     selected_taskrc = taskrc_path(selected_root)
+    settings = resolved_task_config(selected_source_root)
     with _bootstrap_lock(selected_root):
         selected_data_dir.mkdir(parents=True, exist_ok=True)
         lines = [
@@ -567,7 +756,8 @@ def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> 
             "position is ranked by the allocator.",
         ]
         lines.extend(
-            f"urgency.{name}={value}" for name, value in TASKWARRIOR_URGENCY.items()
+            f"urgency.{name}={value}"
+            for name, value in settings.taskwarrior_urgency.items()
         )
         lines.append(
             "# spice priority urgency: adjacent tiers stay wider than the "
@@ -575,12 +765,12 @@ def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> 
         )
         lines.extend(
             f"urgency.uda.priority.{priority}.coefficient={coefficient}"
-            for priority, coefficient in PRIORITY_URGENCY.items()
+            for priority, coefficient in settings.priority_urgency.items()
         )
         for name, frag in sorted(uda_schema().items()):
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")
-        lines.extend(_report_lines(selected_source_root))
+        lines.extend(_report_lines(settings))
         atomic_write_text(
             selected_taskrc,
             "\n".join(lines) + "\n",
@@ -596,10 +786,16 @@ def write_taskrc() -> None:
     shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
 
 
-def _report_lines(source_root: Path | None = None) -> list[str]:
+def _report_lines(
+    source: ResolvedTaskConfig | Path | None = None,
+) -> list[str]:
+    resolved = (
+        source
+        if isinstance(source, ResolvedTaskConfig)
+        else resolved_task_config(source)
+    )
     lines: list[str] = []
-    reports = REPORTS if source_root is None else configured_reports(source_root)
-    for name, (desc, filt, sort) in reports.items():
+    for name, (desc, filt, sort) in resolved.reports.items():
         lines.append(f"report.{name}.description={desc}")
         lines.append(f"report.{name}.filter={filt}")
         lines.append(f"report.{name}.columns={_REPORT_COLUMNS}")
@@ -675,7 +871,7 @@ def is_oops_project(project: str) -> bool:
         hidden, segments = _project_parts(project)
     except SpiceError:
         return False
-    return hidden and segments[0] == project_stem(OOPS_PROJECT)
+    return hidden and segments[0] == resolved_task_config().oops_hidden_stem
 
 
 def validate_project(project: str) -> str:
@@ -723,7 +919,7 @@ def validate_manual_creation_project(project: str) -> str:
             f"hidden project stem {stem!r} is reserved for system task creation; "
             f"use an assignable project such as {_project_example()}"
         )
-    if stem in INTERNAL_STEMS:
+    if stem in resolved_task_config().internal_stems:
         if stem != "agent":
             raise SpiceError(
                 f"project stem {stem!r} is reserved for system task creation; "
@@ -776,7 +972,10 @@ def _project_example(
 
 
 def is_internal_or_hidden_project(project: str) -> bool:
-    return is_hidden_project(project) or project_stem(project) in INTERNAL_STEMS
+    return (
+        is_hidden_project(project)
+        or project_stem(project) in resolved_task_config().internal_stems
+    )
 
 
 def task_project_validation_catalog() -> dict[str, object]:
@@ -796,16 +995,19 @@ def task_project_validation_catalog() -> dict[str, object]:
 def _task_project_validation_catalog(
     table: dict[str, object],
 ) -> dict[str, object]:
+    settings = _resolve_task_config(table)
     approved = _approved_stems(table)
-    stems = _assignable_stems(approved)
+    stems = _assignable_stems(approved, settings.internal_stems)
     hidden = _hidden_stems(table, approved)
     flows = _configured_per_stem_flows(table, approved)
     min_depth, max_depth = _project_depth_bounds(table)
     return {
         "approvedStems": list(stems),
+        "internalStems": list(settings.internal_stems),
         "hiddenStems": list(hidden),
-        "approvedPhases": list(APPROVED_PHASES),
-        "defaultFlow": list(DEFAULT_FLOW),
+        "oopsHiddenStem": settings.oops_hidden_stem,
+        "approvedPhases": list(settings.approved_phases),
+        "defaultFlow": list(settings.default_flow),
         "perStemFlows": {stem: list(flow) for stem, flow in sorted(flows.items())},
         "hiddenProjectPrefix": HIDDEN_PROJECT_PREFIX,
         "projectDelimiter": PROJECT_DELIMITER,
@@ -820,37 +1022,41 @@ def _task_project_validation_catalog(
 
 
 def resolve_flow(flow: list[str] | None, project: str | None) -> list[str]:
+    settings = resolved_task_config()
     phases: list[str]
     stem = project_stem(project) if project else ""
     if flow:
         phases = [p.strip() for p in flow if p.strip()]
     elif project and is_hidden_project(project):
         phases = (
-            list(OOPS_DEFAULT_FLOW)
-            if stem == project_stem(OOPS_PROJECT)
-            else list(PRIVATE_DEFAULT_FLOW)
+            list(settings.oops_default_flow)
+            if stem == settings.oops_hidden_stem
+            else list(settings.private_default_flow)
         )
-    elif stem in INTERNAL_STEMS:
-        phases = list(PRIVATE_DEFAULT_FLOW)
+    elif stem in settings.internal_stems:
+        phases = list(settings.private_default_flow)
     else:
         configured_flows = per_stem_flows()
         phases = (
             list(configured_flows[stem])
             if stem in configured_flows
-            else list(DEFAULT_FLOW)
+            else list(settings.default_flow)
         )
-    return _validate_flow_phases(phases)
+    return _validate_flow_phases(phases, settings=settings)
 
 
-def _validate_flow_phases(phases: list[str]) -> list[str]:
+def _validate_flow_phases(
+    phases: list[str], *, settings: ResolvedTaskConfig | None = None
+) -> list[str]:
+    resolved = settings or resolved_task_config()
     if not phases:
         raise SpiceError("flow has no phases")
-    if len(phases) > PHASE_SLOT_COUNT:
-        raise SpiceError(f"flow exceeds {PHASE_SLOT_COUNT} phases: {phases}")
+    if len(phases) > resolved.phase_slot_count:
+        raise SpiceError(f"flow exceeds {resolved.phase_slot_count} phases: {phases}")
     for phase in phases:
-        if phase not in APPROVED_PHASES:
+        if phase not in resolved.approved_phases:
             raise SpiceError(
                 f"phase {phase!r} is not approved "
-                f"(approved: {', '.join(APPROVED_PHASES)})"
+                f"(approved: {', '.join(resolved.approved_phases)})"
             )
     return phases

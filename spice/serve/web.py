@@ -6,7 +6,7 @@ import hashlib
 import html
 import json
 import mimetypes
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
@@ -14,6 +14,7 @@ from typing import Any
 
 from spice import defaults
 from spice.config.layers import SYSTEM_SOURCE, contextualize_config_error, load_config
+from spice.config.values import layered_table
 from spice.config.pyproject import pyproject_table, read_pyproject
 from spice.errors import SpiceError
 from spice.serve.payload.wire import validate_emitter_payload
@@ -28,7 +29,7 @@ VALID_LIFETIMES = defaults.strings("serve", "valid_lifetimes")
 @dataclass(frozen=True)
 class ServeBranding:
     name: str
-    default_lifetime: str = DEFAULT_LIFETIME
+    default_lifetime: str
 
 
 _INDEX_HTML_TEMPLATE = """<!doctype html>
@@ -96,8 +97,11 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
 def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     loaded = load_config(repo_root) if repo_root is not None else None
     raw_serve = (
-        loaded.effective.get("serve", {})
+        layered_table(repo_root, "serve")
         if loaded is not None
+        # Rendering without a repository is the one deliberate packaged-only
+        # consumer: there is no repository layer to resolve, so read the same
+        # installed table that begins every effective chain.
         else defaults.table("serve")
     )
     if not isinstance(raw_serve, Mapping):
@@ -118,13 +122,27 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     project_brand = _string(project.get("name"))
     name = (
         project_brand
-        if brand_source is not None
-        and brand_source.name == SYSTEM_SOURCE
+        if (brand_source is None or brand_source.name == SYSTEM_SOURCE)
         and project_brand
         else configured_brand or DEFAULT_BRAND
     )
     raw_lifetime = _string(serve.get("default_lifetime"))
-    if raw_lifetime not in VALID_LIFETIMES:
+    raw_valid_lifetimes = serve.get("valid_lifetimes")
+    valid_lifetimes = (
+        tuple(raw_valid_lifetimes)
+        if isinstance(raw_valid_lifetimes, Sequence)
+        and not isinstance(raw_valid_lifetimes, (str, bytes))
+        and all(isinstance(item, str) for item in raw_valid_lifetimes)
+        else ()
+    )
+    if not valid_lifetimes:
+        error = SpiceError("[serve] valid_lifetimes must be a non-empty string list")
+        if repo_root is None:
+            raise error
+        raise contextualize_config_error(
+            repo_root, error, "serve", "valid_lifetimes"
+        ) from error
+    if raw_lifetime not in valid_lifetimes:
         error = SpiceError("[serve] default_lifetime must name a valid lifetime")
         if repo_root is None:
             raise error

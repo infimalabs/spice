@@ -10,7 +10,6 @@ from typing import Callable, TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import format_relative_seconds
-from spice.policy import MAGIC_BASELINE_REF
 from spice.policyconfig import ComplexityPolicy, resolve_policy
 from spice.process.groups import run_bounded_process_group
 from spice.sessions.util import clip
@@ -204,6 +203,7 @@ def _collect_dirty_pressure_findings(
             suffixes=resolved.languages.complexity,
             ccn_threshold=complexity_bounds.ccn_flex_limit,
             length_threshold=complexity_bounds.length_flex_limit,
+            baseline_ref=resolved.magic.baseline_ref,
             bounds_for_path=resolved.jittered_complexity_for_path,
         )
     except (OSError, SpiceError) as exc:
@@ -232,6 +232,7 @@ def _scan_dirty_complexity_pressure(
     suffixes: tuple[str, ...],
     ccn_threshold: int,
     length_threshold: int,
+    baseline_ref: str,
     bounds_for_path: Callable[[Path], ComplexityPolicy] | None = None,
 ) -> list[DirtyComplexityRegression]:
     current_paths = [path for path in paths if (repo_root / path).exists()]
@@ -251,6 +252,7 @@ def _scan_dirty_complexity_pressure(
             current_paths,
             repo_root=repo_root,
             temp_root=temp_root,
+            baseline_ref=baseline_ref,
         )
         baseline_records = complexity.collect_complexity_records(
             baseline_paths,
@@ -270,7 +272,11 @@ def _scan_dirty_complexity_pressure(
 
 
 def _materialize_complexity_baseline_paths(
-    paths: list[Path], *, repo_root: Path, temp_root: Path
+    paths: list[Path],
+    *,
+    repo_root: Path,
+    temp_root: Path,
+    baseline_ref: str,
 ) -> list[Path]:
     materialized: list[Path] = []
     for path in paths:
@@ -280,7 +286,7 @@ def _materialize_complexity_baseline_paths(
                 "-C",
                 str(repo_root),
                 "show",
-                f"{MAGIC_BASELINE_REF}:{path.as_posix()}",
+                f"{baseline_ref}:{path.as_posix()}",
             ],
             timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
             phase="briefing-complexity-baseline-git",

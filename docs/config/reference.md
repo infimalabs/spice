@@ -499,7 +499,7 @@ shared PATHPOL matchers.
 | `exclude` | Tracked paths/globs skipped by study walkers. |
 | `generated_paths` | Tracked paths/globs exempt from repo-shape guards. |
 | `test_paths` | Test roots for production/test classification. |
-| `repo_truth_docs` | Doctrine docs checked because they ride in agent context. |
+| `repo_truth.docs` | Doctrine docs checked because they ride in agent context. |
 | `env_name_patterns`, `env_names`, `env_access_gate` | Env literal watchlist, exact manifest, and access-waiver gate. |
 | `reachability_providers` | Extra language-aware dead-code providers. |
 | `csharp_unused_retention` | C# unused-candidate declarations for framework-retained base types, interfaces, and attribute names. |

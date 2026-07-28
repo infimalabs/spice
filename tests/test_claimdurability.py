@@ -9,6 +9,7 @@ longer owns.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from threading import Event, Thread, Timer
 
 import pytest
@@ -57,6 +58,19 @@ def _wait_for_claim_lease_to_expire(handle: str) -> None:
     finally:
         timer.cancel()
     assert identity.resolve(handle)["claim_until"] < tw.now_iso()
+
+
+def _shorten_claim_lease(monkeypatch) -> None:
+    settings = claimstate.config.resolved_task_config()
+    shortened = replace(
+        settings,
+        claim_ttl_seconds=int(SHORT_LEASE_SECONDS),
+    )
+    monkeypatch.setattr(
+        claimstate.config,
+        "resolved_task_config",
+        lambda *_args, **_kwargs: shortened,
+    )
 
 
 def test_supervisor_claim_lease_promotes_only_after_agent_health(tmp_path, monkeypatch):
@@ -147,7 +161,7 @@ def test_restarted_supervisor_names_peer_after_preclaim_quiet_heartbeat(
     # beyond the lease; only the durable witness can identify the lost row.
     lifecycle._renew_supervised_claim(task_repo, ACTOR_A, log_path, reported, {}, held)
     assert held == {}
-    monkeypatch.setattr(claimstate.config, "CLAIM_TTL_SECONDS", SHORT_LEASE_SECONDS)
+    _shorten_claim_lease(monkeypatch)
     ops.claim(handle)
     _wait_for_claim_lease_to_expire(handle)
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
@@ -258,7 +272,7 @@ def test_backend_failure_keeps_exact_witness_until_takeover_is_loud(
     reported: dict[str, str] = {}
     held: dict[str, str] = {}
     real_renew = claimstate.renew_claim
-    monkeypatch.setattr(claimstate.config, "CLAIM_TTL_SECONDS", SHORT_LEASE_SECONDS)
+    _shorten_claim_lease(monkeypatch)
     ops.claim(handle)
     monkeypatch.setattr(
         claimstate,

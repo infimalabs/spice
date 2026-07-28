@@ -25,7 +25,7 @@ from typing import Any
 
 from spice import defaults
 from spice.config.trust import require_repository_config_approval
-from spice.config.values import configured_judge_bin
+from spice.config.values import configured_judge_bin, layered_table
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.mail.ackstate import AckStateRecord, ack_state_records
@@ -59,6 +59,54 @@ DEFAULT_PROMPT_TEMPLATE = "\n".join(DEFAULT_PROMPT_LINES) + "\n"
 
 JudgeBackend = Callable[[str], str]
 SubprocessRunner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+@dataclass(frozen=True)
+class MaximSettings:
+    max_attempts: int
+    parallel_judges: int
+    proposal_min_recurrence: int
+    proposal_draft_max_words: int
+    prompt_lines: tuple[str, ...]
+
+    @property
+    def prompt_template(self) -> str:
+        return "\n".join(self.prompt_lines) + "\n"
+
+
+def resolved_maxim_settings(repo_root: Path | None = None) -> MaximSettings:
+    root = repo_root if repo_root is not None else repo_root_from_cwd()
+    table = layered_table(root, "maxim")
+    try:
+        return MaximSettings(
+            max_attempts=_positive_setting(table, "max_attempts"),
+            parallel_judges=_positive_setting(table, "parallel_judges"),
+            proposal_min_recurrence=_positive_setting(table, "proposal_min_recurrence"),
+            proposal_draft_max_words=_positive_setting(
+                table, "proposal_draft_max_words"
+            ),
+            prompt_lines=_string_list_setting(table, "prompt_lines"),
+        )
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "maxim") from exc
+
+
+def _positive_setting(table: Mapping[str, Any], key: str) -> int:
+    raw = table.get(key)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise SpiceError(f"[maxim] {key} must be a positive integer")
+    return raw
+
+
+def _string_list_setting(table: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    raw = table.get(key)
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) and item for item in raw
+    ):
+        raise SpiceError(f"[maxim] {key} must be a list of non-empty strings")
+    return tuple(raw)
 
 
 @dataclass(frozen=True)
@@ -159,9 +207,12 @@ def maxim_proposal_source_records(
 def maxim_proposal_themes(
     records: Sequence[MaximProposalSourceRecord],
     *,
-    min_recurrence: int = MAXIM_PROPOSAL_MIN_RECURRENCE,
+    min_recurrence: int | None = None,
+    repo_root: Path | None = None,
 ) -> tuple[MaximProposalTheme, ...]:
     """Cluster recurring ACK correction sources into human-reviewed themes."""
+    if min_recurrence is None:
+        min_recurrence = resolved_maxim_settings(repo_root).proposal_min_recurrence
     threshold = max(2, int(min_recurrence))
     prepared = [
         _PreparedProposalSource(record=record, terms=terms)
@@ -190,12 +241,17 @@ def maxim_proposal_drafts(
     themes: Sequence[MaximProposalTheme],
     *,
     existing_bags: Mapping[str, MaximBag] | None = None,
+    repo_root: Path | None = None,
 ) -> tuple[MaximProposalDraft, ...]:
     """Return mergeable TOML draft data for human-reviewed maxim proposals."""
+    settings = resolved_maxim_settings(repo_root)
     trigger_owners = _flatten_bag_keys(existing_bags or packaged_maxim_bags())
     drafts: list[MaximProposalDraft] = []
     for theme in themes:
-        candidate_words = _maxim_proposal_draft_words(theme.recurring_terms)
+        candidate_words = _maxim_proposal_draft_words(
+            theme.recurring_terms,
+            max_words=settings.proposal_draft_max_words,
+        )
         if not candidate_words:
             continue
         bag_name = _maxim_proposal_draft_bag_name(candidate_words, trigger_owners)
@@ -241,9 +297,9 @@ def file_maxim_proposal_tasks(
             f"ack:{draft.source_keys[0]}" if draft.source_keys else None
         )
         handle = create.add_one(
-            title=_maxim_proposal_task_title(draft, limit=create.TASK_TITLE_LIMIT),
+            title=_maxim_proposal_task_title(draft, limit=create.task_title_limit()),
             description=maxim_proposal_task_description(draft),
-            project=task_config.MAXIM_PROPOSAL_PROJECT,
+            project=task_config.resolved_task_config().maxim_proposal_project,
             priority="medium",
             flow=None,
             tags=[],
@@ -268,7 +324,7 @@ def file_maxim_proposal_tasks(
             FiledMaximProposalTask(
                 handle=handle,
                 bag_name=draft.bag_name,
-                project=task_config.MAXIM_PROPOSAL_PROJECT,
+                project=task_config.resolved_task_config().maxim_proposal_project,
             )
         )
     return tuple(filed)
@@ -478,7 +534,9 @@ def _looks_like_ack_key_fragment(token: str) -> bool:
     return token.startswith("t") and token.endswith("z") and token[1:-1].isdigit()
 
 
-def _maxim_proposal_draft_words(candidates: Sequence[str]) -> tuple[str, ...]:
+def _maxim_proposal_draft_words(
+    candidates: Sequence[str], *, max_words: int
+) -> tuple[str, ...]:
     words: list[str] = []
     for candidate in candidates:
         word = _normalize_proposal_draft_trigger(candidate)
@@ -488,7 +546,7 @@ def _maxim_proposal_draft_words(candidates: Sequence[str]) -> tuple[str, ...]:
             continue
         if word not in words:
             words.append(word)
-        if len(words) >= MAXIM_PROPOSAL_DRAFT_MAX_WORDS:
+        if len(words) >= max_words:
             break
     return tuple(words)
 
@@ -954,19 +1012,25 @@ def evaluate_maxim(
     maxim: str,
     statement: str,
     *,
-    template: str = DEFAULT_PROMPT_TEMPLATE,
+    template: str | None = None,
     backend: JudgeBackend = judge_cli_backend,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    max_attempts: int | None = None,
+    repo_root: Path | None = None,
 ) -> MaximVerdict:
     """Adjudicate ``statement`` against ``maxim`` and return the verdict.
 
     A reply that does not collapse to a single YES/NO triggers a retry, up to
     ``max_attempts`` total invocations of ``backend``.
     """
+    settings = resolved_maxim_settings(repo_root)
+    resolved_template = settings.prompt_template if template is None else template
+    resolved_max_attempts = (
+        settings.max_attempts if max_attempts is None else max_attempts
+    )
     attempts: list[str] = []
     prompt = ""
-    for _attempt in range(max(1, max_attempts)):
-        prompt = render_maxim_prompt(maxim, statement, template=template)
+    for _attempt in range(max(1, resolved_max_attempts)):
+        prompt = render_maxim_prompt(maxim, statement, template=resolved_template)
         raw = backend(prompt)
         attempts.append(raw)
         answer = parse_yes_no(raw)
@@ -988,22 +1052,29 @@ def evaluate_maxim_any_violation(
     maxim: str,
     statement: str,
     *,
-    template: str = DEFAULT_PROMPT_TEMPLATE,
+    template: str | None = None,
     backend: JudgeBackend = judge_cli_backend,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    max_attempts: int | None = None,
+    repo_root: Path | None = None,
 ) -> MaximVerdict:
     """Adjudicate with two parallel judges and fail if either disagrees."""
-    with ThreadPoolExecutor(max_workers=PARALLEL_MAXIM_JUDGES) as executor:
+    settings = resolved_maxim_settings(repo_root)
+    resolved_template = settings.prompt_template if template is None else template
+    resolved_max_attempts = (
+        settings.max_attempts if max_attempts is None else max_attempts
+    )
+    with ThreadPoolExecutor(max_workers=settings.parallel_judges) as executor:
         futures = [
             executor.submit(
                 evaluate_maxim,
                 maxim,
                 statement,
-                template=template,
+                template=resolved_template,
                 backend=backend,
-                max_attempts=max_attempts,
+                max_attempts=resolved_max_attempts,
+                repo_root=repo_root,
             )
-            for _ in range(PARALLEL_MAXIM_JUDGES)
+            for _ in range(settings.parallel_judges)
         ]
         verdicts = [future.result() for future in futures]
     attempts = [attempt for verdict in verdicts for attempt in verdict.attempts]

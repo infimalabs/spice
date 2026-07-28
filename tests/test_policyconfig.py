@@ -17,6 +17,8 @@ CUSTOM_HOTSPOT_LIMIT = 7
 CUSTOM_FILE_LOC_FLEX = 15
 CUSTOM_FILE_BYTE_FLEX = 150
 CUSTOM_MAGIC_THRESHOLD = 12
+CUSTOM_MARKDOWN_DEPTH_BASE_CHARS = 7000
+CUSTOM_MARKDOWN_DEPTH_MAX_BOUNDED_CHARS = 15000
 RATIO_FALLBACK_FILE_LOC_FLEX = 20
 RATIO_FALLBACK_FILE_BYTE_FLEX = 200
 RATIO_FALLBACK_CCN_FLEX = 10
@@ -26,6 +28,79 @@ JITTER_STATIC_FLEX = 200
 DEFAULT_REPO_TRUTH_DOC_CHARS = 10_000
 DEFAULT_MARKDOWN_DEPTH_BASE_CHARS = 10_000
 DEFAULT_MARKDOWN_DEPTH_MAX_BOUNDED_CHARS = 30_000
+
+POLICY_OVERRIDE_TOML = """
+[policy.limits]
+file_loc = 10
+file_bytes = 100
+routine_ccn = 5
+routine_length = 8
+commit_message_wrap = 72
+repo_truth_doc_chars = 6000
+
+[policy.flex]
+ratio = 2.0
+jitter_percent = 9
+file_loc = 15
+file_bytes = 150
+routine_ccn = 7
+routine_length = 9
+
+[policy.complexity]
+hotspot_limit = 7
+
+[policy.magic]
+examine_threshold = 12
+baseline_ref = "origin/main"
+
+[policy.debt]
+reachability_test_only = 2
+assertion_free_tests = 3
+
+[policy.repo_truth]
+docs = ["AGENTS.md", "TESTING.md"]
+
+[policy.markdown_depth]
+base_chars = 7000
+max_bounded_chars = 15000
+
+[policy.package]
+boundary_underscore_pattern = '^x+$'
+
+[policy.env]
+allow_marker = "configured env waiver"
+default_name_patterns = ["CUSTOM_[A-Z_]+"]
+self_path_suffix = "tools/env_gate.py"
+
+[policy.languages]
+complexity = [".py"]
+magic = [".py", ".js"]
+env = [".sh"]
+c_grammar = [".c"]
+
+[policy.lockfiles]
+suffixes = [".lockx"]
+names = ["npm-lock.json"]
+
+[policy.file_shape]
+source_suffixes = [".tmpl"]
+generated_patterns = ["generated/**"]
+
+[policy.env_access]
+baseline = "tools/spice/env-policy-baseline.json"
+
+[policy.env_access.family_suffixes]
+python = [".py", ".pyi"]
+
+[policy.env_access.default_patterns]
+python = ['Env\\.read']
+
+[policy.env_access.finding_names]
+python = "configured Python env access"
+
+[policy.commit_message]
+allowed_trailers = ["Task", "Reviewed-By"]
+"""
 
 
 def test_policy_resolver_defaults_match_policy_constants(tmp_path):
@@ -43,6 +118,7 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     assert resolved.limits.routine_length == policy.COMPLEXITY_MAX_LENGTH
     assert resolved.limits.commit_message_wrap == policy.COMMIT_MESSAGE_WRAP_LIMIT
     assert resolved.limits.repo_truth_doc_chars == policy.REPO_TRUTH_DOC_LIMIT
+    assert resolved.flex.jitter_percent == 5
     assert resolved.flex.file_loc == policy.flex_limit(policy.FILE_LOC_LIMIT)
     assert resolved.flex.file_bytes == policy.flex_limit(policy.FILE_BYTE_LIMIT)
     assert resolved.flex.routine_ccn == policy.flex_limit(policy.COMPLEXITY_MAX_CCN)
@@ -54,6 +130,20 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     assert resolved.magic.baseline_ref == policy.MAGIC_BASELINE_REF
     assert resolved.debt.reachability_test_only == policy.REACHABILITY_TEST_ONLY_LIMIT
     assert resolved.debt.assertion_free_tests == policy.ASSERTION_FREE_TEST_LIMIT
+    assert resolved.markdown_depth.base_chars == (
+        policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET
+    )
+    assert resolved.markdown_depth.max_bounded_chars == (
+        policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET
+    )
+    assert resolved.repo_truth_docs == policy.REPO_TRUTH_DOCS
+    assert resolved.boundary_underscore_pattern == policy.BOUNDARY_UNDERSCORE_PATTERN
+    assert resolved.environment.allow_marker == policy.ENV_POLICY_ALLOW_MARKER
+    assert (
+        resolved.environment.default_name_patterns
+        == policy.ENV_POLICY_DEFAULT_NAME_PATTERNS
+    )
+    assert resolved.environment.self_path_suffix == policy.ENV_POLICY_SELF_PATH_SUFFIX
     assert resolved.languages.complexity == policy.COMPLEXITY_SUFFIXES
     assert resolved.languages.magic == policy.MAGIC_SUFFIXES
     assert resolved.languages.env == policy.ENV_SUFFIXES
@@ -69,6 +159,7 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     )
     assert resolved.env_access.family_suffixes == policy.ENV_ACCESS_FAMILY_SUFFIXES
     assert resolved.env_access.default_patterns == policy.ENV_ACCESS_DEFAULT_PATTERNS
+    assert resolved.env_access.finding_names == policy.ENV_ACCESS_FINDING_NAMES
     assert resolved.env_access.baseline is None
     assert resolved.commit_message.wrap_limit == policy.COMMIT_MESSAGE_WRAP_LIMIT
     assert (
@@ -137,62 +228,7 @@ def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
 
 
 def test_policy_resolver_applies_each_bound_override(tmp_path):
-    _write_repository_config(
-        tmp_path,
-        """
-        [policy.limits]
-        file_loc = 10
-        file_bytes = 100
-        routine_ccn = 5
-        routine_length = 8
-        commit_message_wrap = 72
-        repo_truth_doc_chars = 6000
-
-        [policy.flex]
-        ratio = 2.0
-        file_loc = 15
-        file_bytes = 150
-        routine_ccn = 7
-        routine_length = 9
-
-        [policy.complexity]
-        hotspot_limit = 7
-
-        [policy.magic]
-        examine_threshold = 12
-        baseline_ref = "origin/main"
-
-        [policy.debt]
-        reachability_test_only = 2
-        assertion_free_tests = 3
-
-        [policy.languages]
-        complexity = [".py"]
-        magic = [".py", ".js"]
-        env = [".sh"]
-        c_grammar = [".c"]
-
-        [policy.lockfiles]
-        suffixes = [".lockx"]
-        names = ["npm-lock.json"]
-
-        [policy.file_shape]
-        source_suffixes = [".tmpl"]
-        generated_patterns = ["generated/**"]
-
-        [policy.env_access]
-        baseline = "tools/spice/env-policy-baseline.json"
-
-        [policy.env_access.family_suffixes]
-        python = [".py", ".pyi"]
-
-        [policy.env_access.default_patterns]
-        python = ['Env\\.read']
-
-        [policy.commit_message]
-        allowed_trailers = ["Task", "Reviewed-By"]
-        """,
-    )
+    _write_repository_config(tmp_path, POLICY_OVERRIDE_TOML)
 
     resolved = resolve_policy(tmp_path)
 
@@ -203,6 +239,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.limits.commit_message_wrap == CUSTOM_COMMIT_MESSAGE_WRAP
     assert resolved.limits.repo_truth_doc_chars == CUSTOM_REPO_TRUTH_DOC_CHARS
     assert resolved.flex.ratio == 2.0
+    assert resolved.flex.jitter_percent == 9
     assert resolved.file_shape.line_flex_limit == CUSTOM_FILE_LOC_FLEX
     assert resolved.file_shape.byte_flex_limit == CUSTOM_FILE_BYTE_FLEX
     assert resolved.complexity.ccn_flex_limit == 7
@@ -212,6 +249,16 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.magic.baseline_ref == "origin/main"
     assert resolved.debt.reachability_test_only == 2
     assert resolved.debt.assertion_free_tests == 3
+    assert resolved.repo_truth_docs == ("AGENTS.md", "TESTING.md")
+    assert resolved.markdown_depth.base_chars == CUSTOM_MARKDOWN_DEPTH_BASE_CHARS
+    assert (
+        resolved.markdown_depth.max_bounded_chars
+        == CUSTOM_MARKDOWN_DEPTH_MAX_BOUNDED_CHARS
+    )
+    assert resolved.boundary_underscore_pattern == "^x+$"
+    assert resolved.environment.allow_marker == "configured env waiver"
+    assert resolved.environment.default_name_patterns == ("CUSTOM_[A-Z_]+",)
+    assert resolved.environment.self_path_suffix == "tools/env_gate.py"
     assert resolved.languages.complexity == (".py",)
     assert resolved.languages.magic == (".py", ".js")
     assert resolved.languages.env == (".sh",)
@@ -225,6 +272,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         *policy.ENV_ACCESS_DEFAULT_PATTERNS["python"],
         "Env\\.read",
     )
+    assert resolved.env_access.finding_names["python"] == "configured Python env access"
     assert resolved.env_access.baseline == "tools/spice/env-policy-baseline.json"
     assert resolved.commit_message.wrap_limit == CUSTOM_COMMIT_MESSAGE_WRAP
     assert resolved.commit_message.allowed_trailers == frozenset(
@@ -342,7 +390,7 @@ def test_config_reference_mentions_tracked_policy_keys():
         "exclude",
         "generated_paths",
         "test_paths",
-        "repo_truth_docs",
+        "repo_truth.docs",
         "env_name_patterns",
         "env_names",
         "env_access_gate",

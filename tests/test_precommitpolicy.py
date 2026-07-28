@@ -327,7 +327,7 @@ def test_default_repo_truth_docs_apply_without_configuration(tmp_path):
 
 def test_declared_repo_truth_docs_override_the_default(tmp_path):
     (tmp_path / "spice.toml").write_text(
-        '[policy]\nrepo_truth_docs = ["AGENTS.md", "TESTING.md"]\n',
+        '[policy.repo_truth]\ndocs = ["AGENTS.md", "TESTING.md"]\n',
         encoding="utf-8",
     )
     assert repo_truth_docs(tmp_path) == ["AGENTS.md", "TESTING.md"]
@@ -482,8 +482,8 @@ def test_file_shape_guard_leaves_tracked_markdown_to_repo_doc_budget(tmp_path):
 
 def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
     (tmp_path / "spice.toml").write_text(
-        "[policy]\n"
-        'repo_truth_docs = ["AGENTS.md", "docs/STRICT.md", "wide/WIDE.md", "skip/SKIP.md"]\n'
+        "[policy.repo_truth]\n"
+        'docs = ["AGENTS.md", "docs/STRICT.md", "wide/WIDE.md", "skip/SKIP.md"]\n'
         "\n"
         "[policy.limits]\n"
         "repo_truth_doc_chars = 20\n"

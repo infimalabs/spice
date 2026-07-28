@@ -21,7 +21,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
+from spice.policyconfig import resolve_policy
 from spice.config.layers import config_string_list, effective_table
 from spice.pathmatch import matches_repo_path
 from spice.config.pyproject import read_pyproject
@@ -31,7 +31,6 @@ from spice.studies.walk import (
     is_test_path,
 )
 
-BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)
 # Generic continuation shards: a split must name the seam, not number it.
 GENERIC_SPLIT_RES = (
     re.compile(r"\.part\d+\.py$", re.IGNORECASE),
@@ -336,6 +335,9 @@ def namespace_policy_error(repo_root: Path) -> str:
 
 def path_shape_errors(repo_root: Path) -> list[str]:
     patterns = generated_path_patterns(repo_root)
+    boundary_underscore_re = re.compile(
+        resolve_policy(repo_root).boundary_underscore_pattern
+    )
     offenders: list[str] = []
     scan_roots = dedupe_resolved_paths(
         [*configured_package_roots(repo_root), *configured_test_roots(repo_root)]
@@ -348,14 +350,14 @@ def path_shape_errors(repo_root: Path) -> list[str]:
             if is_generated_path(relative, patterns):
                 continue
             if path.is_dir():
-                if not BOUNDARY_UNDERSCORE_RE.fullmatch(path.name):
+                if not boundary_underscore_re.fullmatch(path.name):
                     offenders.append(f"{relative}: directory name shape")
                 continue
             if path.suffix != ".py":
                 continue
             if path.name in ALLOWED_NON_SHAPE_FILES:
                 continue
-            if not _has_module_shape(path, repo_root):
+            if not _has_module_shape(path, repo_root, boundary_underscore_re):
                 offenders.append(f"{relative}: file name shape")
                 continue
             if any(pattern.search(path.name) for pattern in GENERIC_SPLIT_RES):
@@ -371,14 +373,16 @@ def path_shape_errors(repo_root: Path) -> list[str]:
     return offenders
 
 
-def _has_module_shape(path: Path, repo_root: Path) -> bool:
+def _has_module_shape(
+    path: Path, repo_root: Path, boundary_underscore_re: re.Pattern[str]
+) -> bool:
     # Test modules carry the pytest-mandated `test_` prefix; the boundary
     # shape applies to what the module is actually named after it.
     if is_test_path(path, repo_root):
         return path.stem.startswith("test_") and bool(
-            BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem.removeprefix("test_"))
+            boundary_underscore_re.fullmatch(path.stem.removeprefix("test_"))
         )
-    return bool(BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem))
+    return bool(boundary_underscore_re.fullmatch(path.stem))
 
 
 def _is_residue_path(path: Path) -> bool:
@@ -480,6 +484,9 @@ def _name_cluster_candidates(
 
 def name_cluster_errors(repo_root: Path) -> list[str]:
     patterns = generated_path_patterns(repo_root)
+    boundary_underscore_re = re.compile(
+        resolve_policy(repo_root).boundary_underscore_pattern
+    )
     offenders: list[str] = []
     threshold = name_cluster_threshold(repo_root)
     for root in configured_package_roots(repo_root):
@@ -491,7 +498,7 @@ def name_cluster_errors(repo_root: Path) -> list[str]:
                 continue
             if is_generated_path(path.relative_to(repo_root).as_posix(), patterns):
                 continue
-            if not BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem):
+            if not boundary_underscore_re.fullmatch(path.stem):
                 continue
             modules_by_directory.setdefault(path.parent, []).append(path)
         for directory, modules in sorted(modules_by_directory.items()):

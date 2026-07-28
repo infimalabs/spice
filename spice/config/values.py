@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import math
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from spice import defaults
 from spice.config.layers import (
+    SYSTEM_SOURCE,
     contextualize_config_error,
     effective_mapping,
     load_config,
@@ -24,7 +25,7 @@ SAY_BACKEND_CHOICES = defaults.strings("say", "backend_choices")
 DEFAULT_SAY_BACKEND = defaults.string("say", "backend")
 SAY_COMMAND_KEY = "command"
 SAY_CONTENT_TYPE_KEY = "content_type"
-DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_type")
+DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", SAY_CONTENT_TYPE_KEY)
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
@@ -33,7 +34,7 @@ SAY_TIMEOUT_SECONDS_KEY = "timeout_seconds"
 # (plus render overhead) so legitimately-long messages are never clipped, while
 # still bounding a wedged speech process instead of blocking forever. A repo or
 # worktree ``say.timeout_seconds`` override tunes it through the accessor below.
-DEFAULT_SAY_TIMEOUT_SECONDS = 300.0
+DEFAULT_SAY_TIMEOUT_SECONDS = defaults.number("say", SAY_TIMEOUT_SECONDS_KEY)
 SAY_MUTABLE_KEYS = (
     SAY_BACKEND_KEY,
     SAY_COMMAND_KEY,
@@ -61,6 +62,7 @@ RTK_KEY = "rtk"
 RTK_EXECUTABLE_KEY = "executable"
 DEFAULT_RTK_EXECUTABLE = defaults.string(RTK_KEY, RTK_EXECUTABLE_KEY)
 _CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
+_PACKAGED_VALUES = defaults.packaged_values()
 
 
 @dataclass(frozen=True)
@@ -137,7 +139,9 @@ SCALAR_SCHEMA: dict[tuple[str, str], ScalarPolicy] = {
     (SAY_KEY, SAY_CONTENT_TYPE_KEY): ScalarPolicy(
         _coerce_text, DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
     ),
-    (SAY_KEY, SAY_WORDS_PER_MINUTE_KEY): ScalarPolicy(_coerce_positive_int),
+    (SAY_KEY, SAY_WORDS_PER_MINUTE_KEY): ScalarPolicy(
+        _coerce_positive_int, DEFAULT_SAY_WORDS_PER_MINUTE
+    ),
     (SAY_KEY, SAY_TIMEOUT_SECONDS_KEY): ScalarPolicy(
         _coerce_positive_seconds, DEFAULT_SAY_TIMEOUT_SECONDS
     ),
@@ -172,7 +176,7 @@ def _root_or_current(repo_root: Path | None) -> Path | None:
 
 
 def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
-    raw = effective_mapping(root).get(key)
+    raw = layered_mapping(root).get(key)
     return raw if isinstance(raw, dict) else {}
 
 
@@ -180,12 +184,136 @@ def _configured_value(root: Path | None, section: str, key: str) -> Any:
     return _effective_section(root, section).get(key)
 
 
+def _configured_choice(
+    repo_root: Path | None,
+    section: str,
+    key: str,
+    *,
+    default: str,
+    choices: tuple[str, ...],
+) -> str:
+    root = _root_or_current(repo_root)
+    policy = ScalarPolicy(_coerce_choice, default, choices)
+    path = (section, key)
+    try:
+        return policy.coerce(
+            _configured_value(root, section, key),
+            policy,
+            path,
+        )
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, *path) from exc
+
+
+def layered_value(repo_root: Path | None, *path: str) -> Any:
+    """Resolve one required packaged key through the effective layer chain.
+
+    The immutable installed snapshot remains the base even when a caller
+    redirects the system layer to a deliberately partial compatibility
+    fixture. Effective configuration replaces that base wherever it supplies
+    a value.
+    """
+    current: Any = layered_mapping(repo_root)
+    for part in path:
+        if not isinstance(current, Mapping) or part not in current:
+            error = SpiceError(f"configuration is missing {'.'.join(path)}")
+            root = _root_or_current(repo_root)
+            if root is None:
+                raise error
+            raise contextualize_config_error(root, error, *path) from error
+        current = current[part]
+    return current
+
+
+def layered_mapping(repo_root: Path | None = None) -> dict[str, Any]:
+    """Return packaged defaults recursively overlaid by effective config."""
+    root = _root_or_current(repo_root)
+    return _overlay_mapping(_PACKAGED_VALUES, effective_mapping(root))
+
+
+def layered_table(repo_root: Path | None, *path: str) -> dict[str, Any]:
+    raw = layered_value(repo_root, *path)
+    if isinstance(raw, dict):
+        return raw
+    raise _layered_type_error(repo_root, path, "a table")
+
+
+def _overlay_mapping(
+    base: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
+    merged = {str(key): _mutable_config_value(value) for key, value in base.items()}
+    for key, value in override.items():
+        base_value = base.get(key)
+        merged[str(key)] = (
+            _overlay_mapping(base_value, value)
+            if isinstance(base_value, Mapping) and isinstance(value, Mapping)
+            else _mutable_config_value(value)
+        )
+    return merged
+
+
+def _mutable_config_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _mutable_config_value(child) for key, child in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_mutable_config_value(child) for child in value]
+    return value
+
+
+def layered_string(repo_root: Path | None, *path: str) -> str:
+    raw = layered_value(repo_root, *path)
+    if isinstance(raw, str):
+        return raw
+    raise _layered_type_error(repo_root, path, "a string")
+
+
+def layered_integer(repo_root: Path | None, *path: str) -> int:
+    raw = layered_value(repo_root, *path)
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return raw
+    raise _layered_type_error(repo_root, path, "an integer")
+
+
+def layered_number(repo_root: Path | None, *path: str) -> float:
+    raw = layered_value(repo_root, *path)
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw)
+    raise _layered_type_error(repo_root, path, "numeric")
+
+
+def layered_strings(repo_root: Path | None, *path: str) -> tuple[str, ...]:
+    raw = layered_value(repo_root, *path)
+    if (
+        isinstance(raw, Sequence)
+        and not isinstance(raw, (str, bytes))
+        and all(isinstance(item, str) for item in raw)
+    ):
+        return tuple(raw)
+    raise _layered_type_error(repo_root, path, "a list of strings")
+
+
+def _layered_type_error(
+    repo_root: Path | None, path: tuple[str, ...], expected: str
+) -> SpiceError:
+    root = _root_or_current(repo_root)
+    error = SpiceError(f"configuration {'.'.join(path)} must be {expected}")
+    return error if root is None else contextualize_config_error(root, error, *path)
+
+
 def configured_say_voice(repo_root: Path | None = None) -> str | None:
     return _scalar(SAY_KEY, SAY_VOICE_KEY, repo_root)
 
 
 def configured_say_backend(repo_root: Path | None = None) -> str:
-    return _scalar(SAY_KEY, SAY_BACKEND_KEY, repo_root)
+    return _configured_choice(
+        repo_root,
+        SAY_KEY,
+        SAY_BACKEND_KEY,
+        default=DEFAULT_SAY_BACKEND,
+        choices=layered_strings(repo_root, SAY_KEY, "backend_choices"),
+    )
 
 
 def configured_say_command(repo_root: Path | None = None) -> str:
@@ -196,8 +324,8 @@ def configured_say_content_type(repo_root: Path | None = None) -> str:
     return _scalar(SAY_KEY, SAY_CONTENT_TYPE_KEY, repo_root)
 
 
-def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None:
-    return _scalar(SAY_KEY, SAY_WORDS_PER_MINUTE_KEY, repo_root)
+def configured_say_words_per_minute(repo_root: Path | None = None) -> int:
+    return int(_scalar(SAY_KEY, SAY_WORDS_PER_MINUTE_KEY, repo_root))
 
 
 def configured_say_timeout(repo_root: Path | None = None) -> float:
@@ -210,12 +338,26 @@ def configured_say_timeout(repo_root: Path | None = None) -> float:
 
 
 def configured_agent_personality(repo_root: Path | None = None) -> str:
-    return _scalar(AGENT_KEY, AGENT_PERSONALITY_KEY, repo_root)
+    return _configured_choice(
+        repo_root,
+        AGENT_KEY,
+        AGENT_PERSONALITY_KEY,
+        default=DEFAULT_AGENT_PERSONALITY,
+        choices=layered_strings(repo_root, AGENT_KEY, "personality_choices"),
+    )
 
 
 def configured_agent_model(repo_root: Path | None = None) -> str:
     """Agent launch model from the canonical layered configuration."""
     return _scalar(AGENT_KEY, AGENT_MODEL_KEY, repo_root)
+
+
+def configured_agent_model_for_driver(repo_root: Path | None, driver_name: str) -> str:
+    """Resolve a launch model, including a driver's packaged model key."""
+    configured = configured_agent_model(repo_root)
+    if not configured and driver_name == "claude":
+        return layered_string(repo_root, AGENT_KEY, "claude", "default_model")
+    return configured
 
 
 def configured_agent_effort(repo_root: Path | None = None) -> str:
@@ -252,9 +394,10 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
     from spice.agent.driver import driver_for
 
     driver = driver_for(repo_root)
+    configured_model = configured_agent_model_for_driver(repo_root, driver.name)
     return {
         AGENT_DRIVER_KEY: driver.name,
-        AGENT_MODEL_KEY: driver.resolve_model(configured_agent_model(repo_root)),
+        AGENT_MODEL_KEY: driver.resolve_model(configured_model),
         AGENT_EFFORT_KEY: (
             configured_agent_effort(repo_root) or driver.default_reasoning_effort
         ),
@@ -274,15 +417,51 @@ def default_judge_bin() -> str:
 def configured_judge_bin(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     raw = str(_configured_value(root, JUDGE_KEY, JUDGE_BIN_KEY) or "").strip()
-    if raw == DEFAULT_JUDGE_BIN and sys.platform != "darwin":
-        return PORTABLE_JUDGE_BIN
+    portable = layered_string(repo_root, JUDGE_KEY, "portable_bin")
+    source = load_config(root).source_for((JUDGE_KEY, JUDGE_BIN_KEY)) if root else None
+    if sys.platform != "darwin" and (source is None or source.name == SYSTEM_SOURCE):
+        return portable
     return raw or default_judge_bin()
+
+
+def configured_judge_model(repo_root: Path | None = None) -> str:
+    return layered_string(repo_root, JUDGE_KEY, "model")
+
+
+def configured_judge_model_command(repo_root: Path | None = None) -> tuple[str, ...]:
+    return layered_strings(repo_root, JUDGE_KEY, "model_command")
+
+
+def configured_judge_timeout(repo_root: Path | None = None) -> float:
+    return layered_number(repo_root, JUDGE_KEY, "timeout_seconds")
+
+
+def configured_playwright_mcp(
+    repo_root: Path | None = None,
+) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        layered_string(repo_root, AGENT_KEY, "playwright_mcp", "server_name"),
+        layered_string(repo_root, AGENT_KEY, "playwright_mcp", "command"),
+        layered_strings(repo_root, AGENT_KEY, "playwright_mcp", "args"),
+    )
+
+
+def configured_claude_auto_compact_window(repo_root: Path | None = None) -> int:
+    return layered_integer(repo_root, AGENT_KEY, "claude", "auto_compact_window_tokens")
+
+
+def configured_serve_host(repo_root: Path | None = None) -> str:
+    return layered_string(repo_root, "serve", "host")
+
+
+def configured_serve_port(repo_root: Path | None = None) -> int:
+    return layered_integer(repo_root, "serve", "port")
 
 
 def configured_rtk_executable(repo_root: Path | None = None) -> str:
     """Return the exact layered RTK executable identity without probing it."""
     root = _root_or_current(repo_root)
-    section = effective_mapping(root).get(RTK_KEY)
+    section = layered_mapping(root).get(RTK_KEY)
     if not isinstance(section, Mapping):
         raise _rtk_config_error(
             root,
@@ -350,11 +529,8 @@ def say_command_args(
     if voice:
         args.extend(["-v", voice])
     words_per_minute = configured_say_words_per_minute(repo_root)
-    if words_per_minute is None and rate_multiplier != 1.0:
-        words_per_minute = DEFAULT_SAY_WORDS_PER_MINUTE
-    if words_per_minute is not None:
-        effective = scale_say_words_per_minute(words_per_minute, rate_multiplier)
-        args.extend(["-r", str(effective)])
+    effective = scale_say_words_per_minute(words_per_minute, rate_multiplier)
+    args.extend(["-r", str(effective)])
     return args
 
 
@@ -370,7 +546,7 @@ def config_overview(repo_root: Path) -> dict[str, Any]:
             }
             for layer in loaded.layers
         },
-        "effective": _json_value(loaded.effective),
+        "effective": _json_value(layered_mapping(repo_root)),
         "provenance": {
             ".".join(path): {
                 "scope": layer.name,
