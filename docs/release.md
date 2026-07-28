@@ -97,7 +97,11 @@ ready-made collapsed `<details>` section. Fold the changes into a short set of
 human-readable highlights, delete the banner and placeholder, and keep the
 generated details section intact. Task-level commit SHAs are deliberately left
 bare so the GitHub release page renders them as repository commit links. A
-release that still shows the draft banner was shipped uncurated.
+release that still shows the draft banner was shipped uncurated. Publication
+compares the complete candidate file byte-for-byte with a freshly generated
+draft from the exact release commit and refuses an exact match, naming the
+untouched Highlights placeholder. Pass the curated file with `--notes-file`;
+omitting it selects the untouched generated draft and therefore refuses.
 
 Bare `spice release notes` is state-aware: before `prepare` it labels the draft
 `unreleased`; after the bump commit it recognizes the untagged current version
