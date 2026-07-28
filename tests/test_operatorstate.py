@@ -126,6 +126,70 @@ def test_clone_shipping_each_withdrawn_path_never_honors_either(tmp_path):
     assert not operator_state_path(clone, INITIALIZATION_RECEIPT_PATH).exists()
 
 
+def test_clone_shipping_config_through_tracked_ancestor_symlink_refuses(tmp_path):
+    source = _init_repo(tmp_path / "source")
+    payload_text = 'agent.model = "shipped-through-parent-symlink"\n'
+    _write(source / "payload" / "spice.toml", payload_text)
+    (source / ".spice").mkdir()
+    (source / ".spice" / "config").symlink_to(
+        "../payload",
+        target_is_directory=True,
+    )
+    _git(source, "add", ".spice/config", "payload/spice.toml")
+    _git(source, "commit", "-m", "ship redirected worktree config")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(source), str(clone)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = clone / "payload" / "spice.toml"
+    canonical = operator_state_path(clone, WORKTREE_CONFIG_PATH)
+
+    with pytest.raises(
+        SpiceError,
+        match=rf"worktree configuration path .*withdrawn in "
+        rf"{OPERATOR_STATE_RELOCATION_RELEASE}.*ancestor .* is a symlink",
+    ):
+        layers.load_config(clone)
+
+    assert (clone / ".spice" / "config").is_symlink()
+    assert payload.read_text(encoding="utf-8") == payload_text
+    assert not canonical.exists()
+
+
+def test_clone_shipping_receipt_through_tracked_ancestor_symlink_refuses(tmp_path):
+    source = _init_repo(tmp_path / "source")
+    payload_bytes = b'{"repository": "shipped-through-parent-symlink"}\n'
+    payload = source / "payload" / "init-receipt.json"
+    payload.parent.mkdir()
+    payload.write_bytes(payload_bytes)
+    (source / ".spice").symlink_to("payload", target_is_directory=True)
+    _git(source, "add", ".spice", "payload/init-receipt.json")
+    _git(source, "commit", "-m", "ship redirected initialization receipt")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(source), str(clone)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    cloned_payload = clone / "payload" / "init-receipt.json"
+    canonical = operator_state_path(clone, INITIALIZATION_RECEIPT_PATH)
+
+    with pytest.raises(
+        SpiceError,
+        match=rf"initialization receipt path .*withdrawn in "
+        rf"{OPERATOR_STATE_RELOCATION_RELEASE}.*ancestor .* is a symlink",
+    ):
+        load_initialization_receipt(clone)
+
+    assert (clone / ".spice").is_symlink()
+    assert cloned_payload.read_bytes() == payload_bytes
+    assert not canonical.exists()
+
+
 def test_operator_state_paths_are_distinct_for_linked_worktrees(tmp_path):
     primary = _init_repo(tmp_path / "primary")
     (primary / "README.md").write_text("linked\n", encoding="utf-8")
