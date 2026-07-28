@@ -10,7 +10,7 @@ from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RtkHealth
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
-from spice.paths import shared_state_root, state_dir, worktree_state_root
+from spice.paths import shared_state_root, worktree_state_root
 from spice.studies.walk import staged_paths, tracked_paths
 import pytest
 
@@ -24,12 +24,12 @@ def test_doctor_renders_supported_state_roots_for_linked_worktrees(tmp_path):
     peer = doctor.DoctorReport(repo_root=linked, checks=[], fixes=[]).render()
 
     assert _state_root_lines(primary) == [
-        f"worktree_config_state_root={state_dir(repo)}",
+        f"worktree_config_state_root={worktree_state_root(repo) / 'config'}",
         f"shared_state_root={shared_state_root(repo)}",
         f"worktree_state_root={worktree_state_root(repo)}",
     ]
     assert _state_root_lines(peer) == [
-        f"worktree_config_state_root={state_dir(linked)}",
+        f"worktree_config_state_root={worktree_state_root(linked) / 'config'}",
         f"shared_state_root={shared_state_root(linked)}",
         f"worktree_state_root={worktree_state_root(linked)}",
     ]
@@ -531,6 +531,7 @@ def test_doctor_wrapper_seam_check_requires_dev_pytest_argv(tmp_path):
 
 def _wrapper_repo(repo: Path, pytest_argv: str) -> Path:
     repo.mkdir()
+    _run(repo, "git", "init", "-b", "main")
     (repo / "spice.toml").write_text(
         "[agent]\n"
         'wrappers = ["spice-dev"]\n'
@@ -824,6 +825,7 @@ def _run(repo: Path, *args: str) -> None:
 
 
 def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monkeypatch):
+    _run(tmp_path, "git", "init", "-b", "main")
     real_find_tool = doctor.find_tool
     monkeypatch.setattr(
         doctor,
@@ -894,6 +896,7 @@ def test_doctor_render_reports_attention_posture_when_required_check_fails(tmp_p
 
 
 def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
+    _run(tmp_path, "git", "init", "-b", "main")
     edit.set_scope_section(
         tmp_path,
         layers.WORKTREE_SOURCE,

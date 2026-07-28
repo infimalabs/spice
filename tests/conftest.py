@@ -20,6 +20,7 @@ import gc
 import json
 import os
 import sqlite3
+import subprocess
 import threading
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -37,6 +38,19 @@ SQLITE_LIFECYCLE_AUDIT_ENV = "SPICE_SQLITE_LIFECYCLE_AUDIT"  # env-policy: allow
 _counts_lock = threading.Lock()
 _counts = {"opened": 0, "closed": 0}
 _real_connect = sqlite3.connect
+
+
+@pytest.fixture
+def git_worktree_tmp_path(tmp_path):
+    """Make the standard temporary directory a real empty Git worktree."""
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return tmp_path
 
 
 class _AuditedConnection(sqlite3.Connection):

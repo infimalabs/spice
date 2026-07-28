@@ -1,8 +1,9 @@
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from spice.config import layers
+from spice.config import edit, layers
 from spice.errors import SpiceError
 from spice.scopes import (
     MAXIM_SCOPES,
@@ -286,6 +287,7 @@ def test_malformed_selector_uses_the_same_consumer_diagnostic(raw, detail):
 def test_scopes_inline_leaf_replaces_completely_across_three_layers(
     tmp_path, monkeypatch
 ):
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
     system_root = tmp_path / "runtime"
     system_root.mkdir()
     monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
@@ -299,7 +301,7 @@ def test_scopes_inline_leaf_replaces_completely_across_three_layers(
         "[policy.pre_commit_builtins.formatters]\n"
         'scopes = { paths = ["repository"], models = ["gpt"] }\n',
     )
-    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    worktree = edit.worktree_config_path(tmp_path)
     _write(
         worktree,
         "[policy.pre_commit_builtins.formatters]\n"

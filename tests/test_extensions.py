@@ -21,6 +21,8 @@ from spice.extensions import (
 )
 from tests.test_extensionhelpers import build_fixture_distribution, build_fixture_wheel
 
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
+
 
 def test_extension_entry_points_query_fixture_wheel_groups_without_importing(
     tmp_path,

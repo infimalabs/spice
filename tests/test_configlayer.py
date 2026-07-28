@@ -5,8 +5,10 @@ from types import MappingProxyType
 
 import pytest
 
-from spice.config import layers
+from spice.config import edit, layers
 from spice.errors import SpiceError
+
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 
 @pytest.mark.parametrize("scope", layers.CONFIG_SCOPE_NAMES)
@@ -25,7 +27,7 @@ def test_each_configuration_layer_can_win_independently(tmp_path, monkeypatch, s
     elif scope == layers.WORKTREE_SOURCE:
         expected_model = "worktree-only"
         _write(
-            tmp_path / ".spice" / "config" / "spice.toml",
+            edit.worktree_config_path(tmp_path),
             f'agent.model = "{expected_model}"\n',
         )
 
@@ -43,7 +45,7 @@ def test_parse_error_names_the_exact_layer_and_path(tmp_path, monkeypatch, scope
     paths = {
         layers.SYSTEM_SOURCE: system_root / "spice.toml",
         layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
-        layers.WORKTREE_SOURCE: tmp_path / ".spice" / "config" / "spice.toml",
+        layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
     }
     _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
     _write(paths[scope], "broken = [\n")
@@ -149,7 +151,7 @@ def test_unchanged_layers_parse_once_and_reload_after_source_revision(
     source_paths = [
         system_path,
         repository_path,
-        tmp_path / ".spice" / "config" / "spice.toml",
+        edit.worktree_config_path(tmp_path),
     ]
 
     assert models == ["first"] * repeats + ["second"]
@@ -235,7 +237,7 @@ def test_unknown_key_names_the_exact_layer_and_suggests_nearest_key(
     paths = {
         layers.SYSTEM_SOURCE: system_root / "spice.toml",
         layers.REPOSITORY_SOURCE: tmp_path / "spice.toml",
-        layers.WORKTREE_SOURCE: tmp_path / ".spice" / "config" / "spice.toml",
+        layers.WORKTREE_SOURCE: edit.worktree_config_path(tmp_path),
     }
     _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
     _write(paths[scope], '[agent]\nmodle = "typo"\n')
@@ -320,7 +322,7 @@ def test_distant_unknown_key_has_no_misleading_suggestion(tmp_path):
 
 def test_unknown_key_reports_the_highest_precedence_layer_that_defines_it(tmp_path):
     repository = tmp_path / "spice.toml"
-    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    worktree = edit.worktree_config_path(tmp_path)
     _write(repository, '[agent]\nmodle = "repository"\n')
     _write(worktree, '[agent]\nmodle = "worktree"\n')
 
@@ -386,7 +388,7 @@ def test_registry_resolver_refuses_an_undeclared_false_disable_contract():
 
 
 def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
-    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    worktree = edit.worktree_config_path(tmp_path)
     _write(worktree, '[serve]\nbrand = ""\n')
 
     contextual = layers.contextualize_config_error(
