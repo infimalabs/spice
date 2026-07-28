@@ -312,14 +312,6 @@ CONFIG_SCHEMA = _table(
         "serve": _table(
             ("brand", "default_lifetime", "valid_lifetimes", "host", "port")
         ),
-        "inventory": _table(
-            (
-                "toml_static",
-                "platform_derived",
-                "driver_derived",
-                "protocol_invariant",
-            )
-        ),
     }
 )
 
