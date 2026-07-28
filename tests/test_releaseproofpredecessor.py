@@ -50,6 +50,22 @@ def test_existing_corrupt_carry_is_refused_instead_of_regenerated(
         REHEARSAL._resolve_predecessor(tmp_path, tmp_path / "scratch")
 
 
+def test_existing_dangling_manifest_is_refused_instead_of_regenerated(
+    tmp_path, monkeypatch
+):
+    manifest = tmp_path / REHEARSAL.PRIOR_ARTIFACT_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    manifest.symlink_to(tmp_path / "missing-manifest.json")
+    monkeypatch.setattr(
+        REHEARSAL._inplace_upgrade.upgrade_proof,
+        "export_prior_artifact",
+        lambda *_args: pytest.fail("an existing corrupt carry was regenerated"),
+    )
+
+    with pytest.raises(REHEARSAL.RehearsalError, match="could not read"):
+        REHEARSAL._resolve_predecessor(tmp_path, tmp_path / "scratch")
+
+
 def test_host_rehearsal_derives_post_release_predecessor_without_residue(tmp_path):
     repository, _source = _source_repository(tmp_path)
     _write_release_tree(repository, "1.2.3")
