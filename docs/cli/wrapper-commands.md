@@ -213,8 +213,9 @@ pass their argv exactly.
 
 Mounted names are dot-separated segment paths whose segments match
 `^[a-z][a-z0-9-]*$`. Mounts that shadow built-in or extension-provided spice
-actions fail loudly at any depth. Dotted mounts under built-in verbs are allowed
-only when the full path is a novel action name:
+actions are refused at any depth: `spice doctor` reports each refusal while
+built-in commands and valid sibling mounts remain available. Dotted mounts
+under built-in verbs are allowed only when the full path is a novel action name:
 
 ```toml
 [commands]

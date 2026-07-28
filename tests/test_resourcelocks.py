@@ -7,8 +7,10 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
+from spice import resourcelocks
 from spice.cli.parser import build_parser
 from spice.locking import exclusive_lock, lock_fd_exclusive, unlock_fd
 from spice.resourcelocks import handle_lock
@@ -17,6 +19,7 @@ LOCK_CONTENTION_CODE = 71
 CHOSEN_SHARD_CONTENTION_CODE = 72
 POOL_EXHAUSTION_CODE = 73
 OVERRIDE_LOCK_CONTENTION_CODE = 79
+THREAD_EVENT_TIMEOUT_SECONDS = 5
 
 
 def _repo_with_locks(tmp_path: Path, body: str) -> Path:
@@ -85,7 +88,7 @@ def test_lock_run_holds_configured_named_lock_for_child_lifetime(tmp_path, monke
     assert reacquired
 
 
-def test_held_named_lock_returns_configured_contention_code(tmp_path, monkeypatch):
+def test_held_named_lock_names_holder_on_stderr(tmp_path, monkeypatch, capsys):
     repo = _repo_with_locks(
         tmp_path,
         f"lock_contention_exit_code = {LOCK_CONTENTION_CODE}\n"
@@ -93,8 +96,13 @@ def test_held_named_lock_returns_configured_contention_code(tmp_path, monkeypatc
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     lock_path = repo / "locks" / "editor.lock"
+    holder = {
+        "pid": os.getpid(),
+        "cwd": str(tmp_path),
+        "started_at": "2026-07-28T00:00:00Z",
+    }
 
-    with exclusive_lock(lock_path, blocking=True):
+    with resourcelocks._metadata_lock(lock_path, holder):
         result = handle_lock(
             _parse_lock_args(
                 [
@@ -109,6 +117,58 @@ def test_held_named_lock_returns_configured_contention_code(tmp_path, monkeypatc
         )
 
     assert result == LOCK_CONTENTION_CODE
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "lock 'editor' is already held" in captured.err
+    assert f"pid={holder['pid']}" in captured.err
+    assert f"cwd={holder['cwd']}" in captured.err
+    assert f"started_at={holder['started_at']}" in captured.err
+
+
+def test_status_observation_window_does_not_contend_with_a_run(tmp_path, monkeypatch):
+    repo = _repo_with_locks(
+        tmp_path,
+        '[locks.named.editor]\npath = "locks/editor.lock"\n',
+    )
+    settings = resourcelocks.configured_lock_settings(repo)
+    lock_path = settings.locks["editor"].path
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+    observation_started = threading.Event()
+    release_observation = threading.Event()
+    status_records: list[list[dict[str, object]]] = []
+    status_errors: list[BaseException] = []
+    read_metadata = resourcelocks._read_lock_metadata
+
+    def hold_observation(path):
+        text = read_metadata(path)
+        observation_started.set()
+        assert release_observation.wait(THREAD_EVENT_TIMEOUT_SECONDS)
+        return text
+
+    def observe_status():
+        try:
+            status_records.append(resourcelocks.lock_status_records(settings))
+        except BaseException as exc:
+            status_errors.append(exc)
+
+    monkeypatch.setattr(resourcelocks, "_read_lock_metadata", hold_observation)
+    observer = threading.Thread(target=observe_status)
+    observer.start()
+    assert observation_started.wait(THREAD_EVENT_TIMEOUT_SECONDS)
+    try:
+        result = resourcelocks._run_named_lock(
+            settings.locks["editor"],
+            [sys.executable, "-c", "raise SystemExit(0)"],
+        )
+    finally:
+        release_observation.set()
+        observer.join(THREAD_EVENT_TIMEOUT_SECONDS)
+
+    assert not observer.is_alive()
+    assert status_errors == []
+    assert result == 0
+    assert status_records[0][0]["state"] == "free"
 
 
 def test_lock_run_flags_override_configured_path_and_contention_code(
@@ -144,7 +204,9 @@ def test_lock_run_flags_override_configured_path_and_contention_code(
     assert result == OVERRIDE_LOCK_CONTENTION_CODE
 
 
-def test_pool_chosen_shard_contention_uses_configured_code(tmp_path, monkeypatch):
+def test_pool_chosen_shard_contention_names_holder_on_stderr(
+    tmp_path, monkeypatch, capsys
+):
     repo = _repo_with_locks(
         tmp_path,
         (
@@ -156,8 +218,13 @@ def test_pool_chosen_shard_contention_uses_configured_code(tmp_path, monkeypatch
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     shard_path = repo / "locks" / "android" / "1.lock"
+    holder = {
+        "pid": os.getpid(),
+        "cwd": str(tmp_path),
+        "started_at": "2026-07-28T00:00:00Z",
+    }
 
-    with exclusive_lock(shard_path, blocking=True):
+    with resourcelocks._metadata_lock(shard_path, holder):
         result = handle_lock(
             _parse_lock_args(
                 [
@@ -175,9 +242,13 @@ def test_pool_chosen_shard_contention_uses_configured_code(tmp_path, monkeypatch
         )
 
     assert result == CHOSEN_SHARD_CONTENTION_CODE
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "pool 'android' shard 1 is already held" in captured.err
+    assert f"holder pid={holder['pid']}" in captured.err
 
 
-def test_pool_exhaustion_uses_configured_code(tmp_path, monkeypatch):
+def test_pool_exhaustion_names_each_holder_on_stderr(tmp_path, monkeypatch, capsys):
     repo = _repo_with_locks(
         tmp_path,
         (
@@ -190,9 +261,14 @@ def test_pool_exhaustion_uses_configured_code(tmp_path, monkeypatch):
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     shard_zero = repo / "locks" / "android" / "0.lock"
     shard_one = repo / "locks" / "android" / "1.lock"
+    holder = {
+        "pid": os.getpid(),
+        "cwd": str(tmp_path),
+        "started_at": "2026-07-28T00:00:00Z",
+    }
 
-    with exclusive_lock(shard_zero, blocking=True):
-        with exclusive_lock(shard_one, blocking=True):
+    with resourcelocks._metadata_lock(shard_zero, holder):
+        with resourcelocks._metadata_lock(shard_one, holder):
             result = handle_lock(
                 _parse_lock_args(
                     [
@@ -208,6 +284,11 @@ def test_pool_exhaustion_uses_configured_code(tmp_path, monkeypatch):
             )
 
     assert result == POOL_EXHAUSTION_CODE
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "pool 'android' has no free shards" in captured.err
+    assert f"shard 0 holder pid={holder['pid']}" in captured.err
+    assert f"shard 1 holder pid={holder['pid']}" in captured.err
 
 
 def test_pool_shard_count_flag_extends_configured_pool(tmp_path, monkeypatch):
@@ -274,6 +355,15 @@ def test_lock_status_json_surfaces_holder_metadata(tmp_path, monkeypatch, capsys
             "state": "held",
         }
     ]
+
+
+def test_lock_status_marks_malformed_nonempty_metadata_unknown(tmp_path):
+    lock_path = tmp_path / "editor.lock"
+    lock_path.write_text("{malformed", encoding="utf-8")
+
+    state = resourcelocks._lock_state(lock_path)
+
+    assert state == ("unknown", None)
 
 
 def test_config_reference_documents_resource_locks():

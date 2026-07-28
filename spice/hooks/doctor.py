@@ -116,6 +116,7 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _wrapper_seam_check(repo_root),
         _skill_check(repo_root),
         _policy_check(repo_root),
+        _mounted_commands_check(repo_root),
         _git_clean_check(repo_root),
         _hooks_check(repo_root),
         _shadowed_hooks_check(repo_root),
@@ -130,6 +131,27 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
     if mutation_ratchet is not None:
         checks.append(mutation_ratchet)
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
+
+
+def _mounted_commands_check(repo_root: Path) -> DoctorCheck:
+    from spice.cli.mounts import resolve_mounted_commands
+
+    try:
+        resolution = resolve_mounted_commands(repo_root)
+    except SpiceError as exc:
+        return _fail("commands.mounts", str(exc), "spice config show")
+    if resolution.refusals:
+        return _fail(
+            "commands.mounts",
+            f"refused {len(resolution.refusals)} mount(s): "
+            + " | ".join(resolution.refusals),
+            "spice config show",
+        )
+    return _ok(
+        "commands.mounts",
+        f"accepted {len(resolution.commands)} mount(s); refused 0",
+        "spice config show",
+    )
 
 
 def _apply_safe_fixes(repo_root: Path) -> list[str]:
@@ -331,10 +353,23 @@ def _spice_namespace_portions_from(
 ) -> list[Path]:
     portions: list[Path] = []
     for raw in (*package_paths, *module_paths):
-        portion = _spice_namespace_portion_from_path(Path(str(raw)))
+        path = _absolute_namespace_entry_path(raw)
+        if path is None:
+            continue
+        portion = _spice_namespace_portion_from_path(path)
         if portion is not None and portion not in portions:
             portions.append(portion)
     return portions
+
+
+def _absolute_namespace_entry_path(raw: object) -> Path | None:
+    if not isinstance(raw, (str, os.PathLike)):
+        return None
+    entry = os.fspath(raw)
+    if not isinstance(entry, str):
+        return None
+    path = Path(entry)
+    return path if path.is_absolute() else None
 
 
 def _spice_namespace_portion_from_path(path: Path) -> Path | None:

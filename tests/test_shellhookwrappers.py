@@ -297,7 +297,10 @@ def test_agent_wrapper_lines_rejects_self_intercepting_wrapper_lacking_match(tmp
 def test_agent_wrapper_lines_rejects_unknown_direct_wrapper_keys(tmp_path):
     _write_match_wrapper_config(tmp_path, argv='["scanner"]', extra='mode = "fast"')
 
-    with pytest.raises(SpiceError, match="has unsupported keys: mode"):
+    with pytest.raises(
+        SpiceError,
+        match=r"unknown configuration key wrappers\.tools\.toolbox\.mode",
+    ):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
@@ -308,7 +311,13 @@ def test_agent_wrapper_lines_rejects_unknown_match_route_keys(tmp_path):
         match='[{ flags = ["-raw"], argv = ["viewer"], mode = "fast" }]',
     )
 
-    with pytest.raises(SpiceError, match=r"match\[0\] has unsupported keys: mode"):
+    with pytest.raises(
+        SpiceError,
+        match=(
+            r"unknown configuration key "
+            r"wrappers\.tools\.toolbox\.match\[0\]\.mode"
+        ),
+    ):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 

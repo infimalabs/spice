@@ -11,6 +11,7 @@ from spice.agent import cli as agent_cli
 from spice.agent import lifecycle, lifecyclebinding
 from spice.errors import SpiceError
 from spice.tasks import claimstate
+from tests.test_permissionhelpers import REQUIRES_MODE_BIT_DENIAL
 
 # A UTF-16 byte order mark opens this, so the very first byte is one UTF-8
 # rejects outright: the packaged skill is the tracked file an advance rewrites,
@@ -300,6 +301,7 @@ def test_launch_reports_a_missing_skill_when_undecodable_bytes_cannot_be_repaire
     assert preserved.read_bytes() == expected
 
 
+@REQUIRES_MODE_BIT_DENIAL
 def test_unwritable_tree_reports_a_missing_skill_rather_than_the_corrupt_copy(
     tmp_path,
 ) -> None:
@@ -328,6 +330,7 @@ def test_unwritable_tree_reports_a_missing_skill_rather_than_the_corrupt_copy(
     assert target.read_bytes() == UNDECODABLE_WORKTREE_SKILL_BYTES
 
 
+@REQUIRES_MODE_BIT_DENIAL
 def test_unwritable_tree_still_serves_a_stale_copy_that_reads_back_as_text(
     tmp_path,
 ) -> None:

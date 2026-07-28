@@ -33,6 +33,13 @@ Every inline `scopes = { ... }` selector is also one atomic leaf: a later
 configuration layer replaces the complete selector instead of inheriting
 individual axes from earlier layers.
 
+Every Spice table is checked against the structural configuration schema
+before layers merge. An unknown structural key refuses with its dotted path
+and winning source layer, and suggests the nearest known sibling when the edit
+distance is small. Data-keyed maps such as command paths, wrapper names, lock
+names, maxim bags, and policy word maps remain open while their fixed nested
+fields are checked.
+
 ### Universal applicability selectors
 
 Configurable entries express applicability with one inline selector:
@@ -380,8 +387,10 @@ report.inspect = ["project-tool", "report", "inspect"]
 Keys are dot-separated command paths with lowercase/digit/hyphen segments.
 Mounts cannot shadow built-in or extension-provided `spice` actions at any
 depth. Dotted mounts under built-in verbs are allowed when the full command path
-is a novel action name. For example, these fail because the full paths already
-resolve to registered actions:
+is a novel action name. Collisions are refused individually and reported by
+`spice doctor`; built-in commands and valid sibling mounts remain available.
+For example, these entries are refused because the full paths already resolve
+to registered actions:
 
 ```toml
 [commands]
@@ -431,10 +440,12 @@ requires a specific zero-based shard.
 Default state paths live under `.spice/locks/` when a resource omits `path` or
 `directory`. Each held lock writes JSON holder metadata into its lock file with
 `pid`, `cwd`, and `started_at`; `spice lock status --json` lists configured
-locks and pool shards with that metadata. Per-invocation flags such as
-`--path`, `--directory`, `--shards`, `--lock-contention-exit-code`,
-`--chosen-shard-contention-exit-code`, and `--pool-exhaustion-exit-code`
-override the tracked defaults for that one run.
+locks and pool shards with that metadata without acquiring the resource locks.
+A non-empty malformed metadata record reports `unknown`, never `free`.
+Contention exits name the recorded holder on stderr. Per-invocation flags
+such as `--path`, `--directory`, `--shards`,
+`--lock-contention-exit-code`, `--chosen-shard-contention-exit-code`, and
+`--pool-exhaustion-exit-code` override the tracked defaults for that one run.
 
 ## `[policy]`
 

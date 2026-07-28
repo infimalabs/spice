@@ -41,29 +41,59 @@ class MountedCommand:
         return "spice " + " ".join(self.path)
 
 
+@dataclass(frozen=True)
+class MountedCommandResolution:
+    commands: dict[tuple[str, ...], tuple[str, ...]]
+    refusals: tuple[str, ...]
+
+
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
-    """The validated mount table; any malformed entry fails the whole read."""
+    """The accepted mount table; path collisions are contained per entry."""
+    return resolve_mounted_commands(repo_root).commands
+
+
+def resolve_mounted_commands(repo_root: Path) -> MountedCommandResolution:
+    """Resolve accepted mounts and source-aware path-collision refusals."""
     try:
-        return _mounted_commands(repo_root)
+        return _resolve_mounted_commands(repo_root)
     except SpiceError as exc:
         raise contextualize_config_error(repo_root, exc, "commands") from exc
 
 
-def _mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
+def _resolve_mounted_commands(repo_root: Path) -> MountedCommandResolution:
     mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
+    refusals: list[str] = []
     command_paths = command_path_registry()
     for raw_name, raw_argv in effective_commands(repo_root).items():
         path = mount_command_path(str(raw_name))
         if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
-            raise SpiceError(
+            refusal = SpiceError(
                 f"[commands] entry {raw_name!r} shadows a built-in "
                 "spice command; pick another name"
             )
+            refusals.append(
+                str(
+                    contextualize_config_error(
+                        repo_root, refusal, "commands", str(raw_name)
+                    )
+                )
+            )
+            continue
         registration = command_paths.get(path)
         if registration is not None:
-            raise _mount_shadow_error(str(raw_name), registration)
+            refusals.append(
+                str(
+                    contextualize_config_error(
+                        repo_root,
+                        _mount_shadow_error(str(raw_name), registration),
+                        "commands",
+                        str(raw_name),
+                    )
+                )
+            )
+            continue
         mounts[path] = _mount_argv(str(raw_name), raw_argv)
-    return mounts
+    return MountedCommandResolution(commands=mounts, refusals=tuple(refusals))
 
 
 def _mount_shadow_error(name: str, registration: CommandPathRegistration) -> SpiceError:

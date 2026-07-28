@@ -121,6 +121,7 @@ paths = [
     "spice/agent/identity.py",
     "spice/agent/paths.py",
     "spice/config/layers.py",
+    "spice/config/schema.py",
     "spice/config/values.py",
     "spice/defaultinventory.py",
     "spice/defaults.py",
