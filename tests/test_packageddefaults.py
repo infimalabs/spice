@@ -65,15 +65,20 @@ def test_every_module_level_default_constant_is_classified():
     )
 
 
-def test_reverse_default_gate_discovers_a_new_module_constant(tmp_path):
+def test_reverse_default_gate_discovers_every_authored_default_shape(tmp_path):
     source_root = tmp_path / "spice"
     source_root.mkdir()
     (source_root / "sample.py").write_text(
-        "DEFAULT_UNINVENTORIED = 1\n", encoding="utf-8"
+        "from spice import defaults\n"
+        "DEFAULT_LEFT, DEFAULT_RIGHT = (1, 2)\n"
+        "NAMED_WITHOUT_DEFAULT_PREFIX = defaults.string('sample', 'value')\n",
+        encoding="utf-8",
     )
 
     assert _module_level_default_exports(source_root) == {
-        "spice.sample.DEFAULT_UNINVENTORIED"
+        "spice.sample.DEFAULT_LEFT",
+        "spice.sample.DEFAULT_RIGHT",
+        "spice.sample.NAMED_WITHOUT_DEFAULT_PREFIX",
     }
 
 
@@ -102,13 +107,40 @@ def _module_level_default_exports(
         module = ".".join(module_parts)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in tree.body:
-            targets = node.targets if isinstance(node, ast.Assign) else ()
+            targets: tuple[ast.expr, ...] = (
+                tuple(node.targets) if isinstance(node, ast.Assign) else ()
+            )
             if isinstance(node, ast.AnnAssign):
                 targets = (node.target,)
+            uses_packaged_default = _uses_packaged_default(node)
             for target in targets:
-                if isinstance(target, ast.Name) and target.id.startswith("DEFAULT_"):
-                    exports.add(f"{module}.{target.id}")
+                for name in _target_names(target):
+                    if not name.startswith("_") and (
+                        name.startswith("DEFAULT_")
+                        or (name.isupper() and uses_packaged_default)
+                    ):
+                        exports.add(f"{module}.{name}")
     return exports
+
+
+def _uses_packaged_default(node: ast.stmt) -> bool:
+    return any(
+        isinstance(item, ast.Call)
+        and isinstance(item.func, ast.Attribute)
+        and isinstance(item.func.value, ast.Name)
+        and item.func.value.id == "defaults"
+        for item in ast.walk(node)
+    )
+
+
+def _target_names(target: ast.expr) -> tuple[str, ...]:
+    if isinstance(target, ast.Name):
+        return (target.id,)
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return tuple(name for element in target.elts for name in _target_names(element))
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return ()
 
 
 def test_every_declared_static_family_exists_in_packaged_configuration():
