@@ -205,8 +205,9 @@ def test_mounted_plan_refuses_file_targets_outside_the_repository(tmp_path, targ
     ([], ["--apply=opaque", "--flag"]),
     ids=("bare", "apply-shaped"),
 )
+@pytest.mark.parametrize("returncode", (0, 7), ids=("success", "child-failure"))
 def test_mounted_non_plan_output_and_exit_status_pass_through_unchanged(
-    tmp_path, monkeypatch, capsys, args
+    tmp_path, monkeypatch, capsys, args, returncode
 ):
     observed: dict[str, object] = {}
 
@@ -214,7 +215,7 @@ def test_mounted_non_plan_output_and_exit_status_pass_through_unchanged(
         observed["argv"] = argv
         observed.update(kwargs)
         return SimpleNamespace(
-            returncode=7, stdout="ordinary output\n", stderr="warning\n"
+            returncode=returncode, stdout="ordinary output\n", stderr="warning\n"
         )
 
     monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
@@ -223,7 +224,7 @@ def test_mounted_non_plan_output_and_exit_status_pass_through_unchanged(
     result = run_mounted_command(mount, args)
 
     captured = capsys.readouterr()
-    assert result == 7
+    assert result == returncode
     assert captured.out == "ordinary output\n"
     assert captured.err == "warning\n"
     assert observed["argv"] == ["project-tool", *args]
@@ -416,8 +417,9 @@ def test_mounted_apply_replans_and_refuses_digest_after_authored_input_changes(
         ("digest", "invalid command plan digest"),
     ),
 )
+@pytest.mark.parametrize("returncode", (0, 7), ids=("success", "child-failure"))
 def test_bare_mounted_protocol_claim_with_invalid_document_refuses(
-    tmp_path, monkeypatch, invalidity, message
+    tmp_path, monkeypatch, invalidity, message, returncode
 ):
     operation = _file_operation("generated.txt")
     if invalidity == "operation-shape":
@@ -434,7 +436,7 @@ def test_bare_mounted_protocol_claim_with_invalid_document_refuses(
     def fake_run(argv, **_kwargs):
         calls.append(argv)
         return SimpleNamespace(
-            returncode=0,
+            returncode=returncode,
             stdout=json.dumps(payload) + "\n",
             stderr="",
         )

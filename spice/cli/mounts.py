@@ -189,17 +189,18 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     stderr = str(getattr(result, "stderr", "") or "")
     if stderr:
         sys.stderr.write(stderr)
+    document = parse_command_plan_document(stdout)
+    if document is not None:
+        assert_mounted_plan_digest(document, mount.repo_root, document.digest)
     if result.returncode != 0:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
-    document = parse_command_plan_document(stdout)
     if document is None:
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
     if not requested:
-        assert_mounted_plan_digest(document, mount.repo_root, document.digest)
         if stdout:
             sys.stdout.write(stdout)
         return result.returncode
