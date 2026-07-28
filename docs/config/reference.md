@@ -4,7 +4,7 @@ Spice configuration has exactly three scopes, in increasing precedence order:
 
 | Scope | Path | Behavior |
 | --- | --- | --- |
-| `system` | `<installed spice package>/spice.toml` | Installed defaults; writable only when that existing file is writable |
+| `system` | `<installed spice package>/spice.toml` | Installed defaults; mutations preview by default and require `--apply` |
 | `repository` | `<repository>/spice.toml` | Tracked Spice tables such as `[agent]` |
 | `worktree` | `<worktree-git-dir>/.spice/config/spice.toml` | Local plain Spice tables for one worktree; structurally untracked |
 
@@ -112,7 +112,10 @@ effective mapping, and the winning source for every key as deterministic JSON.
 the same layered view. Mutable commands default to `--scope worktree`; agent,
 personality, say, and judge settings also accept `system` and `repository`.
 `--clear` removes only that command's values from the selected
-scope, revealing the next earlier layer without changing it.
+scope, revealing the next earlier layer without changing it. A mutation with
+`--scope system` previews the exact installed package path and change; pass
+`--apply` to write it. The preview warns that reinstalling Spice replaces this
+installed file and loses the change.
 
 `spice config set <dotted-key> <value> [--scope <scope>]` exposes every leaf in
 the loader schema, including settings without a specialized convenience flag.
@@ -137,8 +140,9 @@ All mutable commands use one structured TOML editor. It preserves unrelated
 tables, comments, ordering, and value types, validates the complete prospective
 layer through the same key schema as the loader, and atomically replaces the
 selected file. A system write requires the installed `spice.toml` to exist and
-be writable; the other two scopes are created on demand. Invalid or unwritable
-mutations report `scope=<name> path=<path>` before changing bytes.
+be writable as well as explicit `--apply`; the other two scopes are created on
+demand and continue to apply directly. Invalid or unwritable mutations report
+`scope=<name> path=<path>` before changing bytes.
 
 Spice v0.30 dropped `[tool.spice]` repository configuration. A repository that
 still contains that table refuses configuration loading and names root

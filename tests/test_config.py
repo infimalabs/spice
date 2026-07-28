@@ -186,6 +186,128 @@ def test_config_system_renders_effective_agent_config_read_only(
     assert sorted(path.name for path in tmp_path.iterdir()) == before
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("set", "agent.model", "preview-model"),
+        ("say", "--voice", "Preview Voice"),
+        ("say", "--clear"),
+        ("judge", "--bin", "preview-judge"),
+        ("judge", "--clear"),
+        ("personality", "friendly"),
+        ("personality", "--clear"),
+        ("agent", "--model", "preview-agent"),
+        ("agent", "--clear"),
+    ),
+)
+def test_every_system_scope_mutation_previews_install_path_and_reinstall_loss(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    arguments,
+):
+    system_path = _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    before = system_path.read_bytes()
+
+    result = handle_config(
+        build_parser().parse_args(["config", *arguments, "--scope", "system"])
+    )
+    preview = capsys.readouterr().out
+
+    assert result == 0
+    assert f"path={system_path}" in preview
+    assert "warning=system configuration modifies installed defaults" in preview
+    assert "is lost on reinstall" in preview
+    assert "preview: no changes applied; pass --apply to execute" in preview
+    assert system_path.read_bytes() == before
+
+
+def test_system_scope_set_applies_only_under_explicit_apply(
+    tmp_path, monkeypatch, capsys
+):
+    system_path = _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        build_parser().parse_args(
+            [
+                "config",
+                "set",
+                "agent.model",
+                "applied-system-model",
+                "--scope",
+                "system",
+                "--apply",
+            ]
+        )
+    )
+
+    assert result == 0
+    assert (
+        tomllib.loads(system_path.read_text(encoding="utf-8"))["agent"]["model"]
+        == "applied-system-model"
+    )
+    assert json.loads(capsys.readouterr().out)["scope"] == "system"
+
+
+def test_system_scope_preview_refuses_an_unknown_set_key_before_rendering(
+    tmp_path, monkeypatch, capsys
+):
+    system_path = _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    before = system_path.read_bytes()
+
+    with pytest.raises(SpiceError, match="unknown configuration key agent.modle"):
+        handle_config(
+            build_parser().parse_args(
+                [
+                    "config",
+                    "set",
+                    "agent.modle",
+                    "typo",
+                    "--scope",
+                    "system",
+                ]
+            )
+        )
+
+    assert capsys.readouterr().out == ""
+    assert system_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("arguments", (("say",), ("personality",), ("agent",)))
+def test_system_scope_read_forms_remain_reads_without_apply(
+    tmp_path, monkeypatch, capsys, arguments
+):
+    _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        build_parser().parse_args(["config", *arguments, "--scope", "system"])
+    )
+
+    assert result == 0
+    assert "configuration-plan" not in capsys.readouterr().out
+
+
+def test_system_scope_clear_executes_under_explicit_apply(
+    tmp_path, monkeypatch, capsys
+):
+    system_path = _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        build_parser().parse_args(
+            ["config", "agent", "--scope", "system", "--clear", "--apply"]
+        )
+    )
+
+    assert result == 0
+    assert tomllib.loads(system_path.read_text(encoding="utf-8"))["agent"] == {}
+    assert capsys.readouterr().out == "agent system config cleared\n"
+
+
 def test_config_set_writes_a_typed_schema_leaf_and_reports_provenance(
     tmp_path, monkeypatch, capsys
 ):
@@ -518,6 +640,7 @@ def test_three_scope_precedence_clears_to_reveal_each_earlier_layer(
         ("worktree", 140, "worktree-agent", "xhigh"),
     )
     for scope, rate, model, effort in scope_layers:
+        apply = ["--apply"] if scope == layers.SYSTEM_SOURCE else []
         handle_config(
             parser.parse_args(
                 [
@@ -527,6 +650,7 @@ def test_three_scope_precedence_clears_to_reveal_each_earlier_layer(
                     scope,
                     "--words-per-minute",
                     str(rate),
+                    *apply,
                 ]
             )
         )
@@ -541,6 +665,7 @@ def test_three_scope_precedence_clears_to_reveal_each_earlier_layer(
                     model,
                     "--effort",
                     effort,
+                    *apply,
                 ]
             )
         )
@@ -581,13 +706,24 @@ def test_personality_and_judge_setters_write_each_named_scope(
     _redirect_system_config(tmp_path, monkeypatch)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     parser = build_parser()
+    apply = ["--apply"] if scope == layers.SYSTEM_SOURCE else []
 
     handle_config(
-        parser.parse_args(["config", "personality", "friendly", "--scope", scope])
+        parser.parse_args(
+            ["config", "personality", "friendly", "--scope", scope, *apply]
+        )
     )
     handle_config(
         parser.parse_args(
-            ["config", "judge", "--bin", f"judge-{scope}", "--scope", scope]
+            [
+                "config",
+                "judge",
+                "--bin",
+                f"judge-{scope}",
+                "--scope",
+                scope,
+                *apply,
+            ]
         )
     )
 
@@ -663,6 +799,7 @@ def test_config_help_names_exact_scope_vocabulary():
     for action in ("set", "agent", "personality", "say", "judge"):
         help_text = config_actions.choices[action].format_help()
         assert "{system,repository,worktree}" in help_text
+        assert "--apply" in help_text
 
 
 def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeypatch):
