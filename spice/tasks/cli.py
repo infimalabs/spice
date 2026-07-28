@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from spice.cli.withdrawn import add_withdrawn_dry_run_argument
 from spice.errors import SpiceError
 from spice.tasks import (
     alloc,
@@ -434,6 +435,7 @@ def _configure_ingest_parser(actions: Any) -> None:
         action="store_true",
         help="Apply the complete validated plan; bare invocation only previews.",
     )
+    add_withdrawn_dry_run_argument(ingest)
     ingest.add_argument(
         "--json",
         action="store_true",

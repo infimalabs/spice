@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from spice import paths as spice_paths
+from spice.cli.withdrawn import add_withdrawn_dry_run_argument
 from spice.errors import SpiceError
 from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
 from spice.paths import require_repo_root
@@ -113,6 +114,7 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         action="store_true",
         help="Apply the ordered initialization plan; bare invocation only previews.",
     )
+    add_withdrawn_dry_run_argument(init)
     init.add_argument(
         "--json",
         action="store_true",

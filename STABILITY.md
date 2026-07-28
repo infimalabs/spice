@@ -60,6 +60,11 @@ For `init`, `init --unapply`, `task ingest`, and the publishing release verbs,
 bare invocation renders the human plan, `--json` renders the same ordered plan
 for machines, and `--apply` is the only mutation instruction.
 
+Beginning with v0.30.0, `--dry-run` is withdrawn from `spice init` and
+`spice task ingest`. Those commands refuse the old spelling with the owning
+release and direct operators to bare invocation for preview or `--apply` for
+execution; they never accept both spellings in one invocation.
+
 | Mutating verb or invocation | Effect-driving reads | Classification |
 | --- | --- | --- |
 | `spice init`; `spice dev install-hooks` | The existing repository and Git configuration semantically reconciled with packaged initialization policy through the shared planner | Authored input |
