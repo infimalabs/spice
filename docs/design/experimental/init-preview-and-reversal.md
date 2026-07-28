@@ -29,7 +29,9 @@ Spice actually introduced.
   scope, the mode, and per-operation completion. The receipt
   (`<worktree-git-dir>/.spice/init-receipt.json`, mode `0600`) is durable
   enough to resume or reverse an interrupted run without becoming tracked
-  worktree content.
+  worktree content. v0.30.0 moves one untracked receipt from the withdrawn
+  visible path; tracked, repeated, or competing predecessors are refused and
+  never honored.
 - **Deinit reverses in strict reverse order, owning only what it owns.**
   `spice deinit` walks the receipt back-to-front. It restores a generated file
   only when the on-disk bytes still match what apply generated, and restores a
