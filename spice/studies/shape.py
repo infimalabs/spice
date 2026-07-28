@@ -1,7 +1,7 @@
 """Repo shape opinions: namespace packages, path names, no generic splits.
 
 These guards bite inside the package roots a repo declares in its tracked
-`pyproject.toml` under `[policy] package_roots` (plus `tests/`
+root `spice.toml` under `[policy] package_roots` (plus `tests/`
 when present). Repos without a declaration skip them — the opinions are
 Python-package-specific; the rest of the constitution still applies.
 

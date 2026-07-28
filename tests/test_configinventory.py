@@ -28,7 +28,6 @@ FORBIDDEN_CONFIGURATION_SYMBOLS = (
 def test_configuration_source_inventory_has_only_current_seams() -> None:
     python_paths = sorted((PROJECT_ROOT / "spice").rglob("*.py"))
     toml_importers: list[str] = []
-    spice_table_readers: list[str] = []
     definitions: dict[str, set[str]] = {}
     source_text: dict[str, str] = {}
     for path in python_paths:
@@ -42,16 +41,6 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
             for node in tree.body
         ):
             toml_importers.append(relative)
-        if relative in toml_importers and any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "get"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value == "spice"
-            for node in ast.walk(tree)
-        ):
-            spice_table_readers.append(relative)
         definitions[relative] = {
             node.name
             for node in tree.body
@@ -67,7 +56,15 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
     )
     inventory = {
         "toml_importers": tuple(toml_importers),
-        "spice_table_readers": tuple(spice_table_readers),
+        "retired_source_guards": tuple(
+            sorted(
+                definitions["spice/config/layers.py"]
+                & {
+                    "_reject_retired_pyproject_config",
+                    "_retired_pyproject_has_spice_table",
+                }
+            )
+        ),
         "loader_functions": tuple(
             sorted(
                 definitions["spice/config/layers.py"]
@@ -95,7 +92,10 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
             "spice/config/layers.py",
             "spice/config/pyproject.py",
         ),
-        "spice_table_readers": (),
+        "retired_source_guards": (
+            "_reject_retired_pyproject_config",
+            "_retired_pyproject_has_spice_table",
+        ),
         "loader_functions": (
             "effective_mapping",
             "effective_table",

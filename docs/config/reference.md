@@ -314,8 +314,8 @@ distillation likewise skips candidates whose judge call fails.
 | `wrappers` | `["common"]` | Ordered wrapper groups loaded into agent shells. Use `[]` to disable configured wrapper functions. |
 
 Agent personality defaults to the worktree scope through `spice config
-personality`; pass `--scope system`, `--scope pyproject`, or `--scope
-repository` to set it in another layer. The effective default is `pragmatic`.
+personality`; pass `--scope system` or `--scope repository` to set it in
+another layer. The effective default is `pragmatic`.
 
 Personality is a launch knob, and unlike `model` and `effort` it does not cross
 every driver: Codex carries it into each launch as a config override, while
@@ -793,8 +793,7 @@ model = "claude-sonnet-5"
 and looks it up in this table for the active driver. A phase with no entry
 (or no claimed task) falls back to the ordinary resolution order: an explicit
 `--model`/`--effort` flag, then the effective `agent` table in `worktree`,
-`repository`, `pyproject`, and `system` precedence order, then the driver's
-shipped default.
+`repository`, and `system` precedence order, then the driver's shipped default.
 
 These `model` values are launch payload selected by live task-phase routing;
 they are not applicability selectors. A `scopes.models` entry filters a
