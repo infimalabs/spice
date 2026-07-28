@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Callable
+
 TOML_STATIC = "TOML-static"
 PLATFORM_DERIVED = "platform-derived"
 DRIVER_DERIVED = "driver-derived"
@@ -10,12 +13,47 @@ CLASSIFICATIONS = frozenset(
     {TOML_STATIC, PLATFORM_DERIVED, DRIVER_DERIVED, PROTOCOL_INVARIANT}
 )
 
+
+def _normalize_path(value: object) -> object:
+    return str(value)
+
+
+def _normalize_prompt_template(value: object) -> object:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return "\n".join(str(line) for line in value) + "\n"
+    return value
+
+
+def _normalize_task_reports(value: object) -> object:
+    if not isinstance(value, Mapping):
+        return value
+    normalized = {}
+    for name, raw in value.items():
+        if isinstance(raw, Mapping):
+            normalized[str(name)] = (
+                raw.get("description"),
+                raw.get("filter"),
+                raw.get("sort"),
+            )
+        else:
+            normalized[str(name)] = tuple(raw) if isinstance(raw, tuple) else raw
+    return normalized
+
+
+TOML_STATIC_NORMALIZERS: dict[str, Callable[[object], object]] = {
+    "spice.agent.maxims.DEFAULT_PROMPT_TEMPLATE": _normalize_prompt_template,
+    "spice.resourcelocks.LOCK_STATE_ROOT": _normalize_path,
+    "spice.tasks.config.REPORTS": _normalize_task_reports,
+}
+
+
 # A dotted Python export maps to the packaged TOML leaf that owns its value.
 TOML_STATIC_EXPORT_PATHS = {
     "spice.config.values.SAY_BACKEND_CHOICES": "say.backend_choices",
     "spice.config.values.DEFAULT_SAY_BACKEND": "say.backend",
     "spice.config.values.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.external_content_type",
     "spice.config.values.DEFAULT_SAY_WORDS_PER_MINUTE": "say.words_per_minute",
+    "spice.config.values.DEFAULT_SAY_TIMEOUT_SECONDS": "say.timeout_seconds",
     "spice.config.values.AGENT_PERSONALITY_CHOICES": "agent.personality_choices",
     "spice.config.values.DEFAULT_AGENT_PERSONALITY": "agent.personality",
     "spice.config.values.DEFAULT_JUDGE_BIN": "judge.bin",
@@ -96,6 +134,8 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.agent.maxims.MAXIM_PROPOSAL_MIN_RECURRENCE": "maxim.proposal_min_recurrence",
     "spice.agent.maxims.MAXIM_PROPOSAL_DRAFT_MAX_WORDS": "maxim.proposal_draft_max_words",
     "spice.agent.maxims.DEFAULT_PROMPT_LINES": "maxim.prompt_lines",
+    "spice.agent.maxims.DEFAULT_PROMPT_TEMPLATE": "maxim.prompt_lines",
+    "spice.serve.team.schema.DEFAULT_LIFETIME": "serve.default_lifetime",
     "spice.serve.web.DEFAULT_BRAND": "serve.brand",
     "spice.serve.web.DEFAULT_LIFETIME": "serve.default_lifetime",
     "spice.serve.web.VALID_LIFETIMES": "serve.valid_lifetimes",
@@ -117,4 +157,36 @@ EXPORTED_DEFAULT_CLASSIFICATION = {
     "spice.policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS": PROTOCOL_INVARIANT,
     "spice.policy.COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS": PROTOCOL_INVARIANT,
     "spice.policy.LEGITIMATE_INTERNAL_COUPLINGS": PROTOCOL_INVARIANT,
+    "spice.agent.maximcli.DEFAULT_OUTPUT_FORMAT": PROTOCOL_INVARIANT,
+    "spice.process.git.DEFAULT_GIT_TIMEOUT_SECONDS": PROTOCOL_INVARIANT,
+    "spice.serve.audio.DEFAULT_SAY_RATE_MULTIPLIER": PROTOCOL_INVARIANT,
+    "spice.serve.livebus.DEFAULT_BUS_MESSAGE_LIMIT": PROTOCOL_INVARIANT,
+    "spice.serve.messages.DEFAULT_MESSAGE_LIMIT": PROTOCOL_INVARIANT,
+    "spice.serve.team.schema.DEFAULT_STUCK_THRESHOLD_SECONDS": PROTOCOL_INVARIANT,
+    "spice.sessions.briefing.DEFAULT_BRIEFING_MAX_BYTES": PROTOCOL_INVARIANT,
+    "spice.sessions.briefing.DEFAULT_BRIEFING_MAX_LINES": PROTOCOL_INVARIANT,
+    "spice.sessions.briefing.DEFAULT_HORIZON_COMPACTIONS": PROTOCOL_INVARIANT,
+    "spice.sessions.briefing.DEFAULT_RECENCY_MAX_SECONDS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_COMMANDS_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_COMMAND_TEXT_CHARS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_COMPACTIONS_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_COMMITS_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_MESSAGES_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_MESSAGE_TEXT_CHARS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_PHASE_EXAMPLES": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_PHASE_TEXT_CHARS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_SLICES_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_SLICE_TEXT_CHARS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_SUMMARY_RECENT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_SWEEP_WINDOWS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_TIMELINE_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_TIMELINE_TEXT_CHARS": PROTOCOL_INVARIANT,
+    "spice.sessions.cli.DEFAULT_TURNS_LIMIT": PROTOCOL_INVARIANT,
+    "spice.sessions.deadline.DEFAULT_REHYDRATION_DEADLINE_SECONDS": PROTOCOL_INVARIANT,
+    "spice.studies.csharpmembers.DEFAULT_MEMBER_LIMIT": PROTOCOL_INVARIANT,
+    "spice.studies.mutations.DEFAULT_MAX_MUTANTS_PER_MODULE": PROTOCOL_INVARIANT,
+    "spice.studies.mutations.DEFAULT_MUTATION_TIMEOUT_SECONDS": PROTOCOL_INVARIANT,
+    "spice.studies.shape.DEFAULT_NAME_CLUSTER_THRESHOLD": PROTOCOL_INVARIANT,
+    "spice.tasks.artifacts.DEFAULT_RETENTION": PROTOCOL_INVARIANT,
+    "spice.tasks.graphs.handout.DEFAULT_OUTPUT": PROTOCOL_INVARIANT,
 }
