@@ -1,5 +1,5 @@
 # Installed static defaults. Repository and worktree layers override these
-# values through the canonical four-layer configuration loader.
+# values through the canonical three-layer configuration loader.
 
 [say]
 backend = "say"

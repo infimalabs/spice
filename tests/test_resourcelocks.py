@@ -24,9 +24,7 @@ THREAD_EVENT_TIMEOUT_SECONDS = 5
 
 def _repo_with_locks(tmp_path: Path, body: str) -> Path:
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
-    (tmp_path / "pyproject.toml").write_text(
-        f"[tool.spice.locks]\n{body}\n", encoding="utf-8"
-    )
+    (tmp_path / "spice.toml").write_text(f"[locks]\n{body}\n", encoding="utf-8")
     return tmp_path
 
 
@@ -55,7 +53,7 @@ def test_lock_parser_exposes_run_and_status_commands():
 def test_lock_run_holds_configured_named_lock_for_child_lifetime(tmp_path, monkeypatch):
     repo = _repo_with_locks(
         tmp_path,
-        '[tool.spice.locks.named.editor]\npath = "locks/editor.lock"\n',
+        '[locks.named.editor]\npath = "locks/editor.lock"\n',
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     lock_path = repo / "locks" / "editor.lock"
@@ -94,7 +92,7 @@ def test_held_named_lock_names_holder_on_stderr(tmp_path, monkeypatch, capsys):
     repo = _repo_with_locks(
         tmp_path,
         f"lock_contention_exit_code = {LOCK_CONTENTION_CODE}\n"
-        '[tool.spice.locks.named.editor]\npath = "locks/editor.lock"\n',
+        '[locks.named.editor]\npath = "locks/editor.lock"\n',
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     lock_path = repo / "locks" / "editor.lock"
@@ -130,7 +128,7 @@ def test_held_named_lock_names_holder_on_stderr(tmp_path, monkeypatch, capsys):
 def test_status_observation_window_does_not_contend_with_a_run(tmp_path, monkeypatch):
     repo = _repo_with_locks(
         tmp_path,
-        '[tool.spice.locks.named.editor]\npath = "locks/editor.lock"\n',
+        '[locks.named.editor]\npath = "locks/editor.lock"\n',
     )
     settings = resourcelocks.configured_lock_settings(repo)
     lock_path = settings.locks["editor"].path
@@ -178,7 +176,7 @@ def test_lock_run_flags_override_configured_path_and_contention_code(
 ):
     repo = _repo_with_locks(
         tmp_path,
-        "[tool.spice.locks.named.editor]\n"
+        "[locks.named.editor]\n"
         'path = "locks/configured.lock"\n'
         f"contention_exit_code = {LOCK_CONTENTION_CODE}\n",
     )
@@ -213,7 +211,7 @@ def test_pool_chosen_shard_contention_names_holder_on_stderr(
         tmp_path,
         (
             f"chosen_shard_contention_exit_code = {CHOSEN_SHARD_CONTENTION_CODE}\n"
-            "[tool.spice.locks.pools.android]\n"
+            "[locks.pools.android]\n"
             'directory = "locks/android"\n'
             "shards = 2\n"
         ),
@@ -255,7 +253,7 @@ def test_pool_exhaustion_names_each_holder_on_stderr(tmp_path, monkeypatch, caps
         tmp_path,
         (
             f"pool_exhaustion_exit_code = {POOL_EXHAUSTION_CODE}\n"
-            "[tool.spice.locks.pools.android]\n"
+            "[locks.pools.android]\n"
             'directory = "locks/android"\n'
             "shards = 2\n"
         ),
@@ -296,7 +294,7 @@ def test_pool_exhaustion_names_each_holder_on_stderr(tmp_path, monkeypatch, caps
 def test_pool_shard_count_flag_extends_configured_pool(tmp_path, monkeypatch):
     repo = _repo_with_locks(
         tmp_path,
-        '[tool.spice.locks.pools.android]\ndirectory = "locks/android"\nshards = 1\n',
+        '[locks.pools.android]\ndirectory = "locks/android"\nshards = 1\n',
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     shard_zero = repo / "locks" / "android" / "0.lock"
@@ -324,7 +322,7 @@ def test_pool_shard_count_flag_extends_configured_pool(tmp_path, monkeypatch):
 def test_lock_status_json_surfaces_holder_metadata(tmp_path, monkeypatch, capsys):
     repo = _repo_with_locks(
         tmp_path,
-        '[tool.spice.locks.named.editor]\npath = "locks/editor.lock"\n',
+        '[locks.named.editor]\npath = "locks/editor.lock"\n',
     )
     monkeypatch.setattr("spice.resourcelocks.require_repo_root", lambda: repo)
     lock_path = repo / "locks" / "editor.lock"
@@ -372,7 +370,7 @@ def test_lock_status_marks_every_nonempty_malformed_metadata_unknown(tmp_path):
 def test_config_reference_documents_resource_locks():
     reference = Path("docs/config/reference.md").read_text(encoding="utf-8")
 
-    assert "## `[tool.spice.locks]`" in reference
+    assert "## `[locks]`" in reference
     assert "spice lock run editor -- project-tool edit" in reference
     assert "chosen_shard_contention_exit_code" in reference
     assert "pool_exhaustion_exit_code" in reference

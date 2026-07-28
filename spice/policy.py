@@ -39,7 +39,7 @@ FLEX_DENOMINATOR = _FLEX_RATIO.denominator
 # exempt. Spice bakes in no per-trailer opinion: every Git trailer -- including
 # Co-Authored-By -- rides through untouched. A repo that wants a finite
 # allowed-trailer set or specific blocked keys configures them under
-# ``[tool.spice.policy.commit_message]``; ``None`` on both means no restriction.
+# ``[policy.commit_message]``; ``None`` on both means no restriction.
 COMMIT_MESSAGE_WRAP_LIMIT = defaults.integer("policy", "limits", "commit_message_wrap")
 COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = None
@@ -48,7 +48,7 @@ COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = None
 # Low-value or poor-taste words mapped to a suggestion (empty = rephrase). A
 # trailing ``*`` is a stem that matches every inflection (``migrat*`` ->
 # migrate/migrated/migration); a bare key is whole-word. Repos merge their own words
-# over these defaults under [tool.spice.policy.taste].
+# over these defaults under [policy.taste].
 TASTE_WORD_SUGGESTIONS: dict[str, str] = {
     str(key): str(value)
     for key, value in defaults.table("policy", "taste", "words").items()
@@ -56,7 +56,7 @@ TASTE_WORD_SUGGESTIONS: dict[str, str] = {
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
-# A repo widens the set in tracked `[tool.spice.policy] repo_truth_docs`.
+# A repo widens the set in tracked `[policy] repo_truth_docs`.
 REPO_TRUTH_DOC_LIMIT = defaults.integer("policy", "limits", "repo_truth_doc_chars")
 REPO_TRUTH_DOCS = defaults.strings("policy", "repo_truth", "docs")
 MARKDOWN_DEPTH_DOC_EXTENSIONS = defaults.strings(
@@ -74,7 +74,7 @@ MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = defaults.integer(
 # root. Package path names match the boundary-underscore shape. Splitting a
 # file requires naming the seam: generic continuation shards are rejected.
 # A target repo declares its roots in tracked `pyproject.toml` under
-# `[tool.spice.policy] package_roots`; repos without a declaration skip the
+# `[policy] package_roots`; repos without a declaration skip the
 # Python package guards (the rest of the constitution still applies).
 BOUNDARY_UNDERSCORE_PATTERN = defaults.string(
     "policy", "package", "boundary_underscore_pattern"
@@ -111,7 +111,7 @@ JAVASCRIPT_UNUSED_DECLARATION_EXEMPTIONS: dict[tuple[str, str], str] = {
 }
 
 # Product-shipped private-internals exceptions. Repo-specific exceptions belong
-# in tracked `[tool.spice.policy].internal_couplings`, where they are visible to
+# in tracked `[policy].internal_couplings`, where they are visible to
 # every clone and stale entries fail the gate.
 LEGITIMATE_INTERNAL_COUPLINGS: frozenset[tuple[str, str, str]] = frozenset()
 
@@ -136,8 +136,8 @@ ENV_POLICY_SELF_PATH_SUFFIX = defaults.string("policy", "env", "self_path_suffix
 # matchers are scoped by suffix family: a shell `$VAR` pattern must never run
 # against `.cs`/`.js`. Built-in defaults below cover the standard idioms; a repo
 # overrides or adds families through
-# `[tool.spice.policy.env_access.default_patterns]` and
-# `[tool.spice.policy.env_access.family_suffixes]`, never having to fork the
+# `[policy.env_access.default_patterns]` and
+# `[policy.env_access.family_suffixes]`, never having to fork the
 # study.
 ENV_ACCESS_FAMILY_SUFFIXES = {
     str(key): tuple(str(item) for item in value)

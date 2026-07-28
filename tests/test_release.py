@@ -116,9 +116,8 @@ def test_release_docs_show_lane_release_workflow():
 
 def test_repo_mounts_release_command(tmp_path):
     (tmp_path / ".git").mkdir()
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.commands]\n"
-        'release = ["uv", "run", "python", "-m", "spice.release"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[commands]\nrelease = ["uv", "run", "python", "-m", "spice.release"]\n',
         encoding="utf-8",
     )
 

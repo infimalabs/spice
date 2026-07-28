@@ -1,6 +1,7 @@
 # Configuration
 
-Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
+Tracked project configuration lives in root `spice.toml` using plain tables
+such as `[agent]`, `[policy]`, and `[serve]`.
 Worktree-local operator preferences, such as speech voice, judge binary, and
 local agent overrides, live in `.spice/config/spice.toml` through
 `spice config`; they are not tracked project knobs.
@@ -33,18 +34,18 @@ rtk --version
 rtk rewrite -- git status
 ```
 
-The `rtk.executable` leaf participates in the standard four-layer precedence.
-Tracked pyproject configuration uses:
+The `rtk.executable` leaf participates in the standard three-layer precedence.
+Every source uses the same bare table shape; tracked repository configuration
+uses:
 
 ```toml
-[tool.spice.rtk]
+[rtk]
 executable = "rtk"
 ```
 
-System, repository, and worktree `spice.toml` files use the plain `[rtk]`
-table. The value is one trusted executable basename or absolute path, not a
-shell command. Resolution performs no availability lookup; activation, Doctor,
-and `agent run` invoke the exact winning identity so missing executables become
+The value is one trusted executable basename or absolute path, not a shell
+command. Resolution performs no availability lookup; activation, Doctor, and
+`agent run` invoke the exact winning identity so missing executables become
 observable health or native-fallback outcomes rather than a different resolver
 silently winning.
 
@@ -103,27 +104,27 @@ intentionally worktree-local. The prompt schema, portable adapter, retries,
 exits, and supervisor degradation are specified in the
 [judge reference](docs/config/reference.md#maxim-judge-binary).
 
-## `[tool.spice.agent]`
+## `[agent]`
 
 Project-wide agent launch defaults: driver, model, effort, and selected wrapper
 groups. Worktree config and explicit launch flags still win. Agent personality
 is worktree-local, not a tracked key.
 
-Reference: [agent table](docs/config/reference.md#toolspiceagent).
+Reference: [agent table](docs/config/reference.md#agent).
 
-## `[tool.spice.wrappers.<group>]`
+## `[wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
-with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group contains
+with `[agent] wrappers = [...]`. The built-in `common` group contains
 the finite RTK command-shape transformations described above. A selected direct
 wrapper whose argv head is not RTK owns its command word regardless of
 configuration source, so RTK cannot replace it before the shell function
 exists; `rtk rewrite` inside `spice agent run` remains the sole optimization
 candidate selector.
 
-Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
+Reference: [wrapper groups](docs/config/reference.md#wrappersgroup).
 
-## `[tool.spice.commands]`
+## `[commands]`
 
 Mounted commands put repo tooling under the `spice` namespace without letting
 repo tools shadow built-in or extension-provided actions at any depth. A
@@ -132,9 +133,9 @@ sibling mounts remain available. Dotted mounts may extend built-in verbs with
 novel action names. Values are command strings or argv lists, and remaining CLI
 arguments pass through verbatim.
 
-Reference: [mounted commands](docs/config/reference.md#toolspicecommands).
+Reference: [mounted commands](docs/config/reference.md#commands).
 
-## `[tool.spice.policy]`
+## `[policy]`
 
 The policy table extends the constitution. It names package roots, test roots,
 generated/excluded paths, env policy, reachability providers, assertion helpers,
@@ -142,18 +143,18 @@ private-internal exceptions, typecheck interpreter selection, and extra
 pre-commit steps. Defaults come from `spice/policy.py`; bad config fails
 loudly.
 
-Reference: [policy table](docs/config/reference.md#toolspicepolicy).
+Reference: [policy table](docs/config/reference.md#policy).
 
-## `[tool.spice.policy.pre_commit_builtins]`
+## `[policy.pre_commit_builtins]`
 
 Per-built-in overrides for hook steps. A key can keep the default, disable the
 step, replace it with a mounted command, or replace it with a command-step
 table.
 
 Reference:
-[pre-commit built-ins](docs/config/reference.md#toolspicepolicypre_commit_builtins).
+[pre-commit built-ins](docs/config/reference.md#policypre_commit_builtins).
 
-## `[tool.spice.maxims.<bag>]`
+## `[maxims.<bag>]`
 
 Maxim bags extend or replace the live prose conscience. Trigger words are
 normalized lowercase alphabetic phrases; a match publishes the bag's message
@@ -161,17 +162,17 @@ back to the agent as steering. By default that publish is judge-free; when
 adjudication is enabled the judge first decides whether the sampled text
 violates the maxim.
 
-Reference: [maxim bags](docs/config/reference.md#toolspicemaximsbag).
+Reference: [maxim bags](docs/config/reference.md#maximsbag).
 
-## `[tool.spice.tasks]`
+## `[tasks]`
 
 Task config adds public project stems, per-stem phase flows, and public project
 depth bounds. Built-in priority aliases and SLA due dates are fixed.
 
-Reference: [task config](docs/config/reference.md#toolspicetasks).
+Reference: [task config](docs/config/reference.md#tasks).
 
-## `[tool.spice.serve]`
+## `[serve]`
 
 Serve config controls the browser header/title brand and default lane lifetime.
 
-Reference: [serve config](docs/config/reference.md#toolspiceserve).
+Reference: [serve config](docs/config/reference.md#serve).

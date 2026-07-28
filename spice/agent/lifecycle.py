@@ -305,7 +305,7 @@ def _prepare_launch(
     """Resolve the command and every value that decided it.
 
     Model and effort resolve in one order: explicit argument, then the claimed
-    task's phase mapping for this driver, then the effective four-layer
+    task's phase mapping for this driver, then the effective three-layer
     configuration, then the driver's shipped default. Personality and fast mode
     resolve instead against what the driver declares it honors, so a knob
     without a launch-time seam stops here, in the open.

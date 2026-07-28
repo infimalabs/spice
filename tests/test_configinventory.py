@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 from spice.config import layers
@@ -19,6 +20,8 @@ FORBIDDEN_CONFIGURATION_SYMBOLS = (
     "set_worktree_section",
     "clear_worktree_section",
     "PACKAGED_SOURCE",
+    "PYPROJECT_SOURCE",
+    "_pyproject_spice_table",
 )
 
 
@@ -92,7 +95,7 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
             "spice/config/layers.py",
             "spice/config/pyproject.py",
         ),
-        "spice_table_readers": ("spice/config/layers.py",),
+        "spice_table_readers": (),
         "loader_functions": (
             "effective_mapping",
             "effective_table",
@@ -100,7 +103,23 @@ def test_configuration_source_inventory_has_only_current_seams() -> None:
             "load_config",
         ),
         "editor_functions": ("clear_scope_section", "set_scope_section"),
-        "scope_vocabulary": ("system", "pyproject", "repository", "worktree"),
+        "scope_vocabulary": ("system", "repository", "worktree"),
         "compatibility_symbols": (),
         "config_state_files": ("spice.toml",),
     }
+
+
+def test_this_repository_exercises_the_unwrapped_tracked_shape() -> None:
+    pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    with (PROJECT_ROOT / "spice.toml").open("rb") as handle:
+        repository_config = tomllib.load(handle)
+
+    assert "[tool.spice" not in pyproject_text
+    assert repository_config["agent"]["wrappers"] == ["common", "spice-dev"]
+    assert repository_config["commands"]["release"] == [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "spice.release",
+    ]

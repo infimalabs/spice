@@ -863,12 +863,8 @@ def test_task_note_preserves_shared_attachment_refs(task_repo):
 
 
 def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
-    (task_repo / "pyproject.toml").write_text(
-        "[tool.spice.tasks]\n"
-        'stems = ["qa"]\n'
-        "\n"
-        "[tool.spice.tasks.flows]\n"
-        'qa = ["todo", "verify", "review"]\n',
+    (task_repo / "spice.toml").write_text(
+        '[tasks]\nstems = ["qa"]\n\n[tasks.flows]\nqa = ["todo", "verify", "review"]\n',
         encoding="utf-8",
     )
 
@@ -888,12 +884,8 @@ def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
 
 
 def test_repo_configured_per_stem_default_flow_rejects_unknown_phase(task_repo):
-    (task_repo / "pyproject.toml").write_text(
-        "[tool.spice.tasks]\n"
-        'stems = ["qa"]\n'
-        "\n"
-        "[tool.spice.tasks.flows]\n"
-        'qa = ["todo", "ship", "review"]\n',
+    (task_repo / "spice.toml").write_text(
+        '[tasks]\nstems = ["qa"]\n\n[tasks.flows]\nqa = ["todo", "ship", "review"]\n',
         encoding="utf-8",
     )
 

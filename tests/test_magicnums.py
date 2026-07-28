@@ -68,8 +68,8 @@ def test_magic_numbers_guard_reads_configured_threshold(tmp_path):
     _git(repo, "commit", "-m", "base")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy.magic]\nexamine_threshold = 100\n",
+        "spice.toml",
+        "[policy.magic]\nexamine_threshold = 100\n",
     )
     _write_repo_file(repo, "src/app.py", "def run(value):\n    return value > 75\n")
     _git(repo, "add", ".")
@@ -98,11 +98,11 @@ def test_magic_numbers_guard_applies_scoped_threshold_and_global_fallback(tmp_pa
     _git(repo, "commit", "-m", "base")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        "[tool.spice.policy.magic]\n"
+        "spice.toml",
+        "[policy.magic]\n"
         "examine_threshold = 10\n"
         "\n"
-        "[[tool.spice.policy.rules]]\n"
+        "[[policy.rules]]\n"
         'scopes = { paths = ["src/high/**"] }\n'
         "magic.examine_threshold = 100\n",
     )
@@ -133,8 +133,8 @@ def test_magic_numbers_guard_reads_configured_baseline_ref(tmp_path):
     _git(repo, "commit", "-m", "head")
     _write_repo_file(
         repo,
-        "pyproject.toml",
-        f'[tool.spice.policy.magic]\nbaseline_ref = "{base}"\n',
+        "spice.toml",
+        f'[policy.magic]\nbaseline_ref = "{base}"\n',
     )
     _git(repo, "add", ".")
 

@@ -24,8 +24,8 @@ async function createFixtureRepository() {
   );
   await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: repo });
   await fs.writeFile(
-    path.join(repo, "pyproject.toml"),
-    '[tool.spice.tasks]\nhidden_stems = ["sandbox"]\n',
+    path.join(repo, "spice.toml"),
+    '[tasks]\nhidden_stems = ["sandbox"]\n',
     "utf8"
   );
   return repo;

@@ -93,9 +93,9 @@ def test_csharp_unused_retention_policy_keeps_configured_surfaces(
     tmp_path: Path,
 ) -> None:
     _write(
-        tmp_path / "pyproject.toml",
+        tmp_path / "spice.toml",
         """
-[tool.spice.policy.csharp_unused_retention]
+[policy.csharp_unused_retention]
 base_types = ["RetainedBase"]
 interfaces = ["IActivatedService"]
 attribute_names = ["ActivatorEntryPoint", "SerializedMemberAttribute"]

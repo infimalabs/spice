@@ -388,16 +388,16 @@ def test_render_maxim_proposals_prints_valid_toml_stanza_with_evidence(tmp_path)
         "# evidence 4 steering_text: Avoid fallback branches. Use one deterministic path.",
         f"# evidence 5 ack_text: ACK {KEY_A}: captured fallback correction.",
         "# evidence 6 ack_content: captured fallback correction.",
-        "[tool.spice.maxims.fallbacks]",
+        "[maxims.fallbacks]",
         'words = ["branches", "deterministic", "fallback", "path"]',
         'message = "Avoid fallback branches. Use one deterministic path."',
     ]
     parsed = tomllib.loads(rendered)
-    assert parsed["tool"]["spice"]["maxims"]["fallbacks"] == {
+    assert parsed["maxims"]["fallbacks"] == {
         "words": ["branches", "deterministic", "fallback", "path"],
         "message": "Avoid fallback branches. Use one deterministic path.",
     }
-    (repo / "pyproject.toml").write_text(rendered, encoding="utf-8")
+    (repo / "spice.toml").write_text(rendered, encoding="utf-8")
     assert maxims.resolved_maxim_bags(repo)["fallbacks"].words == frozenset(
         {"branches", "deterministic", "fallback", "path"}
     )
@@ -440,11 +440,11 @@ def test_maxim_proposal_drafts_drop_or_normalize_invalid_trigger_candidates(
     assert drafts[0].words == ("quiet route", "soft landing")
     assert drafts[0].message == "Avoid quiet routes across contexts."
     parsed = tomllib.loads(rendered)
-    assert parsed["tool"]["spice"]["maxims"]["proposal-quiet-route-soft-landing"] == {
+    assert parsed["maxims"]["proposal-quiet-route-soft-landing"] == {
         "words": ["quiet route", "soft landing"],
         "message": "Avoid quiet routes across contexts.",
     }
-    (repo / "pyproject.toml").write_text(rendered, encoding="utf-8")
+    (repo / "spice.toml").write_text(rendered, encoding="utf-8")
     assert maxims.resolved_maxim_bags(repo)[
         "proposal-quiet-route-soft-landing"
     ].words == frozenset({"quiet route", "soft landing"})
@@ -575,8 +575,8 @@ def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
     tmp_path, monkeypatch, capsys
 ):
     repo = _init_repo(tmp_path / "repo")
-    pyproject = repo / "pyproject.toml"
-    pyproject.write_text("[tool.spice]\n", encoding="utf-8")
+    repository_config = repo / "spice.toml"
+    repository_config.write_text("# unchanged\n", encoding="utf-8")
     _record_ack_source(
         repo,
         key=KEY_A,
@@ -611,11 +611,11 @@ def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
         "# evidence 4 steering_text: Avoid fallback branches. Use one deterministic path.",
         f"# evidence 5 ack_text: ACK {KEY_A}: captured fallback correction.",
         "# evidence 6 ack_content: captured fallback correction.",
-        "[tool.spice.maxims.fallbacks]",
+        "[maxims.fallbacks]",
         'words = ["branches", "deterministic", "fallback", "path"]',
         'message = "Avoid fallback branches. Use one deterministic path."',
     ]
-    assert pyproject.read_text(encoding="utf-8") == "[tool.spice]\n"
+    assert repository_config.read_text(encoding="utf-8") == "# unchanged\n"
     assert maxims.resolved_maxim_bags(repo) == maxims.packaged_maxim_bags()
 
 
@@ -680,13 +680,13 @@ def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
         MAXIM_PROPOSAL_TASK_CREATION_SURFACE
     )
     assert "Human triage decides whether to merge" in row["acceptance"]
-    assert "[tool.spice.maxims.fallbacks]" in row["task_description"]
+    assert "[maxims.fallbacks]" in row["task_description"]
     assert "Fallback branches hide the deterministic path." in row["task_description"]
     assert show.func(show) == 0
     show_output = capsys.readouterr().out
     assert f"handle {handle}" in show_output
     assert "project .maxim_proposal" in show_output
-    assert "[tool.spice.maxims.fallbacks]" in show_output
+    assert "[maxims.fallbacks]" in show_output
     assert "Fallback branches hide the deterministic path." in show_output
     assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.packaged_maxim_bags()
 
@@ -695,8 +695,8 @@ def test_maxim_propose_cli_reports_no_candidate_history_without_install(
     tmp_path, monkeypatch, capsys
 ):
     repo = _init_repo(tmp_path / "repo")
-    pyproject = repo / "pyproject.toml"
-    pyproject.write_text("[tool.spice]\n", encoding="utf-8")
+    repository_config = repo / "spice.toml"
+    repository_config.write_text("# unchanged\n", encoding="utf-8")
     _record_ack_source(
         repo,
         key=KEY_A,
@@ -715,7 +715,7 @@ def test_maxim_propose_cli_reports_no_candidate_history_without_install(
         MAXIM_PROPOSE_CONTRACT_ROW,
         "result: no recurring maxim proposal candidates found; filed=0",
     ]
-    assert pyproject.read_text(encoding="utf-8") == "[tool.spice]\n"
+    assert repository_config.read_text(encoding="utf-8") == "# unchanged\n"
 
 
 def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
@@ -770,7 +770,7 @@ def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
     assert str(row.get("wait") or "").startswith("2099")
     assert row.get("tags", []) == []
     assert "Human triage decides whether to merge" in row["acceptance"]
-    assert "[tool.spice.maxims.fallbacks]" in row["task_description"]
+    assert "[maxims.fallbacks]" in row["task_description"]
     assert (
         'words = ["branches", "deterministic", "fallback", "path"]'
         in row["task_description"]

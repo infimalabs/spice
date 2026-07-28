@@ -112,7 +112,7 @@ def _add_scope_argument(parser: argparse.ArgumentParser) -> None:
         "--scope",
         choices=layers.CONFIG_SCOPE_NAMES,
         default=layers.WORKTREE_SOURCE,
-        help="Configuration layer: system, pyproject, repository, or worktree.",
+        help="Configuration layer: system, repository, or worktree.",
     )
 
 

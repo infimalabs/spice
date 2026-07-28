@@ -59,10 +59,10 @@ def test_rtk_executable_setting_publishes_layering_and_exact_identity_trust():
     reference = _collapsed("docs/config/reference.md")
 
     assert {
-        "config_tracked_table": "[tool.spice.rtk]" in config,
-        "config_plain_table": "plain `[rtk]` table" in config,
-        "config_four_layers": "standard four-layer precedence" in config,
-        "reference_tracked_table": "[tool.spice.rtk]" in reference,
+        "config_tracked_table": "[rtk]" in config,
+        "config_plain_table": "same bare table shape" in config,
+        "config_three_layers": "standard three-layer precedence" in config,
+        "reference_tracked_table": "[rtk]" in reference,
         "reference_plain_table": "use `[rtk]`" in reference,
         "reference_no_lookup": "performs no `which`, existence, or executable probe"
         in reference,
@@ -70,7 +70,7 @@ def test_rtk_executable_setting_publishes_layering_and_exact_identity_trust():
     } == {
         "config_tracked_table": True,
         "config_plain_table": True,
-        "config_four_layers": True,
+        "config_three_layers": True,
         "reference_tracked_table": True,
         "reference_plain_table": True,
         "reference_no_lookup": True,

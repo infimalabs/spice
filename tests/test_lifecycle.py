@@ -471,8 +471,8 @@ def test_ensure_agent_applies_phase_model_for_claimed_task(tmp_path, monkeypatch
         "active_claim_phase",
         lambda actor: "plan" if actor == "claimed-thread" else "",
     )
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.tasks.phase_models.claude.plan]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[tasks.phase_models.claude.plan]\n"
         'model = "claude-sonnet-5"\n'
         'effort = "high"\n',
         encoding="utf-8",
@@ -494,8 +494,8 @@ def test_ensure_agent_falls_back_when_claimed_phase_is_unmapped(tmp_path, monkey
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     monkeypatch.setattr(claimstate, "active_claim_phase", lambda actor: "todo")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-sonnet-5"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[tasks.phase_models.claude.plan]\nmodel = "claude-sonnet-5"\n',
         encoding="utf-8",
     )
 

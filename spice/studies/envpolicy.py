@@ -10,7 +10,7 @@ pattern. The access gate closes that gap: the inventory covers
 *every* env access — including reads under non-watchlisted or dynamic names —
 by requiring a waiver on every known env-access site too. It is on by default
 (the strongest audit with no configuration); a repo opts *out* with
-`[tool.spice.policy] env_access_gate = false`.
+`[policy] env_access_gate = false`.
 
 """
 
@@ -220,19 +220,18 @@ def _load_env_policy_baseline(
     if not path.is_file():
         raise SpiceError(
             f"run `spice study env-policy --write-baseline {baseline}` or "
-            "remove the baseline setting; [tool.spice.policy.env_access] "
+            "remove the baseline setting; [policy.env_access] "
             f"baseline file not found: {baseline}"
         )
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise SpiceError(
-            f"[tool.spice.policy.env_access] baseline {baseline} is not valid JSON: "
-            f"{exc.msg}"
+            f"[policy.env_access] baseline {baseline} is not valid JSON: {exc.msg}"
         ) from exc
     if not isinstance(raw, list):
         raise SpiceError(
-            f"[tool.spice.policy.env_access] baseline {baseline} must be a JSON array"
+            f"[policy.env_access] baseline {baseline} must be a JSON array"
         )
     entries: set[tuple[str, int, str, str]] = set()
     for index, item in enumerate(raw):
@@ -243,7 +242,7 @@ def _load_env_policy_baseline(
 def _env_policy_baseline_entry(
     item: object, baseline: str, index: int
 ) -> tuple[str, int, str, str]:
-    context = f"[tool.spice.policy.env_access] baseline {baseline}[{index}]"
+    context = f"[policy.env_access] baseline {baseline}[{index}]"
     if not isinstance(item, dict):
         raise SpiceError(f"{context} must be an object")
     path = item.get("path")
@@ -519,14 +518,12 @@ def env_access_gate_enabled(repo_root: Path) -> bool:
     """Whether the env access gate is on for this repo.
 
     On by default — the strongest audit is the default, with no configuration.
-    A repo opts *out* with `[tool.spice.policy] env_access_gate = false` if it
+    A repo opts *out* with `[policy] env_access_gate = false` if it
     is not ready to waive every `os.environ`/`os.getenv` access site.
     """
     value = effective_table(repo_root, "policy").get("env_access_gate", True)
     if not isinstance(value, bool):
-        raise SpiceError(
-            "[tool.spice.policy] env_access_gate must be a boolean (true/false)"
-        )
+        raise SpiceError("[policy] env_access_gate must be a boolean (true/false)")
     return value
 
 
@@ -550,8 +547,7 @@ def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:
             matchers.append(re.compile(_quoted_name_pattern(pattern)))
         except re.error as exc:
             raise SpiceError(
-                "[tool.spice.policy] env_name_patterns contains invalid regex "
-                f"{pattern!r}: {exc}"
+                f"[policy] env_name_patterns contains invalid regex {pattern!r}: {exc}"
             ) from exc
     return matchers
 
@@ -576,7 +572,7 @@ def env_access_default_patterns(
 
     The defaults carry the standard idiom for each language family; a repo adds
     its own or replacement idioms via
-    `[tool.spice.policy.env_access.default_patterns]`, a table keyed by family
+    `[policy.env_access.default_patterns]`, a table keyed by family
     name (`python`, `csharp`, `lua`, `shell`, `javascript`, or configured
     families).
     """
@@ -623,7 +619,7 @@ def _compile_access_pattern(family: str, pattern: str) -> re.Pattern[str]:
         return re.compile(pattern)
     except re.error as exc:
         raise SpiceError(
-            "[tool.spice.policy.env_access.default_patterns] contains invalid "
+            "[policy.env_access.default_patterns] contains invalid "
             "regex for "
             f"family {family!r}: {pattern!r}: {exc}"
         ) from exc
@@ -654,7 +650,7 @@ def render_env_name_ledger_board(findings: list[EnvNameLedgerFinding]) -> str:
         return "env-name-ledger: ok"
     lines = [
         f"env-name-ledger: {len(findings)} manifest mismatch(es); "
-        "update `[tool.spice.policy] env_names`"
+        "update `[policy] env_names`"
     ]
     for finding in findings:
         lines.append(f"  FAIL  {finding.kind}: {finding.name}")

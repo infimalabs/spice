@@ -8,7 +8,7 @@ Spice has two command-extension surfaces with different owners:
   shell commands receive steering, keep-working guidance, RTK rewrite routing,
   source checkout routing, and configured wrapper functions
   before the requested command executes.
-- `[tool.spice.commands]` mounted commands are repository-owned command paths.
+- `[commands]` mounted commands are repository-owned command paths.
   They let a project expose its own tools under `spice <verb>` or
   `spice <verb> <subcommand> ...` without making those tools built-ins for
   every repository.
@@ -80,10 +80,10 @@ The complete install, verification, and ownership contract is in
 
 Wrapper functions are generated from the effective `wrappers.<group>` tables.
 The selected groups come from the effective `agent.wrappers` list. In
-`pyproject.toml` those names are `[tool.spice.wrappers.<group>]` and
-`[tool.spice.agent]`; system, repository, and worktree `spice.toml` files use
-`[wrappers.<group>]` and `[agent]`. When no list is configured, spice selects
-the built-in `common` group. An explicit empty list disables wrapper generation.
+every layer those names are `[wrappers.<group>]` and `[agent]`; tracked
+repository settings live in root `spice.toml`. When no list is configured,
+spice selects the built-in `common` group. An explicit empty list disables
+wrapper generation.
 
 The ordinary recursive layer merge applies until the named group boundary. A
 later `[wrappers.common]` replaces the complete inherited `common` group rather
@@ -153,7 +153,7 @@ Repos that need exact shell-function control can override or extend groups
 default only ride along if re-listed):
 
 ```toml
-[tool.spice.wrappers.common]
+[wrappers.common]
 wrap = ["grep", "find", "git"]
 ```
 
@@ -173,10 +173,10 @@ group alongside `common`, without implying that `codegen` belongs to the
 generic default:
 
 ```toml
-[tool.spice.agent]
+[agent]
 wrappers = ["common", "repo-tools"]
 
-[tool.spice.wrappers.repo-tools]
+[wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
@@ -185,27 +185,27 @@ common agent habit of running bare `pre-commit`, while leaving the generic
 `common` group unchanged:
 
 ```toml
-[tool.spice.agent]
+[agent]
 wrappers = ["common", "spice-dev"]
 
-[tool.spice.wrappers.spice-dev]
+[wrappers.spice-dev]
 pre-commit = { argv = ["spice", "dev", "pre-commit"] }
 ```
 
 ## Mounted Commands
 
 Mounted commands come from the effective `commands` table. Repositories usually
-declare them in tracked `pyproject.toml`:
+declare them in tracked root `spice.toml`:
 
 ```toml
-[tool.spice.commands]
+[commands]
 release = ["uv", "run", "python", "-m", "spice.release"]
 ```
 
-System, repository, or worktree TOML uses the plain `[commands]` table. Command
-entries merge by dotted command name across scopes; a later leaf replaces the
-earlier argv exactly. `spice config show` reports the winning scope and path for
-each effective command leaf.
+Every layer uses the same plain `[commands]` table. Command entries merge by
+dotted command name across scopes; a later leaf replaces the earlier argv
+exactly. `spice config show` reports the winning scope and path for each
+effective command leaf.
 
 `spice release notes` runs the mounted command from the repository root with
 `notes` passed through verbatim. String mounts are shell-split once; list mounts
@@ -218,7 +218,7 @@ built-in commands and valid sibling mounts remain available. Dotted mounts
 under built-in verbs are allowed only when the full path is a novel action name:
 
 ```toml
-[tool.spice.commands]
+[commands]
 toolbox = ["uv", "run", "toolbox"]
 report.inspect = ["project-tool", "report", "inspect"]
 "study.repo-tool" = ["project-tool", "study", "repo-tool"]
