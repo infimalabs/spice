@@ -325,7 +325,7 @@ def test_protocol_document_refuses_noncanonical_operation_order():
     ("parser", "argv"),
     (
         (build_parser(), ["init"]),
-        (build_parser(), ["deinit"]),
+        (build_parser(), ["init", "--unapply"]),
         (
             build_parser(),
             ["task", "ingest", "plan.md", "--project", "task.plan"],

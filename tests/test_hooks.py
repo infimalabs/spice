@@ -31,6 +31,7 @@ from spice.studies.walk import (
     staged_renames,
     tracked_paths,
 )
+from tests.test_configtrusthelpers import approve_repository_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -1056,6 +1057,8 @@ def _write_repo_file(repo: Path, name: str, text: str) -> None:
     path = repo / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    if name == "spice.toml":
+        approve_repository_config(repo)
 
 
 def _write_spice_product_shape(repo: Path) -> None:

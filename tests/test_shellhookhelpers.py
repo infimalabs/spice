@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 
 from spice.agent import shellhook
+from spice.paths import repo_root_from_cwd
+from tests.test_configtrusthelpers import approve_repository_config
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 
@@ -54,6 +56,8 @@ def write_rtk_config(repo: Path, executable: str) -> None:
         f"[rtk]\nexecutable = {json.dumps(executable)}\n",
         encoding="utf-8",
     )
+    if repo_root_from_cwd(repo) == repo.resolve():
+        approve_repository_config(repo)
 
 
 def write_agent_wrapper_config(

@@ -12,6 +12,7 @@ from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.paths import shared_state_root, worktree_state_root
 from spice.studies.walk import staged_paths, tracked_paths
+from tests.test_configtrusthelpers import approve_repository_config
 import pytest
 
 
@@ -539,6 +540,7 @@ def _wrapper_repo(repo: Path, pytest_argv: str) -> Path:
         f"argv = {pytest_argv}\n",
         encoding="utf-8",
     )
+    approve_repository_config(repo)
     return repo
 
 

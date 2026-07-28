@@ -56,14 +56,19 @@ Effect count, destructiveness, and reversibility do not choose the default.
 There are no per-verb exceptions: if the reads below predict the wrong answer,
 the criterion or the read classification must change.
 
-For `init`, `deinit`, `task ingest`, and the publishing release verbs, bare
-invocation renders the human plan, `--json` renders the same ordered plan for
-machines, and `--apply` is the only mutation instruction.
+For `init`, `init --unapply`, `task ingest`, and the publishing release verbs,
+bare invocation renders the human plan, `--json` renders the same ordered plan
+for machines, and `--apply` is the only mutation instruction.
+
+Beginning with v0.30.0, `--dry-run` is withdrawn from `spice init` and
+`spice task ingest`. Those commands refuse the old spelling with the owning
+release and direct operators to bare invocation for preview or `--apply` for
+execution; they never accept both spellings in one invocation.
 
 | Mutating verb or invocation | Effect-driving reads | Classification |
 | --- | --- | --- |
 | `spice init`; `spice dev install-hooks` | The existing repository and Git configuration semantically reconciled with packaged initialization policy through the shared planner | Authored input |
-| `spice deinit` | The ownership receipt and current repository and Git configuration semantically reconciled to determine safe reversal | Authored input |
+| `spice init --unapply[=<receipt-digest>]` | The current ownership receipt and repository and Git configuration semantically reconciled to determine safe reversal; the optional digest asserts that receipt rather than selecting a caller-supplied path | Authored input |
 | `spice task ingest` | The Markdown task document selected by path or standard input | Authored input |
 | `spice task artifact prune` | Operator-chosen retention metadata in artifact manifests, combined with task completion state | Authored input |
 | `spice release minor`; `patch`; `prepare`; `publish`; `github` | The versioned repository tree and, where supplied, curated release notes that become the published payload | Authored input |
@@ -73,7 +78,7 @@ machines, and `--apply` is the only mutation instruction.
 | `spice task next`; `add`; `done`; `review`; `oops`; `note`; `reword`; `depends`; `wake`; `claim`; `reclaim`; `unclaim`; `modify`; `delete`; `capture` | Command-line intent and the task board, claim, and dependency graph; a repository tree selected for integration or publication is transferred opaquely | Direct intent |
 | `spice task artifact add` | The command line names the task and source path; the selected bytes are copied opaquely rather than interpreted as instructions | Direct intent |
 | `spice agent activation`; `requeue-deadletter`; `import`; `reply`; `ensure`; `supervise`; `post-tool-hook` | Command-line or ambient-agent identity, approved launch policy, and live agent, inbox, and supervisor state | Direct intent |
-| Mutating forms of `spice config say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys | Direct intent |
+| Mutating forms of `spice config set`; `say`; `judge`; `personality`; `agent` | Exact assignments, clears, and scope named on the command line; existing files are read only to preserve unrelated keys. The system-scope form includes explicit `--apply` after a bare preview names the installed path and reinstall loss. | Direct intent |
 | `spice maxim propose`; `file-proposals`; `disable`; `enable` | Command-line intent and durable ACK, maxim, and task-board state | Direct intent |
 | Interactive Serve mutations | Native fact stores plus the live operator action that requests the authority change | Direct intent |
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from spice.config import values
+from spice.config.trust import require_repository_config_approval
 from spice.agent.driver import driver_for
 from spice.agent.runinbox import (
     AGENT_RUN_INBOX_REPEAT_SECONDS as AGENT_RUN_INBOX_REPEAT_SECONDS,
@@ -53,7 +54,7 @@ from spice.agent.runwatch import (
     watch_agent_side_channel as watch_agent_side_channel,
     write_side_channel_chunk as write_side_channel_chunk,
 )
-from spice.paths import atomic_write_json
+from spice.paths import atomic_write_json, repo_root_from_cwd
 from spice.agent.sidechannelnotify import (
     side_channel_marker_path as side_channel_marker_path,
 )
@@ -240,6 +241,13 @@ def build_agent_run_command(
         else RTK_CANONICAL_EXECUTABLE
     )
     if rewrite_rtk:
+        resolved_root = repo_root or repo_root_from_cwd()
+        if resolved_root is not None:
+            require_repository_config_approval(
+                resolved_root,
+                ("rtk", "executable"),
+                command=shlex.join((rtk_executable, "rewrite", "--", *args)),
+            )
         args = rtk_rewrite_agent_run_args(
             args,
             repo_root=repo_root,

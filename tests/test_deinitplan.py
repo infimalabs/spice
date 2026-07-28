@@ -6,12 +6,14 @@ import json
 import stat
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from spice.errors import SpiceError
 from spice.hooks.initplan import (
+    RECEIPT_DIGEST_BYTES,
     InitOperationScope,
     InitReceiptStatus,
     InitializationReceipt,
@@ -20,6 +22,7 @@ from spice.hooks.initplan import (
     initialization_receipt_path,
     load_initialization_receipt,
     plan_initialization,
+    write_initialization_receipt,
 )
 from spice.hooks.deinitplan import (
     DeinitOutcome,
@@ -27,6 +30,7 @@ from spice.hooks.deinitplan import (
     DeinitializationReceipt,
     apply_deinitialization_plan,
     deinitialization_plan_payload,
+    deinitialization_plan_rows,
     load_deinitialization_receipt,
     deinitialization_receipt_path,
     plan_deinitialization,
@@ -47,7 +51,10 @@ def test_full_cli_round_trip_restores_whole_tree_and_git_config_identity(tmp_pat
     _run([sys.executable, "-m", "spice", "init"], cwd=repo)
     after_preview = (_worktree_identity(repo), _git_config_identity(repo))
     _run([sys.executable, "-m", "spice", "init", "--apply"], cwd=repo)
-    _run([sys.executable, "-m", "spice", "deinit", "--apply"], cwd=repo)
+    _run(
+        [sys.executable, "-m", "spice", "init", "--unapply", "--apply"],
+        cwd=repo,
+    )
     after_reversal = (_worktree_identity(repo), _git_config_identity(repo))
 
     assert (after_preview, after_reversal) == (
@@ -246,7 +253,7 @@ def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
         (True, False, False, False, False, False),
         InitReceiptStatus.DEINITIALIZING,
     )
-    with pytest.raises(SpiceError, match="run `spice deinit`"):
+    with pytest.raises(SpiceError, match="run `spice init --unapply --apply`"):
         apply_initialization_plan(plan_initialization(repo))
 
     monkeypatch.setattr(
@@ -266,21 +273,34 @@ def test_interrupted_deinit_resumes_from_the_durable_reverse_receipt(
     ) == (False, False)
 
 
-def test_deinit_json_cli_emits_the_ordered_preview_without_reversal(tmp_path):
+def test_init_unapply_json_emits_digest_and_applies_the_asserted_receipt(tmp_path):
     repo = _git_init(tmp_path / "repo")
     apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
 
+    before_human = _worktree_identity(repo)
+    human = _run(
+        [sys.executable, "-m", "spice", "init", "--unapply"],
+        cwd=repo,
+    )
+    expected_plan = plan_deinitialization(repo)
+    assert human.stdout.splitlines() == deinitialization_plan_rows(expected_plan)
+    assert _worktree_identity(repo) == before_human
+
     completed = _run(
-        [sys.executable, "-m", "spice", "deinit", "--json"],
+        [sys.executable, "-m", "spice", "init", "--unapply", "--json"],
         cwd=repo,
     )
     plan = json.loads(completed.stdout)
 
     assert (
+        plan["protocol"],
         plan["schema_version"],
         plan["status"],
         plan["repository"],
-    ) == (1, "preview", str(repo.resolve()))
+    ) == ("spice.command-plan", 1, "preview", str(repo.resolve()))
+    receipt_digest = plan["receipt_digest"]
+    plan_digest = plan["plan_digest"]
+    assert len(bytes.fromhex(receipt_digest)) == RECEIPT_DIGEST_BYTES
     assert [item["target"] for item in plan["operations"]] == [
         ".spice/.gitignore",
         "core.hooksPath",
@@ -291,8 +311,76 @@ def test_deinit_json_cli_emits_the_ordered_preview_without_reversal(tmp_path):
     ]
     assert initialization_receipt_path(repo).exists()
 
-    _run([sys.executable, "-m", "spice", "deinit", "--apply"], cwd=repo)
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "spice",
+            "init",
+            f"--unapply={receipt_digest}",
+            f"--apply={plan_digest}",
+        ],
+        cwd=repo,
+    )
     assert not initialization_receipt_path(repo).exists()
+
+
+def test_init_unapply_refuses_digest_mismatch_and_caller_supplied_path(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
+    receipt_before = initialization_receipt_path(repo).read_bytes()
+
+    for assertion in ("0" * (RECEIPT_DIGEST_BYTES * 2), "/tmp/receipt.json"):
+        completed = _run_unchecked(
+            [
+                sys.executable,
+                "-m",
+                "spice",
+                "init",
+                f"--unapply={assertion}",
+                "--apply",
+            ],
+            cwd=repo,
+        )
+        assert completed.returncode == 2
+        assert (
+            f"expected {assertion}" in completed.stderr
+            and "observed " in completed.stderr
+        )
+        assert initialization_receipt_path(repo).read_bytes() == receipt_before
+
+
+def test_unapply_apply_boundary_refuses_a_receipt_changed_after_planning(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
+    plan = plan_deinitialization(repo)
+    receipt = load_initialization_receipt(repo)
+    assert isinstance(receipt, InitializationReceipt)
+    write_initialization_receipt(replace(receipt, mode=InitializationMode.FULL))
+
+    with pytest.raises(
+        SpiceError,
+        match=(
+            rf"receipt changed after unapply planning: "
+            rf"expected {plan.receipt_digest}; observed "
+        ),
+    ):
+        apply_deinitialization_plan(plan)
+
+    assert (repo / ".spice/hooks/pre-commit").is_file()
+
+
+def test_deinit_refuses_with_withdrawal_release_and_current_replacement(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+
+    completed = _run_unchecked(
+        [sys.executable, "-m", "spice", "deinit"],
+        cwd=repo,
+    )
+
+    assert completed.returncode == 2
+    assert "withdrawn in v0.30.0" in completed.stderr
+    assert "`spice init --unapply`" in completed.stderr
 
 
 def _git_init(repo: Path) -> Path:
@@ -380,6 +468,18 @@ def _run(
     return subprocess.run(
         command,
         check=True,
+        capture_output=True,
+        cwd=cwd,
+        text=True,
+    )
+
+
+def _run_unchecked(
+    command: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
         capture_output=True,
         cwd=cwd,
         text=True,

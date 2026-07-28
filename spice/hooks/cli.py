@@ -8,8 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from spice import paths as spice_paths
+from spice.cli.withdrawn import add_withdrawn_dry_run_argument
 from spice.errors import SpiceError
+from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
 from spice.paths import require_repo_root
+
+DEINIT_WITHDRAWAL_RELEASE = OPERATOR_STATE_RELOCATION_RELEASE
 
 
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
@@ -115,16 +119,19 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
             "digest; bare invocation only previews."
         ),
     )
+    add_withdrawn_dry_run_argument(init)
     init.add_argument(
         "--json",
         action="store_true",
         help="Emit the versioned initialization plan as JSON without applying it.",
     )
+    _mark_receipt_writing(init)
     init.set_defaults(func=handle_init)
 
     deinit = subparsers.add_parser(
         "deinit",
-        help="Reverse Spice-owned initialization state without overwriting edits.",
+        help=(f"Withdrawn in {DEINIT_WITHDRAWAL_RELEASE}; use `spice init --unapply`."),
+        recovery_examples=("spice init --unapply",),
     )
     deinit.add_argument(
         "--apply",
@@ -142,6 +149,21 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         help="Emit the versioned reversal plan as JSON without applying it.",
     )
     deinit.set_defaults(func=handle_deinit)
+
+
+def _mark_receipt_writing(parser: argparse.ArgumentParser) -> None:
+    """Declare receipt ownership and install its mandatory reversal selector."""
+    parser.add_argument(
+        "--unapply",
+        nargs="?",
+        const="",
+        metavar="RECEIPT_DIGEST",
+        help=(
+            "Reverse this verb's current receipt; optionally assert its SHA-256 "
+            "digest. Bare reversal only previews."
+        ),
+    )
+    parser.set_defaults(writes_receipt=True)
 
 
 def _configure_commit_parsers(actions: Any) -> None:
@@ -175,6 +197,10 @@ def _configure_commit_parsers(actions: Any) -> None:
 
 
 def handle_init(args: argparse.Namespace) -> int:
+    # Parser-free callers use minimal namespaces, so an omitted direction is forward.
+    if getattr(args, "unapply", None) is not None:
+        return _handle_init_unapply(args)
+
     from spice.commandplan import assert_plan_digest
     from spice.hooks.initplan import (
         InitializationMode,
@@ -204,13 +230,13 @@ def handle_init(args: argparse.Namespace) -> int:
 
     expected_digest = args.apply if isinstance(args.apply, str) else None
     assert_plan_digest(payload, expected_digest)
-    apply_initialization_plan(plan)
+    apply_initialization_plan(plan, approve_repository_config=True)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
     return 0
 
 
-def handle_deinit(args: argparse.Namespace) -> int:
+def _handle_init_unapply(args: argparse.Namespace) -> int:
     from spice.commandplan import assert_plan_digest
     from spice.hooks.deinitplan import (
         apply_deinitialization_plan,
@@ -221,10 +247,24 @@ def handle_deinit(args: argparse.Namespace) -> int:
     )
 
     apply_requested = args.apply is not None
+    if bool(args.gates):
+        raise SpiceError(
+            "`spice init --gates` cannot be combined with `--unapply`; "
+            "the current receipt selects the reversal surface"
+        )
     if apply_requested and bool(args.json):
-        raise SpiceError("`spice deinit --apply` cannot be combined with `--json`")
+        raise SpiceError(
+            "`spice init --unapply --apply` cannot be combined with `--json`"
+        )
     plan = plan_deinitialization(init_repo_root())
     payload = deinitialization_plan_payload(plan)
+    asserted_digest = str(args.unapply)
+    if asserted_digest and asserted_digest != plan.receipt_digest:
+        raise SpiceError(
+            "initialization receipt digest mismatch: "
+            f"expected {asserted_digest}; "
+            f"observed {plan.receipt_digest or '<none>'}"
+        )
     if not apply_requested:
         if bool(args.json):
             print(json.dumps(payload, indent=2, sort_keys=True))
@@ -238,6 +278,13 @@ def handle_deinit(args: argparse.Namespace) -> int:
     for row in deinitialization_report_rows(report):
         print(row)
     return 0
+
+
+def handle_deinit(_args: argparse.Namespace) -> int:
+    raise SpiceError(
+        f"`spice deinit` was withdrawn in {DEINIT_WITHDRAWAL_RELEASE}; "
+        "use `spice init --unapply` to preview the current receipt reversal"
+    )
 
 
 def init_repo_root(cwd: Path | None = None) -> Path:
