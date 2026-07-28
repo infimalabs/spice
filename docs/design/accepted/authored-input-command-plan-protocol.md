@@ -83,7 +83,7 @@ in the same order. Producing a plan promises that no mutation occurred.
 Each operation records enough information to apply and, when receipted, reverse
 one effect:
 
-- operation kind, target, and scope;
+- operation kind, target, scope, and execution owner;
 - observed-before and intended-after value, absence, and mode where applicable;
 - ownership and operation digests;
 - whether Spice manages the operation and introduced its target; and
@@ -100,10 +100,37 @@ application, and reversal rules. The authored-input criterion changes only the
 default; it does not change the protocol.
 
 A mounted command enters the protocol by printing a valid versioned plan
-document. Its configured command and argv remain unchanged. Spice validates the
-document and applies its operations itself; it does not invoke a second command
-form. Output that is not a valid plan document passes through under the existing
-mount behavior. A planning mount is side-effect-free by contract.
+document. Its configured command and argv remain unchanged. Output that is not a
+valid plan document passes through under the existing mount behavior. A planning
+mount is side-effect-free by contract.
+
+Every operation carries the same digest-bound `executor`. Omitted `executor`
+means `spice`, preserving the original mounted-plan vocabulary:
+
+- A `spice` plan contains only the file and Git-configuration operations Spice
+  can preflight, receipt, apply, and reverse itself. Spice invokes the planner
+  once and never delegates those effects back to it.
+- A `command` plan uses an operation vocabulary owned by the mounted command.
+  On `--apply=<plan-digest>`, the first invocation remains a planner: Spice
+  validates the uniform executor and current digest before any effects, then
+  invokes the same configured argv once more with a private execution-digest
+  environment assertion. The command replans, verifies both the caller digest
+  and Spice's execution digest, and executes its effects exactly once. Spice
+  does not create a generic mounted-operation receipt or offer `--unapply` for
+  those opaque effects.
+
+The parent advertises this ownership handshake with the empty internal
+execution-digest variable on the planning pass. Its absence identifies a
+pre-ownership installed parent; a newer candidate then retains the former
+single self-owned apply path only as the bootstrap needed to publish the first
+compatible parent. Once the installed parent advertises the handshake, explicit
+digest authorization and the two-pass boundary are mandatory.
+
+Unknown or mixed executors refuse. A command cannot switch ownership without
+changing every operation and therefore the plan digest. This second ownership
+mode is for commands such as the repository release appliance whose operations
+include validation, build, Git, registry, and hosting effects that Spice cannot
+truthfully reduce to file/Git-config writes.
 
 ## Initialization Receipt And Reversal
 
@@ -220,10 +247,13 @@ disposition:
 - `--apply` and `--unapply` remain independent even for verbs that support both.
 - Reversibility follows receipt ownership. It does not follow destructiveness
   and is not promised for receipt-free verbs such as task-document ingest.
+- Mounted operation executors are uniform and digest-bound. Spice-owned
+  operations use the closed applicable vocabulary; command-owned operations
+  replan under an internal execution-digest assertion and remain receipt-free.
 - Receipt migration is one forward move, not permanent dual-read or dual-write
   compatibility.
-- The existing implementation remains the runtime behavior until the follow-up
-  tasks land. This record is a decision, not an implemented-contract claim.
+- Runtime changes land through claimed implementation tasks and executable
+  gates; editing this decision record alone never changes behavior.
 
 ## Validation
 
@@ -234,6 +264,13 @@ already captured by the hardening follow-ups below. The design-ledger gate
 validates its status and placement. The clause-disposition table makes the
 supersession reviewable without treating the historical record as current
 authority.
+
+Task `RELEASE-1kHYsv1v` reconciled mounted release plans with the implemented
+protocol: executor ownership is carried by every operation and therefore the
+plan digest; end-to-end mount tests prove read-only human/JSON preview,
+pre-effect stale-plan refusal, one command-owned execution after explicit
+digest authorization, and continued refusal of unsupported Spice-owned
+operation kinds.
 
 ## Follow-Ups
 

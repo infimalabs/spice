@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.commandplan import command_plan_payload
+from spice.commandownership import COMMAND_PLAN_EXECUTOR
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class ReleasePlan:
             operations=[
                 {
                     "kind": operation.action,
+                    "executor": COMMAND_PLAN_EXECUTOR,
                     "target": operation.detail,
                     "scope": "repository",
                     "action": operation.action,

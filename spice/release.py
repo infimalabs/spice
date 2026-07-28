@@ -24,6 +24,7 @@ from spice.cli.effects import (
     mark_authored_input,
 )
 from spice.commandplan import assert_plan_digest
+from spice.commandownership import defer_command_owned_apply
 from spice.errors import SpiceError
 from spice.process.tool import run_tool_command
 from spice.releaseidentity import (
@@ -193,9 +194,7 @@ def _add_notes_file(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--notes-file",
         type=Path,
-        help=(
-            "Curated GitHub release notes; the untouched generated draft is refused."
-        ),
+        help="Curated GitHub release notes; untouched generated drafts are refused.",
     )
 
 
@@ -304,7 +303,15 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
                     print(row)
             return 0
         expected_digest = args.apply if isinstance(args.apply, str) else None
-        assert_plan_digest(plan.payload(), expected_digest)
+        payload = plan.payload()
+        assert_plan_digest(payload, expected_digest)
+        if defer_command_owned_apply(
+            payload,
+            apply_requested=apply_requested,
+            environ=os.environ,  # env-policy: allow
+        ):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
         return apply_release_plan(args, root, plan)
 
     raise SpiceError(f"unknown release action {mode!r}")
