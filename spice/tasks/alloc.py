@@ -1,13 +1,13 @@
-"""Allocator policy for `task next`: per-agent urgency, stickiness, anti-affinity.
+"""Allocator policy for `task next`: graph rank, stickiness, anti-affinity.
 
-Native urgency ranks first (computed by Taskwarrior under the actor's rc
-overrides — anti-self-review plus any lane overlay). Within the top urgency
-band, `task next` avoids cells a peer is actively on (spread) and prefers the
-smallest move from the actor's last cell (stick).
+Effective priority ranks first: a prerequisite inherits the highest priority
+it transitively unblocks. Among rows of equal effective priority, downstream
+weight ranks the row that releases more of the graph first. Only then does the
+allocator use native urgency, peer spread, and movement as locality tie-breaks.
 
 A review the actor authored is not excluded from the candidate set; the
-`ANTI_SELF_REVIEW` coefficient drops its urgency far below ordinary work, so
-the actor is handed their own review only as a last resort — when a quiet board
+anti-self-review coefficient drops its urgency far below ordinary work, so the
+actor is handed their own review only as a last resort — when a quiet board
 holds nothing else they can take.
 """
 
@@ -28,9 +28,6 @@ from spice.sqliteconnection import sqlite_connection
 from spice.tasks import claimstate, config, identity, lanes, tw
 from spice.tasks.git import boundaries
 
-ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
-BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
-
 
 @dataclass(frozen=True)
 class BriefingTaskSnapshot:
@@ -40,7 +37,8 @@ class BriefingTaskSnapshot:
 
 def actor_overrides(actor: str, route: dict[str, Any] | None) -> list[str]:
     return [
-        f"rc.urgency.uda.review_author.{actor}.coefficient={ANTI_SELF_REVIEW}",
+        "rc.urgency.uda.review_author."
+        f"{actor}.coefficient={config.ALLOCATOR_ANTI_SELF_REVIEW}",
         *lanes.rc_overrides(route),
     ]
 
@@ -76,24 +74,98 @@ def _urgency(row: dict[str, Any]) -> float:
     return float(row.get("urgency") or 0.0)
 
 
+def _row_uuid(row: dict[str, Any]) -> str:
+    return str(row.get("uuid") or "")
+
+
+def _dependency_uuids(row: dict[str, Any]) -> tuple[str, ...]:
+    raw = row.get("depends") or ()
+    if isinstance(raw, str):
+        return (raw,) if raw else ()
+    return tuple(str(value) for value in raw if str(value))
+
+
+def _priority_score(row: dict[str, Any]) -> float:
+    return config.PRIORITY_URGENCY.get(str(row.get("priority") or ""), 0.0)
+
+
+def _graph_ranks(
+    candidates: list[dict[str, Any]],
+    graph_rows: list[dict[str, Any]],
+) -> dict[str, tuple[float, int]]:
+    """Return ``uuid -> (effective priority, transitive downstream count)``."""
+    rows_by_uuid: dict[str, dict[str, Any]] = {}
+    for row in (*graph_rows, *candidates):
+        uuid = _row_uuid(row)
+        if uuid:
+            rows_by_uuid[uuid] = row
+    dependents: dict[str, set[str]] = {}
+    for uuid, row in rows_by_uuid.items():
+        for dependency_uuid in _dependency_uuids(row):
+            dependents.setdefault(dependency_uuid, set()).add(uuid)
+
+    ranks: dict[str, tuple[float, int]] = {}
+    for candidate in candidates:
+        candidate_uuid = _row_uuid(candidate)
+        if not candidate_uuid:
+            continue
+        downstream: set[str] = set()
+        pending = list(dependents.get(candidate_uuid, ()))
+        while pending:
+            uuid = pending.pop()
+            if uuid == candidate_uuid or uuid in downstream:
+                continue
+            downstream.add(uuid)
+            pending.extend(dependents.get(uuid, ()))
+        effective_priority = max(
+            (
+                _priority_score(rows_by_uuid[uuid])
+                for uuid in (candidate_uuid, *downstream)
+                if uuid in rows_by_uuid
+            ),
+            default=_priority_score(candidate),
+        )
+        ranks[candidate_uuid] = (effective_priority, len(downstream))
+    return ranks
+
+
 def order(
     ready: list[dict[str, Any]],
     actor: str,
     claimed_rows: list[dict[str, Any]],
     active_rows: list[dict[str, Any]],
+    *,
+    graph_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Rank candidates best-first. Native urgency first (the top band), then
-    within the band spread off cells a peer is active on, then stick to the
-    smallest move from the actor's last cell. `next` walks this order,
-    claiming until one claim verifies — so a lost race just falls through to
-    the next."""
+    """Rank candidates best-first without letting locality override the graph.
+
+    Effective priority and downstream weight are actor-independent primary
+    keys. Within rows equal on both, native urgency defines a narrow comparison
+    band, then peer spread and movement provide locality. ``next`` walks this
+    order, so a lost claim race falls through to the next row.
+    """
     ref = last_cell(claimed_rows)
     crowded = peer_cells(actor, active_rows)
-    top = max(_urgency(r) for r in ready)
+    ranks = _graph_ranks(ready, graph_rows if graph_rows is not None else ready)
 
-    def key(r: dict[str, Any]) -> tuple[int, bool, int, float]:
-        in_band = _urgency(r) >= top - BAND_WIDTH
+    def graph_rank(row: dict[str, Any]) -> tuple[float, int]:
+        return ranks.get(_row_uuid(row), (_priority_score(row), 0))
+
+    group_tops: dict[tuple[float, int], float] = {}
+    for row in ready:
+        rank = graph_rank(row)
+        group_tops[rank] = max(group_tops.get(rank, float("-inf")), _urgency(row))
+
+    def key(r: dict[str, Any]) -> tuple[float, int, int, bool, int, float]:
+        effective_priority, downstream_weight = graph_rank(r)
+        in_band = (
+            _urgency(r)
+            >= group_tops[(effective_priority, downstream_weight)]
+            - config.ALLOCATOR_BAND_WIDTH
+        )
         return (
+            -effective_priority,
+            -downstream_weight,
             0 if in_band else 1,
             (_cell(r) in crowded) if in_band else False,
             move_cost(r, ref) if in_band else 0,
@@ -149,6 +221,10 @@ def _is_open_task(row: dict[str, Any]) -> bool:
     this explicit lifecycle guard.
     """
     return str(row.get("status") or "") in ("pending", "waiting")
+
+
+def _open_graph_rows() -> list[dict[str, Any]]:
+    return [row for row in tw.export(["status.any:"]) if _is_open_task(row)]
 
 
 def _scope_filter(
@@ -221,7 +297,13 @@ def ordered_visible_ready_rows(actor: str) -> list[dict[str, Any]]:
     if any(str(row.get("claim_by") or "") == actor for row in active_rows):
         return []
     claimed_rows = tw.export([f"claim_by.is:{actor}"])
-    return order(ready, actor, claimed_rows, active_rows)
+    return order(
+        ready,
+        actor,
+        claimed_rows,
+        active_rows,
+        graph_rows=_open_graph_rows(),
+    )
 
 
 def visible_active_rows(
@@ -319,10 +401,17 @@ def _claim_first(
     claimed_rows: list[dict[str, Any]],
     active_rows: list[dict[str, Any]],
     *,
+    graph_rows: list[dict[str, Any]] | None = None,
     guard_unclaimed: bool,
 ) -> dict[str, Any] | None:
     site = claimstate.current_claim_site()
-    for chosen in order(candidates, actor, claimed_rows, active_rows):
+    for chosen in order(
+        candidates,
+        actor,
+        claimed_rows,
+        active_rows,
+        graph_rows=graph_rows,
+    ):
         if not claimstate.do_claim(
             identity.uuid_of(chosen),
             actor,
@@ -429,6 +518,7 @@ def next_task() -> dict[str, Any] | None:
     overrides = actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
     include_origin = _route_includes_origin(route)
+    graph_rows = _open_graph_rows()
     scoped_active = [
         r
         for r in tw.export(
@@ -443,7 +533,12 @@ def next_task() -> dict[str, Any] | None:
     repair_candidates = _unclaimed_actionable(scoped_active)
     if repair_candidates:
         repaired = _claim_first(
-            repair_candidates, actor, [], active_rows, guard_unclaimed=False
+            repair_candidates,
+            actor,
+            [],
+            active_rows,
+            graph_rows=graph_rows,
+            guard_unclaimed=False,
         )
         if repaired is not None:
             return repaired
@@ -458,7 +553,12 @@ def next_task() -> dict[str, Any] | None:
             print(f"task: {note_text}")
         claimed_rows = tw.export([f"claim_by.is:{actor}"])
         claimed = _claim_first(
-            candidates, actor, claimed_rows, active_rows, guard_unclaimed=True
+            candidates,
+            actor,
+            claimed_rows,
+            active_rows,
+            graph_rows=graph_rows,
+            guard_unclaimed=True,
         )
         if claimed is not None:
             return claimed
@@ -467,7 +567,12 @@ def next_task() -> dict[str, Any] | None:
         return None
     for note_text in boundaries.prepare_for_claim().notes:
         print(f"task: {note_text}")
-    return _take_over_stale(stale_candidates, actor, active_rows)
+    return _take_over_stale(
+        stale_candidates,
+        actor,
+        active_rows,
+        graph_rows=graph_rows,
+    )
 
 
 def _stale_takeover_candidates(
@@ -491,9 +596,17 @@ def _take_over_stale(
     candidates: list[dict[str, Any]],
     actor: str,
     active_rows: list[dict[str, Any]],
+    *,
+    graph_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     site = claimstate.current_claim_site()
-    for chosen in order(candidates, actor, [], active_rows):
+    for chosen in order(
+        candidates,
+        actor,
+        [],
+        active_rows,
+        graph_rows=graph_rows,
+    ):
         previous = str(chosen.get("claim_by") or "")
         previous_until = str(chosen.get("claim_until") or "")
         if not claimstate.take_over_stale_claim(

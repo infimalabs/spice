@@ -349,6 +349,34 @@ def test_critical_priority_is_a_distinct_top_level_across_task_surfaces() -> Non
     assert config.SLA_DUE_SECONDS["C"] == config.SLA_DUE_SECONDS["H"]
 
 
+def test_allocator_band_is_narrower_than_every_adjacent_priority_gap() -> None:
+    ordered_scores = sorted(config.PRIORITY_URGENCY.values(), reverse=True)
+    adjacent_gaps = [
+        higher - lower for higher, lower in zip(ordered_scores, ordered_scores[1:])
+    ]
+
+    assert config.ALLOCATOR_BAND_WIDTH < min(adjacent_gaps)
+
+
+def test_generated_taskrc_owns_every_native_urgency_dimension() -> None:
+    assert config.TASKWARRIOR_URGENCY == {
+        "active.coefficient": 4.0,
+        "age.coefficient": 2.0,
+        "age.max": 365,
+        "annotations.coefficient": 1.0,
+        "blocked.coefficient": 0.0,
+        "blocking.coefficient": 0.0,
+        "due.coefficient": 12.0,
+        "inherit": 0,
+        "project.coefficient": 1.0,
+        "scheduled.coefficient": 5.0,
+        "tags.coefficient": 1.0,
+        "uda.phase.review.coefficient": 4.0,
+        "user.tag.next.coefficient": 15.0,
+        "waiting.coefficient": -3.0,
+    }
+
+
 @pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
 )
@@ -368,6 +396,10 @@ def test_taskwarrior_accepts_critical_above_high_priority(tmp_path, monkeypatch)
         assert "uda.priority.values=C,H,M,L," in lines
         assert "urgency.uda.priority.C.coefficient=8.1" in lines
         assert "urgency.uda.priority.H.coefficient=6.0" in lines
+        assert {
+            f"urgency.{name}={value}"
+            for name, value in config.TASKWARRIOR_URGENCY.items()
+        }.issubset(lines)
         assert rows["critical priority probe"]["priority"] == "C"
         assert rows["high priority probe"]["priority"] == "H"
         assert float(rows["critical priority probe"]["urgency"]) > float(

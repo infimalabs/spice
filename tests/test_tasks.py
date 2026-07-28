@@ -938,6 +938,161 @@ def test_allocator_spreads_from_peer_cell_then_sticks_to_last_cell():
     ]
 
 
+def test_allocator_effective_priority_outranks_every_actor_history():
+    prerequisite = _row(
+        "low prerequisite",
+        uuid="prerequisite",
+        project="task.alpha",
+        phase="todo",
+        priority="L",
+        urgency=1,
+    )
+    middle = _row(
+        "middle",
+        uuid="middle",
+        project="task.alpha",
+        phase="todo",
+        priority="M",
+        urgency=4,
+        depends=["prerequisite"],
+    )
+    critical = _row(
+        "critical descendant",
+        uuid="critical",
+        project="task.alpha",
+        phase="todo",
+        priority="C",
+        urgency=8,
+        depends=["middle"],
+    )
+    direct_high = _row(
+        "direct high",
+        uuid="direct-high",
+        project="task.beta",
+        phase="review",
+        priority="H",
+        urgency=100,
+    )
+    histories = [
+        ([], []),
+        (
+            [
+                _row(
+                    "last",
+                    project="task.beta",
+                    phase="review",
+                    urgency=1,
+                    claim_at="2026-01-01T00:00:00Z",
+                    claim_by=ACTOR_A,
+                )
+            ],
+            [],
+        ),
+        (
+            [
+                _row(
+                    "last",
+                    project="task.beta",
+                    phase="review",
+                    urgency=1,
+                    claim_at="2026-01-01T00:00:00Z",
+                    claim_by=ACTOR_A,
+                )
+            ],
+            [
+                _row(
+                    "peer",
+                    project="task.alpha",
+                    phase="todo",
+                    urgency=1,
+                    claim_by=PEER_ACTOR,
+                )
+            ],
+        ),
+    ]
+
+    for claimed, active in histories:
+        ordered = alloc.order(
+            [direct_high, prerequisite],
+            ACTOR_A,
+            claimed,
+            active,
+            graph_rows=[prerequisite, middle, critical, direct_high],
+        )
+        assert [row["description"] for row in ordered] == [
+            "low prerequisite",
+            "direct high",
+        ]
+
+
+def test_allocator_downstream_weight_outranks_tags_urgency_and_locality():
+    wide = _row(
+        "wide",
+        uuid="wide",
+        project="task.alpha",
+        phase="todo",
+        priority="H",
+        urgency=1,
+        tags=["one"],
+    )
+    wide_child = _row(
+        "wide child",
+        uuid="wide-child",
+        project="task.alpha",
+        phase="todo",
+        priority="L",
+        urgency=1,
+        depends=["wide"],
+    )
+    wide_grandchild = _row(
+        "wide grandchild",
+        uuid="wide-grandchild",
+        project="task.alpha",
+        phase="todo",
+        priority="L",
+        urgency=1,
+        depends=["wide-child"],
+    )
+    narrow = _row(
+        "narrow",
+        uuid="narrow",
+        project="task.beta",
+        phase="review",
+        priority="H",
+        urgency=100,
+        tags=["one", "two", "three", "four"],
+    )
+    claimed = [
+        _row(
+            "last",
+            project="task.beta",
+            phase="review",
+            urgency=1,
+            claim_at="2026-01-01T00:00:00Z",
+            claim_by=ACTOR_A,
+        )
+    ]
+    active = [
+        _row(
+            "peer",
+            project="task.alpha",
+            phase="todo",
+            urgency=1,
+            claim_by=PEER_ACTOR,
+        )
+    ]
+
+    ordered = alloc.order(
+        [narrow, wide],
+        ACTOR_A,
+        claimed,
+        active,
+        graph_rows=[wide, wide_child, wide_grandchild, narrow],
+    )
+
+    assert [row["description"] for row in ordered] == ["wide", "narrow"]
+
+
 def test_alloc_classifies_oops_and_hidden_by_project_stem_alone():
     # Rows carry a project and nothing else -- no oops/hidden tags, no UDA.
     # Identity must ride the project stem alone.
@@ -1212,13 +1367,21 @@ def _row(
     project: str,
     phase: str,
     urgency: float,
+    uuid: str = "",
+    priority: str = "",
+    depends: list[str] | None = None,
+    tags: list[str] | None = None,
     claim_at: str = "",
     claim_by: str = "",
 ) -> dict[str, object]:
     return {
         "description": description,
+        "uuid": uuid,
         "project": project,
         "phase": phase,
+        "priority": priority,
+        "depends": depends or [],
+        "tags": tags or [],
         "urgency": urgency,
         "claim_at": claim_at,
         "claim_by": claim_by,

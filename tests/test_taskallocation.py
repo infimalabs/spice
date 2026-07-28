@@ -718,6 +718,45 @@ def test_task_next_prefers_ready_work_over_stale_takeover(task_repo, monkeypatch
     assert tw.export([stale_uuid])[0]["claim_by"] == PEER_ACTOR
 
 
+def test_task_next_promotes_a_low_prerequisite_of_transitive_critical_work(
+    task_repo, monkeypatch
+):
+    prerequisite = create.add(
+        "Low prerequisite",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="low",
+    )
+    middle = create.add(
+        "Middle dependency",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="medium",
+        after=[prerequisite],
+    )
+    create.add(
+        "Critical descendant",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="critical",
+        after=[middle],
+    )
+    create.add(
+        "Direct high work",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        priority="high",
+    )
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == prerequisite
+
+
 def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     handle = create.add(
         "Repair partial active claim",
