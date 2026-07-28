@@ -264,6 +264,27 @@ def test_repeated_apply_preserves_the_complete_receipt_and_repository_bytes(tmp_
     assert (after_first, after_second) == (after_first, after_first)
 
 
+def test_repository_config_approval_appends_one_replayable_fact(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    apply_initialization_plan(plan_initialization(repo, InitializationMode.GATES_ONLY))
+    path = initialization_receipt_path(repo)
+    prefix = path.read_bytes()
+    before = load_initialization_receipt_records(repo)
+
+    approved = apply_initialization_plan(
+        plan_initialization(repo, InitializationMode.GATES_ONLY),
+        approve_repository_config=True,
+    )
+
+    records = load_initialization_receipt_records(repo)
+    replayed = load_initialization_receipt(repo)
+    assert path.read_bytes().startswith(prefix)
+    assert len(records) == len(before) + 1
+    assert records[-1].event is InitReceiptEvent.APPROVAL
+    assert records[-1].approved_repository_config_digest is not None
+    assert replayed == approved
+
+
 def test_gates_receipt_promotes_to_full_without_losing_first_introduction(tmp_path):
     repo = _git_init(tmp_path / "repo")
     gates = apply_initialization_plan(

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from spice.config.layers import effective_table
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.scopes import SCOPES_KEY, STUDY_PROVIDER_SCOPES, ScopeContext, ScopeSelector
 from spice.process.tool import run_tool_command
@@ -336,6 +337,11 @@ def _scan_command_reachability_provider(
 ) -> list[ReachabilityFinding]:
     env = os.environ.copy()  # env-policy: allow
     env[STAGED_PATHS_ENV] = "\n".join(path.as_posix() for path in provider.staged_paths)
+    require_repository_config_approval(
+        request.repo_root,
+        ("policy", REACHABILITY_PROVIDERS_KEY),
+        command=shlex.join(provider.argv),
+    )
     result = run_tool_command(
         list(provider.argv),
         policy="extension",

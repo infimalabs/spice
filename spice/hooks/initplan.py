@@ -98,6 +98,7 @@ class InitReceiptEvent(StrEnum):
     APPLY = "apply"
     UNAPPLY = "unapply"
     TRANSFER = "transfer"
+    APPROVAL = "approval"
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ class InitializationReceipt:
     plan_schema_version: int
     status: InitReceiptStatus
     operations: tuple[InitReceiptOperation, ...]
+    approved_repository_config_digest: str | None = None
     schema_version: int = 1
 
 
@@ -177,6 +179,7 @@ class InitializationReceiptRecord:
     observed_mode: int | None = None
     observed_sha256: str | None = None
     shared_owner: str | None = None
+    approved_repository_config_digest: str | None = None
     schema_version: int = RECEIPT_LOG_SCHEMA_VERSION
 
 
@@ -362,6 +365,9 @@ def initialization_receipt_payload(
         "repository": str(receipt.repo_root),
         "mode": receipt.mode.value,
         "status": receipt.status.value,
+        "approved_repository_config_digest": (
+            receipt.approved_repository_config_digest
+        ),
         "operations": [
             {
                 **_operation_payload(receipt_operation.operation),
@@ -430,6 +436,7 @@ def initialization_receipt_record_payload(
         "observed_mode": record.observed_mode,
         "observed_sha256": record.observed_sha256,
         "shared_owner": record.shared_owner,
+        "approved_repository_config_digest": (record.approved_repository_config_digest),
     }
 
 
@@ -572,20 +579,39 @@ def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None
     unapplying = False
     plan_schema_version = records[0].plan_schema_version
     mode = records[0].mode
+    approved_repository_config_digest: str | None = None
     for record in records:
         if record.plan_schema_version != plan_schema_version:
             raise SpiceError("initialization receipt mixes plan schema versions")
         if record.mode is InitializationMode.FULL:
             mode = InitializationMode.FULL
+        if record.approved_repository_config_digest is not None:
+            approved_repository_config_digest = record.approved_repository_config_digest
         if record.event is InitReceiptEvent.UNAPPLY:
             unapplying = True
             continue
         if unapplying:
             raise SpiceError(
-                "initialization receipt contains an apply or transfer record "
+                "initialization receipt contains an apply, transfer, or approval record "
                 "after reversal began"
             )
         key = _operation_key(record.operation)
+        if record.event is InitReceiptEvent.APPROVAL:
+            if key not in active:
+                raise SpiceError(
+                    "initialization receipt approves configuration against an "
+                    f"unknown operation {record.operation.target!r}"
+                )
+            prior = active[key]
+            if (
+                record.operation != prior.operation
+                or record.operation_index != prior.operation_index
+                or record.operation_count != prior.operation_count
+            ):
+                raise SpiceError(
+                    "initialization receipt approval changes its operation context"
+                )
+            continue
         if record.event is InitReceiptEvent.TRANSFER and key not in active:
             raise SpiceError(
                 "initialization receipt transfers unknown operation "
@@ -615,6 +641,7 @@ def load_initialization_receipt(repo_root: Path) -> InitializationReceipt | None
             InitReceiptOperation(operation=record.operation, completed=True)
             for record in ordered
         ),
+        approved_repository_config_digest=approved_repository_config_digest,
     )
 
 
@@ -635,6 +662,11 @@ def initialization_receipt_record_from_payload(
     outcome = _optional_string(payload.get("outcome"))
     if (event is InitReceiptEvent.UNAPPLY) != (outcome is not None):
         raise ValueError("only unapply records carry a reversal outcome")
+    approved_digest = _optional_ownership_digest(
+        payload.get("approved_repository_config_digest")
+    )
+    if event is InitReceiptEvent.APPROVAL and approved_digest is None:
+        raise ValueError("approval record is missing its repository config digest")
     return InitializationReceiptRecord(
         repo_root=Path(_required_string(payload["repository"])).expanduser().resolve(),
         mode=InitializationMode(_required_string(payload["mode"])),
@@ -649,11 +681,16 @@ def initialization_receipt_record_from_payload(
         observed_mode=_optional_mode(payload.get("observed_mode")),
         observed_sha256=_optional_string(payload.get("observed_sha256")),
         shared_owner=_optional_string(payload.get("shared_owner")),
+        approved_repository_config_digest=approved_digest,
         schema_version=schema_version,
     )
 
 
-def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt:
+def apply_initialization_plan(
+    plan: InitializationPlan,
+    *,
+    approve_repository_config: bool = False,
+) -> InitializationReceipt:
     """Apply one plan, appending exactly one receipt record per completion."""
     if (git_dir(plan.repo_root) / WITHDRAWN_DEINIT_RECEIPT_FILENAME).is_file():
         raise SpiceError(
@@ -666,7 +703,22 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
             "run `spice init --unapply --apply` to resume the interrupted reversal; "
             "initialization cannot run while its receipt is active"
         )
-    receipt = _receipt_for_plan(plan, existing)
+    approved_digest = (
+        existing.approved_repository_config_digest if existing is not None else None
+    )
+    if approve_repository_config:
+        from spice.config.trust import repository_executable_config_digest
+
+        approved_digest = repository_executable_config_digest(plan.repo_root)
+    approval_changed = (
+        existing is not None
+        and approved_digest != existing.approved_repository_config_digest
+    )
+    receipt = _receipt_for_plan(
+        plan,
+        existing,
+        approved_repository_config_digest=approved_digest,
+    )
     plan_by_key = {
         _operation_key(operation): operation for operation in plan.operations
     }
@@ -699,6 +751,7 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
         _operation_key(receipt_operation.operation): index
         for index, receipt_operation in enumerate(operations)
     }
+    appended_completion = False
     for operation in plan.operations:
         position = positions[_operation_key(operation)]
         if operations[position].completed:
@@ -712,6 +765,7 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
             operation_index=position,
             operation_count=len(operations),
             operation=receipt_operation,
+            approved_repository_config_digest=approved_digest,
         )
         encoded = encode_initialization_receipt_record(record)
         if operation.will_change:
@@ -722,6 +776,27 @@ def apply_initialization_plan(plan: InitializationPlan) -> InitializationReceipt
         append_initialization_receipt_record(record, encoded=encoded)
         operations[position] = replace(operations[position], completed=True)
         receipt = replace(receipt, operations=tuple(operations))
+        appended_completion = True
+
+    if approval_changed and not appended_completion:
+        if not operations:
+            raise SpiceError(
+                "cannot record repository configuration approval without an "
+                "initialization operation"
+            )
+        approval_operation = operations[0].operation
+        approval_record = InitializationReceiptRecord(
+            repo_root=receipt.repo_root,
+            mode=receipt.mode,
+            plan_schema_version=receipt.plan_schema_version,
+            event=InitReceiptEvent.APPROVAL,
+            operation_index=0,
+            operation_count=len(operations),
+            operation=approval_operation,
+            approved_repository_config_digest=approved_digest,
+        )
+        encoded = encode_initialization_receipt_record(approval_record)
+        append_initialization_receipt_record(approval_record, encoded=encoded)
 
     status = (
         InitReceiptStatus.COMPLETE
@@ -835,6 +910,12 @@ def _required_ownership_digest(value: object) -> str:
     return digest
 
 
+def _optional_ownership_digest(value: object) -> str | None:
+    if value is None:
+        return None
+    return _required_ownership_digest(value)
+
+
 def _operation_from_payload(payload: dict[str, object]) -> InitOperation:
     return InitOperation(
         kind=InitOperationKind(_required_string(payload["kind"])),
@@ -902,6 +983,9 @@ def initialization_receipt_from_payload(
         plan_schema_version=plan_schema_version,
         status=status,
         operations=tuple(operations),
+        approved_repository_config_digest=_optional_ownership_digest(
+            payload.get("approved_repository_config_digest")
+        ),
         schema_version=_required_int(payload["schema_version"]),
     )
 
@@ -915,6 +999,8 @@ def _operation_key(
 def _receipt_for_plan(
     plan: InitializationPlan,
     existing: InitializationReceipt | None,
+    *,
+    approved_repository_config_digest: str | None,
 ) -> InitializationReceipt:
     if existing is None:
         return InitializationReceipt(
@@ -926,6 +1012,7 @@ def _receipt_for_plan(
                 InitReceiptOperation(operation=operation, completed=False)
                 for operation in plan.operations
             ),
+            approved_repository_config_digest=approved_repository_config_digest,
         )
     if existing.repo_root != plan.repo_root:
         raise SpiceError(
@@ -963,6 +1050,7 @@ def _receipt_for_plan(
         plan_schema_version=plan.schema_version,
         status=InitReceiptStatus.APPLYING,
         operations=tuple(merged),
+        approved_repository_config_digest=approved_repository_config_digest,
     )
 
 
@@ -1071,6 +1159,9 @@ def _migrate_initialization_receipt_document(
                 operation_index=position,
                 operation_count=len(receipt.operations),
                 operation=item.operation,
+                approved_repository_config_digest=(
+                    receipt.approved_repository_config_digest
+                ),
             )
         )
         for position, item in enumerate(receipt.operations)

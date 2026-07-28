@@ -130,6 +130,9 @@ pre-encoded, checked against the record-size refusal bound, and emitted by one
 unbuffered write on a regular file opened with `O_APPEND`. The regular-file
 `O_APPEND` contract makes end positioning and that write indivisible between
 writers; the byte bound is a resource margin, not the source of atomicity.
+When an already-complete initialization approves changed repository executable
+configuration, that approval is another appended fact; existing receipt bytes
+are never rewritten.
 Run `spice init --unapply` to preview reversal of that receipt in exact reverse
 order, then `spice init --unapply --apply` to execute it. The preview includes
 the current receipt digest; pass it as `--unapply=<receipt-digest>` to assert

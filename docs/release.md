@@ -4,6 +4,14 @@ Releases are cut from a clean synchronized worktree with this repository's
 mounted `spice release` command. Lane branches are allowed; the release command
 pushes the prepared release commit to `origin/main`.
 
+## v0.30.0 command migration
+
+`spice init` and `spice task ingest` now preview their plans when invoked
+without a mutation flag. Their former `--dry-run` spelling is withdrawn and
+refuses with a migration message; use the bare command to preview and
+`--apply` to execute. An invocation that supplies both spellings is always
+refused, regardless of their order.
+
 ```sh
 spice release check           # run the release gates only; bumps nothing
 spice release range           # preview latest-release-tag..HEAD before prepare

@@ -282,6 +282,9 @@ def _unapply_record(
         observed_mode=state.observed_mode,
         observed_sha256=state.observed_sha256,
         shared_owner=state.shared_owner,
+        approved_repository_config_digest=(
+            receipt.initialization.approved_repository_config_digest
+        ),
     )
 
 
@@ -754,6 +757,9 @@ def _transfer_common_ownership(
             operation_index=position,
             operation_count=len(receipt.operations),
             operation=transferred,
+            approved_repository_config_digest=(
+                receipt.approved_repository_config_digest
+            ),
         )
         encoded = encode_initialization_receipt_record(record)
         append_initialization_receipt_record(record, encoded=encoded)

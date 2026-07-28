@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from spice import paths as spice_paths
+from spice.cli.withdrawn import add_withdrawn_dry_run_argument
 from spice.errors import SpiceError
 from spice.operatorstate import OPERATOR_STATE_RELOCATION_RELEASE
 from spice.paths import require_repo_root
@@ -113,6 +114,7 @@ def _configure_initialization_parsers(subparsers: Any) -> None:
         action="store_true",
         help="Apply the ordered initialization plan; bare invocation only previews.",
     )
+    add_withdrawn_dry_run_argument(init)
     init.add_argument(
         "--json",
         action="store_true",
@@ -185,7 +187,8 @@ def _configure_commit_parsers(actions: Any) -> None:
 
 
 def handle_init(args: argparse.Namespace) -> int:
-    if args.unapply is not None:
+    # Parser-free callers use minimal namespaces, so an omitted direction is forward.
+    if getattr(args, "unapply", None) is not None:
         return _handle_init_unapply(args)
 
     from spice.hooks.initplan import (
@@ -214,7 +217,7 @@ def handle_init(args: argparse.Namespace) -> int:
             print(row)
         return 0
 
-    apply_initialization_plan(plan)
+    apply_initialization_plan(plan, approve_repository_config=True)
     for row in initialization_detail_rows(plan, include_ready=True):
         print(row)
     return 0

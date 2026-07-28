@@ -11,9 +11,11 @@ layouts, the Python interpreter pyright should resolve against.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from spice.config.layers import effective_table
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.process.tool import run_typecheck_command
@@ -75,6 +77,11 @@ def run_python_typecheck(repo_root: Path) -> None:
         # derives none has nothing in this lane.
         return
     argv = python_typecheck_argv(repo_root, targets)
+    require_repository_config_approval(
+        repo_root,
+        ("policy", PYTHON_TYPECHECK_INTERPRETER_KEY),
+        command=shlex.join(argv),
+    )
     run_typecheck_command(
         argv,
         operation="run Python typecheck",

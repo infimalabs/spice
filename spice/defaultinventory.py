@@ -18,6 +18,10 @@ def _normalize_path(value: object) -> object:
     return str(value)
 
 
+def _normalize_hidden_project(value: object) -> object:
+    return value.removeprefix(".") if isinstance(value, str) else value
+
+
 def _normalize_prompt_template(value: object) -> object:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return "\n".join(str(line) for line in value) + "\n"
@@ -43,6 +47,7 @@ def _normalize_task_reports(value: object) -> object:
 TOML_STATIC_NORMALIZERS: dict[str, Callable[[object], object]] = {
     "spice.agent.maxims.DEFAULT_PROMPT_TEMPLATE": _normalize_prompt_template,
     "spice.resourcelocks.LOCK_STATE_ROOT": _normalize_path,
+    "spice.tasks.config.OOPS_PROJECT": _normalize_hidden_project,
     "spice.tasks.config.REPORTS": _normalize_task_reports,
 }
 
@@ -95,6 +100,9 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.tasks.config.DEFAULT_PROJECT_MAX_DEPTH": "tasks.project_max_depth",
     "spice.tasks.config.BASE_APPROVED_STEMS": "tasks.base_stems",
     "spice.tasks.config.INTERNAL_STEMS": "tasks.internal_stems",
+    "spice.tasks.config.MAXIM_PROPOSAL_HIDDEN_STEM": (
+        "tasks.maxim_proposal_hidden_stem"
+    ),
     "spice.tasks.config.BASE_HIDDEN_STEMS": "tasks.hidden_stems",
     "spice.tasks.config.APPROVED_PHASES": "tasks.approved_phases",
     "spice.tasks.config.PHASE_SLOT_COUNT": "tasks.phase_slot_count",
@@ -115,6 +123,7 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.tasks.config.CLAIM_CONTEXT_SECONDS": "tasks.claim_context_seconds",
     "spice.tasks.config.DEFERRED_WAIT": "tasks.deferred_wait",
     "spice.tasks.config.OOPS_WAIT_SECONDS": "tasks.oops_wait_seconds",
+    "spice.tasks.config.OOPS_PROJECT": "tasks.oops_hidden_stem",
     "spice.tasks.config.REPORTS": "tasks.reports",
     "spice.tasks.config.ANALYTICS_COMMANDS": "tasks.analytics.commands",
     "spice.agent.driver.PLAYWRIGHT_MCP_SERVER_NAME": "agent.playwright_mcp.server_name",

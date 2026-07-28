@@ -6,7 +6,9 @@ from enum import StrEnum
 
 import pytest
 
+from spice.cli.entry import main
 from spice.cli.parser import build_parser
+from spice.cli.withdrawn import DRY_RUN_WITHDRAWAL_RELEASE
 from spice.release import build_release_parser
 
 
@@ -82,6 +84,11 @@ MUTATING_VERBS = (
     ),
 )
 
+DRY_RUN_REPLACED_VERBS = (
+    ("init",),
+    ("task", "ingest", "plan.md"),
+)
+
 
 def _derived_default(reads: tuple[EffectRead, ...]) -> str:
     return "preview" if AUTHORED_READS.intersection(reads) else "apply"
@@ -99,6 +106,32 @@ def test_mutating_verb_default_is_derived_from_effect_driving_reads(
 
     assert _derived_default(verb.reads) == observed_default
     assert explicit.apply is True
+
+
+@pytest.mark.parametrize(
+    "verb", DRY_RUN_REPLACED_VERBS, ids=lambda argv: " ".join(argv)
+)
+@pytest.mark.parametrize(
+    "options",
+    (
+        ("--dry-run",),
+        ("--dry-run", "--apply"),
+        ("--apply", "--dry-run"),
+    ),
+    ids=("withdrawn", "withdrawn-before-apply", "apply-before-withdrawn"),
+)
+def test_withdrawn_dry_run_refuses_with_release_and_replacement(
+    verb: tuple[str, ...],
+    options: tuple[str, ...],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([*verb, *options]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"`--dry-run` was withdrawn in {DRY_RUN_WITHDRAWAL_RELEASE}" in captured.err
+    assert "invoke the command without it to preview" in captured.err
+    assert "use `--apply` to execute the plan" in captured.err
 
 
 def test_receipt_writers_and_unapply_verbs_are_the_same_live_parser_set() -> None:

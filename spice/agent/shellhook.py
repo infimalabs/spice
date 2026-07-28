@@ -15,6 +15,7 @@ from spice.config.layers import (
     effective_table,
     enabled_registry_entries,
 )
+from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_WRAPPER_ENTRY_POINT_GROUP,
@@ -276,6 +277,11 @@ def project_routes_python(repo_root: Path | None) -> bool:
 def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
     driver_name = active_wrapper_driver_name(repo_root)
     rtk_executable = configured_rtk_executable(repo_root)
+    require_repository_config_approval(
+        repo_root,
+        ("rtk", "executable"),
+        command=shlex.join((rtk_executable,)),
+    )
     lines: list[str] = []
     seen_selectors: dict[str, str] = {}
     for selected in _selected_agent_wrapper_groups(repo_root):
@@ -368,6 +374,12 @@ def _selected_agent_wrapper_groups(
             )
         if not isinstance(raw_group, Mapping):
             raise SpiceError(f"spice shell hook: missing wrappers.{group_name}")
+        if not from_extension:
+            require_repository_config_approval(
+                repo_root,
+                ("wrappers", group_name),
+                command=_wrapper_group_command_summary(group_name, raw_group),
+            )
         selected.append(
             _SelectedAgentWrapperGroup(
                 name=group_name,
@@ -376,6 +388,36 @@ def _selected_agent_wrapper_groups(
             )
         )
     return tuple(selected)
+
+
+def _wrapper_group_command_summary(
+    group_name: str,
+    group: Mapping[str, object],
+) -> str:
+    commands: list[str] = []
+    for raw_wrapper, raw_entry in group.items():
+        wrapper = str(raw_wrapper)
+        if wrapper == SCOPES_KEY:
+            continue
+        if isinstance(raw_entry, Mapping):
+            _append_wrapper_argv(commands, raw_entry.get("argv"))
+            routes = raw_entry.get("match")
+            if isinstance(routes, list):
+                for route in routes:
+                    if isinstance(route, Mapping):
+                        _append_wrapper_argv(commands, route.get("argv"))
+            continue
+        if isinstance(raw_entry, list) and all(
+            isinstance(selector, str) for selector in raw_entry
+        ):
+            commands.extend(shlex.join((wrapper, selector)) for selector in raw_entry)
+    listed = "; ".join(dict.fromkeys(commands))
+    return listed or f"wrapper group {group_name}"
+
+
+def _append_wrapper_argv(commands: list[str], raw: object) -> None:
+    if isinstance(raw, list) and raw and all(isinstance(word, str) for word in raw):
+        commands.append(shlex.join(raw))
 
 
 def configured_agent_wrapper_definitions(
