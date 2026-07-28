@@ -126,8 +126,8 @@ def test_claude_command_leaves_commit_attribution_to_the_harness(tmp_path):
 
 
 def test_claude_settings_disable_attribution_when_repo_blocks_trailer(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.commit_message]\nblocked_trailers = ["Co-Authored-By"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.commit_message]\nblocked_trailers = ["Co-Authored-By"]\n',
         encoding="utf-8",
     )
     command = CLAUDE_DRIVER.build_exec_command(
@@ -144,8 +144,8 @@ def test_claude_settings_disable_attribution_when_repo_blocks_trailer(tmp_path):
 
 
 def test_claude_settings_disable_attribution_when_allow_set_omits_trailer(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.commit_message]\nallowed_trailers = ["Task"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.commit_message]\nallowed_trailers = ["Task"]\n',
         encoding="utf-8",
     )
     command = CLAUDE_DRIVER.build_exec_command(

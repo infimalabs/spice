@@ -325,7 +325,7 @@ def _rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
                 continue
             command_words = command_words_from_config(
                 raw_entry.get("argv"),
-                label=f"tool.spice.wrappers.{group_name}.{wrapper}.argv",
+                label=f"wrappers.{group_name}.{wrapper}.argv",
             )
             if command_words[0] in rtk_words:
                 continue
@@ -345,7 +345,7 @@ def _selected_agent_wrapper_groups(
         )
     ordered_groups = config_string_list(
         agent_settings.get(AGENT_WRAPPERS_KEY),
-        label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
+        label=f"agent.{AGENT_WRAPPERS_KEY}",
     )
     definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
     extension_entries = entry_point_agent_wrapper_entries(
@@ -356,7 +356,7 @@ def _selected_agent_wrapper_groups(
     for group_name in ordered_groups:
         require_config_name(
             group_name,
-            label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY} group",
+            label=f"agent.{AGENT_WRAPPERS_KEY} group",
         )
         raw_group = enabled_definitions.get(group_name)
         if raw_group is None and group_name in definitions:
@@ -367,9 +367,7 @@ def _selected_agent_wrapper_groups(
                 extension_entries[group_name]
             )
         if not isinstance(raw_group, Mapping):
-            raise SpiceError(
-                f"spice shell hook: missing tool.spice.wrappers.{group_name}"
-            )
+            raise SpiceError(f"spice shell hook: missing wrappers.{group_name}")
         selected.append(
             _SelectedAgentWrapperGroup(
                 name=group_name,
@@ -384,9 +382,7 @@ def configured_agent_wrapper_definitions(
     repo_root: Path,
 ) -> tuple[dict[str, object], dict[str, str]]:
     definitions: dict[str, object] = dict(effective_table(repo_root, "wrappers"))
-    sources: dict[str, str] = {
-        name: f"tool.spice.wrappers.{name}" for name in definitions
-    }
+    sources: dict[str, str] = {name: f"wrappers.{name}" for name in definitions}
     return definitions, sources
 
 
@@ -467,21 +463,20 @@ def render_agent_wrapper_group_lines(
             continue
         require_shell_function_name(
             wrapper,
-            label=f"tool.spice.wrappers.{group_name} wrapper",
+            label=f"wrappers.{group_name} wrapper",
         )
         if not isinstance(raw_entry, list):
             raise SpiceError(
                 "spice shell hook: "
-                f"tool.spice.wrappers.{group_name}.{wrapper} must be a list or table"
+                f"wrappers.{group_name}.{wrapper} must be a list or table"
             )
         selectors = config_string_list(
             raw_entry,
-            label=f"tool.spice.wrappers.{group_name}.{wrapper}",
+            label=f"wrappers.{group_name}.{wrapper}",
         )
         if not selectors:
             raise SpiceError(
-                "spice shell hook: "
-                f"tool.spice.wrappers.{group_name}.{wrapper} has no commands"
+                f"spice shell hook: wrappers.{group_name}.{wrapper} has no commands"
             )
         for selector in selectors:
             lines.extend(
@@ -504,7 +499,7 @@ def render_agent_direct_wrapper_lines(
     driver_name: str,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
-    config_path = f"tool.spice.wrappers.{group_name}.{selector}"
+    config_path = f"wrappers.{group_name}.{selector}"
     require_shell_function_name(selector, label=f"{config_path} command")
     extra = sorted(set(entry) - {"argv", SCOPES_KEY, "match"})
     if extra:
@@ -860,7 +855,7 @@ def render_agent_wrapper_selector_lines(
     selector: str,
     seen_selectors: dict[str, str],
 ) -> list[str]:
-    config_path = f"tool.spice.wrappers.{group_name}.{wrapper}"
+    config_path = f"wrappers.{group_name}.{wrapper}"
     if "/" in selector:
         raise SpiceError(
             "spice shell hook: path selector "

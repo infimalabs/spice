@@ -114,7 +114,7 @@ def test_declared_extension_fixture_wheel_runs_driver_study_and_wrapper(
             {"spice-dev", "toy-wrapper"},
             "wrapper",
             "spice-dev",
-            "configured by both tool.spice.wrappers.spice-dev "
+            "configured by both wrappers.spice-dev "
             "and spice.wrappers entry point spice-dev",
         ),
     ],
@@ -203,19 +203,19 @@ def _trigger_shadow(trigger: str, repo_root: Path) -> None:
 def _write_agent_config(
     repo_root: Path, *, driver: str | None = None, wrappers: list[str]
 ) -> None:
-    lines = ["[tool.spice.agent]"]
+    lines = ["[agent]"]
     if driver is not None:
         lines.append(f'driver = "{driver}"')
     wrappers_value = "[" + ", ".join(f'"{wrapper}"' for wrapper in wrappers) + "]"
     lines.append(f"wrappers = {wrappers_value}")
-    (repo_root / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (repo_root / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_agent_wrapper_group(repo_root: Path, group_name: str) -> None:
-    with (repo_root / "pyproject.toml").open("a", encoding="utf-8") as handle:
+    with (repo_root / "spice.toml").open("a", encoding="utf-8") as handle:
         handle.write(
             "\n"
-            f"[tool.spice.wrappers.{group_name}]\n"
+            f"[wrappers.{group_name}]\n"
             'pre-commit = { argv = ["spice", "dev", "pre-commit"] }\n'
         )
 

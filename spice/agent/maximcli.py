@@ -48,7 +48,7 @@ DEFAULT_OUTPUT_FORMAT = "{maxim}"
 SCOPE_DECISION_EVIDENCE_ROW = (
     "scope decisions: run `spice maxim report` and cite per-driver fire_rate, "
     "confirm_rate, and recurrence before editing "
-    "[tool.spice.maxims.<bag>].scopes.drivers or using maxim disable/enable."
+    "[maxims.<bag>].scopes.drivers or using maxim disable/enable."
 )
 MAXIM_PROPOSE_CONTRACT_ROW = (
     "candidate contract: raw evidence-backed candidates for human triage; "
@@ -132,7 +132,7 @@ def configure_maxim_parser(subparsers: Any) -> None:
         description=(
             "Show per-bag, per-driver, per-thread maxim metric history. Cite "
             "this report before narrowing "
-            "[tool.spice.maxims.<bag>].scopes.drivers "
+            "[maxims.<bag>].scopes.drivers "
             "or using worktree-local maxim disable/enable."
         ),
     )
@@ -180,11 +180,11 @@ def _configure_proposal_parsers(actions: Any) -> None:
         help="Mine ACK history and file hidden deferred maxim proposal tasks.",
         description=(
             "Mine real ACK ledger history, cluster recurring correction themes, "
-            "draft mergeable [tool.spice.maxims.<bag>] stanzas, and file each "
+            "draft mergeable [maxims.<bag>] stanzas, and file each "
             "draft as a hidden deferred proposal task. Proposals are raw "
             "evidence-backed candidates for human triage; this command does "
             "not call the local maxim judge for pre-screening, edit "
-            "pyproject.toml, or install maxim configuration."
+            "spice.toml, or install maxim configuration."
         ),
     )
     propose.set_defaults(func=run_maxim_propose_cli)
@@ -200,7 +200,7 @@ def _configure_proposal_parsers(actions: Any) -> None:
         help="Show TOML draft maxims from recurring ACK correction themes.",
         description=(
             "Cluster ACK-ledger correction sources into evidence-backed "
-            "[tool.spice.maxims.<bag>] draft stanzas. This command only "
+            "[maxims.<bag>] draft stanzas. This command only "
             "prints mergeable text; it does not edit repo config, install a "
             "bag, or call the maxim judge. Human triage remains mandatory."
         ),
@@ -212,9 +212,9 @@ def _configure_proposal_parsers(actions: Any) -> None:
         help="File TOML draft maxims as hidden deferred triage tasks.",
         description=(
             "Mine recurring ACK-ledger correction sources, draft mergeable "
-            "[tool.spice.maxims.<bag>] stanzas, and file each draft as a "
+            "[maxims.<bag>] stanzas, and file each draft as a "
             "hidden deferred task for human triage. This command does not edit "
-            "pyproject.toml, install a maxim bag, or call the maxim judge."
+            "spice.toml, install a maxim bag, or call the maxim judge."
         ),
     )
     file_proposals.set_defaults(func=run_maxim_file_proposals_cli)

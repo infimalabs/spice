@@ -89,8 +89,8 @@ not form a second control plane.
 
 ## Wrapper Groups
 
-Repos may define wrapper groups under `[tool.spice.wrappers.<group>]` and let
-agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
+Repos may define wrapper groups under `[wrappers.<group>]` and let
+agents select groups with `[agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group contains the finite post-selection RTK command-shape
 transformations for rg-only grep flags, native find predicates, and diagnostic
@@ -107,13 +107,13 @@ empty list disables wrapper generation.
 Example:
 
 ```toml
-[tool.spice.agent]
+[agent]
 wrappers = ["common", "repo-tools"]
 
-[tool.spice.wrappers.common]
+[wrappers.common]
 wrap = ["grep", "find", "git"]
 
-[tool.spice.wrappers.repo-tools]
+[wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 

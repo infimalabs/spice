@@ -67,19 +67,19 @@ def write_agent_wrapper_config(
         wrappers_value = "[" + ", ".join(f'"{name}"' for name in order) + "]"
         lines.extend(
             [
-                "[tool.spice.agent]",
+                "[agent]",
                 f"wrappers = {wrappers_value}",
             ]
         )
     disabled_groups = [name for name, entries in groups.items() if entries is False]
     if disabled_groups:
-        lines.extend(["", "[tool.spice.wrappers]"])
+        lines.extend(["", "[wrappers]"])
         lines.extend(f"{toml_key(name)} = false" for name in disabled_groups)
     for group_name, entries in groups.items():
         if entries is False:
             continue
         assert isinstance(entries, dict)
-        lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
+        lines.extend(["", f"[wrappers.{group_name}]"])
         for wrapper, value in entries.items():
             if value is False:
                 lines.append(f"{toml_key(wrapper)} = false")
@@ -97,7 +97,7 @@ def write_agent_wrapper_config(
                 + ", ".join(f'"{selector}"' for selector in value)
                 + "]"
             )
-    (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (repo / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def toml_key(value: str) -> str:

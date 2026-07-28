@@ -122,8 +122,8 @@ def test_reachability_uses_all_configured_test_roots_for_modules_and_symbols(
     (tmp_path / "tests").mkdir()
     (tmp_path / "spice" / "cli").mkdir(parents=True)
     unity_tests.mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
         encoding="utf-8",
     )
     (tmp_path / "spice" / "cli" / "entry.py").write_text(
@@ -188,8 +188,8 @@ def test_reachability_config_provider_reports_module_finding(tmp_path):
         f"print({payload!r})\n",
         encoding="utf-8",
     )
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "reachability_providers = [\n"
         '  { name = "lua", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "
@@ -236,8 +236,8 @@ def test_symbol_reachability_config_provider_reports_symbol_finding(tmp_path):
         ]
     )
     provider.write_text(f"print({payload!r})\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "reachability_providers = [\n"
         '  { name = "lua", '
         f"run = {json.dumps([sys.executable, str(provider)])}, "

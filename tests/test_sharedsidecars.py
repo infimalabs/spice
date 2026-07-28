@@ -198,17 +198,17 @@ def _repo_with_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
     (repo / "README.md").write_text("initial\n", encoding="utf-8")
-    (repo / "pyproject.toml").write_text(
-        "[tool.spice.maxims.alpha]\n"
+    (repo / "spice.toml").write_text(
+        "[maxims.alpha]\n"
         'words = ["alpha"]\n'
         'message = "ALPHA reminder."\n'
         "\n"
-        "[tool.spice.maxims.beta]\n"
+        "[maxims.beta]\n"
         'words = ["beta"]\n'
         'message = "BETA reminder."\n',
         encoding="utf-8",
     )
-    _run(repo, "git", "add", "README.md", "pyproject.toml")
+    _run(repo, "git", "add", "README.md", "spice.toml")
     _run(repo, "git", "commit", "-qm", "initial")
     _run(repo, "git", "worktree", "add", "-q", "-b", "linked", str(linked))
     return repo, linked

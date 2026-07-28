@@ -96,7 +96,7 @@ EXPECTED_ACCEPTANCE = (
         "policy exception."
     ),
     (
-        "Remove stale [tool.spice.policy] internal_couplings entry for "
+        "Remove stale [policy] internal_couplings entry for "
         "tests/test_stale.py test_old_contract spice.old._private, or restore the "
         "reviewed coupling if it is still required."
     ),

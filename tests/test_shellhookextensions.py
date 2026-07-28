@@ -100,8 +100,10 @@ def test_agent_run_yields_rtk_rewrite_to_selected_extension_wrapper(
         groups={},
     )
     rtk = _write_fake_rewriting_rtk(tmp_path)
-    (tmp_path / "spice.toml").write_text(
-        f"[rtk]\nexecutable = {json.dumps(str(rtk))}\n",
+    repository_config = tmp_path / "spice.toml"
+    repository_config.write_text(
+        repository_config.read_text(encoding="utf-8")
+        + f"\n[rtk]\nexecutable = {json.dumps(str(rtk))}\n",
         encoding="utf-8",
     )
     trace = tmp_path / "trace.log"
@@ -157,9 +159,9 @@ def test_agent_wrapper_lines_rejects_entry_point_shadowing_configured_group(
         shellhook.render_agent_wrapper_lines(tmp_path)
 
     assert str(exc_info.value) == (
-        f"wrappers (source=pyproject path={tmp_path / 'pyproject.toml'}): "
+        f"wrappers (source=repository path={tmp_path / 'spice.toml'}): "
         "spice shell hook: wrapper group 'spice-dev' is configured by both "
-        "tool.spice.wrappers.spice-dev and spice.wrappers entry point spice-dev"
+        "wrappers.spice-dev and spice.wrappers entry point spice-dev"
     )
 
 
@@ -171,12 +173,12 @@ def _write_agent_wrapper_config(
         wrappers_value = "[" + ", ".join(f'"{name}"' for name in order) + "]"
         lines.extend(
             [
-                "[tool.spice.agent]",
+                "[agent]",
                 f"wrappers = {wrappers_value}",
             ]
         )
     for group_name, entries in groups.items():
-        lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
+        lines.extend(["", f"[wrappers.{group_name}]"])
         for wrapper, value in entries.items():
             if isinstance(value, dict):
                 command = value["argv"]
@@ -191,7 +193,7 @@ def _write_agent_wrapper_config(
                 + ", ".join(f'"{selector}"' for selector in value)
                 + "]"
             )
-    (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (repo / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_fake_rewriting_rtk(repo: Path) -> Path:

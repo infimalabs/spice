@@ -168,9 +168,9 @@ def test_configured_hidden_project_stems_are_addressable_not_assignable(
 ):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
-    pyproject = repo / "pyproject.toml"
+    pyproject = repo / "spice.toml"
     pyproject.write_text(
-        '[tool.spice.tasks]\nhidden_stems = ["scratch", "audit", "oops"]\n',
+        '[tasks]\nhidden_stems = ["scratch", "audit", "oops"]\n',
         encoding="utf-8",
     )
 
@@ -196,24 +196,24 @@ def test_configured_hidden_project_stems_reject_invalid_definitions(
 ):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
-    pyproject = repo / "pyproject.toml"
+    pyproject = repo / "spice.toml"
 
     pyproject.write_text(
-        '[tool.spice.tasks]\nhidden_stems = [".scratch"]\n',
+        '[tasks]\nhidden_stems = [".scratch"]\n',
         encoding="utf-8",
     )
     with pytest.raises(SpiceError, match="omit the leading"):
         config.hidden_stems()
 
     pyproject.write_text(
-        '[tool.spice.tasks]\nhidden_stems = ["bad-stem"]\n',
+        '[tasks]\nhidden_stems = ["bad-stem"]\n',
         encoding="utf-8",
     )
     with pytest.raises(SpiceError, match="lowercase letters, digits, and underscores"):
         config.hidden_stems()
 
     pyproject.write_text(
-        '[tool.spice.tasks]\nhidden_stems = ["task"]\n',
+        '[tasks]\nhidden_stems = ["task"]\n',
         encoding="utf-8",
     )
     with pytest.raises(SpiceError, match="conflicts with an approved public"):
@@ -223,9 +223,9 @@ def test_configured_hidden_project_stems_reject_invalid_definitions(
 def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
-    pyproject = repo / "pyproject.toml"
+    pyproject = repo / "spice.toml"
     pyproject.write_text(
-        "[tool.spice.tasks]\nproject_min_depth = 1\nproject_max_depth = 2\n",
+        "[tasks]\nproject_min_depth = 1\nproject_max_depth = 2\n",
         encoding="utf-8",
     )
 
@@ -240,7 +240,7 @@ def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
         config.validate_manual_creation_project("task.unit.child")
 
     pyproject.write_text(
-        "[tool.spice.tasks]\nproject_min_depth = 3\nproject_max_depth = 4\n",
+        "[tasks]\nproject_min_depth = 3\nproject_max_depth = 4\n",
         encoding="utf-8",
     )
     catalog = config.task_project_validation_catalog()
@@ -267,17 +267,17 @@ def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
 def test_project_depth_rejects_invalid_config(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
-    pyproject = repo / "pyproject.toml"
+    pyproject = repo / "spice.toml"
 
     pyproject.write_text(
-        "[tool.spice.tasks]\nproject_min_depth = 0\n",
+        "[tasks]\nproject_min_depth = 0\n",
         encoding="utf-8",
     )
     with pytest.raises(SpiceError, match=re.escape("project_min_depth")):
         config.project_depth_bounds()
 
     pyproject.write_text(
-        "[tool.spice.tasks]\nproject_min_depth = 4\nproject_max_depth = 3\n",
+        "[tasks]\nproject_min_depth = 4\nproject_max_depth = 3\n",
         encoding="utf-8",
     )
     with pytest.raises(SpiceError, match=re.escape("project_max_depth")):
@@ -286,12 +286,12 @@ def test_project_depth_rejects_invalid_config(tmp_path, monkeypatch):
 
 def test_phase_launch_overrides_reads_per_driver_phase_table(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "pyproject.toml").write_text(
-        "[tool.spice.tasks.phase_models.claude.plan]\n"
+    (repo / "spice.toml").write_text(
+        "[tasks.phase_models.claude.plan]\n"
         'model = "claude-opus-4-8"\n'
         'effort = "high"\n'
         "\n"
-        "[tool.spice.tasks.phase_models.claude.todo]\n"
+        "[tasks.phase_models.claude.todo]\n"
         'model = "claude-sonnet-5"\n',
         encoding="utf-8",
     )
@@ -307,8 +307,8 @@ def test_phase_launch_overrides_reads_per_driver_phase_table(tmp_path):
 
 def test_phase_launch_overrides_falls_back_for_unmapped_phase_or_driver(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "pyproject.toml").write_text(
-        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-opus-4-8"\n',
+    (repo / "spice.toml").write_text(
+        '[tasks.phase_models.claude.plan]\nmodel = "claude-opus-4-8"\n',
         encoding="utf-8",
     )
 

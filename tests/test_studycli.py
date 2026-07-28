@@ -451,8 +451,8 @@ def _reach_repo(root: Path, declared: str) -> Path:
         "def test_two():\n    from pkg.narrow import VALUE\n\n    assert VALUE == 1\n",
         encoding="utf-8",
     )
-    (root / "pyproject.toml").write_text(
-        f'[tool.spice.policy.suite_seam]\nrun = ["pytest"]\npaths = ["{declared}"]\n',
+    (root / "spice.toml").write_text(
+        f'[policy.suite_seam]\nrun = ["pytest"]\npaths = ["{declared}"]\n',
         encoding="utf-8",
     )
     return root

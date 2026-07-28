@@ -90,8 +90,8 @@ def test_commit_msg_rejects_wip_subject_and_accepts_real_subject(tmp_path):
 
 
 def test_commit_msg_uses_configured_wrap_limit(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.limits]\ncommit_message_wrap = 20\n",
+    (tmp_path / "spice.toml").write_text(
+        "[policy.limits]\ncommit_message_wrap = 20\n",
         encoding="utf-8",
     )
     path = tmp_path / "COMMIT_EDITMSG"
@@ -111,8 +111,8 @@ def test_commit_msg_uses_configured_wrap_limit(tmp_path):
 
 
 def test_commit_msg_uses_configured_allowed_trailers(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy.commit_message]\nallowed_trailers = ["Task"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy.commit_message]\nallowed_trailers = ["Task"]\n',
         encoding="utf-8",
     )
     allowed = tmp_path / "ALLOWED_COMMIT_EDITMSG"

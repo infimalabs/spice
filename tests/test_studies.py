@@ -223,8 +223,8 @@ def test_assertion_free_scanner_counts_tests_without_assertions(tmp_path):
 
 
 def test_assertion_free_scanner_counts_configured_assertion_helpers(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         'assertion_helpers = ["ensure_contract", "contracts.require_valid"]\n',
         encoding="utf-8",
     )
@@ -261,8 +261,8 @@ def test_assertion_free_scanner_counts_configured_assertion_helpers(tmp_path):
 
 
 def test_assertion_free_scanner_rejects_invalid_helper_config(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nassertion_helpers = "ensure_contract"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nassertion_helpers = "ensure_contract"\n',
         encoding="utf-8",
     )
     path = tmp_path / "tests" / "test_quality.py"
@@ -310,8 +310,8 @@ def test_assertion_free_scanner_detects_suffix_named_files(tmp_path):
 
 
 def test_testquality_discovers_configured_multi_root_test_paths(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
         encoding="utf-8",
     )
     default_path = tmp_path / "tests" / "test_quality.py"
@@ -466,8 +466,8 @@ def test_study_private_internals_cli_honors_configured_couplings(
         "    assert 1 == 1\n",
         encoding="utf-8",
     )
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         "internal_couplings = [\n"
         '  { path = "tests/test_private.py", test = "<module>", '
         'target = "spice.worker._private_helper" },\n'
@@ -1098,8 +1098,8 @@ def test_mutation_points_and_mutated_text_flip_operator():
 
 
 def test_changed_python_paths_skips_configured_test_roots(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
         encoding="utf-8",
     )
     source = tmp_path / "pkg" / "sample.py"

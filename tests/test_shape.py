@@ -34,8 +34,11 @@ def _make_package(root: Path, name: str) -> None:
 def test_package_roots_explicit_policy_overrides_derivation(tmp_path):
     _make_package(tmp_path, "chosen")
     _make_package(tmp_path, "ignored")
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["chosen"]\n',
+        encoding="utf-8",
+    )
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["chosen"]\n'
         '[tool.setuptools.packages.find]\ninclude = ["ignored*"]\n',
         encoding="utf-8",
     )
@@ -191,8 +194,8 @@ def test_python_typecheck_argv_appends_fixed_flags_and_targets(tmp_path, monkeyp
 def test_python_typecheck_interpreter_uses_configured_override(tmp_path, monkeypatch):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     python = _write_fake_python(tmp_path / "tools" / "python")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npython_typecheck_interpreter = "tools/python"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npython_typecheck_interpreter = "tools/python"\n',
         encoding="utf-8",
     )
 
@@ -200,8 +203,8 @@ def test_python_typecheck_interpreter_uses_configured_override(tmp_path, monkeyp
 
 
 def test_python_typecheck_interpreter_rejects_missing_configured_override(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npython_typecheck_interpreter = "missing/python"\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npython_typecheck_interpreter = "missing/python"\n',
         encoding="utf-8",
     )
 
@@ -273,8 +276,8 @@ def test_python_typecheck_argv_uses_detected_interpreter(tmp_path, monkeypatch):
 def test_run_python_typecheck_resolves_imports_from_repo_venv(tmp_path, monkeypatch):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     _make_package(tmp_path, "app")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["app"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["app"]\n',
         encoding="utf-8",
     )
     _make_real_venv_with_package(tmp_path, "thirdparty")
@@ -287,9 +290,7 @@ def test_run_python_typecheck_resolves_imports_from_repo_venv(tmp_path, monkeypa
 
 
 def test_run_python_typecheck_noops_without_targets(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "x"\n', encoding="utf-8"
-    )
+    (tmp_path / "spice.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
 
     assert run_python_typecheck(tmp_path) is None
 
@@ -327,8 +328,8 @@ def _name_cluster_repo(tmp_path: Path, names: list[str]) -> Path:
     pkg.mkdir()
     for name in names:
         (pkg / f"{name}.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["app"]\n', encoding="utf-8"
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["app"]\n', encoding="utf-8"
     )
     return tmp_path
 
@@ -346,8 +347,8 @@ def test_name_cluster_threshold_defaults_to_four(tmp_path):
 
 def test_name_cluster_threshold_can_be_configured_to_three(tmp_path):
     _name_cluster_repo(tmp_path, ["teamcommands", "teamfilters", "teammetrics"])
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["app"]\nname_cluster_threshold = 3\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["app"]\nname_cluster_threshold = 3\n',
         encoding="utf-8",
     )
 
@@ -361,8 +362,8 @@ def test_name_cluster_threshold_can_be_configured_to_four(tmp_path):
     _name_cluster_repo(
         tmp_path, ["teamcommands", "teamfilters", "teammetrics", "teammailboxes"]
     )
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["app"]\nname_cluster_threshold = 4\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["app"]\nname_cluster_threshold = 4\n',
         encoding="utf-8",
     )
 
@@ -415,11 +416,11 @@ def test_study_shape_cli_fails_on_name_cluster(tmp_path, monkeypatch, capsys):
 
 
 def _generated_shape_repo(root: Path, *, generated=None) -> None:
-    policy = '[tool.spice.policy]\npackage_roots = ["pkg"]\n'
+    policy = '[policy]\npackage_roots = ["pkg"]\n'
     if generated is not None:
         listed = ", ".join(f'"{pattern}"' for pattern in generated)
         policy += f"generated_paths = [{listed}]\n"
-    (root / "pyproject.toml").write_text(policy, encoding="utf-8")
+    (root / "spice.toml").write_text(policy, encoding="utf-8")
     proto = root / "pkg" / "proto"
     proto.mkdir(parents=True)
     (root / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
@@ -458,8 +459,8 @@ def test_generated_paths_does_not_exempt_other_shape_violations(tmp_path):
 
 
 def test_path_shape_uses_configured_test_roots_for_test_module_rule(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\n"
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
         'package_roots = ["src"]\n'
         'test_paths = ["tests", "Assets/**/Tests"]\n',
         encoding="utf-8",
@@ -490,8 +491,8 @@ def test_generated_paths_exempts_namespace_init_but_not_others(tmp_path):
 
 
 def test_generated_paths_exempts_name_cluster(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\npackage_roots = ["pkg"]\ngenerated_paths = ["pkg/gen"]\n',
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\ngenerated_paths = ["pkg/gen"]\n',
         encoding="utf-8",
     )
     gen = tmp_path / "pkg" / "gen"

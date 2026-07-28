@@ -1054,8 +1054,8 @@ def test_task_filter_inventory_emits_configured_hidden_stem_rows(tmp_path, monke
         text=True,
     )
     monkeypatch.chdir(repo)
-    (repo / "pyproject.toml").write_text(
-        '[tool.spice.tasks]\nhidden_stems = ["sandbox"]\n',
+    (repo / "spice.toml").write_text(
+        '[tasks]\nhidden_stems = ["sandbox"]\n',
         encoding="utf-8",
     )
 
