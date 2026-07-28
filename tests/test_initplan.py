@@ -446,6 +446,41 @@ def test_receipt_append_uses_one_bounded_unbuffered_o_append_write(
     assert writes == [encoded]
 
 
+def test_receipt_append_refuses_non_regular_descriptor_before_writing(
+    tmp_path, monkeypatch
+):
+    repo = _git_init(tmp_path / "repo")
+    plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
+    record = InitializationReceiptRecord(
+        repo_root=repo.resolve(),
+        mode=plan.mode,
+        plan_schema_version=plan.schema_version,
+        event=InitReceiptEvent.APPLY,
+        operation_index=0,
+        operation_count=len(plan.operations),
+        operation=plan.operations[0],
+    )
+    real_fstat = os.fstat
+    writes: list[bytes] = []
+
+    def report_fifo(descriptor):
+        metadata = real_fstat(descriptor)
+        values = list(metadata)
+        values[stat.ST_MODE] = stat.S_IFIFO | INIT_RECEIPT_MODE
+        return os.stat_result(values)
+
+    monkeypatch.setattr("spice.hooks.initplan.os.fstat", report_fifo)
+    monkeypatch.setattr(
+        "spice.hooks.initplan.os.write",
+        lambda _descriptor, payload: writes.append(payload) or len(payload),
+    )
+
+    with pytest.raises(SpiceError, match="receipt is not a regular file"):
+        append_initialization_receipt_record(record)
+
+    assert writes == []
+
+
 def test_oversized_receipt_record_refuses_before_creating_the_log(tmp_path):
     repo = _git_init(tmp_path / "repo")
     plan = plan_initialization(repo, InitializationMode.GATES_ONLY)
