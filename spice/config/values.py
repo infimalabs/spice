@@ -67,26 +67,38 @@ _CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
 class ScalarPolicy:
     """Declared coercion policy for one effective scalar configuration key."""
 
-    coerce: Callable[[Any, "ScalarPolicy"], Any]
+    coerce: Callable[[Any, "ScalarPolicy", tuple[str, str]], Any]
     default: Any = None
     choices: tuple[str, ...] = ()
     requires_root: bool = False
 
 
-def _coerce_text(raw: Any, policy: ScalarPolicy) -> Any:
+def _coerce_text(raw: Any, policy: ScalarPolicy, _path: tuple[str, str]) -> Any:
     return str(raw or "").strip() or policy.default
 
 
-def _coerce_optional_text(raw: Any, policy: ScalarPolicy) -> str | None:
+def _coerce_optional_text(
+    raw: Any, _policy: ScalarPolicy, _path: tuple[str, str]
+) -> str | None:
     return str(raw).strip() or None if raw else None
 
 
-def _coerce_choice(raw: Any, policy: ScalarPolicy) -> Any:
-    value = str(raw or "").strip()
-    return value if value in policy.choices else policy.default
+def _coerce_choice(raw: Any, policy: ScalarPolicy, path: tuple[str, str]) -> Any:
+    if raw is None:
+        return policy.default
+    value = str(raw).strip()
+    if value in policy.choices:
+        return value
+    section, key = path
+    choices = ", ".join(repr(choice) for choice in policy.choices)
+    raise SpiceError(
+        f"[{section}] {key} has invalid value {raw!r}; expected one of {choices}"
+    )
 
 
-def _coerce_positive_int(raw: Any, policy: ScalarPolicy) -> int | None:
+def _coerce_positive_int(
+    raw: Any, policy: ScalarPolicy, _path: tuple[str, str]
+) -> int | None:
     if raw is None:
         return policy.default
     try:
@@ -96,7 +108,9 @@ def _coerce_positive_int(raw: Any, policy: ScalarPolicy) -> int | None:
     return value if value > 0 else policy.default
 
 
-def _coerce_positive_seconds(raw: Any, policy: ScalarPolicy) -> float:
+def _coerce_positive_seconds(
+    raw: Any, policy: ScalarPolicy, _path: tuple[str, str]
+) -> float:
     if raw is None:
         return policy.default
     try:
@@ -108,7 +122,7 @@ def _coerce_positive_seconds(raw: Any, policy: ScalarPolicy) -> float:
     return value if value > 0 else policy.default
 
 
-def _coerce_flag(raw: Any, policy: ScalarPolicy) -> bool:
+def _coerce_flag(raw: Any, _policy: ScalarPolicy, _path: tuple[str, str]) -> bool:
     if isinstance(raw, bool):
         return raw
     return str(raw or "").strip().casefold() in _CONFIG_FLAG_TRUE
@@ -144,7 +158,13 @@ def _scalar(section: str, key: str, repo_root: Path | None) -> Any:
     root = _root_or_current(repo_root)
     if root is None and policy.requires_root:
         return policy.default
-    return policy.coerce(_configured_value(root, section, key), policy)
+    path = (section, key)
+    try:
+        return policy.coerce(_configured_value(root, section, key), policy, path)
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, *path) from exc
 
 
 def _root_or_current(repo_root: Path | None) -> Path | None:
