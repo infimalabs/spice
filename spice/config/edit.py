@@ -17,17 +17,21 @@ from spice.config.layers import (
     WORKTREE_SOURCE,
 )
 from spice.errors import SpiceError
+from spice.operatorstate import (
+    WORKTREE_CONFIG_PATH,
+    operator_state_path,
+    prepare_operator_state_path,
+)
 from spice.process.git import run_git_command
-from spice.paths import atomic_write_text, runtime_spice_source, state_dir
+from spice.paths import atomic_write_text, runtime_spice_source
 
-WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
 
 def worktree_config_path(repo_root: Path) -> Path:
     """Path to this worktree's local TOML configuration layer."""
-    return state_dir(repo_root) / WORKTREE_CONFIG_RELATIVE_PATH
+    return operator_state_path(repo_root, WORKTREE_CONFIG_PATH)
 
 
 def config_scope_path(repo_root: Path, scope: str) -> Path:
@@ -71,6 +75,8 @@ def _mutate_scope_section(
     clear_keys: tuple[str, ...] | None = (),
 ) -> Path:
     path = config_scope_path(repo_root, scope)
+    if scope == WORKTREE_SOURCE:
+        path = prepare_operator_state_path(repo_root, WORKTREE_CONFIG_PATH)
     if scope == SYSTEM_SOURCE and (not path.is_file() or not os.access(path, os.W_OK)):
         raise SpiceError(f"configuration scope=system path={path} is not writable")
     try:

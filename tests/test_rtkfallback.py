@@ -15,6 +15,8 @@ from spice.agent import driver as agent_driver
 from spice.agent import rtkrewrite
 from spice.agent import wrap
 
+pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
+
 
 class _RecordedProcess:
     pid = 0

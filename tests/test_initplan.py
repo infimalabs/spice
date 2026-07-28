@@ -162,7 +162,6 @@ def test_gates_only_plan_uses_the_same_model_for_its_bounded_surface(tmp_path):
         ".spice/.gitignore",
         ".spice/hooks/commit-msg",
         ".spice/hooks/pre-commit",
-        ".spice/init-receipt.json",
     )
 
 
