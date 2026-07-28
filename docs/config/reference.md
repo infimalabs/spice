@@ -24,10 +24,13 @@ TaskChampion storage, and team state. It does not redirect repository-owned ACK
 or maxim state, nor does it change either canonical Git-internal namespace.
 
 Tables merge recursively from `system` through `worktree`. A scalar or list at
-a later scope replaces the earlier leaf completely; lists never concatenate,
-and `key = []` explicitly clears an inherited list. A later scalar can replace
-an earlier table and a later table can replace an earlier scalar. Named wrapper
-groups are the one table-level atomic boundary: defining
+a later scope replaces an earlier non-table leaf completely; lists never
+concatenate, and `key = []` explicitly clears an inherited list. Literal
+`false` is the only non-table value that can replace an inherited table,
+making table disablement explicit; every other scalar-for-table substitution
+refuses and names both layers. A later table can replace an earlier scalar,
+including `false`. Named wrapper groups are the one table-level atomic
+boundary: defining
 `[wrappers.<group>]` in a later scope replaces that whole inherited group.
 Every inline `scopes = { ... }` selector is also one atomic leaf: a later
 configuration layer replaces the complete selector instead of inheriting
