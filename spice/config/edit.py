@@ -31,6 +31,10 @@ _TOML_ASSIGN_RE = re.compile(
     r"""^\s*((?:"(?:\\.|[^"])*"|'[^']*'|[A-Za-z0-9_-]+))\s*="""
 )
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_TOML_NUMBER_RE = re.compile(
+    r"^[+-]?(?:inf|nan|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|"
+    r"(?:\d[\d_]*)(?:\.[\d_]+)?(?:[eE][+-]?[\d_]+)?)$"
+)
 
 
 def worktree_config_path(repo_root: Path) -> Path:
@@ -91,6 +95,28 @@ def parse_dotted_key(raw: str) -> tuple[str, ...]:
     if value != 0 or len(path) < 2 or any(not part for part in path):
         raise SpiceError(f"configuration set key {raw!r} must name a dotted table leaf")
     return tuple(path)
+
+
+def parse_toml_value(raw: str) -> Any:
+    """Parse one authored CLI value while preserving unquoted text as a string."""
+    stripped = raw.strip()
+    structured = (
+        stripped in {"true", "false"}
+        or stripped.startswith(('"', "'", "[", "{"))
+        or _TOML_NUMBER_RE.fullmatch(stripped) is not None
+    )
+    if not structured:
+        return raw
+    try:
+        parsed = tomllib.loads(f"value = {stripped}")["value"]
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(f"invalid TOML configuration value {raw!r}: {exc}") from exc
+    if isinstance(parsed, (str, bool, int, float, list, dict)):
+        return parsed
+    raise SpiceError(
+        f"unsupported TOML configuration value {raw!r}; "
+        "expected a string, boolean, number, array, or inline table"
+    )
 
 
 def clear_scope_section(
