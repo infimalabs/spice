@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import tomllib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,27 @@ def configure_config_parser(subparsers: Any) -> None:
         help="Print the classification inventory for exported defaults.",
     )
     defaults_action.set_defaults(func=handle_config)
+
+    set_action = actions.add_parser(
+        "set",
+        help="Set any schema-backed configuration leaf by dotted key.",
+    )
+    set_action.add_argument(
+        "key",
+        help=(
+            "TOML dotted key; quote a segment inside the argument when its name "
+            "contains a dot."
+        ),
+    )
+    set_action.add_argument(
+        "value",
+        help=(
+            "Value: true/false, a number, a TOML array or inline table, or bare "
+            "text for a string."
+        ),
+    )
+    _add_scope_argument(set_action)
+    set_action.set_defaults(func=handle_config)
 
     say = actions.add_parser("say", help="Configure speech playback.")
     say.add_argument(
@@ -137,6 +161,33 @@ def _handle_system(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
     _ = repo_root
     print(json.dumps(values.default_classifications(), indent=2, sort_keys=True))
+    return 0
+
+
+def _handle_set(args: argparse.Namespace, repo_root: Path) -> int:
+    scope = str(args.scope)
+    key_path = edit.parse_dotted_key(str(args.key))
+    value = _parse_set_value(str(args.value))
+    edit.set_scope_value(repo_root, scope, key_path, value)
+    loaded = layers.load_config(repo_root)
+    source = loaded.source_for(key_path)
+    print(
+        json.dumps(
+            {
+                "effective": _config_value_at(loaded.effective, key_path),
+                "key": ".".join(key_path),
+                "provenance": (
+                    {"path": str(source.path), "scope": source.name}
+                    if source is not None
+                    else None
+                ),
+                "scope": scope,
+                "value": _config_value_at(loaded.layer(scope).values, key_path),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -283,11 +334,55 @@ _CONFIG_ACTIONS = {
     "show": _handle_show,
     "system": _handle_system,
     "defaults": _handle_defaults,
+    "set": _handle_set,
     "say": _handle_say,
     "judge": _handle_judge,
     "agent": _handle_agent,
     "personality": _handle_personality,
 }
+
+_TOML_NUMBER_RE = re.compile(
+    r"^[+-]?(?:inf|nan|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|"
+    r"(?:\d[\d_]*)(?:\.[\d_]+)?(?:[eE][+-]?[\d_]+)?)$"
+)
+
+
+def _parse_set_value(raw: str) -> Any:
+    stripped = raw.strip()
+    structured = (
+        stripped in {"true", "false"}
+        or stripped.startswith(('"', "'", "[", "{"))
+        or _TOML_NUMBER_RE.fullmatch(stripped) is not None
+    )
+    if not structured:
+        return raw
+    try:
+        parsed = tomllib.loads(f"value = {stripped}")["value"]
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(f"invalid TOML configuration value {raw!r}: {exc}") from exc
+    if isinstance(parsed, (str, bool, int, float, list, dict)):
+        return parsed
+    raise SpiceError(
+        f"unsupported TOML configuration value {raw!r}; "
+        "expected a string, boolean, number, array, or inline table"
+    )
+
+
+def _config_value_at(values: Mapping[str, Any], path: Sequence[str]) -> Any:
+    value: Any = values
+    for part in path:
+        if not isinstance(value, Mapping) or part not in value:
+            return None
+        value = value[part]
+    return _json_config_value(value)
+
+
+def _json_config_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_config_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_json_config_value(item) for item in value]
+    return value
 
 
 def _agent_config_summary(repo_root: Path) -> str:

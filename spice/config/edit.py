@@ -6,7 +6,7 @@ import json
 import os
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -16,13 +16,17 @@ from spice.config.layers import (
     SYSTEM_SOURCE,
     WORKTREE_SOURCE,
 )
+from spice.config.schema import validate_config_keys
 from spice.errors import SpiceError
 from spice.process.git import run_git_command
 from spice.paths import atomic_write_text, runtime_spice_source, state_dir
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
-_TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
+_TOML_ASSIGN_RE = re.compile(
+    r"""^\s*((?:"(?:\\.|[^"])*"|'[^']*'|[A-Za-z0-9_-]+))\s*="""
+)
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def worktree_config_path(repo_root: Path) -> Path:
@@ -51,6 +55,40 @@ def set_scope_section(
     return _mutate_scope_section(repo_root, scope, key, values=dict(values))
 
 
+def set_scope_value(
+    repo_root: Path, scope: str, key_path: Sequence[str], value: Any
+) -> Path:
+    """Set one explicitly segmented leaf in a scoped configuration layer."""
+    path = tuple(key_path)
+    if len(path) < 2 or any(not part for part in path):
+        raise SpiceError("configuration set key must name a dotted table leaf")
+    return _mutate_scope_section(
+        repo_root,
+        scope,
+        path[:-1],
+        values={path[-1]: value},
+    )
+
+
+def parse_dotted_key(raw: str) -> tuple[str, ...]:
+    """Parse one TOML dotted key, preserving quoted segments containing dots."""
+    key = raw.strip()
+    if not key:
+        raise SpiceError("configuration set key must not be empty")
+    try:
+        parsed = tomllib.loads(f"{key} = 0")
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(f"invalid configuration dotted key {raw!r}: {exc}") from exc
+    path: list[str] = []
+    value: Any = parsed
+    while isinstance(value, Mapping) and len(value) == 1:
+        part, value = next(iter(value.items()))
+        path.append(str(part))
+    if value != 0 or len(path) < 2 or any(not part for part in path):
+        raise SpiceError(f"configuration set key {raw!r} must name a dotted table leaf")
+    return tuple(path)
+
+
 def clear_scope_section(
     repo_root: Path,
     scope: str,
@@ -65,7 +103,7 @@ def clear_scope_section(
 def _mutate_scope_section(
     repo_root: Path,
     scope: str,
-    key: str,
+    key: str | tuple[str, ...],
     *,
     values: Mapping[str, Any] | None = None,
     clear_keys: tuple[str, ...] | None = (),
@@ -90,7 +128,8 @@ def _mutate_scope_section(
         _remove_table_keys(lines, table, set(clear_keys))
     text = "\n".join(lines) + "\n" if lines else ""
     try:
-        tomllib.loads(text)
+        parsed = tomllib.loads(text)
+        validate_config_keys(parsed, source_name=scope, source_path=path)
         return atomic_write_text(path, text)
     except tomllib.TOMLDecodeError as exc:
         raise SpiceError(
@@ -103,7 +142,7 @@ def _mutate_scope_section(
 
 
 def _apply_worktree_table(
-    lines: list[str], table: str, values: Mapping[str, Any]
+    lines: list[str], table: str | tuple[str, ...], values: Mapping[str, Any]
 ) -> None:
     if not values:
         return
@@ -111,7 +150,7 @@ def _apply_worktree_table(
     if start is None:
         if lines and lines[-1].strip():
             lines.append("")
-        lines.append(f"[{table}]")
+        lines.append(_toml_table_header(table))
         lines.extend(_toml_assignment(key, value) for key, value in values.items())
         return
     rewritten: list[str] = []
@@ -131,13 +170,15 @@ def _apply_worktree_table(
     lines[start + 1 : end] = rewritten
 
 
-def _remove_worktree_table(lines: list[str], table: str) -> None:
+def _remove_worktree_table(lines: list[str], table: str | tuple[str, ...]) -> None:
     start, end = _toml_table_bounds(lines, table)
     if start is not None:
         del lines[start:end]
 
 
-def _remove_table_keys(lines: list[str], table: str, keys: set[str]) -> None:
+def _remove_table_keys(
+    lines: list[str], table: str | tuple[str, ...], keys: set[str]
+) -> None:
     start, end = _toml_table_bounds(lines, table)
     if start is None:
         return
@@ -175,11 +216,14 @@ def _toml_inline_comment(line: str) -> str:
     return ""
 
 
-def _toml_table_bounds(lines: list[str], table: str) -> tuple[int | None, int | None]:
+def _toml_table_bounds(
+    lines: list[str], table: str | tuple[str, ...]
+) -> tuple[int | None, int | None]:
+    expected = (table,) if isinstance(table, str) else table
     start: int | None = None
     for index, line in enumerate(lines):
         name = _toml_table_name(line)
-        if name == table:
+        if name == expected:
             start = index
             continue
         if start is not None and name is not None:
@@ -187,28 +231,62 @@ def _toml_table_bounds(lines: list[str], table: str) -> tuple[int | None, int | 
     return (start, len(lines)) if start is not None else (None, None)
 
 
-def _toml_table_name(line: str) -> str | None:
+def _toml_table_name(line: str) -> tuple[str, ...] | None:
     match = _TOML_TABLE_RE.match(line)
-    return match.group(1).strip() if match else None
+    if match is None:
+        return None
+    try:
+        parsed = tomllib.loads(f"[{match.group(1)}]\n")
+    except tomllib.TOMLDecodeError:
+        return None
+    path: list[str] = []
+    value: Any = parsed
+    while isinstance(value, Mapping) and len(value) == 1:
+        part, value = next(iter(value.items()))
+        path.append(str(part))
+    return tuple(path) if isinstance(value, Mapping) and not value else None
 
 
 def _toml_assignment_key(line: str) -> str | None:
     match = _TOML_ASSIGN_RE.match(line)
-    return match.group(1) if match else None
+    if match is None:
+        return None
+    token = match.group(1)
+    try:
+        return str(next(iter(tomllib.loads(f"{token} = 0"))))
+    except tomllib.TOMLDecodeError:
+        return None
 
 
 def _toml_assignment(key: str, value: Any) -> str:
-    return f"{key} = {_toml_scalar(value)}"
+    return f"{_toml_key(key)} = {_toml_scalar(value)}"
+
+
+def _toml_table_header(table: str | tuple[str, ...]) -> str:
+    path = (table,) if isinstance(table, str) else table
+    return "[" + ".".join(_toml_key(part) for part in path) + "]"
+
+
+def _toml_key(key: str) -> str:
+    return key if _TOML_BARE_KEY_RE.fullmatch(key) else json.dumps(key)
 
 
 def _toml_scalar(value: Any) -> str:
-    """Render a scalar as valid TOML, preserving bool/int types across the trip."""
+    """Render one CLI value as TOML without changing its parsed data shape."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
         return repr(value)
+    if isinstance(value, Mapping):
+        body = ", ".join(
+            f"{_toml_key(str(key))} = {_toml_scalar(item)}"
+            for key, item in value.items()
+        )
+        return f"{{ {body} }}"
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
     return json.dumps(str(value))
 
 
