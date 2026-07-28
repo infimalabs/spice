@@ -20,11 +20,11 @@ unrelated edit that shifts a call, can fall out of sync.
 
 ## Subprocess inventory
 
-The judge adapter is the only direct `subprocess.run` site that passes
-`timeout=` syntactically: its deadline is legally disableable, which the
-bounded engine cannot express. Task git sync adds its timeout dynamically for
-`fetch` and `push`. All direct production `run` and `Popen` sites are
-inventoried below.
+The judge adapter passes `timeout=` directly because its deadline is legally
+disableable, which the bounded engine cannot express. The Serve replacement
+probe also passes a direct timeout while it waits for a newly installed runtime
+to become importable. Task git sync adds its timeout dynamically for `fetch`
+and `push`. All direct production `run` and `Popen` sites are inventoried below.
 
 | Call sites | Caller impact and current cancellation contract | Classification |
 | --- | --- | --- |
