@@ -738,6 +738,47 @@ def test_doctor_judge_optional_by_default_and_required_when_opted_in(
     ] == [("skip", False, True), ("fail", True, True)]
 
 
+@pytest.mark.parametrize(
+    ("version", "expected_status"),
+    (("2.6.2", "fail"), ("3.0.0", "ok"), ("4.1.0", "ok")),
+)
+def test_doctor_enforces_taskwarrior_three_version(
+    monkeypatch, version, expected_status
+):
+    calls = []
+
+    def run_tool(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"{version}\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(doctor, "run_tool_command", run_tool)
+
+    check = doctor._taskwarrior_check("/tools/task")
+
+    assert check.status == expected_status
+    assert "Taskwarrior 3" in check.detail
+    assert "task control plane" in check.detail
+    if expected_status == "fail":
+        assert f"Taskwarrior {version} is below required" in check.detail
+    assert calls == [
+        (
+            ["/tools/task", "--version"],
+            {
+                "policy": "probe",
+                "operation": "probe Taskwarrior version",
+                "capture_output": True,
+                "text": True,
+                "check": False,
+            },
+        )
+    ]
+
+
 def _binary_check(repo: Path, name: str) -> doctor.DoctorCheck:
     return next(check for check in doctor._binary_checks(repo) if check.name == name)
 

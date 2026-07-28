@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -104,16 +105,41 @@ CLAIM_CONTEXT_SECONDS = defaults.integer("tasks", "claim_context_seconds")
 _DURATION_RE = re.compile(r"^(\d+)([smhdw])$")
 _DURATION_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
+
 # Named reports so a maintainer can explain the allocator with raw
 # Taskwarrior. name -> (description, filter, sort).
-REPORTS = {
-    str(name): (
-        str(raw["description"]),
-        str(raw["filter"]),
-        str(raw["sort"]),
-    )
-    for name, raw in defaults.table("tasks", "reports").items()
-}
+def _reports_from_entries(
+    entries: Mapping[str, object],
+) -> dict[str, tuple[str, str, str]]:
+    reports: dict[str, tuple[str, str, str]] = {}
+    for name, raw in entries.items():
+        if not isinstance(raw, Mapping):
+            raise SpiceError(f"[tasks.reports] {name!r} must be a table")
+        unsupported = sorted(set(raw) - {"description", "filter", "sort"})
+        if unsupported:
+            raise SpiceError(
+                f"[tasks.reports.{name}] unsupported keys: {', '.join(unsupported)}"
+            )
+        description = raw.get("description")
+        report_filter = raw.get("filter")
+        sort = raw.get("sort")
+        if (
+            not isinstance(description, str)
+            or not description
+            or not isinstance(report_filter, str)
+            or not report_filter
+            or not isinstance(sort, str)
+            or not sort
+        ):
+            raise SpiceError(
+                f"[tasks.reports.{name}] description, filter, and "
+                "sort must be non-empty strings"
+            )
+        reports[str(name)] = (description, report_filter, sort)
+    return reports
+
+
+REPORTS = _reports_from_entries(defaults.table("tasks", "reports"))
 ANALYTICS_COMMANDS = defaults.strings("tasks", "analytics", "commands")
 _REPORT_COLUMNS = "id,project,phase,priority,urgency,claim_by,description"
 _REPORT_LABELS = "ID,Project,Phase,Pri,Urg,Claim,Description"
@@ -220,6 +246,19 @@ def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     if root is None:
         return {}
     return effective_table(root, "tasks")
+
+
+def configured_reports(repo_root: Path) -> dict[str, tuple[str, str, str]]:
+    """Resolve enabled Taskwarrior reports from the layered task registry."""
+    from spice.config.layers import (
+        contextualize_config_error,
+        effective_registry,
+    )
+
+    try:
+        return _reports_from_entries(effective_registry(repo_root, "tasks", "reports"))
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "tasks", "reports") from exc
 
 
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
@@ -508,12 +547,13 @@ def uda_schema() -> dict[str, dict[str, str]]:
     return schema
 
 
-def materialize_task_backend(root: Path) -> Path:
+def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> Path:
     """Create one explicit backend's native Taskwarrior config and data dir."""
     selected_root = root.expanduser()
     if not selected_root.is_absolute():
         raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
     selected_root = selected_root.resolve()
+    selected_source_root = source_root.resolve() if source_root else repo_root()
     selected_data_dir = data_dir(selected_root)
     selected_taskrc = taskrc_path(selected_root)
     with _bootstrap_lock(selected_root):
@@ -540,7 +580,7 @@ def materialize_task_backend(root: Path) -> Path:
         for name, frag in sorted(uda_schema().items()):
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")
-        lines.extend(_report_lines())
+        lines.extend(_report_lines(selected_source_root))
         atomic_write_text(
             selected_taskrc,
             "\n".join(lines) + "\n",
@@ -556,9 +596,10 @@ def write_taskrc() -> None:
     shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
 
 
-def _report_lines() -> list[str]:
+def _report_lines(source_root: Path | None = None) -> list[str]:
     lines: list[str] = []
-    for name, (desc, filt, sort) in REPORTS.items():
+    reports = REPORTS if source_root is None else configured_reports(source_root)
+    for name, (desc, filt, sort) in reports.items():
         lines.append(f"report.{name}.description={desc}")
         lines.append(f"report.{name}.filter={filt}")
         lines.append(f"report.{name}.columns={_REPORT_COLUMNS}")

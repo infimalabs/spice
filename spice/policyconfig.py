@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import cast
 
 from spice import defaults, policy
-from spice.config.layers import contextualize_config_error, effective_table
+from spice.config.layers import (
+    contextualize_config_error,
+    effective_table,
+    enabled_registry_entries,
+)
 from spice.errors import SpiceError
 from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 
@@ -464,17 +468,18 @@ def _worktree_flex_actor_id(repo_root: Path) -> str:
 
 def _taste(raw_policy: Mapping[str, object]) -> PolicyTaste:
     table = _subtable(raw_policy, "taste")
-    words = {key.lower(): value for key, value in policy.TASTE_WORD_SUGGESTIONS.items()}
     raw_words = table.get("words")
-    if raw_words is not None:
-        if not isinstance(raw_words, Mapping):
-            raise SpiceError("[policy.taste] words must be a table")
-        for key, value in raw_words.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                raise SpiceError(
-                    "[policy.taste] words entries must be string -> string"
-                )
-            words[key.lower()] = value
+    if raw_words is None:
+        return PolicyTaste(words=dict(policy.TASTE_WORD_SUGGESTIONS))
+    if not isinstance(raw_words, Mapping):
+        raise SpiceError("[policy.taste] words must be a table")
+    words: dict[str, str] = {}
+    for key, value in enabled_registry_entries(
+        raw_words, "policy", "taste", "words"
+    ).items():
+        if not isinstance(value, str):
+            raise SpiceError("[policy.taste] words entries must be string -> string")
+        words[key.lower()] = value
     return PolicyTaste(words=words)
 
 

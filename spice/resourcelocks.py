@@ -436,7 +436,7 @@ def _write_metadata(handle: Any, metadata: dict[str, Any]) -> None:
 
 def _lock_state(path: Path) -> tuple[str, dict[str, Any] | None]:
     text = _read_lock_metadata(path)
-    if text is None or not text.strip():
+    if text is None or text == "":
         return "free", None
     holder = _metadata_from_text(text)
     return ("held", holder) if holder is not None else ("unknown", None)
@@ -444,7 +444,7 @@ def _lock_state(path: Path) -> tuple[str, dict[str, Any] | None]:
 
 def _read_lock_metadata(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return None
 

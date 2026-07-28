@@ -736,12 +736,13 @@ def render_doctor_report() -> tuple[str, list[str]]:
     for actor, count in sorted(active_by_actor.items()):
         if count > 1:
             problems.append(f"actor {actor} has {count} active claims")
+    reports = config.configured_reports(config.repo_root())
     lines = [
         f"backend {config.backend_root()}",
         f"taskrc {config.taskrc_path()}",
         f"rows {len(rows)} pending {len(pending)}",
         f"stale claims {len(alloc.stale_rows())}",
-        f"reports {' '.join(config.REPORTS)}",
+        f"reports {' '.join(reports)}",
         f"analytics {' '.join(config.ANALYTICS_COMMANDS)}",
         public_task_project_depth_label(),
         f"assignable stems {' '.join(config.assignable_stems())}",
