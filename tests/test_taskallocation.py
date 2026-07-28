@@ -85,7 +85,11 @@ def test_claim_write_paths_refuse_unregistered_metadata_before_modify(
     real_uda_schema = config.uda_schema
     schema_without_context_turn = real_uda_schema()
     schema_without_context_turn.pop("claim_context_turn")
-    monkeypatch.setattr(config, "uda_schema", lambda: schema_without_context_turn)
+    monkeypatch.setattr(
+        config,
+        "uda_schema",
+        lambda _source=None: schema_without_context_turn,
+    )
 
     with pytest.raises(
         SpiceError,

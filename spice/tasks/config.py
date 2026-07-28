@@ -715,9 +715,15 @@ def mark_task_backend_changed(
         )
 
 
-def uda_schema() -> dict[str, dict[str, str]]:
+def uda_schema(
+    source: ResolvedTaskConfig | Path | None = None,
+) -> dict[str, dict[str, str]]:
     """Map of UDA name -> dotted-config fragments (type, optional values)."""
-    settings = resolved_task_config()
+    settings = (
+        source
+        if isinstance(source, ResolvedTaskConfig)
+        else resolved_task_config(source)
+    )
     enum = ",".join(settings.approved_phases)
     schema: dict[str, dict[str, str]] = {}
     schema["incepted"] = {"type": _STRING, "label": "Incepted"}
@@ -767,7 +773,7 @@ def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> 
             f"urgency.uda.priority.{priority}.coefficient={coefficient}"
             for priority, coefficient in settings.priority_urgency.items()
         )
-        for name, frag in sorted(uda_schema().items()):
+        for name, frag in sorted(uda_schema(settings).items()):
             for key, value in frag.items():
                 lines.append(f"uda.{name}.{key}={value}")
         lines.extend(_report_lines(settings))
