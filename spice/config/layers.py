@@ -385,6 +385,12 @@ def _merge_mapping(
     for key, value in incoming.items():
         path = (*prefix, key)
         previous = destination.get(key)
+        if (
+            isinstance(previous, dict)
+            and not isinstance(value, Mapping)
+            and value is not False
+        ):
+            raise _table_replacement_error(path, value, layer, sources.get(path))
         if isinstance(value, Mapping) and (
             key == SCOPES_KEY or prefix == ("wrappers",)
         ):
@@ -406,6 +412,25 @@ def _merge_mapping(
         _forget_sources(sources, path)
         destination[key] = value
         sources[path] = layer
+
+
+def _table_replacement_error(
+    path: tuple[str, ...],
+    value: Any,
+    replacement_layer: ConfigLayer,
+    inherited_layer: ConfigLayer | None,
+) -> SpiceError:
+    inherited_source = (
+        f"source={inherited_layer.name} path={inherited_layer.path}"
+        if inherited_layer is not None
+        else "source=unknown path=-"
+    )
+    return SpiceError(
+        f"configuration table {'.'.join(path)} ({inherited_source}) cannot be "
+        f"replaced by {type(value).__name__} "
+        f"(source={replacement_layer.name} path={replacement_layer.path}); "
+        "use false to disable the inherited table explicitly"
+    )
 
 
 def _forget_sources(
