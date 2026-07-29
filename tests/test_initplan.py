@@ -261,6 +261,9 @@ def test_init_digest_binds_exact_repository_config_approval(tmp_path):
     intended_after = approval_operation["intended_after"]
     assert isinstance(intended_after, dict)
     assert intended_after["capability_digests"] == dict(approval.capability_digests)
+    observed_before = approval_operation["observed_before"]
+    assert isinstance(observed_before, dict)
+    assert observed_before["authority_record_count"] == approval.authority_record_count
 
     config.write_text('[commands]\nprobe = ["printf", "second"]\n', encoding="utf-8")
     result = subprocess.run(

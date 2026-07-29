@@ -162,10 +162,13 @@ def record_exact_approvals(
     *,
     commit: str | None,
     source: str,
+    expected_record_count: int | None = None,
 ) -> None:
     """Append only exact capability digests not already approved exactly."""
     with _trust_lock(repo_root, action="record exact repository authority"):
         state = _load_repository_trust_state_unlocked(repo_root)
+        if expected_record_count is not None:
+            _require_record_count(state, expected_record_count)
         missing = {
             capability: digest
             for capability, digest in sorted(approvals.items())

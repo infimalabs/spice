@@ -49,6 +49,7 @@ def exact_approval_operation(
         "observed_before": {
             "aggregate_digest": approval.digest,
             "capability_digests": capability_digests,
+            "authority_record_count": approval.authority_record_count,
         },
         "intended_after": {
             "authority": "exact",
@@ -72,7 +73,8 @@ def exact_approval_preview_row(
     return (
         f"{order}. repository-config-approval common-git-state "
         f"{repository_trust_log_path(repo_root)} digest={approval.digest} "
-        f"capabilities={capabilities or '<none>'} state=authorize"
+        f"capabilities={capabilities or '<none>'} "
+        f"observed-records={approval.authority_record_count} state=authorize"
     )
 
 

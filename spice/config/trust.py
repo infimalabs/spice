@@ -94,6 +94,7 @@ class ExactRepositoryConfigApproval:
 
     digest: str
     capability_digests: tuple[tuple[str, str], ...]
+    authority_record_count: int
 
 
 @dataclass(frozen=True)
@@ -119,11 +120,21 @@ def plan_exact_repository_config_approval(
     repo_root: Path,
 ) -> ExactRepositoryConfigApproval:
     """Capture one internally consistent executable-config approval snapshot."""
-    loaded = load_config(repo_root.expanduser().resolve())
+    resolved_root = repo_root.expanduser().resolve()
+    state = _shared_authority_state(resolved_root)
+    return _exact_repository_config_approval(resolved_root, state.record_count)
+
+
+def _exact_repository_config_approval(
+    repo_root: Path,
+    authority_record_count: int,
+) -> ExactRepositoryConfigApproval:
+    loaded = load_config(repo_root)
     surface = _repository_executable_surface(loaded)
     return ExactRepositoryConfigApproval(
         digest=_surface_digest(surface),
         capability_digests=tuple(_capability_digests(surface).items()),
+        authority_record_count=authority_record_count,
     )
 
 
@@ -235,6 +246,11 @@ def require_planned_repository_config_approval_current(
     resolved_root = repo_root.expanduser().resolve()
     _shared_authority_state(resolved_root)
     current = plan_exact_repository_config_approval(resolved_root)
+    if current.authority_record_count != approval.authority_record_count:
+        raise SpiceError(
+            "repository configuration authority changed after plan preview; "
+            "preview `spice init` again"
+        )
     if current != approval:
         raise SpiceError(
             "repository executable configuration changed after the exact approval "
@@ -259,6 +275,7 @@ def record_planned_repository_config_approval(
         approvals,
         commit=git_read(resolved_root, "rev-parse", "HEAD^{commit}") or None,
         source=source,
+        expected_record_count=approval.authority_record_count,
     )
 
 
@@ -427,14 +444,23 @@ def _refresh_standing_approvals(
         for capability, digest in delegated.items()
         if digest not in effective.delegated_approvals.get(capability, ())
     }
-    if not missing:
-        return effective, None
     try:
-        signatures, refusal = _relevant_signatures(repo_root, grant, tuple(missing))
+        signatures, refusal = _relevant_signatures(
+            repo_root,
+            grant,
+            tuple(delegated),
+        )
     except SpiceError as exc:
         return effective, f"has provenance-ambiguous commit history ({exc})"
     if refusal is not None:
         return effective, refusal
+    if missing and not signatures:
+        return (
+            effective,
+            "has changed capability digest without attributable commit provenance",
+        )
+    if not missing:
+        return effective, None
     head = current_commit(repo_root)
     record_derived_approvals(
         repo_root,
@@ -485,10 +511,7 @@ def _relevant_signatures(
         if _commit_changes_capability(repo_root, commit, parents, capabilities):
             relevant.append(commit)
     if not relevant:
-        return (
-            (),
-            "has changed capability digest without attributable commit provenance",
-        )
+        return (), None
     signatures: list[tuple[str, CommitSignature]] = []
     for commit in relevant:
         signature = commit_signature(repo_root, commit)
@@ -718,7 +741,8 @@ def _shared_authority_state(repo_root: Path) -> RepositoryTrustState:
 
 def _migrate_legacy_authority(repo_root: Path, marker: Path) -> None:
     legacy = _legacy_approved_digest(repo_root)
-    snapshot = plan_exact_repository_config_approval(repo_root)
+    state = load_repository_trust_state(repo_root)
+    snapshot = _exact_repository_config_approval(repo_root, state.record_count)
     approvals: dict[str, str] = {}
     if legacy is not None and hmac.compare_digest(legacy, snapshot.digest):
         approvals = dict(snapshot.capability_digests)
