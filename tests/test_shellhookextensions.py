@@ -12,6 +12,7 @@ import pytest
 from spice.agent import shellhook, wrap
 from spice.errors import SpiceError
 from tests.test_extensionhelpers import build_fixture_wheel
+from tests.test_shellhookhelpers import expected_packaged_wrapper_drop
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 TOY_WRAPPER_ENTRY_POINTS = {
@@ -33,7 +34,10 @@ def test_agent_wrapper_lines_keep_builtin_and_configured_groups_compatible(tmp_p
         },
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == [
         *_expected_wrapper_lines("wrap", ["grep"]),
         "",
         "pre-commit() {",

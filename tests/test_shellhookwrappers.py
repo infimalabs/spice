@@ -16,6 +16,7 @@ from tests.test_shellhookhelpers import (
     approved_spice_checkout,
     builtin_common_wrapper_lines,
     completed_process_detail,
+    expected_packaged_wrapper_drop,
     expected_project_common_with_pytest_wrapper_lines,
     expected_python_module_wrapper_lines,
     expected_wrapper_lines,
@@ -32,9 +33,10 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
         groups={"common": {"wrap": ["grep", "find", "git"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == expected_wrapper_lines(
-        "wrap", ["grep", "find", "git"]
-    )
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == expected_wrapper_lines("wrap", ["grep", "find", "git"])
 
 
 @pytest.mark.parametrize("driver_name", ["codex", "claude"])
@@ -211,10 +213,10 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
         },
     )
 
-    assert (
-        shellhook.render_agent_wrapper_lines(tmp_path)
-        == expected_project_common_with_pytest_wrapper_lines()
-    )
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == expected_project_common_with_pytest_wrapper_lines()
 
 
 def test_repository_common_wrapper_preserves_native_git_fidelity_routes(tmp_path):

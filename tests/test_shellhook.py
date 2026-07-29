@@ -17,6 +17,7 @@ from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
     approved_spice_checkout,
+    expected_packaged_wrapper_drop,
     expected_python_module_wrapper_lines,
     expected_wrapper_lines,
     init_git_repo,
@@ -899,7 +900,10 @@ def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
         },
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        lines = shellhook.render_agent_wrapper_lines(tmp_path)
+
+    assert lines == [
         *expected_wrapper_lines("wrap", ["grep"]),
         *expected_python_module_wrapper_lines(["pytest"]),
     ]

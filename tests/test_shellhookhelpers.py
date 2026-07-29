@@ -1,17 +1,39 @@
 """Shared fixtures for shell-hook routing and startup tests."""
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+
+import pytest
 
 from spice.agent import shellhook
 from spice.paths import repo_root_from_cwd
 from tests.test_configtrusthelpers import approve_repository_config
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
+
+
+@contextmanager
+def expected_packaged_wrapper_drop(
+    group: str,
+    dropped: tuple[str, ...],
+    *,
+    count: int = 1,
+) -> Iterator[None]:
+    """Capture intentional repository replacement warnings at their call site."""
+    message = (
+        f"spice shell hook: wrappers.{group} from repository replaces the "
+        f"packaged wrapper group and drops packaged wrappers: {', '.join(dropped)}"
+    )
+    with pytest.warns(UserWarning, match=f"^{re.escape(message)}$") as caught:
+        yield
+    assert [str(item.message) for item in caught] == [message] * count
 
 
 def write_spice_product_shape(repo: Path) -> None:
