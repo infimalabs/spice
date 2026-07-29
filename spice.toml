@@ -131,6 +131,7 @@ paths = [
     "spice/defaults.py",
     "spice/errors.py",
     "spice/extensions.py",
+    "spice/flexprovenance.py",
     "spice/hooks/commitmsg.py",
     "spice/locking.py",
     "spice/mail/steeringkey.py",
