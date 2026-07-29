@@ -152,6 +152,9 @@ spice config trust revoke \
 Revocation immediately invalidates all exact and delegated executable-
 configuration authority while preserving its audit history. It is therefore
 also the recovery path for an exact approval when no standing grant is active.
+The shared authority-log generation is bound into every exact `spice init`
+approval plan, so a plan previewed before revocation cannot be replayed to
+restore the revoked authority.
 To recover, first make the lane clean and equal to the intended trusted ref. An
 unsigned or untrusted commit cannot be repaired by a later signed descendant
 because its provenance remains in the range: inspect the new anchor, revoke the

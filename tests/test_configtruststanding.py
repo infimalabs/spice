@@ -150,6 +150,29 @@ def test_revocation_without_a_standing_grant_invalidates_exact_approvals(tmp_pat
         _require_probe(repo, "first")
 
 
+def test_revocation_refuses_an_older_exact_approval_plan(tmp_path):
+    repo = _repository(tmp_path / "repo")
+    _write_config(repo, command="first", wrapper="first")
+    _commit(repo, "initial executable configuration")
+    approve_repository_config(repo)
+    stale_exact = trust.plan_exact_repository_config_approval(repo)
+    revoke = trust.plan_standing_repository_revocation(
+        repo,
+        reason="invalidate every earlier exact plan",
+    )
+    trust.apply_standing_trust_plan(revoke)
+
+    with pytest.raises(SpiceError, match="authority changed after plan preview"):
+        trust.record_planned_repository_config_approval(
+            repo,
+            stale_exact,
+            source="replayed stale init plan",
+        )
+
+    with pytest.raises(SpiceError, match="no operator approval or active standing"):
+        _require_probe(repo, "first")
+
+
 def test_shared_migration_marker_prevents_linked_legacy_receipt_resurrection(
     tmp_path,
 ):
@@ -287,6 +310,24 @@ def test_cached_delegated_digest_still_refuses_a_later_divergent_head(
 
     with pytest.raises(SpiceError, match="agent-local or divergent HEAD"):
         _require_probe(repo, "trusted")
+
+
+def test_cached_anchor_digest_still_checks_intermediate_commit_signatures(tmp_path):
+    repo, remote = _remote_repository(tmp_path)
+    _apply_standing_grant(repo)
+    peer = _clone_peer(tmp_path, remote)
+    _write_config(peer, command="transient-unsigned", wrapper="first")
+    _commit(peer, "unsigned executable change")
+    unsigned_commit = _git(peer, "rev-parse", "HEAD")
+    _write_config(peer, command="first", wrapper="first")
+    _commit(peer, "unsigned executable revert")
+    _git(peer, "push", "origin", "main")
+    boundaries.fast_forward_if_safe(repo)
+
+    with pytest.raises(SpiceError, match="unsigned executable-config commit") as raised:
+        _require_probe(repo, "first")
+
+    assert unsigned_commit in str(raised.value)
 
 
 def test_task_release_publish_never_turns_unsigned_agent_action_into_authority(
