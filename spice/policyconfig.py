@@ -21,6 +21,7 @@ from spice.config.layers import (
 )
 from spice.config.values import layered_table
 from spice.errors import SpiceError
+from spice.flexprovenance import FlexProvenanceResolver
 from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
@@ -198,6 +199,12 @@ class ResolvedPolicy:
     taste: PolicyTaste
     rules: tuple[PolicyRule, ...] = ()
     flex_actor_id: str = ""
+    flex_provenance: FlexProvenanceResolver | None = None
+
+    def flex_seed_for_path(self, path: Path) -> str:
+        if self.flex_provenance is None:
+            return self.flex_actor_id
+        return self.flex_provenance.seed_for_path(path)
 
     @property
     def file_shape(self) -> FileShapePolicy:
@@ -249,7 +256,7 @@ class ResolvedPolicy:
                 scoped.limit,
                 scoped.flex_limit,
                 path,
-                self.flex_actor_id,
+                self.flex_seed_for_path(path),
                 jitter_percent=self.flex.jitter_percent,
             ),
         )
@@ -276,7 +283,7 @@ class ResolvedPolicy:
                 shape.line_limit,
                 shape.line_flex_limit,
                 path,
-                self.flex_actor_id,
+                self.flex_seed_for_path(path),
                 jitter_percent=self.flex.jitter_percent,
             ),
             byte_flex_limit=shape.byte_flex_limit
@@ -285,7 +292,7 @@ class ResolvedPolicy:
                 shape.byte_limit,
                 shape.byte_flex_limit,
                 path,
-                self.flex_actor_id,
+                self.flex_seed_for_path(path),
                 jitter_percent=self.flex.jitter_percent,
             ),
         )
@@ -508,6 +515,7 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
     raw_policy = layered_table(repo_root, "policy")
     limits = _policy_limits(raw_policy)
     flex = _policy_flex(raw_policy, limits)
+    flex_actor_id = _worktree_flex_actor_id(repo_root)
     markdown_depth_budget = _markdown_depth_budget(raw_policy)
     markdown_depth = _policy_markdown_depth(raw_policy)
     return ResolvedPolicy(
@@ -543,7 +551,8 @@ def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
         commit_message=_commit_message(raw_policy, limits),
         taste=_taste(raw_policy),
         rules=_rules(raw_policy, markdown_depth_budget, markdown_depth),
-        flex_actor_id=_worktree_flex_actor_id(repo_root),
+        flex_actor_id=flex_actor_id,
+        flex_provenance=FlexProvenanceResolver(repo_root, flex_actor_id),
     )
 
 
