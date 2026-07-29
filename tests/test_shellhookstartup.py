@@ -12,6 +12,7 @@ from spice.agent import shellhook
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
     completed_process_detail,
+    expected_packaged_wrapper_drop,
     fake_spice_executable,
     trace_lines,
     write_agent_wrapper_config,
@@ -159,6 +160,8 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     )
     base_env = {"HOME": str(home)}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
     env = {
         "HOME": str(home),
         "PATH": str(bin_dir)
@@ -166,9 +169,7 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
         + os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
-        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
-            shellhook.render_agent_wrapper_lines(tmp_path)
-        ),
+        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(wrapper_lines),
         **shellhook.shell_steering_runtime_environment(
             base_env=base_env,
             repo_root=tmp_path,
@@ -421,6 +422,8 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     )
     wrap_bin.chmod(0o755)
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
     env = {
         "PATH": str(fake_spice.parent)
         + os.pathsep
@@ -429,9 +432,7 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
         + os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
-        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
-            shellhook.render_agent_wrapper_lines(tmp_path)
-        ),
+        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(wrapper_lines),
         **shellhook.shell_steering_runtime_environment(
             base_env={},
             repo_root=tmp_path,

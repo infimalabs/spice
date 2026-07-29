@@ -20,6 +20,7 @@ from spice.resourcelocks import configured_lock_settings
 from spice.serve.web import serve_branding
 from spice.tasks import config as task_config
 from tests.test_configtrusthelpers import approve_repository_config
+from tests.test_shellhookhelpers import expected_packaged_wrapper_drop
 
 SYSTEM_FILE_BYTES = 222
 REPOSITORY_FILE_LOC = 333
@@ -265,7 +266,18 @@ def test_false_disables_one_inherited_entry_in_every_registry(
     (tmp_path / "spice.toml").write_text(repository_config, encoding="utf-8")
     approve_repository_config(tmp_path)
 
-    assert entry not in _resolved_registry_names(registry_path, tmp_path)
+    warning = {
+        ("wrappers",): ("probe-group", ("probe",)),
+        ("wrappers", "*"): ("common", ("rtk",)),
+    }.get(registry_path)
+    if warning is None:
+        resolved = _resolved_registry_names(registry_path, tmp_path)
+    else:
+        group, dropped = warning
+        with expected_packaged_wrapper_drop(group, dropped):
+            resolved = _resolved_registry_names(registry_path, tmp_path)
+
+    assert entry not in resolved
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,7 @@ from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
     approved_spice_checkout,
     builtin_common_wrapper_lines,
+    expected_packaged_wrapper_drop,
     expected_python_module_wrapper_lines,
     expected_wrapper_lines,
     trace_lines,
@@ -144,10 +145,11 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     base_env[SHELL_TRACE_ENV] = str(trace)
     base_env.pop(shellhook.ZDOTDIR_ENV, None)
     base_env.pop(shellhook.BASH_ENV_ENV, None)
-    ambient_env = shellhook.apply_shell_steering_environment(
-        tmp_path,
-        base_env=base_env,
-    )
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk")):
+        ambient_env = shellhook.apply_shell_steering_environment(
+            tmp_path,
+            base_env=base_env,
+        )
     for name, value in ambient_env.items():
         monkeypatch.setenv(name, value)
 
@@ -381,11 +383,11 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
 
-    env = lifecycle.agent_environment(tmp_path)
+    with expected_packaged_wrapper_drop("common", ("grep", "rtk"), count=2):
+        env = lifecycle.agent_environment(tmp_path)
+        rendered = shellhook.render_shell_runtime_wrapper_lines(tmp_path)
 
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        shellhook.render_shell_runtime_wrapper_lines(tmp_path)
-    )
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(rendered)
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
             *expected_wrapper_lines("wrap", ["grep", "git"]),
