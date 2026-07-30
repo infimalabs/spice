@@ -488,6 +488,34 @@ def test_spaced_argument_runs_natively_when_a_rewrite_unquotes_it(
     }
 
 
+def test_spaceless_argument_runs_natively_when_a_rewrite_breaks_it_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One argv word stays one word even when it never carried a space."""
+    subject = tmp_path / "subject.txt"
+    command = ["grep", "-E", ALTERNATION_PATTERN, str(subject)]
+    # Verbatim RTK output for this command: the extended flag survives, so the
+    # dialect is intact and only the spacing of the pattern gives it away.
+    alternative, rest = ALTERNATION_PATTERN.split("|")
+    rewritten = f"rtk grep -E {alternative} |{rest} {subject}"
+    exit_code, child_calls, warning = _run_spaced_rewrite(
+        tmp_path, monkeypatch, command, rewritten
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "child_calls": child_calls,
+        "warning": warning,
+    } == {
+        "exit_code": 0,
+        "child_calls": [command],
+        "warning": (
+            "spice agent run: RTK rewrite degraded to native "
+            "executable='configured-rtk' failure=unquoted-argument\n"
+        ),
+    }
+
+
 def test_spaced_argument_keeps_the_rewrite_when_the_word_survives_whole(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
