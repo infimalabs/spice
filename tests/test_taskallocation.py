@@ -11,6 +11,7 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.mail.inbox import collect_inbox_items, inbox_request_body
+from spice.paths import require_repo_root
 from spice.tasks import alloc, claimstate, config, create, identity, ops, render, tw
 from tests.test_tasks import ACTOR_A, PEER_ACTOR, task_repo
 
@@ -47,7 +48,7 @@ def test_do_claim_records_explicit_cross_worktree_site(task_repo):
 
     assert claimed is True
     assert identity.render_handle(next_row) == handle
-    assert config.repo_root() == task_repo
+    assert require_repo_root() == task_repo
     assert Path(fresh["claim_worktree"]) == target_site.worktree
     assert fresh["claim_branch"] == target_site.branch
     assert fresh["claim_head"] == target_site.head

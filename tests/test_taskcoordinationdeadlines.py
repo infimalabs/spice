@@ -16,7 +16,7 @@ from spice.cli import entry
 from spice.errors import SpiceError
 from spice.locking import FileLockTimeout, exclusive_lock
 from spice.mail import inbox
-from spice.paths import git_common_dir
+from spice.paths import git_common_dir, require_repo_root
 from spice.process.groups import ProcessDeadlineExceeded
 from spice.tasks import config, tw
 
@@ -53,7 +53,7 @@ def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
 
     monkeypatch.setattr(tw, "require_task_binary", lambda: None)
     monkeypatch.setattr(config, "bootstrap", lambda: tmp_path / "taskrc")
-    monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(tw, "require_repo_root", lambda: tmp_path)
     monkeypatch.setattr(tw.subprocess, "run", task_process)
     monkeypatch.setattr(
         config,
@@ -123,8 +123,12 @@ def test_task_local_git_helpers_timeout_with_identity_and_recover(
 
     monkeypatch.setattr("spice.process.git.run_bounded_process_group", git_process)
     if helper == "repo-root":
-        operation = config.repo_root
-        expected = tmp_path.resolve()
+
+        def repo_root_operation():
+            return require_repo_root(tmp_path)
+
+        operation = repo_root_operation
+        expected = tmp_path
     elif helper == "common-dir":
 
         def common_dir_operation():
@@ -133,7 +137,7 @@ def test_task_local_git_helpers_timeout_with_identity_and_recover(
         operation = common_dir_operation
         expected = (tmp_path / ".git").resolve()
     else:
-        monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+        monkeypatch.setattr(tw, "require_repo_root", lambda: tmp_path)
         operation = tw.current_branch
         expected = "main"
 
@@ -151,7 +155,7 @@ def test_task_bootstrap_lock_timeout_names_action_and_recovers(tmp_path, monkeyp
     repo = _init_repo(tmp_path / "repo")
     backend = tmp_path / "backend"
     config.set_backend(str(backend))
-    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "require_repo_root", lambda: repo)
     monkeypatch.setattr(
         config, "TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS", LOCK_TEST_TIMEOUT_SECONDS
     )

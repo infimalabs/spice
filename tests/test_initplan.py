@@ -793,6 +793,11 @@ def test_bare_common_lane_plan_names_a_failing_git_rather_than_the_tree(
         )
 
     monkeypatch.setattr(paths, "run_git_command", contended)
+    # Git dir resolution memoizes per repository on the assumption that a
+    # repository's layout cannot change under a running process. Swapping in a
+    # contended git breaks that assumption on purpose, so drop what the healthy
+    # plan above cached and let this plan meet the failing git for itself.
+    paths._resolve_git_dir.cache_clear()
     with pytest.raises(SpiceError) as contended_failure:
         plan_initialization(lane)
 

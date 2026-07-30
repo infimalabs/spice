@@ -41,7 +41,7 @@ def _patch_targets(
         for path, running, thread_id in targets
     }
 
-    monkeypatch.setattr(reviewfeedback.config, "repo_root", lambda: cwd)
+    monkeypatch.setattr(reviewfeedback, "require_repo_root", lambda: cwd)
     monkeypatch.setattr(reviewfeedback, "list_worktrees", lambda cwd: records)
     monkeypatch.setattr(
         reviewfeedback,

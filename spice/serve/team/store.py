@@ -439,9 +439,9 @@ def team_database_path(repo_root: Path | None = None) -> Path:
 def _default_directive_state_path(team_path: Path | None) -> Path:
     if team_path is not None:
         return Path(team_path).with_name(ACK_STATE_DATABASE_FILENAME)
-    from spice.tasks import config as task_config
+    from spice.paths import require_repo_root
 
-    return ack_state_database_path(task_config.repo_root())
+    return ack_state_database_path(require_repo_root())
 
 
 def _default_projection_path(team_path: Path | None) -> Path:

@@ -27,7 +27,7 @@ from spice.agent.sidechannelnotify import (
     notify_agent_side_channel,
 )
 from spice.errors import SpiceError
-from spice.paths import atomic_write_json
+from spice.paths import atomic_write_json, require_repo_root
 from spice.tasks import config, identity, readiness, tw
 from spice.tasks.git import boundaries
 
@@ -114,7 +114,7 @@ class ClaimSite:
 
 def current_claim_site() -> ClaimSite:
     return ClaimSite(
-        worktree=config.repo_root(),
+        worktree=require_repo_root(),
         branch=tw.current_branch(),
         head=tw.claim_head(),
     )
@@ -863,9 +863,9 @@ def release_claim(uuid: str, actor: str) -> ClaimReleaseResult:
     claim_actor = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
     rows = tw.export([uuid])
     claim_worktree = (
-        Path(str(rows[0].get("claim_worktree") or config.repo_root()))
+        Path(str(rows[0].get("claim_worktree") or require_repo_root()))
         if len(rows) == 1
-        else config.repo_root()
+        else require_repo_root()
     )
     try:
         tw.run(

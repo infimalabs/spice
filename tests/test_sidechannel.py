@@ -435,6 +435,7 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
     results: list[int] = []
     registration_started = Event()
     allow_registration = Event()
+    notification_handled = Event()
     script = (
         "from pathlib import Path; "
         "import sys, time; "
@@ -444,15 +445,25 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
 
     with sidechannel.AgentSideChannelServer(tmp_path) as server:
         register_stream_wakeup = server._register_stream_wakeup
+        wake_streams = server._wake_streams
 
         def register_after_notification(wake_writer):
             registration_started.set()
             assert allow_registration.wait(timeout=2.0)
             register_stream_wakeup(wake_writer)
 
+        def record_handled_notification():
+            wake_streams()
+            notification_handled.set()
+
         monkeypatch.setattr(
             server, "_register_stream_wakeup", register_after_notification
         )
+        # The server handles a notify on its own connection thread, so
+        # `write_inbox_item` returning only means the hello was sent. Waiting for
+        # the wake itself is what puts the notification strictly before stream
+        # registration -- the ordering this test exists to cover.
+        monkeypatch.setattr(server, "_wake_streams", record_handled_notification)
         thread = Thread(
             target=lambda: results.append(
                 wrap.run_agent_command(
@@ -470,6 +481,7 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
             "1jN54zJN.txt",
             compose_inbox_text(body="runner steering", priority=None, stop=False),
         )
+        assert notification_handled.wait(timeout=2.0)
         allow_registration.set()
         output = _eventually(lambda: stderr.getvalue(), contains="runner steering")
         thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
