@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.paths import atomic_write_json, fsync_directory, shared_state_path
+from spice.paths import (
+    atomic_write_json,
+    fsync_directory,
+    require_repo_root,
+    shared_state_path,
+)
 from spice.tasks import config, identity
 from spice.transcript.timestamps import parse_timestamp
 
@@ -288,7 +293,7 @@ def apply_artifact_prune_plan(plan: ArtifactPrunePlan) -> None:
 
 
 def artifact_root() -> Path:
-    return shared_state_path(config.repo_root(), TASK_ARTIFACT_DIR)
+    return shared_state_path(require_repo_root(), TASK_ARTIFACT_DIR)
 
 
 def _resolve_rendered_handle(handle: str) -> tuple[str, dict[str, Any]]:

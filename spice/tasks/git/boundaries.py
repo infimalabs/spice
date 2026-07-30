@@ -42,7 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.tasks import config, wordingreview
+from spice.paths import require_repo_root
+from spice.tasks import wordingreview
 from spice.tasks.git import merging, plumbing
 
 # Publish-race rounds before surfacing recovery guidance: enough for a full
@@ -196,7 +197,7 @@ def commits_ahead_of_baseline(repo_root: Path | None = None) -> int:
     work over: commits on HEAD not yet recorded by a completed task. With no
     configured remote there is no baseline to be ahead of, so the count is 0.
     """
-    root = repo_root or config.repo_root()
+    root = repo_root or require_repo_root()
     resolved = _resolve_target(root)
     return _commits_ahead_of_target(root, resolved)
 
@@ -220,7 +221,7 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     else is an anomaly we refuse rather than paper over. With no configured
     remote this is a no-op and the claim simply records the local HEAD.
     """
-    root = repo_root or config.repo_root()
+    root = repo_root or require_repo_root()
     resolved = _resolve_target(root)
     if resolved is None:
         return SyncResult()
@@ -276,7 +277,7 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     observable in the packet instead of invisible. A missing remote, failed
     fetch, and uninspectable baseline remain distinct outcomes.
     """
-    root = repo_root or config.repo_root()
+    root = repo_root or require_repo_root()
     try:
         resolved = _resolve_target(root)
     except SpiceError:
@@ -344,7 +345,7 @@ def integrate_and_publish(
     advance and correctly skips, leaving the stale copy in service for the
     lifetime of the lane.
     """
-    root = repo_root or config.repo_root()
+    root = repo_root or require_repo_root()
     wordingreview.require_integrate_allowed(label, meta)
     agent_head = plumbing.read(root, "rev-parse", "HEAD")
     resolved = _resolve_target(root)

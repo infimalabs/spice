@@ -29,6 +29,7 @@ from spice.serve.team.store import (
     pending_authority_migration,
     team_database_path,
 )
+from spice.paths import require_repo_root
 from spice.sqliteconnection import sqlite_connection
 from spice.tasks import alloc, config, create, identity, ops
 from tests.test_reposcaffolding import init_committed_repo as _init_repo
@@ -78,7 +79,7 @@ def _recorded_lane_schema() -> str:
     with sqlite_connection(team_database_path()) as connection:
         row = connection.execute(
             "SELECT value FROM global_settings WHERE key = ?",
-            (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{config.repo_root()}",),
+            (f"{GLOBAL_LANE_SCHEMA_KEY_PREFIX}{require_repo_root()}",),
         ).fetchone()
     return str(row[0]) if row is not None else ""
 

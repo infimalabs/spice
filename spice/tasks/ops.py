@@ -19,7 +19,7 @@ from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.hooks import install as hook_install
 from spice.hooks import precommit
-from spice.paths import repo_root_from_cwd
+from spice.paths import repo_root_from_cwd, require_repo_root
 from spice.process.git import git_read
 from spice.process.tool import run_tool_command
 from spice.sessions import learnings as session_learnings
@@ -374,7 +374,7 @@ def _capture_default_title() -> str:
     """A task title derived from the most recent loose commit subject."""
     from spice.tasks import create
 
-    subject = git_read(config.repo_root(), "log", "-1", "--format=%s")
+    subject = git_read(require_repo_root(), "log", "-1", "--format=%s")
     if not subject:
         return "Capture loose commit"
     return subject[: create.task_title_limit()].strip()
@@ -519,7 +519,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
     index = phase_index(row)
     handle = identity.render_handle(row)
     actor = str(row.get("claim_by") or "").strip() or tw.current_actor()
-    claim_worktree = Path(str(row.get("claim_worktree") or config.repo_root()))
+    claim_worktree = Path(str(row.get("claim_worktree") or require_repo_root()))
     transitioned_at = tw.now_iso()
     if index + 1 >= len(phases):
         project = str(row.get("project") or "")
@@ -569,7 +569,7 @@ def done(
     _require_plan_phase_done_has_no_local_commits(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.
-    repo_root = config.repo_root()
+    repo_root = require_repo_root()
     before_head = git_read(repo_root, "rev-parse", "HEAD")
     sync = boundaries.integrate_and_publish(
         identity.render_handle(row),
@@ -637,7 +637,7 @@ def _continue_done(payload: dict[str, Any]) -> str:
             row,
             done_at=tw.now_iso(),
             handle_text=identity.render_handle(row),
-            repo_root=config.repo_root(),
+            repo_root=require_repo_root(),
         ).render()
         next_line = next_task_drain_line()
         if result.endswith(" -> review"):
@@ -864,7 +864,7 @@ def review(
         creation_surface=creation_surface,
     )
     reviewed_handle = identity.render_handle(row)
-    repo_root = config.repo_root()
+    repo_root = require_repo_root()
     before_head = git_read(repo_root, "rev-parse", "HEAD")
     sync = boundaries.integrate_and_publish(
         reviewed_handle,

@@ -433,7 +433,7 @@ def test_failed_command_raises_with_the_requested_arguments(task_repo):
 def test_export_rejects_a_non_array_payload(monkeypatch, tmp_path):
     monkeypatch.setattr(tw, "require_task_binary", lambda: None)
     monkeypatch.setattr(config, "bootstrap", lambda: tmp_path / "taskrc")
-    monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(tw, "require_repo_root", lambda: tmp_path)
     monkeypatch.setattr(subprocess, "run", _fake_process('{"rows": []}'))
 
     with pytest.raises(SpiceError) as failure:
@@ -447,7 +447,7 @@ def test_timeout_names_the_action_and_omits_schema_override_noise(
 ):
     monkeypatch.setattr(tw, "require_task_binary", lambda: None)
     monkeypatch.setattr(config, "bootstrap", lambda: tmp_path / "taskrc")
-    monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(tw, "require_repo_root", lambda: tmp_path)
 
     def timing_out(command, **_kwargs):
         raise subprocess.TimeoutExpired(command, tw.TASK_COMMAND_TIMEOUT_SECONDS)

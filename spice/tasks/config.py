@@ -20,9 +20,8 @@ from typing import Any, cast
 
 from spice import defaults
 from spice.errors import SpiceError
-from spice.process.git import run_git_command
 from spice.locking import bounded_exclusive_lock
-from spice.paths import atomic_write_text, shared_state_root
+from spice.paths import atomic_write_text, require_repo_root, shared_state_root
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
@@ -601,18 +600,6 @@ def _selector() -> str:
     return os.environ.get(TASK_BACKEND_ENV, "").strip()  # env-policy: allow
 
 
-def repo_root() -> Path:
-    result = run_git_command(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SpiceError("not inside a git worktree")
-    return Path(result.stdout.strip()).resolve()
-
-
 def backend_root() -> Path:
     selector = _selector()
     if selector:
@@ -620,7 +607,7 @@ def backend_root() -> Path:
         if expanded.is_absolute():
             return expanded.resolve()
         raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
-    return shared_state_root(repo_root())
+    return shared_state_root(require_repo_root())
 
 
 def data_dir(root: Path | None = None) -> Path:
@@ -747,7 +734,7 @@ def materialize_task_backend(root: Path, *, source_root: Path | None = None) -> 
     if not selected_root.is_absolute():
         raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
     selected_root = selected_root.resolve()
-    selected_source_root = source_root.resolve() if source_root else repo_root()
+    selected_source_root = source_root.resolve() if source_root else require_repo_root()
     selected_data_dir = data_dir(selected_root)
     selected_taskrc = taskrc_path(selected_root)
     settings = resolved_task_config(selected_source_root)
@@ -789,7 +776,7 @@ def write_taskrc() -> None:
     from spice.paths import shared_attachment_root
 
     materialize_task_backend(backend_root())
-    shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
+    shared_attachment_root(require_repo_root()).mkdir(parents=True, exist_ok=True)
 
 
 def _report_lines(

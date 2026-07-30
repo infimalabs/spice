@@ -16,6 +16,7 @@ from typing import Any
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
+from spice.paths import require_repo_root
 from spice.process.git import git_read
 from spice.tasks import config
 
@@ -71,7 +72,7 @@ def run(
     try:
         result = subprocess.run(
             command,
-            cwd=config.repo_root(),
+            cwd=require_repo_root(),
             capture_output=True,
             check=False,
             text=True,
@@ -161,11 +162,11 @@ def current_actor() -> str:
 
 
 def current_branch() -> str:
-    return git_read(config.repo_root(), "branch", "--show-current")
+    return git_read(require_repo_root(), "branch", "--show-current")
 
 
 def worktree_clean() -> bool:
-    return git_read(config.repo_root(), "status", "--porcelain") == ""
+    return git_read(require_repo_root(), "status", "--porcelain") == ""
 
 
 def require_clean_worktree(action: str) -> None:
@@ -176,4 +177,4 @@ def require_clean_worktree(action: str) -> None:
 
 
 def claim_head() -> str:
-    return git_read(config.repo_root(), "rev-parse", "HEAD")
+    return git_read(require_repo_root(), "rev-parse", "HEAD")

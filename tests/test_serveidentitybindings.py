@@ -28,7 +28,7 @@ REBOUND_THREAD_ID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 def test_binding_resolution_resolves_one_git_state_root_per_target(
     tmp_path, monkeypatch
 ):
-    import spice.paths as state_paths
+    import spice.agent.paths as agent_paths
 
     lane_a, lane_c = _linked_worktrees(tmp_path)
     _write_idle_binding(lane_a, started_at="2026-07-22T19:04:22.000000Z")
@@ -38,15 +38,17 @@ def test_binding_resolution_resolves_one_git_state_root_per_target(
         thread_id=REBOUND_THREAD_ID,
     )
     targets = discover_serve_worktrees(cwd=lane_a)
-    real_run_git_command = state_paths.run_git_command
+    real_worktree_state_root = agent_paths.worktree_state_root
     git_dir_roots: list[str] = []
 
-    def counted_run_git_command(argv, *args, **kwargs):
-        if "--git-dir" in argv:
-            git_dir_roots.append(str(Path(argv[2]).resolve()))
-        return real_run_git_command(argv, *args, **kwargs)
+    # Counted at the call, not at the git subprocess: path resolution memoizes
+    # per repository, so a caller that asks repeatedly still spawns one git.
+    # Reconciliation is what must ask once per target.
+    def counted_worktree_state_root(repo_root, *args, **kwargs):
+        git_dir_roots.append(str(Path(repo_root).resolve()))
+        return real_worktree_state_root(repo_root, *args, **kwargs)
 
-    monkeypatch.setattr(state_paths, "run_git_command", counted_run_git_command)
+    monkeypatch.setattr(agent_paths, "worktree_state_root", counted_worktree_state_root)
 
     resolved = reconcile_target_thread_bindings(targets)
 
