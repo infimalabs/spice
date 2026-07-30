@@ -230,20 +230,40 @@ def _reject_unquoted_argument(
     if decision.rewritten is None or len(args) < 2:
         return decision
     try:
-        substituted = frozenset(shlex.split(decision.rewritten))
+        substituted = shlex.split(decision.rewritten)
     except ValueError:
         return decision
     # Only the argv shape can be checked this way. Shell text arrives as a
     # single argument whose words are the command itself, so its spaces carry
     # no promise; an argv word's spaces are part of one pattern or one path,
     # and a rewrite that emits them bare searches for something else entirely.
+    intact = frozenset(substituted)
     for index, arg in enumerate(args):
-        if arg.split() != [arg] and arg not in substituted:
+        if arg in intact:
+            continue
+        if arg.split() != [arg] or _split_across_words(arg, substituted):
             return RtkRewriteDecision(
                 failure_class=RTK_QUOTING_FAILURE_CLASS,
                 failure_signature=f"argument={index}",
             )
     return decision
+
+
+def _split_across_words(arg: str, substituted: Sequence[str]) -> bool:
+    """Whether consecutive substituted words spell one written word between them."""
+    # A word can be broken without ever having carried a space: RTK spaces an
+    # alternation operator away from its alternatives, so the halves rejoin to
+    # the written word only once the spacing is discarded on both sides.
+    target = "".join(arg.split())
+    for start in range(len(substituted) - 1):
+        joined = substituted[start]
+        for word in substituted[start + 1 :]:
+            joined += word
+            if len(joined) > len(target):
+                break
+            if joined == target:
+                return True
+    return False
 
 
 def _written_words(args: Sequence[str]) -> list[str]:
