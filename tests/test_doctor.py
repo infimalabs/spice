@@ -831,6 +831,23 @@ def _patch_non_hook_checks(monkeypatch) -> None:
                 name, "ok", "ok", command
             ),
         )
+    # These answer for the host interpreter and the installed spice entrypoint --
+    # each takes repo_root and discards it -- so a temporary repository cannot
+    # arrange them. Left live they decide `report.failed` for callers asking
+    # about hooks: a machine whose spice is installed non-editable reddens every
+    # such test. `_installed_spice_source_check` keeps its own tests below.
+    for attribute, name in (
+        ("_runtime_resolution_check", "runtime.spice"),
+        ("_spice_namespace_portions_check", "runtime.spice-namespace"),
+        ("_installed_spice_source_check", "runtime.installed-spice"),
+    ):
+        monkeypatch.setattr(
+            doctor,
+            attribute,
+            lambda *_args, name=name: doctor.DoctorCheck(
+                name, "ok", "ok", "spice dev doctor"
+            ),
+        )
 
 
 def test_doctor_judge_optional_by_default_and_required_when_opted_in(

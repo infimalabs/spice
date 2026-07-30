@@ -25,6 +25,7 @@ from spice.mail.inbox import (
     inbox_item_key,
     write_inbox_item,
 )
+from spice.paths import require_repo_root
 from spice.sqliteconnection import sqlite_connection
 from spice.tasks import claimstate, config, identity, lanes, tw
 from spice.tasks.git import boundaries
@@ -472,7 +473,7 @@ def _require_current_supervisor() -> None:
         team_database_path,
     )
 
-    repo_root = config.repo_root()
+    repo_root = require_repo_root()
     lane = str(repo_root)
     state = read_agent_state(repo_root)
     recorded = state.get(SUPERVISOR_SCHEMA_VERSION_FIELD)
@@ -669,7 +670,7 @@ def _notify_displaced_claimant(
     if not target.is_dir():
         return f"target-unavailable target={target}"
     try:
-        if target.resolve() == config.repo_root().resolve():
+        if target.resolve() == require_repo_root().resolve():
             return f"same-worktree target={target}"
     except OSError:
         return f"target-unavailable target={target}"

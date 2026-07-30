@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.paths import repo_root_from_cwd
+from spice.paths import repo_root_from_cwd, require_repo_root
 from spice.tasks import (
     alloc,
     artifacts,
@@ -736,7 +736,7 @@ def render_doctor_report() -> tuple[str, list[str]]:
     for actor, count in sorted(active_by_actor.items()):
         if count > 1:
             problems.append(f"actor {actor} has {count} active claims")
-    reports = config.configured_reports(config.repo_root())
+    reports = config.configured_reports(require_repo_root())
     settings = config.resolved_task_config()
     lines = [
         f"backend {config.backend_root()}",

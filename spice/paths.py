@@ -144,6 +144,7 @@ def _git_failure_message(argv: list[str], returncode: int, stderr: str) -> str:
     )
 
 
+@cache
 def _resolve_git_dir(root: Path, flag: str) -> Path:
     """Ask git for one of its directory paths, keeping the failures distinct.
 
@@ -154,6 +155,14 @@ def _resolve_git_dir(root: Path, flag: str) -> Path:
     real fault, and callers that degrade quietly on that sentence -- the side
     channel socket lookup, the ack archive -- would silently do nothing instead
     of surfacing a broken environment.
+
+    Answers are process-stable and cached per root and flag, matching
+    :func:`_cached_repo_root_from_cwd`. Every managed-state path resolves
+    through here, so an uncached probe spawns one git per state lookup rather
+    than one per process. Failures cache nothing -- a raising call leaves no
+    entry -- so a repository that appears later is still observed, and only the
+    answers git actually gave are reused. Callers normalize ``root`` to an
+    absolute path so two spellings of one worktree share an entry.
     """
     from spice.errors import SpiceError
 
@@ -176,12 +185,12 @@ def _resolve_git_dir(root: Path, flag: str) -> Path:
 
 def git_common_dir(root: Path) -> Path:
     """The shared git dir for every worktree of one repository."""
-    return _resolve_git_dir(root, "--git-common-dir")
+    return _resolve_git_dir(Path(os.path.abspath(root)), "--git-common-dir")
 
 
 def git_dir(root: Path) -> Path:
     """The git dir for this specific worktree."""
-    return _resolve_git_dir(root, "--git-dir")
+    return _resolve_git_dir(Path(os.path.abspath(root)), "--git-dir")
 
 
 def shared_state_root(repo_root: Path) -> Path:

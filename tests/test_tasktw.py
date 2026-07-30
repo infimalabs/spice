@@ -57,7 +57,7 @@ def test_task_run_disables_bulk_confirmation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tw, "require_task_binary", lambda: None)
     monkeypatch.setattr(config, "bootstrap", lambda: tmp_path / "taskrc")
-    monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(tw, "require_repo_root", lambda: tmp_path)
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     tw.run(["export"])

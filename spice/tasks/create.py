@@ -11,7 +11,7 @@ from typing import Sequence
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.policyconfig import resolve_policy
-from spice.paths import repo_root_from_cwd
+from spice.paths import repo_root_from_cwd, require_repo_root
 from spice.tasks import claimstate, config, identity, projectsubs, tw, wording
 from spice.tasks.git import boundaries
 
@@ -369,7 +369,7 @@ def _build_add_args(
         args.append(f"origin:{origin}")
     args += [
         f"origin_thread:{actor}",
-        f"origin_worktree:{config.repo_root()}",
+        f"origin_worktree:{require_repo_root()}",
         f"origin_branch:{tw.current_branch()}",
     ]
     for tag in tags:

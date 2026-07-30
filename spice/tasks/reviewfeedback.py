@@ -13,7 +13,8 @@ from spice.mail.inbox import (
     inbox_item_key,
     write_inbox_item,
 )
-from spice.tasks import config, identity, tw
+from spice.paths import require_repo_root
+from spice.tasks import identity, tw
 from spice.worktrees import list_worktrees
 
 # Review steering rides the same body-prefix idiom as [MAXIM]: the prefix
@@ -56,7 +57,7 @@ def emit_review_feedback(
         _record_feedback_status(reviewed_row, result)
         return result
     target = _resolve_active_author_target(
-        review_author, config.repo_root(), reviewer=reviewer
+        review_author, require_repo_root(), reviewer=reviewer
     )
     if target.status != "delivered":
         result = ReviewFeedbackResult(
