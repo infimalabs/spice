@@ -38,6 +38,7 @@ RTK_EXTENDED_REGEX_COMMANDS = frozenset(("rg",))
 RTK_BASIC_REGEX_COMMANDS = frozenset(("grep", "egrep", "fgrep"))
 RTK_EXTENDED_REGEX_FLAGS = frozenset(("-E", "--extended-regexp"))
 RTK_DIALECT_FAILURE_CLASS = "regex-dialect-narrowed"
+RTK_QUOTING_FAILURE_CLASS = "unquoted-argument"
 
 RtkWarningKey = tuple[str, str, str]
 _rtk_warned_keys: set[RtkWarningKey] = set()
@@ -108,7 +109,10 @@ def rewrite_command_text(
             failure_signature=f"{failure_class}:errno={exc.errno}",
         )
         return None
-    decision = _reject_narrowed_regex_dialect(_classify_rewrite_result(completed), args)
+    decision = _reject_unquoted_argument(
+        _reject_narrowed_regex_dialect(_classify_rewrite_result(completed), args),
+        args,
+    )
     if decision.failure_class:
         emit_rewrite_diagnostic(
             repo_root,
@@ -215,6 +219,29 @@ def _narrowed_regex_operators(args: Sequence[str], rewritten: str) -> str:
         for operator in RTK_EXTENDED_REGEX_OPERATORS.intersection(word)
     }
     return "".join(sorted(found))
+
+
+def _reject_unquoted_argument(
+    decision: RtkRewriteDecision, args: Sequence[str]
+) -> RtkRewriteDecision:
+    """Select native execution when a rewrite reproduced one argv word as several."""
+    if decision.rewritten is None or len(args) < 2:
+        return decision
+    try:
+        substituted = frozenset(shlex.split(decision.rewritten))
+    except ValueError:
+        return decision
+    # Only the argv shape can be checked this way. Shell text arrives as a
+    # single argument whose words are the command itself, so its spaces carry
+    # no promise; an argv word's spaces are part of one pattern or one path,
+    # and a rewrite that emits them bare searches for something else entirely.
+    for index, arg in enumerate(args):
+        if arg.split() != [arg] and arg not in substituted:
+            return RtkRewriteDecision(
+                failure_class=RTK_QUOTING_FAILURE_CLASS,
+                failure_signature=f"argument={index}",
+            )
+    return decision
 
 
 def _written_words(args: Sequence[str]) -> list[str]:

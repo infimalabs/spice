@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import shlex
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -415,6 +416,99 @@ def _record_child(calls: list[list[str]], command: list[str]) -> _RecordedProces
 
 ALTERNATION_SUBJECT_LINES = ("alpha", "beta")
 ALTERNATION_PATTERN = "alpha|beta"
+SPACED_PATTERN = "alpha beta"
+SPACED_PATH = "with space.txt"
+# A rewrite headed by a word the shell resolves itself is refused before any of
+# this runs, so these shapes route through `git`, which RTK does claim. Their
+# rewrites are the ones that reach a child process.
+SPACED_REWRITE_HEAD = "rtk git log"
+
+
+def _run_spaced_rewrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+    rewritten: str,
+) -> tuple[int, list[list[str]], str]:
+    """Run one argv command against a fixed rewrite and report what happened."""
+    _configure_rtk(tmp_path, "configured-rtk")
+    wrap._rtk_warned_keys.clear()
+    child_calls: list[list[str]] = []
+
+    def run_rtk(_command: list[str], **_kwargs: object) -> object:
+        return subprocess.CompletedProcess([], 3, stdout=rewritten + "\n", stderr="")
+
+    _isolate_agent_run(monkeypatch, run_rtk)
+    stderr = io.StringIO()
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        command,
+        popen_factory=lambda argv, **_kwargs: _record_child(child_calls, argv),
+        stderr=stderr,
+    )
+    return exit_code, child_calls, stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("shape", "written_tail", "rewritten_tail"),
+    [
+        # The pattern holds the space, so a bare rewrite reads its second word as
+        # a separate operand and searches for the first word alone.
+        ("spaced-pattern", ["--grep", SPACED_PATTERN], f"--grep {SPACED_PATTERN}"),
+        # The path holds the space, so a bare rewrite names two paths that do not
+        # exist while the rest of the command survives intact.
+        ("spaced-path", ["--", SPACED_PATH], f"-- {SPACED_PATH}"),
+    ],
+)
+def test_spaced_argument_runs_natively_when_a_rewrite_unquotes_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    written_tail: list[str],
+    rewritten_tail: str,
+) -> None:
+    """One argv word stays one word or the caller's own command runs instead."""
+    del shape
+    command = ["git", "log", *written_tail]
+    exit_code, child_calls, warning = _run_spaced_rewrite(
+        tmp_path, monkeypatch, command, f"{SPACED_REWRITE_HEAD} {rewritten_tail}"
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "child_calls": child_calls,
+        "warning": warning,
+    } == {
+        "exit_code": 0,
+        "child_calls": [command],
+        "warning": (
+            "spice agent run: RTK rewrite degraded to native "
+            "executable='configured-rtk' failure=unquoted-argument\n"
+        ),
+    }
+
+
+def test_spaced_argument_keeps_the_rewrite_when_the_word_survives_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rewrite that preserves the spaced word is still the command that runs."""
+    command = ["git", "log", "--grep", SPACED_PATTERN]
+    exit_code, child_calls, warning = _run_spaced_rewrite(
+        tmp_path,
+        monkeypatch,
+        command,
+        f"{SPACED_REWRITE_HEAD} --grep {shlex.quote(SPACED_PATTERN)}",
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "child_calls": child_calls,
+        "warning": warning,
+    } == {
+        "exit_code": 0,
+        "child_calls": [["configured-rtk", "git", "log", "--grep", SPACED_PATTERN]],
+        "warning": "",
+    }
 
 
 @pytest.mark.parametrize(
