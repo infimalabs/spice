@@ -453,6 +453,58 @@ def test_git_dir_resolvers_carry_their_own_argv_and_name_a_launch_failure(
     assert "git command could not be launched" in launch_message
 
 
+def test_git_dir_resolvers_reuse_one_probe_per_absolute_root_and_flag(
+    tmp_path, monkeypatch
+):
+    """Every managed-state path lands here, so repetition must cost no git."""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    probed: list[tuple[Path, str]] = []
+
+    def resolve(command, **_kwargs):
+        # Git answers for the directory it was pointed at, so both spellings of
+        # one worktree earn the same answer -- what differs is how many probes
+        # it takes to learn it.
+        lookup, flag = Path(command[2]), command[4]
+        answer = Path(os.path.abspath(lookup)) / (
+            ".git" if flag == "--git-dir" else "common.git"
+        )
+        probed.append((lookup, flag))
+        return subprocess.CompletedProcess(command, 0, stdout=f"{answer}\n", stderr="")
+
+    monkeypatch.setattr(paths, "run_git_command", resolve)
+    monkeypatch.chdir(tmp_path)
+    repeats = 40
+
+    resolved = [
+        *(git_dir(worktree) for _ in range(repeats)),
+        # The relative spelling of the same worktree, which callers normalize to
+        # an absolute path so it shares the entry rather than paying its own git.
+        *(git_dir(Path("worktree")) for _ in range(repeats)),
+        *(git_common_dir(worktree) for _ in range(repeats)),
+    ]
+
+    assert resolved == (
+        [worktree / ".git"] * (repeats * 2) + [worktree / "common.git"] * repeats
+    )
+    assert probed == [(worktree, "--git-dir"), (worktree, "--git-common-dir")]
+
+
+def test_git_dir_resolvers_discover_a_repository_created_after_an_absent_probe(
+    tmp_path,
+):
+    """A raising call leaves no entry, so a later repository is still observed."""
+    late = tmp_path / "late"
+    late.mkdir()
+
+    with pytest.raises(SpiceError) as absent:
+        git_dir(late)
+    subprocess.run(["git", "init", "-q"], cwd=late, check=True)
+
+    assert str(absent.value) == "not inside a git worktree"
+    assert git_dir(late) == late / ".git"
+
+
 def _repo_with_linked_worktree(tmp_path: Path) -> Path:
     repo = _initialized_repo(tmp_path / "repo")
     subprocess.run(
