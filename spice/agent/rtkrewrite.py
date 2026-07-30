@@ -28,12 +28,13 @@ RTK_REWRITE_SUCCESS_EXIT_CODES = frozenset((0, RTK_REWRITE_MATCH_EXIT_CODE))
 RTK_DIAGNOSTIC_EXECUTABLE_CHARS = 160
 
 # A search reads its pattern as an extended regular expression when its name says
-# so or when a flag asks for it, and as a basic one otherwise; the same rule
-# decides the dialect on both sides of a rewrite. These characters are operators
-# in the extended dialect and literals in the basic one, so a substitution that
-# carries one from an extended search into a basic one answers a different
-# question than the one that was asked -- and answers it as "no matches" rather
-# than as an error.
+# so or when a flag asks for it. These characters are operators in that dialect
+# and literals in the basic one, so a substitution that carries one from an
+# extended search into a basic one answers a different question than the one that
+# was asked -- and answers it as "no matches" rather than as an error. Only the
+# written command is named by the caller, so only there does a name decide the
+# dialect; a substituted search reaching the check is already known by name to be
+# a basic one, and only the flag can widen it back.
 RTK_EXTENDED_REGEX_OPERATORS = frozenset("|+?(){}")
 RTK_EXTENDED_REGEX_COMMANDS = frozenset(("rg", "egrep"))
 RTK_BASIC_REGEX_COMMANDS = frozenset(("grep", "fgrep"))
@@ -207,7 +208,7 @@ def _narrowed_regex_operators(args: Sequence[str], rewritten: str) -> str:
         return ""
     if RTK_BASIC_REGEX_COMMANDS.isdisjoint(substituted):
         return ""
-    if _reads_extended_regex(substituted):
+    if any(_requests_extended_regex(word) for word in substituted):
         return ""
     # Every operator the caller wrote is read differently by the substituted
     # search, whether the rewrite reproduced the pattern intact or split it into

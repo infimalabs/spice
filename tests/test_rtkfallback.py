@@ -542,6 +542,13 @@ def test_spaced_argument_keeps_the_rewrite_when_the_word_survives_whole(
             ["grep", "-E", ALTERNATION_PATTERN, "{subject}"],
             "rtk grep '" + ALTERNATION_PATTERN + "' {subject}",
         ),
+        # A path argument spelled like an extended-dialect command is still a
+        # path; the substituted search reads the basic dialect its name declares.
+        (
+            "argument-spelled-rg",
+            ["rg", ALTERNATION_PATTERN, "rg"],
+            "rtk grep '" + ALTERNATION_PATTERN + "' rg",
+        ),
     ],
 )
 def test_alternation_search_runs_natively_when_a_rewrite_narrows_the_dialect(
