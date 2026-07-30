@@ -8,7 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -26,6 +26,18 @@ RTK_REWRITE_MATCH_EXIT_CODE = 3
 RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
 RTK_REWRITE_SUCCESS_EXIT_CODES = frozenset((0, RTK_REWRITE_MATCH_EXIT_CODE))
 RTK_DIAGNOSTIC_EXECUTABLE_CHARS = 160
+
+# The search written by the caller reads its pattern as an extended regular
+# expression; the search RTK substitutes reads a basic one unless it is told
+# otherwise. These characters are operators in the first dialect and literals in
+# the second, so a substitution that carries one across without requesting the
+# extended dialect answers a different question than the one that was asked --
+# and answers it as "no matches" rather than as an error.
+RTK_EXTENDED_REGEX_OPERATORS = frozenset("|+?(){}")
+RTK_EXTENDED_REGEX_COMMANDS = frozenset(("rg",))
+RTK_BASIC_REGEX_COMMANDS = frozenset(("grep", "egrep", "fgrep"))
+RTK_EXTENDED_REGEX_FLAGS = frozenset(("-E", "--extended-regexp"))
+RTK_DIALECT_FAILURE_CLASS = "regex-dialect-narrowed"
 
 RtkWarningKey = tuple[str, str, str]
 _rtk_warned_keys: set[RtkWarningKey] = set()
@@ -96,7 +108,7 @@ def rewrite_command_text(
             failure_signature=f"{failure_class}:errno={exc.errno}",
         )
         return None
-    decision = _classify_rewrite_result(completed)
+    decision = _reject_narrowed_regex_dialect(_classify_rewrite_result(completed), args)
     if decision.failure_class:
         emit_rewrite_diagnostic(
             repo_root,
@@ -162,6 +174,60 @@ def _classify_rewrite_result(completed: object) -> RtkRewriteDecision:
         failure_class="invalid-result-pair",
         failure_signature=f"exit={returncode}:stdout={stdout_shape}",
     )
+
+
+def _reject_narrowed_regex_dialect(
+    decision: RtkRewriteDecision, args: Sequence[str]
+) -> RtkRewriteDecision:
+    """Select native execution when a rewrite reinterprets an extended pattern."""
+    if decision.rewritten is None:
+        return decision
+    operators = _narrowed_regex_operators(args, decision.rewritten)
+    if not operators:
+        return decision
+    return RtkRewriteDecision(
+        failure_class=RTK_DIALECT_FAILURE_CLASS,
+        failure_signature=f"operators={operators}",
+    )
+
+
+def _narrowed_regex_operators(args: Sequence[str], rewritten: str) -> str:
+    """The extended operators a rewrite carries into a basic-dialect search."""
+    try:
+        written = _written_words(args)
+        substituted = shlex.split(rewritten)
+    except ValueError:
+        return ""
+    if RTK_EXTENDED_REGEX_COMMANDS.isdisjoint(written):
+        return ""
+    if RTK_BASIC_REGEX_COMMANDS.isdisjoint(substituted):
+        return ""
+    if any(_requests_extended_regex(word) for word in substituted):
+        return ""
+    # Every operator the caller wrote is read differently by the substituted
+    # search, whether the rewrite reproduced the pattern intact or split it into
+    # separate words. Both outcomes report no matches, so neither is inspected
+    # further; the written operators alone decide that the answer would change.
+    found = {
+        operator
+        for word in written
+        if not word.startswith("-")
+        for operator in RTK_EXTENDED_REGEX_OPERATORS.intersection(word)
+    }
+    return "".join(sorted(found))
+
+
+def _written_words(args: Sequence[str]) -> list[str]:
+    """The caller's command as words, whether it arrived as text or as argv."""
+    if len(args) == 1:
+        return shlex.split(args[0])
+    return list(args)
+
+
+def _requests_extended_regex(word: str) -> bool:
+    if word in RTK_EXTENDED_REGEX_FLAGS:
+        return True
+    return word.startswith("-") and not word.startswith("--") and "E" in word
 
 
 def _launch_failure_class(exc: OSError) -> str:

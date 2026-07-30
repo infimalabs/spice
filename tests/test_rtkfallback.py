@@ -411,3 +411,72 @@ def _isolate_agent_run(
 def _record_child(calls: list[list[str]], command: list[str]) -> _RecordedProcess:
     calls.append(command)
     return _RecordedProcess()
+
+
+ALTERNATION_SUBJECT_LINES = ("alpha", "beta")
+ALTERNATION_PATTERN = "alpha|beta"
+
+
+@pytest.mark.parametrize(
+    ("shape", "written_args", "rewrite_template"),
+    [
+        # RTK reproduces the pattern as separate words here, so the search that
+        # would run looks for one alternative in a file named for the other.
+        (
+            "explicit-file-list",
+            ["rg", ALTERNATION_PATTERN, "{subject}"],
+            "rtk grep alpha |beta {subject}",
+        ),
+        # RTK keeps the quoting here and still substitutes a basic-dialect
+        # search, so the alternation degrades to a literal instead of splitting.
+        (
+            "shell-text",
+            ["zsh", "-c", f"rg '{ALTERNATION_PATTERN}' {{subject}}"],
+            "rtk grep '" + ALTERNATION_PATTERN + "' {subject}",
+        ),
+    ],
+)
+def test_alternation_search_runs_natively_when_a_rewrite_narrows_the_dialect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    written_args: list[str],
+    rewrite_template: str,
+) -> None:
+    """An extended alternation reaches a search that reads it as one."""
+    del shape
+    subject = tmp_path / "subject.txt"
+    subject.write_text("\n".join(ALTERNATION_SUBJECT_LINES) + "\n")
+    executable = "configured-rtk"
+    _configure_rtk(tmp_path, executable)
+    wrap._rtk_warned_keys.clear()
+    command = [part.format(subject=subject) for part in written_args]
+    rewritten = rewrite_template.format(subject=subject)
+    child_calls: list[list[str]] = []
+
+    def run_rtk(_command: list[str], **_kwargs: object) -> object:
+        return subprocess.CompletedProcess([], 3, stdout=rewritten + "\n", stderr="")
+
+    _isolate_agent_run(monkeypatch, run_rtk)
+    stderr = io.StringIO()
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        command,
+        popen_factory=lambda argv, **_kwargs: _record_child(child_calls, argv),
+        stderr=stderr,
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "subject_lines": tuple(subject.read_text().split()),
+        "child_calls": child_calls,
+        "warning": stderr.getvalue(),
+    } == {
+        "exit_code": 0,
+        "subject_lines": ALTERNATION_SUBJECT_LINES,
+        "child_calls": [command],
+        "warning": (
+            "spice agent run: RTK rewrite degraded to native "
+            f"executable={executable!r} failure=regex-dialect-narrowed\n"
+        ),
+    }
