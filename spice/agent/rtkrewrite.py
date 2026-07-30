@@ -27,15 +27,16 @@ RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
 RTK_REWRITE_SUCCESS_EXIT_CODES = frozenset((0, RTK_REWRITE_MATCH_EXIT_CODE))
 RTK_DIAGNOSTIC_EXECUTABLE_CHARS = 160
 
-# The search written by the caller reads its pattern as an extended regular
-# expression; the search RTK substitutes reads a basic one unless it is told
-# otherwise. These characters are operators in the first dialect and literals in
-# the second, so a substitution that carries one across without requesting the
-# extended dialect answers a different question than the one that was asked --
-# and answers it as "no matches" rather than as an error.
+# A search reads its pattern as an extended regular expression when its name says
+# so or when a flag asks for it, and as a basic one otherwise; the same rule
+# decides the dialect on both sides of a rewrite. These characters are operators
+# in the extended dialect and literals in the basic one, so a substitution that
+# carries one from an extended search into a basic one answers a different
+# question than the one that was asked -- and answers it as "no matches" rather
+# than as an error.
 RTK_EXTENDED_REGEX_OPERATORS = frozenset("|+?(){}")
-RTK_EXTENDED_REGEX_COMMANDS = frozenset(("rg",))
-RTK_BASIC_REGEX_COMMANDS = frozenset(("grep", "egrep", "fgrep"))
+RTK_EXTENDED_REGEX_COMMANDS = frozenset(("rg", "egrep"))
+RTK_BASIC_REGEX_COMMANDS = frozenset(("grep", "fgrep"))
 RTK_EXTENDED_REGEX_FLAGS = frozenset(("-E", "--extended-regexp"))
 RTK_DIALECT_FAILURE_CLASS = "regex-dialect-narrowed"
 
@@ -198,11 +199,11 @@ def _narrowed_regex_operators(args: Sequence[str], rewritten: str) -> str:
         substituted = shlex.split(rewritten)
     except ValueError:
         return ""
-    if RTK_EXTENDED_REGEX_COMMANDS.isdisjoint(written):
+    if not _reads_extended_regex(written):
         return ""
     if RTK_BASIC_REGEX_COMMANDS.isdisjoint(substituted):
         return ""
-    if any(_requests_extended_regex(word) for word in substituted):
+    if _reads_extended_regex(substituted):
         return ""
     # Every operator the caller wrote is read differently by the substituted
     # search, whether the rewrite reproduced the pattern intact or split it into
@@ -222,6 +223,13 @@ def _written_words(args: Sequence[str]) -> list[str]:
     if len(args) == 1:
         return shlex.split(args[0])
     return list(args)
+
+
+def _reads_extended_regex(words: Sequence[str]) -> bool:
+    """Whether a search reads its pattern as an extended regular expression."""
+    if not RTK_EXTENDED_REGEX_COMMANDS.isdisjoint(words):
+        return True
+    return any(_requests_extended_regex(word) for word in words)
 
 
 def _requests_extended_regex(word: str) -> bool:
