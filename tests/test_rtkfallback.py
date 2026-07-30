@@ -528,6 +528,20 @@ def test_spaced_argument_keeps_the_rewrite_when_the_word_survives_whole(
             ["zsh", "-c", f"rg '{ALTERNATION_PATTERN}' {{subject}}"],
             "rtk grep '" + ALTERNATION_PATTERN + "' {subject}",
         ),
+        # egrep reads the extended dialect by name, so a caller who writes it is
+        # narrowed by the same substitution that narrows a caller who writes rg.
+        (
+            "written-egrep",
+            ["egrep", ALTERNATION_PATTERN, "{subject}"],
+            "rtk grep '" + ALTERNATION_PATTERN + "' {subject}",
+        ),
+        # grep asks for the extended dialect by flag, and the flag does not
+        # survive the substitution.
+        (
+            "written-grep-extended-flag",
+            ["grep", "-E", ALTERNATION_PATTERN, "{subject}"],
+            "rtk grep '" + ALTERNATION_PATTERN + "' {subject}",
+        ),
     ],
 )
 def test_alternation_search_runs_natively_when_a_rewrite_narrows_the_dialect(
@@ -573,4 +587,39 @@ def test_alternation_search_runs_natively_when_a_rewrite_narrows_the_dialect(
             "spice agent run: RTK rewrite degraded to native "
             f"executable={executable!r} failure=regex-dialect-narrowed\n"
         ),
+    }
+
+
+def test_egrep_substitution_keeps_a_rewrite_of_an_extended_search(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A substituted egrep reads the alternation the caller wrote."""
+    subject = tmp_path / "subject.txt"
+    _configure_rtk(tmp_path, "configured-rtk")
+    wrap._rtk_warned_keys.clear()
+    command = ["rg", ALTERNATION_PATTERN, str(subject)]
+    rewritten = f"egrep '{ALTERNATION_PATTERN}' {subject}"
+    child_calls: list[list[str]] = []
+
+    def run_rtk(_command: list[str], **_kwargs: object) -> object:
+        return subprocess.CompletedProcess([], 3, stdout=rewritten + "\n", stderr="")
+
+    _isolate_agent_run(monkeypatch, run_rtk)
+    stderr = io.StringIO()
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        command,
+        popen_factory=lambda argv, **_kwargs: _record_child(child_calls, argv),
+        stderr=stderr,
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "child_calls": child_calls,
+        "warning": stderr.getvalue(),
+    } == {
+        "exit_code": 0,
+        "child_calls": [["egrep", ALTERNATION_PATTERN, str(subject)]],
+        "warning": "",
     }
