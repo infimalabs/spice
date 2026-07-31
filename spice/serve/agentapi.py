@@ -26,12 +26,18 @@ from spice.agent.lifecycle import (
     launch_refusal,
     preflight_automatic_agent_launch,
 )
+from spice.agent.launchhistory import (
+    clear_refusal_parked,
+    lapsed_refusal_parked_keys,
+    record_refusal_parked,
+)
 from spice.config.trust import RepositoryConfigApprovalRequiredError
 from spice.mail.inbox import (
     deadletter_inbox_item,
     inbox_item_key,
     inbox_request_priority,
     pending_operator_inbox_items,
+    requeue_deadlettered_inbox_item,
 )
 from spice.process.git import git_read
 from spice.serve.attachments import inbox_attachment_payloads
@@ -256,7 +262,11 @@ def ensure_agent_for_pending_inbox(
     agent up (or its renewed successor, under `force_new`). Production calls are
     owned and target-serialized by ``LifecycleDecisionAuthority``; this low-level
     function deliberately owns no second coordination policy.
+
+    Steering parked by an earlier refusal is restored first, because a lapsed
+    hold leaves the inbox empty for a reason that has stopped being true.
     """
+    requeue_lapsed_refusal_parking(target)
     operator_items = pending_operator_inbox_items(target.repo_root)
     pending_count = len(operator_items)
     if pending_count <= 0:
@@ -502,8 +512,16 @@ def deadletter_refused_ensure_payload(
     """Park every pending operator item once automatic restarts are refused.
 
     The pending items are the wake condition: any left behind re-trigger the
-    ensure on the next status pass, which is exactly the reinvocation storm
-    the refusal exists to stop.
+    ensure on the next status pass, which is exactly the reinvocation storm the
+    refusal exists to stop. Parking them is therefore right while the hold is
+    armed and wrong the moment it lapses, so the keys are recorded and
+    ``requeue_lapsed_refusal_parking`` restores them when it does.
+
+    Directed operator asks are parked alongside broadcasts, and the distinction
+    is deliberately not drawn: a receiving lane has no observable that separates
+    them -- fanout is a sender-side act and leaves no mark on the delivered item
+    -- and once every parked key comes back on lapse, being selective would only
+    decide which asks arrive late, not which arrive at all.
     """
     parked = [
         key
@@ -511,12 +529,39 @@ def deadletter_refused_ensure_payload(
         if (key := deadletter_inbox_item(target.repo_root, inbox_item_key(item.name)))
     ]
     if parked:
+        record_refusal_parked(target.repo_root, parked)
         payload["deadletteredInboxKeys"] = parked
         payload["deadletteredInboxKey"] = parked[0]
         payload["deadletterRequeueCommand"] = (
             f"spice agent requeue-deadletter {parked[0]}"
         )
     return payload
+
+
+def requeue_lapsed_refusal_parking(target: WorktreeTarget) -> list[str]:
+    """Return operator steering to the inbox once its refusal hold lapses.
+
+    Deadlettering is terminal, and the hold that justified it is not: it expires
+    on its own after RAPID_DEATH_REFUSAL_WINDOW_SECONDS with nothing arranged to
+    undo the parking. Until this ran, the only exit was an operator typing
+    ``spice agent requeue-deadletter`` per key -- which requires knowing the lane
+    was refused at all, so a parked ask reads exactly like a delivered one on
+    every surface an operator has.
+
+    Keys that no longer sit in the deadletter directory are dropped rather than
+    retried; someone requeued them by hand, and a record that never clears would
+    outlive the item it names.
+    """
+    keys = lapsed_refusal_parked_keys(target.repo_root)
+    if not keys:
+        return []
+    restored = [
+        key
+        for key in keys
+        if requeue_deadlettered_inbox_item(target.repo_root, key) is not None
+    ]
+    clear_refusal_parked(target.repo_root)
+    return restored
 
 
 def deadletter_failed_agent_ensure_payload(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -33,6 +34,7 @@ from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
 LAUNCH_OUTCOMES_LIMIT = 32
+REFUSAL_PARKED_FILE = "refusal-parked.json"
 # A supervised launch that fails this young never did real work; healthy
 # sessions run for minutes, the 2026-07-17 spend-limit storm's launches died
 # in 0.75-3s. Kept well above that storm and well under a real session, because
@@ -119,6 +121,54 @@ def launch_refusal(
     if reset_epoch:
         refusal["reset_epoch"] = reset_epoch
     return refusal
+
+
+def refusal_parked_path(repo_root: Path) -> Path:
+    return agent_worktree_state_dir(repo_root) / REFUSAL_PARKED_FILE
+
+
+def read_refusal_parked(repo_root: Path) -> list[str]:
+    try:
+        loaded = json.loads(refusal_parked_path(repo_root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, SpiceError):
+        return []
+    if not isinstance(loaded, list):
+        return []
+    return [entry for entry in loaded if isinstance(entry, str) and entry]
+
+
+def record_refusal_parked(repo_root: Path, keys: Iterable[str]) -> None:
+    """Remember which inbox keys a live refusal parked, so a lapse can undo it.
+
+    Deadlettering is terminal on its own. This record is the only thing that
+    tells steering parked by a refusal -- which the hold will release on its own
+    schedule -- from steering parked by a failure nothing is going to retry.
+    """
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return
+    merged = list(dict.fromkeys([*read_refusal_parked(repo_root), *wanted]))
+    atomic_write_json(refusal_parked_path(repo_root), merged)
+
+
+def clear_refusal_parked(repo_root: Path) -> None:
+    with contextlib.suppress(OSError):
+        refusal_parked_path(repo_root).unlink()
+
+
+def lapsed_refusal_parked_keys(
+    repo_root: Path, *, now: float | None = None
+) -> list[str]:
+    """Inbox keys a refusal parked, once its hold has lapsed.
+
+    Empty while the refusal still holds, and that is what bounds redelivery: a
+    lane that keeps dying young re-arms the hold and parks again, so a restore
+    can run at most once per RAPID_DEATH_REFUSAL_WINDOW_SECONDS rather than on
+    every status pass. The storm the parking exists to stop stays stopped.
+    """
+    if launch_refusal(repo_root, now=now) is not None:
+        return []
+    return read_refusal_parked(repo_root)
 
 
 def _died_young(outcome: dict[str, Any]) -> bool:
