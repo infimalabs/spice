@@ -22,6 +22,10 @@ SLOW_CLEANUP_TEST_TIMEOUT_SECONDS = 5.0
 # is the compaction phase alone, so these outcomes cannot pass by scheduling
 # luck the way a merely-short window could.
 EXPIRED_GRACE_SECONDS = 0.0
+# Half the rapid-death threshold: short enough that lifetime alone would still
+# condemn these runs, so any clean verdict has to come from what else they recorded.
+SHORT_RUN_LIFETIME_SECONDS = lifecycle.RAPID_DEATH_LIFETIME_SECONDS / 2
+SHORT_RUN_TOOL_CALLS = 9
 
 
 @pytest.fixture(autouse=True)
@@ -340,6 +344,91 @@ def test_silent_supervised_agent_stalls_recovers_and_arms_restart_refusal(
     assert (
         refusal["consecutive_rapid_deaths"] == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
     )
+
+
+def _record_launch_run(
+    root, *, exit_code: int = 0, failure_kind: str = "", tool_calls: int = 0
+) -> None:
+    """Record one launch that ended well under the rapid-death threshold."""
+    lifecycle.record_launch_outcome(
+        root,
+        {
+            "lifetime_seconds": SHORT_RUN_LIFETIME_SECONDS,
+            "exit_code": exit_code,
+            "failure_kind": failure_kind,
+            "tool_calls": tool_calls,
+            "ended_at": lifecycle.utc_now(),
+        },
+    )
+
+
+def _storm(root, **outcome) -> None:
+    """Record a full refusal threshold worth of identical launches."""
+    for _ in range(lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD):
+        _record_launch_run(root, **outcome)
+
+
+def _armed(refusal) -> bool:
+    """Whether a refusal verdict names a full threshold run of deaths."""
+    return (
+        isinstance(refusal, dict)
+        and refusal["consecutive_rapid_deaths"]
+        == lifecycle.RAPID_DEATH_REFUSAL_THRESHOLD
+    )
+
+
+def test_productive_short_runs_never_arm_the_rapid_death_refusal(tmp_path):
+    """An empty board exits fast having worked; that is finishing, not dying.
+
+    Lane j drained its board in roughly 48s per launch, exiting 0 every time,
+    and three of those armed the refusal — which then deadlettered the very
+    steering that would have given it work. These runs are recorded at half
+    the threshold, so lifetime alone would still condemn them.
+    """
+    _storm(tmp_path, exit_code=0, tool_calls=SHORT_RUN_TOOL_CALLS)
+    assert lifecycle.launch_refusal(tmp_path) is None
+
+
+def test_spend_limit_storm_still_arms_the_refusal_despite_exiting_zero(tmp_path):
+    """The 2026-07-17 storm exited 0 in 0.751s; a clean exit cannot excuse it."""
+    _storm(tmp_path, exit_code=0, tool_calls=0)
+    assert _armed(lifecycle.launch_refusal(tmp_path))
+
+
+def test_crashing_short_runs_still_arm_the_refusal(tmp_path):
+    """Work recorded before a nonzero exit is still a death."""
+    _storm(tmp_path, exit_code=1, tool_calls=SHORT_RUN_TOOL_CALLS)
+    assert _armed(lifecycle.launch_refusal(tmp_path))
+
+
+def test_classified_failure_arms_the_refusal_even_when_it_exits_zero(tmp_path):
+    """A driver reporting a failure kind is a death whatever else it recorded."""
+    _storm(
+        tmp_path,
+        exit_code=0,
+        failure_kind="out-of-credits",
+        tool_calls=SHORT_RUN_TOOL_CALLS,
+    )
+    assert _armed(lifecycle.launch_refusal(tmp_path))
+
+
+def test_refusal_reads_recorded_activity_rather_than_lifetime_or_exit_code(tmp_path):
+    """Same lifetime, same exit code, opposite verdicts.
+
+    Only recorded activity differs between these two lanes, so neither the
+    lifetime nor the exit code can be what decided them. This is the pair that
+    a guard keying on either one alone cannot tell apart.
+    """
+    worked, idle = tmp_path / "worked", tmp_path / "idle"
+    for root, calls in ((worked, SHORT_RUN_TOOL_CALLS), (idle, 0)):
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+        _storm(root, exit_code=0, tool_calls=calls)
+    worked_verdict = lifecycle.launch_refusal(worked)
+    idle_verdict = lifecycle.launch_refusal(idle)
+    assert worked_verdict != idle_verdict
+    assert worked_verdict is None
+    assert _armed(idle_verdict)
 
 
 def test_startup_stall_waits_for_slow_group_cleanup_and_terminal_state(
