@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 from pathlib import Path
 
-from spice.process.groups import run_streamed_process_group
+import pytest
+
+from spice.process.groups import process_id_is_running, run_streamed_process_group
 from spice.studies import suiteseam
 from spice.studies.suiteseam import SuiteSeamPlan
 
@@ -122,3 +125,32 @@ def test_the_streamed_runner_cleans_up_its_sink(tmp_path, monkeypatch):
     )
 
     assert sorted(path.name for path in Path(tmp_path).iterdir()) == []
+
+
+def test_a_progress_failure_reaps_the_streamed_child(tmp_path):
+    seen: list[str] = []
+
+    def reject_progress(chunk: str, _elapsed: float) -> None:
+        seen.append(chunk)
+        if chunk:
+            raise RuntimeError("progress sink closed")
+
+    with pytest.raises(RuntimeError, match="progress sink closed"):
+        run_streamed_process_group(
+            [
+                sys.executable,
+                "-c",
+                "import os,time; print(os.getpid(), flush=True); time.sleep(30)",
+            ],
+            timeout_seconds=STREAM_DEADLINE_SECONDS,
+            phase="tool.suite",
+            input_label="prove callback failures reap the child",
+            on_progress=reject_progress,
+            cwd=tmp_path,
+        )
+
+    child_pid = int("".join(seen).strip())
+    reaping_deadline = time.monotonic() + 2
+    while process_id_is_running(child_pid) and time.monotonic() < reaping_deadline:
+        time.sleep(0.02)
+    assert not process_id_is_running(child_pid)
