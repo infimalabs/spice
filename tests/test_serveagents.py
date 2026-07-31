@@ -352,6 +352,14 @@ def _age_recorded_deaths(repo, seconds: float) -> None:
 
 
 def _storm_launcher(monkeypatch, counter: list[int]):
+    """Every launch reproduces one 2026-07-17 storm death: 0.751s, exit 0, idle.
+
+    The activity counts are written out rather than left absent on purpose. A
+    record missing them is treated as a death too, but by the guard's fallback
+    for partial records -- so omitting them would pin that fallback instead of
+    the storm, and keep passing if the storm's own shape stopped counting.
+    """
+
     def fake_start_agent(repo_root, **_kwargs):
         counter[0] += 1
         lifecycle.record_launch_outcome(
@@ -359,6 +367,8 @@ def _storm_launcher(monkeypatch, counter: list[int]):
             {
                 "lifetime_seconds": 0.751,
                 "exit_code": 0,
+                "assistant_messages": 0,
+                "tool_calls": 0,
                 "ended_at": lifecycle.utc_now(),
             },
         )
