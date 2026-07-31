@@ -76,11 +76,7 @@ class RtkHealth:
         )
 
 
-def agent_rtk_health(
-    repo_root: Path | None,
-    *,
-    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
-) -> RtkHealth:
+def agent_rtk_health(repo_root: Path | None) -> RtkHealth:
     """The one verdict both the advertised mode and the shell's behavior read.
 
     Activation prints a mode and the shell stage decides whether to rewrite. Two
@@ -94,11 +90,16 @@ def agent_rtk_health(
     subprocesses and the shell stage sits in front of every command the agent
     issues. One process is one command, so the executable cannot change
     underneath a decision already made.
+
+    Settling it once is also why there is no runner to pass in here: a second
+    caller naming a different one would be answered from the memo the first
+    caller filled, and its runner would go unused without saying so. A caller
+    that needs to decide the verdict itself probes directly.
     """
     key = "" if repo_root is None else str(repo_root)
     health = AGENT_RTK_HEALTH.get(key)
     if health is None:
-        health = probe_rtk_health(repo_root, run=run)
+        health = probe_rtk_health(repo_root)
         AGENT_RTK_HEALTH[key] = health
     return health
 
