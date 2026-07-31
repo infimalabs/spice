@@ -60,6 +60,10 @@ from spice.agent.sidechannelnotify import (
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir, agent_thread_state_dir
+from spice.agent.rtkhealth import (
+    RTK_NOT_PERMITTED_FAILURE_CLASS,
+    agent_rtk_health,
+)
 from spice.agent.rtkrewrite import (
     RTK_CANONICAL_EXECUTABLE as RTK_CANONICAL_EXECUTABLE,
     RTK_REWRITE_MATCH_EXIT_CODE as RTK_REWRITE_MATCH_EXIT_CODE,
@@ -152,7 +156,7 @@ def run_agent_command(
     command = build_agent_run_command(
         raw_args,
         repo_root=repo_root,
-        rewrite_rtk=True,
+        rewrite_rtk=_rtk_rewrite_permitted(repo_root, stderr=stderr),
         rtk_environment=environment,
         rtk_stderr=stderr,
     )
@@ -181,6 +185,29 @@ def run_agent_command(
         return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
     finally:
         join_agent_side_channel_watch(watch_thread)
+
+
+def _rtk_rewrite_permitted(repo_root: Path | None, *, stderr: TextIO) -> bool:
+    """Whether this shell may rewrite, announcing itself once when it may not.
+
+    An executable that failed a probe used to keep rewriting and only stop being
+    advertised, so the agent read `mode=native` in one place and a substituted
+    command's answer in another. Refusing here is what makes the advertisement
+    true. The refusal is spoken rather than assumed: a rewrite that stops
+    silently is indistinguishable from one that never had anything to say, and
+    the whole failure being fixed is a wrong answer that looked like a real one.
+    """
+    health = agent_rtk_health(repo_root)
+    if health.active:
+        return True
+    _emit_rtk_rewrite_diagnostic(
+        repo_root,
+        stderr,
+        executable=health.executable,
+        failure_class=RTK_NOT_PERMITTED_FAILURE_CLASS,
+        failure_signature=f"state={health.state}",
+    )
+    return False
 
 
 def bind_ambient_thread_for_shell_stage(

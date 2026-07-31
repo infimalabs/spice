@@ -22,6 +22,7 @@ from spice.config.layers import (
     enabled_registry_entries,
     load_config,
 )
+from spice.agent.rtkhealth import agent_rtk_health
 from spice.config.trust import require_repository_config_approval
 from spice.config.trust import RepositoryConfigApprovalRequiredError
 from spice.errors import SpiceError
@@ -294,17 +295,50 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
         ("rtk", "executable"),
         command=shlex.join((rtk_executable,)),
     )
+    rewriting = agent_rtk_health(repo_root).active
     lines: list[str] = []
     for selected in _selected_agent_wrapper_groups(repo_root):
+        group = selected.group
+        if not rewriting:
+            group = _without_rtk_routes(selected.name, group, rtk_executable)
         lines.extend(
             render_agent_wrapper_group_lines(
                 group_name=selected.name,
-                group=selected.group,
+                group=group,
                 driver_name=driver_name,
                 rtk_executable=rtk_executable,
             )
         )
     return lines
+
+
+def _without_rtk_routes(
+    group_name: str, group: Mapping[str, object], rtk_executable: str
+) -> dict[str, object]:
+    """The group's wrappers minus every one that routes its word through RTK.
+
+    A shell that reports `mode=native` while a wrapper still expands a word into
+    an RTK invocation is reporting one thing and doing another, and the word it
+    expands is a search whose answer changes with the substitution. The mode is
+    decided from the same probe that decides this, so what activation says about
+    the shell is a statement about the wrappers the shell actually carries.
+
+    Only the RTK-headed wrappers go. The rest of a group routes to the command
+    the agent typed and is unaffected by whether RTK may rewrite.
+    """
+    rtk_words = {RTK_CANONICAL_EXECUTABLE, rtk_executable}
+    kept: dict[str, object] = {}
+    for raw_wrapper, raw_entry in group.items():
+        wrapper = str(raw_wrapper).strip()
+        if wrapper != SCOPES_KEY and isinstance(raw_entry, Mapping):
+            command_words = command_words_from_config(
+                raw_entry.get("argv"),
+                label=f"wrappers.{group_name}.{wrapper}.argv",
+            )
+            if command_words[0] in rtk_words:
+                continue
+        kept[str(raw_wrapper)] = raw_entry
+    return kept
 
 
 def rtk_rewrite_yield_selectors(repo_root: Path) -> frozenset[str]:
