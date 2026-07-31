@@ -15,11 +15,14 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from spice.agent import cli as agent_cli
 from spice.agent import rtkhealth, shellhook, wrap
 from spice.config import values
+from spice.tasks import claimstate
 
 ALTERNATION_PATTERN = "alpha|beta"
 SUBJECT_LINES = "alpha\nbeta\ngamma\n"
@@ -48,19 +51,26 @@ class _ExecutedProcess:
         return self.returncode
 
 
-def _declare_health(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
-    """State the verdict this shell was activated under."""
+def _declare_health(monkeypatch: pytest.MonkeyPatch, state: str) -> list[str]:
+    """State the verdict this shell was activated under, recording each probe.
+
+    The returned list is what a caller counts to tell one verdict serving every
+    reading apart from two readings that happened to agree.
+    """
+    probes: list[str] = []
     rtkhealth.AGENT_RTK_HEALTH.clear()
-    monkeypatch.setattr(
-        rtkhealth,
-        "probe_rtk_health",
-        lambda repo_root, **_kwargs: rtkhealth.RtkHealth(
+
+    def probe(repo_root: Path, **_kwargs: object) -> rtkhealth.RtkHealth:
+        probes.append(str(repo_root))
+        return rtkhealth.RtkHealth(
             values.configured_rtk_executable(repo_root),
             state,
             UNFAITHFUL_DETAIL,
             rtkhealth.RTK_MINIMUM_VERSION_TEXT,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(rtkhealth, "probe_rtk_health", probe)
+    return probes
 
 
 def _isolate_shell_stage(monkeypatch: pytest.MonkeyPatch, rewrites: list[list[str]]):
@@ -80,6 +90,33 @@ def _isolate_shell_stage(monkeypatch: pytest.MonkeyPatch, rewrites: list[list[st
     )
     monkeypatch.setattr(wrap, "emit_initial_side_channel_payload", lambda *_a, **_k: ())
     monkeypatch.setattr(wrap, "start_agent_side_channel_watch", lambda *_a, **_k: None)
+
+
+def _isolate_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every activation step except the one that decides the RTK verdict.
+
+    The packet is rendered rather than assembled by hand because the row under
+    test is the row an agent actually reads, and reaching it means letting the
+    real renderer choose which health reading to print.
+    """
+    monkeypatch.setattr(
+        agent_cli,
+        "_bind_activation_thread",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
+    monkeypatch.setattr(
+        agent_cli,
+        "_refresh_activation_baseline",
+        lambda _repo: SimpleNamespace(notes=[]),
+    )
+    monkeypatch.setattr(
+        agent_cli,
+        "_renew_activation_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
 
 def _alternation_subject(tmp_path: Path) -> Path:
@@ -186,6 +223,29 @@ def test_a_healthy_shell_still_asks_rtk_to_rewrite(
     ]
 
 
+def test_one_worktree_spelled_two_ways_settles_a_single_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A launch renders the shell twice, and both renders get the same verdict.
+
+    The two renders of a launch are handed the worktree by different callers,
+    so a memo keyed on the spelling rather than the worktree would probe once
+    for each and let the environment the agent receives be built from a verdict
+    the approval boundary never saw.
+    """
+    nested = tmp_path / "sub"
+    nested.mkdir()
+    probes = _declare_health(monkeypatch, "rewrite-unfaithful")
+
+    approval = rtkhealth.agent_rtk_health(tmp_path)
+    handover = rtkhealth.agent_rtk_health(nested / "..")
+
+    assert {"verdict": approval, "probes": probes} == {
+        "verdict": handover,
+        "probes": [str(tmp_path)],
+    }
+
+
 @pytest.mark.parametrize(
     ("state", "expected_mode", "expected_wrappers"),
     [
@@ -210,16 +270,32 @@ def test_advertised_mode_matches_the_wrappers_the_shell_carries(
 
     A wrapper that expands a word into an RTK invocation is a rewrite the shell
     performs itself, so a shell reporting `native` while carrying one reports a
-    mode it does not have. Both readings come from one verdict here, which is
-    what makes the report checkable rather than merely printed.
+    mode it does not have. The mode is read off the rendered activation packet
+    rather than off a health object this test built, because a packet that
+    decided the question a second time could print an answer no wrapper was
+    ever built from, and asking the health object directly would never notice.
+
+    The recorded probes are what distinguishes one verdict serving both
+    readings from two readings that merely agreed: a second probe means the
+    packet and the wrappers are each free to describe a different shell.
     """
-    _declare_health(monkeypatch, state)
-    health = rtkhealth.agent_rtk_health(tmp_path)
+    probes = _declare_health(monkeypatch, state)
+    _isolate_activation(monkeypatch)
+
+    packet = agent_cli.render_activation_packet(tmp_path)
+    status_line = next(
+        line for line in packet.splitlines() if line.startswith("rtk_status=")
+    )
+    advertised = json.loads(status_line.removeprefix("rtk_status="))
     rendered = shellhook.render_agent_wrapper_lines(tmp_path)
     installed = [line[: -len("() {")] for line in rendered if line.endswith("() {")]
-    advertised = json.loads(health.activation_status_line().split("=", 1)[1])
 
-    assert {"mode": advertised["mode"], "wrappers": installed} == {
+    assert {
+        "mode": advertised["mode"],
+        "wrappers": installed,
+        "probes": probes,
+    } == {
         "mode": expected_mode,
         "wrappers": expected_wrappers,
+        "probes": [str(tmp_path)],
     }
