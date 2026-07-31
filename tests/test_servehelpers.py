@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from io import BytesIO
@@ -104,6 +105,26 @@ def _repo(tmp_path: Path) -> Path:
 
 def _target(repo: Path) -> WorktreeTarget:
     return WorktreeTarget(id="target-1", repo_root=repo, name=repo.name, branch="main")
+
+
+def _retry_gate():
+    """A per-target launch-attempt gate backed by this call's own clock.
+
+    Shared because both ensure paths take one: the inbox path and the
+    available-work path each ask it before spending a launch, and a gate held
+    per test keeps one test's attempts from rate-limiting the next.
+    """
+    attempts: dict[str, float] = {}
+
+    def due(target_id: str, retry_seconds: float) -> bool:
+        now = time.monotonic()
+        last_attempt = attempts.get(target_id)
+        if last_attempt is not None and now - last_attempt < retry_seconds:
+            return False
+        attempts[target_id] = now
+        return True
+
+    return due
 
 
 def _transcript_resolution(thread_id: str, path: Path) -> TranscriptResolution:
