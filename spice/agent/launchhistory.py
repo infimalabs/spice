@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
-from spice.agent.driver import driver_for
+from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecyclebinding import utc_now
 from spice.agent.paths import agent_worktree_state_dir
@@ -222,16 +222,29 @@ def supervised_launch_outcome(
 def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
     """Activity counts and structural failure fields from one launch log.
 
-    The bounded typed read includes a terminal unterminated record from a
-    process that exited mid-flush. Marker-format stdout decodes only to unknown
-    facts and contributes nothing, leaving text-pattern fallback to the caller.
+    A launch log is the supervised process's captured stdout, and
+    ``stdout_format`` is where each driver names which dialect that is. That
+    declaration picks the reader outright: there is no sniffing and no fallback
+    between the two, so a log that does not hold what its driver promised
+    reports no activity rather than being retried as the other dialect.
     """
     driver = driver_for(repo_root)
-    end_offset = transcript_size(log_path)
+    if driver.stdout_format == "json":
+        return scan_transcript_activity(driver, log_path)
+    return _marker_launch_projection(driver, log_path)
+
+
+def scan_transcript_activity(driver: AgentDriver, path: Path) -> dict[str, Any]:
+    """Activity counts and structural failure fields from one JSON transcript.
+
+    The bounded typed read includes a terminal unterminated record from a
+    process that exited mid-flush.
+    """
+    end_offset = transcript_size(path)
     if end_offset is None:
         return {"assistant_messages": 0, "tool_calls": 0}
     events = (
-        TranscriptEventReader(log_path, driver)
+        TranscriptEventReader(path, driver)
         .read(
             "bounded",
             start_offset=0,
@@ -240,6 +253,36 @@ def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
         .events
     )
     return _launch_log_projection(events)
+
+
+def _marker_launch_projection(driver: AgentDriver, log_path: Path) -> dict[str, Any]:
+    """Activity counts read from a marker-format launch log's own section lines.
+
+    A driver whose ``exec`` stdout is human-readable prints section markers
+    rather than JSON records, so the typed reader finds nothing to decode and
+    every such launch would otherwise be recorded as having done no work at
+    all -- a 2850s Codex session and a crash-on-boot look identical. The
+    markers the driver already declares carry that fact: its assistant marker
+    opens a message block and its activity markers open tool work.
+
+    Counting the log itself keeps the answer scoped to this one launch. The
+    driver's full thread transcript would also decode, but it spans every
+    launch on that thread, so a fresh start could inherit an earlier session's
+    work and pass a guard it never earned.
+    """
+    assistant_messages = 0
+    tool_calls = 0
+    try:
+        with log_path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                marker = line.rstrip("\r\n")
+                if marker == driver.stdout_assistant_marker:
+                    assistant_messages += 1
+                elif marker in driver.stdout_activity_markers:
+                    tool_calls += 1
+    except OSError:
+        pass
+    return {"assistant_messages": assistant_messages, "tool_calls": tool_calls}
 
 
 def _launch_log_projection(events: Iterable[TranscriptEvent]) -> dict[str, Any]:
