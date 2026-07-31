@@ -29,6 +29,9 @@ RTK_PROTOCOL_PROBE = ("git", "status")
 RTK_FIDELITY_PROBE = ("rg", "--count", "al+pha", "-")
 RTK_FIDELITY_SUBJECT = "alpha\nbeta\n"
 SEARCH_NO_MATCH_EXIT_CODE = 1
+RTK_NOT_PERMITTED_FAILURE_CLASS = "rewrite-not-permitted"
+
+AGENT_RTK_HEALTH: dict[str, "RtkHealth"] = {}
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,33 @@ class RtkHealth:
             f"printf '{subject}' | {probe}; "
             f"printf '{subject}' | $({executable} rewrite -- {probe})"
         )
+
+
+def agent_rtk_health(
+    repo_root: Path | None,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> RtkHealth:
+    """The one verdict both the advertised mode and the shell's behavior read.
+
+    Activation prints a mode and the shell stage decides whether to rewrite. Two
+    readings of the same executable can disagree, and the disagreement is silent
+    in the direction that matters: a shell that reports ``native`` while still
+    substituting commands answers a different question than the one it was
+    asked, and reports the answer as a legitimate result. Both readings come
+    from here so there is only one verdict to disagree with.
+
+    The verdict is settled once per process because deciding it costs several
+    subprocesses and the shell stage sits in front of every command the agent
+    issues. One process is one command, so the executable cannot change
+    underneath a decision already made.
+    """
+    key = "" if repo_root is None else str(repo_root)
+    health = AGENT_RTK_HEALTH.get(key)
+    if health is None:
+        health = probe_rtk_health(repo_root, run=run)
+        AGENT_RTK_HEALTH[key] = health
+    return health
 
 
 def probe_rtk_health(

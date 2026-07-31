@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from spice.agent import rtkhealth
+from spice.config import values
 from spice.serve import launch
 from spice.serve.team.ids import thread_id_for_actor
 from spice.tasks import config as task_config
@@ -96,6 +98,34 @@ def _join_test_owned_available_work_watches(
             "AvailableWorkWatch teardown could not join: " + ", ".join(still_alive)
         )
     return [thread.name for _watch, thread in leaked]
+
+
+@pytest.fixture(autouse=True)
+def _declared_rtk_health(monkeypatch):
+    """Every test states the RTK verdict it runs under instead of inheriting one.
+
+    Whether a shell rewrites commands is now decided by probing the configured
+    executable, so a suite that let that probe reach the developer's machine
+    would describe a different shell on every machine -- and on a machine whose
+    RTK answers searches wrongly it would describe one that does not rewrite at
+    all. Healthy is the declared default because it is the arrangement the rest
+    of the suite is written about; a test concerned with a failed probe declares
+    that instead. The memo is cleared at both ends so a verdict cannot outlive
+    the test that declared it.
+    """
+    rtkhealth.AGENT_RTK_HEALTH.clear()
+    monkeypatch.setattr(
+        rtkhealth,
+        "probe_rtk_health",
+        lambda repo_root, **_kwargs: rtkhealth.RtkHealth(
+            values.configured_rtk_executable(repo_root),
+            "active",
+            "health declared by the test suite",
+            rtkhealth.RTK_MINIMUM_VERSION_TEXT,
+        ),
+    )
+    yield
+    rtkhealth.AGENT_RTK_HEALTH.clear()
 
 
 @pytest.fixture(autouse=True)
