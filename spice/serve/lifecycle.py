@@ -18,6 +18,7 @@ from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any, Callable, TypeAlias
 
+from spice.agent.launchhistory import refusal_parking_retry_seconds
 from spice.errors import SpiceError
 from spice.serve.payload.identity import (
     projected_team_actor_for_target,
@@ -117,6 +118,9 @@ class LifecycleDecision:
     predecessor_actor: str
     renewal_intent: bool
     agent_ensure: dict[str, Any] | None
+    # When no ensure ran but the lane still owes itself a later look. An ensure
+    # carries its own retry, so this is read only in its absence.
+    idle_retry_after_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +422,11 @@ class LifecycleDecisionAuthority:
             predecessor_actor=predecessor_actor,
             renewal_intent=renewal_intent,
             agent_ensure=agent_ensure,
+            idle_retry_after_seconds=(
+                refusal_parking_retry_seconds(target.repo_root)
+                if agent_ensure is None
+                else None
+            ),
         )
 
     def _converge_automatic_identity_locked(
@@ -656,7 +665,7 @@ def _decision_retry_after_seconds(
 ) -> float | None:
     agent_ensure = decision.agent_ensure
     if agent_ensure is None:
-        return None
+        return decision.idle_retry_after_seconds
     value = agent_ensure.get("retryAfterSeconds")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
