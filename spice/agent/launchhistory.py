@@ -33,10 +33,11 @@ from spice.transcript.timestamps import parse_timestamp
 
 LAUNCH_OUTCOMES_FILE = "launch-outcomes.json"
 LAUNCH_OUTCOMES_LIMIT = 32
-# A supervised launch that dies this young never did real work; healthy
+# A supervised launch that fails this young never did real work; healthy
 # sessions run for minutes, the 2026-07-17 spend-limit storm's launches died
-# in 0.75-3s.
-RAPID_DEATH_LIFETIME_SECONDS = 60.0
+# in 0.75-3s. Kept well above that storm and well under a real session, because
+# the window between the two is where clean short runs get miscounted.
+RAPID_DEATH_LIFETIME_SECONDS = 30.0
 RAPID_DEATH_REFUSAL_THRESHOLD = 3
 RAPID_DEATH_REFUSAL_WINDOW_SECONDS = 30 * 60
 STARTUP_SESSION_ID_TIMEOUT_SECONDS = 1.0
@@ -78,10 +79,11 @@ def launch_refusal(
 
     Message-agnostic by design: launch lifetime and the recorded rate-limit
     reset horizon are the ordinary signals, never failure prose. A trailing
-    outcome that died under RAPID_DEATH_LIFETIME_SECONDS counts as rapid; a
+    outcome that failed under RAPID_DEATH_LIFETIME_SECONDS counts as rapid; a
     supervised ``startup-stalled`` classification also counts because its
-    intentional readiness grace can exceed that threshold. Once the run reaches
-    RAPID_DEATH_REFUSAL_THRESHOLD, automatic ensures hold off until
+    intentional readiness grace can exceed that threshold. A run that recorded
+    real work never counts however short it was -- see ``_died_young``. Once the
+    run reaches RAPID_DEATH_REFUSAL_THRESHOLD, automatic ensures hold off until
     RAPID_DEATH_REFUSAL_WINDOW_SECONDS pass the newest death — or until the
     largest recorded reset epoch, when the account itself named the retry
     horizon.
@@ -89,11 +91,7 @@ def launch_refusal(
     clock = time.time() if now is None else now
     rapid: list[dict[str, Any]] = []
     for outcome in reversed(read_launch_outcomes(repo_root)):
-        lifetime = outcome.get("lifetime_seconds")
-        if not isinstance(lifetime, (int, float)):
-            break
-        startup_stalled = outcome.get("failure_kind") == "startup-stalled"
-        if float(lifetime) >= RAPID_DEATH_LIFETIME_SECONDS and not startup_stalled:
+        if not _died_young(outcome):
             break
         rapid.append(outcome)
     if len(rapid) < RAPID_DEATH_REFUSAL_THRESHOLD:
@@ -121,6 +119,44 @@ def launch_refusal(
     if reset_epoch:
         refusal["reset_epoch"] = reset_epoch
     return refusal
+
+
+def _died_young(outcome: dict[str, Any]) -> bool:
+    """Whether one recorded outcome is a rapid death rather than a short run.
+
+    Dying and finishing are different events that a lifetime alone cannot tell
+    apart. A lane whose board is empty boots, consumes its pending steering,
+    finds no work and exits 0 in well under the threshold; that is a completed
+    run, and counting it as a crash refuses the lane's own steering and keeps
+    the board empty.
+
+    Exit status cannot carry that distinction either: the 2026-07-17
+    spend-limit storm exited 0 in 0.751s, so a clean exit proves nothing on its
+    own. Recorded activity is what separates the two -- see ``_did_real_work``.
+    An outcome carrying no activity fields stays a death, keeping partial
+    records on the safe side of the guard.
+    """
+    lifetime = outcome.get("lifetime_seconds")
+    if not isinstance(lifetime, (int, float)):
+        return False
+    if outcome.get("failure_kind") == "startup-stalled":
+        return True
+    if float(lifetime) >= RAPID_DEATH_LIFETIME_SECONDS:
+        return False
+    return not _did_real_work(outcome)
+
+
+def _did_real_work(outcome: dict[str, Any]) -> bool:
+    """Whether a launch got far enough to count as a session rather than a start.
+
+    Requires a clean exit and recorded activity together. The storm supplies
+    the first without the second; a lane that drains an empty board supplies
+    both, having consumed its steering and answered before exiting.
+    """
+    if outcome.get("exit_code") != 0 or outcome.get("failure_kind"):
+        return False
+    counts = (outcome.get("assistant_messages"), outcome.get("tool_calls"))
+    return any(isinstance(count, int) and count > 0 for count in counts)
 
 
 def _epoch_seconds(stamp: Any) -> float:
