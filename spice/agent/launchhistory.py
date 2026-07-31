@@ -171,6 +171,28 @@ def lapsed_refusal_parked_keys(
     return read_refusal_parked(repo_root)
 
 
+def refusal_parking_retry_seconds(
+    repo_root: Path, *, now: float | None = None
+) -> float | None:
+    """When parked steering is next owed a look, or None when none is parked.
+
+    Parking is the lane's last inbox write. The wake it emits is spent while the
+    hold is still armed, on a pass that now finds nothing pending and therefore
+    drops the lane's serve timer; after it the inbox never moves again. So
+    nothing calls the restore however long the hold has been lapsed, unless
+    unrelated fleet traffic happens to wake the lane. The wait is what has to
+    become the schedule: a lane holding parked steering keeps a timer for the
+    remaining hold, and reaching zero is the wake that returns the steering.
+    """
+    if not read_refusal_parked(repo_root):
+        return None
+    refusal = launch_refusal(repo_root, now=now)
+    if refusal is None:
+        return 0.0
+    clock = time.time() if now is None else now
+    return max(float(refusal["hold_until_epoch"]) - clock, 0.0)
+
+
 def _died_young(outcome: dict[str, Any]) -> bool:
     """Whether one recorded outcome is a rapid death rather than a short run.
 
