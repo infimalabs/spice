@@ -362,13 +362,17 @@ def _stream_until_exit(
             env=env,
             **popen_new_process_group_kwargs(),
         )
-        output = _tail_process_output(
-            process,
-            tail,
-            on_progress,
-            started=started,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            output = _tail_process_output(
+                process,
+                tail,
+                on_progress,
+                started=started,
+                timeout_seconds=timeout_seconds,
+            )
+        except BaseException:
+            _reap_expired_process_group(process)
+            raise
         if output is None:
             _reap_expired_process_group(process)
             raise ProcessDeadlineExceeded(
