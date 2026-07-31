@@ -49,6 +49,10 @@ LAPSE_OVERSHOOT_SECONDS = 60.0
 STORM_LIFETIME_SECONDS = 0.751
 # Enough passes to show the bound holds across wakes, not just on the first one.
 REPEATED_WAKE_COUNT = 3
+# An arbitrary origin for the patched monotonic clock the watch schedules against.
+TIMER_CLOCK_ORIGIN = 100.0
+# Overshoot the retry floor so a lane that still wanted a timer would have one due.
+SETTLED_PASS_MULTIPLIER = 2
 
 
 class _Lane:
@@ -233,6 +237,38 @@ def test_a_lane_with_nothing_parked_schedules_nothing(monkeypatch, tmp_path):
     assert lane.watch.next_timer_timeout() is None
 
 
+def _timed_parked_lane(monkeypatch, tmp_path) -> tuple[_Lane, list[float]]:
+    """A parked lane whose watch reads a clock these cases can advance."""
+    now = [TIMER_CLOCK_ORIGIN]
+    monkeypatch.setattr(launch, "monotonic", lambda: now[0])
+    lane = _lane(monkeypatch, tmp_path)
+    _send_steering(lane)
+    _park_the_steering(lane)
+    return lane, now
+
+
+def _fire_the_scheduled_timer(
+    lane: _Lane, now: list[float]
+) -> tuple[AutomaticLifecycleWake, ...]:
+    """Let the hold lapse, reach the due time, and consume the lane's own timer.
+
+    Nothing is synthesized on the lane's behalf: the wake evaluated here is the
+    one its earlier reconcile scheduled, which is what joins the schedule to the
+    restore rather than leaving the two ends proven separately.
+    """
+    lane.reconcile()
+    scheduled = lane.watch.next_timer_timeout()
+    assert scheduled is not None, "parked lane kept no timer to fire"
+    _age_recorded_deaths(
+        lane.repo,
+        lifecycle.RAPID_DEATH_REFUSAL_WINDOW_SECONDS + LAPSE_OVERSHOOT_SECONDS,
+    )
+    now[0] += scheduled
+    timer_wakes = lane.watch.due_timer_wakes()
+    lane.watch.evaluate(timer_wakes)
+    return timer_wakes
+
+
 def test_lapsed_hold_returns_the_steering_on_the_wake_it_scheduled(
     monkeypatch, tmp_path
 ):
@@ -240,22 +276,38 @@ def test_lapsed_hold_returns_the_steering_on_the_wake_it_scheduled(
 
     Reaching zero is the whole point: the restore runs off the lapse rather than
     off traffic from another lane, and the operator's ask returns to the inbox
-    it was taken from.
+    it was taken from. Consuming the scheduled timer is what makes that the
+    claim -- a change that stopped routing timer wakes to a quiet lane would
+    strand the steering again, and would show up right here.
     """
-    lane = _lane(monkeypatch, tmp_path)
-    _send_steering(lane)
-    _park_the_steering(lane)
+    lane, now = _timed_parked_lane(monkeypatch, tmp_path)
     assert pending_inbox_count(lane.repo) == 0
 
-    _age_recorded_deaths(
-        lane.repo,
-        lifecycle.RAPID_DEATH_REFUSAL_WINDOW_SECONDS + LAPSE_OVERSHOOT_SECONDS,
-    )
-    assert refusal_parking_retry_seconds(lane.repo) == 0.0
-    lane.reconcile()
+    timer_wakes = _fire_the_scheduled_timer(lane, now)
 
+    assert [wake.source for wake in timer_wakes] == [LifecycleWakeSource.TIMER]
     assert pending_inbox_count(lane.repo) == 1
     assert collect_deadlettered_inbox_items(lane.repo) == []
+
+
+def test_the_lane_stops_being_timed_once_its_steering_is_back(monkeypatch, tmp_path):
+    """The schedule this adds has to end, or it is a busy loop instead of a fix.
+
+    Clearing the parked record on restore is the only thing that ends it. Left
+    behind, the remaining hold reads as zero from then on, the retry floor turns
+    that into a wake every AVAILABLE_WORK_WATCH_MIN_SECONDS, and every parked
+    lane in the fleet spins the reconciler for good -- so termination is the
+    safety property of the whole change, not a detail of it.
+    """
+    lane, now = _timed_parked_lane(monkeypatch, tmp_path)
+
+    _fire_the_scheduled_timer(lane, now)
+    settled = refusal_parking_retry_seconds(lane.repo)
+    now[0] += launch.AVAILABLE_WORK_WATCH_MIN_SECONDS * SETTLED_PASS_MULTIPLIER
+    lane.watch.evaluate(lane.watch.due_timer_wakes())
+
+    assert settled is None
+    assert lane.watch.next_timer_timeout() is None
 
 
 def test_an_armed_hold_still_withholds_the_wake_it_would_answer(monkeypatch, tmp_path):
