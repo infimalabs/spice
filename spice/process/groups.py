@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import ctypes
 from ctypes import wintypes
 import os
+from pathlib import Path
 import signal
 import subprocess
+import tempfile
 import time
 from typing import Any
 
@@ -17,6 +20,11 @@ WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WINDOWS_STILL_ACTIVE = 259
 WINDOWS_ERROR_INVALID_PARAMETER = 87
 PROCESS_POLL_INTERVAL_SECONDS = 0.1
+# How often a streamed child is checked for exit and for newly written output.
+# This is the granularity of "still alive" reporting, so it is short enough that
+# a caller's heartbeat lands on time and long enough that a quiet multi-minute
+# suite costs a negligible number of wakeups.
+STREAMED_OUTPUT_TICK_SECONDS = 0.25
 # Liveness and forced-termination helpers shell out to `ps`/`taskkill`. A wedged
 # invocation must not stall the supervisor's cleanup or liveness decisions, so
 # every probe carries this named budget and degrades deterministically on expiry
@@ -254,15 +262,7 @@ def run_bounded_process_group(
     try:
         stdout, stderr = process.communicate(input=input_data, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
-        terminate_process_group(
-            process,
-            timeout_seconds=PROCESS_GROUP_TERMINATION_GRACE_SECONDS,
-        )
-        try:
-            process.communicate(timeout=PROCESS_GROUP_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
+        _reap_expired_process_group(process)
         raise ProcessDeadlineExceeded(
             phase=phase,
             input_label=input_label,
@@ -278,6 +278,137 @@ def run_bounded_process_group(
             stderr=stderr,
         )
     return completed
+
+
+def _reap_expired_process_group(process: subprocess.Popen[Any]) -> None:
+    """Terminate the whole group and cap the final reap before diagnosing."""
+    terminate_process_group(
+        process,
+        timeout_seconds=PROCESS_GROUP_TERMINATION_GRACE_SECONDS,
+    )
+    try:
+        process.communicate(timeout=PROCESS_GROUP_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+
+
+def run_streamed_process_group(
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    phase: str,
+    input_label: str,
+    on_progress: Callable[[str, float], None],
+    cwd: Any = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a child under a deadline, reporting output while it still runs.
+
+    The child writes into a temporary file rather than a pipe, and the parent
+    tails that file through its own handle. Two handles onto one path is what
+    makes this work: they are separate file descriptions, so the parent's reads
+    never move the offset the child appends at, and no reader thread is needed
+    to keep a pipe from filling. `on_progress` is called on a fixed tick with
+    whatever arrived since the last one -- the empty string when nothing did --
+    so a caller can both forward output and notice silence.
+
+    Streams merge: the child's stderr is redirected into the same sink so the
+    order the caller sees is the order the child wrote, which a two-pipe capture
+    cannot reconstruct after the fact.
+    """
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    handle, raw_sink = tempfile.mkstemp(prefix="spice-streamed-")
+    os.close(handle)
+    sink_path = Path(raw_sink)
+    try:
+        return _stream_until_exit(
+            command,
+            sink_path,
+            timeout_seconds=timeout_seconds,
+            phase=phase,
+            input_label=input_label,
+            on_progress=on_progress,
+            cwd=cwd,
+            env=env,
+        )
+    finally:
+        sink_path.unlink(missing_ok=True)
+
+
+def _stream_until_exit(
+    command: list[str],
+    sink_path: Path,
+    *,
+    timeout_seconds: float,
+    phase: str,
+    input_label: str,
+    on_progress: Callable[[str, float], None],
+    cwd: Any,
+    env: dict[str, str] | None,
+) -> subprocess.CompletedProcess[str]:
+    started = time.monotonic()
+    with (
+        open(sink_path, "w", encoding="utf-8") as sink,
+        open(sink_path, encoding="utf-8", errors="replace") as tail,
+    ):
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            **popen_new_process_group_kwargs(),
+        )
+        output = _tail_process_output(
+            process,
+            tail,
+            on_progress,
+            started=started,
+            timeout_seconds=timeout_seconds,
+        )
+        if output is None:
+            _reap_expired_process_group(process)
+            raise ProcessDeadlineExceeded(
+                phase=phase,
+                input_label=input_label,
+                timeout_seconds=timeout_seconds,
+                command=command,
+            )
+    return subprocess.CompletedProcess(command, process.returncode, output, "")
+
+
+def _tail_process_output(
+    process: subprocess.Popen[Any],
+    tail: Any,
+    on_progress: Callable[[str, float], None],
+    *,
+    started: float,
+    timeout_seconds: float,
+) -> str | None:
+    """Return the child's complete output, or None once its deadline expires."""
+    collected: list[str] = []
+    while True:
+        running = _child_outlives_one_tick(process)
+        chunk = tail.read()
+        collected.append(chunk)
+        elapsed = time.monotonic() - started
+        on_progress(chunk, elapsed)
+        if not running:
+            return "".join(collected)
+        if elapsed >= timeout_seconds:
+            return None
+
+
+def _child_outlives_one_tick(process: subprocess.Popen[Any]) -> bool:
+    """Return whether the child is still running after one output tick."""
+    try:
+        process.wait(timeout=STREAMED_OUTPUT_TICK_SECONDS)
+    except subprocess.TimeoutExpired:
+        return True
+    return False
 
 
 def _is_windows() -> bool:
