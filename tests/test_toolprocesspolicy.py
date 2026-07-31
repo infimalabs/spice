@@ -16,6 +16,10 @@ from spice.serve import typecheck as serve_typecheck
 from spice.studies import typecheck as python_typecheck
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Both ways a caller reaches a named tool policy. A new entry point that this
+# set does not know is a bounded-tool surface the catalog below cannot see, so
+# adding one here is what keeps the catalog a gate rather than a sample.
+TOOL_POLICY_ENTRY_POINTS = {"run_tool_command", "run_streamed_tool_command"}
 EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
     "spice/agent/judgeadapter.py:main:run",
     "spice/agent/lifecycle.py:spawn_agent:Popen",
@@ -24,6 +28,7 @@ EXPECTED_DIRECT_SUBPROCESS_SEAMS = {
     "spice/process/groups.py:_force_windows_process_tree:run",
     "spice/process/groups.py:_posix_pid_has_live_state:run",
     "spice/process/groups.py:_posix_process_group_has_live_member:run",
+    "spice/process/groups.py:_stream_until_exit:Popen",
     "spice/process/groups.py:run_bounded_process_group:Popen",
     "spice/process/tool.py:run_parent_lifetime_command:run",
     "spice/serve/runtimeinstall.py:restart_replaced_runtime:run",
@@ -53,7 +58,7 @@ EXPECTED_TOOL_POLICY_CALLERS = {
         "spice/tasks/graphs/handout.py:generate:capture=true",
     },
     "study": {"spice/studies/mutations.py:_collect_test_nodeids:capture=true"},
-    "suite": {"spice/studies/suiteseam.py:_measure_suite:capture=true"},
+    "suite": {"spice/studies/suiteseam.py:_measure_suite:capture=stream"},
     "typecheck": {
         "spice/process/tool.py:run_typecheck_command:capture=true",
         "spice/studies/pythonruntime.py:_uv_project_interpreter:capture=true",
@@ -240,7 +245,7 @@ def _tool_policy_callers() -> dict[str, set[str]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
-            if node.func.id != "run_tool_command":
+            if node.func.id not in TOOL_POLICY_ENTRY_POINTS:
                 continue
             policy_keyword = next(
                 (keyword for keyword in node.keywords if keyword.arg == "policy"),
@@ -263,15 +268,26 @@ def _tool_policy_callers() -> dict[str, set[str]]:
                 ),
                 None,
             )
-            capture = (
-                _ast_value_label(capture_keyword.value)
-                if capture_keyword is not None
-                else "missing"
-            )
+            capture = _capture_label(node.func.id, capture_keyword)
             callers.setdefault(policy, set()).add(
                 f"{relative}:{function}:capture={capture}"
             )
     return callers
+
+
+def _capture_label(entry_point: str, capture_keyword: ast.keyword | None) -> str:
+    """Describe how one call site takes the child's output.
+
+    The streamed entry point has no `capture_output` switch to read: it always
+    both retains the complete output and forwards it while the child runs, so
+    its call sites are catalogued under their own label rather than sharing the
+    buffered surface's true/false/missing vocabulary.
+    """
+    if entry_point == "run_streamed_tool_command":
+        return "stream"
+    if capture_keyword is None:
+        return "missing"
+    return _ast_value_label(capture_keyword.value)
 
 
 def _ast_value_label(node: ast.AST) -> str:
