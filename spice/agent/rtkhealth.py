@@ -95,8 +95,14 @@ def agent_rtk_health(repo_root: Path | None) -> RtkHealth:
     caller naming a different one would be answered from the memo the first
     caller filled, and its runner would go unused without saying so. A caller
     that needs to decide the verdict itself probes directly.
+
+    The worktree is resolved before it is used as a key so that two spellings of
+    one worktree cannot settle two verdicts for it. A launch renders the shell's
+    wrappers twice -- once as the config approval boundary, once into the
+    environment it hands over -- and those two renders reading different
+    verdicts is the disagreement this function exists to remove.
     """
-    key = "" if repo_root is None else str(repo_root)
+    key = "" if repo_root is None else str(repo_root.resolve())
     health = AGENT_RTK_HEALTH.get(key)
     if health is None:
         health = probe_rtk_health(repo_root)

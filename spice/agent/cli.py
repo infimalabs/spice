@@ -322,9 +322,15 @@ def shell_display_part(value: str) -> str:
 
 
 def _activation_rtk_health(repo_root: Path) -> tuple[RtkHealth, str]:
-    from spice.agent.rtkhealth import probe_rtk_health
+    """The verdict activation advertises, which is the one the shell obeys.
 
-    health = probe_rtk_health(repo_root)
+    Probing here again would answer the same question a second time and print
+    whichever answer this call happened to get, so the mode on the packet could
+    describe a shell other than the one the agent is about to be handed.
+    """
+    from spice.agent.rtkhealth import agent_rtk_health
+
+    health = agent_rtk_health(repo_root)
     return health, health.activation_status_line()
 
 
