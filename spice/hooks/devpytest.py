@@ -42,11 +42,19 @@ def run_checkout_pytest(repo_root: Path, pytest_args: list[str]) -> int:
     # selection therefore keeps the original output and exit code.
     diagnostic_stdout = StringIO()
     diagnostic_stderr = StringIO()
+    option_terminator = args.index("--") if "--" in args else len(args)
+    diagnostic_args = [
+        *args[:option_terminator],
+        "-n",
+        "0",
+        "--collect-only",
+        *args[option_terminator:],
+    ]
     with (
         redirect_stdout(diagnostic_stdout),
         redirect_stderr(diagnostic_stderr),
     ):
-        diagnostic_exit_code = int(pytest.main([*args, "-n", "0", "--collect-only"]))
+        diagnostic_exit_code = int(pytest.main(diagnostic_args))
     if diagnostic_exit_code != int(pytest.ExitCode.USAGE_ERROR):
         return exit_code
 
