@@ -89,6 +89,43 @@ def test_not_found_selector_replays_pytest_diagnostic_and_exits_usage_error(
     ]
 
 
+def test_diagnostic_flags_precede_pytest_option_terminator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = _bind_checkout_venv(tmp_path, monkeypatch)
+    pytest_args = ["-q", "--", "tests/does_not_exist_probe.py"]
+    calls = _stub_pytest_main(
+        monkeypatch,
+        [
+            (int(pytest.ExitCode.NO_TESTS_COLLECTED), "no tests ran\n", ""),
+            (
+                int(pytest.ExitCode.USAGE_ERROR),
+                "no tests collected\n",
+                "ERROR: file or directory not found: tests/does_not_exist_probe.py\n",
+            ),
+        ],
+    )
+
+    code = devpytest.run_checkout_pytest(repo_root, pytest_args)
+
+    captured = capsys.readouterr()
+    assert code == int(pytest.ExitCode.USAGE_ERROR)
+    assert "tests/does_not_exist_probe.py" in captured.err
+    assert calls == [
+        pytest_args,
+        [
+            "-q",
+            "-n",
+            "0",
+            "--collect-only",
+            "--",
+            "tests/does_not_exist_probe.py",
+        ],
+    ]
+
+
 def test_empty_k_selection_keeps_original_exit_and_discards_diagnostic_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
