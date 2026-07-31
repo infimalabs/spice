@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
 from spice.errors import SpiceError
-from spice.process.groups import run_bounded_process_group
+from spice.process.groups import run_bounded_process_group, run_streamed_process_group
 
 ToolPolicy = Literal[
     "coverage",
@@ -69,6 +70,33 @@ def run_tool_command(
         input_data=input_data,
         capture_output=capture_output,
         check=check,
+    )
+
+
+def run_streamed_tool_command(
+    command: list[str],
+    *,
+    policy: ToolPolicy,
+    operation: str,
+    on_progress: Callable[[str, float], None],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a tool under its policy deadline, reporting output while it runs.
+
+    The returned `stdout` still carries the complete output, so a caller that
+    diagnoses a failure after the fact keeps everything it had when the same
+    command was fully buffered; streaming adds a live view rather than
+    trading one away.
+    """
+    return run_streamed_process_group(
+        command,
+        timeout_seconds=TOOL_POLICY_TIMEOUT_SECONDS[policy],
+        phase=f"tool.{policy}",
+        input_label=operation,
+        on_progress=on_progress,
+        cwd=cwd,
+        env=env,
     )
 
 

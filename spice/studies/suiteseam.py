@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ from spice.config.layers import config_string_list, effective_table
 from spice.config.trust import require_repository_config_approval
 from spice.errors import SpiceError
 from spice.pathmatch import matches_repo_path_or_ancestor, normalize_repo_path
-from spice.process.tool import run_tool_command
+from spice.process.tool import run_streamed_tool_command
 from spice.studies.reachabilitypython import (
     _direct_imports,
     _module_to_path,
@@ -39,6 +40,10 @@ from spice.studies.reachabilitypython import (
 )
 from spice.studies.walk import configured_test_roots
 
+# How long the suite may say nothing before the gate says it is still alive.
+# Long enough that a talkative suite never triggers it, short enough that the
+# quiet stretches which read as a hang are covered several times over.
+SUITE_HEARTBEAT_SECONDS = 30.0
 SUITE_SEAM_KEY = "suite_seam"
 SUITE_SEAM_PATHS_KEY = "paths"
 SUITE_SEAM_RUN_KEY = "run"
@@ -318,26 +323,45 @@ def _suite_env() -> dict[str, str]:
     return env
 
 
+class _SuiteProgress:
+    """Forward the suite's own output, and speak up when it has none.
+
+    A suite that prints nothing for minutes is the case that made a healthy
+    completion look like a hang, so silence is the condition worth reporting.
+    Anything the suite says resets the clock: its output is already proof of
+    life, and a heartbeat interleaved with it would be noise.
+    """
+
+    def __init__(self) -> None:
+        self._spoke_at = 0.0
+
+    def report(self, chunk: str, elapsed: float) -> None:
+        if chunk:
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            self._spoke_at = elapsed
+            return
+        if elapsed - self._spoke_at < SUITE_HEARTBEAT_SECONDS:
+            return
+        self._spoke_at = elapsed
+        print(f"suite seam: still running after {elapsed:.0f}s")
+
+
 def _measure_suite(repo_root: Path, plan: SuiteSeamPlan) -> SuiteSeamOutcome:
     started = time.monotonic()
-    result = run_tool_command(
+    result = run_streamed_tool_command(
         list(plan.argv),
         policy="suite",
         operation="run the whole suite over an integrated task landing",
-        capture_output=True,
-        text=True,
+        on_progress=_SuiteProgress().report,
         cwd=repo_root,
         env=_suite_env(),
-        check=False,
-    )
-    output = "\n".join(
-        part for part in (result.stdout.strip(), result.stderr.strip()) if part
     )
     return SuiteSeamOutcome(
         plan=plan,
         elapsed_seconds=time.monotonic() - started,
         returncode=result.returncode,
-        output=output,
+        output=result.stdout.strip(),
     )
 
 
