@@ -312,6 +312,8 @@ message = "🌶️ Rename in place, update every reference immediately, and let 
 words = ["legacy", "legacies"]
 message = "🌶️ Keep exactly one tested, visible, current execution path. One forward migration of durable data or a refusal naming its owning release preserves that rule. An untested or invisible alternate path, a silent fallback, or executable arms accumulated per release break it!"
 
+[taste]
+
 [serve]
 brand = "spice"
 default_lifetime = "Drive"

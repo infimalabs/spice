@@ -291,6 +291,9 @@ CONFIG_SCHEMA = _table(
         "rtk": _table(("executable",)),
         "wrappers": _table(wildcard=_WRAPPER_GROUP),
         "policy": _POLICY,
+        # policy.taste.words remains Python's lexical replacement map; these
+        # named rows are behavioral rules evaluated by the Rust taste judge.
+        "taste": _table(wildcard=_table(("words", "message"))),
         "tasks": _TASKS,
         "locks": _LOCKS,
         "commands": _table(wildcard=None),
