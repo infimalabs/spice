@@ -579,89 +579,103 @@ def test_release_apply_accepts_curated_highlights_with_generated_inventory_prese
     assert published == [("0.30.0", notes, "release-head")]
 
 
-def test_release_apply_refuses_curated_notes_that_drop_generated_inventory(
+def _publish_github_release_body(tmp_path, monkeypatch, curated, canonical):
+    """Run publish_github_release and return the body it handed to gh."""
+    published = []
+
+    def fake_run(argv, **kwargs):
+        if argv[:3] == ["gh", "release", "create"]:
+            published.append(Path(argv[argv.index("--notes-file") + 1]).read_text())
+        return None
+
+    monkeypatch.setattr(release, "git", lambda *args: "")
+    monkeypatch.setattr(release, "run", fake_run)
+    monkeypatch.setattr(release, "github_release_url", lambda tag: "")
+    monkeypatch.setattr(
+        release,
+        "release_notes_for_version",
+        lambda version, commit: canonical,
+    )
+    notes = None
+    if curated is not None:
+        notes = tmp_path / "notes.md"
+        notes.write_text(curated, encoding="utf-8")
+
+    release.publish_github_release("0.30.0", notes, release_commit="release-head")
+
+    assert len(published) == 1
+    return published[0]
+
+
+def test_publication_composes_curated_highlights_over_the_generated_tail(
     tmp_path, monkeypatch
 ):
-    placeholder = (
-        "_Replace this line with a short, curated set of highlights folded from "
-        "the changes below._"
-    )
     canonical = (
         "> [!IMPORTANT]\n"
         "## Highlights\n\n"
-        f"{placeholder}\n\n"
+        "_placeholder_\n\n"
         "<details>\n<summary>Task-level changes</summary>\n\n"
         "- Fixed the release path. (abcdef1)\n"
-        "</details>\n"
+        "</details>\n\n"
+        "## Package Notes\n\n"
+        "- Release commit: `release-head`\n"
     )
-    # Highlights curated exactly as a reader would write them, inventory gone.
-    curated = "## Highlights\n\n- Refused uncurated generated release notes.\n"
-    notes = tmp_path / "notes.md"
-    notes.write_bytes(curated.encode("utf-8"))
-    args = build_release_parser().parse_args(
-        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
-    )
-    plan = release.ReleasePlan(
-        repository=tmp_path,
-        action="github",
-        version="0.30.0",
-        source_commit="source-head",
-        notes_sha256="notes-digest",
-        release_commit="release-head",
-        notes_file=notes,
-        operations=(),
+    # The curator writes Highlights and nothing else.
+    curated = "## Highlights\n\n- Composed the generated tail at publish time.\n"
+
+    body = _publish_github_release_body(tmp_path, monkeypatch, curated, canonical)
+
+    assert body == (
+        "## Highlights\n\n"
+        "- Composed the generated tail at publish time.\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Fixed the release path. (abcdef1)\n"
+        "</details>\n\n"
+        "## Package Notes\n\n"
+        "- Release commit: `release-head`\n"
     )
 
-    monkeypatch.setattr(
-        release,
-        "canonical_release_notes_for_commit",
-        lambda commit: canonical,
-    )
-    monkeypatch.setattr(
-        release,
-        "publish_github_release",
-        lambda *args, **kwargs: pytest.fail("inventory-less notes reached publication"),
-    )
 
-    with pytest.raises(SpiceError, match="drop the generated task inventory"):
-        release.apply_release_plan(args, tmp_path, plan)
-
-
-def test_release_apply_refuses_publication_when_the_draft_has_no_inventory(
+def test_publication_regenerates_a_stale_inventory_the_curator_carried_over(
     tmp_path, monkeypatch
 ):
-    # A canonical draft with no <details> block makes the inventory check match
-    # every candidate, so the gate must stop the release instead of passing one.
-    canonical = "> [!IMPORTANT]\n## Highlights\n\n- Renderer stopped emitting it.\n"
-    notes = tmp_path / "notes.md"
-    notes.write_bytes("## Highlights\n\n- Curated.\n".encode("utf-8"))
-    args = build_release_parser().parse_args(
-        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    canonical = (
+        "## Highlights\n\n_placeholder_\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Landed this release. (abcdef1)\n"
+        "</details>\n\n"
+        "## Package Notes\n\n- Release commit: `release-head`\n"
     )
-    plan = release.ReleasePlan(
-        repository=tmp_path,
-        action="github",
-        version="0.30.0",
-        source_commit="source-head",
-        notes_sha256="notes-digest",
-        release_commit="release-head",
-        notes_file=notes,
-        operations=(),
+    # Curated against an older draft, so its inventory names the wrong commit.
+    curated = (
+        "## Highlights\n\n- Curated early.\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Landed some other release. (9999999)\n"
+        "</details>\n\n"
+        "## Package Notes\n\n- Release commit: `stale-head`\n"
     )
 
-    monkeypatch.setattr(
-        release,
-        "canonical_release_notes_for_commit",
-        lambda commit: canonical,
-    )
-    monkeypatch.setattr(
-        release,
-        "publish_github_release",
-        lambda *args, **kwargs: pytest.fail("uncheckable notes reached publication"),
+    body = _publish_github_release_body(tmp_path, monkeypatch, curated, canonical)
+
+    assert body == (
+        "## Highlights\n\n- Curated early.\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Landed this release. (abcdef1)\n"
+        "</details>\n\n"
+        "## Package Notes\n\n- Release commit: `release-head`\n"
     )
 
-    with pytest.raises(SpiceError, match="cannot check curated release notes"):
-        release.apply_release_plan(args, tmp_path, plan)
+
+def test_publication_stops_when_the_generated_notes_have_no_inventory(
+    tmp_path, monkeypatch
+):
+    # Composition slices the tail at the inventory, so a renderer that stopped
+    # emitting it would silently publish curated Highlights with no tail at all.
+    canonical = "## Highlights\n\n- Renderer stopped emitting the section.\n"
+    curated = "## Highlights\n\n- Curated.\n"
+
+    with pytest.raises(SpiceError, match="cannot compose release notes"):
+        _publish_github_release_body(tmp_path, monkeypatch, curated, canonical)
 
 
 def test_release_apply_refuses_curated_notes_that_keep_highlights_placeholder(

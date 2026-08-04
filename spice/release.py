@@ -41,11 +41,11 @@ from spice.releaseidentity import (
 )
 from spice.releasenotes import (
     HIGHLIGHTS_PLACEHOLDER,
+    INVENTORY_OPEN,
     ReleaseRecord,
     commit_records as _collect_commit_records,
     edited_release_highlight as edited_release_highlight,
     is_ancestor as _release_note_is_ancestor,
-    release_notes_inventory,
     render_release_notes,
     render_release_range,
 )
@@ -834,10 +834,12 @@ def ensure_curated_release_notes(
     notes_file: Path | None,
     release_commit: str,
 ) -> None:
-    """Refuse notes that kept the Highlights scaffold or dropped the inventory."""
+    """Refuse notes that still carry the generator's Highlights scaffold.
+
+    The curator owns Highlights and nothing else: publication composes the
+    inventory and Package Notes itself, so this checks curation, not structure.
+    """
     canonical = canonical_release_notes_for_commit(release_commit)
-    # Read as text, not bytes: universal newlines normalize a curator's CRLF so
-    # line endings alone cannot spell a dropped inventory the file actually kept.
     candidate = canonical if notes_file is None else notes_file.read_text("utf-8")
     if candidate == canonical:
         raise SpiceError(
@@ -849,23 +851,6 @@ def ensure_curated_release_notes(
         raise SpiceError(
             "refusing to publish release notes that still carry the Highlights "
             "placeholder; replace it with curated highlights before publication"
-        )
-    inventory = release_notes_inventory(canonical)
-    if not inventory:
-        # An empty extraction would silently pass every candidate, so a renderer
-        # that stopped emitting the block must stop the release, not the check.
-        raise SpiceError(
-            "cannot check curated release notes: the canonical draft for "
-            f"{release_commit} carries no collapsed Task-level changes section, "
-            "so the inventory this gate exists to protect cannot be located"
-        )
-    if inventory not in candidate:
-        raise SpiceError(
-            "refusing to publish release notes that drop the generated task "
-            "inventory: the draft's collapsed Task-level changes section must "
-            "survive curation intact, and every published release carries it; "
-            "append the canonical <details> block from `spice release notes` "
-            "to the curated Highlights before publication"
         )
 
 
@@ -893,6 +878,24 @@ def publish_release(
     run(["git", "status", "--short", "--branch"])
 
 
+def compose_release_notes(curated: str, canonical: str) -> str:
+    """Publish the curator's Highlights over the tail generated for this commit.
+
+    Whatever the curator wrote before the inventory is theirs; everything from
+    the inventory onward is regenerated, so the published Package Notes name
+    the real release commit even though curation happens before it exists.
+    """
+    opened = canonical.find(INVENTORY_OPEN)
+    if opened < 0:
+        raise SpiceError(
+            "cannot compose release notes: the generated notes carry no collapsed "
+            "Task-level changes section, so there is no generated tail to publish "
+            "under the curated Highlights"
+        )
+    highlights = curated.split(INVENTORY_OPEN, maxsplit=1)[0].rstrip("\n")
+    return f"{highlights}\n\n{canonical[opened:]}"
+
+
 def publish_github_release(
     version: str,
     notes_file: Path | None = None,
@@ -917,24 +920,12 @@ def publish_github_release(
         print(f"GitHub release exists: {existing_release_url}")
         return
 
+    body = release_notes_for_version(version, release_commit)
     if notes_file is not None:
-        run(
-            [
-                "gh",
-                "release",
-                "create",
-                tag,
-                "--title",
-                tag,
-                "--notes-file",
-                str(notes_file),
-            ]
-        )
-        return
-
+        body = compose_release_notes(notes_file.read_text("utf-8"), body)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
         path = Path(handle.name)
-        handle.write(release_notes_for_version(version, release_commit))
+        handle.write(body)
     try:
         run(["gh", "release", "create", tag, "--title", tag, "--notes-file", str(path)])
     finally:
