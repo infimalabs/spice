@@ -852,6 +852,14 @@ def ensure_curated_release_notes(
             "refusing to publish release notes that still carry the Highlights "
             "placeholder; replace it with curated highlights before publication"
         )
+    if not carries_highlights(curated_highlights(candidate)):
+        raise SpiceError(
+            "refusing to publish release notes that carry no Highlights: the "
+            "curated region above the generated task inventory holds nothing but "
+            "the draft banner and headings, so the release page would open "
+            "straight into the collapsed inventory; write the highlights before "
+            "publication"
+        )
 
 
 def publish_release(
@@ -878,6 +886,28 @@ def publish_release(
     run(["git", "status", "--short", "--branch"])
 
 
+def curated_highlights(candidate: str) -> str:
+    """The curator's own region of a notes file: everything above the inventory.
+
+    Both the notes gate and publication read the curated region through here, so
+    the region the gate judges is exactly the region publication keeps.
+    """
+    return candidate.split(INVENTORY_OPEN, maxsplit=1)[0].rstrip("\n")
+
+
+def carries_highlights(curated: str) -> bool:
+    """True when the curated region says something a reader would call a highlight.
+
+    Blank lines, the draft banner's blockquote, and section headings are all
+    scaffold the generator supplied, so a file holding only those carries no
+    curated content even though it is not empty.
+    """
+    return any(
+        line.strip() and not line.strip().startswith((">", "#"))
+        for line in curated.splitlines()
+    )
+
+
 def compose_release_notes(curated: str, canonical: str) -> str:
     """Publish the curator's Highlights over the tail generated for this commit.
 
@@ -892,8 +922,7 @@ def compose_release_notes(curated: str, canonical: str) -> str:
             "Task-level changes section, so there is no generated tail to publish "
             "under the curated Highlights"
         )
-    highlights = curated.split(INVENTORY_OPEN, maxsplit=1)[0].rstrip("\n")
-    return f"{highlights}\n\n{canonical[opened:]}"
+    return f"{curated_highlights(curated)}\n\n{canonical[opened:]}"
 
 
 def publish_github_release(

@@ -725,6 +725,66 @@ def test_release_apply_refuses_curated_notes_that_keep_highlights_placeholder(
         release.apply_release_plan(args, tmp_path, plan)
 
 
+@pytest.mark.parametrize(
+    ("label", "curated"),
+    [
+        ("empty", ""),
+        ("whitespace-only", "\n   \n\n"),
+        # The curator deleted the placeholder and the banner but never wrote
+        # anything in their place, leaving only generated scaffold.
+        (
+            "inventory-only",
+            "## Highlights\n\n<details>\n<summary>Task-level changes</summary>\n\n"
+            "- Fixed the release path. (abcdef1)\n</details>\n",
+        ),
+    ],
+)
+def test_release_apply_refuses_notes_whose_curated_region_says_nothing(
+    tmp_path, monkeypatch, label, curated
+):
+    canonical = (
+        "> [!IMPORTANT]\n"
+        "## Highlights\n\n"
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Fixed the release path. (abcdef1)\n"
+        "</details>\n"
+    )
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(curated.encode("utf-8"))
+    args = build_release_parser().parse_args(
+        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    )
+    plan = release.ReleasePlan(
+        repository=tmp_path,
+        action="github",
+        version="0.30.0",
+        source_commit="source-head",
+        notes_sha256="notes-digest",
+        release_commit="release-head",
+        notes_file=notes,
+        operations=(),
+    )
+
+    monkeypatch.setattr(
+        release,
+        "canonical_release_notes_for_commit",
+        lambda commit: canonical,
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda *args, **kwargs: pytest.fail(f"{label} notes reached publication"),
+    )
+
+    # Publication composes the generated tail under whatever the curator wrote,
+    # so a curated region that says nothing publishes a release page opening
+    # straight into the collapsed inventory.
+    with pytest.raises(SpiceError, match="carry no Highlights"):
+        release.apply_release_plan(args, tmp_path, plan)
+
+
 def test_release_apply_accepts_curated_notes_with_windows_line_endings(
     tmp_path, monkeypatch
 ):

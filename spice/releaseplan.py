@@ -101,7 +101,7 @@ def publication_operations(
 def curated_notes_operation() -> ReleasePlanOperation:
     return ReleasePlanOperation(
         "check-release-notes",
-        "refuse notes that still carry the generated Highlights placeholder",
+        "refuse notes whose Highlights are missing or still the generated draft",
     )
 
 
