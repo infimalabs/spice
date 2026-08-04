@@ -874,6 +874,8 @@ def test_release_notes_group_edited_highlights_by_project():
         "> _Task-level changes_ section below; keep that section intact. Omit from\n"
         "> Highlights any feature that was added and then functionally reverted\n"
         "> within this same release window — a net-zero change is not a highlight.\n"
+        "> Write each highlight as one unwrapped line: the release page reflows it\n"
+        "> to the reader's width, and a hard wrap renders as a line break instead.\n"
         "\n"
         "## Highlights\n"
         "\n"
