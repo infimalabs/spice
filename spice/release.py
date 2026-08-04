@@ -40,10 +40,12 @@ from spice.releaseidentity import (
     require_installed_cli_matches_release as _require_installed_cli_matches_release,
 )
 from spice.releasenotes import (
+    HIGHLIGHTS_PLACEHOLDER,
     ReleaseRecord,
     commit_records as _collect_commit_records,
     edited_release_highlight as edited_release_highlight,
     is_ancestor as _release_note_is_ancestor,
+    release_notes_inventory,
     render_release_notes,
     render_release_range,
 )
@@ -832,14 +834,30 @@ def ensure_curated_release_notes(
     notes_file: Path | None,
     release_commit: str,
 ) -> None:
-    """Refuse the generator's untouched Highlights scaffold before publication."""
-    canonical = canonical_release_notes_for_commit(release_commit).encode("utf-8")
-    candidate = canonical if notes_file is None else notes_file.read_bytes()
+    """Refuse notes that kept the Highlights scaffold or dropped the inventory."""
+    canonical = canonical_release_notes_for_commit(release_commit)
+    # Read as text, not bytes: universal newlines normalize a curator's CRLF so
+    # line endings alone cannot spell a dropped inventory the file actually kept.
+    candidate = canonical if notes_file is None else notes_file.read_text("utf-8")
     if candidate == canonical:
         raise SpiceError(
             "refusing to publish untouched generated release notes: the candidate "
             "still exactly matches the canonical draft and retains the Highlights "
             "placeholder; curate Highlights before publication"
+        )
+    if HIGHLIGHTS_PLACEHOLDER in candidate:
+        raise SpiceError(
+            "refusing to publish release notes that still carry the Highlights "
+            "placeholder; replace it with curated highlights before publication"
+        )
+    inventory = release_notes_inventory(canonical)
+    if inventory and inventory not in candidate:
+        raise SpiceError(
+            "refusing to publish release notes that drop the generated task "
+            "inventory: the draft's collapsed Task-level changes section must "
+            "survive curation intact, and every published release carries it; "
+            "append the canonical <details> block from `spice release notes` "
+            "to the curated Highlights before publication"
         )
 
 

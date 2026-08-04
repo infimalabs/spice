@@ -26,6 +26,12 @@ TASK_PHASE_SUBJECT_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 REVERT_TARGET_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})\b")
+HIGHLIGHTS_PLACEHOLDER = (
+    "_Replace this line with a short, curated set of highlights folded from "
+    "the changes below._"
+)
+INVENTORY_OPEN = "<details>"
+INVENTORY_CLOSE = "</details>"
 
 
 @dataclass(frozen=True)
@@ -209,10 +215,9 @@ def render_release_notes(
         "",
         "## Highlights",
         "",
-        "_Replace this line with a short, curated set of highlights folded from "
-        "the changes below._",
+        HIGHLIGHTS_PLACEHOLDER,
         "",
-        "<details>",
+        INVENTORY_OPEN,
         "<summary>Task-level changes</summary>",
         "",
         "## Changes by project",
@@ -231,7 +236,7 @@ def render_release_notes(
 
     lines.extend(
         [
-            "</details>",
+            INVENTORY_CLOSE,
             "",
             "## Package Notes",
             "",
@@ -252,6 +257,15 @@ def render_release_notes(
         lines.append(f"- Release tag: `{current_tag}`")
     lines.append("")
     return "\n".join(lines)
+
+
+def release_notes_inventory(notes: str) -> str:
+    """Return the collapsed task-level export the draft says to keep intact."""
+    opened = notes.find(INVENTORY_OPEN)
+    closed = notes.find(INVENTORY_CLOSE, opened + len(INVENTORY_OPEN))
+    if opened < 0 or closed < 0:
+        return ""
+    return notes[opened : closed + len(INVENTORY_CLOSE)]
 
 
 def edited_release_highlight(subject: str) -> str:
