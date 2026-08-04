@@ -579,6 +579,151 @@ def test_release_apply_accepts_curated_highlights_with_generated_inventory_prese
     assert published == [("0.30.0", notes, "release-head")]
 
 
+def test_release_apply_refuses_curated_notes_that_drop_generated_inventory(
+    tmp_path, monkeypatch
+):
+    placeholder = (
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._"
+    )
+    canonical = (
+        "> [!IMPORTANT]\n"
+        "## Highlights\n\n"
+        f"{placeholder}\n\n"
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Fixed the release path. (abcdef1)\n"
+        "</details>\n"
+    )
+    # Highlights curated exactly as a reader would write them, inventory gone.
+    curated = "## Highlights\n\n- Refused uncurated generated release notes.\n"
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(curated.encode("utf-8"))
+    args = build_release_parser().parse_args(
+        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    )
+    plan = release.ReleasePlan(
+        repository=tmp_path,
+        action="github",
+        version="0.30.0",
+        source_commit="source-head",
+        notes_sha256="notes-digest",
+        release_commit="release-head",
+        notes_file=notes,
+        operations=(),
+    )
+
+    monkeypatch.setattr(
+        release,
+        "canonical_release_notes_for_commit",
+        lambda commit: canonical,
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda *args, **kwargs: pytest.fail("inventory-less notes reached publication"),
+    )
+
+    with pytest.raises(SpiceError, match="drop the generated task inventory"):
+        release.apply_release_plan(args, tmp_path, plan)
+
+
+def test_release_apply_refuses_curated_notes_that_keep_highlights_placeholder(
+    tmp_path, monkeypatch
+):
+    placeholder = (
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._"
+    )
+    inventory = (
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Fixed the release path. (abcdef1)\n"
+        "</details>\n"
+    )
+    canonical = f"> [!IMPORTANT]\n## Highlights\n\n{placeholder}\n\n{inventory}"
+    # Banner dropped and inventory kept, but the placeholder survived curation,
+    # so the file no longer matches the canonical draft byte for byte.
+    curated = f"## Highlights\n\n{placeholder}\n\n{inventory}"
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(curated.encode("utf-8"))
+    args = build_release_parser().parse_args(
+        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    )
+    plan = release.ReleasePlan(
+        repository=tmp_path,
+        action="github",
+        version="0.30.0",
+        source_commit="source-head",
+        notes_sha256="notes-digest",
+        release_commit="release-head",
+        notes_file=notes,
+        operations=(),
+    )
+
+    monkeypatch.setattr(
+        release,
+        "canonical_release_notes_for_commit",
+        lambda commit: canonical,
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda *args, **kwargs: pytest.fail("placeholder notes reached publication"),
+    )
+
+    with pytest.raises(SpiceError, match="Highlights placeholder"):
+        release.apply_release_plan(args, tmp_path, plan)
+
+
+def test_release_apply_accepts_curated_notes_with_windows_line_endings(
+    tmp_path, monkeypatch
+):
+    placeholder = (
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._"
+    )
+    inventory = (
+        "<details>\n<summary>Task-level changes</summary>\n\n"
+        "- Fixed the release path. (abcdef1)\n"
+        "</details>\n"
+    )
+    canonical = f"> [!IMPORTANT]\n## Highlights\n\n{placeholder}\n\n{inventory}"
+    curated = (
+        f"## Highlights\n\n- Curated by an editor that writes CRLF.\n\n{inventory}"
+    )
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(curated.replace("\n", "\r\n").encode("utf-8"))
+    args = build_release_parser().parse_args(
+        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    )
+    plan = release.ReleasePlan(
+        repository=tmp_path,
+        action="github",
+        version="0.30.0",
+        source_commit="source-head",
+        notes_sha256="notes-digest",
+        release_commit="release-head",
+        notes_file=notes,
+        operations=(),
+    )
+    published = []
+
+    monkeypatch.setattr(
+        release,
+        "canonical_release_notes_for_commit",
+        lambda commit: canonical,
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda version, notes_file, *, release_commit=None: published.append(
+            (version, notes_file, release_commit)
+        ),
+    )
+
+    assert release.apply_release_plan(args, tmp_path, plan) == 0
+    assert published == [("0.30.0", notes, "release-head")]
+
+
 def test_canonical_release_notes_derive_version_and_range_from_candidate_commit(
     monkeypatch,
 ):
