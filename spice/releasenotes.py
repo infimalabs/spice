@@ -262,8 +262,10 @@ def render_release_notes(
 def release_notes_inventory(notes: str) -> str:
     """Return the collapsed task-level export the draft says to keep intact."""
     opened = notes.find(INVENTORY_OPEN)
+    if opened < 0:
+        return ""
     closed = notes.find(INVENTORY_CLOSE, opened + len(INVENTORY_OPEN))
-    if opened < 0 or closed < 0:
+    if closed < 0:
         return ""
     return notes[opened : closed + len(INVENTORY_CLOSE)]
 
