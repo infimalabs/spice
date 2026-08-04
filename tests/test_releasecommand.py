@@ -194,6 +194,31 @@ def test_publish_plan_checks_release_notes_before_expensive_gates(
     ]
 
 
+def test_release_docs_state_the_publish_time_composition_contract():
+    # Unwrap the hard-wrapped prose so a sentence spanning several lines in the
+    # file still reads as one sentence here.
+    doc = " ".join(Path("docs/release.md").read_text(encoding="utf-8").split())
+
+    # Curation happens before the bump commit exists, so the doc has to say
+    # which half of the candidate file survives publication.
+    assert "The curator owns Highlights and nothing else." in doc
+    assert (
+        "everything from the collapsed `<details>` section down is regenerated "
+        "at publication against the real release commit" in doc
+    )
+    # Every refusal a curator can hit is named, so a rejected publish points at
+    # the fix rather than at the gate.
+    assert (
+        "matches a freshly generated draft from the exact release commit "
+        "byte-for-byte" in doc
+    )
+    assert "still carries the generated Highlights placeholder anywhere" in doc
+    assert (
+        "curated region above the inventory holds nothing but the banner and "
+        "headings" in doc
+    )
+
+
 def test_release_docs_show_lane_release_workflow():
     release_doc = Path("docs/release.md").read_text(encoding="utf-8")
     release_section = release_doc.split("\n\n", 1)[1]

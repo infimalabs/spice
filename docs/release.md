@@ -93,15 +93,27 @@ grouped by landed task project metadata under a `## Changes by project` section,
 and records that range in the package notes. That grouped export is a **draft,
 not the final release body**: it opens with a curation banner and an empty
 `## Highlights` placeholder, followed by the raw project-grouped inventory in a
-ready-made collapsed `<details>` section. Fold the changes into a short set of
-human-readable highlights, delete the banner and placeholder, and keep the
-generated details section intact. Task-level commit SHAs are deliberately left
-bare so the GitHub release page renders them as repository commit links. A
-release that still shows the draft banner was shipped uncurated. Publication
-compares the complete candidate file byte-for-byte with a freshly generated
-draft from the exact release commit and refuses an exact match, naming the
-untouched Highlights placeholder. Pass the curated file with `--notes-file`;
-omitting it selects the untouched generated draft and therefore refuses.
+ready-made collapsed `<details>` section.
+
+**The curator owns Highlights and nothing else.** Fold the changes into a short
+set of human-readable highlights and delete the banner and placeholder;
+everything from the collapsed `<details>` section down is regenerated at
+publication against the real release commit and replaces whatever the candidate
+file left there, so leave it or drop it as you like — editing it has no effect
+on what ships. That is deliberate: curation happens before the bump commit
+exists, so a hand-written Package Notes section can only guess at the release
+commit and range the tool already knows. Write each highlight as one unwrapped
+line; the release page reflows it to the reader's width, and a hard wrap in the
+file renders as a literal line break. Task-level commit SHAs are deliberately
+left bare so the GitHub release page renders them as repository commit links.
+
+Publication refuses a candidate file three ways, each naming what to fix: one
+that matches a freshly generated draft from the exact release commit
+byte-for-byte, one that still carries the generated Highlights placeholder
+anywhere, and one whose curated region above the inventory holds nothing but
+the banner and headings. A release that still shows the draft banner was
+shipped uncurated. Pass the curated file with `--notes-file`; omitting it
+selects the untouched generated draft and therefore refuses.
 
 Bare `spice release notes` is state-aware: before `prepare` it labels the draft
 `unreleased`; after the bump commit it recognizes the untagged current version
