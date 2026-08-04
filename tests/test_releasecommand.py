@@ -627,6 +627,43 @@ def test_release_apply_refuses_curated_notes_that_drop_generated_inventory(
         release.apply_release_plan(args, tmp_path, plan)
 
 
+def test_release_apply_refuses_publication_when_the_draft_has_no_inventory(
+    tmp_path, monkeypatch
+):
+    # A canonical draft with no <details> block makes the inventory check match
+    # every candidate, so the gate must stop the release instead of passing one.
+    canonical = "> [!IMPORTANT]\n## Highlights\n\n- Renderer stopped emitting it.\n"
+    notes = tmp_path / "notes.md"
+    notes.write_bytes("## Highlights\n\n- Curated.\n".encode("utf-8"))
+    args = build_release_parser().parse_args(
+        ["github", "0.30.0", "--notes-file", str(notes), "--apply"]
+    )
+    plan = release.ReleasePlan(
+        repository=tmp_path,
+        action="github",
+        version="0.30.0",
+        source_commit="source-head",
+        notes_sha256="notes-digest",
+        release_commit="release-head",
+        notes_file=notes,
+        operations=(),
+    )
+
+    monkeypatch.setattr(
+        release,
+        "canonical_release_notes_for_commit",
+        lambda commit: canonical,
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda *args, **kwargs: pytest.fail("uncheckable notes reached publication"),
+    )
+
+    with pytest.raises(SpiceError, match="cannot check curated release notes"):
+        release.apply_release_plan(args, tmp_path, plan)
+
+
 def test_release_apply_refuses_curated_notes_that_keep_highlights_placeholder(
     tmp_path, monkeypatch
 ):

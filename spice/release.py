@@ -851,7 +851,15 @@ def ensure_curated_release_notes(
             "placeholder; replace it with curated highlights before publication"
         )
     inventory = release_notes_inventory(canonical)
-    if inventory and inventory not in candidate:
+    if not inventory:
+        # An empty extraction would silently pass every candidate, so a renderer
+        # that stopped emitting the block must stop the release, not the check.
+        raise SpiceError(
+            "cannot check curated release notes: the canonical draft for "
+            f"{release_commit} carries no collapsed Task-level changes section, "
+            "so the inventory this gate exists to protect cannot be located"
+        )
+    if inventory not in candidate:
         raise SpiceError(
             "refusing to publish release notes that drop the generated task "
             "inventory: the draft's collapsed Task-level changes section must "
