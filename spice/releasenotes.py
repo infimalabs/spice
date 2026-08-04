@@ -212,6 +212,8 @@ def render_release_notes(
         "> _Task-level changes_ section below; keep that section intact. Omit from",
         "> Highlights any feature that was added and then functionally reverted",
         "> within this same release window — a net-zero change is not a highlight.",
+        "> Write each highlight as one unwrapped line: the release page reflows it",
+        "> to the reader's width, and a hard wrap renders as a line break instead.",
         "",
         "## Highlights",
         "",
