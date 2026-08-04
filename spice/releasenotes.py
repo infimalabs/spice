@@ -208,10 +208,11 @@ def render_release_notes(
         "> [!IMPORTANT]",
         "> **Draft release notes — curate Highlights before publishing.** Replace",
         "> the placeholder under _Highlights_ with a short summary, then delete this",
-        "> banner. The generated task inventory is already wrapped in the collapsed",
-        "> _Task-level changes_ section below; keep that section intact. Omit from",
-        "> Highlights any feature that was added and then functionally reverted",
-        "> within this same release window — a net-zero change is not a highlight.",
+        "> banner. Everything from the collapsed _Task-level changes_ section down",
+        "> is regenerated at publication against the real release commit, so leave",
+        "> it or drop it as you like. Omit from Highlights any feature that was",
+        "> added and then functionally reverted within this same release window —",
+        "> a net-zero change is not a highlight.",
         "> Write each highlight as one unwrapped line: the release page reflows it",
         "> to the reader's width, and a hard wrap renders as a line break instead.",
         "",
@@ -259,17 +260,6 @@ def render_release_notes(
         lines.append(f"- Release tag: `{current_tag}`")
     lines.append("")
     return "\n".join(lines)
-
-
-def release_notes_inventory(notes: str) -> str:
-    """Return the collapsed task-level export the draft says to keep intact."""
-    opened = notes.find(INVENTORY_OPEN)
-    if opened < 0:
-        return ""
-    closed = notes.find(INVENTORY_CLOSE, opened + len(INVENTORY_OPEN))
-    if closed < 0:
-        return ""
-    return notes[opened : closed + len(INVENTORY_CLOSE)]
 
 
 def edited_release_highlight(subject: str) -> str:
