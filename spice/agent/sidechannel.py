@@ -21,6 +21,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Callable, TextIO, cast
 
+from spice.agent.hookack import sweep_transcript_acks
 from spice.agent.sidechannelnotify import (
     SIDE_CHANNEL_CLAIM_EVENT,
     SIDE_CHANNEL_NOTIFY_EVENT,
@@ -333,6 +334,9 @@ def render_side_channel_payload(repo_root: Path) -> tuple[str, InboxSignature]:
 
 def render_post_tool_hook_payload(repo_root: Path) -> str:
     stderr = io.StringIO()
+    # Sweep before the readout, not after: a key this hook retires must not be
+    # rendered as still pending in the very payload that retired it.
+    sweep_transcript_acks(repo_root, stderr=stderr)
     AgentInboxInjector(
         repo_root,
         stderr=stderr,

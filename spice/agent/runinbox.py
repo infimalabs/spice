@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -176,14 +176,26 @@ class AgentSideChannelNoticeInjector:
 
     def inject(self, *, force: bool) -> None:
         del force
-        notices = consume_side_channel_notices(self.repo_root)
-        if not notices:
-            return
-        self.stderr.write(f"{SUPERVISOR_FEEDBACK_HEADING}\n")
-        for notice in notices:
-            for line in notice.splitlines():
-                self.stderr.write(f"  {line}\n")
-        self.stderr.flush()
+        write_side_channel_notices(
+            self.stderr, consume_side_channel_notices(self.repo_root)
+        )
+
+
+def write_side_channel_notices(stderr: TextIO, notices: Sequence[str]) -> None:
+    """Render supervisor notices into one stderr readout under its heading.
+
+    Publishers that reach the agent through the queue drain it above; a
+    publisher whose notice belongs only to the readout it is already building
+    -- the post-tool hook, which is its own process and drains nothing -- hands
+    its lines here directly so both roads render the same shape.
+    """
+    if not notices:
+        return
+    stderr.write(f"{SUPERVISOR_FEEDBACK_HEADING}\n")
+    for notice in notices:
+        for line in notice.splitlines():
+            stderr.write(f"  {line}\n")
+    stderr.flush()
 
 
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
