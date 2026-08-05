@@ -45,7 +45,11 @@ from spice.agent.maximmetrics import (
     record_maxim_metric_events,
 )
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
-from spice.mail.ackarchive import summarize_ack_archival, summarize_nack_archival
+from spice.mail.ackarchive import (
+    AckArchivalSummary,
+    summarize_ack_archival,
+    summarize_nack_archival,
+)
 from spice.mail.ackgrammar import (
     extract_ack_keys_from_text,
     extract_task_batch_lines_from_text,
@@ -365,9 +369,23 @@ def _publish_nack_feedback(
             publish_supervisor_feedback(repo_root, log_handle, kind, keys=keys)
 
 
-def _publish_ack_feedback(
+def archive_message_acks(
     repo_root: Path, message_text: str, log_handle: TextIO
-) -> None:
+) -> AckArchivalSummary | None:
+    """Retire the inbox keys one assistant message ACK'd, and mirror them.
+
+    The single retirement authority. Acknowledgment reaches an agent's lane by
+    two independent roads -- the stdout supervisor below, and the command hook
+    in `spice.agent.hookack` for the messages that stream never delivered --
+    and both roads end here, so the keys one of them would retire are the keys
+    the other retires and the mirrored annotation cannot depend on which road
+    the message arrived by.
+
+    Returns the disposition, or None when archival itself failed; a failure is
+    logged and published as `ack.error` here rather than raised, because a
+    locked store or a full disk must not take down the caller that was only
+    passing a message through.
+    """
     try:
         ack_summary = summarize_ack_archival(repo_root, message_text)
     except Exception as exc:  # surface-and-survive: archival must not crash the loop
@@ -380,6 +398,23 @@ def _publish_ack_feedback(
             keys=list(dict.fromkeys(extract_ack_keys_from_text(message_text))),
             error=str(exc),
         )
+        return None
+    if ack_summary.archived:
+        try:
+            _annotate_active_task_with_acks(
+                repo_root, message_text, ack_summary.archived, log_handle
+            )
+        except Exception as exc:  # surface-and-survive: retirement already landed
+            log_handle.write(f"spice ack annotate supervisor error: {exc}\n")
+            log_handle.flush()
+    return ack_summary
+
+
+def _publish_ack_feedback(
+    repo_root: Path, message_text: str, log_handle: TextIO
+) -> None:
+    ack_summary = archive_message_acks(repo_root, message_text, log_handle)
+    if ack_summary is None:
         return
     for kind, keys in (
         ("ack.archived", ack_summary.archived),
@@ -395,14 +430,6 @@ def _publish_ack_feedback(
             "ack.noop",
             message=ACK_NOOP_MESSAGE,
         )
-    if ack_summary.archived:
-        try:
-            _annotate_active_task_with_acks(
-                repo_root, message_text, ack_summary.archived, log_handle
-            )
-        except Exception as exc:  # surface-and-survive: retirement already landed
-            log_handle.write(f"spice ack annotate supervisor error: {exc}\n")
-            log_handle.flush()
 
 
 # Steering routinely amends the acceptance criteria or the very understanding
@@ -674,9 +701,16 @@ class SupervisedProseFold:
         immediately rather than holding it until the next record: a supervisor
         that archived an ACK one line late would nudge a lane for silence it
         had already broken.
+
+        Messages the reducer completes mid-push are consumed too. The stdout
+        supervisor hands over one record at a time and never completes one that
+        way, but a caller replaying several records in a single call -- the hook
+        backstop reading a transcript span -- would otherwise have every message
+        but the last dropped on the floor, silently retiring only its newest ACK.
         """
         for event in events:
-            self._reducer.push(event)
+            for message in self._reducer.push(event):
+                self._consume(message)
         for message in self._reducer.finish():
             self._consume(message)
 
