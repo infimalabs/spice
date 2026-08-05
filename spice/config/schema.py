@@ -138,6 +138,11 @@ _PRE_COMMIT_BUILTINS = _table(
 
 _POLICY = _table(
     (
+        # The argv the Rust publisher runs over every synthesized integration
+        # before it reaches the shared baseline. Python evaluates nothing here;
+        # the key is admitted so one repository configuration serves both
+        # runtimes across the cutover, as policy.taste rows already do.
+        "admission",
         "package_roots",
         "name_cluster_threshold",
         "exclude",

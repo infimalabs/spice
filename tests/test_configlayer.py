@@ -474,6 +474,33 @@ def test_unknown_key_validation_reaches_fixed_fields_beneath_dynamic_tables(
     assert outcome["message"].endswith(f"; did you mean {suggested_path}?")
 
 
+def test_repository_configuration_admits_the_rust_publisher_admission_argv(tmp_path):
+    # The Rust cutover tree sets this argv and every runtime reads the same
+    # repository configuration, so admitting the key has to survive the real
+    # layered load rather than only the schema table.
+    _write(
+        tmp_path / "spice.toml",
+        "[policy]\n"
+        "admission = [\n"
+        '    "cargo", "metadata", "--no-deps", "--offline", "--format-version", "1",\n'
+        "]\n",
+    )
+
+    loaded = layers.load_config(tmp_path)
+
+    assert loaded.effective["policy"]["admission"] == (
+        "cargo",
+        "metadata",
+        "--no-deps",
+        "--offline",
+        "--format-version",
+        "1",
+    )
+    assert loaded.source_for("policy.admission") == loaded.layer(
+        layers.REPOSITORY_SOURCE
+    )
+
+
 def test_distant_unknown_key_has_no_misleading_suggestion(tmp_path):
     _write(tmp_path / "spice.toml", "[say]\nopaque = true\n")
 

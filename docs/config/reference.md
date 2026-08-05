@@ -492,6 +492,7 @@ shared PATHPOL matchers.
 
 | Key | Meaning |
 | --- | --- |
+| `admission` | Argv the Rust publisher runs over every synthesized integration before it reaches the shared baseline; admitted so one repository configuration serves both runtimes, and evaluated by nothing in Python. |
 | `package_roots` | Python namespace-package roots; derived from packaging metadata when unset. |
 | `name_cluster_threshold` | Sibling prefix/suffix cluster size before namespace packaging is required. |
 | `exclude` | Tracked paths/globs skipped by study walkers. |
