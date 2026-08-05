@@ -14,8 +14,17 @@ from spice.agent import hookack, sidechannel, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, dashed_uuid
 from spice.agent.hookack import sweep_transcript_acks
 from spice.agent.paths import write_agent_thread_pointer
-from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ack_state_records
-from spice.mail.inbox import compose_inbox_text, pending_inbox_count, write_inbox_item
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
+    ack_state_records,
+)
+from spice.mail.inbox import (
+    collect_refused_inbox_items,
+    compose_inbox_text,
+    pending_inbox_count,
+    write_inbox_item,
+)
 
 KEY_A = "1jyG6kGq"
 KEY_B = "1jyG6kSc"
@@ -108,6 +117,26 @@ def test_sweep_retires_every_message_in_a_multi_record_span(tmp_path, monkeypatc
     assert sweep.archived == (KEY_A, KEY_B)
     assert sweep.messages == 2
     assert pending_inbox_count(tmp_path) == 0
+
+
+def test_hook_refuses_the_key_a_transcript_nack_refused(tmp_path, monkeypatch):
+    transcript = _seat_agent(tmp_path, monkeypatch)
+    _pend(tmp_path, KEY_A, "the lane refused this one and said why")
+    sweep_transcript_acks(tmp_path, stderr=io.StringIO())
+    _append_assistant_text(
+        transcript, f"NACK {KEY_A}: refusing because it conflicts with policy."
+    )
+    stderr = io.StringIO()
+
+    sweep = sweep_transcript_acks(tmp_path, stderr=stderr)
+
+    refused = collect_refused_inbox_items(tmp_path)
+    assert sweep.refused == (KEY_A,)
+    assert sweep.archived == ()
+    assert [(item.name, item.disposition) for item in refused] == [
+        (f"{KEY_A}.txt", ACK_DISPOSITION_REFUSED)
+    ]
+    assert f"nack.refused-at-hook keys={KEY_A}" in stderr.getvalue()
 
 
 def test_first_sweep_primes_past_history_the_supervisor_already_handled(
