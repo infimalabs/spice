@@ -16,7 +16,11 @@ from typing import Any, TypeVar
 from spice.mail.ackarchive import nack_response_is_honored
 from spice.mail.ackgrammar import blank_edge_span
 from spice.mail.feedback import supervisor_feedback_notices
-from spice.serve.images import image_markdown, view_image_markdown
+from spice.serve.images import (
+    image_is_tool_output,
+    image_markdown,
+    view_image_markdown,
+)
 from spice.serve.markdown import render_message_html
 from spice.serve.taskdirectives import (
     MarkedText,
@@ -331,8 +335,7 @@ class MessagePresenter:
     def contains_tool_output_image(events: Sequence[TranscriptEvent]) -> bool:
         """Whether an event pass carries a tool-output image."""
         return any(
-            isinstance(event, Image) and _is_tool_output_image(event)
-            for event in events
+            isinstance(event, Image) and image_is_tool_output(event) for event in events
         )
 
 
@@ -1050,15 +1053,11 @@ def _source_text(spans: Sequence[ClassifiedSpan]) -> str:
     return "\n\n".join(texts).strip()
 
 
-def _is_tool_output_image(image: Image) -> bool:
-    return image.tool_output_type == "function_call_output"
-
-
 def _image_source_kind(images: Sequence[Image]) -> str | None:
     """Where a locus' pictures came from, or None when it shows none."""
     if not images:
         return None
-    if any(_is_tool_output_image(image) for image in images):
+    if any(image_is_tool_output(image) for image in images):
         return "tool_output_image"
     if all(image.role in (None, "assistant") for image in images):
         return "assistant_image"
