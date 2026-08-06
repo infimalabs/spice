@@ -34,6 +34,31 @@ DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOT
 VIEW_IMAGE_TOOL = "view_image"
 
 
+def image_is_tool_output(image: Image) -> bool:
+    """Whether a tool handed this picture back, by any tool-call protocol.
+
+    `ToolOutputType` names every protocol a tool result can arrive on, so the
+    question is whether the image came back on one of them at all -- not which.
+    Naming a single member instead is how Codex moving its shell tool from
+    `function_call_output` to `custom_tool_call_output` silently reclassified
+    every screenshot it produced as a picture the assistant had sent.
+    """
+    return image.tool_output_type is not None
+
+
+def image_is_addressable(image: Image) -> bool:
+    """Whether an embedded picture can be fetched back out of its own line.
+
+    The one rule both directions consult: the presenter mints an embedded URL
+    only for an image this admits, and the fetcher selects only an image this
+    admits. It is written once because the two answers have to be the same
+    answer -- a URL minted for an image the fetcher then refuses is a broken
+    picture sitting in the operator's lane, which is exactly what a second copy
+    of this rule produced.
+    """
+    return image.role == "assistant" or image_is_tool_output(image)
+
+
 def image_markdown(
     images: Sequence[Image], *, worktree_id: str | None, source_offset: int | None
 ) -> str | None:
@@ -45,6 +70,8 @@ def image_markdown(
         embedded = DATA_IMAGE_RE.match(image.url) is not None
         if embedded:
             if image.payload_index is None or not worktree_id or source_offset is None:
+                continue
+            if not image_is_addressable(image):
                 continue
             target = embedded_image_url(
                 worktree_id,
@@ -91,10 +118,7 @@ def rollout_image_from_offset(
             if isinstance(event, Image)
             and event.at.offset == offset
             and event.payload_index == item_index
-            and (
-                event.role == "assistant"
-                or event.tool_output_type == "function_call_output"
-            )
+            and image_is_addressable(event)
         ),
         None,
     )

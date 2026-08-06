@@ -4,6 +4,7 @@ import base64
 import json
 
 from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER
+from spice.serve import images
 from spice.serve.images import (
     image_markdown,
     markdown_image_reference,
@@ -76,8 +77,20 @@ def test_embedded_url_addresses_a_picture_by_its_payload_index():
     """
     second = "data:image/gif;base64," + base64.b64encode(b"gif").decode("ascii")
     images = [
-        Image(at=AT, url=PNG_DATA_URL, content_type="input_image", payload_index=1),
-        Image(at=AT, url=second, content_type="input_image", payload_index=3),
+        Image(
+            at=AT,
+            url=PNG_DATA_URL,
+            content_type="input_image",
+            payload_index=1,
+            tool_output_type="custom_tool_call_output",
+        ),
+        Image(
+            at=AT,
+            url=second,
+            content_type="input_image",
+            payload_index=3,
+            tool_output_type="custom_tool_call_output",
+        ),
     ]
     markdown = image_markdown(images, worktree_id="wt", source_offset=9)
     assert markdown == (
@@ -147,7 +160,15 @@ def test_rollout_image_keeps_mixed_content_payload_index(tmp_path):
     )
 
 
-def test_rollout_image_rejects_unselected_payload_families(tmp_path):
+def test_rollout_image_serves_a_tool_result_and_rejects_an_operator_upload(tmp_path):
+    """Who produced the picture decides, not which tool protocol carried it.
+
+    Both records here are indexed pictures on their own line, so nothing but
+    provenance separates them: the tool result is fetchable and the picture the
+    operator pasted into the conversation is not. The custom-tool protocol used
+    to land on the rejecting side of this pair, which is how every Codex
+    screenshot became an address the presenter minted and the fetcher refused.
+    """
     user = json.dumps(
         {
             "type": "response_item",
@@ -175,15 +196,12 @@ def test_rollout_image_rejects_unselected_payload_families(tmp_path):
         rollout_image_from_offset(rollout, offset=0, item_index=0, driver=CODEX_DRIVER)
         is None
     )
-    assert (
-        rollout_image_from_offset(
-            rollout,
-            offset=custom_offset,
-            item_index=0,
-            driver=CODEX_DRIVER,
-        )
-        is None
-    )
+    assert rollout_image_from_offset(
+        rollout,
+        offset=custom_offset,
+        item_index=0,
+        driver=CODEX_DRIVER,
+    ) == (PNG_BYTES, "image/png")
 
 
 def test_claude_image_decodes_from_transcript_owner(tmp_path, monkeypatch):
@@ -343,3 +361,116 @@ def test_worktree_file_image_url_encodes_target():
         worktree_file_image_url("lane one", ".spice/shots/x.png")
         == "/api/work/trees/lane%20one/files/image?path=.spice/shots/x.png&missing=placeholder"
     )
+
+
+def _custom_tool_output_payload() -> dict:
+    """The shape Codex screenshots actually arrive in.
+
+    Copied from a live rollout: the shell tool moved onto the custom-tool
+    protocol, and its screenshot rides at payload index 1 behind the run's
+    text.
+    """
+    return {
+        "type": "custom_tool_call_output",
+        "call_id": "call-1",
+        "output": [
+            {"type": "input_text", "text": "Script completed\n"},
+            {
+                "type": "input_image",
+                "image_url": PNG_DATA_URL,
+                "detail": "original",
+            },
+        ],
+    }
+
+
+def test_custom_tool_call_output_image_fetches_back_from_its_own_line(tmp_path):
+    first = json.dumps({"type": "response_item", "payload": {"type": "reasoning"}})
+    second = json.dumps(
+        {"type": "response_item", "payload": _custom_tool_output_payload()}
+    )
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(f"{first}\n{second}\n", encoding="utf-8")
+    offset = len(first.encode("utf-8")) + 1
+    image = Image(
+        at=AT,
+        url=PNG_DATA_URL,
+        content_type="input_image",
+        tool_output_type="custom_tool_call_output",
+        payload_index=1,
+    )
+
+    markdown = image_markdown([image], worktree_id="wt", source_offset=offset)
+    fetched = rollout_image_from_offset(
+        rollout, offset=offset, item_index=1, driver=CODEX_DRIVER
+    )
+
+    assert markdown == (
+        f"![input_image](/api/work/trees/wt/messages/image?offset={offset}&item=1)"
+    )
+    assert fetched == (PNG_BYTES, "image/png")
+
+
+def test_one_addressability_rule_answers_the_emitter_and_the_fetcher(
+    tmp_path, monkeypatch
+):
+    record = json.dumps(
+        {"type": "response_item", "payload": _custom_tool_output_payload()}
+    )
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(f"{record}\n", encoding="utf-8")
+    image = Image(
+        at=AT,
+        url=PNG_DATA_URL,
+        content_type="input_image",
+        tool_output_type="custom_tool_call_output",
+        payload_index=1,
+    )
+    consultations: list[str | None] = []
+    real_rule = images.image_is_addressable
+
+    def counted_rule(candidate):
+        consultations.append(candidate.tool_output_type)
+        return real_rule(candidate)
+
+    monkeypatch.setattr(images, "image_is_addressable", counted_rule)
+
+    image_markdown([image], worktree_id="wt", source_offset=0)
+    rollout_image_from_offset(rollout, offset=0, item_index=1, driver=CODEX_DRIVER)
+
+    # Counting consultations, not comparing answers: two copies of this rule
+    # would agree on this image and register one call.
+    assert consultations == ["custom_tool_call_output", "custom_tool_call_output"]
+
+
+def test_a_picture_any_tool_handed_back_reads_as_tool_output(tmp_path):
+    record = json.dumps(
+        {
+            "timestamp": "2026-06-10T12:00:01.000Z",
+            "type": "response_item",
+            "payload": _custom_tool_output_payload(),
+        }
+    )
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(f"{record}\n", encoding="utf-8")
+
+    messages = read_assistant_messages(rollout, worktree_id="wt")
+
+    assert [message.source_kind for message in messages] == ["tool_output_image"]
+    assert 'href="/api/work/trees/wt/messages/image?offset=' in messages[0].display_html
+
+
+def test_a_picture_the_operator_supplied_publishes_no_address():
+    """An image no tool and no assistant produced stays unaddressed.
+
+    The emitter and the fetcher have to decline it together: a URL minted here
+    would resolve to nothing and render as a broken picture in the lane.
+    """
+    image = Image(
+        at=AT,
+        url=PNG_DATA_URL,
+        content_type="input_image",
+        role="user",
+        payload_index=1,
+    )
+    assert image_markdown([image], worktree_id="wt", source_offset=9) is None
