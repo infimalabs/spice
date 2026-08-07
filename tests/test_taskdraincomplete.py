@@ -13,12 +13,21 @@ import pytest
 
 from spice.tasks import claimstate, render
 
+NOW = "20260807T060000Z"
+LAPSED = "20260807T050000Z"
+FRESH = "20260807T070000Z"
 PARKED_ROWS = {
-    "active": [{"uuid": "held-a", "claim_by": "other-lane"}],
+    "active": [
+        {"uuid": "held-a", "claim_by": "other-lane", "claim_until": FRESH},
+        {"uuid": "lapsed-a", "claim_by": "gone-lane", "claim_until": LAPSED},
+    ],
     "blocked": [{"uuid": "blocked-a"}, {"uuid": "blocked-b"}],
     "waiting": [{"uuid": "waiting-a"}],
     "oops": [{"uuid": "oops-a"}],
 }
+EMPTY_COUNTS = dict.fromkeys(
+    [label for label, _reason in render.DRAIN_PARKED_REASONS], 0
+)
 
 
 @pytest.fixture
@@ -31,6 +40,7 @@ def parked_board(monkeypatch):
         return list(PARKED_ROWS["waiting"])
 
     monkeypatch.setattr(render.tw, "current_actor", lambda: "this-lane")
+    monkeypatch.setattr(render.tw, "now_iso", lambda: NOW)
     monkeypatch.setattr(render.lanes, "team_route_for_actor", lambda _actor: None)
     monkeypatch.setattr(
         render.alloc, "effective_route_filter_args", lambda _actor, _route: []
@@ -51,10 +61,23 @@ def test_drain_readout_names_every_parked_row_and_why_it_is_parked(parked_board)
 
     assert board == [
         "board: 1 active (held by other lanes), "
+        "1 stale (lapsed claims whose takeover did not land this pass), "
         "2 blocked (waiting on their dependencies), "
         "1 waiting (deferred until their scheduled time), "
         "1 oops (parked on the deferred triage board)"
     ]
+
+
+def test_drain_readout_counts_a_lapsed_claim_as_stale_not_as_held(parked_board):
+    """A lapsed claim is not "someone else's" -- the allocator takes those over.
+
+    `task status` splits active from stale, so folding a lapsed row into the
+    held count would both mislabel why it is parked and disagree with the very
+    readout an agent would check next.
+    """
+    counts = render._drain_parked_counts()
+
+    assert (counts["active"], counts["stale"]) == (1, 1)
 
 
 def test_drain_readout_calls_a_populated_board_the_expected_answer(parked_board):
@@ -97,9 +120,7 @@ def test_drain_readout_tells_the_agent_to_stop_hunting(parked_board):
 
 def test_drain_readout_reports_a_board_holding_nothing_else(monkeypatch):
     """A genuinely empty board still gets a board line, so the shape is stable."""
-    monkeypatch.setattr(
-        render, "_drain_parked_counts", lambda: dict.fromkeys(PARKED_ROWS, 0)
-    )
+    monkeypatch.setattr(render, "_drain_parked_counts", lambda: dict(EMPTY_COUNTS))
 
     lines = render.drain_complete_lines()
 
