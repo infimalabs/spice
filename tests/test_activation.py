@@ -178,6 +178,39 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "task_project_depth=public task project depth bounds" in text
 
 
+def test_activation_command_surface_refuses_to_wait_on_a_background_command():
+    """An agent that ends a turn on a background job stops the lane.
+
+    Nothing here restarts it: the completion the agent is waiting for never
+    reaches it, so the wait is spent by the operator noticing and restarting by
+    hand. The contract has to name the working alternative too, or an agent that
+    genuinely needs a long command has nowhere to put it.
+    """
+    text = "\n".join(activation_command_surface_lines(rtk_active=False))
+
+    assert "wake_contract=ending a turn stops the lane" in text
+    assert "not a backgrounded command finishing" in text
+    assert "whose exit is not a wake signal" in text
+    assert "costs the operator a manual restart" in text
+    assert "Run long work in the foreground" in text
+    assert "bring an already-backgrounded wait into the foreground" in text
+
+
+def test_activation_ties_message_cadence_to_command_cadence():
+    """Cadence guidance describes what an agent controls, not the wire.
+
+    Steering rides along with the output of commands the agent runs, so the
+    lever is how often it runs one. Naming a transport instead invites an agent
+    to reason about whether its own redirection could lose a message.
+    """
+    text = "\n".join(activation_command_surface_lines(rtk_active=False))
+
+    assert "steering arrives alongside the output of the commands you run" in text
+    assert "your command cadence is your message cadence" in text
+    assert "interact roughly every 30-60s" in text
+    assert "leaves live corrections waiting for your next command" in text
+
+
 def test_activation_command_surface_explains_pending_count_recovery():
     text = "\n".join(activation_command_surface_lines(rtk_active=False))
 

@@ -45,15 +45,26 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   and progress continuously so live steering can correct you mid-flight. Many
   small acknowledged steps beat a single late dump; if you notice yourself
   planning extensively before acting or batching ACKs and captures for a final
-  message, break that habit and start emitting now. Operator steering only
-  reaches you on shell-command stderr, so interact roughly every 30-60s: sparse
-  shell interaction means you miss live messages and wake cold. Take swings and
-  favor latency and experimentation over nailing it in one shot — live steering
-  reverses cheap mistakes; do not stop to ask what you can try and correct.
+  message, break that habit and start emitting now. Steering arrives alongside
+  the output of the commands you run, which makes your command cadence your
+  message cadence: interact roughly every 30-60s so live corrections land while
+  they still apply, rather than queueing up behind a long quiet stretch. Take
+  swings and favor latency and experimentation over nailing it in one shot —
+  live steering reverses cheap mistakes; do not stop to ask what you can try
+  and correct.
+- Never end a turn waiting to be woken. Finishing a turn stops the lane, and
+  nothing restarts it on your behalf — not a timer, and not the completion of a
+  command you sent to the background. A backgrounded command's exit is not a wake
+  signal here, so a turn ended on one costs the operator a manual restart. Run
+  long work in the foreground and let its own completion hand control back; a
+  gate, a build, or a full test suite that blocks for minutes is the cheap case,
+  and the wait is yours to spend rather than theirs. If something is already
+  backgrounded, bring the wait into the foreground with a blocking wait instead of
+  ending the turn on it.
 - Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Outside the operator decision boundaries below, power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
-- Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering and RTK rewrite routing before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
+- Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns steering delivery and RTK rewrite routing before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
 - Treat RTK as a command-output optimization, never a command prerequisite. If activation reports `rtk_status` mode `native`, run commands normally and spice preserves the native command path. Only when activation reports mode `active`, help RTK by running read-heavy commands as discrete commands and letting it compact the complete output.
 - Continue allocator-selected work with `spice task next` when command output or explicit steering calls for allocator continuation. Allocation is immediate and never blocks: it either hands you work or reports that the lane has none, and an empty lane is a turn boundary, not something to sit on. Direct `spice task claim` is exceptional and usually belongs to explicit operator direction, operator-directed oops triage, or claim repair.
 - If the allocator assigns a task whose plan is structurally incomplete — its acceptance-bearing children exist but lack dependency edges to the parent — repair it instead of forcing it forward: wire the children with `spice task depends <parent> --after <child...>`, then release the task with `spice task unclaim` so the allocator can re-route the repaired plan.
@@ -62,7 +73,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - A `claim.renewal-skipped` feedback line naming `reason=claimed_by_other` or `reason=different_worktree` means your claim left this lane while you were working it: the handle is no longer yours to finish. Stop editing, run `spice task next` for fresh work, and fold any commits you already made in with `spice task capture` instead of driving a row another tree now owns.
 - Use `TASK title=... | project=<stem.child> [| acceptance=...]` on its own line with the task-add batch format, or `spice task add --project <stem.child>`, for public backlog items. Repeat `acceptance=...` for multiple criteria. Omitting acceptance with no explicit flow starts public tasks in plan. `spice task status` and `spice task doctor` report the current public task project depth bounds. Omitting `--project` creates private `agent.*` scratch work. Use `spice task note` for small observations attached to a task.
 - When the tooling itself fights you (weak default, surprising output, a command that did not work as emitted), record it with `spice task oops "..." --severity ... --kind ...`. It files the friction as a task on the deferred `oops` triage board; capture the speed bump rather than silently working around it. When an operator directs you to triage one, claim the oops row itself with `spice task claim <handle>` instead of waking it into a public stem. Oops rows already use the plan flow. Public tasks created during that claim inherit `origin=task:<oops-handle>`; connect them as native dependencies with `spice task depends <oops-handle> --after <child...>`, then complete the oops plan phase. In-place triage preserves the original friction record as the provenance parent without a separate wake-path write.
-- Read side-channel steering before acting and acknowledge it through the normal agent workflow. Steering streams to each command's stderr (and shows a `pending=N` line even when repeat-suppressed); read it inline from command output and do not redirect stderr to a file (`2>...`), which hides it.
+- Read side-channel steering before acting and acknowledge it through the normal agent workflow. Steering streams alongside each command's output (and shows a `pending=N` line even when repeat-suppressed); read it inline.
 - You cannot land work without a claimed task: every local commit must be captured by a completed task, and `task next` refuses to start new work while an uncaptured commit or dirty tree exists. Claim a task before committing; if you end up with a loose commit, fold it into a task before continuing. If you arrive to a pre-existing dirty tree or uncommitted commits with no claim, claim a task first and commit into it, or run `spice task capture` to fold existing loose commits in — do not commit blindly, which forces a commit-then-capture detour.
 - Treat a dirty worktree as pressure toward commit, split, or cleanup.
 - Do not spawn sub-agents.

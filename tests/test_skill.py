@@ -54,6 +54,24 @@ def test_agent_guidance_routes_authority_gate_refusals_to_the_operator():
     assert "a `spice task oops`, or a route around the gate" in doctrine
 
 
+def test_packaged_skill_forbids_ending_a_turn_to_wait_for_a_background_command():
+    """The skill is where an agent learns that a finished turn is a stopped lane.
+
+    Backgrounding a long command and yielding looks like patience and is
+    actually an outage: the exit never arrives as a wake signal, so the lane
+    idles until the operator restarts it. The rule names the foreground
+    alternative and the recovery for work already sent to the background,
+    because a prohibition with no exit leaves an agent stuck either way.
+    """
+    skill = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+
+    assert "- Never end a turn waiting to be woken." in skill
+    assert "not a timer, and not the completion of a" in skill
+    assert "costs the operator a manual restart" in skill
+    assert "long work in the foreground" in skill
+    assert "bring the wait into the foreground with a blocking wait" in skill
+
+
 def _undecodable_packaged_skill(tmp_path, monkeypatch):
     """Point the packaged-source lookup at bytes this process cannot decode.
 
