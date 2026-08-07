@@ -196,6 +196,26 @@ def test_activation_command_surface_refuses_to_wait_on_a_background_command():
     assert "bring an already-backgrounded wait into the foreground" in text
 
 
+def test_activation_names_the_restart_that_recovers_a_held_task():
+    """A stopped lane loses its session, never the task it was holding.
+
+    Serve restarts a driven lane onto the claim it still holds, so the contract
+    has to say so -- an agent that believed a held task was stranded would reach
+    for the wrong repair. It also has to say what the restart does not do: it
+    replaces the agent, so it is a floor under a stopped lane and never a way to
+    be woken, and it hands back a task the agent does not want only if the agent
+    unclaims it.
+    """
+    text = "\n".join(activation_command_surface_lines(rtk_active=False))
+
+    assert "held_claim_restart_contract=a driven lane that stops while" in text
+    assert "holding a claim is restarted onto that same task" in text
+    assert "the claim is never released on your behalf" in text
+    assert "it recovers the task and not your context" in text
+    assert "a floor under a stopped lane rather than a way to be woken" in text
+    assert "hand it back with spice task unclaim" in text
+
+
 def test_activation_ties_message_cadence_to_command_cadence():
     """Cadence guidance describes what an agent controls, not the wire.
 

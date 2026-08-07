@@ -481,6 +481,7 @@ def _assert_drain_trace(calls, available_result, retry_due) -> None:
         ("actor", "bound-thread"),
         ("pending", ensure_kwargs),
         ("team", "bound-thread"),
+        ("held-claim", {"thread_id": "bound-thread", **ensure_kwargs}),
         ("available", {"thread_id": "bound-thread", **ensure_kwargs}),
         (
             "record",
@@ -600,10 +601,19 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
         ),
     )
 
+    def ensure_held_claim(_target, **kwargs):
+        calls.append(("held-claim", kwargs))
+        return None
+
     def ensure_available(_target, **kwargs):
         calls.append(("available", kwargs))
         return available_result
 
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_held_claim",
+        ensure_held_claim,
+    )
     monkeypatch.setattr(
         lifecycle,
         "ensure_agent_for_available_work",
@@ -639,12 +649,77 @@ def test_automatic_authority_falls_through_to_drain_work(monkeypatch) -> None:
     assert outcome.detail == "available-work:skipped:claim-lost"
     assert outcome.retry_after_seconds == RECONCILER_RETRY_AFTER_SECONDS
     _assert_drain_trace(calls, available_result, retry_due)
-    available_kwargs = calls[3][1]
+    available_kwargs = calls[4][1]
     assert isinstance(available_kwargs, dict)
     assert available_kwargs["retry_due"] is retry_due
     assert retry_due("lane-a", 5.0) is True
     assert retry_due("lane-a", 5.0) is False
     assert retry_due("lane-b", 5.0) is True
+
+
+@pytest.mark.parametrize(
+    ("lifetime", "expected_arms"),
+    [
+        # Restarting a lane onto a claim it already holds takes no new work, so
+        # it is open to every lane Serve drives -- while expanding onto the
+        # board stays the Drain-only arm it has always been.
+        ("Drain", ["held-claim", "available"]),
+        ("Drive", ["held-claim"]),
+        ("Steer", []),
+    ],
+)
+def test_held_claim_restart_reaches_every_driven_lifetime(
+    monkeypatch, lifetime, expected_arms
+) -> None:
+    store = SimpleNamespace(
+        agent_renewal_active=lambda _actor: False,
+        global_fast_mode_enabled=lambda: True,
+    )
+    _target, state = _automatic_authority_state(store)
+    arms: list[str] = []
+    monkeypatch.setattr(
+        lifecycle,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "bound-thread",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_actor_for_target",
+        lambda _store, _target, _thread_id: "thread:bound-thread",
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_pending_inbox",
+        lambda _target, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "team_facts_for_target",
+        lambda _store, _target, _thread_id: {"lifetime": lifetime},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_held_claim",
+        lambda _target, **_kwargs: arms.append("held-claim"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "ensure_agent_for_available_work",
+        lambda _target, **_kwargs: arms.append("available"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_started_renewal_from_ensure",
+        lambda _store, **_kwargs: "",
+    )
+    _patch_automatic_identity_projection(monkeypatch, lambda *_a, **_k: {})
+
+    _run_automatic_wake(
+        state,
+        AutomaticLifecycleWake("lane-a", LifecycleWakeSource.TASK, "task-revision-9"),
+    )
+
+    assert arms == expected_arms
 
 
 def test_duplicate_automatic_policy_wake_performs_lifecycle_writes_once(

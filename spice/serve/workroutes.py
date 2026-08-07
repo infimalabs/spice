@@ -21,7 +21,7 @@ from spice.serve.agentapi import (
     sent_steering_payload,
     sent_steering_response_payload,
 )
-from spice.serve.drive import drive_drain_queue_controls
+from spice.serve.drive import drive_drain_queue_controls, lifetime_drives_agent
 from spice.serve.lifecycle import (
     LifecycleOutcome,
     explicit_send_publication,
@@ -69,7 +69,7 @@ def _validate_work_tree_send_request(
     return (
         _WorkTreeSendRequest(
             text=text,
-            drive_agent=lifetime in {"Drive", "Drain"},
+            drive_agent=lifetime_drives_agent(lifetime),
             no_say=bool(payload.get("noSay")),
             attachments=payload.get("attachments"),
         ),

@@ -20,6 +20,7 @@ from typing import Any, Callable, TypeAlias
 
 from spice.agent.launchhistory import refusal_parking_retry_seconds
 from spice.errors import SpiceError
+from spice.serve.drive import lifetime_drives_agent
 from spice.serve.payload.identity import (
     projected_team_actor_for_target,
     record_started_renewal_from_ensure,
@@ -195,6 +196,16 @@ def ensure_agent_for_pending_inbox(
 ) -> dict[str, Any] | None:
     """Call the pending-inbox actuator without creating an import cycle."""
     from spice.serve.agentapi import ensure_agent_for_pending_inbox as ensure
+
+    return ensure(target, **kwargs)
+
+
+def ensure_agent_for_held_claim(
+    target: WorktreeTarget,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Call the held-claim actuator without creating an import cycle."""
+    from spice.serve.agentapi import ensure_agent_for_held_claim as ensure
 
     return ensure(target, **kwargs)
 
@@ -406,7 +417,19 @@ class LifecycleDecisionAuthority:
         }
         agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
         team_facts = team_facts_for_target(store, target, bound_thread_id)
-        if agent_ensure is None and team_facts.get("lifetime") == "Drain":
+        lifetime = str(team_facts.get("lifetime") or "")
+        if agent_ensure is None and lifetime_drives_agent(lifetime):
+            # A lane whose actor still holds a claim comes back on that claim
+            # first. Its row is not READY, so the available-work arm below is
+            # blind to exactly the task that should restart it. This arm takes
+            # no new work, so it is open to every lane Serve drives, not just
+            # the Drain lanes that may also expand onto the board.
+            agent_ensure = ensure_agent_for_held_claim(
+                target,
+                thread_id=bound_thread_id,
+                **ensure_kwargs,
+            )
+        if agent_ensure is None and lifetime == "Drain":
             agent_ensure = ensure_agent_for_available_work(
                 target,
                 thread_id=bound_thread_id,
