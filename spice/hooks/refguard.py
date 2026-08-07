@@ -11,6 +11,8 @@ from spice.process.git import git_lines, git_read, git_run
 
 ZERO_OID_CHARS = {"0"}
 PROTECTED_COMMIT_LIMIT = 5
+HEADS_PREFIX = "refs/heads/"
+SELF_REMOTE = "."
 
 
 @dataclass(frozen=True)
@@ -28,9 +30,7 @@ def handle_reference_transaction(
     current_ref = git_read(repo_root, "symbolic-ref", "--quiet", "HEAD")
     if not current_ref:
         return 0
-    upstream = git_read(
-        repo_root, "rev-parse", "--verify", "--quiet", "@{upstream}^{commit}"
-    )
+    upstream = _true_upstream_commit(repo_root, current_ref)
     if not upstream:
         return 0
 
@@ -51,6 +51,34 @@ def handle_reference_transaction(
                 "append-only commit instead of amending or resetting backwards."
             )
     return 0
+
+
+def _true_upstream_commit(repo_root: Path, current_ref: str) -> str:
+    """The published tip this guard protects: the branch's declared upstream.
+
+    Read from the repository's own local scope and from nowhere else. A lane
+    runs under a per-process git shadow that redefines the current branch's
+    upstream across two scopes at once: the generated system config supplies the
+    first `branch.<name>.merge` value, which is the one git tracking reads, and
+    the single-valued `branch.<name>.remote` takes a command-scope override to
+    `.`. Together those aim `@{upstream}` back at this very branch, which reads
+    every local commit as already published and refuses ordinary amends, so
+    `@{upstream}` is never consulted here -- not even as a fallback, because a
+    fallback is precisely where that shadow would come back in.
+
+    Which remote and which branch are whatever the pairing names; nothing here
+    assumes `origin` or `main`. A branch declaring no remote pairing has
+    published nothing, and the empty result lets the transaction through.
+    """
+    branch = current_ref.removeprefix(HEADS_PREFIX)
+    remote = git_read(
+        repo_root, "config", "--local", "--get", f"branch.{branch}.remote"
+    )
+    merge = git_read(repo_root, "config", "--local", "--get", f"branch.{branch}.merge")
+    if not remote or not merge or remote == SELF_REMOTE:
+        return ""
+    tracked = merge.removeprefix(HEADS_PREFIX)
+    return _commit_oid(repo_root, f"refs/remotes/{remote}/{tracked}")
 
 
 def _parse_updates(text: str) -> list[RefUpdate]:
