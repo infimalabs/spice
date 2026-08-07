@@ -22,6 +22,7 @@ from spice.hooks.initplan import (
     plan_initialization,
 )
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
+from spice.hooks.refguard import SELF_REMOTE, handle_reference_transaction
 from spice.studies.localpaths import (
     render_local_path_board,
     scan_local_path_literals,
@@ -35,6 +36,7 @@ from spice.studies.walk import (
 from tests.test_configtrusthelpers import approve_repository_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LANE_BRANCH = "main-i"
 
 
 def _write_mount_env_recorder(tmp_path):
@@ -619,6 +621,123 @@ def test_reference_transaction_allows_unmerged_current_branch_rewind(
 
     assert result.returncode == 0
     assert _git(repo, "rev-parse", "refs/heads/main").stdout.strip() == protected
+
+
+def _shadowed_lane(tmp_path, monkeypatch):
+    """A lane branch whose `@{upstream}` the agent git shadow aims at itself.
+
+    Reproduces all four definitions a live worktree carries. The generated
+    system config contributes the first `branch.<name>.merge` value, and git
+    tracking reads the first; the command scope overrides the single-valued
+    `branch.<name>.remote` to `.`, and single-valued keys take the last. The
+    local scope still holds the real `origin` + `refs/heads/main` pairing.
+    """
+    remote = tmp_path / "origin.git"
+    _run(["git", "init", "--bare", str(remote)])
+    repo = _git_init(tmp_path / "lane")
+    _git(repo, "remote", "add", "origin", str(remote))
+    published = _commit(repo, "story.txt", "published\n", "published")
+    _git(repo, "push", "origin", "main")
+    _git(repo, "fetch", "origin", "main")
+    _git(repo, "checkout", "-q", "-b", LANE_BRANCH)
+    _git(repo, "config", f"branch.{LANE_BRANCH}.remote", "origin")
+    _git(repo, "config", f"branch.{LANE_BRANCH}.merge", "refs/heads/main")
+    unpublished = _commit(repo, "story.txt", "published\nlocal\n", "local work")
+
+    system = tmp_path / "agent.gitconfig"
+    system.write_text(
+        f'[branch "{LANE_BRANCH}"]\n\tmerge = refs/heads/{LANE_BRANCH}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system))
+    shadow = (
+        (f"branch.{LANE_BRANCH}.merge", "refs/heads/main"),
+        (f"branch.{LANE_BRANCH}.remote", "."),
+    )
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(shadow)))
+    for index, (key, value) in enumerate(shadow):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{index}", key)
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{index}", value)
+    return repo, published, unpublished
+
+
+def _rewritten_commit(repo: Path, source: str, parent: str, message: str) -> str:
+    """`source`'s tree re-parented onto `parent`, an amend with no ref move."""
+    tree = _git(repo, "rev-parse", f"{source}^{{tree}}").stdout.strip()
+    parents = ["-p", parent] if parent else []
+    return _git(repo, "commit-tree", tree, *parents, "-m", message).stdout.strip()
+
+
+def test_reference_transaction_shadow_aims_the_branch_upstream_at_itself(
+    tmp_path, monkeypatch
+):
+    """Fidelity check; without this the two guard tests below prove nothing."""
+    repo, _, _ = _shadowed_lane(tmp_path, monkeypatch)
+
+    tracked = _git(repo, "rev-parse", "--symbolic-full-name", "@{upstream}")
+
+    assert tracked.stdout.strip() == f"refs/heads/{LANE_BRANCH}"
+
+
+def test_reference_transaction_allows_amending_an_unpublished_commit(
+    tmp_path, monkeypatch
+):
+    """Following the shadow would read local work as published and refuse this."""
+    repo, published, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    amended = _rewritten_commit(repo, unpublished, published, "amended")
+
+    state = handle_reference_transaction(
+        repo,
+        "prepared",
+        stdin_text=f"{unpublished} {amended} refs/heads/{LANE_BRANCH}\n",
+    )
+
+    assert state == 0
+
+
+def test_reference_transaction_refuses_dropping_a_published_commit(
+    tmp_path, monkeypatch
+):
+    """Reading past the shadow must not cost the guard its actual job."""
+    repo, published, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    orphan = _rewritten_commit(repo, unpublished, "", "drops published history")
+
+    with pytest.raises(SpiceError) as refusal:
+        handle_reference_transaction(
+            repo,
+            "prepared",
+            stdin_text=f"{unpublished} {orphan} refs/heads/{LANE_BRANCH}\n",
+        )
+
+    listed = str(refusal.value).split(f"branch refs/heads/{LANE_BRANCH}: ")[1]
+    short = _git(repo, "rev-parse", "--short", published).stdout.strip()
+    assert listed.split(". This is expected")[0] == short
+
+
+@pytest.mark.parametrize("remote", ["", SELF_REMOTE], ids=["unset", "self"])
+def test_reference_transaction_passes_a_lane_declaring_no_remote_upstream(
+    tmp_path, monkeypatch, remote
+):
+    """A branch pointed at nothing published nothing, so the amend goes through.
+
+    This is the case that makes `@{upstream}` unusable even as a fallback:
+    consulting it here is exactly where the self-aiming shadow comes back in.
+    """
+    repo, published, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    setting = f"branch.{LANE_BRANCH}.remote"
+    if remote:
+        _git(repo, "config", setting, remote)
+    else:
+        _git(repo, "config", "--unset", setting)
+    amended = _rewritten_commit(repo, unpublished, published, "amended")
+
+    state = handle_reference_transaction(
+        repo,
+        "prepared",
+        stdin_text=f"{unpublished} {amended} refs/heads/{LANE_BRANCH}\n",
+    )
+
+    assert state == 0
 
 
 def test_dev_serve_web_typecheck_parser_exposes_command():
