@@ -17,7 +17,13 @@ SELF_REMOTE = "."
 
 @dataclass(frozen=True)
 class RefUpdate:
-    old: str
+    """One line of the hook's stdin. The reported old value is not carried.
+
+    Git names three fields and `_parse_updates` still requires all three, but
+    the old one is whatever the caller declared rather than what the ref holds,
+    so keeping it would only invite reading it again.
+    """
+
     new: str
     ref: str
 
@@ -33,13 +39,21 @@ def handle_reference_transaction(
     upstream = _true_upstream_commit(repo_root, current_ref)
     if not upstream:
         return 0
+    # Git reports the old value the caller *declared*, and `git update-ref
+    # <ref> <new>` declares none, so that field arrives as the zero OID -- a
+    # rewind then reads as a ref creation. In the `prepared` state the ref
+    # itself still holds its pre-transaction value, so ask the repository. No
+    # tip to read means this branch is being created and abandons nothing.
+    current_tip = _commit_oid(repo_root, current_ref)
+    if not current_tip:
+        return 0
 
     text = sys.stdin.read() if stdin_text is None else stdin_text
     for update in _parse_updates(text):
         if update.ref != current_ref:
             continue
         protected = _abandoned_upstream_commits(
-            repo_root, old=update.old, new=update.new, upstream=upstream
+            repo_root, tip=current_tip, new=update.new, upstream=upstream
         )
         if protected:
             listed = ", ".join(_short_oid(repo_root, commit) for commit in protected)
@@ -89,25 +103,20 @@ def _parse_updates(text: str) -> list[RefUpdate]:
         parts = raw_line.split()
         if len(parts) != 3:
             raise SpiceError(f"malformed reference-transaction line {line_number}")
-        updates.append(RefUpdate(old=parts[0], new=parts[1], ref=parts[2]))
+        updates.append(RefUpdate(new=parts[1], ref=parts[2]))
     return updates
 
 
 def _abandoned_upstream_commits(
-    repo_root: Path, *, old: str, new: str, upstream: str
+    repo_root: Path, *, tip: str, new: str, upstream: str
 ) -> list[str]:
-    if _is_zero_oid(old):
-        return []
-    old_commit = _commit_oid(repo_root, old)
-    if not old_commit:
-        return []
     new_commit = "" if _is_zero_oid(new) else _commit_oid(repo_root, new)
     if new and not _is_zero_oid(new) and not new_commit:
         return []
-    if new_commit and _is_ancestor(repo_root, old_commit, new_commit):
+    if new_commit and _is_ancestor(repo_root, tip, new_commit):
         return []
 
-    merge_bases = git_lines(repo_root, "merge-base", "--all", old_commit, upstream)
+    merge_bases = git_lines(repo_root, "merge-base", "--all", tip, upstream)
     if not merge_bases:
         return []
     args = ["rev-list", f"--max-count={PROTECTED_COMMIT_LIMIT}", *merge_bases]
