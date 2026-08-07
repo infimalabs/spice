@@ -80,6 +80,31 @@ def test_packaged_skill_forbids_ending_a_turn_to_wait_for_a_background_command()
     assert "bring the wait into the foreground with a blocking wait" in skill
 
 
+def test_packaged_skill_names_the_floor_under_a_lane_that_stops_anyway():
+    """The rule above would otherwise read as "a stopped lane loses the task".
+
+    Serve restarts a driven lane onto the claim it still holds, so the skill has
+    to correct that reading while keeping the rule intact: the restart recovers
+    the task and not the session, which makes it a floor and not a wake signal.
+    An agent that lands back on work it does not want needs the way out named,
+    or the only exit it can see is stopping again.
+
+    Read with line breaks collapsed for the same reason as the rule above.
+    """
+    skill = " ".join(
+        lifecycle.packaged_skill_path().read_text(encoding="utf-8").split()
+    )
+
+    assert "One floor exists under a lane that stops anyway" in skill
+    assert (
+        "a driven lane still holding a claim is restarted onto that same task" in skill
+    )
+    assert "the claim is never released for you" in skill
+    assert "That restart brings back the task, not you" in skill
+    assert "it is a floor and never a wake signal" in skill
+    assert "`spice task unclaim` hands it back" in skill
+
+
 def _undecodable_packaged_skill(tmp_path, monkeypatch):
     """Point the packaged-source lookup at bytes this process cannot decode.
 

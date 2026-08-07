@@ -54,6 +54,12 @@ from spice.tasks import alloc, claimstate, identity, readiness
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 AVAILABLE_WORK_ENSURE_RETRY_SECONDS = 5.0
+# Restarting a lane onto its own held claim reserves nothing, so unlike
+# available work it is not self-limiting: the row stays held whether or not the
+# restart accomplishes anything. This bounds attempts at the available-work
+# cadence and leaves the rapid-death hold as the standing answer for a lane that
+# will not stay up.
+HELD_CLAIM_ENSURE_RETRY_SECONDS = AVAILABLE_WORK_ENSURE_RETRY_SECONDS
 # Start one stopped Drain lane when two tasks are currently ready: one for the
 # lane to claim and one left on the board. READY excludes active claims, so the
 # already-running lane count is not part of this backlog threshold.
@@ -291,6 +297,56 @@ def ensure_agent_for_pending_inbox(
     return payload
 
 
+def ensure_agent_for_held_claim(
+    target: WorktreeTarget,
+    *,
+    thread_id: str,
+    retry_due: _RetryDue | None = None,
+    retry_seconds: float = HELD_CLAIM_ENSURE_RETRY_SECONDS,
+    fast_mode: bool = False,
+    force_new: bool = False,
+) -> dict[str, Any] | None:
+    """Restart a stopped lane onto the task its own actor still holds.
+
+    An agent that stops mid-task takes the claim with it, and a claimed row is
+    not READY, so `ensure_agent_for_available_work` cannot see the one task that
+    would bring this lane back. Nothing else does either: no timer wakes a lane,
+    so the row sits held until an operator restarts the lane by hand.
+
+    A lane holding work is treated exactly like a lane just assigned some -- the
+    same ensure path, minus the claim, because the claim already exists. It is
+    deliberately not re-reserved as a `LaunchClaim`: that reservation exists to
+    hand a freshly claimed row back when the launch never reaches readiness, and
+    releasing this row would put a task back on the board whose worktree still
+    holds the stopped agent's unfinished changes. The claim stays put and the
+    agent decides -- it keeps working, or it runs `spice task unclaim`.
+    """
+    actor = canonical_thread_id(thread_id)
+    if not actor:
+        return _held_claim_skip("unbound")
+    if agent_status(target.repo_root).running:
+        return None
+    held = claimstate.active_claim(actor)
+    if held is None:
+        return None
+    handle = identity.render_handle(held)
+    if not _retry_is_due(target.id, retry_due=retry_due, retry_seconds=retry_seconds):
+        return _held_claim_skip("retry-wait", task_handle=handle)
+    refusal = _available_work_preflight_failure(target, task_handle=handle)
+    if refusal is not None:
+        refusal["trigger"] = "held-claim"
+        return refusal
+    payload, _status = agent_ensure_response_payload(
+        target,
+        fast_mode=fast_mode,
+        force_new=force_new,
+        automatic=True,
+        launch_preflighted=True,
+    )
+    payload.update({"trigger": "held-claim", "taskHandle": handle})
+    return payload
+
+
 def ensure_agent_for_available_work(
     target: WorktreeTarget,
     *,
@@ -486,6 +542,18 @@ def available_work_settle_remaining(
     if not candidates:
         return 0.0
     return settle_seconds - available_work_queue_age_seconds(candidates[0], now=now)
+
+
+def _held_claim_skip(reason: str, *, task_handle: str = "") -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "action": "skipped",
+        "trigger": "held-claim",
+        "reason": reason,
+    }
+    if task_handle:
+        payload["taskHandle"] = task_handle
+    return payload
 
 
 def _available_work_skip(

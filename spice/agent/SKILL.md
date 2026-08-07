@@ -60,7 +60,13 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   build, or a full test suite that blocks for minutes is the cheap case, because
   then the wait costs you seconds instead of costing the operator their attention.
   If something is already backgrounded, bring the wait into the foreground with a
-  blocking wait instead of ending the turn on it.
+  blocking wait instead of ending the turn on it. One floor exists under a lane
+  that stops anyway: a driven lane still holding a claim is restarted onto that
+  same task, because the claim is never released for you and the worktree keeps
+  whatever you were doing. That restart brings back the task, not you — a fresh
+  session pays for the whole context again — so it is a floor and never a wake
+  signal. If you return to a task you do not want, `spice task unclaim` hands it
+  back.
 - Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Outside the operator decision boundaries below, power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
