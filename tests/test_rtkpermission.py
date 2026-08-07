@@ -108,11 +108,6 @@ def _isolate_activation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
         agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=[]),
-    )
-    monkeypatch.setattr(
-        agent_cli,
         "_renew_activation_claim",
         lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )

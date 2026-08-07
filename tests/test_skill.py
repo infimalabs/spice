@@ -78,11 +78,6 @@ def _activation_packet(repo_root, monkeypatch):
     monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
     monkeypatch.setattr(
         agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=["current"]),
-    )
-    monkeypatch.setattr(
-        agent_cli,
         "_renew_activation_claim",
         lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
