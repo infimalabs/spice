@@ -62,13 +62,21 @@ def test_packaged_skill_forbids_ending_a_turn_to_wait_for_a_background_command()
     idles until the operator restarts it. The rule names the foreground
     alternative and the recovery for work already sent to the background,
     because a prohibition with no exit leaves an agent stuck either way.
+
+    The prose is hard-wrapped, so the rule is read with its line breaks
+    collapsed: every clause below spans a wrap somewhere, and asserting on the
+    wrapped bytes would make an editorial reflow look like a deleted rule.
     """
-    skill = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+    skill = " ".join(
+        lifecycle.packaged_skill_path().read_text(encoding="utf-8").split()
+    )
 
     assert "- Never end a turn waiting to be woken." in skill
-    assert "not a timer, and not the completion of a" in skill
-    assert "costs the operator a manual restart" in skill
-    assert "long work in the foreground" in skill
+    assert (
+        "not a timer, and not the exit of a command you sent to the background" in skill
+    )
+    assert "idles the lane until the operator notices and restarts it by hand" in skill
+    assert "Run long work in the foreground and let its own completion hand" in skill
     assert "bring the wait into the foreground with a blocking wait" in skill
 
 
