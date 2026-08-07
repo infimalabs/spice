@@ -74,14 +74,25 @@ def activation_command_surface_lines(*, rtk_active: bool) -> list[str]:
         ),
         (
             "interaction_contract=spice is a live shell loop, not a batch job: "
-            "operator steering reaches you only on shell-command stderr, so "
-            "interact roughly every 30-60s. Emit small narrated steps "
+            "steering arrives alongside the output of the commands you run, so "
+            "your command cadence is your message cadence -- interact roughly "
+            "every 30-60s. Emit small narrated steps "
             "continuously -- a short status line plus a real action -- instead "
             "of front-loading a long silent investigation and one big message. "
             "Run a command, say what you saw, take the next step; do not stop to "
             "ask permission when you can act and let live steering correct you. "
-            "Sparse shell interaction means you miss messages and wake cold. "
+            "Sparse shell interaction leaves live corrections waiting for your "
+            "next command. "
             "Favor latency and experimentation over nailing it in one shot"
+        ),
+        (
+            "wake_contract=ending a turn stops the lane and nothing restarts "
+            "it for you -- not a timer, and not a backgrounded command "
+            "finishing, whose exit is not a wake signal; a turn ended on one "
+            "costs the operator a manual restart. Run long work in the "
+            "foreground and let its own completion return control, and bring "
+            "an already-backgrounded wait into the foreground with a blocking "
+            "wait rather than ending a turn on it"
         ),
         "session=spice session briefing",
         "task_status=spice task status",
