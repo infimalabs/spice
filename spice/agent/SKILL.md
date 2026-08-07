@@ -53,14 +53,14 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   live steering reverses cheap mistakes; do not stop to ask what you can try
   and correct.
 - Never end a turn waiting to be woken. Finishing a turn stops the lane, and
-  nothing restarts it on your behalf — not a timer, and not the completion of a
-  command you sent to the background. A backgrounded command's exit is not a wake
-  signal here, so a turn ended on one costs the operator a manual restart. Run
-  long work in the foreground and let its own completion hand control back; a
-  gate, a build, or a full test suite that blocks for minutes is the cheap case,
-  and the wait is yours to spend rather than theirs. If something is already
-  backgrounded, bring the wait into the foreground with a blocking wait instead of
-  ending the turn on it.
+  nothing restarts it on your behalf — not a timer, and not the exit of a command
+  you sent to the background, which is never a wake signal here. A turn ended on
+  one idles the lane until the operator notices and restarts it by hand. Run long
+  work in the foreground and let its own completion hand control back; a gate, a
+  build, or a full test suite that blocks for minutes is the cheap case, because
+  then the wait costs you seconds instead of costing the operator their attention.
+  If something is already backgrounded, bring the wait into the foreground with a
+  blocking wait instead of ending the turn on it.
 - Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Outside the operator decision boundaries below, power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.

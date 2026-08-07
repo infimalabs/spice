@@ -88,11 +88,11 @@ def activation_command_surface_lines(*, rtk_active: bool) -> list[str]:
         (
             "wake_contract=ending a turn stops the lane and nothing restarts "
             "it for you -- not a timer, and not a backgrounded command "
-            "finishing, whose exit is not a wake signal; a turn ended on one "
-            "costs the operator a manual restart. Run long work in the "
-            "foreground and let its own completion return control, and bring "
-            "an already-backgrounded wait into the foreground with a blocking "
-            "wait rather than ending a turn on it"
+            "finishing, whose exit is never a wake signal here; the lane idles "
+            "until the operator notices and restarts it by hand. Run long work "
+            "in the foreground and let its own completion return control, and "
+            "bring an already-backgrounded wait into the foreground with a "
+            "blocking wait rather than ending a turn on it"
         ),
         "session=spice session briefing",
         "task_status=spice task status",

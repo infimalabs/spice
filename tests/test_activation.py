@@ -190,8 +190,8 @@ def test_activation_command_surface_refuses_to_wait_on_a_background_command():
 
     assert "wake_contract=ending a turn stops the lane" in text
     assert "not a backgrounded command finishing" in text
-    assert "whose exit is not a wake signal" in text
-    assert "costs the operator a manual restart" in text
+    assert "whose exit is never a wake signal here" in text
+    assert "the lane idles until the operator notices and restarts it by hand" in text
     assert "Run long work in the foreground" in text
     assert "bring an already-backgrounded wait into the foreground" in text
 
