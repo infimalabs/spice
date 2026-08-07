@@ -70,11 +70,6 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     )
     monkeypatch.setattr(
         agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: events.append("baseline") or SimpleNamespace(notes=["current"]),
-    )
-    monkeypatch.setattr(
-        agent_cli,
         "_renew_activation_claim",
         lambda *, actor=None: (
             events.append(f"renew:{actor}")
@@ -94,7 +89,6 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
         "bind",
         "hooks",
         "skill",
-        "baseline",
         "renew:actor-a",
     ]
     assert payload == {
@@ -106,7 +100,6 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     }
     assert "dev_hooks_detail=hook-row" in packet
     assert "claim_renewal=skipped no_active_claim" in packet
-    assert "baseline_refresh=current" in packet
 
 
 def test_activation_converges_an_already_stale_skill_by_raw_bytes(
@@ -131,11 +124,6 @@ def test_activation_converges_an_already_stale_skill_by_raw_bytes(
     monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
     monkeypatch.setattr(
         agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=["current"]),
-    )
-    monkeypatch.setattr(
-        agent_cli,
         "_renew_activation_claim",
         lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
@@ -145,40 +133,6 @@ def test_activation_converges_an_already_stale_skill_by_raw_bytes(
 
     assert target.read_bytes() == packaged_bytes
     assert f"skill={target.resolve()}" in packet
-    assert "baseline_refresh=current" in packet
-
-
-@pytest.mark.parametrize(
-    "condition",
-    ["dirty", "ahead", "diverged", "fetch-failed", "baseline-uninspectable"],
-)
-def test_activation_packet_names_a_skipped_launch_refresh(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    condition: str,
-) -> None:
-    monkeypatch.setattr(
-        agent_cli,
-        "_bind_activation_thread",
-        lambda _repo: SimpleNamespace(thread_id="actor-a"),
-    )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
-    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
-    monkeypatch.setattr(
-        agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=[f"skipped:{condition}"]),
-    )
-    monkeypatch.setattr(
-        agent_cli,
-        "_renew_activation_claim",
-        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
-    )
-    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
-
-    packet = agent_cli.render_activation_packet(tmp_path)
-
-    assert f"baseline_refresh=skipped:{condition}" in packet
 
 
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
@@ -279,11 +233,6 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
-    monkeypatch.setattr(
-        agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=["current"]),
-    )
     monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
     def fake_renew_claim(*, actor=None):
@@ -303,10 +252,11 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
     assert (
         "claim_renewal=renewed TASK-1k4Q5gJw until 2026-07-09T06:00:00.000000Z"
     ) in packet
-    assert "baseline_refresh=current" in packet
 
 
-def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeypatch):
+def test_activation_renews_a_claim_without_advancing_a_behind_tree(
+    tmp_path, monkeypatch
+):
     if shutil.which("task") is None:
         pytest.skip("Taskwarrior binary is required")
     repo = _repo_with_upstream(tmp_path)
@@ -316,10 +266,10 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
     config.set_backend(str(backend))
     try:
         handle = create.add(
-            "Activation claim follows fast-forward",
+            "Activation renews a claim without moving the tree",
             project="task.unit",
             origin="ack:1jN54zJJ",
-            acceptance=["claim metadata reflects post-refresh HEAD"],
+            acceptance=["claim metadata reflects the unmoved HEAD"],
         )
         claimed = identity.resolve(handle)
         claimstate.do_claim(
@@ -329,6 +279,9 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
             context_thread=ACTOR,
             lease_seconds=60.0,
         )
+        # Upstream really does advance here, and the lane really is clean: this
+        # is the exact state in which activation used to fast-forward. Whatever
+        # the packet says, HEAD has to be where the agent left it.
         old_head = _git(repo, "rev-parse", "HEAD")
         _advance_upstream(tmp_path)
 
@@ -347,12 +300,11 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
 
         packet = agent_cli.render_activation_packet(repo)
         row = identity.resolve(handle)
-        refreshed_head = _git(repo, "rev-parse", "HEAD")
+        head_after = _git(repo, "rev-parse", "HEAD")
 
-        assert old_head != refreshed_head
-        assert "baseline_refresh=updated working tree to the current baseline" in packet
+        assert head_after == old_head
         assert f"claim_renewal=renewed {handle} until " in packet
-        assert row["claim_head"] == refreshed_head
+        assert row["claim_head"] == old_head
         assert row["claim_lease_seconds"] == "60"
     finally:
         config.set_backend(None)
@@ -366,11 +318,6 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
-    monkeypatch.setattr(
-        agent_cli,
-        "_refresh_activation_baseline",
-        lambda _repo: SimpleNamespace(notes=["current"]),
-    )
     monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
     monkeypatch.setattr(
         agent_cli,
@@ -383,7 +330,6 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
     packet = agent_cli.render_activation_packet(tmp_path)
 
     assert "claim_renewal=failed backend_error detail=backend offline" in packet
-    assert "baseline_refresh=current" in packet
 
 
 def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
@@ -427,11 +373,6 @@ def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
             agent_cli, "_materialize_activation_skill", lambda _repo: None
         )
         monkeypatch.setattr(
-            agent_cli,
-            "_refresh_activation_baseline",
-            lambda _repo: SimpleNamespace(notes=["current"]),
-        )
-        monkeypatch.setattr(
             agent_cli, "_activation_steering_token", lambda _repo: "tok"
         )
 
@@ -448,11 +389,73 @@ def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
         assert (
             "steering_authenticity=real spice steering reaches you on shell" in packet
         )
-        assert "baseline_refresh=current" in packet
         assert row["claim_lease_seconds"] == "unreadable"
         assert row["claim_by"] == ACTOR
     finally:
         config.set_backend(None)
+
+
+def test_repeated_activation_leaves_a_lane_behind_upstream_byte_identical(
+    tmp_path, monkeypatch
+):
+    """The post-compaction path: the skill replays, so activation runs again.
+
+    A compaction re-delivers the skill invocation whose first step is `spice
+    agent activation`, so this runs mid-session between an agent's own
+    commands, against the clean tree a lane has just after it commits.
+    Upstream is genuinely ahead here and the safe advance is genuinely
+    available, so a fetch would move `origin/main` and a fast-forward would
+    rewrite README.md -- the closing fetch proves both are detectable rather
+    than letting an unmoved ref stand in for an unreachable upstream.
+    """
+    repo = _repo_with_upstream(tmp_path)
+    _advance_upstream(tmp_path)
+    monkeypatch.chdir(repo)
+    _stub_activation_side_effects(monkeypatch)
+    before = _worktree_manifest(repo)
+    before_head = _git(repo, "rev-parse", "HEAD")
+    before_tracking = _git(repo, "rev-parse", "origin/main")
+
+    for _ in range(3):
+        agent_cli.render_activation_packet(repo)
+
+    assert _worktree_manifest(repo) == before
+    assert _git(repo, "rev-parse", "HEAD") == before_head
+    assert _git(repo, "rev-parse", "origin/main") == before_tracking
+    _run(repo, "git", "fetch", "origin")
+    assert _git(repo, "rev-parse", "origin/main") != before_tracking
+
+
+def _stub_activation_side_effects(monkeypatch) -> None:
+    """Silence the packet's declared writers so only git is left to observe.
+
+    Activation legitimately writes lane state, git hooks, and the generated
+    skill file -- that last one lands in the worktree, so it would move the
+    manifest on its own. Each is stubbed by name, which also means a new writer
+    added later shows up as movement rather than hiding behind these.
+    """
+    monkeypatch.setattr(
+        agent_cli,
+        "_bind_activation_thread",
+        lambda _repo: SimpleNamespace(thread_id=ACTOR),
+    )
+    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
+    monkeypatch.setattr(
+        agent_cli,
+        "_renew_activation_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
+
+
+def _worktree_manifest(repo: Path) -> dict[str, bytes]:
+    """Every tracked-tree byte, so a rewritten file cannot hide behind HEAD."""
+    return {
+        str(path.relative_to(repo)): path.read_bytes()
+        for path in sorted(repo.rglob("*"))
+        if path.is_file() and ".git" not in path.parts
+    }
 
 
 def test_package_json_makes_node_playwright_available():

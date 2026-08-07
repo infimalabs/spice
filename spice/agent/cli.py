@@ -352,12 +352,6 @@ def _materialize_activation_skill(repo_root: Path) -> Path | None:
     return available_skill_path(repo_root, required=False)
 
 
-def _refresh_activation_baseline(repo_root: Path):
-    from spice.tasks.git.boundaries import fast_forward_if_safe
-
-    return fast_forward_if_safe(repo_root)
-
-
 def _renew_activation_claim(*, actor: str | None):
     from spice.tasks.claimstate import renew_claim_or_report
 
@@ -383,7 +377,6 @@ def render_activation_packet(repo_root: Path) -> str:
     status = _bind_activation_thread(repo_root)
     hook_rows = _install_activation_hooks(repo_root)
     skill = _materialize_activation_skill(repo_root)
-    refresh = _refresh_activation_baseline(repo_root)
     claim_renewal = _renew_activation_claim(actor=status.thread_id or None)
     token = _activation_steering_token(repo_root)
     return "\n".join(
@@ -404,7 +397,6 @@ def render_activation_packet(repo_root: Path) -> str:
             *(f"dev_hooks_detail={row}" for row in hook_rows),
             *((f"skill={skill}",) if skill else ()),
             claimstate.claim_renewal_status_line(claim_renewal),
-            *(f"baseline_refresh={note}" for note in refresh.notes),
             *activation_git_hygiene_lines(),
             *activation_source_root_lines(repo_root),
             *activation_browser_validation_lines(),

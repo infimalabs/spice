@@ -14,12 +14,21 @@ control-plane boundaries:
   overlap with the baseline, never as a sync with an upstream.
 * **agent launch** (`fast_forward_if_safe`): opportunistically fast-forward a
   clean, uncommitted lane immediately before its supervisor or native harness
-  starts — the very same safe advance activation applies from inside the
-  checkout, so both pre-run refreshes share one code path. It never raises:
-  dirty, locally committed, divergent, or unfetchable lanes keep their work
-  exactly as-is and start with an explicit skip note. A lane is thus never
-  locked out — nor its tree mangled or reset — by its own checkout or an
-  unavailable remote; the agent it starts reconciles whatever the advance skips.
+  starts. It never raises: dirty, locally committed, divergent, or unfetchable
+  lanes keep their work exactly as-is and start with an explicit skip note. A
+  lane is thus never locked out — nor its tree mangled or reset — by its own
+  checkout or an unavailable remote; the agent it starts reconciles whatever
+  the advance skips.
+
+`spice agent activation` is deliberately *not* a fourth boundary. It once ran
+this same advance from inside the checkout, on the theory that it was the
+launch refresh seen from the other side. It is not: launch already advances
+exactly once per start, so activation's copy was redundant at startup, and
+activation is a command the agent re-runs mid-session — the harness replays the
+skill invocation that calls it after every compaction. That turned a status
+packet into a fetch, a fast-forward, a bytecode purge, and a skill rewrite
+landing under a live agent between two of its own commands. Git moves when the
+control plane says so, never because someone asked what state it was in.
 
 The default baseline is the current branch's user-managed merge target on the
 conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
@@ -265,10 +274,9 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
     """Bring the tree up to the current baseline when, and only when, it is
     safe.
 
-    The single safe advance shared by the two opportunistic pre-run refreshes:
-    the control plane's **agent launch** (from the globally installed spice,
-    before ``python -m spice`` and the native harness import from the checkout)
-    and the agent's own **activation** (from inside the checkout). Lenient
+    The control plane's **agent launch** refresh, run from the globally
+    installed spice before ``python -m spice`` and the native harness import
+    from the checkout. Lenient
     sibling of :func:`prepare_for_claim`: it applies the same rules (clean tree,
     zero commits ahead, fast-forward-only) but never raises, so a lane always
     starts and its tree is never mangled or reset. Every outcome is reported as

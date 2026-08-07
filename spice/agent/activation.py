@@ -2,9 +2,14 @@
 
 `spice agent activation` is the first command a freshly started worktree
 agent runs (the skill mandates it). It binds the ambient thread id into the
-lane's agent state, installs the git hooks, refreshes the baseline when safe,
-and prints the working contract: git hygiene, validation expectations, and
-the command surface that is the agent's source of truth.
+lane's agent state, installs the git hooks, and prints the working contract:
+git hygiene, validation expectations, and the command surface that is the
+agent's source of truth.
+
+It does not move the tree. "First command a freshly started agent runs" is
+only half true -- the skill invocation that calls it is replayed after every
+compaction, so activation runs again and again inside one session, between an
+agent's own commands. Anything it did to git would land there.
 """
 
 from __future__ import annotations
