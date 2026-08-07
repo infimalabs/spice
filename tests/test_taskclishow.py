@@ -437,6 +437,11 @@ def test_task_next_renders_active_review_claim_packet(monkeypatch):
     assert output.endswith("drive: continue TASK-test")
 
 
+def _patch_drain_lines(monkeypatch, lines=("no available tasks",)):
+    """Stand in for the board readout so renewal tests stay about renewal."""
+    monkeypatch.setattr(render, "drain_complete_lines", lambda: list(lines))
+
+
 def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
     monkeypatch.setattr(
         render.claimstate,
@@ -444,13 +449,14 @@ def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
         lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
     monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+    _patch_drain_lines(monkeypatch)
 
     output = render.render_next()
 
     assert output == "\n".join(
         [
             "claim_renewal=skipped no_active_claim",
-            "no available tasks; run spice task status",
+            "no available tasks",
         ]
     )
 
@@ -464,13 +470,14 @@ def test_task_next_reports_failed_claim_renewal_detail(monkeypatch):
         ),
     )
     monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+    _patch_drain_lines(monkeypatch)
 
     output = render.render_next()
 
     assert output == "\n".join(
         [
             "claim_renewal=failed backend_error detail=backend offline",
-            "no available tasks; run spice task status",
+            "no available tasks",
         ]
     )
 

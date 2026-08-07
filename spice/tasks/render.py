@@ -630,7 +630,7 @@ def _render_next_result(
         return "\n".join(
             [
                 claimstate.claim_renewal_status_line(renewal),
-                "no available tasks; run spice task status",
+                *drain_complete_lines(),
             ]
         )
     rendered = identity.render_handle(row)
@@ -644,6 +644,77 @@ def _render_next_result(
         ops.claim_drive_line(rendered),
     ]
     return "\n".join(lines)
+
+
+# Every category a row can sit in while being no use to this lane, paired with
+# the reason it is parked there. The readout names them because an agent told
+# only "no available tasks" against a board it can see is not empty concludes
+# the allocator missed something, and goes looking for a row to unstick by hand.
+DRAIN_PARKED_REASONS = (
+    ("active", "held by other lanes"),
+    ("blocked", "waiting on their dependencies"),
+    ("waiting", "deferred until their scheduled time"),
+    ("oops", "parked on the deferred triage board"),
+)
+
+
+def _drain_parked_counts() -> dict[str, int]:
+    """How many rows sit on the board that the allocator will not hand over."""
+    actor = tw.current_actor()
+    scope = alloc.effective_route_filter_args(actor, lanes.team_route_for_actor(actor))
+    others_active = [
+        r
+        for r in alloc.visible_active_rows(actor, scope=scope)
+        if str(r.get("claim_by") or "") != actor
+    ]
+    # -ACTIVE for the same reason status uses it: a claimed deferred task keeps
+    # its wait and would be counted as both held and waiting.
+    waiting = [
+        r
+        for r in alloc.visible_rows_in_scope(["status:waiting", "-ACTIVE"], scope)
+        if not alloc.is_hidden(r)
+    ]
+    blocked = alloc.visible_rows_in_scope(["status:pending", "+BLOCKED"], scope)
+    return {
+        "active": len(others_active),
+        "blocked": len(blocked),
+        "waiting": len(waiting),
+        "oops": len(alloc.oops_rows()),
+    }
+
+
+def drain_complete_lines() -> list[str]:
+    """The readout for a lane the allocator had nothing for.
+
+    This is the one condition under which a lane is told to stop, so it says so
+    outright instead of leaving the agent to infer it. It reports the board
+    rather than pointing at `task status`, because sending an agent to look at
+    the rows is what starts the hunt this readout exists to end.
+    """
+    counts = _drain_parked_counts()
+    parked = [
+        f"{counts[label]} {label} ({reason})"
+        for label, reason in DRAIN_PARKED_REASONS
+        if counts[label]
+    ]
+    board = ", ".join(parked) if parked else "nothing else visible to this lane"
+    return [
+        "no available tasks",
+        f"board: {board}",
+        (
+            "drain complete: the allocator ran and had nothing to give this lane. "
+            "Those rows are parked on purpose, so a board that still has entries "
+            "on it is the expected answer here, not an error, not a lookup "
+            "failure, and not work you failed to pick up. There is nothing for "
+            "you to do."
+        ),
+        (
+            "spin down: stop here rather than hunting the board for something to "
+            "unstick or unblock. A dry allocator immediately after spice task "
+            "next is the only thing that ever releases you; a board that merely "
+            "looks quiet, or a low pending count, never does on its own."
+        ),
+    ]
 
 
 def _row_problems(r: dict[str, Any]) -> list[str]:
