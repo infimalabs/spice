@@ -96,6 +96,33 @@ def test_held_claim_restart_leaves_a_lane_holding_nothing_to_the_board(
     assert trace == []
 
 
+def test_held_claim_restart_leaves_the_attempt_unspent_when_nothing_is_held(
+    tmp_path, monkeypatch
+):
+    """One attempt bucket serves every arm for a lane, and asking spends it.
+
+    So this arm has to read the claim before it consults the gate. Reversed,
+    a lane holding nothing would spend its own attempt on a pass it was never
+    going to take, and the available-work arm right behind it would find the
+    lane throttled -- turning "nothing held here" into "no new work either".
+    """
+    target = _target(_repo(tmp_path))
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    _patch_held_claim(monkeypatch, None)
+    gate = _retry_gate()
+
+    payload = agentapi.ensure_agent_for_held_claim(
+        target,
+        thread_id=THREAD_A,
+        retry_due=gate,
+        retry_seconds=agentapi.HELD_CLAIM_ENSURE_RETRY_SECONDS,
+    )
+
+    assert payload is None
+    # The gate still answers True, so the arm behind this one can still launch.
+    assert gate(target.id, agentapi.HELD_CLAIM_ENSURE_RETRY_SECONDS) is True
+
+
 def test_held_claim_restart_leaves_a_running_lane_alone(tmp_path, monkeypatch):
     target = _target(_repo(tmp_path))
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)

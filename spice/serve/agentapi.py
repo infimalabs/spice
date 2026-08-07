@@ -326,15 +326,20 @@ def ensure_agent_for_held_claim(
         return _held_claim_skip("unbound")
     if agent_status(target.repo_root).running:
         return None
+    # The claim is read before the attempt gate is asked, not after: one gate
+    # bucket serves every arm for this lane, and consulting it spends the lane's
+    # attempt. Asking first would let a lane holding nothing throttle the
+    # available-work arm behind it for a pass this arm was never going to take.
     held = claimstate.active_claim(actor)
     if held is None:
         return None
     handle = identity.render_handle(held)
     if not _retry_is_due(target.id, retry_due=retry_due, retry_seconds=retry_seconds):
         return _held_claim_skip("retry-wait", task_handle=handle)
-    refusal = _available_work_preflight_failure(target, task_handle=handle)
+    refusal = _launch_preflight_failure(
+        target, trigger="held-claim", task_handle=handle
+    )
     if refusal is not None:
-        refusal["trigger"] = "held-claim"
         return refusal
     payload, _status = agent_ensure_response_payload(
         target,
@@ -431,7 +436,9 @@ def _dispatch_available_work_candidate(
 ) -> dict[str, Any]:
     task_uuid = identity.uuid_of(chosen)
     handle = identity.render_handle(chosen)
-    refusal = _available_work_preflight_failure(target, task_handle=handle)
+    refusal = _launch_preflight_failure(
+        target, trigger="available-work", task_handle=handle
+    )
     if refusal is not None:
         return refusal
     site = claimstate.ClaimSite(
@@ -472,9 +479,14 @@ def _dispatch_available_work_candidate(
     return payload
 
 
-def _available_work_preflight_failure(
-    target: WorktreeTarget, *, task_handle: str
+def _launch_preflight_failure(
+    target: WorktreeTarget, *, trigger: str, task_handle: str
 ) -> dict[str, Any] | None:
+    """Render the refusal an automatic launch preflight raises, or None.
+
+    Shared by every arm that preflights before launching, so the trigger is
+    the caller's to name -- a refusal has to say which decision it refused.
+    """
     try:
         preflight_automatic_agent_launch(target.repo_root)
     except AgentRestartRefusedError as exc:
@@ -492,7 +504,7 @@ def _available_work_preflight_failure(
         payload = agent_ensure_failure_payload(exc)
     else:
         return None
-    payload.update({"trigger": "available-work", "taskHandle": task_handle})
+    payload.update({"trigger": trigger, "taskHandle": task_handle})
     return payload
 
 
