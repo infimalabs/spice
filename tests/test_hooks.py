@@ -37,6 +37,8 @@ from tests.test_configtrusthelpers import approve_repository_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LANE_BRANCH = "main-i"
+UNBORN_BRANCH = "main-i-next"
+ZERO_OID = "0000000000000000000000000000000000000000"
 
 
 def _write_mount_env_recorder(tmp_path):
@@ -735,6 +737,48 @@ def test_reference_transaction_passes_a_lane_declaring_no_remote_upstream(
         repo,
         "prepared",
         stdin_text=f"{unpublished} {amended} refs/heads/{LANE_BRANCH}\n",
+    )
+
+    assert state == 0
+
+
+def test_reference_transaction_refuses_a_rewind_reported_with_a_zero_old_value(
+    tmp_path, monkeypatch
+):
+    """`git update-ref <ref> <new>` declares no old value, so git reports zeros.
+
+    Taking that field at its word reads a rewind as a ref creation, which is
+    the one shape that abandons published work without the caller naming a tip.
+    """
+    repo, published, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    orphan = _rewritten_commit(repo, unpublished, "", "drops published history")
+
+    with pytest.raises(SpiceError) as refusal:
+        handle_reference_transaction(
+            repo,
+            "prepared",
+            stdin_text=f"{ZERO_OID} {orphan} refs/heads/{LANE_BRANCH}\n",
+        )
+
+    listed = str(refusal.value).split(f"branch refs/heads/{LANE_BRANCH}: ")[1]
+    short = _git(repo, "rev-parse", "--short", published).stdout.strip()
+    assert listed.split(". This is expected")[0] == short
+
+
+def test_reference_transaction_passes_creating_the_current_branch(
+    tmp_path, monkeypatch
+):
+    """A pairing may be declared before the ref exists; an unborn branch holds
+    no tip, so the zero old value means here exactly what it claims."""
+    repo, published, _ = _shadowed_lane(tmp_path, monkeypatch)
+    _git(repo, "config", f"branch.{UNBORN_BRANCH}.remote", "origin")
+    _git(repo, "config", f"branch.{UNBORN_BRANCH}.merge", "refs/heads/main")
+    _git(repo, "symbolic-ref", "HEAD", f"refs/heads/{UNBORN_BRANCH}")
+
+    state = handle_reference_transaction(
+        repo,
+        "prepared",
+        stdin_text=f"{ZERO_OID} {published} refs/heads/{UNBORN_BRANCH}\n",
     )
 
     assert state == 0
