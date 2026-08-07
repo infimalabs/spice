@@ -784,6 +784,56 @@ def test_reference_transaction_passes_creating_the_current_branch(
     assert state == 0
 
 
+@pytest.mark.parametrize(
+    "remote",
+    ["origin", "https://example.test/spice.git"],
+    ids=["never-fetched", "bare-url"],
+)
+def test_reference_transaction_refuses_a_rewind_it_cannot_judge(
+    tmp_path, monkeypatch, remote
+):
+    """A pairing that resolves to nothing must not read the same as no pairing.
+
+    Both once returned an empty upstream and took the same silent permissive
+    exit, so a lane that could not be checked reported exactly what a lane with
+    nothing to protect reports.
+    """
+    repo, _, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    _git(repo, "config", f"branch.{LANE_BRANCH}.remote", remote)
+    orphan = _rewritten_commit(repo, unpublished, "", "drops published history")
+
+    with pytest.raises(SpiceError) as refusal:
+        handle_reference_transaction(
+            repo,
+            "prepared",
+            stdin_text=f"{unpublished} {orphan} refs/heads/{LANE_BRANCH}\n",
+        )
+
+    assert f"refs/remotes/{remote}/main" in str(refusal.value)
+
+
+def test_reference_transaction_passes_an_append_it_need_not_judge(
+    tmp_path, monkeypatch
+):
+    """An append gives up no history whatever the unresolvable upstream holds.
+
+    Refusing it would strand a lane whose remote is merely unfetched, unable to
+    commit at all.
+    """
+    repo, _, unpublished = _shadowed_lane(tmp_path, monkeypatch)
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    appended = _rewritten_commit(repo, unpublished, unpublished, "appended")
+
+    state = handle_reference_transaction(
+        repo,
+        "prepared",
+        stdin_text=f"{unpublished} {appended} refs/heads/{LANE_BRANCH}\n",
+    )
+
+    assert state == 0
+
+
 def test_dev_serve_web_typecheck_parser_exposes_command():
     from spice.cli.parser import build_parser
 
