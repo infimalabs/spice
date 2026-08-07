@@ -652,6 +652,7 @@ def _render_next_result(
 # the allocator missed something, and goes looking for a row to unstick by hand.
 DRAIN_PARKED_REASONS = (
     ("active", "held by other lanes"),
+    ("stale", "lapsed claims whose takeover did not land this pass"),
     ("blocked", "waiting on their dependencies"),
     ("waiting", "deferred until their scheduled time"),
     ("oops", "parked on the deferred triage board"),
@@ -659,10 +660,17 @@ DRAIN_PARKED_REASONS = (
 
 
 def _drain_parked_counts() -> dict[str, int]:
-    """How many rows sit on the board that the allocator will not hand over."""
+    """How many rows sit on the board that the allocator will not hand over.
+
+    Stale claims are split out rather than folded into the held count, because
+    a lapsed claim is not "someone else's": the allocator takes those over when
+    it can, so one still sitting here lost a race or is hidden. It is also the
+    split `task status` reports, and the two readouts have to agree.
+    """
     actor = tw.current_actor()
+    now = tw.now_iso()
     scope = alloc.effective_route_filter_args(actor, lanes.team_route_for_actor(actor))
-    others_active = [
+    peers = [
         r
         for r in alloc.visible_active_rows(actor, scope=scope)
         if str(r.get("claim_by") or "") != actor
@@ -675,8 +683,10 @@ def _drain_parked_counts() -> dict[str, int]:
         if not alloc.is_hidden(r)
     ]
     blocked = alloc.visible_rows_in_scope(["status:pending", "+BLOCKED"], scope)
+    stale = [r for r in peers if _is_stale_claim(r, now)]
     return {
-        "active": len(others_active),
+        "active": len(peers) - len(stale),
+        "stale": len(stale),
         "blocked": len(blocked),
         "waiting": len(waiting),
         "oops": len(alloc.oops_rows()),
