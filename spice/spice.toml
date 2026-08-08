@@ -35,7 +35,14 @@ executable = "rtk"
 [wrappers.common.rtk]
 argv = ["rtk"]
 match = [
-  # Only rg-native flags divert grep to ripgrep. A grep-dialect command (bare
+  # This route outlived the rg-to-grep collapse that first motivated it. From
+  # 0.45.0 RTK sends a written rg to its own rg frontend, but it still forwards
+  # rg-only flags written on grep onto the grep frontend: 'grep --files docs'
+  # rewrites to 'rtk grep --files docs', where platform grep exits 2 with
+  # "option `--files' is ambiguous" and --glob exits 2 as an unrecognized option.
+  # The route turns that hard failure into the search the caller asked for, so it
+  # still earns its place. Only rg-native flags divert grep to ripgrep, though.
+  # A grep-dialect command (bare
   # directory operand, -r/-R recursion) must not reach rg, because grep and rg
   # share short flags with different meanings (-r=--replace, -E=--encoding,
   # -L=--follow, -U=--multiline) and forwarding argv untranslated silently
@@ -44,6 +51,23 @@ match = [
   # operand recurses through native grep, which runs the intended search
   # correctly without ever translating a grep short flag against rg's dialect.
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "--pcre2", "-g", "--glob", "--glob=*"], argv = ["rg"] },
+  # A search written as rg reaches this frontend whole, because the supported RTK
+  # releases rewrite rg onto an rg frontend rather than collapsing it onto grep.
+  # That frontend drops the path each match came from in exactly one shape: a
+  # search carrying no path operand, which is the recursive search of the working
+  # directory. It then answers the right set of matches as bare 'LINE:text' lines
+  # naming no file to open. A search that names a directory keeps its paths, a
+  # search that names one file omits them natively, and a piped search is already
+  # byte-identical to native rg. The activation fidelity check cannot see the loss
+  # because it compares a --count whose answer is a bare number with no path in it.
+  # --with-filename does restore the prefix, but unconditionally it stamps
+  # '<stdin>:' onto every line of the faithful piped shape, and applying it only to
+  # the losing shape means deciding which bare word is the pattern and which is a
+  # path -- rg's whole flag grammar, re-implemented in shell, silently wrong at the
+  # next rg release. So the whole frontend takes one deterministic route to native
+  # ripgrep. A search written as grep still reaches the rtk grep frontend, which
+  # compacts the same 2000 matches to the same 203 lines and keeps every path.
+  { head = "rg", argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
   # refuses (exit 1) or silently binds the directory operand as the pattern
