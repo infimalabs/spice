@@ -668,6 +668,65 @@ def test_every_driver_recurses_directory_operands_through_native_grep(
     assert directory_line != rg_native_line
 
 
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+@pytest.mark.parametrize("driver_name", sorted(shellhook.known_wrapper_driver_names()))
+def test_every_driver_routes_the_rg_frontend_to_native_ripgrep(
+    tmp_path, monkeypatch, driver_name, shell_name
+):
+    # A search written as rg arrives at this wrapper whole, because the supported
+    # RTK releases rewrite rg onto an rg frontend instead of collapsing it onto
+    # grep. That frontend answers the right set of matches and then prints them
+    # without the path each one came from, which names no file to open, so the
+    # whole frontend belongs to native ripgrep. Nothing about that loss is
+    # dialect-specific, so the route carries no driver scope and the assertion is
+    # parametrized over every known driver: a newly registered driver that
+    # reintroduces a route claiming rg fails here rather than silently answering
+    # searches with path-less lines. The flag-carrying case is included because
+    # the losing shapes are the ordinary ones -- it is -l and --files, whose
+    # answers are paths already, that survive the frontend intact.
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("rtk", "rg"):
+        tool = bin_dir / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            "rtk rg -n needle",
+            "rtk rg --glob '*.py' needle project/",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed_process_detail(completed, trace)
+    assert trace_lines(trace, expected_prefix="rg:") == [
+        "rg:-n needle",
+        "rg:--glob *.py needle project/",
+    ]
+
+
 def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:

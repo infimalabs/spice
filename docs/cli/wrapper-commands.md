@@ -102,6 +102,23 @@ after RTK selection by routing:
   must never be forwarded to `rg`, which reinterprets grep short flags (`-r` as
   `--replace`, `-E` as `--encoding`, `-L` as `--follow`, `-U` as `--multiline`)
   and would silently rewrite or misdirect the search;
+- every `rtk rg` to `rg`, whatever it carries. A search written as `rg` reaches
+  this frontend whole, because the supported RTK releases rewrite `rg` onto an
+  `rg` frontend rather than collapsing it onto `grep`. That frontend drops the
+  path each match came from in exactly one shape — a search carrying no path
+  operand, which is the recursive search of the working directory — so it returns
+  the right matches as bare `LINE:text` lines that name no file to open. A search
+  naming a directory keeps its paths, a search naming one file omits them
+  natively, and a piped search is already byte-identical to native `rg`. The
+  activation fidelity check cannot see the loss, because it compares a `--count`
+  whose answer is a bare number with no path in it to lose. `--with-filename`
+  does restore the prefix, but adding it unconditionally stamps `<stdin>:` onto
+  every line of the faithful piped shape, and adding it only to the losing shape
+  means deciding which bare word is the pattern and which is a path — rg's whole
+  flag grammar, re-implemented in the wrapper and silently wrong at the next rg
+  release. The whole frontend therefore takes one deterministic route out, and a
+  search written as `grep` still reaches `rtk grep`, which compacts the same 2000
+  matches to the same 203 lines with every path intact;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every `rtk grep` carrying a file or directory search operand through the

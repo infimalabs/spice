@@ -93,11 +93,19 @@ Repos may define wrapper groups under `[wrappers.<group>]` and let
 agents select groups with `[agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group contains the finite post-selection RTK command-shape
-transformations for rg-only grep flags, native find predicates, and diagnostic
-git flags, plus the driver-scoped regexp defaults for RTK grep and plain grep.
-Every selected direct wrapper whose argv head is not RTK owns its command word
-regardless of configuration source, so the shared plain grep wrapper prevents
-an RTK candidate from changing a raw `rg` into platform grep. Codex receives
+transformations for rg-only grep flags, the whole RTK rg frontend, native find
+predicates, and diagnostic git flags, plus the driver-scoped regexp defaults for
+RTK grep and plain grep. Every selected direct wrapper whose argv head is not
+RTK owns its command word regardless of configuration source, so the shared
+plain grep wrapper makes spice refuse an RTK candidate naming `grep`. No wrapper
+owns `rg`, so a candidate naming it is accepted and routed to native ripgrep
+instead: the RTK rg frontend drops the path each match came from whenever the
+search carries no path operand, and the activation fidelity check cannot see that
+loss because it compares a `--count` whose answer is a bare number with no path
+in it to lose. `--with-filename` restores the prefix at the cost of stamping
+`<stdin>:` onto the piped shape that is faithful today, and confining it to the
+losing shape would require rg's flag grammar in the wrapper, so the frontend takes
+one deterministic route out while `grep` remains the compacting path. Codex receives
 `-E`; Claude preserves native BASIC-regexp arguments. RTK rewrite selection
 remains wholly inside `spice agent run`. Repos can override `common` for their
 own command-shape contract, and repo-specific direct-command wrappers such as
