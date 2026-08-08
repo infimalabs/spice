@@ -192,7 +192,7 @@ def builtin_common_wrapper_lines(
         "      esac",
         "    done",
         "  fi",
-        '  if [ "${1-}" = rg ] && [ ! -p /dev/stdin ] && [ ! -f /dev/stdin ]; then',
+        '  if [ "${1-}" = rg ]; then',
         "    shift",
         f'    command {command_word} rg --with-filename "$@"',
         "    return",

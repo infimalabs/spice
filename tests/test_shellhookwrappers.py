@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent import driver as agent_driver
+from spice.agent import rtkhealth
 from spice.agent import shellhook
 from spice.errors import SpiceError
 from tests.test_shellhookhelpers import (
@@ -308,38 +309,6 @@ def test_agent_wrapper_lines_rejects_route_lacking_head_and_flags(tmp_path):
     )
 
     with pytest.raises(SpiceError, match=r"match\[0\] needs a head or flags"):
-        shellhook.render_agent_wrapper_lines(tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("match", "expected"),
-    [
-        (
-            '[{ head = "rg", filesystem_search = "yes", argv = ["rg"] }]',
-            r"filesystem_search must be boolean",
-        ),
-        (
-            '[{ head = "rg", filesystem_search = true, flags = ["-n"], argv = ["rg"] }]',
-            r"filesystem_search requires a head-only route",
-        ),
-        (
-            '[{ head = "grep", filesystem_search = true, search_operands = true,'
-            ' argv = ["rg"] }]',
-            r"cannot combine with search_operands",
-        ),
-    ],
-)
-def test_agent_wrapper_lines_rejects_unusable_filesystem_search_routes(
-    tmp_path, match, expected
-):
-    # The guard asks one question about stdin and rewrites the whole argv under a
-    # head, so a route that pairs it with flags or with the operand scanner is
-    # asking two questions with one answer. Each of those is refused where it is
-    # written rather than resolved into a precedence the configuration never
-    # states.
-    _write_match_wrapper_config(tmp_path, argv='["rtk"]', match=match)
-
-    with pytest.raises(SpiceError, match=expected):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
@@ -880,18 +849,15 @@ def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
 @pytest.mark.parametrize("driver_name", sorted(shellhook.known_wrapper_driver_names()))
-def test_every_driver_restores_rg_paths_only_when_searching_the_filesystem(
+def test_every_driver_labels_every_rtk_rg_match_source(
     tmp_path, monkeypatch, driver_name, shell_name
 ):
-    # RTK's rg frontend prints bare 'LINE:text' when it searches the working
-    # directory, and matches native rg byte for byte when it reads stdin. So the
-    # route repairs printing in the first shape and must leave the second alone,
-    # or a piped search grows a '<stdin>:' prefix native rg never writes. Which
-    # shape is running is settled by rg's own readable-stdin rule rather than by
-    # argv, which is why all three runs below send identical words and differ
-    # only in what stdin is. Every driver shares one rg frontend, so the whole
-    # known-driver set is parametrized: a newly registered driver that loses the
-    # route fails here instead of quietly dropping paths for that agent.
+    # The route deliberately chooses one output invariant over native rg's
+    # shape-dependent omission: every match names either its filesystem path or
+    # '<stdin>'. It therefore dispatches the same argv for DEVNULL, a pipe, and a
+    # redirected regular file. Every driver shares one rg frontend, so a newly
+    # registered driver that loses the route fails here instead of quietly
+    # dropping sources for that agent.
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} is not installed")
@@ -942,12 +908,88 @@ def test_every_driver_restores_rg_paths_only_when_searching_the_filesystem(
         "rtk:rg --with-filename -n needle",
         "rtk:rg --with-filename --glob *.py needle project/",
     ]
-    assert piped == [
-        "rtk:rg -n needle",
-        "rtk:rg --glob *.py needle project/",
-    ]
-    assert redirect == piped
-    assert filesystem != piped
+    assert piped == filesystem
+    assert redirect == filesystem
+
+
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_real_rtk_labels_filesystem_and_stdin_matches_through_packaged_wrapper(
+    tmp_path, monkeypatch, shell_name
+):
+    shell = shutil.which(shell_name)
+    rtk = shutil.which("rtk")
+    rg = shutil.which("rg")
+    if shell is None or rtk is None or rg is None:
+        pytest.skip(f"{shell_name}, rtk, and rg are required")
+    version = subprocess.run(
+        [rtk, "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    match = rtkhealth.RTK_VERSION_PATTERN.search(version.stdout)
+    if match is None or tuple(int(part) for part in match.groups()) < (
+        rtkhealth.RTK_MINIMUM_VERSION
+    ):
+        pytest.skip(f"supported RTK is required: {version.stdout.strip()}")
+
+    corpus = tmp_path / "corpus"
+    nested = corpus / "nested"
+    nested.mkdir(parents=True)
+    (corpus / "one.txt").write_text("needle filesystem one\n", encoding="utf-8")
+    (nested / "two.txt").write_text("needle filesystem two\n", encoding="utf-8")
+    redirected = tmp_path / "redirected.txt"
+    redirected.write_text("needle redirected stdin\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, "codex")
+    wrapper = "\n".join(["set -u", *shellhook.render_agent_wrapper_lines(tmp_path)])
+    child_path = os.pathsep.join(
+        dict.fromkeys(
+            [
+                str(Path(rtk).parent),
+                str(Path(rg).parent),
+                os.environ.get("PATH", ""),  # env-policy: allow
+            ]
+        )
+    )
+    child_env = {
+        "HOME": str(home),
+        "PATH": child_path,
+        "RTK_DB_PATH": str(tmp_path / "rtk-history.db"),
+    }
+
+    def dispatch(command: str, stream: dict) -> list[str]:
+        completed = subprocess.run(
+            [shell, "-c", f"{wrapper}\n{command}"],
+            cwd=corpus,
+            env=child_env,
+            check=False,
+            capture_output=True,
+            text=True,
+            **stream,
+        )
+        assert completed.returncode == 0, completed_process_detail(completed)
+        return completed.stdout.splitlines()
+
+    filesystem = dispatch("rtk rg -n needle", {"stdin": subprocess.DEVNULL})
+    piped = dispatch("rtk rg -n needle", {"input": "needle piped stdin\n"})
+    piped_path = dispatch(
+        "rtk rg -n needle one.txt", {"input": "needle ignored pipe\n"}
+    )
+    with redirected.open(encoding="utf-8") as handle:
+        regular = dispatch("rtk rg -n needle", {"stdin": handle})
+    with redirected.open(encoding="utf-8") as handle:
+        regular_path = dispatch("rtk rg -n needle one.txt", {"stdin": handle})
+
+    assert set(filesystem) == {
+        "one.txt:1:needle filesystem one",
+        "nested/two.txt:1:needle filesystem two",
+    }
+    assert piped == ["<stdin>:1:needle piped stdin"]
+    assert regular == ["<stdin>:1:needle redirected stdin"]
+    assert piped_path == ["one.txt:1:needle filesystem one"]
+    assert regular_path == piped_path
 
 
 def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):

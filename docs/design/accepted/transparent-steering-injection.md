@@ -93,20 +93,20 @@ Repos may define wrapper groups under `[wrappers.<group>]` and let
 agents select groups with `[agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group contains the finite post-selection RTK command-shape
-transformations for rg-only grep flags, a filesystem-searching RTK rg frontend,
+transformations for rg-only grep flags, every RTK rg frontend invocation,
 native find predicates, and diagnostic git flags, plus the driver-scoped regexp
 defaults for RTK grep and plain grep. Every selected direct wrapper whose argv
 head is not RTK owns its command word regardless of configuration source, so the
 shared plain grep wrapper makes spice refuse an RTK candidate naming `grep`. No
 wrapper owns `rg`, so a candidate naming it is accepted and keeps RTK's
-compaction, and the route repairs only how that frontend prints: it drops the
-path each match came from whenever the search reads the working directory instead
-of stdin, and the activation fidelity check cannot see that loss because it
-compares a `--count` whose answer is a bare number with no path in it to lose.
-`--with-filename` restores the prefix byte-identically to native rg, and the
-`filesystem_search` route predicate confines it to the losing shape by asking
-rg's own readable-stdin question instead of re-implementing its flag grammar, so
-a piped or redirected search is left untouched. Codex receives
+compaction, and the route repairs only how that frontend prints: the frontend can
+return bare `LINE:text` matches that name no source, and the activation fidelity
+check cannot see that loss because it compares a `--count` whose answer is a bare
+number with no path in it to lose. `--with-filename` gives every match a stable
+source label: a filesystem path or `<stdin>`. This unconditional shape
+intentionally prefers agent-visible source identity over native rg's cosmetic
+omission and stays correct when readable stdin and an explicit path operand are
+both present. Codex receives
 `-E`; Claude preserves native BASIC-regexp arguments. RTK rewrite selection
 remains wholly inside `spice agent run`. Repos can override `common` for their
 own command-shape contract, and repo-specific direct-command wrappers such as

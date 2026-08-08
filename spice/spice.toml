@@ -56,25 +56,16 @@ match = [
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "--pcre2", "-g", "--glob", "--glob=*"], argv = ["rg"] },
   # A search written as rg reaches this frontend whole, because the supported RTK
   # releases rewrite rg onto an rg frontend rather than collapsing it onto grep.
-  # That frontend drops the path each match came from in exactly one shape: a
-  # search that reads the working directory instead of stdin, where it answers the
-  # right set of matches as bare 'LINE:text' lines naming no file to open. The
+  # That frontend can answer with bare 'LINE:text' matches naming no source. The
   # activation fidelity check cannot see the loss, because it compares a --count
   # whose answer is a bare number with no path in it to lose. --with-filename
-  # restores the prefix -- measured byte-identical to native rg -- so the search
-  # stays on the frontend and keeps RTK's compaction, and the wrapper repairs only
-  # how the matches are printed. Routing this frontend to native ripgrep instead
-  # would buy the same paths by giving up compaction on every search in the
-  # session, which is the more expensive way to pay for the smaller problem.
-  # The guard is deliberately not rg's flag grammar, which would go silently wrong
-  # at the next rg release. rg reads stdin when stdin is a FIFO or a regular file
-  # and searches the filesystem otherwise; filesystem_search asks that same
-  # question, so a piped or redirected search never takes this route and stays
-  # byte-identical to native rg rather than wearing a '<stdin>:' prefix. A search
-  # naming one file does gain a prefix native rg omits: that is one uniform shape
-  # for every match line, in place of a shape that depends on how many paths the
-  # search happened to name.
-  { head = "rg", filesystem_search = true, argv = ["rtk", "rg", "--with-filename"] },
+  # restores the prefix while the search stays on the frontend and keeps RTK's
+  # compaction. The route is unconditional: filesystem matches name their path,
+  # and piped or redirected matches name '<stdin>'. That single source-labeled
+  # line shape is more useful to an agent than preserving native rg's cosmetic
+  # omission, and it remains correct when readable stdin is present alongside an
+  # explicit path operand because rg then searches the path rather than stdin.
+  { head = "rg", argv = ["rtk", "rg", "--with-filename"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
   # refuses (exit 1) or silently binds the directory operand as the pattern
