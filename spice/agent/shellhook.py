@@ -672,6 +672,7 @@ class WrapperMatchRoute(NamedTuple):
     flags: tuple[str, ...]
     keep: tuple[str, ...]
     search_operands: bool
+    filesystem_search: bool
     argv: tuple[str, ...]
     scope: ScopeSelector
 
@@ -695,6 +696,9 @@ def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     if route.search_operands:
         assert route.head == "grep"
         return grep_search_operand_route_guard_lines(argv)
+    if route.filesystem_search:
+        assert route.head is not None
+        return filesystem_search_route_guard_lines(route.head, argv)
     if not route.flags:
         assert route.head is not None
         return [
@@ -723,6 +727,30 @@ def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     return [
         f'  if [ "${{1-}}" = {shell_quote(route.head)} ]; then',
         *("    " + line for line in scan),
+        "  fi",
+    ]
+
+
+def filesystem_search_route_guard_lines(head: str, argv: str) -> list[str]:
+    """Route a search only when it will read the filesystem rather than stdin.
+
+    ripgrep reads stdin when stdin is a FIFO or a regular file and searches the
+    working directory otherwise, so these two tests decide what a search is
+    about to read without inspecting a single argument. Telling a pattern apart
+    from a path would instead mean re-implementing rg's flag grammar in shell,
+    which goes silently wrong at the next rg release; asking the question rg
+    asks itself cannot drift from it.
+
+    A platform without ``/dev/stdin`` fails both tests and takes the route. That
+    direction is the safe one on purpose: every argv this guard admits differs
+    only in how matches are printed, never in what gets searched.
+    """
+    return [
+        f'  if [ "${{1-}}" = {shell_quote(head)} ] &&'
+        " [ ! -p /dev/stdin ] && [ ! -f /dev/stdin ]; then",
+        "    shift",
+        f'    command {argv} "$@"',
+        "    return",
         "  fi",
     ]
 
@@ -866,7 +894,16 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     if not isinstance(raw, Mapping):
         raise SpiceError(f"spice shell hook: {label} must be a table")
     extra = sorted(
-        set(raw) - {"head", "flags", "keep", "search_operands", "argv", SCOPES_KEY}
+        set(raw)
+        - {
+            "head",
+            "flags",
+            "keep",
+            "search_operands",
+            "filesystem_search",
+            "argv",
+            SCOPES_KEY,
+        }
     )
     if extra:
         raise SpiceError(
@@ -905,6 +942,14 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
         raise SpiceError(
             f"spice shell hook: {label}.search_operands requires a head-only grep route"
         )
+    filesystem_search = raw.get("filesystem_search", False)
+    if not isinstance(filesystem_search, bool):
+        raise SpiceError(f"spice shell hook: {label}.filesystem_search must be boolean")
+    if filesystem_search and (head is None or flags or search_operands):
+        raise SpiceError(
+            f"spice shell hook: {label}.filesystem_search requires a head-only "
+            "route and cannot combine with search_operands"
+        )
     argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
     scope = WRAPPER_ROUTE_SCOPES.parse(raw.get(SCOPES_KEY))
     return WrapperMatchRoute(
@@ -912,6 +957,7 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
         flags=tuple(flags),
         keep=tuple(keep),
         search_operands=search_operands,
+        filesystem_search=filesystem_search,
         argv=tuple(argv),
         scope=scope,
     )
