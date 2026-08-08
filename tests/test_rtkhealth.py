@@ -9,11 +9,20 @@ from pathlib import Path
 import pytest
 
 from spice.config import edit, layers, values
-from spice.agent.rtkhealth import RTK_FIDELITY_PROBE, probe_rtk_health
+from spice.agent.rtkhealth import (
+    RTK_FIDELITY_PROBE,
+    RTK_MINIMUM_VERSION_TEXT,
+    probe_rtk_health,
+)
 
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
 FIDELITY_REWRITE = "rtk grep --count -E al+pha -"
+# Every stage past the version check needs an executable the floor admits, so the
+# supported version is the floor itself. Naming a release instead dates the test
+# to that release: raising the floor turns each of these into an obsolete verdict
+# and reddens tests that are not about versions at all.
+SUPPORTED_VERSION = RTK_MINIMUM_VERSION_TEXT
 
 
 @pytest.mark.parametrize(
@@ -51,7 +60,7 @@ def test_health_probe_uses_exact_executable_and_accepts_supported_rewrites(
         ],
         "state": "active",
         "mode": "active",
-        "version": "0.42.4",
+        "version": SUPPORTED_VERSION,
         "command": (
             f"{_quoted(executable)} --version && "
             f"{_quoted(executable)} rewrite -- git status; echo; "
@@ -177,7 +186,9 @@ def _staged_run(
     def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         if command[1:] == ["--version"]:
-            return subprocess.CompletedProcess(command, 0, "rtk 0.42.4\n", "")
+            return subprocess.CompletedProcess(
+                command, 0, f"rtk {SUPPORTED_VERSION}\n", ""
+            )
         if command[1:] == ["rewrite", "--", "git", "status"]:
             return subprocess.CompletedProcess(
                 command, rewrite_exit, "rtk git status --short\n", ""
@@ -225,10 +236,10 @@ def _tree_entries(root: Path) -> dict[str, bytes | None]:
             "rewrite-invalid",
             "broken-rtk",
             [
-                subprocess.CompletedProcess([], 0, "rtk 0.42.4\n", ""),
+                subprocess.CompletedProcess([], 0, f"rtk {SUPPORTED_VERSION}\n", ""),
                 subprocess.CompletedProcess([], 1, "", ""),
             ],
-            ("protocol-invalid", "native", "0.42.4"),
+            ("protocol-invalid", "native", SUPPORTED_VERSION),
         ),
     ],
 )

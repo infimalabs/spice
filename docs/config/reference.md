@@ -173,7 +173,7 @@ defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
 The agent shell can optionally use
-[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer as a command-output
+[RTK](https://github.com/rtk-ai/rtk) `0.45.0` or newer as a command-output
 optimizer. Missing, obsolete, or invalid RTK selects reported native-command
 mode without blocking activation, as does an RTK whose rewrite answers a probe
 search differently than the command as written. Install and protocol details

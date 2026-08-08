@@ -42,7 +42,7 @@ The wrapper does this before running the requested command:
 
 - prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
-- asks optional [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer for each
+- asks optional [RTK](https://github.com/rtk-ai/rtk) `0.45.0` or newer for each
   eligible shell command string or direct argv, falling back to the native
   command whenever that attempt is unusable;
 - routes git through the worktree shadow environment;

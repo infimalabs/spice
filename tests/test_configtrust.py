@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent.maxims import judge_cli_backend
-from spice.agent.rtkhealth import probe_rtk_health
+from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, probe_rtk_health
 from spice.agent.shellhook import render_agent_wrapper_lines
 from spice.cli.mounts import MountedCommand, run_mounted_command
 from spice.cli.parser import build_parser
@@ -337,7 +337,9 @@ def test_tracked_rtk_refuses_before_health_probe(tmp_path):
 
     def run(argv, **_kwargs):
         started.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout="rtk 0.42.4", stderr="")
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"rtk {RTK_MINIMUM_VERSION_TEXT}", stderr=""
+        )
 
     with pytest.raises(SpiceError) as raised:
         probe_rtk_health(repo, run=run)

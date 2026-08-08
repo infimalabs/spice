@@ -273,11 +273,11 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
     tmp_path, monkeypatch
 ):
     rtk = write_fake_rewriting_rtk(tmp_path)
-    write_rtk_config(tmp_path, str(rtk))
     write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+        rtk_executable=str(rtk),
     )
     ambient_env = shellhook.apply_shell_steering_environment(
         tmp_path,
@@ -322,11 +322,11 @@ def test_run_agent_command_yields_rtk_pytest_rewrite_to_repository_wrapper(
 
 def test_shell_rewrite_yield_covers_module_pytest_and_selected_plain_grep(tmp_path):
     rtk = write_fake_rewriting_rtk(tmp_path)
-    write_rtk_config(tmp_path, str(rtk))
     write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+        rtk_executable=str(rtk),
     )
 
     module = wrap.build_agent_run_command(
@@ -344,11 +344,11 @@ def test_agent_run_routes_python_module_wrapper_through_uv(tmp_path, monkeypatch
     if shutil.which("zsh") is None:
         pytest.skip("zsh is required for the end-to-end child shell")
     rtk = write_fake_rewriting_rtk(tmp_path)
-    write_rtk_config(tmp_path, str(rtk))
     write_agent_wrapper_config(
         tmp_path,
         order=["common", "spice-dev"],
         groups={"spice-dev": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
+        rtk_executable=str(rtk),
     )
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "fixture"\n',

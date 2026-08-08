@@ -15,7 +15,7 @@ from spice.agent.activation import (
     activation_command_surface_lines,
 )
 from spice.agent.driver import DRIVER
-from spice.agent.rtkhealth import RtkHealth
+from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, RtkHealth
 from spice.tasks import claimstate, config, create, identity, tw
 from tests.test_reposcaffolding import run as _run
 
@@ -24,7 +24,9 @@ ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 @pytest.fixture(autouse=True)
 def _active_rtk(monkeypatch: pytest.MonkeyPatch) -> None:
-    health = RtkHealth("rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4")
+    health = RtkHealth(
+        "rtk", "active", "rewrite protocol valid (exit 3)", RTK_MINIMUM_VERSION_TEXT
+    )
     monkeypatch.setattr(
         agent_cli,
         "_activation_rtk_health",
@@ -35,7 +37,9 @@ def _active_rtk(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     "health",
     [
-        RtkHealth("rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4"),
+        RtkHealth(
+            "rtk", "active", "rewrite protocol valid (exit 3)", RTK_MINIMUM_VERSION_TEXT
+        ),
         RtkHealth("missing-rtk", "missing", "launch failed"),
         RtkHealth("old-rtk", "obsolete", "RTK 0.41.0 is obsolete", "0.41.0"),
         RtkHealth("invalid-rtk", "protocol-invalid", "rewrite probe invalid"),

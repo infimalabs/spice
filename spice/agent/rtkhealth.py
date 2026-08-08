@@ -18,7 +18,15 @@ from spice.agent.rtkrewrite import (
 )
 from spice.paths import repo_root_from_cwd
 
-RTK_MINIMUM_VERSION = (0, 42, 4)
+# Earlier releases rewrite an ``rg`` search into ``rtk grep``, and that target
+# hands the command verbatim to the native basic-dialect search whenever it meets
+# a flag it does not own, so an extended pattern is answered as a basic one. The
+# same target reads nothing from a ``-`` stdin path. Both are answer-changing
+# rather than merely unsupported, so the fidelity check below refuses the
+# executable outright and the agent pays full output cost for every command.
+# Requiring the release that rewrites ``rg`` into ``rtk rg`` instead reports that
+# as an upgrade the operator can act on, rather than as an opaque infidelity.
+RTK_MINIMUM_VERSION = (0, 45, 0)
 RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
 RTK_VERSION_PATTERN = re.compile(r"\brtk\s+(\d+)\.(\d+)\.(\d+)\b", re.IGNORECASE)
 RTK_PROTOCOL_PROBE = ("git", "status")
