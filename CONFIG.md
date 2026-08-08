@@ -27,7 +27,7 @@ Gates do not require Taskwarrior.
 
 ## RTK Rewrite Companion
 
-The agent shell can use [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer
+The agent shell can use [RTK](https://github.com/rtk-ai/rtk) `0.45.0` or newer
 to compact command output. Install it to enable that optimization:
 
 ```sh

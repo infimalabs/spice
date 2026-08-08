@@ -212,7 +212,7 @@ uv tool install -e /path/to/spice-main
 # or, for the released package:
 uv tool install spice-harness
 
-# Optional: RTK 0.42.4 or newer compacts agent-shell command output:
+# Optional: RTK 0.45.0 or newer compacts agent-shell command output:
 brew install rtk
 # or: cargo install --git https://github.com/rtk-ai/rtk
 ```

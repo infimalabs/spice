@@ -172,7 +172,7 @@ have these fixed classes:
 
 Runtime dependencies are intentionally small: `watchfiles`, `ruff`, and
 `lizard`. The agent shell optionally uses
-[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer to optimize command
+[RTK](https://github.com/rtk-ai/rtk) `0.45.0` or newer to optimize command
 output; unavailable or invalid RTK is reported and preserves native command
 execution. Other external binaries degrade loudly rather than silently
 changing semantics: Taskwarrior, the maxim judge, speech backends, and the

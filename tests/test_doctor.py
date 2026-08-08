@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from spice.config import edit, layers, values
-from spice.agent.rtkhealth import RtkHealth
+from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, RtkHealth
 from spice.hooks import doctor, precommit
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.paths import shared_state_root, worktree_state_root
@@ -274,7 +274,7 @@ def test_doctor_traces_semantic_disablement_leaf_through_spelling_overlay(
                 "alternate-rtk",
                 "active",
                 "rewrite protocol valid (exit 3)",
-                "0.42.4",
+                RTK_MINIMUM_VERSION_TEXT,
             ),
             "ok",
         ),
@@ -317,7 +317,7 @@ def test_doctor_rtk_check_reports_health_without_failing(
 @pytest.mark.parametrize(
     "health",
     [
-        RtkHealth("rtk", "active", "valid", "0.42.4"),
+        RtkHealth("rtk", "active", "valid", RTK_MINIMUM_VERSION_TEXT),
         RtkHealth("missing-rtk", "missing", "launch failed"),
         RtkHealth("old-rtk", "obsolete", "obsolete", "0.41.0"),
         RtkHealth("broken-rtk", "protocol-invalid", "invalid"),

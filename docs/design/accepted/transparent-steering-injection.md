@@ -32,7 +32,7 @@ counter to read.
 The native harness or shell startup hook must hand the complete top-level shell
 command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
 because it is the only layer that sees the full shell string before execution.
-[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer is an optional output
+[RTK](https://github.com/rtk-ai/rtk) `0.45.0` or newer is an optional output
 optimization: Exit `0` or Exit `3` with non-empty stdout rewrites, Exit `1` with
 empty stdout leaves the command unmatched, and unusable results preserve the
 native command with a bounded diagnostic. The complete protocol and
