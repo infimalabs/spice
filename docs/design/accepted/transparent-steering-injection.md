@@ -105,7 +105,9 @@ loss because it compares a `--count` whose answer is a bare number with no path
 in it to lose. `--with-filename` restores the prefix at the cost of stamping
 `<stdin>:` onto the piped shape that is faithful today, and confining it to the
 losing shape would require rg's flag grammar in the wrapper, so the frontend takes
-one deterministic route out while `grep` remains the compacting path. Codex receives
+one deterministic route out. Both search words therefore run native, by opposite
+means, and searching is the one job this default does entirely without RTK; `ls`,
+`cat`, `wc`, `git`, and `find` still compact. Codex receives
 `-E`; Claude preserves native BASIC-regexp arguments. RTK rewrite selection
 remains wholly inside `spice agent run`. Repos can override `common` for their
 own command-shape contract, and repo-specific direct-command wrappers such as

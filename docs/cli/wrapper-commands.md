@@ -116,9 +116,11 @@ after RTK selection by routing:
   every line of the faithful piped shape, and adding it only to the losing shape
   means deciding which bare word is the pattern and which is a path — rg's whole
   flag grammar, re-implemented in the wrapper and silently wrong at the next rg
-  release. The whole frontend therefore takes one deterministic route out, and a
-  search written as `grep` still reaches `rtk grep`, which compacts the same 2000
-  matches to the same 203 lines with every path intact;
+  release. The whole frontend therefore takes one deterministic route out, and no
+  compaction is claimed for `grep` in its place: a written `grep` never reaches
+  RTK either, because the `grep` yield selector refuses that candidate before any
+  route exists. Searching is the one job this configuration does entirely without
+  RTK; `ls`, `cat`, `wc`, `git`, and `find` still compact;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every `rtk grep` carrying a file or directory search operand through the
