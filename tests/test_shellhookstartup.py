@@ -67,7 +67,6 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     base_env = {"HOME": str(home)}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s:%s\\n' "
@@ -89,9 +88,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([zsh, "-c", command], check=True, env=env)
 
     lines = trace_lines(trace, expected_prefix="after:")
-    assert (
-        f"after:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
-    )
+    assert "after:unset:unset" in lines
     assert lines.count("real-zshenv:unset") == 2
 
 
@@ -299,7 +296,6 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     base_env = {"HOME": str(home), shellhook.BASH_ENV_ENV: str(real_bash_env)}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s\\n' "
@@ -320,7 +316,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([bash, "-c", command], check=True, env=env)
 
     lines = trace_lines(trace, expected_prefix="after:")
-    assert f"after:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert f"after:{real_bash_env}" in lines
     assert lines.count(f"real-bash:{real_bash_env}") == 2
 
 
@@ -332,7 +328,6 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "printf 'ran:%s:%s\\n' "
         f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
@@ -358,9 +353,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
-    assert (
-        f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
-    )
+    assert "ran:unset:unset" in lines
 
 
 def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path):
@@ -369,7 +362,6 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
     fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     base_env = {
         "PATH": str(fake_spice.parent)
         + os.pathsep
@@ -397,9 +389,7 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
-    assert (
-        f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
-    )
+    assert "ran:unset:unset" in lines
 
 
 def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
@@ -642,7 +632,6 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     fake_spice = fake_spice_executable(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "printf 'ran:%s\\n' "
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
@@ -666,7 +655,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {bash} -c " in agent_run_lines[0]
-    assert f"ran:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert "ran:unset" in lines
 
 
 def test_bash_env_hook_fails_noninteractive_shell_without_execution_string(tmp_path):

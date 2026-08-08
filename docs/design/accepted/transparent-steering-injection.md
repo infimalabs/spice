@@ -20,14 +20,23 @@ spice agent run -- <shell> -c "<original command>"
 That gives `spice agent run` ownership of stderr for steering injection,
 keep-working guidance, RTK rewrite routing,
 and wrapper setup before the requested command.
-`agent run` repoints `ZDOTDIR`/`BASH_ENV` at the packaged static hook dir for
-the shell command it runs, so that shell and its descendants do not reexec and
-do not inject steering again. The static stage restores the user's original
+`agent run` points `ZDOTDIR`/`BASH_ENV` at the packaged static hook dir for the
+immediate command shell. The static stage restores the user's original
 `ZDOTDIR`, `BASH_ENV`, and zsh history file, sources the real startup file when
-present, rearms the packaged hook environment for later descendants, and evals
-`SPICE_SHELL_HOOK_WRAPPERS`. The redirector and static stages are distinct
-packaged hook directories, not an environment marker, so there is no reexec
-counter to read.
+present, and evals `SPICE_SHELL_HOOK_WRAPPERS` exactly once. It does not rearm
+the packaged hook environment. Executed shell scripts and descendant shells
+therefore start natively from the user's startup paths and receive no Spice
+hook, wrapper functions, reexec, or per-descendant steering connection. A
+sourced script is not a descendant process and shares the immediate shell's
+functions and options.
+
+`agent run` owns exactly one side-channel watcher in its parent process and
+binds that watcher to the immediate command child's PID. Forking and waiting
+keeps that PID alive, and `exec` preserves it, so both operations retain the
+same stream without descendant participation. The stream closes when the root
+PID exits even if a background descendant remains after its parent. The watcher
+writes to the outer wrapper's stderr; file-descriptor changes made inside
+descendants cannot redirect it.
 
 The native harness or shell startup hook must hand the complete top-level shell
 command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
@@ -143,13 +152,18 @@ until that resolver exists.
 - Do not touch the agent's stdin.
 - ACK semantics are transcript-based: items retire only on `ACK <key>`.
 - The side-channel repeat policy remains the rate limiter.
+- One outer side-channel follows the immediate command child's PID through
+  fork/wait and `exec`; descendants never open their own connection.
 - The redirector and static packaged hook dirs are the reexec gate: the
   redirector reexecs an execution-string shell through `agent run` exactly once,
-  and `agent run` repoints descendants at the static hook dir so they do not
-  reexec again.
+  and `agent run` points only its immediate command shell at the static hook.
+- The static hook restores the user's startup paths without rearming itself;
+  executed scripts and descendant shells receive no Spice shell behavior.
+- Sourced scripts share the immediate command shell's wrapper functions and
+  options because sourcing does not create a descendant process.
 - RTK rewrite happens in `spice agent run`, where the complete shell command
   string is still available.
-- `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; hooks eval it
-  but do not regenerate wrapper functions.
+- `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; the immediate
+  command shell evals it once, and hooks do not regenerate wrapper functions.
 - The direct shell-startup path is the only command-string injection contract;
   agent-native hooks add context but never commands.

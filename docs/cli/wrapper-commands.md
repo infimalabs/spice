@@ -25,14 +25,23 @@ spice agent run -- <shell> -c "<original command>"
 ```
 
 Agents normally run shell commands directly; the startup hooks perform this
-reexec. `agent run` repoints `ZDOTDIR`/`BASH_ENV` at the packaged static hook
-dir for the shell command it runs, so that shell and its descendants run the
-static stage only: source the user's real startup files, rearm the packaged
-hook environment, and eval `SPICE_SHELL_HOOK_WRAPPERS` without a second
-`agent run` hop or second steering injection. The redirector and static stages
-are distinct packaged hook directories, not an environment marker, so there is
-no reexec counter to read. Use `spice agent run -- <command>` explicitly only
-when recovering a command path or inspecting wrapper behavior.
+reexec. `agent run` points `ZDOTDIR`/`BASH_ENV` at the packaged static hook dir
+for the immediate command shell. That shell sources the user's real startup
+files, restores the original startup paths, and evals
+`SPICE_SHELL_HOOK_WRAPPERS` exactly once. It does not rearm the packaged hook
+environment: executed shell scripts and descendant shells start natively with
+the user's startup paths and receive no Spice wrapper functions, reexec, or
+per-descendant steering connection. A sourced script is not a descendant
+process and therefore shares the immediate shell's wrapper functions. Use
+`spice agent run -- <command>` explicitly only when recovering a command path
+or inspecting wrapper behavior.
+
+`agent run` owns one side-channel watcher in its parent process, bound to the
+PID of the immediate command child. The watcher remains connected while that
+PID forks and waits or replaces itself with `exec`, and closes when that PID
+exits even if a background descendant remains after its parent. It writes to the
+outer wrapper's stderr, so redirection performed inside a descendant does not
+redirect steering; redirection of `spice agent run` itself does.
 
 The native harness or shell startup hook must hand the complete top-level shell
 command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
@@ -48,7 +57,8 @@ The wrapper does this before running the requested command:
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
-- makes configured shell wrapper functions available.
+- makes configured shell wrapper functions available to the immediate command
+  shell only.
 
 ### RTK Rewrite Protocol
 

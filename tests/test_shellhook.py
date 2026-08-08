@@ -1058,7 +1058,7 @@ def test_shell_steering_files_are_stable_across_original_env_changes():
     assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in first_bashenv
 
 
-def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
+def test_packaged_shell_hooks_are_one_shot_env_driven_and_packaged():
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     dynamic_surfaces = {
@@ -1085,11 +1085,13 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
             'exec spice agent run -- "$_spice_shell_bin" -c "$BASH_EXECUTION_STRING"',
         ],
     }
+    wrapper_eval = f'eval "${{{shellhook.SHELL_HOOK_WRAPPERS_ENV}-}}"'
 
     for filename in (*shellhook.ZSH_HOOK_NAMES, shellhook.BASH_HOOK_NAME):
         text = (hook_dir / filename).read_text(encoding="utf-8")
         assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in text
+        assert text.count(wrapper_eval) == 1
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
         if filename in dynamic_surfaces:
@@ -1099,7 +1101,6 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
                 if line.strip().startswith("exec spice agent run --")
             ]
             assert reexec_lines == expected_reexec_lines[filename]
-        assert "staticshellhooks" in text
         assert "--preserve-shell-hook-env" not in text
         if filename == shellhook.BASH_HOOK_NAME:
             assert shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV not in text
@@ -1110,6 +1111,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in static_text
         assert "spice agent run --" not in static_text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in static_text
+        assert static_text.count(wrapper_eval) == 1
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in static_text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in static_text
 
