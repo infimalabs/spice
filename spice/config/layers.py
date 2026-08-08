@@ -87,6 +87,11 @@ _CONFIG_CACHE: dict[
 ] = {}
 _WORKTREE_CONFIG_PATH_CACHE: dict[tuple[Path, Path | None], Path] = {}
 _RETIRED_PYPROJECT_REVISIONS: dict[Path, _ConfigRevision] = {}
+# The revision of the packaged layer this process last validated against the
+# schema it imported at startup. Rewriting that file invalidates the cache in
+# every already-running process, so a key unknown to an older parser separates
+# into two different diagnoses depending on whether this baseline moved.
+_PACKAGED_VALIDATED_REVISIONS: dict[Path, _ConfigRevision] = {}
 
 
 def load_config(repo_root: Path) -> LayeredConfig:
@@ -158,6 +163,29 @@ def _config_revision(source_name: str, path: Path) -> _ConfigRevision:
     )
 
 
+def _validate_packaged_keys(values: Mapping[str, Any], path: Path) -> None:
+    """Validate the packaged layer, naming skew when its file outran this process."""
+    revision = _config_revision(SYSTEM_SOURCE, path)
+    baseline = _PACKAGED_VALIDATED_REVISIONS.get(path)
+    try:
+        validate_config_keys(values, source_name=SYSTEM_SOURCE, source_path=path)
+    except SpiceError as exc:
+        if baseline is None or baseline == revision:
+            # Either the first packaged file this process ever read, or the same
+            # one it already accepted. Nobody rewrote it underneath us, so an
+            # unknown key is a defect in the file and the typo wording applies.
+            raise
+        # The file moved while this process held the schema it imported at
+        # startup, so the key is unknown for a reason the operator did not cause
+        # and cannot fix in place. Restarting is the only remedy this code has.
+        raise SpiceError(
+            f"packaged configuration source={SYSTEM_SOURCE} path={path} changed "
+            "under this running process and declares configuration its loaded "
+            f"code does not know; restart to load it (detail: {exc})"
+        ) from exc
+    _PACKAGED_VALIDATED_REVISIONS[path] = revision
+
+
 def _load_config_sources(
     specifications: tuple[_ConfigSource, ...],
 ) -> LayeredConfig:
@@ -179,6 +207,9 @@ def _load_config_sources(
 
     for layer, values in reversed(tuple(zip(layers, parsed, strict=True))):
         if layer.path is None:
+            continue
+        if layer.name == SYSTEM_SOURCE:
+            _validate_packaged_keys(values, layer.path)
             continue
         validate_config_keys(
             values,
@@ -203,7 +234,7 @@ def load_packaged_config(path: Path | None = None) -> ConfigLayer:
     values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
-    validate_config_keys(values, source_name=SYSTEM_SOURCE, source_path=path)
+    _validate_packaged_keys(values, path)
     return ConfigLayer(
         name=SYSTEM_SOURCE,
         path=path,
