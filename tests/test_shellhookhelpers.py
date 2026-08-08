@@ -85,11 +85,32 @@ def write_fake_rewriting_rtk(repo: Path) -> Path:
 
 
 def write_rtk_config(repo: Path, executable: str) -> None:
-    (repo / "spice.toml").write_text(
-        f"[rtk]\nexecutable = {json.dumps(executable)}\n",
-        encoding="utf-8",
-    )
-    if repo_root_from_cwd(repo) == repo.resolve():
+    _write_spice_config(repo, _rtk_lines(executable), rtk_executable=executable)
+
+
+def _rtk_lines(executable: str) -> list[str]:
+    return ["[rtk]", f"executable = {json.dumps(executable)}"]
+
+
+def _write_spice_config(
+    repo: Path, lines: list[str], *, rtk_executable: str | None
+) -> None:
+    """The single writer of a test's config, so no stanza can be clobbered.
+
+    Two writers of one path leave whichever stanza was written first silently
+    gone, and a missing ``[rtk]`` stanza does not fail: the executable resolves
+    by bare name and the test reaches whatever RTK the machine has installed
+    instead of the fake it named. That reads as a passing test until the
+    installed release changes its rewrite, so the second write refuses here and
+    the stanzas are composed in one call instead.
+    """
+    path = repo / "spice.toml"
+    if path.exists():
+        raise AssertionError(
+            f"{path} is already written; pass every stanza to one call instead"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if rtk_executable is not None and repo_root_from_cwd(repo) == repo.resolve():
         approve_repository_config(repo)
 
 
@@ -98,8 +119,11 @@ def write_agent_wrapper_config(
     *,
     order: list[str] | None,
     groups: dict[str, dict[str, object] | bool],
+    rtk_executable: str | None = None,
 ) -> None:
     lines: list[str] = []
+    if rtk_executable is not None:
+        lines.extend((*_rtk_lines(rtk_executable), ""))
     if order is not None:
         wrappers_value = "[" + ", ".join(f'"{name}"' for name in order) + "]"
         lines.extend(
@@ -134,7 +158,7 @@ def write_agent_wrapper_config(
                 + ", ".join(f'"{selector}"' for selector in value)
                 + "]"
             )
-    (repo / "spice.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_spice_config(repo, lines, rtk_executable=rtk_executable)
 
 
 def toml_key(value: str) -> str:
