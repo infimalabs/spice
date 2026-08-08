@@ -172,8 +172,10 @@ matches as bare `LINE:text` lines that name no file to open. `--with-filename`
 restores the prefix but stamps `<stdin>:` onto the piped shape that is faithful
 today, and applying it only where the loss occurs would mean re-implementing rg's
 flag grammar to tell a pattern from a path, so the whole frontend takes one
-deterministic route out and `grep` remains the compacting path that keeps paths.
-The shared plain wrapper preserves Claude's BASIC-regexp authoring
+deterministic route out. The two words reach native tooling by opposite means but
+reach the same place, and neither compacts: searching is the one job this default
+does entirely without RTK, while `ls`, `cat`, `wc`, `git`, and `find` still
+compact. The shared plain wrapper preserves Claude's BASIC-regexp authoring
 with `\|`; its Codex-scoped catch-all injects `-E`, with explicit matcher flags
 still winning.
 Naming `common` in a repo `[wrappers.common]` table replaces the whole

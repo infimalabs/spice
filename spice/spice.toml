@@ -68,8 +68,10 @@ match = [
   # the losing shape means deciding which bare word is the pattern and which is a
   # path -- rg's whole flag grammar, re-implemented in shell, silently wrong at the
   # next rg release. So the whole frontend takes one deterministic route to native
-  # ripgrep. A search written as grep still reaches the rtk grep frontend, which
-  # compacts the same 2000 matches to the same 203 lines and keeps every path.
+  # ripgrep, and no consolation is claimed for grep: a written grep is refused
+  # before any route by the grep yield selector and runs native too. Searching is
+  # therefore the one job this configuration does entirely without RTK, while ls,
+  # cat/read, wc, git, and find still compact.
   { head = "rg", argv = ["rg"] },
   # rtk find executes only the verified-safe primaries -name, -iname, -type,
   # and -maxdepth (alone or combined) correctly; every other primary either
