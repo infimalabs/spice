@@ -421,6 +421,53 @@ def test_unknown_key_names_the_exact_layer_and_suggests_nearest_key(
     }
 
 
+def test_packaged_configuration_rewritten_under_this_process_reports_skew(
+    tmp_path, monkeypatch
+):
+    # Editing the packaged file changes its revision, which invalidates the
+    # cache in every already-running process at once. Those processes then read
+    # the newer file through the schema they imported at startup, so this is the
+    # live-edit window a fleet-wide packaged change opens, not a rare race.
+    system_root = tmp_path / "runtime"
+    packaged = system_root / "spice.toml"
+    _write(packaged, '[agent]\nmodel = "system"\n')
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
+    accepted = _load_outcome(tmp_path)
+
+    _write(packaged, '[agent]\nmodel = "system"\nrollout_window = 3\n')
+    skewed = _load_outcome(tmp_path)
+
+    assert accepted["state"] == "accepted"
+    assert skewed["state"] == "rejected"
+    assert skewed["message"].startswith(
+        f"packaged configuration source=system path={packaged} changed under "
+        "this running process and declares configuration its loaded code does "
+        "not know; restart to load it"
+    )
+    assert "agent.rollout_window" in skewed["message"]
+
+
+def test_packaged_unknown_key_without_a_moved_revision_keeps_the_typo_error(
+    tmp_path, monkeypatch
+):
+    # No load has succeeded yet, so this process has no revision to compare and
+    # the packaged file is simply wrong. The typo wording is the correct one.
+    system_root = tmp_path / "runtime"
+    packaged = system_root / "spice.toml"
+    _write(packaged, '[agent]\nmodle = "typo"\n')
+    monkeypatch.setattr(layers.paths, "runtime_spice_source", lambda: system_root)
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome == {
+        "state": "rejected",
+        "message": (
+            "unknown configuration key agent.modle "
+            f"(source=system path={packaged}); did you mean agent.model?"
+        ),
+    }
+
+
 @pytest.mark.parametrize(
     ("document", "unknown_path", "suggested_path"),
     (
