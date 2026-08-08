@@ -129,11 +129,11 @@ after RTK selection by routing:
 
 Because these routes are shell functions named after the wrapped command, they
 intercept only ordinary command words. A `command`-prefixed invocation such as
-`command rg --files docs/design` bypasses the generated `rtk()` function through
+`command rg -n needle` bypasses the generated `rtk()` function through
 the POSIX `command` builtin: RTK still rewrites it to
-`command rtk rg --files docs/design`, but no `wrappers.common.rtk` match flag
-can fire, so it reaches the real RTK rg frontend unrouted and searches with the
-path each match came from dropped whenever it carries no path operand. The `command`-prefixed
+`command rtk rg -n needle`, but no `wrappers.common.rtk` match flag
+can fire, so it reaches the real RTK rg frontend unrouted and, carrying no path
+operand, answers with the path each match came from dropped. The `command`-prefixed
 form is a known limitation of the shell-function mechanism, not a routed case;
 Spice's post-selection routing governs only wrapper-visible command words, never
 RTK's external rewrite selection.
