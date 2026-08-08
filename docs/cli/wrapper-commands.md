@@ -102,27 +102,21 @@ after RTK selection by routing:
   must never be forwarded to `rg`, which reinterprets grep short flags (`-r` as
   `--replace`, `-E` as `--encoding`, `-L` as `--follow`, `-U` as `--multiline`)
   and would silently rewrite or misdirect the search;
-- every `rtk rg` that will search the filesystem to `rtk rg --with-filename`. A
+- every `rtk rg` to `rtk rg --with-filename`. A
   search written as `rg` reaches this frontend whole, because the supported RTK
   releases rewrite `rg` onto an `rg` frontend rather than collapsing it onto
-  `grep`. That frontend drops the path each match came from in exactly one shape
-  — a search that reads the working directory instead of stdin — so it returns
-  the right matches as bare `LINE:text` lines that name no file to open. The
-  activation fidelity check cannot see the loss, because it compares a `--count`
+  `grep`. That frontend can return bare `LINE:text` matches that name no source.
+  The activation fidelity check cannot see the loss, because it compares a `--count`
   whose answer is a bare number with no path in it to lose. `--with-filename`
-  restores the prefix, measured byte-identical to native `rg`, so the search
-  stays on the frontend and keeps RTK's compaction while the wrapper repairs only
-  how matches are printed. Routing the frontend to native ripgrep instead would
-  buy the same paths by surrendering compaction on every search in the session,
-  which is the more expensive way to pay for the smaller problem. The guard is
-  deliberately not rg's flag grammar, which would go silently wrong at the next
-  rg release: `rg` reads stdin when stdin is a FIFO or a regular file and
-  searches the filesystem otherwise, and `filesystem_search` asks that same
-  question, so a piped or redirected search never takes the route and stays
-  byte-identical to native `rg` rather than wearing a `<stdin>:` prefix. A search
-  naming one file does gain a prefix native `rg` omits, giving every match line
-  one uniform shape instead of a shape that depends on how many paths the search
-  happened to name;
+  restores a source prefix while the search stays on the frontend and keeps
+  RTK's compaction. Routing the frontend to native ripgrep instead would buy the
+  same paths by surrendering compaction on every search in the session, which is
+  the more expensive way to pay for the smaller problem. The route is
+  unconditional and gives every match one uniform source-labeled shape:
+  filesystem matches name their path, while piped or redirected matches name
+  `<stdin>`. The latter is an intentional cosmetic difference from native `rg`.
+  It also avoids an incorrect stdin-only classifier: when readable stdin and an
+  explicit path operand are both present, rg ignores stdin and searches the path;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every `rtk grep` carrying a file or directory search operand through the

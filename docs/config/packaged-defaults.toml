@@ -35,7 +35,7 @@ executable = "rtk"
 argv = ["rtk"]
 match = [
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading", "--pcre2", "-g", "--glob", "--glob=*"], argv = ["rg"] },
-  { head = "rg", filesystem_search = true, argv = ["rtk", "rg", "--with-filename"] },
+  { head = "rg", argv = ["rtk", "rg", "--with-filename"] },
   { head = "find", keep = ["-name", "-iname", "-type", "-maxdepth"], flags = ["-*", "(", ")", "!"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
   { head = "grep", search_operands = true, scopes = { drivers = ["codex"] }, argv = ["rtk", "grep", "-E", "-r"] },
