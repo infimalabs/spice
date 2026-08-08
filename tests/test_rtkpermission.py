@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import cli as agent_cli
-from spice.agent import rtkhealth, shellhook, wrap
+from spice.agent import rtkhealth, rtkrewrite, shellhook, wrap
 from spice.config import values
 from spice.tasks import claimstate
 
@@ -30,10 +30,9 @@ NARROWED_REWRITE = "grep --count 'alpha|beta'"
 UNFAITHFUL_DETAIL = "rewriting rg changed its answer: written 2, rewritten 0"
 
 
-# The shell stage is isolated by replacing `subprocess.run`, and `wrap.subprocess`
-# is that same module object, so a child launched afterwards would reach the fake
-# rewriter instead of the program named on its argv. Both real executions in this
-# file are bound to the launcher as it was before any test replaced it.
+# The shell stage replaces the bounded RTK selector owner. Both real executions
+# in this file stay bound to the native launcher so the fake selector cannot
+# intercept the program named on the resulting argv.
 _LAUNCH = subprocess.run
 
 
@@ -84,7 +83,13 @@ def _isolate_shell_stage(monkeypatch: pytest.MonkeyPatch, rewrites: list[list[st
             [], 3, stdout=f"{NARROWED_REWRITE} {subject}\n", stderr=""
         )
 
-    monkeypatch.setattr(wrap.subprocess, "run", run_rtk)
+    def bounded_rtk_run(command: list[str], **kwargs: object) -> object:
+        kwargs.pop("timeout_seconds")
+        kwargs.pop("phase")
+        kwargs.pop("input_label")
+        return run_rtk(command, **kwargs)
+
+    monkeypatch.setattr(rtkrewrite, "run_bounded_process_group", bounded_rtk_run)
     monkeypatch.setattr(
         wrap, "bind_ambient_thread_for_shell_stage", lambda *_a, **_k: None
     )

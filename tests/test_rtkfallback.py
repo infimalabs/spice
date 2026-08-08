@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import shlex
 import subprocess
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -15,6 +17,7 @@ from spice.config import edit, layers, values
 from spice.agent import driver as agent_driver
 from spice.agent import rtkrewrite
 from spice.agent import wrap
+from spice.process.groups import ProcessDeadlineExceeded, process_id_is_running
 
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
 
@@ -371,6 +374,94 @@ def test_warning_dedup_keys_thread_executable_and_failure_signature(
     }
 
 
+def test_rewrite_deadline_selects_native_and_suppresses_repeat_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = "stalled-rtk"
+    _configure_rtk(tmp_path, executable)
+    wrap._rtk_warned_keys.clear()
+    calls: list[dict[str, object]] = []
+
+    def stalled(command: list[str], **kwargs: object) -> object:
+        calls.append({"command": command, **kwargs})
+        raise ProcessDeadlineExceeded(
+            phase=str(kwargs["phase"]),
+            input_label=str(kwargs["input_label"]),
+            timeout_seconds=float(kwargs["timeout_seconds"]),
+            command=command,
+        )
+
+    monkeypatch.setattr(rtkrewrite, "run_bounded_process_group", stalled)
+    stderr = io.StringIO()
+
+    first = rtkrewrite.rewrite_command_text(
+        "native-tool", repo_root=tmp_path, rtk_executable=executable, stderr=stderr
+    )
+    second = rtkrewrite.rewrite_command_text(
+        "native-tool", repo_root=tmp_path, rtk_executable=executable, stderr=stderr
+    )
+
+    assert first is None
+    assert second is None
+    assert (
+        calls
+        == [
+            {
+                "command": [executable, "rewrite", "--", "native-tool"],
+                "timeout_seconds": rtkrewrite.RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS,
+                "phase": "agent.rtk-rewrite-selector",
+                "input_label": "command-selection",
+                "capture_output": True,
+                "text": True,
+                "check": False,
+            }
+        ]
+        * 2
+    )
+    assert stderr.getvalue().splitlines() == [
+        "spice agent run: RTK rewrite degraded to native "
+        "executable='stalled-rtk' failure=deadline-exceeded"
+    ]
+
+
+def test_rewrite_deadline_reaps_stalled_descendant_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    descendant_pid_path = tmp_path / "descendant.pid"
+    provider = (
+        "import pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8'); "
+        "time.sleep(60)"
+    )
+    executable = tmp_path / "stalled-rtk"
+    executable.write_text(
+        "#!/bin/sh\n"
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(provider)} "
+        f"{shlex.quote(str(descendant_pid_path))}\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    wrap._rtk_warned_keys.clear()
+    monkeypatch.setattr(rtkrewrite, "RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS", 1.0)
+
+    stderr = io.StringIO()
+    rewritten = rtkrewrite.rewrite_command_text(
+        "native-tool", rtk_executable=str(executable), stderr=stderr
+    )
+    descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
+    reaping_deadline = time.monotonic() + 2.0
+    while process_id_is_running(descendant_pid) and time.monotonic() < reaping_deadline:
+        time.sleep(0.01)
+
+    assert rewritten is None
+    assert not process_id_is_running(descendant_pid)
+    assert stderr.getvalue().splitlines() == [
+        "spice agent run: RTK rewrite degraded to native "
+        f"executable={str(executable)!r} failure=deadline-exceeded"
+    ]
+
+
 def _configure_rtk(repo_root: Path, executable: str) -> None:
     repo_root.mkdir(exist_ok=True)
     edit.set_scope_section(
@@ -391,7 +482,14 @@ def _isolate_agent_run(
     if not preserve_thread:
         monkeypatch.delenv(agent_driver.CODEX_DRIVER.thread_id_env, raising=False)
         monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.setattr(wrap.subprocess, "run", rtk_run)
+
+    def bounded_rtk_run(command: list[str], **kwargs: object) -> object:
+        kwargs.pop("timeout_seconds")
+        kwargs.pop("phase")
+        kwargs.pop("input_label")
+        return rtk_run(command, **kwargs)
+
+    monkeypatch.setattr(rtkrewrite, "run_bounded_process_group", bounded_rtk_run)
     monkeypatch.setattr(
         wrap,
         "bind_ambient_thread_for_shell_stage",

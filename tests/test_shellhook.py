@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent import driver as agent_driver
-from spice.agent import lifecycle, shellhook, wrap
+from spice.agent import lifecycle, rtkrewrite, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from tests.test_shellhookhelpers import (
     SHELL_TRACE_ENV,
@@ -850,7 +850,13 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
         child_environments.append(env)
         return Process()
 
-    monkeypatch.setattr(wrap.subprocess, "run", rewrite_run)
+    def bounded_rewrite_run(args, **kwargs):
+        kwargs.pop("timeout_seconds")
+        kwargs.pop("phase")
+        kwargs.pop("input_label")
+        return rewrite_run(args, **kwargs)
+
+    monkeypatch.setattr(rtkrewrite, "run_bounded_process_group", bounded_rewrite_run)
     for thread_id, command in (
         ("thread-a", ["git", "status"]),
         ("thread-b", ["zsh", "-c", "git status"]),

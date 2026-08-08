@@ -87,18 +87,126 @@ def test_blocking_surface_audit_anchors_name_calls_the_scan_still_finds():
     )
 
 
+def test_blocking_surface_audit_resolves_a_local_blocking_callable_binding():
+    path = PROJECT_ROOT / "spice" / "_local_binding_probe.py"
+    tree = ast.parse(
+        "def choose(injected=None):\n"
+        "    runner = injected or subprocess.run\n"
+        "    return runner(['provider'])\n"
+        "\n"
+        "def rebound(injected):\n"
+        "    runner = subprocess.run\n"
+        "    runner = injected\n"
+        "    return runner(['provider'])\n",
+        filename=str(path),
+    )
+
+    assert _blocking_call_sites(path, tree) == {
+        "spice/_local_binding_probe.py::choose#runner"
+    }
+
+
 def _production_blocking_call_sites() -> set[str]:
     found: set[str] = set()
     for path in sorted((PROJECT_ROOT / "spice").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        scopes = _function_scopes(tree)
-        rel = path.relative_to(PROJECT_ROOT).as_posix()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and _is_blocking_call(node, path):
-                qualified = _enclosing_qualified_name(scopes, node.lineno)
-                call = _qualified_name(node.func).rsplit(".", 1)[-1]
-                found.add(f"{rel}::{qualified}#{call}")
+        found.update(_blocking_call_sites(path, tree))
     return found
+
+
+def _blocking_call_sites(path: Path, tree: ast.AST) -> set[str]:
+    scopes = _function_scopes(tree)
+    bindings = _local_blocking_callable_bindings(tree)
+    rel = path.relative_to(PROJECT_ROOT).as_posix()
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qualified = _enclosing_qualified_name(scopes, node.lineno)
+        if not (
+            _is_blocking_call(node, path)
+            or _calls_local_blocking_binding(node, qualified, bindings)
+        ):
+            continue
+        call = _qualified_name(node.func).rsplit(".", 1)[-1]
+        found.add(f"{rel}::{qualified}#{call}")
+    return found
+
+
+def _local_blocking_callable_bindings(
+    tree: ast.AST,
+) -> dict[str, dict[str, list[tuple[int, bool]]]]:
+    bindings: dict[str, dict[str, list[tuple[int, bool]]]] = {}
+    stack: list[str] = []
+
+    class _Bindings(ast.NodeVisitor):
+        def _enter_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._enter_function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._enter_function(node)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_Assign(self, node: ast.Assign) -> None:
+            if stack:
+                scope = ".".join(stack)
+                is_blocking = _expression_names_blocking_callable(node.value)
+                for target in node.targets:
+                    for name in _assigned_names(target):
+                        bindings.setdefault(scope, {}).setdefault(name, []).append(
+                            (node.lineno, is_blocking)
+                        )
+            self.generic_visit(node)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+            if stack and node.value is not None:
+                scope = ".".join(stack)
+                is_blocking = _expression_names_blocking_callable(node.value)
+                for name in _assigned_names(node.target):
+                    bindings.setdefault(scope, {}).setdefault(name, []).append(
+                        (node.lineno, is_blocking)
+                    )
+            self.generic_visit(node)
+
+    _Bindings().visit(tree)
+    return bindings
+
+
+def _expression_names_blocking_callable(expression: ast.expr) -> bool:
+    return any(
+        isinstance(node, (ast.Name, ast.Attribute))
+        and _qualified_name(node) in DIRECT_BLOCKING_CALLS
+        for node in ast.walk(expression)
+    )
+
+
+def _assigned_names(target: ast.expr) -> tuple[str, ...]:
+    if isinstance(target, ast.Name):
+        return (target.id,)
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return tuple(name for item in target.elts for name in _assigned_names(item))
+    return ()
+
+
+def _calls_local_blocking_binding(
+    node: ast.Call,
+    qualified_scope: str,
+    bindings: dict[str, dict[str, list[tuple[int, bool]]]],
+) -> bool:
+    if not isinstance(node.func, ast.Name):
+        return False
+    history = bindings.get(qualified_scope, {}).get(node.func.id, [])
+    prior = [is_blocking for line, is_blocking in history if line <= node.lineno]
+    return prior[-1] if prior else False
 
 
 def _function_scopes(tree: ast.AST) -> list[tuple[int, int, str]]:
