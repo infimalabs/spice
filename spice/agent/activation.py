@@ -82,10 +82,10 @@ def _activation_runtime_lines(*, rtk_active: bool) -> list[str]:
             "command_surface=run shell commands normally; spice shell startup "
             "hooks reexec the first zsh/bash command shell through spice agent "
             "run so inbox steering and keep-working guidance arrive before the "
-            "requested command; descendant shells use static hooks and "
-            "precomputed wrappers without another reexec; agent-run child "
-            "shells enter the static hook stage before exported "
-            "snapshot/descendant state is captured"
+            "requested command; the agent-run command shell consumes the static "
+            "hook and precomputed wrappers exactly once, restores the original "
+            "startup environment, and leaves executed scripts and descendant "
+            "shells native; sourced scripts share their caller's shell state"
         ),
     ]
     if rtk_active:

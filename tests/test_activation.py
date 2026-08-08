@@ -144,9 +144,10 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
 
     assert "command_surface=run shell commands normally" in text
     assert "reexec the first zsh/bash command shell through spice agent run" in text
-    assert "descendant shells use static hooks and precomputed wrappers" in text
-    assert "agent-run child shells enter the static hook stage" in text
-    assert "snapshot/descendant state is captured" in text
+    assert "command shell consumes the static hook and precomputed wrappers" in text
+    assert "restores the original startup environment" in text
+    assert "executed scripts and descendant shells native" in text
+    assert "sourced scripts share their caller's shell state" in text
     assert "rtk_contract=RTK is an optional command-output optimization" in text
     assert "preserves native command execution" in text
     assert "rtk_guidance=RTK rewrite support is active" in text

@@ -596,6 +596,150 @@ def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(
     assert output.count("Inbox Steering") == 1
 
 
+def test_side_channel_watch_survives_root_child_fork_and_wait(tmp_path, monkeypatch):
+    if not hasattr(os, "fork"):
+        pytest.skip("platform does not support fork")
+    watcher = wrap._parent_exit_watcher(os.getpid())
+    if watcher is None:
+        pytest.skip("platform does not expose process-exit watch handles")
+    watcher.close()
+    monkeypatch.chdir(tmp_path)
+    stderr = io.StringIO()
+    parent = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os, sys; "
+                "sys.stdin.read(1); "
+                "child = os.fork(); "
+                "os._exit(0) if child == 0 else os.waitpid(child, 0); "
+                "print('after-wait', flush=True); "
+                "sys.stdin.read(1)"
+            ),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert parent.stdin is not None
+    assert parent.stdout is not None
+
+    try:
+        with sidechannel.AgentSideChannelServer(tmp_path):
+            thread = Thread(
+                target=wrap.watch_agent_side_channel,
+                kwargs={
+                    "repo_root": tmp_path,
+                    "parent_pid": parent.pid,
+                    "stderr": stderr,
+                },
+            )
+            thread.start()
+            write_inbox_item(
+                tmp_path,
+                "1jN54zJR.txt",
+                compose_inbox_text(body="before fork", priority=None, stop=False),
+            )
+            assert "before fork" in _eventually(
+                lambda: stderr.getvalue(), contains="before fork"
+            )
+
+            parent.stdin.write("f")
+            parent.stdin.flush()
+            assert parent.stdout.readline().strip() == "after-wait"
+            write_inbox_item(
+                tmp_path,
+                "1jN54zJS.txt",
+                compose_inbox_text(body="after wait", priority=None, stop=False),
+            )
+            assert "after wait" in _eventually(
+                lambda: stderr.getvalue(), contains="after wait"
+            )
+            assert thread.is_alive()
+
+            parent.stdin.write("q")
+            parent.stdin.flush()
+            assert parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S) == 0
+            thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+            assert not thread.is_alive()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+
+
+def test_side_channel_watch_survives_root_child_exec(tmp_path, monkeypatch):
+    watcher = wrap._parent_exit_watcher(os.getpid())
+    if watcher is None:
+        pytest.skip("platform does not expose process-exit watch handles")
+    watcher.close()
+    monkeypatch.chdir(tmp_path)
+    stderr = io.StringIO()
+    after_exec = "import sys; print('after-exec', flush=True); sys.stdin.read(1)"
+    parent = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os, sys; "
+                "print('before-exec', flush=True); "
+                "sys.stdin.read(1); "
+                f"os.execv(sys.executable, [sys.executable, '-c', {after_exec!r}])"
+            ),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert parent.stdin is not None
+    assert parent.stdout is not None
+
+    try:
+        assert parent.stdout.readline().strip() == "before-exec"
+        with sidechannel.AgentSideChannelServer(tmp_path):
+            thread = Thread(
+                target=wrap.watch_agent_side_channel,
+                kwargs={
+                    "repo_root": tmp_path,
+                    "parent_pid": parent.pid,
+                    "stderr": stderr,
+                },
+            )
+            thread.start()
+            write_inbox_item(
+                tmp_path,
+                "1jN54zJT.txt",
+                compose_inbox_text(body="before exec", priority=None, stop=False),
+            )
+            assert "before exec" in _eventually(
+                lambda: stderr.getvalue(), contains="before exec"
+            )
+
+            parent.stdin.write("e")
+            parent.stdin.flush()
+            assert parent.stdout.readline().strip() == "after-exec"
+            write_inbox_item(
+                tmp_path,
+                "1jN54zJU.txt",
+                compose_inbox_text(body="after exec", priority=None, stop=False),
+            )
+            assert "after exec" in _eventually(
+                lambda: stderr.getvalue(), contains="after exec"
+            )
+            assert thread.is_alive()
+
+            parent.stdin.write("q")
+            parent.stdin.flush()
+            assert parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S) == 0
+            thread.join(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+            assert not thread.is_alive()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=SIDE_CHANNEL_SHUTDOWN_DEADLINE_S)
+
+
 def test_side_channel_watch_exits_when_parent_already_exited_before_registration(
     tmp_path, monkeypatch
 ):
