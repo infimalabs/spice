@@ -131,9 +131,9 @@ Because these routes are shell functions named after the wrapped command, they
 intercept only ordinary command words. A `command`-prefixed invocation such as
 `command rg --files docs/design` bypasses the generated `rtk()` function through
 the POSIX `command` builtin: RTK still rewrites it to
-`command rtk grep --files docs/design`, but no `wrappers.common.rtk` match flag
-can fire, so it reaches the real RTK grep frontend unrouted and the rg-only
-`--files` forwards to the platform grep to fail natively. The `command`-prefixed
+`command rtk rg --files docs/design`, but no `wrappers.common.rtk` match flag
+can fire, so it reaches the real RTK rg frontend unrouted and searches with the
+path each match came from dropped whenever it carries no path operand. The `command`-prefixed
 form is a known limitation of the shell-function mechanism, not a routed case;
 Spice's post-selection routing governs only wrapper-visible command words, never
 RTK's external rewrite selection.
@@ -142,9 +142,12 @@ Every selected direct wrapper whose argv head is not the configured RTK
 executable owns its command word before RTK rewrite, regardless of whether the
 wrapper came from packaged defaults, repository configuration, or an extension.
 The global plain `grep` wrapper therefore makes an RTK candidate ending at
-`rtk grep` yield: an agent-authored `rg` remains `rg`, preserving ripgrep's
-regular-expression dialect and flags. RTK-headed and unselected wrapper words
-remain eligible for rewrite.
+`rtk grep` yield, so an agent-authored `grep` stays on native grep and keeps its
+own dialect. The two search words reach native tooling by opposite means, and the
+asymmetry is worth reading once: no wrapper owns `rg`, so an agent-authored `rg`
+is a candidate that proceeds to `rtk rg`, and the `head = "rg"` route above is
+what returns it to native ripgrep with its regular-expression dialect and flags
+intact. RTK-headed and unselected wrapper words remain eligible for rewrite.
 
 Both drivers receive that plain `grep` wrapper. Its shared base invokes native
 grep, preserving Claude-authored BASIC alternation such as `\|`; a Codex-scoped
