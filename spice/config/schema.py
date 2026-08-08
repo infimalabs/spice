@@ -62,7 +62,7 @@ _POLICY_RULE_SCOPES = _table(("paths", "extensions"))
 _PRE_COMMIT_SCOPES = _table(("paths", "drivers", "models", "phases"))
 
 _WRAPPER_ROUTE = _table(
-    ("head", "flags", "keep", "search_operands", "argv"),
+    ("head", "flags", "keep", "search_operands", "filesystem_search", "argv"),
     children={"scopes": _DRIVER_SCOPES},
 )
 _WRAPPER_ENTRY = _table(

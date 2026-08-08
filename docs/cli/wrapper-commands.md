@@ -102,25 +102,27 @@ after RTK selection by routing:
   must never be forwarded to `rg`, which reinterprets grep short flags (`-r` as
   `--replace`, `-E` as `--encoding`, `-L` as `--follow`, `-U` as `--multiline`)
   and would silently rewrite or misdirect the search;
-- every `rtk rg` to `rg`, whatever it carries. A search written as `rg` reaches
-  this frontend whole, because the supported RTK releases rewrite `rg` onto an
-  `rg` frontend rather than collapsing it onto `grep`. That frontend drops the
-  path each match came from in exactly one shape — a search carrying no path
-  operand, which is the recursive search of the working directory — so it returns
-  the right matches as bare `LINE:text` lines that name no file to open. A search
-  naming a directory keeps its paths, a search naming one file omits them
-  natively, and a piped search is already byte-identical to native `rg`. The
+- every `rtk rg` that will search the filesystem to `rtk rg --with-filename`. A
+  search written as `rg` reaches this frontend whole, because the supported RTK
+  releases rewrite `rg` onto an `rg` frontend rather than collapsing it onto
+  `grep`. That frontend drops the path each match came from in exactly one shape
+  — a search that reads the working directory instead of stdin — so it returns
+  the right matches as bare `LINE:text` lines that name no file to open. The
   activation fidelity check cannot see the loss, because it compares a `--count`
   whose answer is a bare number with no path in it to lose. `--with-filename`
-  does restore the prefix, but adding it unconditionally stamps `<stdin>:` onto
-  every line of the faithful piped shape, and adding it only to the losing shape
-  means deciding which bare word is the pattern and which is a path — rg's whole
-  flag grammar, re-implemented in the wrapper and silently wrong at the next rg
-  release. The whole frontend therefore takes one deterministic route out, and no
-  compaction is claimed for `grep` in its place: a written `grep` never reaches
-  RTK either, because the `grep` yield selector refuses that candidate before any
-  route exists. Searching is the one job this configuration does entirely without
-  RTK; `ls`, `cat`, `wc`, `git`, and `find` still compact;
+  restores the prefix, measured byte-identical to native `rg`, so the search
+  stays on the frontend and keeps RTK's compaction while the wrapper repairs only
+  how matches are printed. Routing the frontend to native ripgrep instead would
+  buy the same paths by surrendering compaction on every search in the session,
+  which is the more expensive way to pay for the smaller problem. The guard is
+  deliberately not rg's flag grammar, which would go silently wrong at the next
+  rg release: `rg` reads stdin when stdin is a FIFO or a regular file and
+  searches the filesystem otherwise, and `filesystem_search` asks that same
+  question, so a piped or redirected search never takes the route and stays
+  byte-identical to native `rg` rather than wearing a `<stdin>:` prefix. A search
+  naming one file does gain a prefix native `rg` omits, giving every match line
+  one uniform shape instead of a shape that depends on how many paths the search
+  happened to name;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
 - every `rtk grep` carrying a file or directory search operand through the
@@ -134,8 +136,8 @@ intercept only ordinary command words. A `command`-prefixed invocation such as
 `command rg -n needle` bypasses the generated `rtk()` function through
 the POSIX `command` builtin: RTK still rewrites it to
 `command rtk rg -n needle`, but no `wrappers.common.rtk` match flag
-can fire, so it reaches the real RTK rg frontend unrouted and, carrying no path
-operand, answers with the path each match came from dropped. The `command`-prefixed
+can fire, so it reaches the real RTK rg frontend unrouted and, when it searches
+the filesystem, answers with the path each match came from dropped. The `command`-prefixed
 form is a known limitation of the shell-function mechanism, not a routed case;
 Spice's post-selection routing governs only wrapper-visible command words, never
 RTK's external rewrite selection.
@@ -145,11 +147,11 @@ executable owns its command word before RTK rewrite, regardless of whether the
 wrapper came from packaged defaults, repository configuration, or an extension.
 The global plain `grep` wrapper therefore makes an RTK candidate ending at
 `rtk grep` yield, so an agent-authored `grep` stays on native grep and keeps its
-own dialect. The two search words reach native tooling by opposite means, and the
-asymmetry is worth reading once: no wrapper owns `rg`, so an agent-authored `rg`
-is a candidate that proceeds to `rtk rg`, and the `head = "rg"` route above is
-what returns it to native ripgrep with its regular-expression dialect and flags
-intact. RTK-headed and unselected wrapper words remain eligible for rewrite.
+own dialect. The two search words are treated oppositely, and the asymmetry is
+worth reading once: no wrapper owns `rg`, so an agent-authored `rg` is a
+candidate that proceeds to `rtk rg` and keeps RTK's compaction, and the
+`head = "rg"` route above repairs only how that frontend prints its matches.
+RTK-headed and unselected wrapper words remain eligible for rewrite.
 
 Both drivers receive that plain `grep` wrapper. Its shared base invokes native
 grep, preserving Claude-authored BASIC alternation such as `\|`; a Codex-scoped

@@ -158,24 +158,22 @@ with `[agent] wrappers = [...]`.
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
 group supplies only the finite post-selection command-shape transformations:
-rg-only grep flags to `rg`, the whole `rtk rg` frontend to `rg`, native find
-predicates to `find`, diagnostic git flags to `git`, a Codex-scoped head-only
-route that injects `-E` into `rtk grep`, and one plain `grep` wrapper shared by
-both drivers. The two search words reach native tooling by different means, and
-the difference is worth reading once. Every selected direct wrapper whose argv
-head is not RTK owns its command word regardless of configuration source, so the
-plain `grep` wrapper makes spice refuse an RTK candidate naming `grep` outright.
-No wrapper owns `rg`, so a candidate naming `rg` is accepted and the route above
-sends that frontend to native `rg` instead: RTK's rg frontend drops the path each
-match came from whenever the search carries no path operand, returning the right
-matches as bare `LINE:text` lines that name no file to open. `--with-filename`
-restores the prefix but stamps `<stdin>:` onto the piped shape that is faithful
-today, and applying it only where the loss occurs would mean re-implementing rg's
-flag grammar to tell a pattern from a path, so the whole frontend takes one
-deterministic route out. The two words reach native tooling by opposite means but
-reach the same place, and neither compacts: searching is the one job this default
-does entirely without RTK, while `ls`, `cat`, `wc`, `git`, and `find` still
-compact. The shared plain wrapper preserves Claude's BASIC-regexp authoring
+rg-only grep flags to `rg`, a filesystem-searching `rtk rg` to
+`rtk rg --with-filename`, native find predicates to `find`, diagnostic git flags
+to `git`, a Codex-scoped head-only route that injects `-E` into `rtk grep`, and
+one plain `grep` wrapper shared by both drivers. The two search words are treated
+oppositely, and the difference is worth reading once. Every selected direct
+wrapper whose argv head is not RTK owns its command word regardless of
+configuration source, so the plain `grep` wrapper makes spice refuse an RTK
+candidate naming `grep` outright. No wrapper owns `rg`, so a candidate naming
+`rg` is accepted and keeps RTK's compaction, and the route above repairs only how
+that frontend prints: RTK's rg frontend drops the path each match came from
+whenever the search reads the working directory instead of stdin, returning the
+right matches as bare `LINE:text` lines that name no file to open.
+`--with-filename` restores the prefix byte-identically to native `rg`, and
+`filesystem_search` confines it to the shape that loses paths by asking rg's own
+readable-stdin question rather than re-implementing its flag grammar, so a piped
+or redirected search is left alone. The shared plain wrapper preserves Claude's BASIC-regexp authoring
 with `\|`; its Codex-scoped catch-all injects `-E`, with explicit matcher flags
 still winning.
 Naming `common` in a repo `[wrappers.common]` table replaces the whole
