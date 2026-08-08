@@ -19,12 +19,14 @@ from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_thread_state_dir
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
+from spice.process.groups import ProcessDeadlineExceeded, run_bounded_process_group
 
 RTK_REWRITE_SUBCOMMAND = "rewrite"
 RTK_CANONICAL_EXECUTABLE = "rtk"
 RTK_REWRITE_MATCH_EXIT_CODE = 3
 RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
 RTK_REWRITE_SUCCESS_EXIT_CODES = frozenset((0, RTK_REWRITE_MATCH_EXIT_CODE))
+RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS = 5.0
 RTK_DIAGNOSTIC_EXECUTABLE_CHARS = 160
 
 # A search reads its pattern as an extended regular expression when its name says
@@ -88,7 +90,6 @@ def rewrite_command_text(
             ("rtk", "executable"),
             command=shlex.join(command),
         )
-    runner = run or subprocess.run
     run_kwargs: dict[str, Any] = {
         "capture_output": True,
         "text": True,
@@ -97,10 +98,26 @@ def rewrite_command_text(
     if env is not None:
         run_kwargs["env"] = dict(env)
     try:
-        completed = runner(
-            command,
-            **run_kwargs,
+        if run is None:
+            completed = run_bounded_process_group(
+                command,
+                timeout_seconds=RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS,
+                phase="agent.rtk-rewrite-selector",
+                input_label="command-selection",
+                **run_kwargs,
+            )
+        else:
+            completed = run(command, **run_kwargs)
+    except ProcessDeadlineExceeded:
+        failure_class = "deadline-exceeded"
+        emit_rewrite_diagnostic(
+            repo_root,
+            stderr,
+            executable=executable,
+            failure_class=failure_class,
+            failure_signature=(f"deadline={RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS:g}s"),
         )
+        return None
     except OSError as exc:
         failure_class = _launch_failure_class(exc)
         emit_rewrite_diagnostic(

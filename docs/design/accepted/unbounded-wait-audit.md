@@ -29,6 +29,7 @@ and `push`. All direct production `run` and `Popen` sites are inventoried below.
 | Call sites | Caller impact and current cancellation contract | Classification |
 | --- | --- | --- |
 | `spice/agent/judgeadapter.py::main#run` | Judge execution has a configured timeout and reports expiry. | Bounded |
+| RTK command selection in `spice/agent/rtkrewrite.py::rewrite_command_text`, owned by `spice/process/groups.py::run_bounded_process_group#Popen` | The optional `rtk rewrite` selector has a named 5-second deadline. Expiry terminates and reaps the complete selector process group, emits the existing repeat-suppressed degradation diagnostic, and selects the original native command; the foreground command selected afterward remains intentionally uncapped. | Bounded by `RTK_REWRITE_SELECTOR_TIMEOUT_SECONDS` |
 | `spice/studies/mutations.py::_run_pytest` | The mutation command receives its configured timeout. | Bounded |
 | Optional RTK gain measurement at `spice/tasks/ops.py::rtk_usage_nudge` rides the named probe tool policy | The probe deadline bounds the measurement and the caller degrades to no gain data. | Bounded, implemented under `PROCESS-1kF6VWvS` |
 | `spice/process/git.py::run_git_command`; wrapper at `spice/tasks/git/plumbing.py::run` | The shared git runner applies a configurable 120-second default; task `fetch` and `push` retain their tighter 30-second limit plus noninteractive SSH connect timeout. | Bounded, implemented under `GITSYNC-1kCzJQCl` and `RELIABI-1kCzJljJ` |
