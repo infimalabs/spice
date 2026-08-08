@@ -35,13 +35,16 @@ executable = "rtk"
 [wrappers.common.rtk]
 argv = ["rtk"]
 match = [
-  # This route outlived the rg-to-grep collapse that first motivated it. From
-  # 0.45.0 RTK sends a written rg to its own rg frontend, but it still forwards
-  # rg-only flags written on grep onto the grep frontend: 'grep --files docs'
-  # rewrites to 'rtk grep --files docs', where platform grep exits 2 with
-  # "option `--files' is ambiguous" and --glob exits 2 as an unrecognized option.
-  # The route turns that hard failure into the search the caller asked for, so it
-  # still earns its place. Only rg-native flags divert grep to ripgrep, though.
+  # This route outlived the rg-to-grep collapse that first motivated it, and no
+  # rewrite reaches it any more. From 0.45.0 a written rg becomes 'rtk rg', which
+  # the route below owns; a written grep still proposes 'rtk grep', but grep is a
+  # yield selector, so spice refuses that candidate outright and the command stays
+  # native. What remains is an agent that literally types 'rtk grep --files docs',
+  # which RTK's own 'rtk init' assistant instructions invite. Unrouted, that hands
+  # rg-only flags to platform grep, which exits 2 with "option `--files' is
+  # ambiguous" and treats --glob as an unrecognized option; the route runs the
+  # intended ripgrep search instead. That narrow, still-live shape is the whole of
+  # what it earns. Only rg-native flags divert grep to ripgrep, though.
   # A grep-dialect command (bare
   # directory operand, -r/-R recursion) must not reach rg, because grep and rg
   # share short flags with different meanings (-r=--replace, -E=--encoding,
