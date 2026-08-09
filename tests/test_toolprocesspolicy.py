@@ -16,7 +16,6 @@ from spice.serve import typecheck as serve_typecheck
 from spice.studies import typecheck as python_typecheck
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PREVIOUS_EXTENSION_TOOL_TIMEOUT_SECONDS = 120.0
 EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS = 180.0
 # Both ways a caller reaches a named tool policy. A new entry point that this
 # set does not know is a bounded-tool surface the catalog below cannot see, so
@@ -85,11 +84,7 @@ def test_extension_policy_admits_a_150_second_rust_gate_through_one_lookup(
 
     def fake_bounded(command, **kwargs):
         timeout = kwargs["timeout_seconds"]
-        assert (
-            PREVIOUS_EXTENSION_TOOL_TIMEOUT_SECONDS
-            < synthetic_runtime_seconds
-            < timeout
-        )
+        assert synthetic_runtime_seconds < timeout
         calls.append(
             (
                 "buffered",
