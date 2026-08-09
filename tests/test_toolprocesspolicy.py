@@ -11,11 +11,13 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.process.groups import ProcessDeadlineExceeded
-from spice.process import tool
+from spice.process import groups, tool
 from spice.serve import typecheck as serve_typecheck
 from spice.studies import typecheck as python_typecheck
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PREVIOUS_EXTENSION_TOOL_TIMEOUT_SECONDS = 120.0
+EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS = 180.0
 # Both ways a caller reaches a named tool policy. A new entry point that this
 # set does not know is a bounded-tool surface the catalog below cannot see, so
 # adding one here is what keeps the catalog a gate rather than a sample.
@@ -72,6 +74,123 @@ def test_direct_subprocess_seams_match_the_explicit_policy_catalog():
 
 def test_each_bounded_tool_policy_has_a_catalogued_production_caller():
     assert _tool_policy_callers() == EXPECTED_TOOL_POLICY_CALLERS
+
+
+def test_extension_policy_admits_a_150_second_rust_gate_through_one_lookup(
+    monkeypatch,
+):
+    command = ["cargo", "run", "--locked", "--package", "spice", "--", "gate"]
+    synthetic_runtime_seconds = 150.0
+    calls: list[tuple[str, float, str, str, tuple[str, ...]]] = []
+
+    def fake_bounded(command, **kwargs):
+        timeout = kwargs["timeout_seconds"]
+        assert (
+            PREVIOUS_EXTENSION_TOOL_TIMEOUT_SECONDS
+            < synthetic_runtime_seconds
+            < timeout
+        )
+        calls.append(
+            (
+                "buffered",
+                timeout,
+                kwargs["phase"],
+                kwargs["input_label"],
+                tuple(command),
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    def fake_streamed(command, **kwargs):
+        timeout = kwargs["timeout_seconds"]
+        calls.append(
+            (
+                "streamed",
+                timeout,
+                kwargs["phase"],
+                kwargs["input_label"],
+                tuple(command),
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(tool, "run_bounded_process_group", fake_bounded)
+    monkeypatch.setattr(tool, "run_streamed_process_group", fake_streamed)
+
+    buffered = tool.run_tool_command(
+        command,
+        policy="extension",
+        operation="Rust gate",
+        capture_output=True,
+    )
+    streamed = tool.run_streamed_tool_command(
+        command,
+        policy="extension",
+        operation="Rust gate",
+        on_progress=lambda _output, _elapsed: None,
+    )
+
+    assert (
+        tool.EXTENSION_TOOL_TIMEOUT_SECONDS == EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS
+    )
+    assert (
+        tool.TOOL_POLICY_TIMEOUT_SECONDS["extension"]
+        == EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS
+    )
+    assert buffered.returncode == streamed.returncode == 0
+    assert calls == [
+        (
+            "buffered",
+            EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS,
+            "tool.extension",
+            "Rust gate",
+            tuple(command),
+        ),
+        (
+            "streamed",
+            EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS,
+            "tool.extension",
+            "Rust gate",
+            tuple(command),
+        ),
+    ]
+
+
+def test_extension_stall_reports_180_second_rust_gate_and_reaps(monkeypatch):
+    command = ["cargo", "run", "--locked", "--package", "spice", "--", "gate"]
+    communication: list[tuple[object, float]] = []
+    reaped: list[object] = []
+
+    class SyntheticStall:
+        def communicate(self, *, input, timeout):
+            communication.append((input, timeout))
+            raise subprocess.TimeoutExpired(command, timeout)
+
+    stalled = SyntheticStall()
+    monkeypatch.setattr(groups.subprocess, "Popen", lambda *_args, **_kwargs: stalled)
+    monkeypatch.setattr(
+        groups, "_reap_expired_process_group", lambda process: reaped.append(process)
+    )
+
+    with pytest.raises(ProcessDeadlineExceeded) as exc_info:
+        tool.run_tool_command(
+            command,
+            policy="extension",
+            operation="Rust gate",
+            capture_output=True,
+        )
+
+    error = exc_info.value
+    assert error.phase == "tool.extension"
+    assert error.input_label == "Rust gate"
+    assert error.timeout_seconds == EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS
+    assert error.command == tuple(command)
+    assert str(error) == (
+        "process deadline exceeded phase=tool.extension input=Rust gate "
+        "budget=180s command=cargo run --locked --package spice -- gate"
+    )
+    assert communication == [(None, EXPECTED_EXTENSION_TOOL_TIMEOUT_SECONDS)]
+    assert reaped == [stalled]
 
 
 @pytest.mark.parametrize("policy", sorted(tool.TOOL_POLICY_TIMEOUT_SECONDS))
