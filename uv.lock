@@ -710,7 +710,7 @@ dev = [
 requires-dist = [
     { name = "lizard", specifier = ">=1.21" },
     { name = "ruff", specifier = ">=0.11" },
-    { name = "tree-sitter", specifier = ">=0.25.2" },
+    { name = "tree-sitter", specifier = "==0.25.2" },
     { name = "tree-sitter-c-sharp", specifier = ">=0.23.5" },
     { name = "tree-sitter-javascript", specifier = ">=0.25.0" },
     { name = "tree-sitter-rust", specifier = ">=0.24.2" },
