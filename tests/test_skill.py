@@ -158,6 +158,13 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
         "Omitting acceptance with no explicit flow starts public tasks in plan" in text
     )
     assert "immediate task capture, not allocator selection" in text
+    assert "Handle the current operator instruction before allocator work" in text
+    assert "Perform an immediate direction first" in text
+    assert "capture it as a task before running `spice task next`" in text
+    assert (
+        "empty result describes only allocator-selected work; after the current "
+        "operator direction is handled, it is a turn boundary" in text
+    )
     assert "on its own line with the task-add batch format" in text
     assert "`spice task status` and `spice task doctor` report" in text
     assert "Small findings may be fixed, validated, and committed during review" in text

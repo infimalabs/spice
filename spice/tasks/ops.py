@@ -1070,9 +1070,9 @@ def next_task_drain_line(
     contract = _task_continuation_contract(actor)
     if not contract.drain_after_phase_boundary:
         tail = (
-            "run spice task next only when explicitly directed to continue "
-            "allocator work; capture operator task-creation requests "
-            "immediately with a TASK directive that starts on its own line; "
+            "handle operator directions before allocator work; perform immediate "
+            "directions first; capture durable operator work immediately with a "
+            "TASK directive that starts on its own line; "
             "when ACKing, write ACK <key>: captured the request. then put TASK "
             "title=... | project=<stem.child> [| acceptance=...] on the next "
             "line using the same task-add batch format; omitted acceptance "
@@ -1080,7 +1080,9 @@ def next_task_drain_line(
             "other work; the captured task inherits "
             "origin=ack:<key> from your ACK (prefer that; set origin= only "
             "when the provenance differs); immediate task capture is not "
-            "allocator selection; manual task claims are exceptional and "
+            "allocator selection; after operator directions are handled, run "
+            "spice task next only when explicitly directed to continue allocator "
+            "work; manual task claims are exceptional and "
             "usually require explicit operator direction"
         )
         if review_assignment:
@@ -1090,7 +1092,8 @@ def next_task_drain_line(
             )
         return f"next: phase boundary reached; {tail}"
     tail = (
-        "keep working until no allocator-selected work remains or a real blocker exists"
+        "after current operator directions are handled, keep working until no "
+        "allocator-selected work remains or a real blocker exists"
     )
     if review_assignment:
         return (

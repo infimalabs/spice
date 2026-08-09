@@ -696,10 +696,12 @@ def _drain_parked_counts() -> dict[str, int]:
 def drain_complete_lines() -> list[str]:
     """The readout for a lane the allocator had nothing for.
 
-    This is the one condition under which a lane is told to stop, so it says so
-    outright instead of leaving the agent to infer it. It reports the board
-    rather than pointing at `task status`, because sending an agent to look at
-    the rows is what starts the hunt this readout exists to end.
+    The allocator can prove only that it has no row for this lane. It cannot
+    prove that every instruction in the current operator turn was captured or
+    resolved, so the readout makes that check an explicit precondition of
+    stopping. It still reports the board rather than pointing at `task status`,
+    because sending an agent to inspect parked rows is the hunt this readout
+    exists to end.
     """
     counts = _drain_parked_counts()
     parked = [
@@ -712,17 +714,19 @@ def drain_complete_lines() -> list[str]:
         "no available tasks",
         f"board: {board}",
         (
-            "drain complete: the allocator ran and had nothing to give this lane. "
-            "Those rows are parked on purpose, so a board that still has entries "
-            "on it is the expected answer here, not an error, not a lookup "
-            "failure, and not work you failed to pick up. There is nothing for "
-            "you to do."
+            "allocator result: no task was assigned to this lane. Parked rows are "
+            "expected, not missed work. This says nothing about whether the current "
+            "operator request is complete."
         ),
         (
-            "spin down: stop here rather than hunting the board for something to "
-            "unstick or unblock. A dry allocator immediately after spice task "
-            "next is the only thing that ever releases you; a board that merely "
-            "looks quiet, or a low pending count, never does on its own."
+            "operator first: handle the current prompt and steering before "
+            "allocator work. Perform immediate directions now; capture durable "
+            "work as a task before running spice task next."
+        ),
+        (
+            "turn boundary: if the operator's directions are handled, end this "
+            "turn. Do not hunt the parked board for something to unstick or "
+            "unblock; a quiet board or low pending count proves nothing by itself."
         ),
     ]
 

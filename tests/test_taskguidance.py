@@ -21,8 +21,10 @@ pytestmark = pytest.mark.skipif(
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 REVIEWER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 KEEP_DRAINING = (
-    "keep working until no allocator-selected work remains or a real blocker exists"
+    "after current operator directions are handled, keep working until no "
+    "allocator-selected work remains or a real blocker exists"
 )
+OPERATOR_FIRST = "handle operator directions before allocator work"
 STEER_EXPLICIT_DIRECTION = (
     "run spice task next only when explicitly directed to continue allocator work"
 )
@@ -30,7 +32,7 @@ STEER_MANUAL_CLAIM = (
     "manual task claims are exceptional and usually require explicit operator direction"
 )
 TASK_CAPTURE_IMMEDIATE = (
-    "capture operator task-creation requests immediately with a TASK directive "
+    "capture durable operator work immediately with a TASK directive "
     "that starts on its own line"
 )
 TASK_CAPTURE_NOT_ALLOCATOR = "immediate task capture is not allocator selection"
@@ -166,6 +168,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert "YOU ARE NOT DONE" not in done_output
     assert KEEP_DRAINING not in done_output
     assert "next: review assignment pending" in done_output
+    assert OPERATOR_FIRST in done_output
     assert STEER_EXPLICIT_DIRECTION in done_output
     assert TASK_CAPTURE_IMMEDIATE in done_output
     assert TASK_CAPTURE_ACK_EXAMPLE in done_output
@@ -209,6 +212,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert "YOU ARE NOT DONE" not in review_output
     assert KEEP_DRAINING not in review_output
     assert "next: phase boundary reached" in review_output
+    assert OPERATOR_FIRST in review_output
     assert STEER_EXPLICIT_DIRECTION in review_output
     assert TASK_CAPTURE_IMMEDIATE in review_output
     assert TASK_CAPTURE_ACK_EXAMPLE in review_output
