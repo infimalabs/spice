@@ -276,6 +276,7 @@ _BOUNDED_STUDY_CONTRACT = {
             "staged_gate_renames": 1,
         },
         "module_definitions": [
+            "_collect_rust_complexity_records",
             "_complexity_breach_sets",
             "_complexity_findings",
             "_complexity_input_label",
