@@ -54,6 +54,19 @@ def test_agent_guidance_routes_authority_gate_refusals_to_the_operator():
     assert "a `spice task oops`, or a route around the gate" in doctrine
 
 
+def test_repository_doctrine_puts_operator_directions_before_allocator_work():
+    doctrine = " ".join(
+        (Path(__file__).resolve().parents[1] / "AGENTS.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+
+    assert "Operator direction comes before allocator work" in doctrine
+    assert "Perform immediate directions first" in doctrine
+    assert "capture it as a task before running `spice task next`" in doctrine
+    assert "only then return to allocator draining" in doctrine
+
+
 def test_packaged_skill_forbids_ending_a_turn_to_wait_for_a_background_command():
     """The skill is where an agent learns that a finished turn is a stopped lane.
 
