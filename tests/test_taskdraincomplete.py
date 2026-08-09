@@ -1,10 +1,9 @@
 """The readout a lane gets when the allocator has nothing left to give it.
 
-A dry allocator right after `spice task next` is the one condition that ever
-releases an agent, and it arrives while the board still visibly holds rows. The
-readout has to carry that whole picture -- what is parked, why none of it is
-allocatable, and that stopping is the correct move -- or an agent reads a
-non-empty board as evidence the allocator missed something and starts hunting.
+A dry allocator proves that no allocator-selected row is available; it cannot
+prove that the current operator request was captured or resolved. The readout
+has to carry both that boundary and the parked-board picture, or an agent either
+abandons an uncaptured request or starts hunting rows the allocator parked.
 """
 
 from __future__ import annotations
@@ -89,33 +88,41 @@ def test_drain_readout_calls_a_populated_board_the_expected_answer(parked_board)
     """
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
-    assert "parked on purpose" in readout
-    assert "is the expected answer here, not an error" in readout
-    assert "There is nothing for you to do." in readout
+    assert "Parked rows are expected, not missed work" in readout
+    assert "no task was assigned to this lane" in readout
+    assert "says nothing about whether the current operator request is complete" in (
+        readout
+    )
 
 
-def test_drain_readout_ties_release_to_the_dry_allocator_alone(parked_board):
-    """The license to stop must not generalize past this one condition.
+def test_drain_readout_guards_the_turn_boundary_with_operator_request_capture(
+    parked_board,
+):
+    """Allocator emptiness cannot erase work that never reached the allocator.
 
-    An agent that learns "a quiet board means done" spins itself down early, so
-    the readout names the dry allocator as the only thing that releases it and
-    calls out the two lookalikes it must keep working through.
+    The screenshot regression is an acknowledged port request followed by a dry
+    allocator and a final response. The readout must instead require the agent
+    to persist that request and consult the allocator again.
     """
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
-    assert "A dry allocator immediately after spice task next is the only thing" in (
-        readout
-    )
-    assert "a board that merely looks quiet, or a low pending count, never does" in (
-        readout
-    )
+    assert "operator first: handle the current prompt and steering" in readout
+    assert "Perform immediate directions now" in readout
+    assert "capture durable work as a task before running spice task next" in readout
+    assert "if the operator's directions are handled, end this turn" in readout
+    assert "There is nothing for you to do" not in readout
+    assert "stop here" not in readout
 
 
 def test_drain_readout_tells_the_agent_to_stop_hunting(parked_board):
-    """The concrete behavior being replaced, named as the thing to skip."""
+    """The capture check precedes the instruction not to hunt parked rows."""
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
-    assert "stop here rather than hunting the board for something to unstick" in readout
+    capture = readout.index("capture durable work as a task")
+    no_hunt = readout.index("Do not hunt the parked board")
+
+    assert capture < no_hunt
+    assert "a quiet board or low pending count proves nothing by itself" in readout
 
 
 def test_drain_readout_reports_a_board_holding_nothing_else(monkeypatch):

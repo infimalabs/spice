@@ -154,15 +154,18 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "session=spice session briefing" in text
     assert "task_next=spice task next" in text
     assert (
-        "task_drain_contract=drive/drain lanes are not done after a task phase boundary"
-        in text
+        "operator_precedence_contract=current operator directions come before "
+        "allocator work" in text
     )
+    assert "perform immediate directions first" in text
+    assert "capture durable work as a task before running spice task next" in text
+    assert "task_drain_contract=after current operator directions are handled" in text
     assert (
         "allocates immediately and reports an empty lane rather than blocking" in text
     )
     assert "task_steer_contract=steer lanes treat allocator continuation" in text
     assert "manual task claims are exceptional" in text
-    assert "task_capture_contract=operator requests to create or capture tasks" in text
+    assert "task_capture_contract=durable work assigned by the operator" in text
     assert "TASK directive that starts on its own line" in text
     assert "ACK <key>: captured the request." in text
     assert "TASK title=... | project=<stem.child> [| acceptance=...]" in text

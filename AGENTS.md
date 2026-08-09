@@ -28,16 +28,19 @@ rules apply to the agents working here.
 - Operator steering arrives as inbox items. Reading does not retire them;
   retire an item by ACKing its key in an assistant message:
   `ACK <key> [<key> ...]: <what you understood and did>`.
-- When steering asks for task capture, add an inline batch line that starts on
-  its own line, using the same key=value format as task-add batch input. If you
-  are also ACKing, write the ACK prose first, then a separate TASK line:
+- Operator direction comes before allocator work. Perform immediate directions
+  first. When a direction describes durable work, capture it as a task before
+  running `spice task next`; only then return to allocator draining.
+- Capture durable operator work with an inline batch line that starts on its
+  own line, using the same key=value format as task-add batch input. If you are
+  also ACKing, write the ACK prose first, then a separate TASK line:
   `ACK <key>: captured the request.`
   `TASK title=... | project=<stem.child> | acceptance=...`. Capture first, then
   return to `spice task next`; task creation is not allocator selection.
 - Keep-working guidance means continue through the allocator. A phase boundary
-  keeps the lane active: after `task done` or `task review`, run
-  `spice task next` and keep working until the allocator reports no work or a
-  real blocker exists.
+  keeps the lane active after current operator directions are handled: after
+  `task done` or `task review`, run `spice task next` and keep working until the
+  allocator reports no work or a real blocker exists.
 
 ## Tasks
 

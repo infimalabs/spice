@@ -144,10 +144,16 @@ def _activation_task_lines() -> list[str]:
         "task_status=spice task status",
         "task_next=spice task next",
         (
-            "task_drain_contract=drive/drain lanes are not done after a task "
-            "phase boundary; run spice task next, which allocates immediately "
-            "and reports an empty lane rather than blocking, and keep working "
-            "until no allocator-selected work remains or a real blocker exists"
+            "operator_precedence_contract=current operator directions come before "
+            "allocator work; perform immediate directions first, and capture "
+            "durable work as a task before running spice task next"
+        ),
+        (
+            "task_drain_contract=after current operator directions are handled, "
+            "drive/drain lanes are not done at a task phase boundary; run spice "
+            "task next, which allocates immediately and reports an empty lane "
+            "rather than blocking, and keep working until no allocator-selected "
+            "work remains or a real blocker exists"
         ),
         (
             "task_steer_contract=steer lanes treat allocator continuation as "
@@ -155,8 +161,8 @@ def _activation_task_lines() -> list[str]:
             "usually require explicit operator direction"
         ),
         (
-            "task_capture_contract=operator requests to create or capture tasks "
-            "are captured immediately with a TASK directive that starts on its "
+            "task_capture_contract=durable work assigned by the operator is "
+            "captured immediately with a TASK directive that starts on its "
             "own line; when ACKing, write ACK <key>: captured the request. "
             "then put TASK title=... | project=<stem.child> "
             "[| acceptance=...] on the next line using the same key=value "
