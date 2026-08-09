@@ -65,6 +65,11 @@ def test_repository_doctrine_puts_operator_directions_before_allocator_work():
     assert "Perform immediate directions first" in doctrine
     assert "capture it as a task before running `spice task next`" in doctrine
     assert "only then return to allocator draining" in doctrine
+    assert "A dry result ends only allocator draining" in doctrine
+    assert (
+        "does not decide whether operator work or the current turn is complete"
+        in doctrine
+    )
 
 
 def test_packaged_skill_forbids_ending_a_turn_to_wait_for_a_background_command():
@@ -175,9 +180,10 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "Perform an immediate direction first" in text
     assert "capture it as a task before running `spice task next`" in text
     assert (
-        "empty result describes only allocator-selected work; after the current "
-        "operator direction is handled, it is a turn boundary" in text
+        "empty result ends only allocator draining; it does not decide whether "
+        "the current operator direction or turn is complete" in text
     )
+    assert "Finish or durably capture operator work before any final response" in text
     assert "on its own line with the task-add batch format" in text
     assert "`spice task status` and `spice task doctor` report" in text
     assert "Small findings may be fixed, validated, and committed during review" in text

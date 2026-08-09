@@ -40,7 +40,9 @@ rules apply to the agents working here.
 - Keep-working guidance means continue through the allocator. A phase boundary
   keeps the lane active after current operator directions are handled: after
   `task done` or `task review`, run `spice task next` and keep working until the
-  allocator reports no work or a real blocker exists.
+  allocator reports no work or a real blocker exists. A dry result ends only
+  allocator draining; it does not decide whether operator work or the current
+  turn is complete.
 
 ## Tasks
 

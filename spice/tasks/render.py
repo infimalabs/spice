@@ -698,10 +698,10 @@ def drain_complete_lines() -> list[str]:
 
     The allocator can prove only that it has no row for this lane. It cannot
     prove that every instruction in the current operator turn was captured or
-    resolved, so the readout makes that check an explicit precondition of
-    stopping. It still reports the board rather than pointing at `task status`,
-    because sending an agent to inspect parked rows is the hunt this readout
-    exists to end.
+    resolved, so the readout keeps operator work explicitly independent from
+    allocator draining. It still reports the board rather than pointing at
+    `task status`, because sending an agent to inspect parked rows is the hunt
+    this readout exists to end.
     """
     counts = _drain_parked_counts()
     parked = [
@@ -714,19 +714,19 @@ def drain_complete_lines() -> list[str]:
         "no available tasks",
         f"board: {board}",
         (
-            "allocator result: no task was assigned to this lane. Parked rows are "
-            "expected, not missed work. This says nothing about whether the current "
-            "operator request is complete."
+            "allocator scope: no allocator-selected task is available to this lane. "
+            "Parked rows are expected, not missed work. This result does not decide "
+            "whether the current operator request or turn is complete."
         ),
         (
-            "operator first: handle the current prompt and steering before "
-            "allocator work. Perform immediate directions now; capture durable "
-            "work as a task before running spice task next."
+            "operator continuity: continue the current prompt and steering "
+            "independently. Perform immediate directions now; capture durable work "
+            "as a task, then run spice task next again."
         ),
         (
-            "turn boundary: if the operator's directions are handled, end this "
-            "turn. Do not hunt the parked board for something to unstick or "
-            "unblock; a quiet board or low pending count proves nothing by itself."
+            "parked-board boundary: do not hunt the parked board for something to "
+            "unstick or unblock. A quiet board or low pending count is not evidence "
+            "that operator work is complete."
         ),
     ]
 

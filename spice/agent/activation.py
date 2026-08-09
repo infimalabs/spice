@@ -149,11 +149,11 @@ def _activation_task_lines() -> list[str]:
             "durable work as a task before running spice task next"
         ),
         (
-            "task_drain_contract=after current operator directions are handled, "
-            "drive/drain lanes are not done at a task phase boundary; run spice "
-            "task next, which allocates immediately and reports an empty lane "
-            "rather than blocking, and keep working until no allocator-selected "
-            "work remains or a real blocker exists"
+            "task_drain_contract=a dry allocator ends only allocator-selected "
+            "draining and does not decide whether operator work or the current "
+            "turn is complete; after current operator directions are handled, "
+            "drive/drain lanes run spice task next across phase boundaries until "
+            "no allocator-selected work remains or a real blocker exists"
         ),
         (
             "task_steer_contract=steer lanes treat allocator continuation as "

@@ -89,13 +89,14 @@ def test_drain_readout_calls_a_populated_board_the_expected_answer(parked_board)
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
     assert "Parked rows are expected, not missed work" in readout
-    assert "no task was assigned to this lane" in readout
-    assert "says nothing about whether the current operator request is complete" in (
-        readout
+    assert "no allocator-selected task is available to this lane" in readout
+    assert (
+        "does not decide whether the current operator request or turn is complete"
+        in readout
     )
 
 
-def test_drain_readout_guards_the_turn_boundary_with_operator_request_capture(
+def test_drain_readout_keeps_operator_work_independent_from_allocator_emptiness(
     parked_board,
 ):
     """Allocator emptiness cannot erase work that never reached the allocator.
@@ -106,10 +107,11 @@ def test_drain_readout_guards_the_turn_boundary_with_operator_request_capture(
     """
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
-    assert "operator first: handle the current prompt and steering" in readout
+    assert "operator continuity: continue the current prompt and steering" in readout
     assert "Perform immediate directions now" in readout
-    assert "capture durable work as a task before running spice task next" in readout
-    assert "if the operator's directions are handled, end this turn" in readout
+    assert "capture durable work as a task, then run spice task next again" in readout
+    assert "turn boundary" not in readout
+    assert "end this turn" not in readout
 
 
 def test_drain_readout_tells_the_agent_to_stop_hunting(parked_board):
@@ -117,10 +119,13 @@ def test_drain_readout_tells_the_agent_to_stop_hunting(parked_board):
     readout = " ".join(" ".join(render.drain_complete_lines()).split())
 
     capture = readout.index("capture durable work as a task")
-    no_hunt = readout.index("Do not hunt the parked board")
+    no_hunt = readout.index("do not hunt the parked board")
 
     assert capture < no_hunt
-    assert "a quiet board or low pending count proves nothing by itself" in readout
+    assert (
+        "A quiet board or low pending count is not evidence that operator work is "
+        "complete" in readout
+    )
 
 
 def test_drain_readout_reports_a_board_holding_nothing_else(monkeypatch):
