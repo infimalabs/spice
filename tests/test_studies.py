@@ -1076,12 +1076,12 @@ def test_csharp_tree_sitter_magic_positions_are_flagged():
     ]
 
 
-def test_c_grammar_family_covers_other_languages():
+def test_go_fallback_and_rust_tree_sitter_comparisons_are_covered():
     go_findings = scan_text_magic_numbers(
         Path("sample.go"), "if delta > 75 {\n\tgrow()\n}\n"
     )
     rust_findings = scan_text_magic_numbers(
-        Path("sample.rs"), "if delta > 75 { grow(); } // limit\n"
+        Path("sample.rs"), "if delta > 75usize { grow(); } // limit\n"
     )
     assert [(f.line, f.literal) for f in go_findings] == [(1, "75")]
     assert [(f.line, f.literal) for f in rust_findings] == [(1, "75")]
@@ -1288,6 +1288,6 @@ def test_mutation_cli_resolves_ratchet_paths_from_repo_root(tmp_path, monkeypatc
     assert calls["written_reports"] == ()
 
 
-def test_c_grammar_comments_pass():
+def test_rust_tree_sitter_comments_pass():
     text = "// retries > 75 is too many\n/* delta > 99 */\nlet x = 5;\n"
     assert scan_text_magic_numbers(Path("sample.rs"), text) == []
