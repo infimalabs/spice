@@ -1,4 +1,4 @@
-"""Internal parser seam for C# and JavaScript tree-sitter studies."""
+"""Internal parser seam for tree-sitter-backed source studies."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from typing import Literal
 
 import tree_sitter_c_sharp as ts_csharp
 import tree_sitter_javascript as ts_javascript
+import tree_sitter_rust as ts_rust
 from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 
-TreeSitterLanguage = Literal["csharp", "javascript"]
+TreeSitterLanguage = Literal["csharp", "javascript", "rust"]
 TreeSitterNode = Node
 
 _LANGUAGE_BY_SUFFIX: dict[str, TreeSitterLanguage] = {
@@ -20,6 +21,7 @@ _LANGUAGE_BY_SUFFIX: dict[str, TreeSitterLanguage] = {
     ".js": "javascript",
     ".jsx": "javascript",
     ".mjs": "javascript",
+    ".rs": "rust",
 }
 
 
@@ -90,4 +92,6 @@ def query_for_language(language: TreeSitterLanguage, source: str) -> Query:
 def language_object(language: TreeSitterLanguage) -> Language:
     if language == "csharp":
         return Language(ts_csharp.language())
-    return Language(ts_javascript.language())
+    if language == "javascript":
+        return Language(ts_javascript.language())
+    return Language(ts_rust.language())

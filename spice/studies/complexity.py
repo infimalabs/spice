@@ -1,9 +1,9 @@
-"""Routine complexity pressure: CCN and length via lizard, flex + sticky.
+"""Routine complexity pressure: CCN and length, flex + sticky.
 
 Same regime as file shape: a routine may reach the flex limit, but one that
 ever breached stays held to the base limit (per `(path, routine)` key) until
-it shrinks back under. lizard is the single measurement backend; its absence
-fails the gate loudly rather than miscounting.
+it shrinks back under. Rust uses the tree-sitter contract shared with the Rust
+port; other configured languages retain the bounded lizard backend.
 
 """
 
@@ -29,7 +29,7 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     COMPLEXITY_SUFFIXES,
 )
-from spice.studies import gates
+from spice.studies import gates, rustcomplexity
 from spice.studies.walk import is_excluded_path
 
 COMPLEXITY_VERSION = 1
@@ -194,16 +194,20 @@ def collect_complexity_records(
     ]
     if not targets:
         return []
+    rust_targets = [path for path in targets if path.suffix.lower() == ".rs"]
+    lizard_targets = [path for path in targets if path not in rust_targets]
+    records = _collect_rust_complexity_records(rust_targets, root=root)
+    if not lizard_targets:
+        return records
     lizard = require_lizard()
     result = run_bounded_process_group(
-        [lizard, "--csv", *[str(root / path) for path in targets]],
+        [lizard, "--csv", *[str(root / path) for path in lizard_targets]],
         timeout_seconds=timeout_seconds,
         phase=phase,
-        input_label=input_label or _complexity_input_label(root, targets),
+        input_label=input_label or _complexity_input_label(root, lizard_targets),
         text=True,
         cwd=root,
     )
-    records: list[ComplexityRecord] = []
     for row in csv.reader(io.StringIO(result.stdout)):
         if len(row) < LIZARD_CSV_MIN_COLUMNS:
             continue
@@ -230,6 +234,28 @@ def collect_complexity_records(
                 length=length,
                 nloc=nloc,
             )
+        )
+    return records
+
+
+def _collect_rust_complexity_records(
+    paths: list[Path], *, root: Path
+) -> list[ComplexityRecord]:
+    records: list[ComplexityRecord] = []
+    for path in paths:
+        routines = rustcomplexity.measure_complexity(
+            path,
+            (root / path).read_text(encoding="utf-8"),
+        )
+        records.extend(
+            ComplexityRecord(
+                path=routine.path,
+                function_name=routine.function_name,
+                ccn=routine.ccn,
+                length=routine.length,
+                nloc=routine.length,
+            )
+            for routine in routines
         )
     return records
 

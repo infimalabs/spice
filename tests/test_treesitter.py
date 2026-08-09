@@ -8,7 +8,7 @@ from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies import treesitter
 
 
-def test_tree_sitter_seam_parses_csharp_and_javascript_sources():
+def test_tree_sitter_seam_parses_csharp_javascript_and_rust_sources():
     csharp = treesitter.parse_source(
         Path("Assets/Scripts/Demo.cs"),
         "public class Demo { private void Run() {} }\n",
@@ -16,6 +16,10 @@ def test_tree_sitter_seam_parses_csharp_and_javascript_sources():
     javascript = treesitter.parse_source(
         Path("static/demo.js"),
         "function demo() { return 1; }\n",
+    )
+    rust = treesitter.parse_source(
+        Path("src/demo.rs"),
+        "fn demo() { let digit = '0'; }\n",
     )
 
     assert csharp is not None
@@ -30,6 +34,11 @@ def test_tree_sitter_seam_parses_csharp_and_javascript_sources():
     assert [child.type for child in javascript.root.children] == [
         "function_declaration"
     ]
+    assert rust is not None
+    assert rust.language == "rust"
+    assert rust.suffix == ".rs"
+    assert rust.root.type == "source_file"
+    assert [child.type for child in rust.root.children] == ["function_item"]
 
 
 def test_tree_sitter_seam_exposes_suffix_keyed_query_access():
