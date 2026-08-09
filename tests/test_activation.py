@@ -159,10 +159,14 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     )
     assert "perform immediate directions first" in text
     assert "capture durable work as a task before running spice task next" in text
-    assert "task_drain_contract=after current operator directions are handled" in text
     assert (
-        "allocates immediately and reports an empty lane rather than blocking" in text
+        "task_drain_contract=a dry allocator ends only allocator-selected draining"
+        in text
     )
+    assert (
+        "does not decide whether operator work or the current turn is complete" in text
+    )
+    assert "run spice task next across phase boundaries" in text
     assert "task_steer_contract=steer lanes treat allocator continuation" in text
     assert "manual task claims are exceptional" in text
     assert "task_capture_contract=durable work assigned by the operator" in text
