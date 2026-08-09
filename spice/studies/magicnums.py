@@ -43,9 +43,12 @@ _CS_COMPARISON_OPS = frozenset({"==", "!=", ">", "<", ">=", "<="})
 _CS_INT_SUFFIX_RE = re.compile(r"[uUlL]+$", re.ASCII)
 _JS_COMPARISON_OPS = frozenset({"==", "===", "!=", "!==", ">", "<", ">=", "<="})
 _JS_BIGINT_SUFFIX_RE = re.compile(r"n$", re.ASCII)
+_RS_COMPARISON_OPS = frozenset({"==", "!=", ">", "<", ">=", "<="})
+_RS_INT_SUFFIX_RE = re.compile(r"[ui](?:8|16|32|64|128|size)$", re.ASCII)
 _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE = {
     "csharp": "(integer_literal) @literal",
     "javascript": "(number) @literal",
+    "rust": "(integer_literal) @literal",
 }
 MagicThresholdForPath = Callable[[Path], int]
 
@@ -103,6 +106,13 @@ def _scan_tree_sitter(
         )
     if parsed.language == "javascript":
         return _scan_javascript_tree(
+            rel_path,
+            parsed.source,
+            literal_nodes,
+            examine_threshold=examine_threshold,
+        )
+    if parsed.language == "rust":
+        return _scan_rust_tree(
             rel_path,
             parsed.source,
             literal_nodes,
@@ -207,7 +217,7 @@ def _python_exempt_constant_ids(tree: ast.Module) -> set[int]:
     return exempt
 
 
-# ---- C# and JavaScript: tree-sitter parent classification -------------------
+# ---- C#, JavaScript, and Rust: tree-sitter parent classification ------------
 
 
 def _scan_csharp_tree(
@@ -243,6 +253,26 @@ def _scan_javascript_tree(
     findings: list[MagicFinding] = []
     for node in literal_nodes:
         finding = _javascript_literal_finding(
+            rel_path,
+            node,
+            source,
+            examine_threshold=examine_threshold,
+        )
+        if finding is not None:
+            findings.append(finding)
+    return findings
+
+
+def _scan_rust_tree(
+    rel_path: Path,
+    source: bytes,
+    literal_nodes: list[Any],
+    *,
+    examine_threshold: int,
+) -> list[MagicFinding]:
+    findings: list[MagicFinding] = []
+    for node in literal_nodes:
+        finding = _rust_literal_finding(
             rel_path,
             node,
             source,
@@ -430,6 +460,59 @@ def _javascript_parent_kind(parent: Any) -> str:
         if grandparent is not None and grandparent.type == "formal_parameters":
             return "default_arg"
     return "other"
+
+
+def _rust_literal_finding(
+    rel_path: Path,
+    node: Any,
+    source: bytes,
+    *,
+    examine_threshold: int,
+) -> MagicFinding | None:
+    value = _rust_int_value(_tree_sitter_node_text(node, source))
+    if value is None:
+        return None
+    parent_kind, sign = _rust_parent_kind_and_sign(node)
+    value *= sign
+    if parent_kind != "compare" or not _examine_value(
+        value, threshold=examine_threshold
+    ):
+        return None
+    return MagicFinding(
+        path=rel_path.as_posix(), line=node.start_point[0] + 1, literal=str(value)
+    )
+
+
+def _rust_int_value(text: str) -> int | None:
+    normalized = _RS_INT_SUFFIX_RE.sub("", text).replace("_", "")
+    try:
+        return int(normalized, 0)
+    except ValueError:
+        try:
+            return int(normalized)
+        except ValueError:
+            return None
+
+
+def _rust_parent_kind_and_sign(node: Any) -> tuple[str, int]:
+    parent = node.parent
+    if parent is None:
+        return "other", 1
+    if parent.type == "unary_expression":
+        sign = -1 if any(child.type == "-" for child in parent.children) else 1
+        grandparent = parent.parent
+        return (
+            _rust_parent_kind(grandparent) if grandparent is not None else "other",
+            sign,
+        )
+    return _rust_parent_kind(parent), 1
+
+
+def _rust_parent_kind(parent: Any) -> str:
+    if parent.type != "binary_expression":
+        return "other"
+    child_types = {child.type for child in parent.children}
+    return "compare" if child_types & _RS_COMPARISON_OPS else "binop"
 
 
 # ---- C-grammar family: comparison-adjacent literals by regex ----------------
