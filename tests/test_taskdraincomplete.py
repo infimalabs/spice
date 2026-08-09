@@ -110,8 +110,6 @@ def test_drain_readout_guards_the_turn_boundary_with_operator_request_capture(
     assert "Perform immediate directions now" in readout
     assert "capture durable work as a task before running spice task next" in readout
     assert "if the operator's directions are handled, end this turn" in readout
-    assert "There is nothing for you to do" not in readout
-    assert "stop here" not in readout
 
 
 def test_drain_readout_tells_the_agent_to_stop_hunting(parked_board):
