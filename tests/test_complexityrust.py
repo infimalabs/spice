@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import subprocess
+import sys
+import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -12,6 +16,47 @@ from spice.studies.complexity import (
     collect_complexity_records,
     scan_staged_complexity_violations,
 )
+
+
+def test_tree_sitter_runtime_is_the_exercised_native_release():
+    pyproject = tomllib.loads(
+        (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert "tree-sitter==0.25.2" in pyproject["project"]["dependencies"]
+    assert importlib.metadata.version("tree-sitter") == "0.25.2"
+
+
+def test_python_314_runtime_extracts_many_rust_routine_names_without_crashing():
+    script = textwrap.dedent(
+        """
+        import sys
+
+        from spice.studies.rustcomplexity import measure_complexity
+
+        assert all(
+            name in sys.modules
+            for name in (
+                "tree_sitter_c_sharp",
+                "tree_sitter_javascript",
+                "tree_sitter_rust",
+            )
+        )
+        source = "\\n".join(f"fn routine_{index}() {{}}" for index in range(320))
+        routines = measure_complexity("src/lib.rs", source)
+        print(len(routines))
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "320"
 
 
 def test_rust_comment_apostrophe_cannot_absorb_preceding_routine(tmp_path: Path):

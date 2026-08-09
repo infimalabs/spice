@@ -29,7 +29,7 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     COMPLEXITY_SUFFIXES,
 )
-from spice.studies import gates, rustcomplexity
+from spice.studies import gates
 from spice.studies.walk import is_excluded_path
 
 COMPLEXITY_VERSION = 1
@@ -241,6 +241,8 @@ def collect_complexity_records(
 def _collect_rust_complexity_records(
     paths: list[Path], *, root: Path
 ) -> list[ComplexityRecord]:
+    from spice.studies import rustcomplexity
+
     records: list[ComplexityRecord] = []
     for path in paths:
         routines = rustcomplexity.measure_complexity(
