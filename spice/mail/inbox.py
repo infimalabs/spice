@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote
 
+from spice.errors import SpiceError
 from spice.mail.ackstate import (
     ACK_DISPOSITION_REFUSED,
     ack_state_database_path,
@@ -44,6 +45,7 @@ from spice.paths import (
     STATE_DIRNAME,
     atomic_write_text,
     fsync_directory,
+    shared_state_path,
     worktree_inbox_dir,
     worktree_runtime_state_root,
 )
@@ -56,6 +58,9 @@ INBOX_ARCHIVE_DEFAULT_LIMIT = 6
 INBOX_COLLISION_MAX = 1000
 INBOX_PUBLISH_LOCK_NAME = ".publish.lock"
 INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS = 10.0
+INBOX_KEY_SEQUENCE_FILENAME = "inbox-key-sequence"
+INBOX_KEY_SEQUENCE_LOCK_FILENAME = ".inbox-key-sequence.lock"
+INBOX_KEY_SEQUENCE_LOCK_TIMEOUT_SECONDS = 10.0
 INBOX_EVENT_FILENAME = "inbox-events"
 _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
@@ -768,7 +773,7 @@ def write_inbox_item(
 ) -> Path:
     if repo_root is None:
         raise RuntimeError("Unable to resolve git repo root for inbox send")
-    target_name = name or default_inbox_name()
+    target_name = name or default_inbox_name(repo_root)
     if not valid_inbox_name(target_name):
         raise RuntimeError("Inbox item name must be a direct child name, not a path")
     directory = inbox_dir(repo_root)
@@ -1135,15 +1140,40 @@ def compose_inbox_text(
     return "\n".join(lines) + "\n"
 
 
-def default_inbox_name() -> str:
-    return f"{mint_inbox_key()}.txt"
+def default_inbox_name(repo_root: Path) -> str:
+    return f"{mint_inbox_key(repo_root)}.txt"
 
 
-def mint_inbox_key() -> str:
-    # The empty collision set keeps publish off the task export path; two mints
-    # inside one millisecond collide on the filename and pick up a `-N` suffix
-    # via `_inbox_collision_path`.
-    return identity.mint_incepted(existing=set())
+def mint_inbox_key(repo_root: Path) -> str:
+    """Mint one repository-wide key for the shared ACK authority.
+
+    Linked worktrees have separate pending inbox directories but one ACK-state
+    database. A clock-only key therefore cannot rely on a filename collision in
+    one inbox to distinguish simultaneous sends to sibling worktrees. Persist
+    the last allocated millisecond under the same shared state root as ACK
+    history and advance it under a repository-wide lock.
+    """
+    sequence_path = shared_state_path(repo_root, INBOX_KEY_SEQUENCE_FILENAME)
+    lock_path = shared_state_path(repo_root, INBOX_KEY_SEQUENCE_LOCK_FILENAME)
+    with bounded_exclusive_lock(
+        lock_path,
+        timeout_seconds=INBOX_KEY_SEQUENCE_LOCK_TIMEOUT_SECONDS,
+        action="mint inbox key",
+    ):
+        try:
+            previous = sequence_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            previous = ""
+        if previous and not identity.INCEPTED_RE.fullmatch(previous):
+            raise SpiceError(
+                f"inbox key sequence at {sequence_path} is invalid: {previous!r}"
+            )
+        millis = identity.epoch_millis()
+        if previous:
+            millis = max(millis, identity.decode(previous) + 1)
+        key = identity.encode_width(millis)
+        atomic_write_text(sequence_path, key + "\n")
+        return key
 
 
 def valid_inbox_name(name: str) -> bool:

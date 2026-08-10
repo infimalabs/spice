@@ -568,6 +568,12 @@ class CodexDriver(AgentDriver):
         )
         return matches[-1].resolve() if matches else None
 
+    def thread_known_foreign(self, repo_root: Path, thread_id: str) -> bool:
+        path = self.find_session_transcript(thread_id)
+        return (
+            path is not None and _codex_transcript_belongs_to(path, repo_root) is False
+        )
+
     def build_exec_command(
         self,
         *,
@@ -1007,7 +1013,25 @@ class ClaudeDriver(AgentDriver):
         return {"kind": kind} if kind else None
 
 
-CLAUDE_TRANSCRIPT_CWD_WINDOW_BYTES = 64 * 1024
+TRANSCRIPT_CWD_WINDOW_BYTES = 64 * 1024
+
+
+def _codex_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
+    """Whether a Codex transcript began inside ``repo_root``.
+
+    Codex can resume a thread from any cwd, but resume reachability is not lane
+    ownership. Refusing a provably foreign ambient thread keeps a command run in
+    a sibling worktree from rebinding that sibling to this conversation.
+    """
+    recorded = _transcript_cwd(path, CODEX_DRIVER)
+    if not recorded:
+        return None
+    try:
+        candidate = Path(recorded).resolve()
+        root = repo_root.resolve()
+        return candidate == root or root in candidate.parents
+    except OSError:
+        return recorded == str(repo_root)
 
 
 def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
@@ -1020,7 +1044,7 @@ def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
     is not safe to resume, but it is also not provably foreign while a brand-new
     session is still writing its first transcript records.
     """
-    recorded = _claude_transcript_cwd(path)
+    recorded = _transcript_cwd(path, CLAUDE_DRIVER)
     if not recorded:
         return None
     try:
@@ -1029,18 +1053,18 @@ def _claude_transcript_belongs_to(path: Path, repo_root: Path) -> bool | None:
         return recorded == str(repo_root)
 
 
-def _claude_transcript_cwd(path: Path) -> str:
-    """The cwd Claude recorded for a transcript, or '' when none is present.
+def _transcript_cwd(path: Path, driver: AgentDriver) -> str:
+    """The cwd a driver recorded for a transcript, or '' when absent.
 
-    Claude stamps cwd on the first user/system record. Read one bounded head
-    window through the shared typed engine, rather than maintaining a private
-    JSONL scanner in the driver.
+    Both built-in dialects expose their startup cwd as ``WorkingDirectory``.
+    Read one bounded head window through the shared typed engine rather than
+    maintaining a private JSONL scanner in the driver.
     """
     from spice.transcript.reader import TranscriptEventReader
 
-    read = TranscriptEventReader(path, CLAUDE_DRIVER).read(
+    read = TranscriptEventReader(path, driver).read(
         "bounded",
-        end_offset=CLAUDE_TRANSCRIPT_CWD_WINDOW_BYTES,
+        end_offset=TRANSCRIPT_CWD_WINDOW_BYTES,
     )
     return next(
         (event.path for event in read.events if isinstance(event, WorkingDirectory)),

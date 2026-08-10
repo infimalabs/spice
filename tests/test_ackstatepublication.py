@@ -7,6 +7,7 @@ import pytest
 from spice.errors import SpiceError
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
     DIRECTIVE_PROVENANCE_ARCHIVE_ONLY,
     AckStateWrite,
     DirectivePublicationWrite,
@@ -22,6 +23,8 @@ INBOX_NAME = f"{KEY}.txt"
 TEXT = "inspect the attached artifact"
 ACK_TEXT = f"ACK {KEY}: inspected the artifact"
 ACK_CONTENT = "inspected the artifact"
+FIRST_ACKNOWLEDGED_AT = 20.0
+RETRY_ACKNOWLEDGED_AT = 30.0
 ATTACHMENT = {
     "path": "/shared/attachment.png",
     "name": "attachment.png",
@@ -43,7 +46,7 @@ def _archive_first(path, *, attachment=ATTACHMENT) -> None:
                 ack_content=ACK_CONTENT,
             )
         ],
-        now=20.0,
+        now=FIRST_ACKNOWLEDGED_AT,
     )
 
 
@@ -129,11 +132,113 @@ def test_publication_first_duplicate_and_ack_completion_remain_idempotent(tmp_pa
         ack_text=ACK_TEXT,
         ack_content=ACK_CONTENT,
     )
-    record_acked_inbox_items_to_database(path, [acknowledgement], now=20.0)
-    record_acked_inbox_items_to_database(path, [acknowledgement], now=30.0)
+    record_acked_inbox_items_to_database(
+        path, [acknowledgement], now=FIRST_ACKNOWLEDGED_AT
+    )
+    record_acked_inbox_items_to_database(
+        path, [acknowledgement], now=RETRY_ACKNOWLEDGED_AT
+    )
 
     record = directive_history_records_from_database(path)[0]
     assert (record.disposition, record.acknowledged_at) == (
         ACK_DISPOSITION_ACKED,
-        20.0,
+        FIRST_ACKNOWLEDGED_AT,
     )
+
+
+def test_same_delivery_retry_keeps_first_auditable_ack(tmp_path):
+    path = tmp_path / "acks.sqlite3"
+    record_directive_publications_to_database(path, [_publication()])
+    first = AckStateWrite(
+        key=KEY,
+        inbox_name=INBOX_NAME,
+        text=TEXT,
+        attachments=(ATTACHMENT,),
+        ack_text=ACK_TEXT,
+        ack_content=ACK_CONTENT,
+    )
+    retry = AckStateWrite(
+        key=KEY,
+        inbox_name=INBOX_NAME,
+        text=TEXT,
+        attachments=(ATTACHMENT,),
+        ack_text=f"ACK {KEY}: retry after restart",
+        ack_content="retry after restart",
+    )
+
+    record_acked_inbox_items_to_database(path, [first], now=FIRST_ACKNOWLEDGED_AT)
+    record_acked_inbox_items_to_database(path, [retry], now=RETRY_ACKNOWLEDGED_AT)
+
+    record = directive_history_records_from_database(path)[0]
+    assert record.ack_text == ACK_TEXT
+    assert record.ack_content == ACK_CONTENT
+    assert record.acknowledged_at == FIRST_ACKNOWLEDGED_AT
+
+
+def test_consumed_key_still_refuses_different_delivery(tmp_path):
+    path = tmp_path / "acks.sqlite3"
+    record_directive_publications_to_database(path, [_publication()])
+    first = AckStateWrite(
+        key=KEY,
+        inbox_name=INBOX_NAME,
+        text=TEXT,
+        attachments=(ATTACHMENT,),
+        ack_text=ACK_TEXT,
+        ack_content=ACK_CONTENT,
+    )
+    record_acked_inbox_items_to_database(path, [first], now=FIRST_ACKNOWLEDGED_AT)
+
+    with pytest.raises(SpiceError, match="directive ACK collision"):
+        record_acked_inbox_items_to_database(
+            path,
+            [
+                AckStateWrite(
+                    key=KEY,
+                    inbox_name=INBOX_NAME,
+                    text="different operator directive",
+                    attachments=(ATTACHMENT,),
+                    ack_text=f"ACK {KEY}: unrelated",
+                    ack_content="unrelated",
+                )
+            ],
+            now=RETRY_ACKNOWLEDGED_AT,
+        )
+
+    record = directive_history_records_from_database(path)[0]
+    assert record.text == TEXT
+    assert record.ack_text == ACK_TEXT
+
+
+def test_same_delivery_still_refuses_opposite_disposition(tmp_path):
+    path = tmp_path / "acks.sqlite3"
+    record_directive_publications_to_database(path, [_publication()])
+    first = AckStateWrite(
+        key=KEY,
+        inbox_name=INBOX_NAME,
+        text=TEXT,
+        attachments=(ATTACHMENT,),
+        ack_text=ACK_TEXT,
+        ack_content=ACK_CONTENT,
+    )
+    record_acked_inbox_items_to_database(path, [first], now=FIRST_ACKNOWLEDGED_AT)
+
+    with pytest.raises(SpiceError, match="directive ACK collision"):
+        record_acked_inbox_items_to_database(
+            path,
+            [
+                AckStateWrite(
+                    key=KEY,
+                    inbox_name=INBOX_NAME,
+                    text=TEXT,
+                    attachments=(ATTACHMENT,),
+                    ack_text=f"NACK {KEY}: cannot comply",
+                    ack_content="cannot comply",
+                    disposition=ACK_DISPOSITION_REFUSED,
+                )
+            ],
+            now=RETRY_ACKNOWLEDGED_AT,
+        )
+
+    record = directive_history_records_from_database(path)[0]
+    assert record.disposition == ACK_DISPOSITION_ACKED
+    assert record.ack_text == ACK_TEXT

@@ -30,6 +30,7 @@ from spice.transcript.events import (
     Unknown,
     UserMessage,
     WebSearch,
+    WorkingDirectory,
 )
 
 TurnMetadataKey = Literal["internal_chat_message_metadata_passthrough", "metadata"]
@@ -52,6 +53,13 @@ def codex_line_events(
     payload = raw.get("payload")
     if not isinstance(payload, dict):
         return []
+    if outer_type == "session_meta":
+        cwd = payload.get("cwd")
+        return (
+            [WorkingDirectory(at=stamper.stamp(), path=cwd)]
+            if isinstance(cwd, str) and cwd
+            else []
+        )
     payload_type = payload.get("type")
     if outer_type == "event_msg":
         return _codex_event_message_events(stamper, payload)

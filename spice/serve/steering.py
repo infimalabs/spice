@@ -44,7 +44,7 @@ def submit_steering_message(
 ) -> SentSteeringMessage:
     if target_repo_root is None:
         raise RuntimeError("No target worktree is selected.")
-    name = default_inbox_name()
+    name = default_inbox_name(target_repo_root)
     body = text if text.endswith("\n") else f"{text}\n"
     composed = compose_inbox_text(
         body=body,

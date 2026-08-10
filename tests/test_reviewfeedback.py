@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +33,7 @@ def _patch_targets(
     calls: list[list[str]] = []
     for path, _running, _thread_id in targets:
         path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
     records = [
         WorktreeRecord(path=path, branch="refs/heads/main", bare=False)
         for path, _running, _thread_id in targets

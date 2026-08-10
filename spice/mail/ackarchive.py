@@ -27,8 +27,10 @@ from spice.mail.ackgrammar import (
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
     ACK_DISPOSITION_REFUSED,
+    AckStateRecord,
     AckStateWrite,
     ack_state_records,
+    ack_state_records_for_keys,
     record_acked_inbox_items,
 )
 from spice.mail.inbox import (
@@ -95,25 +97,55 @@ def _archive_keyed_inbox_items(
     to_retire = [item for item in pending if inbox_item_key(item.name) in wanted]
     if not to_retire:
         return []
-    record_acked_inbox_items(
-        repo_root,
-        [
-            AckStateWrite(
-                key=inbox_item_key(item.name),
-                inbox_name=item.name,
-                text=item.text,
-                attachments=_ack_state_attachments(item),
-                lineage=_ack_state_lineage(item),
-                ack_text=message_text,
-                ack_content=_ack_content_for_item(item.name, content_by_key),
-                disposition=disposition,
-            )
-            for item in to_retire
-        ],
-    )
+    consumed = {
+        inbox_item_key(record.key): record
+        for record in ack_state_records_for_keys(repo_root, wanted)
+    }
+    fresh = [
+        item
+        for item in to_retire
+        if not _pending_item_matches_consumed_record(
+            item,
+            consumed.get(inbox_item_key(item.name)),
+            disposition=disposition,
+        )
+    ]
+    if fresh:
+        record_acked_inbox_items(
+            repo_root,
+            [
+                AckStateWrite(
+                    key=inbox_item_key(item.name),
+                    inbox_name=item.name,
+                    text=item.text,
+                    attachments=_ack_state_attachments(item),
+                    lineage=_ack_state_lineage(item),
+                    ack_text=message_text,
+                    ack_content=_ack_content_for_item(item.name, content_by_key),
+                    disposition=disposition,
+                )
+                for item in fresh
+            ],
+        )
     discard_inbox_items(inbox_payload_items(to_retire))
     notify_inbox_changed(root)
-    return [inbox_item_key(item.name) for item in to_retire]
+    return [inbox_item_key(item.name) for item in fresh]
+
+
+def _pending_item_matches_consumed_record(
+    item: Any,
+    record: AckStateRecord | None,
+    *,
+    disposition: str,
+) -> bool:
+    if record is None:
+        return False
+    return (
+        record.inbox_name == item.name
+        and record.text == item.text
+        and record.attachments == _ack_state_attachments(item)
+        and record.disposition == disposition
+    )
 
 
 @dataclass(frozen=True)

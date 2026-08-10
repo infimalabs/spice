@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -527,6 +528,7 @@ def test_automatic_peer_stale_snapshot_preserves_winner_lease_and_notifies_old_l
     uuid = identity.uuid_of(identity.resolve(handle))
     displaced_lane = tmp_path / "displaced-lane"
     displaced_lane.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=displaced_lane, check=True)
     second_allocator = "cccccccccccccccccccccccccccccccc"
 
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)

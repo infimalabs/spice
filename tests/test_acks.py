@@ -11,7 +11,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
-from spice.mail import ackstate
+from spice.mail import ackarchive, ackstate
 from spice.mail.ackschema import ACK_STATE_MIGRATION_SOURCES
 from spice.sqliteconnection import sqlite_connection
 from spice.mail.feedback import supervisor_feedback_line
@@ -827,7 +827,13 @@ def test_ack_write_waits_for_shared_writer_then_archives_original_header(
     assert finished.wait(timeout=2.0) is True
     worker.join()
 
-    assert configured_timeouts == [None, ackstate.ACK_STATE_SQLITE_BUSY_TIMEOUT_MS]
+    # Summary reads the consumed keys and their delivery signatures before the
+    # archival write. Only that write receives the bounded busy timeout.
+    assert configured_timeouts == [
+        None,
+        None,
+        ackstate.ACK_STATE_SQLITE_BUSY_TIMEOUT_MS,
+    ]
     assert outcomes == [
         AckArchivalSummary(archived=[KEY_A], already_acked=[], unmatched=[])
     ]
@@ -1212,6 +1218,34 @@ def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
     assert summary.already_acked == [KEY_A]
     assert summary.unmatched == []
     assert not summary.noop
+
+
+def test_ack_retry_clears_pending_transport_left_after_durable_write(
+    tmp_path, monkeypatch
+):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    text = compose_inbox_text(body="restart boundary", priority=None, stop=False)
+    write_inbox_item(tmp_path, name, text)
+
+    with monkeypatch.context() as crash_window:
+        crash_window.setattr(ackarchive, "discard_inbox_items", lambda _items: None)
+        first = summarize_ack_archival(
+            tmp_path, f"ACK {KEY_A}: durable before restart."
+        )
+
+    assert first.archived == [KEY_A]
+    assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
+
+    retried = summarize_ack_archival(tmp_path, f"ACK {KEY_A}: retry after restart.")
+
+    assert retried == AckArchivalSummary(
+        archived=[], already_acked=[KEY_A], unmatched=[]
+    )
+    assert collect_inbox_items(tmp_path) == []
+    record = ack_state_records(tmp_path)[0]
+    assert record.ack_text == f"ACK {KEY_A}: durable before restart."
+    assert record.ack_content == "durable before restart."
 
 
 def test_summarize_ack_archival_reports_noop_ack_without_key(tmp_path):
