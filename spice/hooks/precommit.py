@@ -137,14 +137,16 @@ class DisabledBuiltinPreCommitStep:
 
     key: str
     config_path: tuple[str, ...]
+    config_source: str
 
 
 @dataclass(frozen=True)
 class _BuiltinPreCommitOverrides:
-    """Canonical effective overrides and each winning raw configuration path."""
+    """Canonical overrides with each winning raw path and source layer."""
 
     values: dict[str, Any]
     config_paths: dict[tuple[str, ...], tuple[str, ...]]
+    config_sources: dict[tuple[str, ...], str]
 
     def config_path(self, key: str, *field_path: str) -> tuple[str, ...]:
         semantic_path = (key, *field_path)
@@ -153,19 +155,23 @@ class _BuiltinPreCommitOverrides:
             ("policy", "pre_commit_builtins", key, *field_path),
         )
 
+    def config_source(self, key: str, *field_path: str) -> str:
+        return self.config_sources[(key, *field_path)]
+
 
 def handle_pre_commit(repo_root: Path) -> int:
     failures: list[PreCommitFailure] = []
     paths = staged_paths(repo_root)
     for disabled in disabled_builtin_pre_commit_steps(repo_root):
         print(f"pre-commit: disabled builtin {disabled.key}")
-    staging_verified = False
+    steps = pre_commit_steps(repo_root, paths)
+    staging_verified = not any(step.key == "staging" for step in steps)
     # A sticky latch records what a landed commit must live with, so it persists
     # only once every step below has accepted this run. A rejected run leaves the
     # ledgers exactly as it found them, rather than latching a breach on work the
     # author is being told to go back and change.
     with gates.deferred_sticky_writes() as pending_sticky:
-        for step in pre_commit_steps(repo_root, paths):
+        for step in steps:
             if step.key.startswith("extension-") and not staging_verified:
                 continue
             passed = _run_step(failures, step.label, step.action)
@@ -237,6 +243,16 @@ def _builtin_pre_commit_steps(
     repo_root: Path, paths: list[Path]
 ) -> list[PreCommitStep]:
     return [
+        *_builtin_pre_commit_repository_steps(repo_root, paths),
+        *_builtin_pre_commit_source_steps(repo_root, paths),
+        *_builtin_pre_commit_analysis_steps(repo_root, paths),
+    ]
+
+
+def _builtin_pre_commit_repository_steps(
+    repo_root: Path, paths: list[Path]
+) -> list[PreCommitStep]:
+    return [
         PreCommitStep(
             "merge-integrity",
             "merge integrity",
@@ -272,6 +288,13 @@ def _builtin_pre_commit_steps(
             "formatters",
             lambda: _run_python_format_guard(repo_root, paths),
         ),
+    ]
+
+
+def _builtin_pre_commit_source_steps(
+    repo_root: Path, paths: list[Path]
+) -> list[PreCommitStep]:
+    return [
         PreCommitStep(
             "local-paths",
             "local paths",
@@ -317,6 +340,13 @@ def _builtin_pre_commit_steps(
             "complexity",
             lambda: _run_complexity_guard(repo_root, paths),
         ),
+    ]
+
+
+def _builtin_pre_commit_analysis_steps(
+    repo_root: Path, paths: list[Path]
+) -> list[PreCommitStep]:
+    return [
         PreCommitStep(
             "magic-numbers",
             "magic numbers",
@@ -576,6 +606,11 @@ def disabled_builtin_pre_commit_steps(
                 step.key,
                 resolved.values.get(step.key, False),
             ),
+            config_source=_builtin_disablement_config_source(
+                resolved,
+                step.key,
+                resolved.values.get(step.key, False),
+            ),
         )
         for step in builtin_steps
         if _builtin_override_is_disabled(resolved.values.get(step.key, False))
@@ -594,6 +629,18 @@ def _builtin_disablement_config_path(
     )
 
 
+def _builtin_disablement_config_source(
+    resolved: _BuiltinPreCommitOverrides,
+    key: str,
+    raw: Any,
+) -> str:
+    return (
+        resolved.config_source(key, "enabled")
+        if isinstance(raw, dict)
+        else resolved.config_source(key)
+    )
+
+
 def _builtin_pre_commit_overrides(
     repo_root: Path,
     builtin_steps: list[PreCommitStep],
@@ -601,6 +648,7 @@ def _builtin_pre_commit_overrides(
     by_key = {step.key: step for step in builtin_steps}
     normalized: dict[str, Any] = {step.key: True for step in builtin_steps}
     config_paths: dict[tuple[str, ...], tuple[str, ...]] = {}
+    config_sources: dict[tuple[str, ...], str] = {}
     for layer in load_config(repo_root).layers:
         policy = layer.values.get("policy")
         if not isinstance(policy, Mapping):
@@ -608,9 +656,22 @@ def _builtin_pre_commit_overrides(
         raw_overrides = policy.get("pre_commit_builtins")
         if raw_overrides is None:
             continue
+        if raw_overrides is False:
+            for step in builtin_steps:
+                _merge_builtin_override(
+                    normalized,
+                    step.key,
+                    False,
+                    semantic_path=(step.key,),
+                    config_path=("policy", "pre_commit_builtins"),
+                    config_source=layer.name,
+                    config_paths=config_paths,
+                    config_sources=config_sources,
+                )
+            continue
         if not isinstance(raw_overrides, Mapping):
             raise SpiceError(
-                "[policy] pre_commit_builtins must be a table of "
+                "[policy] pre_commit_builtins must be false or a table of "
                 "built-in pre-commit step overrides"
             )
         layer_entries: dict[str, tuple[str, Any]] = {}
@@ -640,9 +701,11 @@ def _builtin_pre_commit_overrides(
                 raw_value,
                 semantic_path=(key,),
                 config_path=("policy", "pre_commit_builtins", raw_name),
+                config_source=layer.name,
                 config_paths=config_paths,
+                config_sources=config_sources,
             )
-    return _BuiltinPreCommitOverrides(normalized, config_paths)
+    return _BuiltinPreCommitOverrides(normalized, config_paths, config_sources)
 
 
 def _merge_builtin_override(
@@ -652,14 +715,22 @@ def _merge_builtin_override(
     *,
     semantic_path: tuple[str, ...],
     config_path: tuple[str, ...],
+    config_source: str,
     config_paths: dict[tuple[str, ...], tuple[str, ...]],
+    config_sources: dict[tuple[str, ...], str],
 ) -> None:
     if isinstance(incoming, Mapping):
         config_paths[semantic_path] = config_path
+        config_sources[semantic_path] = config_source
         previous = destination.get(key)
         if not isinstance(previous, dict):
-            _forget_builtin_config_paths(config_paths, semantic_path)
+            _forget_builtin_config_metadata(
+                config_paths,
+                config_sources,
+                semantic_path,
+            )
             config_paths[semantic_path] = config_path
+            config_sources[semantic_path] = config_source
             previous = {}
             destination[key] = previous
         for raw_child, child_value in incoming.items():
@@ -670,21 +741,26 @@ def _merge_builtin_override(
                 child_value,
                 semantic_path=(*semantic_path, child),
                 config_path=(*config_path, child),
+                config_source=config_source,
                 config_paths=config_paths,
+                config_sources=config_sources,
             )
         return
-    _forget_builtin_config_paths(config_paths, semantic_path)
+    _forget_builtin_config_metadata(config_paths, config_sources, semantic_path)
     destination[key] = _mutable_config_value(incoming)
     config_paths[semantic_path] = config_path
+    config_sources[semantic_path] = config_source
 
 
-def _forget_builtin_config_paths(
+def _forget_builtin_config_metadata(
     config_paths: dict[tuple[str, ...], tuple[str, ...]],
+    config_sources: dict[tuple[str, ...], str],
     prefix: tuple[str, ...],
 ) -> None:
     for path in tuple(config_paths):
         if path[: len(prefix)] == prefix:
             del config_paths[path]
+            del config_sources[path]
 
 
 def _mutable_config_value(value: Any) -> Any:

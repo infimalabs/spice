@@ -548,6 +548,29 @@ def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypa
     ]
 
 
+def test_policy_pre_commit_whole_builtin_disable_runs_configured_replacement(
+    tmp_path, monkeypatch, capsys
+):
+    recorder = _write_recorder(tmp_path)
+    (tmp_path / "spice.toml").write_text(
+        "[policy]\n"
+        "pre_commit_builtins = false\n"
+        "pre_commit = [\n"
+        '  { label = "Rust gate", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'Rust gate')} }},\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    events = _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch)
+
+    assert precommit.handle_pre_commit(tmp_path) == 0
+    assert events.read_text(encoding="utf-8").splitlines() == ["Rust gate"]
+    assert capsys.readouterr().out.splitlines() == [
+        f"pre-commit: disabled builtin {key}"
+        for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS
+    ]
+
+
 def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
     tmp_path, monkeypatch
 ):
@@ -662,6 +685,32 @@ def test_scalar_disable_retains_its_exact_entry_spelling(tmp_path, spelling):
         "pre_commit_builtins",
         spelling,
     )
+
+
+def test_whole_builtin_disable_retains_repository_source_through_operator_overlay(
+    tmp_path,
+):
+    repo = _git_init(tmp_path / "repo")
+    (repo / "spice.toml").write_text(
+        "[policy]\npre_commit_builtins = false\n",
+        encoding="utf-8",
+    )
+    worktree = edit.worktree_config_path(repo)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    worktree.write_text(
+        "[policy.pre_commit_builtins]\nstaging = true\n",
+        encoding="utf-8",
+    )
+
+    disabled = precommit.disabled_builtin_pre_commit_steps(repo)
+
+    assert [entry.key for entry in disabled] == [
+        key for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS if key != "staging"
+    ]
+    assert {entry.config_path for entry in disabled} == {
+        ("policy", "pre_commit_builtins")
+    }
+    assert {entry.config_source for entry in disabled} == {"repository"}
 
 
 def test_markdown_links_pre_commit_guard_reports_shared_board(tmp_path, monkeypatch):

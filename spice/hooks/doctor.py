@@ -19,7 +19,7 @@ from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.lifecycle import packaged_skill_path
 from spice.agent.shellhook import rtk_rewrite_yield_selectors
 from spice.cli.entry import is_spice_checkout
-from spice.config.layers import REPOSITORY_SOURCE, effective_table, load_config
+from spice.config.layers import REPOSITORY_SOURCE, effective_table
 from spice.config.trust import repository_config_path_approval
 from spice.config.edit import git_worktree_config_get
 from spice.config.values import (
@@ -714,20 +714,19 @@ def _pre_commit_builtin_disablement_check(repo_root: Path) -> DoctorCheck:
     if not disabled:
         return _ok(name, "all builtins enabled", "spice config show")
 
-    loaded = load_config(repo_root)
     repository_disabled = tuple(
-        entry
-        for entry in disabled
-        if (source := loaded.source_for(entry.config_path)) is not None
-        and source.name == REPOSITORY_SOURCE
+        entry for entry in disabled if entry.config_source == REPOSITORY_SOURCE
     )
     disabled_names = ", ".join(entry.key for entry in disabled)
     if repository_disabled:
-        approvals = tuple(
-            (
-                entry,
-                repository_config_path_approval(repo_root, entry.config_path),
+        approval_by_path = {
+            entry.config_path: repository_config_path_approval(
+                repo_root, entry.config_path
             )
+            for entry in repository_disabled
+        }
+        approvals = tuple(
+            (entry, approval_by_path[entry.config_path])
             for entry in repository_disabled
         )
         unapproved = tuple(
@@ -736,8 +735,10 @@ def _pre_commit_builtin_disablement_check(repo_root: Path) -> DoctorCheck:
         if unapproved:
             unapproved_names = ", ".join(entry.key for entry, _approval in unapproved)
             refusal = "; ".join(
-                approval.refusal or "has no operator approval"
-                for _entry, approval in unapproved
+                dict.fromkeys(
+                    approval.refusal or "has no operator approval"
+                    for _entry, approval in unapproved
+                )
             )
             return _fail(
                 name,
