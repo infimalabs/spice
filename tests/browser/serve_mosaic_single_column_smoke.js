@@ -7,17 +7,19 @@ const { withServePage } = require("./serve_playwright_harness");
 // special-cased "natural height mode" fork. Drives a real lane through
 // renderMessagesIfChanged at a real 380px viewport (below the ~556px L=1/L=2
 // capacity-rule threshold at root 16px) exactly as live traffic would, then
-// crosses the L=1/L=2 boundary via a real Playwright viewport resize in both
-// directions and checks: every card spans the full 12 tracks at L=1; a new
+// crosses the L=1/L=2 boundary through the lane's wrapped ResizeObserver in
+// both directions and checks: every card spans the full 12 tracks at L=1; a new
 // message pushes down like a standard feed; late content growth pushes the
 // same way it would at any other column count; crossing the boundary
-// triggers exactly one full replay each way; and the settled lattice at
-// L=1 reflects the CURRENT module/geometry, never a stale one carried over
-// from the wide viewport.
+// triggers exactly one full replay each way; same-frame observer bursts
+// coalesce into one render with no timer or delayed second replay; and the
+// settled lattice at L=1 reflects the CURRENT module/geometry, never a stale
+// one carried over from the wide host.
 
 const MOSAIC_SINGLE_COLUMN_NARROW_WIDTH = 380;
-const MOSAIC_SINGLE_COLUMN_WIDE_WIDTH = 1280;
-const MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_WIDTH = 1320;
+const MOSAIC_SINGLE_COLUMN_WIDE_HOST_WIDTHS = [600, 900];
+const MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_HOST_WIDTHS = [920, 940];
+const MOSAIC_SINGLE_COLUMN_NARROW_HOST_WIDTHS = [360, 340];
 const MOSAIC_SINGLE_COLUMN_FULL_SPAN = 12;
 
 function mosaicSingleColumnResolveLane() {
@@ -68,26 +70,74 @@ function mosaicSingleColumnSnapshot(lane) {
   };
 }
 
-// Resolve each resize from the production render callback itself. The caller
-// arms one observation before changing the viewport; the wrapped render
-// resolves it only after this lane's mosaicRenderMessageStream invocation has
-// completed, so the smoke never polls a counter or guesses at a quiet window.
-function mosaicSingleColumnInstallResizeObserver() {
+// Install before the isolated lane exists so its production observer is born
+// wrapped. Message hosts are driven manually below, making same-frame delivery
+// deterministic while other observer users continue through the native API.
+function mosaicSingleColumnInstallResizeHarness() {
+  const NativeResizeObserver = window.ResizeObserver;
+  window.__mosaicWrappedResizeObservers = [];
+  window.ResizeObserver = class WrappedResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = new Set();
+      this.nativeObserver = new NativeResizeObserver((entries) => {
+        this.callback(entries, this);
+      });
+      window.__mosaicWrappedResizeObservers.push(this);
+    }
+
+    observe(target, options) {
+      this.targets.add(target);
+      if (!target.classList.contains("messages"))
+        this.nativeObserver.observe(target, options);
+    }
+
+    unobserve(target) {
+      this.targets.delete(target);
+      this.nativeObserver.unobserve(target);
+    }
+
+    disconnect() {
+      this.targets.clear();
+      this.nativeObserver.disconnect();
+    }
+  };
+}
+
+// Resolve each resize from the production render callback itself. The replay
+// wrapper counts only calls made inside this lane's render, so unrelated live
+// lanes cannot contaminate the result.
+function mosaicSingleColumnInstallRenderObserver() {
   window.__mosaicFullReplayCallCount = 0;
+  window.__mosaicRenderCallCount = 0;
+  window.__mosaicObservedLane = mosaicSingleColumnResolveLane();
+  window.__mosaicObservedLaneRendering = false;
   const originalReplay = mosaicFullReplay;
   mosaicFullReplay = function (...args) {
-    window.__mosaicFullReplayCallCount += 1;
+    if (window.__mosaicObservedLaneRendering)
+      window.__mosaicFullReplayCallCount += 1;
     return originalReplay.apply(this, args);
   };
   const originalRender = mosaicRenderMessageStream;
   mosaicRenderMessageStream = function (lane, ...args) {
-    const result = originalRender.call(this, lane, ...args);
+    const observed = lane === window.__mosaicObservedLane;
+    if (observed) {
+      window.__mosaicRenderCallCount += 1;
+      window.__mosaicObservedLaneRendering = true;
+    }
+    let result;
+    try {
+      result = originalRender.call(this, lane, ...args);
+    } finally {
+      if (observed) window.__mosaicObservedLaneRendering = false;
+    }
     const resolve = window.__mosaicResizeObservationResolve;
-    if (resolve && lane === window.__mosaicResizeObservationLane) {
+    if (resolve && observed) {
       window.__mosaicResizeObservationResolve = null;
       resolve({
         snapshot: mosaicSingleColumnSnapshot(lane),
         fullReplayCallCount: window.__mosaicFullReplayCallCount,
+        renderCallCount: window.__mosaicRenderCallCount,
       });
     }
     return result;
@@ -97,7 +147,6 @@ function mosaicSingleColumnInstallResizeObserver() {
 function mosaicSingleColumnBeginResizeObservation() {
   if (window.__mosaicResizeObservationResolve)
     throw new Error("a mosaic resize observation is already armed");
-  window.__mosaicResizeObservationLane = mosaicSingleColumnResolveLane();
   window.__mosaicResizeObservation = new Promise((resolve) => {
     window.__mosaicResizeObservationResolve = resolve;
   });
@@ -105,6 +154,55 @@ function mosaicSingleColumnBeginResizeObservation() {
 
 function mosaicSingleColumnAwaitResizeObservation() {
   return window.__mosaicResizeObservation;
+}
+
+async function mosaicSingleColumnDeliverResizeBurst(widths) {
+  const lane = mosaicSingleColumnResolveLane();
+  const observer = window.__mosaicWrappedResizeObservers.find((candidate) =>
+    candidate.targets.has(lane.messagesEl),
+  );
+  if (!observer) throw new Error("isolated lane has no wrapped ResizeObserver");
+  if (lane.mosaicFrame) throw new Error("resize burst began with a frame already scheduled");
+
+  mosaicSingleColumnBeginResizeObservation();
+  const renderCallCountBefore = window.__mosaicRenderCallCount;
+  const originalSetTimeout = window.setTimeout;
+  let setTimeoutCallCount = 0;
+  const frameIds = [];
+  const observedHostWidths = [];
+  try {
+    window.setTimeout = function (...args) {
+      setTimeoutCallCount += 1;
+      return originalSetTimeout.apply(this, args);
+    };
+    for (const width of widths) {
+      lane.messagesEl.style.boxSizing = "border-box";
+      lane.messagesEl.style.flex = "0 0 auto";
+      lane.messagesEl.style.width = width + "px";
+      void lane.messagesEl.offsetWidth;
+      const rect = lane.messagesEl.getBoundingClientRect();
+      observedHostWidths.push(rect.width);
+      observer.callback([{ target: lane.messagesEl, contentRect: rect }], observer);
+      frameIds.push(lane.mosaicFrame);
+    }
+  } finally {
+    window.setTimeout = originalSetTimeout;
+  }
+
+  const observed = await mosaicSingleColumnAwaitResizeObservation();
+  const renderCallCountAtCompletion = window.__mosaicRenderCallCount;
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  return {
+    ...observed,
+    frameIds,
+    observedHostWidths,
+    renderCallCountBefore,
+    renderCallCountAtCompletion,
+    renderCallCountAfterExtraFrames: window.__mosaicRenderCallCount,
+    fullReplayCallCountAfterExtraFrames: window.__mosaicFullReplayCallCount,
+    setTimeoutCallCount,
+  };
 }
 
 function mosaicSingleColumnRunAtNarrowWidth() {
@@ -137,9 +235,11 @@ async function installMosaicSingleColumnHelpers(page) {
       mosaicSingleColumnPushMessage,
       mosaicSingleColumnCardsOverlap,
       mosaicSingleColumnSnapshot,
-      mosaicSingleColumnInstallResizeObserver,
+      mosaicSingleColumnInstallResizeHarness,
+      mosaicSingleColumnInstallRenderObserver,
       mosaicSingleColumnBeginResizeObservation,
       mosaicSingleColumnAwaitResizeObservation,
+      mosaicSingleColumnDeliverResizeBurst,
       mosaicSingleColumnRunAtNarrowWidth,
     ]
       .map((helper) => helper.toString())
@@ -179,6 +279,50 @@ function assertNarrowWidthResult(result, fail) {
 }
 
 function assertResizeResult(label, result, expectedFullReplayCallCount, expectFullSpan, fail) {
+  if (result.frameIds.length < 2)
+    fail(label + ": fixture must deliver a same-frame ResizeObserver burst");
+  if (
+    result.observedHostWidths.some((width) => width <= 0) ||
+    new Set(result.observedHostWidths).size !== result.observedHostWidths.length
+  )
+    fail(
+      label +
+        ": observer deliveries must carry distinct nonzero host widths: " +
+        JSON.stringify(result.observedHostWidths),
+    );
+  if (
+    !result.frameIds[0] ||
+    !result.frameIds.every((id) => id === result.frameIds[0])
+  )
+    fail(
+      label +
+        ": observer deliveries did not coalesce onto one scheduled frame: " +
+        JSON.stringify(result.frameIds),
+    );
+  if (result.setTimeoutCallCount !== 0)
+    fail(label + ": ResizeObserver scheduled " + result.setTimeoutCallCount + " timeout(s)");
+  if (result.renderCallCountAtCompletion !== result.renderCallCountBefore + 1)
+    fail(
+      label +
+        ": expected exactly one render for the observer burst, got " +
+        (result.renderCallCountAtCompletion - result.renderCallCountBefore),
+    );
+  if (result.renderCallCountAfterExtraFrames !== result.renderCallCountAtCompletion)
+    fail(
+      label +
+        ": a delayed second render appeared after completion: " +
+        result.renderCallCountAtCompletion +
+        " -> " +
+        result.renderCallCountAfterExtraFrames,
+    );
+  if (result.fullReplayCallCountAfterExtraFrames !== result.fullReplayCallCount)
+    fail(
+      label +
+        ": a delayed second replay appeared after completion: " +
+        result.fullReplayCallCount +
+        " -> " +
+        result.fullReplayCallCountAfterExtraFrames,
+    );
   if (result.fullReplayCallCount !== expectedFullReplayCallCount)
     fail(
       label +
@@ -194,7 +338,7 @@ function assertResizeResult(label, result, expectedFullReplayCallCount, expectFu
       fail(label + ": expected every card back at span=12 (L=1), got spans " + JSON.stringify(spans));
   } else {
     if (spans.every((span) => span === MOSAIC_SINGLE_COLUMN_FULL_SPAN))
-      fail(label + ": expected at least one card narrower than span=12 at the wide viewport (L>1)");
+      fail(label + ": expected at least one card narrower than span=12 at the wide host (L>1)");
   }
   // Never-mixed-module: every card's rendered height, recomputed from the
   // CURRENT geometry's M/gap, must match n*M-gap exactly -- proving the
@@ -244,10 +388,8 @@ function assertSameTopologyResize(before, after, fail) {
   }
 }
 
-async function mosaicSingleColumnResizeAndObserve(page, width) {
-  await page.evaluate(mosaicSingleColumnBeginResizeObservation);
-  await page.setViewportSize({ width, height: 900 });
-  return page.evaluate(mosaicSingleColumnAwaitResizeObservation);
+async function mosaicSingleColumnResizeAndObserve(page, widths) {
+  return page.evaluate(mosaicSingleColumnDeliverResizeBurst, widths);
 }
 
 async function run() {
@@ -267,6 +409,7 @@ async function run() {
         ],
       });
       await installMosaicSingleColumnHelpers(page);
+      await page.evaluate(mosaicSingleColumnInstallResizeHarness);
 
       const narrowResult = await page.evaluate(mosaicSingleColumnRunAtNarrowWidth);
 
@@ -274,25 +417,24 @@ async function run() {
       // (which always full-replays once on its own, since geometry starts
       // null) -- so the counter below measures full replays caused by the
       // resizes themselves, not the lane's initial bootstrap.
-      await page.evaluate(mosaicSingleColumnInstallResizeObserver);
+      await page.evaluate(mosaicSingleColumnInstallRenderObserver);
 
-      // The real production trigger for a viewport resize is the
-      // ResizeObserver on lane.messagesEl (mosaicSyncResizeObserver), which
-      // schedules rendering via requestAnimationFrame (mosaicScheduleRender).
-      // Each resize below blocks on the wrapped render's completion callback,
-      // including the width-only case where no full replay event should exist.
+      // Drive multiple final-width observations in one browser turn. Each
+      // burst blocks on the wrapped production render callback, including the
+      // width-only case where no full replay event should exist, then crosses
+      // two additional animation frames to expose any wrongly queued replay.
       const wideResizeResult = await mosaicSingleColumnResizeAndObserve(
         page,
-        MOSAIC_SINGLE_COLUMN_WIDE_WIDTH,
+        MOSAIC_SINGLE_COLUMN_WIDE_HOST_WIDTHS,
       );
       const sameTopologyResizeResult = await mosaicSingleColumnResizeAndObserve(
         page,
-        MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_WIDTH,
+        MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_HOST_WIDTHS,
       );
 
       const narrowAgainResizeResult = await mosaicSingleColumnResizeAndObserve(
         page,
-        MOSAIC_SINGLE_COLUMN_NARROW_WIDTH,
+        MOSAIC_SINGLE_COLUMN_NARROW_HOST_WIDTHS,
       );
 
       const fail = (message) => {

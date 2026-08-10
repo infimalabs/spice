@@ -34,12 +34,6 @@ const MOSAIC_MIN_RENDER_WIDTH_PX = 24;
 // settled-board rule suppresses every transform transition. Settling flips
 // a flag and never triggers a render.
 const MOSAIC_SETTLE_QUIET_MS = 500;
-// Width churn coalesces: a burst of host width changes (lane mounts, pane
-// dividers mid-drag, window drags) runs ONE full replay at the settled
-// width instead of one per observation. The reveal path (deferred renders
-// waiting on the 0-to-real transition) bypasses the debounce -- stale
-// content should come back in a frame, not a fifth of a second.
-const MOSAIC_RESIZE_DEBOUNCE_MS = 200;
 const MOSAIC_SETTLE_INTERACTION_EVENTS = [
   "pointerdown",
   "wheel",
@@ -1139,7 +1133,7 @@ function mosaicReconcileStreamEntries(
 }
 
 // ---- resize + image-load wiring (mirrors the legacy grid packer's resize
-// observer pattern, retargeted at full replay instead of a repack) -----------------
+// observer pattern, retargeted at render reconciliation) --------------------------
 
 function mosaicHostResizeChanged(lane) {
   const next = mosaicContainerWidthPx(lane.messagesEl);
@@ -1150,8 +1144,8 @@ function mosaicHostResizeChanged(lane) {
   return next !== previous;
 }
 
-// The single deferred re-render scheduler for every self-triggered render
-// (resize settlement, reveal, fonts correction, image resolution): resets
+// The single next-frame scheduler for every self-triggered render (resize
+// observation, reveal, fonts correction, image resolution): resets
 // the fingerprint and re-enters renderMessagesIfChanged on the next frame,
 // coalescing everything marked in the same tick into ONE render. Render
 // machinery must never call renderMessagesIfChanged synchronously from
@@ -1172,15 +1166,7 @@ function mosaicSyncResizeObserver(lane) {
   if (!lane.mosaicResizeObserver) {
     lane.mosaicResizeObserver = new ResizeObserver(() => {
       if (!mosaicHostResizeChanged(lane)) return;
-      if (lane.mosaicRenderDeferred) {
-        mosaicScheduleRender(lane);
-        return;
-      }
-      if (lane.mosaicResizeDebounce) clearTimeout(lane.mosaicResizeDebounce);
-      lane.mosaicResizeDebounce = setTimeout(() => {
-        lane.mosaicResizeDebounce = 0;
-        mosaicScheduleRender(lane);
-      }, MOSAIC_RESIZE_DEBOUNCE_MS);
+      mosaicScheduleRender(lane);
     });
     lane.mosaicHostContentWidth = mosaicContainerWidthPx(lane.messagesEl);
     lane.mosaicResizeObserver.observe(lane.messagesEl);
@@ -1245,10 +1231,6 @@ function mosaicResetResizeObserver(lane) {
   if (lane.mosaicSettleTimer) {
     clearTimeout(lane.mosaicSettleTimer);
     lane.mosaicSettleTimer = 0;
-  }
-  if (lane.mosaicResizeDebounce) {
-    clearTimeout(lane.mosaicResizeDebounce);
-    lane.mosaicResizeDebounce = 0;
   }
   if (lane.mosaicFrame) {
     cancelAnimationFrame(lane.mosaicFrame);
