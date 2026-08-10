@@ -5,8 +5,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from spice import flexprovenance
 from spice.agent.paths import write_agent_thread_pointer
-from spice.flexprovenance import FlexProvenanceResolver
+from spice.errors import SpiceError
+from spice.flexprovenance import FlexProvenanceResolver, preload_flex_provenance
 from spice.hooks import precommit
 from spice.policyconfig import jittered_flex_limit, resolve_policy
 
@@ -58,6 +62,8 @@ def test_published_task_session_is_cached_across_linked_worktrees(tmp_path):
     _git(repo, "worktree", "add", "-q", "-b", "peer", str(peer), "HEAD")
     author_resolver = FlexProvenanceResolver(repo, AUTHOR_ACTOR)
     peer_resolver = FlexProvenanceResolver(peer, PEER_ACTOR)
+    preload_flex_provenance(author_resolver, (Path("shared.py"),))
+    preload_flex_provenance(peer_resolver, (Path("shared.py"),))
 
     author = author_resolver.resolve(Path("shared.py"))
     repeated = author_resolver.resolve(Path("shared.py"))
@@ -80,6 +86,70 @@ def test_historical_commit_without_task_session_uses_commit_identity(tmp_path):
     assert provenance.seed == commit
     assert provenance.commit == commit
     assert provenance.blob
+
+
+def test_preload_batches_candidate_hashes_and_published_history(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    paths = (Path("first.py"), Path("space name.py"))
+    for path in paths:
+        _write(repo, path.as_posix(), f"VALUE = {path.name!r}\n")
+    commit = _commit_all(repo, "published pair")
+    _write(repo, "untracked.py", "VALUE = 'untracked'\n")
+    resolver = FlexProvenanceResolver(repo, PEER_ACTOR)
+    calls: list[tuple[str, object]] = []
+    original_run_git_command = flexprovenance.run_git_command
+    original_git_run = flexprovenance.git_run
+
+    def counted_run_git_command(command, **kwargs):
+        if "hash-object" in command:
+            calls.append(("hash-object", kwargs.get("input")))
+        return original_run_git_command(command, **kwargs)
+
+    def counted_git_run(repo_root, *args, **kwargs):
+        if args and args[0] == "log":
+            calls.append(("log", args))
+        return original_git_run(repo_root, *args, **kwargs)
+
+    monkeypatch.setattr(
+        flexprovenance,
+        "run_git_command",
+        counted_run_git_command,
+    )
+    monkeypatch.setattr(flexprovenance, "git_run", counted_git_run)
+
+    preload_flex_provenance(resolver, paths)
+    resolved = tuple(resolver.resolve(path) for path in paths)
+    repeated = tuple(resolver.resolve(path) for path in paths)
+
+    assert resolved == repeated
+    assert [item.source for item in resolved] == [
+        "published-commit",
+        "published-commit",
+    ]
+    assert [item.commit for item in resolved] == [commit, commit]
+    assert [name for name, _detail in calls] == ["hash-object", "log"]
+    assert calls[0][1] == "first.py\nspace name.py\n"
+
+
+def test_preload_refuses_malformed_bulk_hash_output(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write(repo, "tracked.py", "VALUE = 1\n")
+    _commit_all(repo, "tracked source")
+    resolver = FlexProvenanceResolver(repo, PEER_ACTOR)
+
+    monkeypatch.setattr(
+        flexprovenance,
+        "run_git_command",
+        lambda _command, **_kwargs: subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="not-an-object-id\n",
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(SpiceError, match="hashing returned malformed output"):
+        preload_flex_provenance(resolver, (Path("tracked.py"),))
 
 
 def test_cross_actor_merge_retains_authored_file_shape_ceiling(tmp_path):

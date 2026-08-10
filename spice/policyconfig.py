@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -21,7 +21,7 @@ from spice.config.layers import (
 )
 from spice.config.values import layered_table
 from spice.errors import SpiceError
-from spice.flexprovenance import FlexProvenanceResolver
+from spice.flexprovenance import FlexProvenanceResolver, preload_flex_provenance
 from spice.scopes import POLICY_RULE_SCOPES, SCOPES_KEY, ScopeContext, ScopeSelector
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
@@ -205,6 +205,10 @@ class ResolvedPolicy:
         if self.flex_provenance is None:
             return self.flex_actor_id
         return self.flex_provenance.seed_for_path(path)
+
+    def preload_flex_provenance(self, paths: Iterable[Path]) -> None:
+        if self.flex_provenance is not None:
+            preload_flex_provenance(self.flex_provenance, paths)
 
     @property
     def file_shape(self) -> FileShapePolicy:
