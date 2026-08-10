@@ -174,7 +174,15 @@ def test_the_supervisor_and_a_transcript_replay_reach_the_same_judgments(
     tmp_path: Path,
 ) -> None:
     """Stdout and the persisted file are one lane, so they say the same things."""
-    corpus = parity_corpus(extra=(live_starvation_case(tmp_path),))
+    # Claude's exec stream is its transcript dialect. Codex intentionally has
+    # a separate ``exec --json`` envelope, covered by test_codexexecevents and
+    # the launch-history tests instead of feeding rollout bytes to its stdout
+    # decoder.
+    corpus = tuple(
+        case
+        for case in parity_corpus(extra=(live_starvation_case(tmp_path),))
+        if case.driver is CLAUDE_DRIVER
+    )
 
     assert_parity(
         supervised_judgments,
@@ -206,7 +214,11 @@ def test_the_keys_archival_requests_are_the_keys_the_reducer_classified(
     tmp_path: Path,
 ) -> None:
     """Archival reads the agent's own text; the ACK header has to survive it."""
-    corpus = parity_corpus(extra=(live_starvation_case(tmp_path),))
+    corpus = tuple(
+        case
+        for case in parity_corpus(extra=(live_starvation_case(tmp_path),))
+        if case.driver is CLAUDE_DRIVER
+    )
 
     assert_parity(
         archived_headers,

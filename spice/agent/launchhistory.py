@@ -9,7 +9,7 @@ import re
 import time
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import canonical_thread_id
@@ -302,21 +302,22 @@ def scan_launch_log(repo_root: Path, log_path: Path) -> dict[str, Any]:
     """
     driver = driver_for(repo_root)
     if driver.stdout_format == "json":
-        return scan_transcript_activity(driver, log_path)
+        return scan_json_activity(driver, log_path, surface="stdout")
     return _marker_launch_projection(driver, log_path)
 
 
-def scan_transcript_activity(driver: AgentDriver, path: Path) -> dict[str, Any]:
-    """Activity counts and structural failure fields from one JSON transcript.
-
-    The bounded typed read includes a terminal unterminated record from a
-    process that exited mid-flush.
-    """
+def scan_json_activity(
+    driver: AgentDriver,
+    path: Path,
+    *,
+    surface: Literal["transcript", "stdout"],
+) -> dict[str, Any]:
+    """Activity and failures from transcript or captured-stdout JSONL."""
     end_offset = transcript_size(path)
     if end_offset is None:
         return {"assistant_messages": 0, "tool_calls": 0}
     events = (
-        TranscriptEventReader(path, driver)
+        TranscriptEventReader(path, driver, surface=surface)
         .read(
             "bounded",
             start_offset=0,
@@ -333,7 +334,7 @@ def _marker_launch_projection(driver: AgentDriver, log_path: Path) -> dict[str, 
     A driver whose ``exec`` stdout is human-readable prints section markers
     rather than JSON records, so the typed reader finds nothing to decode and
     every such launch would otherwise be recorded as having done no work at
-    all -- a 2850s Codex session and a crash-on-boot look identical. The
+    all -- a long working session and a crash-on-boot look identical. The
     markers the driver already declares carry that fact: its assistant marker
     opens a message block and its activity markers open tool work.
 

@@ -9,7 +9,7 @@ import shutil
 import pytest
 
 from spice.agent import sidechannelnotify, watchdog
-from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER, DRIVER
 from spice.mail.ackstate import ACK_DISPOSITION_REFUSED, ack_state_records
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
@@ -238,6 +238,42 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
         ),
         _task_backlog_note_feedback(),
     ]
+
+
+def test_codex_completed_agent_item_archives_ack_immediately_and_once(
+    task_repo, quiet_supervisor
+):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="retire from JSON prose", priority=None, stop=False),
+    )
+    log = io.StringIO()
+    delivered: list[str] = []
+    gate = watchdog.MaximReminderGate()
+
+    def process(text: str) -> None:
+        delivered.append(text)
+        watchdog.process_supervised_assistant_message(task_repo, text, log, gate)
+
+    scanner = watchdog.JsonStdoutScanner(process, CODEX_DRIVER)
+    item = {
+        "id": "item_ack",
+        "type": "agent_message",
+        "phase": "commentary",
+        "text": f"ACK {INBOX_KEY}: handled from the JSON event.",
+    }
+    scanner.process_line(json.dumps({"type": "item.started", "item": item}))
+    assert len(collect_inbox_items(task_repo)) == 1
+
+    scanner.process_line(json.dumps({"type": "item.completed", "item": item}))
+
+    # Retirement happens on the prose item itself, before a later tool event or
+    # process close could provide a PostToolUse recovery opportunity.
+    assert collect_inbox_items(task_repo) == []
+    assert _acked_inbox_names(task_repo) == [f"{INBOX_KEY}.txt"]
+    assert delivered == [item["text"]]
+    scanner.close()
 
 
 def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
