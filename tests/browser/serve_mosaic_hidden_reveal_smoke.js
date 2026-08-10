@@ -374,43 +374,74 @@ async function measureResizeBurst(page) {
 // exactly one silent re-measuring full replay at fonts.ready; warm loads
 // (system fonts, the shipping default) never set the flag at all.
 async function measureFontsCorrection(page) {
-  const warm = await page.evaluate(() =>
-    Boolean(hiddenRevealResolveLane().mosaicMeasuredBeforeFonts),
-  );
-  const before = await page.evaluate(() => {
+  return page.evaluate(async () => {
     const lane = hiddenRevealResolveLane();
+    const warm = Boolean(lane.mosaicMeasuredBeforeFonts);
     hiddenRevealPurgeLiveTraffic(lane);
     window.__hiddenRevealTransitions.length = 0;
-    // A 200 non-font route: keeps document.fonts in "loading" while the
-    // fetch runs, then rejects with a decode WARNING (the harness fails the
-    // run on console errors, so a 404 is not usable here).
-    const face = new FontFace("HiddenRevealSmokeFont", 'url("/")');
-    document.fonts.add(face);
-    face.load().catch(() => {});
-    if (document.fonts.status !== "loading")
-      throw new Error("could not force fonts into loading state");
-    lane.renderedMessageFingerprint = "";
-    renderMessagesIfChanged(lane);
-    return {
-      flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
-      replays: lane.mosaicEventLog.events.filter(
+    const snapshot = () => ({
+      width: lane.mosaicGeometry.edges[mosaicGridTrackCount],
+      baseSpan: lane.mosaicGeometry.baseSpan,
+      trackCount: mosaicGridTrackCount,
+      M: lane.mosaicGeometry.M,
+    });
+    let armed = false;
+    let replayCountBefore = 0;
+    let resolveCorrection;
+    const correction = new Promise((resolve) => {
+      resolveCorrection = resolve;
+    });
+    const originalRender = mosaicRenderMessageStream;
+    window.mosaicRenderMessageStream = function (candidate, ...args) {
+      const result = originalRender.call(this, candidate, ...args);
+      if (!armed || candidate !== lane) return result;
+      const fullReplays = lane.mosaicEventLog.events.filter(
         (event) => event.type === "full-replay",
-      ).length,
+      );
+      const event = fullReplays.slice(replayCountBefore).find(
+        (candidateEvent) =>
+          candidateEvent.geometryReplay &&
+          candidateEvent.geometryReplay.reason === "fonts-ready",
+      );
+      if (!event) return result;
+      armed = false;
+      resolveCorrection({
+        flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
+        replays: fullReplays.length,
+        transitions: window.__hiddenRevealTransitions.slice(),
+        fontsStatus: document.fonts.status,
+        geometry: snapshot(),
+        event: event.geometryReplay,
+        invalidation: lane.mosaicGeometryInvalidation,
+      });
+      return result;
     };
+    try {
+      // A 200 non-font route keeps document.fonts loading while the fetch
+      // runs, then rejects with a decode warning. The wrapped production
+      // render resolves this proof after fonts.ready schedules correction.
+      const face = new FontFace("HiddenRevealSmokeFont", 'url("/")');
+      document.fonts.add(face);
+      face.load().catch(() => {});
+      if (document.fonts.status !== "loading")
+        throw new Error("could not force fonts into loading state");
+      lane.renderedMessageFingerprint = "";
+      renderMessagesIfChanged(lane);
+      const before = {
+        flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
+        replays: lane.mosaicEventLog.events.filter(
+          (event) => event.type === "full-replay",
+        ).length,
+        geometry: snapshot(),
+      };
+      replayCountBefore = before.replays;
+      armed = true;
+      const after = await correction;
+      return { warm, before, after };
+    } finally {
+      window.mosaicRenderMessageStream = originalRender;
+    }
   });
-  await page.waitForTimeout(900);
-  const after = await page.evaluate(() => {
-    const lane = hiddenRevealResolveLane();
-    return {
-      flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
-      replays: lane.mosaicEventLog.events.filter(
-        (event) => event.type === "full-replay",
-      ).length,
-      transitions: window.__hiddenRevealTransitions.slice(),
-      fontsStatus: document.fonts.status,
-    };
-  });
-  return { warm, before, after };
 }
 
 function assertFontsCorrection(fonts) {
@@ -422,6 +453,8 @@ function assertFontsCorrection(fonts) {
     throw new Error("fonts never settled: " + fonts.after.fontsStatus);
   if (fonts.after.flagged)
     throw new Error("fonts correction did not clear the flag");
+  if (fonts.after.invalidation !== null)
+    throw new Error("fonts correction did not consume its geometry invalidation");
   const delta = fonts.after.replays - fonts.before.replays;
   if (delta !== 1)
     throw new Error("fonts.ready ran " + delta + " correction replays (want 1)");
@@ -429,6 +462,31 @@ function assertFontsCorrection(fonts) {
     throw new Error(
       "fonts correction animated: " + fonts.after.transitions.join(","),
     );
+  const event = fonts.after.event;
+  if (
+    !event ||
+    event.kind !== "geometry" ||
+    event.reason !== "fonts-ready" ||
+    event.source !== "fonts-ready"
+  ) {
+    throw new Error("fonts correction provenance is wrong: " + JSON.stringify(event));
+  }
+  if (JSON.stringify(event.previous) !== JSON.stringify(fonts.before.geometry)) {
+    throw new Error(
+      "fonts correction lost previous geometry: " +
+        JSON.stringify(event.previous) +
+        " vs " +
+        JSON.stringify(fonts.before.geometry),
+    );
+  }
+  if (JSON.stringify(event.next) !== JSON.stringify(fonts.after.geometry)) {
+    throw new Error(
+      "fonts correction next geometry is wrong: " +
+        JSON.stringify(event.next) +
+        " vs " +
+        JSON.stringify(fonts.after.geometry),
+    );
+  }
 }
 
 // Render coalescing: several image resolutions marked in the same tick get

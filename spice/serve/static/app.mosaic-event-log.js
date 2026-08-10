@@ -5,6 +5,104 @@
 // through the same pure lattice functions that the live path uses.
 
 const MOSAIC_EVENT_LOG_VERSION = 1;
+const MOSAIC_GEOMETRY_REPLAY_REASONS = Object.freeze([
+  "initial",
+  "topology",
+  "fonts-ready",
+]);
+const MOSAIC_GEOMETRY_REPLAY_SOURCES = Object.freeze([
+  "stream-render",
+  "resize-observer",
+  "deferred-reveal",
+  "fonts-ready",
+  "image-resolution",
+]);
+
+function mosaicRequireExactKeys(value, keys, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(label + " must be an object");
+  }
+  const actual = Object.keys(value).sort();
+  const expected = keys.slice().sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((key, index) => key !== expected[index])
+  ) {
+    throw new Error(label + " fields must be exactly " + expected.join(", "));
+  }
+}
+
+function mosaicRequireReplayEnum(value, accepted, label) {
+  if (!accepted.includes(value)) {
+    throw new Error(label + " is unknown: " + String(value));
+  }
+  return value;
+}
+
+function mosaicGeometryReplaySource(value) {
+  return mosaicRequireReplayEnum(
+    value,
+    MOSAIC_GEOMETRY_REPLAY_SOURCES,
+    "geometry replay source",
+  );
+}
+
+function mosaicNormalizeGeometrySnapshot(snapshot) {
+  mosaicRequireExactKeys(
+    snapshot,
+    ["width", "baseSpan", "trackCount", "M"],
+    "geometry replay snapshot",
+  );
+  const { width, baseSpan, trackCount, M } = snapshot;
+  if (!Number.isFinite(width) || width < 0) {
+    throw new Error("geometry replay snapshot width must be finite and nonnegative");
+  }
+  if (!Number.isInteger(baseSpan) || baseSpan <= 0) {
+    throw new Error("geometry replay snapshot baseSpan must be a positive integer");
+  }
+  if (!Number.isInteger(trackCount) || trackCount <= 0) {
+    throw new Error("geometry replay snapshot trackCount must be a positive integer");
+  }
+  if (baseSpan > trackCount) {
+    throw new Error("geometry replay snapshot baseSpan exceeds trackCount");
+  }
+  if (!Number.isFinite(M) || M <= 0) {
+    throw new Error("geometry replay snapshot M must be finite and positive");
+  }
+  return Object.freeze({ width, baseSpan, trackCount, M });
+}
+
+function mosaicNormalizeGeometryReplay(value) {
+  mosaicRequireExactKeys(
+    value,
+    ["kind", "reason", "source", "previous", "next"],
+    "geometry replay provenance",
+  );
+  if (value.kind !== "geometry") {
+    throw new Error("geometry replay provenance kind must be geometry");
+  }
+  const reason = mosaicRequireReplayEnum(
+    value.reason,
+    MOSAIC_GEOMETRY_REPLAY_REASONS,
+    "geometry replay reason",
+  );
+  const source = mosaicGeometryReplaySource(value.source);
+  const previous =
+    value.previous === null
+      ? null
+      : mosaicNormalizeGeometrySnapshot(value.previous);
+  const next = mosaicNormalizeGeometrySnapshot(value.next);
+  if (reason === "initial" && previous !== null) {
+    throw new Error("initial geometry replay must not have a previous snapshot");
+  }
+  if (reason !== "initial" && previous === null) {
+    throw new Error(reason + " geometry replay requires a previous snapshot");
+  }
+  if (reason === "fonts-ready" && source !== "fonts-ready") {
+    throw new Error("fonts-ready geometry replay requires the fonts-ready source");
+  }
+  return Object.freeze({ kind: "geometry", reason, source, previous, next });
+}
 
 function mosaicCloneCandidates(candidates) {
   return (candidates || []).map((candidate) => ({
@@ -57,7 +155,7 @@ function mosaicNormalizeEventLogEvent(event) {
     };
   }
   if (event.type === "full-replay") {
-    return {
+    const normalized = {
       type: "full-replay",
       cause: String(event.cause || "unspecified"),
       fallbackReason: String(event.fallbackReason || ""),
@@ -70,6 +168,25 @@ function mosaicNormalizeEventLogEvent(event) {
         candidates: mosaicCloneCandidates(card.candidates),
       })),
     };
+    if (Object.prototype.hasOwnProperty.call(event, "geometryReplay")) {
+      normalized.geometryReplay = mosaicNormalizeGeometryReplay(
+        event.geometryReplay,
+      );
+      const snapshots = [
+        normalized.geometryReplay.previous,
+        normalized.geometryReplay.next,
+      ].filter(Boolean);
+      if (
+        snapshots.some(
+          (snapshot) => snapshot.trackCount !== normalized.trackCount,
+        )
+      ) {
+        throw new Error(
+          "geometry replay snapshot trackCount conflicts with full replay",
+        );
+      }
+    }
+    return normalized;
   }
   if (event.type === "epoch-replay") {
     return {

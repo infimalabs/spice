@@ -65,8 +65,12 @@ function mosaicSingleColumnSnapshot(lane) {
     baseSpan: lane.mosaicGeometry.baseSpan,
     M: lane.mosaicGeometry.M,
     gap: lane.mosaicGeometry.gap,
+    width: lane.mosaicGeometry.edges[mosaicGridTrackCount],
     lattice: lane.mosaicCards.map((c) => ({ ...c })),
     overlap: mosaicSingleColumnCardsOverlap(lane.mosaicCards),
+    fullReplays: lane.mosaicEventLog.events
+      .filter((event) => event.type === "full-replay")
+      .map((event) => event.geometryReplay || null),
   };
 }
 
@@ -366,6 +370,12 @@ function assertSameTopologyResize(before, after, fail) {
         " -> " +
         after.fullReplayCallCount,
     );
+  if (
+    JSON.stringify(before.snapshot.fullReplays) !==
+    JSON.stringify(after.snapshot.fullReplays)
+  ) {
+    fail("same-topology width change emitted a full-replay event");
+  }
   const beforeByKey = new Map(
     before.snapshot.lattice.map((card) => [card.key, card]),
   );
@@ -388,78 +398,188 @@ function assertSameTopologyResize(before, after, fail) {
   }
 }
 
+function assertGeometryReplay(event, reason, source, previous, next, fail) {
+  if (!event) fail(reason + " geometry replay provenance is missing");
+  if (event.kind !== "geometry" || event.reason !== reason || event.source !== source) {
+    fail(
+      "unexpected geometry replay identity: " +
+        JSON.stringify(event) +
+        " (want " +
+        reason +
+        "/" +
+        source +
+        ")",
+    );
+  }
+  if (previous === null) {
+    if (event.previous !== null)
+      fail(reason + " geometry replay unexpectedly has a previous snapshot");
+  } else if (JSON.stringify(event.previous) !== JSON.stringify(previous)) {
+    fail(
+      reason +
+        " previous geometry mismatch: " +
+        JSON.stringify(event.previous) +
+        " vs " +
+        JSON.stringify(previous),
+    );
+  }
+  if (JSON.stringify(event.next) !== JSON.stringify(next)) {
+    fail(
+      reason +
+        " next geometry mismatch: " +
+        JSON.stringify(event.next) +
+        " vs " +
+        JSON.stringify(next),
+    );
+  }
+}
+
+function mosaicSingleColumnGeometrySnapshot(snapshot) {
+  return {
+    width: snapshot.width,
+    baseSpan: snapshot.baseSpan,
+    trackCount: MOSAIC_SINGLE_COLUMN_FULL_SPAN,
+    M: snapshot.M,
+  };
+}
+
 async function mosaicSingleColumnResizeAndObserve(page, widths) {
   return page.evaluate(mosaicSingleColumnDeliverResizeBurst, widths);
+}
+
+async function mosaicSingleColumnCollectResults(page) {
+  const narrowResult = await page.evaluate(mosaicSingleColumnRunAtNarrowWidth);
+  // Install the spy after first paint so counters cover resizes only. Each
+  // viewport mutation resolves from the wrapped production render callback.
+  await page.evaluate(mosaicSingleColumnInstallRenderObserver);
+  const wideResizeResult = await mosaicSingleColumnResizeAndObserve(
+    page,
+    MOSAIC_SINGLE_COLUMN_WIDE_HOST_WIDTHS,
+  );
+  const sameTopologyResizeResult = await mosaicSingleColumnResizeAndObserve(
+    page,
+    MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_HOST_WIDTHS,
+  );
+  const narrowAgainResizeResult = await mosaicSingleColumnResizeAndObserve(
+    page,
+    MOSAIC_SINGLE_COLUMN_NARROW_HOST_WIDTHS,
+  );
+  return {
+    narrowResult,
+    wideResizeResult,
+    sameTopologyResizeResult,
+    narrowAgainResizeResult,
+  };
+}
+
+function assertMosaicSingleColumnResults(results, fail) {
+  const { narrowResult, wideResizeResult, sameTopologyResizeResult } = results;
+  const { narrowAgainResizeResult } = results;
+  assertNarrowWidthResult(narrowResult, fail);
+  assertResizeResult("wide resize", wideResizeResult, 1, false, fail);
+  assertResizeResult("same-topology resize", sameTopologyResizeResult, 1, false, fail);
+  assertSameTopologyResize(wideResizeResult, sameTopologyResizeResult, fail);
+  assertResizeResult("narrow-again resize", narrowAgainResizeResult, 2, true, fail);
+  const initialReplays = narrowResult.afterInserts.fullReplays;
+  if (initialReplays.length !== 1)
+    fail("initial lane render recorded " + initialReplays.length + " full replays");
+  assertGeometryReplay(
+    initialReplays[0],
+    "initial",
+    "stream-render",
+    null,
+    mosaicSingleColumnGeometrySnapshot(narrowResult.afterInserts),
+    fail,
+  );
+  const wideReplays = wideResizeResult.snapshot.fullReplays;
+  assertGeometryReplay(
+    wideReplays[wideReplays.length - 1],
+    "topology",
+    "resize-observer",
+    mosaicSingleColumnGeometrySnapshot(narrowResult.afterFifthInsert),
+    mosaicSingleColumnGeometrySnapshot(wideResizeResult.snapshot),
+    fail,
+  );
+  const narrowReplays = narrowAgainResizeResult.snapshot.fullReplays;
+  assertGeometryReplay(
+    narrowReplays[narrowReplays.length - 1],
+    "topology",
+    "resize-observer",
+    mosaicSingleColumnGeometrySnapshot(sameTopologyResizeResult.snapshot),
+    mosaicSingleColumnGeometrySnapshot(narrowAgainResizeResult.snapshot),
+    fail,
+  );
+}
+
+async function mosaicSingleColumnLifecycleProof(page, fail) {
+  const proof = await page.evaluate(() => {
+    let conflict = "accepted";
+    try {
+      mosaicMergeRenderSources("resize-observer", "fonts-ready");
+    } catch (error) {
+      conflict = String(error && error.message ? error.message : error);
+    }
+    const lane = {
+      mosaicPendingRenderSource: "resize-observer",
+      mosaicActiveRenderSource: "resize-observer",
+      mosaicGeometryInvalidation: Object.freeze({
+        reason: "fonts-ready",
+        source: "fonts-ready",
+      }),
+      mosaicImageLoadHandlers: new Map(),
+    };
+    mosaicResetResizeObserver(lane);
+    return {
+      conflict,
+      reset: {
+        pending: lane.mosaicPendingRenderSource,
+        active: lane.mosaicActiveRenderSource,
+        invalidation: lane.mosaicGeometryInvalidation,
+      },
+    };
+  });
+  if (!proof.conflict.includes("conflicting mosaic geometry render sources"))
+    fail("conflicting geometry sources did not refuse: " + proof.conflict);
+  if (
+    proof.reset.pending !== "" ||
+    proof.reset.active !== "" ||
+    proof.reset.invalidation !== null
+  ) {
+    fail("lane reset retained geometry provenance: " + JSON.stringify(proof.reset));
+  }
+  return proof;
+}
+
+async function mosaicSingleColumnExercise({ page, server }) {
+  await installMosaicSingleColumnHelpers(page);
+  await page.evaluate(mosaicSingleColumnInstallResizeHarness);
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessagesIfChanged",
+      "upsertKnownMessage",
+      "trimKnownMessages",
+      "mosaicFullReplay",
+      "mosaicRenderMessageStream",
+    ],
+  });
+  const results = await mosaicSingleColumnCollectResults(page);
+  const fail = (message) => {
+    throw new Error(message);
+  };
+  assertMosaicSingleColumnResults(results, fail);
+  const lifecycle = await mosaicSingleColumnLifecycleProof(page, fail);
+  return { ...results, lifecycle, url: server.url };
 }
 
 async function run() {
   return withServePage(
     {
       path: "/?smoke=serve-mosaic-single-column-" + Date.now(),
-      contextOptions: { viewport: { width: MOSAIC_SINGLE_COLUMN_NARROW_WIDTH, height: 900 } },
+      contextOptions: {
+        viewport: { width: MOSAIC_SINGLE_COLUMN_NARROW_WIDTH, height: 900 },
+      },
     },
-    async ({ page, server }) => {
-      await installIsolatedLaneFixture(page, {
-        globals: [
-          "renderMessagesIfChanged",
-          "upsertKnownMessage",
-          "trimKnownMessages",
-          "mosaicFullReplay",
-          "mosaicRenderMessageStream",
-        ],
-      });
-      await installMosaicSingleColumnHelpers(page);
-      await page.evaluate(mosaicSingleColumnInstallResizeHarness);
-
-      const narrowResult = await page.evaluate(mosaicSingleColumnRunAtNarrowWidth);
-
-      // The spy is installed only now, AFTER the lane's first-ever render
-      // (which always full-replays once on its own, since geometry starts
-      // null) -- so the counter below measures full replays caused by the
-      // resizes themselves, not the lane's initial bootstrap.
-      await page.evaluate(mosaicSingleColumnInstallRenderObserver);
-
-      // Drive multiple final-width observations in one browser turn. Each
-      // burst blocks on the wrapped production render callback, including the
-      // width-only case where no full replay event should exist, then crosses
-      // two additional animation frames to expose any wrongly queued replay.
-      const wideResizeResult = await mosaicSingleColumnResizeAndObserve(
-        page,
-        MOSAIC_SINGLE_COLUMN_WIDE_HOST_WIDTHS,
-      );
-      const sameTopologyResizeResult = await mosaicSingleColumnResizeAndObserve(
-        page,
-        MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_HOST_WIDTHS,
-      );
-
-      const narrowAgainResizeResult = await mosaicSingleColumnResizeAndObserve(
-        page,
-        MOSAIC_SINGLE_COLUMN_NARROW_HOST_WIDTHS,
-      );
-
-      const fail = (message) => {
-        throw new Error(message);
-      };
-      assertNarrowWidthResult(narrowResult, fail);
-      assertResizeResult("wide resize", wideResizeResult, 1, false, fail);
-      assertResizeResult(
-        "same-topology resize",
-        sameTopologyResizeResult,
-        1,
-        false,
-        fail,
-      );
-      assertSameTopologyResize(wideResizeResult, sameTopologyResizeResult, fail);
-      assertResizeResult("narrow-again resize", narrowAgainResizeResult, 2, true, fail);
-
-      return {
-        narrowResult,
-        wideResizeResult,
-        sameTopologyResizeResult,
-        narrowAgainResizeResult,
-        url: server.url,
-      };
-    },
+    mosaicSingleColumnExercise,
   );
 }
 

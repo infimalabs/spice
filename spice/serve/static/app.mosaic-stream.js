@@ -82,10 +82,13 @@ function mosaicArmFontsCorrection(lane) {
   lane.mosaicFontsCorrectionArmed = true;
   document.fonts.ready.then(() => {
     if (lane.closed || !lane.mosaicMeasuredBeforeFonts) return;
+    const target = laneGroupHost(lane);
+    if (target.closed) return;
     lane.mosaicMeasuredBeforeFonts = false;
-    lane.mosaicSettled = false;
-    lane.mosaicGeometry = null;
-    mosaicScheduleRender(lane);
+    target.mosaicMeasuredBeforeFonts = false;
+    target.mosaicSettled = false;
+    mosaicSetGeometryInvalidation(target, "fonts-ready", "fonts-ready");
+    mosaicScheduleRender(target, "fonts-ready");
   });
 }
 
@@ -132,6 +135,9 @@ function mosaicLaneReady(lane) {
   lane.mosaicPrevMaxRow = null;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
+  lane.mosaicGeometryInvalidation = null;
+  lane.mosaicPendingRenderSource = "";
+  lane.mosaicActiveRenderSource = "";
   lane.mosaicSettled = false;
   lane.mosaicSettleTimer = 0;
 }
@@ -352,11 +358,127 @@ function mosaicCandidatesFor(lane, entry, node, geometry) {
 // existing card can keep its latched track/span while its height is measured
 // at the new shared edges, then settle vertically through the same
 // wet/frozen paths as a content resize.
+function mosaicGeometrySnapshot(geometry) {
+  if (!geometry || !Array.isArray(geometry.edges)) {
+    throw new Error("mosaic geometry snapshot requires shared edges");
+  }
+  return mosaicNormalizeGeometrySnapshot({
+    width: geometry.edges[mosaicGridTrackCount],
+    baseSpan: geometry.baseSpan,
+    trackCount: mosaicGridTrackCount,
+    M: geometry.M,
+  });
+}
+
+function mosaicRenderSourceIsGeometryAuthority(source) {
+  const normalized = mosaicGeometryReplaySource(source);
+  return ["resize-observer", "deferred-reveal", "fonts-ready"].includes(
+    normalized,
+  );
+}
+
+function mosaicMergeRenderSources(previous, next) {
+  const normalizedNext = mosaicGeometryReplaySource(next);
+  if (!previous) return normalizedNext;
+  const normalizedPrevious = mosaicGeometryReplaySource(previous);
+  if (normalizedPrevious === normalizedNext) return normalizedPrevious;
+  const previousGeometry = mosaicRenderSourceIsGeometryAuthority(
+    normalizedPrevious,
+  );
+  const nextGeometry = mosaicRenderSourceIsGeometryAuthority(normalizedNext);
+  if (previousGeometry && nextGeometry) {
+    throw new Error(
+      "conflicting mosaic geometry render sources: " +
+        normalizedPrevious +
+        " and " +
+        normalizedNext,
+    );
+  }
+  if (previousGeometry) return normalizedPrevious;
+  if (nextGeometry) return normalizedNext;
+  throw new Error(
+    "conflicting mosaic render sources: " +
+      normalizedPrevious +
+      " and " +
+      normalizedNext,
+  );
+}
+
+function mosaicSetGeometryInvalidation(lane, reason, source) {
+  mosaicLaneReady(lane);
+  const normalized = mosaicNormalizeGeometryReplay({
+    kind: "geometry",
+    reason,
+    source,
+    previous: mosaicGeometrySnapshot(lane.mosaicGeometry),
+    next: mosaicGeometrySnapshot(lane.mosaicGeometry),
+  });
+  if (normalized.reason === "initial") {
+    throw new Error("initial geometry replay cannot be a pending invalidation");
+  }
+  if (lane.mosaicGeometryInvalidation) {
+    throw new Error("mosaic geometry invalidation is already pending");
+  }
+  lane.mosaicGeometryInvalidation = Object.freeze({
+    reason: normalized.reason,
+    source: normalized.source,
+  });
+}
+
+function mosaicGeometryReplay(previous, next, reason, source) {
+  const replay = mosaicNormalizeGeometryReplay({
+    kind: "geometry",
+    reason,
+    source,
+    previous: previous ? mosaicGeometrySnapshot(previous) : null,
+    next: mosaicGeometrySnapshot(next),
+  });
+  return { changed: true, replay: true, reason, geometryReplay: replay };
+}
+
 function mosaicGeometryChange(lane, geometry) {
   const previous = lane.mosaicGeometry;
-  if (!previous) return { changed: true, replay: true, reason: "initial" };
+  const source = lane.mosaicActiveRenderSource || "stream-render";
+  mosaicGeometryReplaySource(source);
+  const invalidation = lane.mosaicGeometryInvalidation;
+  if (!previous) {
+    if (invalidation) {
+      throw new Error("geometry invalidation conflicts with initial mosaic render");
+    }
+    return mosaicGeometryReplay(
+      null,
+      geometry,
+      "initial",
+      source,
+    );
+  }
+  if (invalidation) {
+    if (
+      mosaicRenderSourceIsGeometryAuthority(source) &&
+      source !== invalidation.source
+    ) {
+      throw new Error(
+        "geometry invalidation source " +
+          invalidation.source +
+          " conflicts with active source " +
+          source,
+      );
+    }
+    lane.mosaicGeometryInvalidation = null;
+    return mosaicGeometryReplay(
+      previous,
+      geometry,
+      invalidation.reason,
+      invalidation.source,
+    );
+  }
   if (previous.M !== geometry.M || previous.baseSpan !== geometry.baseSpan) {
-    return { changed: true, replay: true, reason: "topology" };
+    return mosaicGeometryReplay(
+      previous,
+      geometry,
+      "topology",
+      source,
+    );
   }
   const previousWidth = previous.edges[mosaicGridTrackCount];
   const nextWidth = geometry.edges[mosaicGridTrackCount];
@@ -805,7 +927,7 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, replay) {
       span: previous ? previous.span : geometry.baseSpan,
     };
   });
-  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+  const event = {
     type: "full-replay",
     cause: classification.cause,
     fallbackReason: classification.fallbackReason || "",
@@ -813,7 +935,11 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, replay) {
     newerBarrierKey: classification.newerBarrierKey || "",
     trackCount: mosaicGridTrackCount,
     cards: withCandidates,
-  });
+  };
+  if (classification.geometryReplay) {
+    event.geometryReplay = classification.geometryReplay;
+  }
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, event);
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
   lane.mosaicNextCreationIndex = entries.length;
@@ -1107,6 +1233,7 @@ function mosaicReconcileStreamEntries(
         geometryChange.reason === "initial"
           ? "initial-layout"
           : "geometry-topology-change",
+      geometryReplay: geometryChange.geometryReplay,
     });
   } else {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
@@ -1168,13 +1295,28 @@ function mosaicHostResizeChanged(lane) {
 // machinery must never call renderMessagesIfChanged synchronously from
 // inside a render -- re-entrant renders multiply content-diff passes, wet
 // replays, and motion events (the load-time image cascade).
-function mosaicScheduleRender(lane) {
+function mosaicScheduleRender(lane, source) {
+  lane.mosaicPendingRenderSource = mosaicMergeRenderSources(
+    lane.mosaicPendingRenderSource,
+    source,
+  );
   if (lane.mosaicFrame) return;
   lane.mosaicFrame = requestAnimationFrame(() => {
     lane.mosaicFrame = 0;
+    const renderSource = lane.mosaicPendingRenderSource;
+    lane.mosaicPendingRenderSource = "";
     if (lane.closed) return;
-    lane.renderedMessageFingerprint = "";
-    renderMessagesIfChanged(lane);
+    const host = laneGroupHost(lane);
+    if (host.mosaicActiveRenderSource) {
+      throw new Error("mosaic render source is already active");
+    }
+    host.mosaicActiveRenderSource = renderSource;
+    try {
+      host.renderedMessageFingerprint = "";
+      renderMessagesIfChanged(host);
+    } finally {
+      host.mosaicActiveRenderSource = "";
+    }
   });
 }
 
@@ -1183,7 +1325,10 @@ function mosaicSyncResizeObserver(lane) {
   if (!lane.mosaicResizeObserver) {
     lane.mosaicResizeObserver = new ResizeObserver(() => {
       if (!mosaicHostResizeChanged(lane)) return;
-      mosaicScheduleRender(lane);
+      const source = lane.mosaicRenderDeferred
+        ? "deferred-reveal"
+        : "resize-observer";
+      mosaicScheduleRender(lane, source);
     });
     lane.mosaicHostContentWidth = mosaicContainerWidthPx(lane.messagesEl);
     lane.mosaicResizeObserver.observe(lane.messagesEl);
@@ -1206,7 +1351,7 @@ function mosaicSyncImageLoadHandlers(lane) {
     }
     const handler = () => {
       if (!mosaicMarkImageResolved(lane, image)) return;
-      mosaicScheduleRender(lane);
+      mosaicScheduleRender(lane, "image-resolution");
     };
     image.addEventListener("load", handler);
     image.addEventListener("error", handler);
@@ -1223,7 +1368,7 @@ function mosaicSyncImageLoadHandlers(lane) {
   // Already-complete images (cache hits) resolve through the same deferred
   // scheduler: this function runs at the tail of a render, and a render
   // must never re-enter itself.
-  if (resolvedCompleteImage) mosaicScheduleRender(lane);
+  if (resolvedCompleteImage) mosaicScheduleRender(lane, "image-resolution");
 }
 
 function mosaicMarkImageResolved(lane, image) {
@@ -1253,6 +1398,9 @@ function mosaicResetResizeObserver(lane) {
     cancelAnimationFrame(lane.mosaicFrame);
     lane.mosaicFrame = 0;
   }
+  lane.mosaicPendingRenderSource = "";
+  lane.mosaicActiveRenderSource = "";
+  lane.mosaicGeometryInvalidation = null;
   if (lane.mosaicResizeObserver) lane.mosaicResizeObserver.disconnect();
   lane.mosaicResizeObserver = null;
   lane.mosaicHostContentWidth = null;
