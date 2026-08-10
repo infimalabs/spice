@@ -106,6 +106,34 @@ function backfillEvent(seed, count) {
   };
 }
 
+function epochReplayEvent() {
+  return {
+    type: "epoch-replay",
+    cause: "interleaved-message-insertion",
+    olderBarrierKey: "card-0",
+    newerBarrierKey: "card-3",
+    trackCount: TRACKS,
+    replacedKeys: ["card-1", "epoch-new", "card-2"],
+    cards: [
+      {
+        key: "card-2",
+        creationIndex: 1.75,
+        candidates: [{ span: 6, n: 2 }],
+      },
+      {
+        key: "epoch-new",
+        creationIndex: 1.5,
+        candidates: [{ span: 6, n: 2 }],
+      },
+      {
+        key: "card-1",
+        creationIndex: 1.25,
+        candidates: [{ span: 6, n: 6 }],
+      },
+    ],
+  };
+}
+
 function assertNoOverlaps(cards, label) {
   for (let i = 0; i < cards.length; i += 1) {
     for (let j = i + 1; j < cards.length; j += 1) {
@@ -186,6 +214,47 @@ for (const seed of [377, 610, 987]) {
   context.mosaicRecordEventLogEvent(log, replay);
   const twice = context.mosaicReplayEventLog(log).layout;
   assert(deepEqual(once, twice), "full replay idempotence failed for seed " + seed);
+}
+
+// Epoch replay seeds from the stable older full-span floor, re-decides only
+// the named interval, and retains every outside card byte-for-byte. The event
+// also carries its structural cause and nearest compaction keys, and its
+// complete replacement set makes applying it twice idempotent.
+{
+  const log = context.mosaicCreateEventLog(TRACKS, 2);
+  const inserts = [
+    ["card-0", [{ span: 12, n: 2 }]],
+    ["card-1", [{ span: 6, n: 6 }]],
+    ["card-2", [{ span: 6, n: 2 }]],
+    ["card-3", [{ span: 12, n: 2 }]],
+    ["card-4", [{ span: 6, n: 2 }]],
+  ];
+  for (let index = 0; index < inserts.length; index += 1) {
+    context.mosaicRecordEventLogEvent(log, {
+      type: "insert",
+      key: inserts[index][0],
+      creationIndex: index,
+      candidates: inserts[index][1],
+    });
+  }
+  const outsideKeys = new Set(["card-0", "card-3", "card-4"]);
+  const before = context
+    .mosaicReplayEventLog(log)
+    .layout.filter((card) => outsideKeys.has(card.key));
+  context.mosaicRecordEventLogEvent(log, epochReplayEvent());
+  const once = context.mosaicReplayEventLog(log);
+  const after = once.layout.filter((card) => outsideKeys.has(card.key));
+  assert(deepEqual(before, after), "epoch replay changed an outside card");
+  assert(once.layout.some((card) => card.key === "epoch-new"), "epoch card missing");
+  assertNoOverlaps(once.cards, "epoch replay");
+  const event = log.events[log.events.length - 1];
+  assert(event.cause === "interleaved-message-insertion", "epoch cause missing");
+  assert(event.olderBarrierKey === "card-0", "older epoch barrier missing");
+  assert(event.newerBarrierKey === "card-3", "newer epoch barrier missing");
+
+  context.mosaicRecordEventLogEvent(log, epochReplayEvent());
+  const twice = context.mosaicReplayEventLog(log);
+  assert(deepEqual(once.layout, twice.layout), "epoch replay idempotence failed");
 }
 
 // Layout-path source audit: the pure lattice/replay path must not read ambient

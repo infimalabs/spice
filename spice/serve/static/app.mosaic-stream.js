@@ -499,6 +499,134 @@ function mosaicBackfillEntries(entries, previousKeySet, addedKeys) {
   return backfillEntries;
 }
 
+function mosaicEntryIsCompaction(entry) {
+  return Boolean(entry && entry.item && entry.item.kind === "compaction");
+}
+
+// Structural arrivals are bounded by compaction cards that already existed
+// before this render. A newly-arrived compaction is part of the changed
+// epoch, not a trusted boundary. Time rules are full-span layout cards too,
+// but they are derived from adjacency and can appear/disappear as part of
+// the change, so they cannot partition structural replay.
+function mosaicStructuralReplayPlan(entries, previousKeySet, addedKeys) {
+  const addedKeySet = new Set(addedKeys);
+  const affectedIndexes = [];
+  let insertedMessage = false;
+  for (let index = 0; index < entries.length; index += 1) {
+    if (!addedKeySet.has(entries[index].key)) continue;
+    affectedIndexes.push(index);
+    if (entries[index].item) insertedMessage = true;
+  }
+  const firstAffected = affectedIndexes.length
+    ? Math.min(...affectedIndexes)
+    : 0;
+  const lastAffected = affectedIndexes.length
+    ? Math.max(...affectedIndexes)
+    : entries.length - 1;
+
+  let newerBarrierIndex = -1;
+  for (let index = firstAffected - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (mosaicEntryIsCompaction(entry) && previousKeySet.has(entry.key)) {
+      newerBarrierIndex = index;
+      break;
+    }
+  }
+  let olderBarrierIndex = entries.length;
+  for (let index = lastAffected + 1; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (mosaicEntryIsCompaction(entry) && previousKeySet.has(entry.key)) {
+      olderBarrierIndex = index;
+      break;
+    }
+  }
+
+  return {
+    cause: insertedMessage
+      ? "interleaved-message-insertion"
+      : "derived-time-rule-change",
+    startIndex: newerBarrierIndex + 1,
+    endIndex: olderBarrierIndex,
+    newerBarrierKey:
+      newerBarrierIndex >= 0 ? entries[newerBarrierIndex].key : "",
+    olderBarrierKey:
+      olderBarrierIndex < entries.length
+        ? entries[olderBarrierIndex].key
+        : "",
+  };
+}
+
+// Creation indexes are stable order labels, not array offsets. Re-label only
+// the changed epoch by interpolating between its untouched boundaries; this
+// gives every interleaved key a deterministic slot while leaving both outside
+// epochs' indexes exact. Replaying a later change re-interpolates the same
+// bounded interval, so fractional labels do not accumulate rounding drift.
+function mosaicEpochCreationIndexes(lane, entries, plan) {
+  const epochEntries = entries.slice(plan.startIndex, plan.endIndex);
+  if (!epochEntries.length) return null;
+  const olderKeys = new Set(
+    entries.slice(plan.endIndex).map((entry) => entry.key),
+  );
+  const newerKeys = new Set(
+    entries.slice(0, plan.startIndex).map((entry) => entry.key),
+  );
+  const olderIndexes = lane.mosaicCards
+    .filter((card) => olderKeys.has(card.key))
+    .map((card) => card.creationIndex);
+  const newerIndexes = lane.mosaicCards
+    .filter((card) => newerKeys.has(card.key))
+    .map((card) => card.creationIndex);
+  const lower = olderIndexes.length ? Math.max(...olderIndexes) : null;
+  const upper = newerIndexes.length ? Math.min(...newerIndexes) : null;
+  if (lower !== null && upper !== null && !(upper > lower)) return null;
+
+  const oldestFirst = epochEntries.slice().reverse();
+  const indexes = new Map();
+  if (lower !== null && upper !== null) {
+    const step = (upper - lower) / (oldestFirst.length + 1);
+    for (let index = 0; index < oldestFirst.length; index += 1) {
+      indexes.set(oldestFirst[index].key, lower + step * (index + 1));
+    }
+  } else if (lower !== null) {
+    for (let index = 0; index < oldestFirst.length; index += 1) {
+      indexes.set(oldestFirst[index].key, lower + index + 1);
+    }
+  } else if (upper !== null) {
+    for (let index = 0; index < oldestFirst.length; index += 1) {
+      indexes.set(
+        oldestFirst[index].key,
+        upper - oldestFirst.length + index,
+      );
+    }
+  } else {
+    for (let index = 0; index < oldestFirst.length; index += 1) {
+      indexes.set(oldestFirst[index].key, index);
+    }
+  }
+  return indexes;
+}
+
+function mosaicLatticeCardsOverlap(left, right) {
+  const tracksOverlap =
+    left.t < right.t + right.span &&
+    right.t < left.t + left.span;
+  const rowsOverlap =
+    left.b < right.b + right.n &&
+    right.b < left.b + left.n;
+  return tracksOverlap && rowsOverlap;
+}
+
+function mosaicEpochReplayCollides(cards, replayedKeys) {
+  const replayed = cards.filter((card) => replayedKeys.has(card.key));
+  const outside = cards.filter((card) => !replayedKeys.has(card.key));
+  for (const card of replayed) {
+    for (const other of outside) {
+      if (mosaicLatticeCardsOverlap(card, other)) return true;
+    }
+  }
+  return false;
+}
+
 function mosaicDeriveDownwardRowFloor(cards, trackCount) {
   const tracks = mosaicTrackCount(trackCount);
   const bottomByTrack = new Array(tracks).fill(0);
@@ -652,7 +780,8 @@ function mosaicRunContentDiffPass(
 // several older messages at once -- would otherwise get stapled onto the
 // END of the counter in newest-first iteration order, backwards, and
 // stamped as newer than every already-known card regardless of true age.
-function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
+function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, replay) {
+  const classification = replay || { cause: "unspecified" };
   const withCandidates = entries.map((entry, index) => {
     const previous = lane.mosaicCards.find((card) => card.key === entry.key);
     const node = nodesByKey.get(entry.key);
@@ -669,6 +798,10 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
   });
   mosaicRecordEventLogEvent(lane.mosaicEventLog, {
     type: "full-replay",
+    cause: classification.cause,
+    fallbackReason: classification.fallbackReason || "",
+    olderBarrierKey: classification.olderBarrierKey || "",
+    newerBarrierKey: classification.newerBarrierKey || "",
     trackCount: mosaicGridTrackCount,
     cards: withCandidates,
   });
@@ -683,6 +816,141 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
   // (e.g. a task card rebuilt during a replay, flushed on a later reorder).
   for (const node of nodesByKey.values()) {
     if (node.dataset) delete node.dataset.mosaicContentDirty;
+  }
+}
+
+function mosaicRunEpochReplay(lane, entries, nodesByKey, geometry, plan) {
+  if (plan.startIndex === 0 && plan.endIndex === entries.length) {
+    return { applied: false, fallbackReason: "no-compaction-boundary" };
+  }
+  const creationIndexes = mosaicEpochCreationIndexes(lane, entries, plan);
+  if (!creationIndexes) {
+    return { applied: false, fallbackReason: "invalid-creation-order" };
+  }
+  const epochEntries = entries.slice(plan.startIndex, plan.endIndex);
+  const epochKeys = new Set(epochEntries.map((entry) => entry.key));
+  const replacedKeys = Array.from(
+    new Set([
+      ...lane.mosaicCards
+        .filter((card) => epochKeys.has(card.key))
+        .map((card) => card.key),
+      ...epochKeys,
+    ]),
+  );
+  const withCandidates = epochEntries.map((entry) => {
+    const previous = lane.mosaicCards.find((card) => card.key === entry.key);
+    const node = nodesByKey.get(entry.key);
+    return {
+      key: entry.key,
+      creationIndex: creationIndexes.get(entry.key),
+      frozen: false,
+      candidates: mosaicCandidatesFor(lane, entry, node, geometry),
+      t: previous ? previous.t : 0,
+      b: previous ? previous.b : 0,
+      n: previous ? previous.n : 0,
+      span: previous ? previous.span : geometry.baseSpan,
+    };
+  });
+  const replayed = mosaicEpochReplay(
+    lane.mosaicCards,
+    replacedKeys,
+    withCandidates,
+    mosaicGridTrackCount,
+    MOSAIC_FREEZE_DEPTH,
+  );
+  const replayedKeys = new Set(withCandidates.map((card) => card.key));
+  if (mosaicEpochReplayCollides(replayed, replayedKeys)) {
+    return { applied: false, fallbackReason: "epoch-overflow" };
+  }
+
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "epoch-replay",
+    cause: plan.cause,
+    olderBarrierKey: plan.olderBarrierKey,
+    newerBarrierKey: plan.newerBarrierKey,
+    trackCount: mosaicGridTrackCount,
+    replacedKeys,
+    cards: withCandidates,
+  });
+  lane.mosaicCards = replayed.map((card) => {
+    if (!replayedKeys.has(card.key)) return card;
+    const { candidates, ...positioned } = card;
+    return positioned;
+  });
+  const maxCreationIndex = lane.mosaicCards.length
+    ? Math.max(...lane.mosaicCards.map((card) => card.creationIndex))
+    : -1;
+  lane.mosaicNextCreationIndex = Math.max(
+    lane.mosaicNextCreationIndex,
+    Math.floor(maxCreationIndex) + 1,
+  );
+  for (const entry of epochEntries) {
+    const node = nodesByKey.get(entry.key);
+    if (node && node.dataset) delete node.dataset.mosaicContentDirty;
+  }
+  return { applied: true, fallbackReason: "" };
+}
+
+function mosaicRunStructuralReconcile(
+  lane,
+  entries,
+  nodesByKey,
+  geometry,
+  previousKeySet,
+  addedKeys,
+  widthOnly,
+) {
+  const plan = mosaicStructuralReplayPlan(
+    entries,
+    previousKeySet,
+    addedKeys,
+  );
+  const bounded = mosaicRunEpochReplay(
+    lane,
+    entries,
+    nodesByKey,
+    geometry,
+    plan,
+  );
+  if (bounded.applied) {
+    if (!widthOnly) {
+      mosaicRunContentDiffPass(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        false,
+      );
+    }
+    return;
+  }
+  mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
+    ...plan,
+    fallbackReason: bounded.fallbackReason,
+  });
+}
+
+function mosaicRunIncrementalReconcile(
+  lane,
+  entries,
+  nodesByKey,
+  geometry,
+  widthOnly,
+  newestPrefixEntries,
+  backfillEntries,
+) {
+  // Oldest new card first: sequential inserts assign creation indexes in
+  // true stream order (entries run newest-first).
+  if (newestPrefixEntries) {
+    for (let index = newestPrefixEntries.length - 1; index >= 0; index -= 1) {
+      const entry = newestPrefixEntries[index];
+      mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
+    }
+  } else if (backfillEntries) {
+    mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
+  }
+  if (!widthOnly) {
+    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry, false);
   }
 }
 
@@ -822,26 +1090,39 @@ function mosaicReconcileStreamEntries(
     addedKeys.length > 0 && !newestPrefixEntries && !backfillEntries;
   const replaying = geometryChange.replay || structuralReplay;
 
-  if (replaying) {
-    mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
+  if (geometryChange.replay) {
+    mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
+      cause:
+        geometryChange.reason === "initial"
+          ? "initial-layout"
+          : "geometry-topology-change",
+    });
   } else {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
     const widthOnly = geometryChange.reason === "width";
     if (widthOnly) {
       mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry, true);
     }
-    // Oldest new card first: sequential inserts assign creation indexes in
-    // true stream order (entries run newest-first).
-    if (newestPrefixEntries) {
-      for (let i = newestPrefixEntries.length - 1; i >= 0; i -= 1) {
-        const entry = newestPrefixEntries[i];
-        mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
-      }
-    } else if (backfillEntries) {
-      mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
-    }
-    if (!widthOnly) {
-      mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry, false);
+    if (structuralReplay) {
+      mosaicRunStructuralReconcile(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        previousKeySet,
+        addedKeys,
+        widthOnly,
+      );
+    } else {
+      mosaicRunIncrementalReconcile(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        widthOnly,
+        newestPrefixEntries,
+        backfillEntries,
+      );
     }
   }
 
