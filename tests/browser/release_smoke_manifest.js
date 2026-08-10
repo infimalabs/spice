@@ -21,6 +21,7 @@ const releaseSafe = [
   { path: "serve_mobile_layout_smoke.js" },
   { path: "serve_mosaic_ack_resolution_smoke.js" },
   { path: "serve_mosaic_capacity_smoke.js" },
+  { path: "serve_mosaic_compaction_retention_smoke.js" },
   { path: "serve_mosaic_hidden_reveal_smoke.js" },
   { path: "serve_mosaic_hydration_smoke.js" },
   { path: "serve_mosaic_join_smoke.js" },
