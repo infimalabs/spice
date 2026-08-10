@@ -136,10 +136,10 @@ function mosaicStreamFullReplayCount(lane) {
   ).length;
 }
 
-// A second fused member's backlog lands between already-settled cards. The
-// tall first card leaves enough deterministic room in the other six tracks
-// for the short arrival, so the epoch can be reconciled without moving either
-// surrounding compaction divider or either adjacent epoch.
+// A second fused member's backlog lands between already-settled cards in two
+// different epochs. Each tall first card leaves enough deterministic room in
+// the other six tracks for its short arrival. Both epochs must reconcile
+// independently without claiming or moving the stable divider between them.
 function mosaicStreamFusedEpochReplayCheck() {
   const lane = mosaicStreamResolveLane();
   const member = {
@@ -152,10 +152,13 @@ function mosaicStreamFusedEpochReplayCheck() {
   mosaicStreamResetLane(lane);
   lane.retainedMessageLimit = 100;
   const initial = [
-    mosaicStreamEpochItem("epoch-newer", 150, 2),
-    mosaicStreamEpochItem("epoch-comp-newer", 120, 1, "compaction"),
-    mosaicStreamEpochItem("epoch-short", 90, 1),
-    mosaicStreamEpochItem("epoch-tall", 60, 14),
+    mosaicStreamEpochItem("epoch-newer", 240, 2),
+    mosaicStreamEpochItem("epoch-comp-newer", 210, 1, "compaction"),
+    mosaicStreamEpochItem("epoch-short-newer", 180, 1),
+    mosaicStreamEpochItem("epoch-tall-newer", 150, 14),
+    mosaicStreamEpochItem("epoch-comp-middle", 120, 1, "compaction"),
+    mosaicStreamEpochItem("epoch-short-older", 90, 1),
+    mosaicStreamEpochItem("epoch-tall-older", 60, 14),
     mosaicStreamEpochItem("epoch-comp-older", 30, 1, "compaction"),
     mosaicStreamEpochItem("epoch-older", 0, 2),
   ];
@@ -178,6 +181,7 @@ function mosaicStreamFusedEpochReplayCheck() {
   const outsideKeys = [
     "epoch-newer",
     "epoch-comp-newer",
+    "epoch-comp-middle",
     "epoch-comp-older",
     "epoch-older",
   ];
@@ -191,22 +195,31 @@ function mosaicStreamFusedEpochReplayCheck() {
     return next;
   };
   try {
-    const backlog = mosaicStreamEpochItem(
-      "epoch-member-b-backlog",
-      75,
-      1,
-      "assistant",
-      "epoch-member-b",
-    );
-    member.knownMessages = [backlog];
-    member.knownMessageKeys = new Set([backlog.key]);
+    const backlog = [
+      mosaicStreamEpochItem(
+        "epoch-member-b-backlog-newer",
+        165,
+        1,
+        "assistant",
+        "epoch-member-b",
+      ),
+      mosaicStreamEpochItem(
+        "epoch-member-b-backlog-older",
+        75,
+        1,
+        "assistant",
+        "epoch-member-b",
+      ),
+    ];
+    member.knownMessages = backlog;
+    member.knownMessageKeys = new Set(backlog.map((item) => item.key));
     mosaicRenderMessageStream(lane, laneGroupMergedMessages(lane));
   } finally {
     mosaicApplyCardPosition = originalApply;
     laneGroupMemberLanes = originalGroupMembers;
   }
 
-  const event = lane.mosaicEventLog.events.at(-1) || null;
+  const events = lane.mosaicEventLog.events.slice(-2);
   const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
   return {
     before,
@@ -214,14 +227,16 @@ function mosaicStreamFusedEpochReplayCheck() {
     outsideWrites: writes.filter((key) => outsideKeys.includes(key)),
     fullReplaysBefore,
     fullReplaysAfter: mosaicStreamFullReplayCount(lane),
-    backlogPresent: lane.mosaicCards.some(
-      (card) => card.key === "epoch-member-b-backlog",
+    backlogPresent: ["newer", "older"].every((suffix) =>
+      lane.mosaicCards.some(
+        (card) => card.key === "epoch-member-b-backlog-" + suffix,
+      ),
     ),
     overlap: mosaicStreamCardsOverlap(lane.mosaicCards),
     replayMatches:
       JSON.stringify(mosaicEventLogLayout(lane.mosaicCards)) ===
       JSON.stringify(replayed.layout),
-    event,
+    events,
   };
 }
 
@@ -1191,7 +1206,8 @@ function assertEpochReplayInvariants(result, expected, fail) {
     fail(expected + " produced overlapping cards: " + JSON.stringify(result.overlap));
   if (!result.replayMatches)
     fail(expected + " event log did not reproduce the live epoch lattice");
-  if (!result.event || result.event.type !== "epoch-replay")
+  const events = result.events || [result.event];
+  if (!events.length || events.some((event) => !event || event.type !== "epoch-replay"))
     fail(expected + " did not record an epoch-replay event");
 }
 
@@ -1228,13 +1244,24 @@ function assertMosaicStreamResult(result) {
   assertEpochReplayInvariants(result.fusedEpochReplay, "fused backlog", fail);
   if (!result.fusedEpochReplay.backlogPresent)
     fail("fused backlog card was not reconciled");
-  if (result.fusedEpochReplay.event.cause !== "interleaved-message-insertion")
-    fail("fused backlog replay did not classify its structural cause");
   if (
-    result.fusedEpochReplay.event.olderBarrierKey !== "epoch-comp-older" ||
-    result.fusedEpochReplay.event.newerBarrierKey !== "epoch-comp-newer"
+    result.fusedEpochReplay.events.length !== 2 ||
+    result.fusedEpochReplay.events.some(
+      (event) => event.cause !== "interleaved-message-insertion",
+    )
   )
-    fail("fused backlog replay did not identify both nearest compaction barriers");
+    fail("fused backlog replay did not classify its structural cause");
+  const fusedBounds = result.fusedEpochReplay.events.map(
+    (event) => event.newerBarrierKey + ":" + event.olderBarrierKey,
+  );
+  if (
+    JSON.stringify(fusedBounds) !==
+    JSON.stringify([
+      "epoch-comp-newer:epoch-comp-middle",
+      "epoch-comp-middle:epoch-comp-older",
+    ])
+  )
+    fail("fused backlog replay did not partition at every nearest compaction barrier");
   assertEpochReplayInvariants(result.timeRuleEpochReplay, "time-rule churn", fail);
   if (!result.timeRuleEpochReplay.rulePresent)
     fail("time-rule churn did not add its derived rule card");
