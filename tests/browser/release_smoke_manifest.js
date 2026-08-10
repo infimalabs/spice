@@ -29,6 +29,7 @@ const releaseSafe = [
   { path: "serve_mosaic_reduced_motion_smoke.js" },
   { path: "serve_mosaic_render_smoke.js" },
   { path: "serve_mosaic_reservations_smoke.js" },
+  { path: "serve_mosaic_resize_width_authority_smoke.js" },
   { path: "serve_mosaic_scroll_smoke.js" },
   { path: "serve_mosaic_seam_smoke.js" },
   { path: "serve_mosaic_single_column_smoke.js" },
