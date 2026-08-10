@@ -18,7 +18,7 @@
 // sentinel carries no visual meaning and stays outside the lattice
 // entirely, pinned to the plane's bottom edge in CSS alone (messages.css).
 
-const MOSAIC_RESIZE_WIDTH_EPSILON_PX = 0.5;
+const MOSAIC_GEOMETRY_WIDTH_EPSILON_PX = 0.5;
 const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
 // Below this host width the lane is not meaningfully measurable (hidden
 // ancestor, mid-mount, collapsed pane): rendering would run the geometry
@@ -49,7 +49,7 @@ const MOSAIC_SETTLE_INTERACTION_EVENTS = [
 ];
 
 function mosaicHostMeasurable(host) {
-  return Boolean(host) && host.clientWidth >= MOSAIC_MIN_RENDER_WIDTH_PX;
+  return Boolean(host) && mosaicContainerWidthPx(host) >= MOSAIC_MIN_RENDER_WIDTH_PX;
 }
 
 function mosaicSettleNow(lane) {
@@ -366,7 +366,7 @@ function mosaicGeometryChange(lane, geometry) {
   }
   const previousWidth = previous.edges[mosaicGridTrackCount];
   const nextWidth = geometry.edges[mosaicGridTrackCount];
-  if (Math.abs(previousWidth - nextWidth) > MOSAIC_RESIZE_WIDTH_EPSILON_PX) {
+  if (Math.abs(previousWidth - nextWidth) > MOSAIC_GEOMETRY_WIDTH_EPSILON_PX) {
     return { changed: true, replay: false, reason: "width" };
   }
   return { changed: false, replay: false, reason: "stable" };
@@ -1141,17 +1141,13 @@ function mosaicReconcileStreamEntries(
 // ---- resize + image-load wiring (mirrors the legacy grid packer's resize
 // observer pattern, retargeted at full replay instead of a repack) -----------------
 
-function mosaicElementResizeSize(element) {
-  const rect = element.getBoundingClientRect();
-  return { height: rect.height, width: rect.width };
-}
-
 function mosaicHostResizeChanged(lane) {
-  const next = mosaicElementResizeSize(lane.messagesEl);
-  const previous = lane.mosaicHostResizeSize || null;
-  lane.mosaicHostResizeSize = next;
-  if (!previous) return false;
-  return Math.abs(next.width - previous.width) > MOSAIC_RESIZE_WIDTH_EPSILON_PX;
+  const next = mosaicContainerWidthPx(lane.messagesEl);
+  const previous = lane.mosaicHostContentWidth;
+  if (!Number.isFinite(previous))
+    throw new Error("mosaic ResizeObserver content width was not initialized");
+  lane.mosaicHostContentWidth = next;
+  return next !== previous;
 }
 
 // The single deferred re-render scheduler for every self-triggered render
@@ -1186,7 +1182,7 @@ function mosaicSyncResizeObserver(lane) {
         mosaicScheduleRender(lane);
       }, MOSAIC_RESIZE_DEBOUNCE_MS);
     });
-    lane.mosaicHostResizeSize = mosaicElementResizeSize(lane.messagesEl);
+    lane.mosaicHostContentWidth = mosaicContainerWidthPx(lane.messagesEl);
     lane.mosaicResizeObserver.observe(lane.messagesEl);
   }
 }
@@ -1260,7 +1256,7 @@ function mosaicResetResizeObserver(lane) {
   }
   if (lane.mosaicResizeObserver) lane.mosaicResizeObserver.disconnect();
   lane.mosaicResizeObserver = null;
-  lane.mosaicHostResizeSize = null;
+  lane.mosaicHostContentWidth = null;
   for (const [image, handler] of lane.mosaicImageLoadHandlers || []) {
     image.removeEventListener("load", handler);
     image.removeEventListener("error", handler);

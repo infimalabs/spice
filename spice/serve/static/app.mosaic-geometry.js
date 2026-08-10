@@ -72,10 +72,27 @@ function mosaicRootFontSizePx() {
 // depends on content height (see mosaic-scrollbar-gutter); this only mirrors
 // the host's own padding box, it does not reserve the gutter itself.
 function mosaicContainerWidthPx(host) {
+  if (!host) throw new Error("mosaic content width requires a host element");
+  const clientWidth = host.clientWidth;
+  if (!Number.isFinite(clientWidth) || clientWidth < 0)
+    throw new Error("mosaic host clientWidth must be finite and nonnegative");
+  // display:none collapses clientWidth to zero even though computed padding
+  // still reports its authored value. Zero is the real unmeasurable content
+  // width in that state; subtracting the dormant padding would invent a
+  // contradictory negative measurement.
+  if (clientWidth === 0) return 0;
   const style = getComputedStyle(host);
-  return (
-    host.clientWidth -
-    Number.parseFloat(style.paddingLeft || "0") -
-    Number.parseFloat(style.paddingRight || "0")
-  );
+  const paddingLeft = Number.parseFloat(style.paddingLeft);
+  const paddingRight = Number.parseFloat(style.paddingRight);
+  if (
+    !Number.isFinite(paddingLeft) ||
+    !Number.isFinite(paddingRight) ||
+    paddingLeft < 0 ||
+    paddingRight < 0
+  )
+    throw new Error("mosaic host padding must be finite and nonnegative");
+  const contentWidth = clientWidth - paddingLeft - paddingRight;
+  if (!Number.isFinite(contentWidth) || contentWidth < 0)
+    throw new Error("mosaic host padding exceeds its measurable client width");
+  return contentWidth;
 }
