@@ -26,6 +26,16 @@ function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function assertThrows(callback, text) {
+  let message = "";
+  try {
+    callback();
+  } catch (error) {
+    message = String(error && error.message ? error.message : error);
+  }
+  assert(message.includes(text), "expected refusal containing: " + text);
+}
+
 function fixtureCardsOverlap(a, b) {
   const tracksOverlap = a.t < b.t + b.span && b.t < a.t + a.span;
   const rowsOverlap = a.b < b.b + b.n && b.b < a.b + a.n;
@@ -33,6 +43,8 @@ function fixtureCardsOverlap(a, b) {
 }
 
 const TRACKS = 12;
+const GEOMETRY_PREVIOUS_WIDTH = 820;
+const GEOMETRY_NEXT_WIDTH = 1180;
 const FORBIDDEN_LAYOUT_READS = [
   /\bDate\s*\./,
   /\bDate\s*\(/,
@@ -103,6 +115,20 @@ function backfillEvent(seed, count) {
       creationIndex: -i - 1,
       candidates: candidatesFor(rng),
     })),
+  };
+}
+
+function geometrySnapshot(width, baseSpan, M) {
+  return { width, baseSpan, trackCount: TRACKS, M };
+}
+
+function geometryReplay(reason, source, previous, next) {
+  return {
+    kind: "geometry",
+    reason,
+    source,
+    previous,
+    next,
   };
 }
 
@@ -186,6 +212,112 @@ for (const seed of [377, 610, 987]) {
   context.mosaicRecordEventLogEvent(log, replay);
   const twice = context.mosaicReplayEventLog(log).layout;
   assert(deepEqual(once, twice), "full replay idempotence failed for seed " + seed);
+}
+
+// Geometry provenance is normalized into an immutable copy while remaining
+// observational: adding it to the same full-replay event cannot alter layout.
+{
+  const plain = recordInserts(1597, 10);
+  const observed = recordInserts(1597, 10);
+  const plainReplay = fullReplayEvent(2584, 10);
+  const observedReplay = fullReplayEvent(2584, 10);
+  observedReplay.geometryReplay = geometryReplay(
+    "topology",
+    "resize-observer",
+    geometrySnapshot(GEOMETRY_PREVIOUS_WIDTH, 4, 60),
+    geometrySnapshot(GEOMETRY_NEXT_WIDTH, 3, 60),
+  );
+  context.mosaicRecordEventLogEvent(plain, plainReplay);
+  context.mosaicRecordEventLogEvent(observed, observedReplay);
+  observedReplay.geometryReplay.previous.width = 1;
+  observedReplay.geometryReplay.next.baseSpan = 12;
+  const normalized = observed.events[observed.events.length - 1].geometryReplay;
+  assert(normalized.kind === "geometry", "geometry provenance kind was not retained");
+  assert(normalized.reason === "topology", "geometry provenance reason was not retained");
+  assert(
+    normalized.source === "resize-observer",
+    "geometry provenance source was not retained",
+  );
+  assert(
+    normalized.previous.width === GEOMETRY_PREVIOUS_WIDTH,
+    "previous geometry snapshot was not copied",
+  );
+  assert(normalized.next.baseSpan === 3, "next geometry snapshot was not copied");
+  assert(Object.isFrozen(normalized), "geometry provenance must be immutable");
+  assert(Object.isFrozen(normalized.previous), "previous geometry snapshot must be immutable");
+  assert(Object.isFrozen(normalized.next), "next geometry snapshot must be immutable");
+  assert(
+    deepEqual(
+      context.mosaicReplayEventLog(plain).layout,
+      context.mosaicReplayEventLog(observed).layout,
+    ),
+    "geometry provenance changed replay layout",
+  );
+}
+
+// The normalized diagnostic shape is closed: missing, unknown, contradictory,
+// or multiply-authored values refuse instead of becoming an unclassified event.
+{
+  const valid = () =>
+    geometryReplay(
+      "topology",
+      "resize-observer",
+      geometrySnapshot(GEOMETRY_PREVIOUS_WIDTH, 4, 60),
+      geometrySnapshot(GEOMETRY_NEXT_WIDTH, 3, 60),
+    );
+  const record = (geometry) => {
+    const log = context.mosaicCreateEventLog(TRACKS, 2);
+    const event = fullReplayEvent(4181, 2);
+    event.geometryReplay = geometry;
+    context.mosaicRecordEventLogEvent(log, event);
+  };
+
+  const missingSource = valid();
+  delete missingSource.source;
+  assertThrows(() => record(missingSource), "fields must be exactly");
+
+  const unknownReason = valid();
+  unknownReason.reason = "mystery";
+  assertThrows(() => record(unknownReason), "geometry replay reason is unknown");
+
+  const unknownSource = valid();
+  unknownSource.source = "mystery";
+  assertThrows(() => record(unknownSource), "geometry replay source is unknown");
+
+  const conflictingSources = valid();
+  conflictingSources.sources = ["resize-observer", "fonts-ready"];
+  assertThrows(() => record(conflictingSources), "fields must be exactly");
+
+  const initialWithPrevious = valid();
+  initialWithPrevious.reason = "initial";
+  initialWithPrevious.source = "stream-render";
+  assertThrows(() => record(initialWithPrevious), "must not have a previous snapshot");
+
+  const topologyWithoutPrevious = valid();
+  topologyWithoutPrevious.previous = null;
+  assertThrows(() => record(topologyWithoutPrevious), "requires a previous snapshot");
+
+  const fontsFromResize = valid();
+  fontsFromResize.reason = "fonts-ready";
+  assertThrows(() => record(fontsFromResize), "requires the fonts-ready source");
+
+  const invalidWidth = valid();
+  invalidWidth.next.width = Number.NaN;
+  assertThrows(() => record(invalidWidth), "width must be finite and nonnegative");
+
+  const coercedWidth = valid();
+  coercedWidth.next.width = "1180";
+  assertThrows(() => record(coercedWidth), "width must be finite and nonnegative");
+
+  const contradictoryTracks = valid();
+  const log = context.mosaicCreateEventLog(TRACKS, 2);
+  const event = fullReplayEvent(6765, 2);
+  event.trackCount = 6;
+  event.geometryReplay = contradictoryTracks;
+  assertThrows(
+    () => context.mosaicRecordEventLogEvent(log, event),
+    "trackCount conflicts with full replay",
+  );
 }
 
 // Layout-path source audit: the pure lattice/replay path must not read ambient
