@@ -77,6 +77,19 @@ function compareKnownMessagesNewestFirst(a, b) {
   return aKey < bKey ? 1 : -1;
 }
 
+function retainedVisibleMessagesAtCompactionFloor(messages, limit) {
+  const capped = messages.slice(0, limit);
+  if (messages.length < limit) return capped;
+  // A compaction divider is the floor of the epoch above it. Under cap
+  // pressure, retain through the oldest divider that fits inside the cap so
+  // no fragment of the epoch below that floor survives. If the capped window
+  // has no divider, the named retention contract is the hard newest-N cap;
+  // allowing an unbounded current epoch would make the client cache grow
+  // without limit.
+  const floorIndex = capped.findLastIndex((item) => item.kind === "compaction");
+  return floorIndex < 0 ? capped : capped.slice(0, floorIndex + 1);
+}
+
 function trimKnownMessages(lane) {
   lane.knownMessages.sort(compareKnownMessagesNewestFirst);
   const visible = [];
@@ -86,9 +99,13 @@ function trimKnownMessages(lane) {
       if (!latestPresence) latestPresence = item;
       continue;
     }
-    if (visible.length < lane.retainedMessageLimit) visible.push(item);
+    visible.push(item);
   }
-  const kept = latestPresence ? [latestPresence, ...visible] : visible;
+  const retained = retainedVisibleMessagesAtCompactionFloor(
+    visible,
+    lane.retainedMessageLimit,
+  );
+  const kept = latestPresence ? [latestPresence, ...retained] : retained;
   const seen = new Set();
   lane.knownMessages = kept.filter((item) => {
     if (seen.has(item.key)) return false;
