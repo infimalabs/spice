@@ -17,6 +17,7 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const MOSAIC_SINGLE_COLUMN_NARROW_WIDTH = 380;
 const MOSAIC_SINGLE_COLUMN_WIDE_WIDTH = 1280;
+const MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_WIDTH = 1320;
 const MOSAIC_SINGLE_COLUMN_FULL_SPAN = 12;
 
 function mosaicSingleColumnResolveLane() {
@@ -67,13 +68,43 @@ function mosaicSingleColumnSnapshot(lane) {
   };
 }
 
-function mosaicSingleColumnInstallFullReplaySpy() {
+// Resolve each resize from the production render callback itself. The caller
+// arms one observation before changing the viewport; the wrapped render
+// resolves it only after this lane's mosaicRenderMessageStream invocation has
+// completed, so the smoke never polls a counter or guesses at a quiet window.
+function mosaicSingleColumnInstallResizeObserver() {
   window.__mosaicFullReplayCallCount = 0;
-  const original = mosaicFullReplay;
+  const originalReplay = mosaicFullReplay;
   mosaicFullReplay = function (...args) {
     window.__mosaicFullReplayCallCount += 1;
-    return original.apply(this, args);
+    return originalReplay.apply(this, args);
   };
+  const originalRender = mosaicRenderMessageStream;
+  mosaicRenderMessageStream = function (lane, ...args) {
+    const result = originalRender.call(this, lane, ...args);
+    const resolve = window.__mosaicResizeObservationResolve;
+    if (resolve && lane === window.__mosaicResizeObservationLane) {
+      window.__mosaicResizeObservationResolve = null;
+      resolve({
+        snapshot: mosaicSingleColumnSnapshot(lane),
+        fullReplayCallCount: window.__mosaicFullReplayCallCount,
+      });
+    }
+    return result;
+  };
+}
+
+function mosaicSingleColumnBeginResizeObservation() {
+  if (window.__mosaicResizeObservationResolve)
+    throw new Error("a mosaic resize observation is already armed");
+  window.__mosaicResizeObservationLane = mosaicSingleColumnResolveLane();
+  window.__mosaicResizeObservation = new Promise((resolve) => {
+    window.__mosaicResizeObservationResolve = resolve;
+  });
+}
+
+function mosaicSingleColumnAwaitResizeObservation() {
+  return window.__mosaicResizeObservation;
 }
 
 function mosaicSingleColumnRunAtNarrowWidth() {
@@ -98,21 +129,6 @@ function mosaicSingleColumnRunAtNarrowWidth() {
   return { afterInserts, afterGrow, afterFifthInsert };
 }
 
-// No explicit forced re-render here: the real trigger for a viewport
-// resize in production is mosaicSyncResizeObserver's ResizeObserver ->
-// mosaicScheduleRender's requestAnimationFrame -> renderMessagesIfChanged,
-// exactly the path this check observes (via waitForFullReplayCallCount
-// below, awaited by the caller before this runs). Forcing an extra manual
-// re-render here would race the natural observer callback and could
-// double-trigger a full replay that would never happen from a real resize.
-function mosaicSingleColumnResizeCheck() {
-  const lane = mosaicSingleColumnResolveLane();
-  return {
-    snapshot: mosaicSingleColumnSnapshot(lane),
-    fullReplayCallCount: window.__mosaicFullReplayCallCount,
-  };
-}
-
 async function installMosaicSingleColumnHelpers(page) {
   await page.addScriptTag({
     content: [
@@ -121,9 +137,10 @@ async function installMosaicSingleColumnHelpers(page) {
       mosaicSingleColumnPushMessage,
       mosaicSingleColumnCardsOverlap,
       mosaicSingleColumnSnapshot,
-      mosaicSingleColumnInstallFullReplaySpy,
+      mosaicSingleColumnInstallResizeObserver,
+      mosaicSingleColumnBeginResizeObservation,
+      mosaicSingleColumnAwaitResizeObservation,
       mosaicSingleColumnRunAtNarrowWidth,
-      mosaicSingleColumnResizeCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -190,17 +207,47 @@ function assertResizeResult(label, result, expectedFullReplayCallCount, expectFu
   }
 }
 
-async function waitForFullReplayCallCount(page, expectedCount) {
-  await page.waitForFunction(
-    // Braced body: lizard (the complexity gate) misparses a braceless
-    // arrow followed by an object-literal argument, misattributing
-    // function spans to the end of the file.
-    (expected) => {
-      return window.__mosaicFullReplayCallCount >= expected;
-    },
-    expectedCount,
-    { timeout: 5000 },
+function assertSameTopologyResize(before, after, fail) {
+  if (before.snapshot.baseSpan !== after.snapshot.baseSpan)
+    fail(
+      "same-topology fixture crossed a base-span boundary: " +
+        before.snapshot.baseSpan +
+        " -> " +
+        after.snapshot.baseSpan,
+    );
+  if (before.fullReplayCallCount !== after.fullReplayCallCount)
+    fail(
+      "same-topology width change invoked a full replay: " +
+        before.fullReplayCallCount +
+        " -> " +
+        after.fullReplayCallCount,
+    );
+  const beforeByKey = new Map(
+    before.snapshot.lattice.map((card) => [card.key, card]),
   );
+  for (const card of after.snapshot.lattice) {
+    const prior = beforeByKey.get(card.key);
+    if (!prior) fail("same-topology resize lost prior card " + card.key);
+    if (prior.t !== card.t || prior.span !== card.span)
+      fail(
+        "same-topology resize moved " +
+          card.key +
+          " horizontally: t/span " +
+          prior.t +
+          "/" +
+          prior.span +
+          " -> " +
+          card.t +
+          "/" +
+          card.span,
+      );
+  }
+}
+
+async function mosaicSingleColumnResizeAndObserve(page, width) {
+  await page.evaluate(mosaicSingleColumnBeginResizeObservation);
+  await page.setViewportSize({ width, height: 900 });
+  return page.evaluate(mosaicSingleColumnAwaitResizeObservation);
 }
 
 async function run() {
@@ -216,6 +263,7 @@ async function run() {
           "upsertKnownMessage",
           "trimKnownMessages",
           "mosaicFullReplay",
+          "mosaicRenderMessageStream",
         ],
       });
       await installMosaicSingleColumnHelpers(page);
@@ -226,30 +274,49 @@ async function run() {
       // (which always full-replays once on its own, since geometry starts
       // null) -- so the counter below measures full replays caused by the
       // resizes themselves, not the lane's initial bootstrap.
-      await page.evaluate(mosaicSingleColumnInstallFullReplaySpy);
+      await page.evaluate(mosaicSingleColumnInstallResizeObserver);
 
       // The real production trigger for a viewport resize is the
       // ResizeObserver on lane.messagesEl (mosaicSyncResizeObserver), which
-      // schedules its full replay via requestAnimationFrame
-      // (mosaicScheduleRender) -- so each resize below waits on the
-      // observed effect (the full-replay counter advancing) rather than
-      // forcing a render manually, which would race the real observer.
-      await page.setViewportSize({ width: MOSAIC_SINGLE_COLUMN_WIDE_WIDTH, height: 900 });
-      await waitForFullReplayCallCount(page, 1);
-      const wideResizeResult = await page.evaluate(mosaicSingleColumnResizeCheck);
+      // schedules rendering via requestAnimationFrame (mosaicScheduleRender).
+      // Each resize below blocks on the wrapped render's completion callback,
+      // including the width-only case where no full replay event should exist.
+      const wideResizeResult = await mosaicSingleColumnResizeAndObserve(
+        page,
+        MOSAIC_SINGLE_COLUMN_WIDE_WIDTH,
+      );
+      const sameTopologyResizeResult = await mosaicSingleColumnResizeAndObserve(
+        page,
+        MOSAIC_SINGLE_COLUMN_SAME_TOPOLOGY_WIDTH,
+      );
 
-      await page.setViewportSize({ width: MOSAIC_SINGLE_COLUMN_NARROW_WIDTH, height: 900 });
-      await waitForFullReplayCallCount(page, 2);
-      const narrowAgainResizeResult = await page.evaluate(mosaicSingleColumnResizeCheck);
+      const narrowAgainResizeResult = await mosaicSingleColumnResizeAndObserve(
+        page,
+        MOSAIC_SINGLE_COLUMN_NARROW_WIDTH,
+      );
 
       const fail = (message) => {
         throw new Error(message);
       };
       assertNarrowWidthResult(narrowResult, fail);
       assertResizeResult("wide resize", wideResizeResult, 1, false, fail);
+      assertResizeResult(
+        "same-topology resize",
+        sameTopologyResizeResult,
+        1,
+        false,
+        fail,
+      );
+      assertSameTopologyResize(wideResizeResult, sameTopologyResizeResult, fail);
       assertResizeResult("narrow-again resize", narrowAgainResizeResult, 2, true, fail);
 
-      return { narrowResult, wideResizeResult, narrowAgainResizeResult, url: server.url };
+      return {
+        narrowResult,
+        wideResizeResult,
+        sameTopologyResizeResult,
+        narrowAgainResizeResult,
+        url: server.url,
+      };
     },
   );
 }
