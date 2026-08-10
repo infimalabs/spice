@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from spice import defaults
 from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, RtkHealth
 from spice.hooks import doctor, precommit
@@ -188,6 +189,36 @@ def test_doctor_requires_approval_for_tracked_disabled_builtins(tmp_path):
     assert approved.status == "ok"
     assert "repository disablement approved" in approved.detail
     assert "formatters, magic-numbers" in approved.detail
+
+
+def test_doctor_requires_one_approval_for_tracked_whole_builtin_disable(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "spice.toml").write_text(
+        '[policy]\npackage_roots = ["pkg"]\npre_commit_builtins = false\n',
+        encoding="utf-8",
+    )
+    _run(repo, "git", "add", "spice.toml")
+    _run(repo, "git", "commit", "-m", "replace builtin gate battery")
+
+    disabled = precommit.disabled_builtin_pre_commit_steps(repo)
+    assert [entry.key for entry in disabled] == list(
+        defaults.table("policy", "pre_commit_builtins")
+    )
+    assert {entry.config_path for entry in disabled} == {
+        ("policy", "pre_commit_builtins")
+    }
+    assert {entry.config_source for entry in disabled} == {"repository"}
+
+    unapproved = doctor._pre_commit_builtin_disablement_check(repo)
+    assert unapproved.status == "fail"
+    assert "repository disabled builtin(s)" in unapproved.detail
+    assert unapproved.detail.count("has no operator approval") == 1
+    assert unapproved.command == "spice init --apply"
+
+    approve_repository_config(repo)
+    approved = doctor._pre_commit_builtin_disablement_check(repo)
+    assert approved.status == "ok"
+    assert "repository disablement approved" in approved.detail
 
 
 def test_doctor_accepts_operator_owned_builtin_disablement_without_receipt(tmp_path):

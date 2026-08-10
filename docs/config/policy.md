@@ -229,6 +229,19 @@ required non-empty strings. `test` is the test function name or `<module>`, and
 
 ## `[policy.pre_commit_builtins]`
 
+Set `pre_commit_builtins = false` directly in `[policy]` to disable the whole
+built-in Python gate battery. This does not remove Spice's installed Git hook
+or disable explicit `policy.pre_commit` steps, so a repository can retain
+Spice hook ownership while replacing the battery with another implementation:
+
+```toml
+[policy]
+pre_commit_builtins = false
+pre_commit = [
+  { label = "Rust gate", run = ["cargo", "run", "--locked", "--package", "spice", "--", "gate", "pre-commit"] },
+]
+```
+
 Each built-in key may be:
 
 - `true` to keep the default.

@@ -45,6 +45,10 @@ a removal spelling. A new packaged named-entry registry must declare this
 contract and prove its consumer returns the same disabled answer before the
 configuration gate accepts it.
 
+`policy.pre_commit_builtins = false` also disables that entire inherited table.
+The installed Spice Git hook and explicit `policy.pre_commit` replacement steps
+remain active.
+
 Every Spice table is checked against the structural configuration schema
 before layers merge. An unknown structural key refuses with its dotted path
 and winning source layer, and suggests the nearest known sibling when the edit
@@ -508,7 +512,7 @@ shared PATHPOL matchers.
 | `suite_seam` | Paths the whole suite depends on, and the suite command that gates a task landing that touches one. |
 | `pre_commit` | Extra gate steps that run after built-in pre-commit gates. |
 | `pre_commit_success` | Success-only steps that run after the gate passes. |
-| `pre_commit_builtins` | Per gate-only pre-commit built-in overrides for `merge-integrity`, `plan-phase`, `repo-shape`, `staging`, `repo-docs`, `config-key-validity`, `config-false-disable`, `config-tracked-trust`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `javascript-unused`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `python-unused`, `assertion-free-tests`, and `private-internals`. |
+| `pre_commit_builtins` | Whole-battery `false` disable or per gate-only pre-commit built-in overrides for `merge-integrity`, `plan-phase`, `repo-shape`, `staging`, `repo-docs`, `config-key-validity`, `config-false-disable`, `config-tracked-trust`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `javascript-unused`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `python-unused`, `assertion-free-tests`, and `private-internals`. |
 | `limits`, `flex`, `rules` | Base bounds, sticky headroom, and applicability-selected overrides. |
 | `languages`, `lockfiles`, `file_shape`, `env_access` | Suffix/pattern families for grammar-aware gates. |
 | `complexity`, `taste`, `magic`, `debt`, `commit_message` | Gate-specific knobs. |
