@@ -73,7 +73,7 @@ def emit_review_feedback(
     )
     path = write_inbox_item(
         Path(target.repo_root),
-        default_inbox_name(),
+        default_inbox_name(Path(target.repo_root)),
         compose_inbox_text(body=body, priority=None, stop=False),
         dedupe_pending_text=True,
     )

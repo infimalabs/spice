@@ -5,7 +5,10 @@ import subprocess
 import time
 from pathlib import Path
 
-from spice.mail.ackarchive import archive_ackd_inbox_items
+import pytest
+
+from spice.errors import SpiceError
+from spice.mail.ackarchive import archive_ackd_inbox_items, summarize_ack_archival
 from spice.mail.ackstate import (
     ACK_DISPOSITION_REFUSED,
     AckStateWrite,
@@ -42,7 +45,7 @@ from spice.mail.inbox import (
     requeue_deadlettered_inbox_item,
     write_inbox_item,
 )
-from spice.paths import shared_attachment_root
+from spice.paths import shared_attachment_root, shared_state_path
 from spice.serve.markdown import render_message_html
 from spice.tasks import identity
 
@@ -387,6 +390,61 @@ def test_parse_preserves_non_note_parenthetical_suffix():
 
 def _init_repo(path):
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+
+
+def test_generated_keys_are_unique_across_linked_worktrees_in_one_millisecond(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", "initial"],
+        cwd=repo,
+        check=True,
+    )
+    peer = tmp_path / "peer"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "peer", str(peer)],
+        cwd=repo,
+        check=True,
+    )
+    monkeypatch.setattr(identity, "epoch_millis", lambda _when=None: _DATED_EPOCH_MS)
+    text = compose_inbox_text(body="operator broadcast", priority=None, stop=False)
+
+    first = write_inbox_item(repo, None, text)
+    second = write_inbox_item(peer, None, text)
+
+    assert first.name == f"{identity.encode_width(_DATED_EPOCH_MS)}.txt"
+    assert second.name == f"{identity.encode_width(_DATED_EPOCH_MS + 1)}.txt"
+    assert summarize_ack_archival(
+        repo, f"ACK {inbox_item_key(first.name)}: first lane handled it."
+    ).archived == [inbox_item_key(first.name)]
+    assert summarize_ack_archival(
+        peer, f"ACK {inbox_item_key(second.name)}: second lane handled it."
+    ).archived == [inbox_item_key(second.name)]
+    assert collect_inbox_items(repo) == []
+    assert collect_inbox_items(peer) == []
+    assert {record.key for record in ack_state_records(repo)} == {
+        inbox_item_key(first.name),
+        inbox_item_key(second.name),
+    }
+
+
+def test_generated_key_refuses_corrupt_shared_sequence(tmp_path):
+    _init_repo(tmp_path)
+    sequence = shared_state_path(tmp_path, "inbox-key-sequence")
+    sequence.parent.mkdir(parents=True, exist_ok=True)
+    sequence.write_text("not-a-key\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="inbox key sequence.*is invalid"):
+        write_inbox_item(tmp_path, None, "operator steering")
+
+    assert collect_inbox_items(tmp_path) == []
 
 
 def test_inbox_item_key_strips_extension_and_keeps_collision_suffix():

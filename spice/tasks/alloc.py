@@ -685,7 +685,7 @@ def _notify_displaced_claimant(
     try:
         path = write_inbox_item(
             target,
-            default_inbox_name(),
+            default_inbox_name(target),
             compose_inbox_text(body=body, priority="review", stop=False),
             dedupe_pending_text=True,
         )

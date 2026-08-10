@@ -235,6 +235,50 @@ def test_bind_refuses_a_foreign_worktree_thread_and_keeps_the_local_one(
     assert read_agent_thread_pointer(tmp_path) == local_canonical
 
 
+def test_codex_bind_refuses_thread_recorded_in_another_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    sessions = codex_home / "sessions" / "2026" / "08" / "10"
+    sessions.mkdir(parents=True)
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "codex")
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    local_dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
+    local_canonical = "768bcba1a66f4d229ce7bcf65b5d16aa"
+    foreign_dashed = "019f8806-85c0-7312-b89f-6bfc6cdd0bb5"
+    foreign_canonical = "019f880685c07312b89f6bfc6cdd0bb5"
+
+    def write_rollout(thread_id: str, cwd: Path) -> None:
+        path = sessions / f"rollout-2026-08-10T00-00-00-{thread_id}.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "session_meta",
+                    "payload": {"cwd": str(cwd.resolve())},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    write_rollout(local_dashed, tmp_path)
+    monkeypatch.setenv(CODEX_DRIVER.thread_id_env, local_dashed)
+    assert bind_ambient_agent_thread(tmp_path).thread_id == local_canonical
+
+    other_root = tmp_path.with_name(f"{tmp_path.name}-other-worktree")
+    other_root.mkdir()
+    write_rollout(foreign_dashed, other_root)
+    monkeypatch.setenv(CODEX_DRIVER.thread_id_env, foreign_dashed)
+
+    after = bind_ambient_agent_thread(tmp_path)
+
+    assert after.thread_id == local_canonical
+    assert after.thread_id != foreign_canonical
+    assert read_agent_thread_pointer(tmp_path) == local_canonical
+
+
 def test_bind_seats_a_new_session_whose_transcript_is_not_written_yet(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

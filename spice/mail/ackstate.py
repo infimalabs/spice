@@ -539,6 +539,17 @@ def _validate_or_upgrade_consumed_ack_locked(
             acknowledged_at=acknowledged_at,
         )
         return
+    if _recorded_delivery_signature(record) == _proposed_delivery_signature(
+        item,
+        attachments_json=attachments_json,
+        disposition=disposition,
+    ):
+        # The SQLite write commits before the pending transport is discarded.
+        # A concurrent ACK or restart in that gap may retry with different prose
+        # or lineage. The first durable response remains canonical; an identical
+        # delivered directive and disposition is an idempotent retry so its stale
+        # pending copy can be removed by the caller.
+        return
     existing_ack = _recorded_ack_signature(record)
     proposed_ack = _proposed_ack_signature(
         item,
@@ -631,6 +642,29 @@ def _recorded_ack_signature(record: DirectiveHistoryRecord) -> tuple[Any, ...]:
         record.ack_text,
         record.ack_content,
         record.disposition,
+    )
+
+
+def _recorded_delivery_signature(record: DirectiveHistoryRecord) -> tuple[Any, ...]:
+    return (
+        record.inbox_name,
+        record.text,
+        json.dumps(list(record.attachments), sort_keys=True),
+        record.disposition,
+    )
+
+
+def _proposed_delivery_signature(
+    item: AckStateWrite,
+    *,
+    attachments_json: str,
+    disposition: str,
+) -> tuple[Any, ...]:
+    return (
+        item.inbox_name,
+        item.text,
+        attachments_json,
+        disposition,
     )
 
 
