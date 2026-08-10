@@ -280,7 +280,6 @@ async function run(screenshotDir) {
       await installHydrationHelpers(page, context);
       const floor = await page.evaluate(() => ({
         settleQuiet: MOSAIC_SETTLE_QUIET_MS,
-        resizeDebounce: MOSAIC_RESIZE_DEBOUNCE_MS,
         minRenderWidth: MOSAIC_MIN_RENDER_WIDTH_PX,
       }));
       await runStagedHydration(page);
