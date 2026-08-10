@@ -26,7 +26,7 @@ from spice.errors import SpiceError
 from spice.policy import (
     ENV_POLICY_ALLOW_MARKER,
 )
-from spice.policyconfig import resolve_policy
+from spice.policyconfig import ResolvedPolicy, resolve_policy
 from spice.config.layers import config_string_list, effective_table
 from spice.studies.walk import is_excluded_path
 
@@ -126,17 +126,19 @@ def scan_env_policy(
     root: Path,
     suffixes: tuple[str, ...] | None = None,
     apply_baseline: bool = True,
+    resolved_policy: ResolvedPolicy | None = None,
 ) -> list[EnvPolicyFinding]:
     findings: list[EnvPolicyFinding] = []
-    resolved = resolve_policy(root)
+    resolved = resolved_policy if resolved_policy is not None else resolve_policy(root)
     scan_suffixes = suffixes if suffixes is not None else resolved.languages.env
-    matchers = env_name_matchers(root)
+    matchers = env_name_matchers(root, resolved_policy=resolved)
     access_gate = env_access_gate_enabled(root)
     access_matchers = (
         env_access_matchers(
             root,
             family_suffixes=resolved.env_access.family_suffixes,
             default_patterns=resolved.env_access.default_patterns,
+            finding_names=resolved.env_access.finding_names,
         )
         if access_gate
         else {}
@@ -271,9 +273,15 @@ def scan_env_name_ledger(
     *,
     root: Path,
     suffixes: tuple[str, ...] | None = None,
+    resolved_policy: ResolvedPolicy | None = None,
 ) -> list[EnvNameLedgerFinding]:
     declared = set(env_names(root))
-    references = collect_env_name_references(paths, root=root, suffixes=suffixes)
+    references = collect_env_name_references(
+        paths,
+        root=root,
+        suffixes=suffixes,
+        resolved_policy=resolved_policy,
+    )
     by_name: dict[str, list[EnvNameReference]] = {}
     for reference in references:
         by_name.setdefault(reference.name, []).append(reference)
@@ -297,12 +305,13 @@ def collect_env_name_references(
     *,
     root: Path,
     suffixes: tuple[str, ...] | None = None,
+    resolved_policy: ResolvedPolicy | None = None,
 ) -> list[EnvNameReference]:
-    resolved = resolve_policy(root)
+    resolved = resolved_policy if resolved_policy is not None else resolve_policy(root)
     scan_suffixes = suffixes if suffixes is not None else resolved.languages.env
     family_suffixes = resolved.env_access.family_suffixes
     references: dict[tuple[str, int, str], EnvNameReference] = {}
-    watchlist_matchers = env_name_matchers(root)
+    watchlist_matchers = env_name_matchers(root, resolved_policy=resolved)
     exact_matchers = env_name_exact_matchers(root)
     for rel_path in paths:
         if rel_path.suffix not in scan_suffixes or is_excluded_path(
@@ -533,13 +542,18 @@ def env_access_gate_enabled(repo_root: Path) -> bool:
     return value
 
 
-def env_name_patterns(repo_root: Path) -> list[str]:
+def env_name_patterns(
+    repo_root: Path,
+    *,
+    resolved_policy: ResolvedPolicy | None = None,
+) -> list[str]:
     declared = config_string_list(
         effective_table(repo_root, "policy").get("env_name_patterns")
     )
-    patterns: list[str] = list(
-        resolve_policy(repo_root).environment.default_name_patterns
+    resolved = (
+        resolved_policy if resolved_policy is not None else resolve_policy(repo_root)
     )
+    patterns: list[str] = list(resolved.environment.default_name_patterns)
     patterns.extend(pattern for pattern in declared if pattern not in patterns)
     return patterns
 
@@ -548,9 +562,13 @@ def env_names(repo_root: Path) -> list[str]:
     return config_string_list(effective_table(repo_root, "policy").get("env_names"))
 
 
-def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:
+def env_name_matchers(
+    repo_root: Path,
+    *,
+    resolved_policy: ResolvedPolicy | None = None,
+) -> list[re.Pattern[str]]:
     matchers: list[re.Pattern[str]] = []
-    for pattern in env_name_patterns(repo_root):
+    for pattern in env_name_patterns(repo_root, resolved_policy=resolved_policy):
         try:
             matchers.append(re.compile(_quoted_name_pattern(pattern)))
         except re.error as exc:
@@ -594,19 +612,21 @@ def env_access_matchers(
     *,
     family_suffixes: Mapping[str, tuple[str, ...]] | None = None,
     default_patterns: Mapping[str, tuple[str, ...]] | None = None,
+    finding_names: Mapping[str, str] | None = None,
 ) -> dict[str, list[EnvAccessMatcher]]:
     """Suffix -> compiled env-access matchers, scoped by language family.
 
     A file is audited only by the matchers of its own family, so a shell `$VAR`
     idiom never fires against a `.cs` or `.js` source.
     """
-    if family_suffixes is None or default_patterns is None:
+    if family_suffixes is None or default_patterns is None or finding_names is None:
         resolved = resolve_policy(repo_root).env_access
-        family_suffixes = resolved.family_suffixes
-        default_patterns = resolved.default_patterns
-        finding_names = resolved.finding_names
-    else:
-        finding_names = resolve_policy(repo_root).env_access.finding_names
+        if family_suffixes is None:
+            family_suffixes = resolved.family_suffixes
+        if default_patterns is None:
+            default_patterns = resolved.default_patterns
+        if finding_names is None:
+            finding_names = resolved.finding_names
     by_suffix: dict[str, list[EnvAccessMatcher]] = {}
     for family, patterns in env_access_default_patterns(
         repo_root, default_patterns=default_patterns

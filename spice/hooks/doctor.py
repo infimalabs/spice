@@ -38,7 +38,7 @@ from spice.paths import (
     shared_state_root,
     worktree_state_root,
 )
-from spice.policyconfig import resolve_policy
+from spice.policyconfig import ResolvedPolicy, resolve_policy
 from spice.config.pyproject import read_pyproject
 from spice.process.tool import run_tool_command
 from spice.version import DISTRIBUTION_NAME
@@ -113,6 +113,13 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         fixes.extend(_apply_safe_fixes(repo_root))
     paths = tracked_paths(repo_root)
     staged_paths = staged_gate_paths(repo_root)
+    resolved = resolve_policy(repo_root)
+    # The exact git ls-files inventory is the whole-tree boundary. Resolve its
+    # source candidates once so every study below shares one bounded provenance
+    # snapshot instead of forking Git independently per path and per study.
+    resolved.preload_flex_provenance(
+        _doctor_flex_candidate_paths(repo_root, paths, resolved)
+    )
     checks = [
         *_binary_checks(repo_root),
         _runtime_resolution_check(repo_root),
@@ -128,16 +135,34 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _hooks_check(repo_root),
         _shadowed_hooks_check(repo_root),
         _shape_check(repo_root),
-        _file_loc_check(repo_root, paths, staged_paths),
-        _complexity_check(repo_root, paths, staged_paths),
-        _magic_numbers_check(repo_root, paths),
-        _env_policy_check(repo_root, paths, staged_paths),
-        _env_name_ledger_check(repo_root, paths),
+        _file_loc_check(repo_root, paths, staged_paths, resolved),
+        _complexity_check(repo_root, paths, staged_paths, resolved),
+        _magic_numbers_check(repo_root, paths, resolved),
+        _env_policy_check(repo_root, paths, staged_paths, resolved),
+        _env_name_ledger_check(repo_root, paths, resolved),
     ]
     mutation_ratchet = _mutation_ratchet_check(repo_root)
     if mutation_ratchet is not None:
         checks.append(mutation_ratchet)
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
+
+
+def _doctor_flex_candidate_paths(
+    repo_root: Path,
+    paths: list[Path],
+    resolved: ResolvedPolicy,
+) -> tuple[Path, ...]:
+    suffixes = frozenset(
+        (
+            *resolved.file_shape_paths.source_suffixes,
+            *resolved.languages.complexity,
+        )
+    )
+    return tuple(
+        path
+        for path in paths
+        if path.suffix in suffixes and (repo_root / path).is_file()
+    )
 
 
 def _mounted_commands_check(repo_root: Path) -> DoctorCheck:
@@ -919,9 +944,13 @@ def _shape_check(repo_root: Path) -> DoctorCheck:
 
 
 def _file_loc_check(
-    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+    repo_root: Path,
+    paths: list[Path],
+    staged_paths: list[Path],
+    resolved: ResolvedPolicy | None = None,
 ) -> DoctorCheck:
-    resolved = resolve_policy(repo_root)
+    if resolved is None:
+        resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
     generated_patterns = (
         *resolved.file_shape_paths.generated_patterns,
@@ -976,9 +1005,13 @@ def _file_loc_check(
 
 
 def _complexity_check(
-    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+    repo_root: Path,
+    paths: list[Path],
+    staged_paths: list[Path],
+    resolved: ResolvedPolicy | None = None,
 ) -> DoctorCheck:
-    resolved = resolve_policy(repo_root)
+    if resolved is None:
+        resolved = resolve_policy(repo_root)
     bounds = resolved.complexity
     try:
         blockers = complexity.scan_staged_complexity_violations(
@@ -1032,8 +1065,13 @@ def _complexity_check(
     )
 
 
-def _magic_numbers_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    resolved = resolve_policy(repo_root)
+def _magic_numbers_check(
+    repo_root: Path,
+    paths: list[Path],
+    resolved: ResolvedPolicy | None = None,
+) -> DoctorCheck:
+    if resolved is None:
+        resolved = resolve_policy(repo_root)
     findings = magicnums.detect_magic_regressions(
         paths,
         root=repo_root,
@@ -1057,14 +1095,24 @@ def _magic_numbers_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
 
 
 def _env_policy_check(
-    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+    repo_root: Path,
+    paths: list[Path],
+    staged_paths: list[Path],
+    resolved: ResolvedPolicy | None = None,
 ) -> DoctorCheck:
-    resolved = resolve_policy(repo_root)
+    if resolved is None:
+        resolved = resolve_policy(repo_root)
     blockers = envpolicy.scan_env_policy(
-        staged_paths, root=repo_root, suffixes=resolved.languages.env
+        staged_paths,
+        root=repo_root,
+        suffixes=resolved.languages.env,
+        resolved_policy=resolved,
     )
     standing = envpolicy.scan_env_policy(
-        paths, root=repo_root, suffixes=resolved.languages.env
+        paths,
+        root=repo_root,
+        suffixes=resolved.languages.env,
+        resolved_policy=resolved,
     )
     if blockers:
         return _fail(
@@ -1088,10 +1136,18 @@ def _env_policy_check(
     )
 
 
-def _env_name_ledger_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    resolved = resolve_policy(repo_root)
+def _env_name_ledger_check(
+    repo_root: Path,
+    paths: list[Path],
+    resolved: ResolvedPolicy | None = None,
+) -> DoctorCheck:
+    if resolved is None:
+        resolved = resolve_policy(repo_root)
     findings = envpolicy.scan_env_name_ledger(
-        paths, root=repo_root, suffixes=resolved.languages.env
+        paths,
+        root=repo_root,
+        suffixes=resolved.languages.env,
+        resolved_policy=resolved,
     )
     if findings:
         return _fail(

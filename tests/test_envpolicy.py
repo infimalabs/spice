@@ -6,6 +6,8 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.policy import ENV_POLICY_ALLOW_MARKER
+from spice.policyconfig import resolve_policy
+from spice.studies import envpolicy
 from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import (
     render_env_name_ledger_board,
@@ -32,6 +34,40 @@ def test_env_policy_defaults_still_apply(tmp_path):
     findings = scan_env_policy([Path("sample.py")], root=tmp_path)
 
     assert [finding.name for finding in findings] == names
+
+
+def test_env_studies_reuse_explicit_resolved_policy(tmp_path, monkeypatch):
+    (tmp_path / "spice.toml").write_text(
+        '[policy]\nenv_names = ["HOME"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'value = os.getenv("HOME")  # env-policy: allow\n',
+        encoding="utf-8",
+    )
+    resolved = resolve_policy(tmp_path)
+
+    def unexpected_resolve(_root):
+        raise AssertionError("explicit resolved policy must be reused")
+
+    monkeypatch.setattr(envpolicy, "resolve_policy", unexpected_resolve)
+
+    assert (
+        scan_env_policy(
+            [Path("sample.py")],
+            root=tmp_path,
+            resolved_policy=resolved,
+        )
+        == []
+    )
+    assert (
+        scan_env_name_ledger(
+            [Path("sample.py")],
+            root=tmp_path,
+            resolved_policy=resolved,
+        )
+        == []
+    )
 
 
 def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):

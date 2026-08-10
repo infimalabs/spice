@@ -12,6 +12,7 @@ import pytest
 from spice import defaults
 from spice.config import edit, layers, values
 from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, RtkHealth
+from spice.flexprovenance import FlexProvenanceResolver
 from spice.hooks import doctor, precommit
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.paths import shared_state_root, worktree_state_root
@@ -148,6 +149,57 @@ def test_dev_doctor_parser_exposes_fix_flag():
 
     assert args.dev_command == "doctor"
     assert args.fix
+
+
+def test_doctor_shares_one_policy_and_preloads_only_tracked_source_paths(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    untracked = repo / "untracked.py"
+    untracked.write_text("VALUE = 'untracked'\n", encoding="utf-8")
+    tracked = [Path("pkg/module.py"), Path("spice.toml")]
+    staged = [Path("pkg/module.py")]
+    resolved = doctor.resolve_policy(repo)
+    resolve_calls: list[Path] = []
+    preloaded: list[tuple[Path, ...]] = []
+    observed: list[tuple[object, list[Path], list[Path] | None]] = []
+    _patch_non_hook_checks(monkeypatch)
+    monkeypatch.setattr(doctor, "tracked_paths", lambda _root: tracked)
+    monkeypatch.setattr(doctor, "staged_gate_paths", lambda _root: staged)
+
+    def resolve_once(root):
+        resolve_calls.append(root)
+        return resolved
+
+    def preload(_resolver, paths):
+        preloaded.append(tuple(paths))
+
+    def staged_check(_root, paths, staged_paths, policy):
+        observed.append((policy, paths, staged_paths))
+        return doctor.DoctorCheck("study", "ok", "ok", "study")
+
+    def whole_tree_check(_root, paths, policy):
+        observed.append((policy, paths, None))
+        return doctor.DoctorCheck("study", "ok", "ok", "study")
+
+    monkeypatch.setattr(doctor, "resolve_policy", resolve_once)
+    monkeypatch.setattr(FlexProvenanceResolver, "preload", preload)
+    for name in ("_file_loc_check", "_complexity_check", "_env_policy_check"):
+        monkeypatch.setattr(doctor, name, staged_check)
+    for name in ("_magic_numbers_check", "_env_name_ledger_check"):
+        monkeypatch.setattr(doctor, name, whole_tree_check)
+
+    doctor.run_doctor(repo)
+
+    assert resolve_calls == [repo]
+    assert preloaded == [(Path("pkg/module.py"), Path("spice.toml"))]
+    assert observed == [
+        (resolved, tracked, staged),
+        (resolved, tracked, staged),
+        (resolved, tracked, None),
+        (resolved, tracked, staged),
+        (resolved, tracked, None),
+    ]
 
 
 def test_doctor_requires_approval_for_tracked_disabled_builtins(tmp_path):
