@@ -212,7 +212,18 @@ def test_codex_driver_command_honors_explicit_fast_mode_and_playwright_mcp(
     ) == {"browser": {"contextOptions": {"colorScheme": "dark"}}}
     assert 'personality="pragmatic"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
+    assert command.count("--json") == 1
     assert command[-3:] == ["resume", "thread-1", prompt]
+
+
+def test_codex_fresh_exec_enables_json_before_the_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
+    prompt = "[$spice](/tmp/skill.md)"
+
+    command = DRIVER.build_exec_command(repo_root=tmp_path, prompt=prompt)
+
+    assert command.count("--json") == 1
+    assert command[-2:] == ["--json", prompt]
 
 
 def test_every_driver_honors_exactly_the_launch_knobs_it_declares(

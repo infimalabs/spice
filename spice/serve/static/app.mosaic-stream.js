@@ -353,17 +353,23 @@ function mosaicCandidatesFor(lane, entry, node, geometry) {
 // Width comparison reads the shared edges table's total span rather than
 // colW directly (seam rule: only mosaic-geometry.js's edges[] table
 // construction may compute with colW; every other mosaic file derives
-// widths from that table alone).
-function mosaicGeometryChanged(lane, geometry) {
+// widths from that table alone). A root/module or base-span change alters
+// the lattice topology and needs a full replay. Width alone does not: every
+// existing card can keep its latched track/span while its height is measured
+// at the new shared edges, then settle vertically through the same
+// wet/frozen paths as a content resize.
+function mosaicGeometryChange(lane, geometry) {
   const previous = lane.mosaicGeometry;
-  if (!previous) return true;
+  if (!previous) return { changed: true, replay: true, reason: "initial" };
+  if (previous.M !== geometry.M || previous.baseSpan !== geometry.baseSpan) {
+    return { changed: true, replay: true, reason: "topology" };
+  }
   const previousWidth = previous.edges[mosaicGridTrackCount];
   const nextWidth = geometry.edges[mosaicGridTrackCount];
-  return (
-    Math.abs(previousWidth - nextWidth) > MOSAIC_RESIZE_WIDTH_EPSILON_PX ||
-    previous.M !== geometry.M ||
-    previous.baseSpan !== geometry.baseSpan
-  );
+  if (Math.abs(previousWidth - nextWidth) > MOSAIC_RESIZE_WIDTH_EPSILON_PX) {
+    return { changed: true, replay: false, reason: "width" };
+  }
+  return { changed: false, replay: false, reason: "stable" };
 }
 
 // ---- render application ------------------------------------------------------------
@@ -688,10 +694,11 @@ function mosaicDropVacatedKeys(lane, desiredKeySet) {
 // candidate/decide pass -- span is fixed outside insert/fullReplay)
 // and routes the outcome to wetReplay (wet) or mosaicResolveFrozenResize
 // (frozen, which itself no-ops on shrink/exact and only ripples on true
-// growth). Only cards whose node was actually replaced by a fresh
-// render (content genuinely changed, flagged by the caller) are touched;
-// an untouched reused node must never re-enter this pass; that is what
-// keeps a no-op re-render from moving anything.
+// growth). Ordinarily only cards whose node was actually replaced by a fresh
+// render are touched; an untouched reused node must never re-enter that pass.
+// A width-only geometry change deliberately sets remeasureAll because every
+// survivor's natural height may have changed at the new shared edges. Both
+// modes preserve the latched track/span and share the same vertical dispatch.
 //
 // Dirty entries are resolved in CREATION-INDEX order, not entries'
 // (newest-first) order -- two simultaneously-resolving cards (e.g. two acks
@@ -700,14 +707,22 @@ function mosaicDropVacatedKeys(lane, desiredKeySet) {
 // re-sorts internally, but mosaicResolveFrozenResize applies ripples one
 // card at a time as this loop reaches them, so the loop order IS the
 // ripple-application order and must be deterministic on its own.
-function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
+function mosaicRunContentDiffPass(
+  lane,
+  entries,
+  nodesByKey,
+  geometry,
+  remeasureAll,
+) {
   const dirty = [];
   for (const entry of entries) {
     const card = lane.mosaicCards.find((candidate) => candidate.key === entry.key);
     if (!card) continue;
     const node = nodesByKey.get(entry.key);
-    if (!node || !node.dataset.mosaicContentDirty) continue;
-    delete node.dataset.mosaicContentDirty;
+    if (!node) continue;
+    const contentDirty = Boolean(node.dataset.mosaicContentDirty);
+    if (!contentDirty && !remeasureAll) continue;
+    if (contentDirty) delete node.dataset.mosaicContentDirty;
     dirty.push({ entry, node, creationIndex: card.creationIndex });
   }
   dirty.sort((a, b) => a.creationIndex - b.creationIndex);
@@ -876,6 +891,69 @@ function mosaicRunEpochReplay(lane, entries, nodesByKey, geometry, plan) {
   return { applied: true, fallbackReason: "" };
 }
 
+function mosaicRunStructuralReconcile(
+  lane,
+  entries,
+  nodesByKey,
+  geometry,
+  previousKeySet,
+  addedKeys,
+  widthOnly,
+) {
+  const plan = mosaicStructuralReplayPlan(
+    entries,
+    previousKeySet,
+    addedKeys,
+  );
+  const bounded = mosaicRunEpochReplay(
+    lane,
+    entries,
+    nodesByKey,
+    geometry,
+    plan,
+  );
+  if (bounded.applied) {
+    if (!widthOnly) {
+      mosaicRunContentDiffPass(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        false,
+      );
+    }
+    return;
+  }
+  mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
+    ...plan,
+    fallbackReason: bounded.fallbackReason,
+  });
+}
+
+function mosaicRunIncrementalReconcile(
+  lane,
+  entries,
+  nodesByKey,
+  geometry,
+  widthOnly,
+  newestPrefixEntries,
+  backfillEntries,
+) {
+  // Oldest new card first: sequential inserts assign creation indexes in
+  // true stream order (entries run newest-first).
+  if (newestPrefixEntries) {
+    for (let index = newestPrefixEntries.length - 1; index >= 0; index -= 1) {
+      const entry = newestPrefixEntries[index];
+      mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
+    }
+  } else if (backfillEntries) {
+    mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
+  }
+  if (!widthOnly) {
+    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry, false);
+  }
+}
+
 function mosaicCaptureBackfillViewport(lane) {
   const scroller = lane.messagesEl;
   if (!scroller) return null;
@@ -931,7 +1009,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
   const geometry = mosaicGeometry(mosaicRootFontSizePx(), mosaicContainerWidthPx(lane.messagesEl));
-  const geometryChanged = mosaicGeometryChanged(lane, geometry);
+  const geometryChange = mosaicGeometryChange(lane, geometry);
   lane.mosaicGeometry = geometry;
   const plane = mosaicPlane(lane, geometry);
 
@@ -940,7 +1018,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     plane,
     visibleItems,
     geometry,
-    geometryChanged,
+    geometryChange,
   );
 
   // Motion suppression unions three sources: reveal corrections, the
@@ -966,7 +1044,7 @@ function mosaicReconcileStreamEntries(
   plane,
   visibleItems,
   geometry,
-  geometryChanged,
+  geometryChange,
 ) {
   const entries = mosaicStreamEntries(visibleItems);
   const desiredKeys = entries.map((entry) => entry.key);
@@ -1008,50 +1086,43 @@ function mosaicReconcileStreamEntries(
     ? null
     : mosaicBackfillEntries(entries, previousKeySet, addedKeys);
   const backfillViewport = backfillEntries ? mosaicCaptureBackfillViewport(lane) : null;
-  let replaying = geometryChanged;
+  const structuralReplay =
+    addedKeys.length > 0 && !newestPrefixEntries && !backfillEntries;
+  const replaying = geometryChange.replay || structuralReplay;
 
-  if (geometryChanged) {
+  if (geometryChange.replay) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
-      cause: lane.mosaicCards.length ? "geometry-change" : "initial-layout",
+      cause:
+        geometryChange.reason === "initial"
+          ? "initial-layout"
+          : "geometry-topology-change",
     });
-  } else if (!addedKeys.length) {
-    if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
-    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
-  } else if (newestPrefixEntries) {
-    if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
-    // Oldest new card first: sequential inserts assign creation indexes in
-    // true stream order (entries run newest-first).
-    for (let i = newestPrefixEntries.length - 1; i >= 0; i -= 1) {
-      const entry = newestPrefixEntries[i];
-      mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
-    }
-    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
-  } else if (backfillEntries) {
-    if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
-    mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
-    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
   } else {
-    replaying = true;
-    const plan = mosaicStructuralReplayPlan(
-      entries,
-      previousKeySet,
-      addedKeys,
-    );
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
-    const bounded = mosaicRunEpochReplay(
-      lane,
-      entries,
-      nodesByKey,
-      geometry,
-      plan,
-    );
-    if (bounded.applied) {
-      mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
+    const widthOnly = geometryChange.reason === "width";
+    if (widthOnly) {
+      mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry, true);
+    }
+    if (structuralReplay) {
+      mosaicRunStructuralReconcile(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        previousKeySet,
+        addedKeys,
+        widthOnly,
+      );
     } else {
-      mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
-        ...plan,
-        fallbackReason: bounded.fallbackReason,
-      });
+      mosaicRunIncrementalReconcile(
+        lane,
+        entries,
+        nodesByKey,
+        geometry,
+        widthOnly,
+        newestPrefixEntries,
+        backfillEntries,
+      );
     }
   }
 
@@ -1060,7 +1131,7 @@ function mosaicReconcileStreamEntries(
     replaying,
     backfillViewport,
     changed:
-      geometryChanged ||
+      geometryChange.changed ||
       addedKeys.length > 0 ||
       removedKeys.length > 0 ||
       Boolean(backfillEntries),

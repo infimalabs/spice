@@ -8,9 +8,9 @@ resulting typed event stream -- a whole access pass, or the prose a single
 record carries. Consumer-specific projection stays above it.
 
 Access is the whole contract, so any JSONL a driver can decode reads through
-here -- a supervised launch log is the same dialect echoed to stdout, and it
-earns the same gzip, malformed-line, and offset handling for free rather than
-growing a second private loop.
+here. A supervised launch log may use a distinct driver-owned stdout dialect,
+but it still earns the same gzip, malformed-line, and offset handling rather
+than growing a second private loop.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from threading import RLock
 from typing import Any, BinaryIO, Literal
 
 from spice.agent.driver import AgentDriver
-from spice.transcript.decode import decode_parsed_line
+from spice.transcript.decode import decode_parsed_line, decode_stdout_parsed_line
 from spice.transcript.events import TranscriptEvent
 from spice.transcript.timestamps import normalize_timestamp
 
@@ -129,11 +129,12 @@ class TranscriptEventRead:
 
 @dataclass(frozen=True, slots=True)
 class TranscriptEventReader:
-    """Driver-bound typed access to one authoritative transcript."""
+    """Driver-bound typed access to transcript or captured JSON stdout."""
 
     path: Path
     driver: AgentDriver
     source_actor: str | None = None
+    surface: Literal["transcript", "stdout"] = "transcript"
 
     def read(
         self,
@@ -194,9 +195,14 @@ class TranscriptEventReader:
     def _decode(self, read: TranscriptRead) -> TranscriptEventRead:
         source = str(self.path)
         events: list[TranscriptEvent] = []
+        decoder = (
+            decode_stdout_parsed_line
+            if self.surface == "stdout"
+            else decode_parsed_line
+        )
         for record in read.records:
             events.extend(
-                decode_parsed_line(
+                decoder(
                     record.parsed,
                     self.driver,
                     source=source,

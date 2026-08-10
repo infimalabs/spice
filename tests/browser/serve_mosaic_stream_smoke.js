@@ -391,7 +391,7 @@ function mosaicStreamGeometryChangeCheck() {
   // Mirrors what mosaicScheduleRender's ResizeObserver callback does on
   // a real geometry change: force past the fingerprint early-return
   // (app.stream.js renderMessagesIfChanged) so the render path actually
-  // runs and mosaicGeometryChanged sees the new root/M and full-replays.
+  // runs and mosaicGeometryChange sees the new root/M and full-replays.
   lane.renderedMessageFingerprint = "";
   renderMessagesIfChanged(lane);
   const afterAtNewRoot = mosaicStreamCardSnapshot(lane);
