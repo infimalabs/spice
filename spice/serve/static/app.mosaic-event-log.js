@@ -59,7 +59,26 @@ function mosaicNormalizeEventLogEvent(event) {
   if (event.type === "full-replay") {
     return {
       type: "full-replay",
+      cause: String(event.cause || "unspecified"),
+      fallbackReason: String(event.fallbackReason || ""),
+      olderBarrierKey: String(event.olderBarrierKey || ""),
+      newerBarrierKey: String(event.newerBarrierKey || ""),
       trackCount: mosaicTrackCount(event.trackCount),
+      cards: (event.cards || []).map((card) => ({
+        key: String(card.key),
+        creationIndex: card.creationIndex,
+        candidates: mosaicCloneCandidates(card.candidates),
+      })),
+    };
+  }
+  if (event.type === "epoch-replay") {
+    return {
+      type: "epoch-replay",
+      cause: String(event.cause || "unspecified"),
+      olderBarrierKey: String(event.olderBarrierKey || ""),
+      newerBarrierKey: String(event.newerBarrierKey || ""),
+      trackCount: mosaicTrackCount(event.trackCount),
+      replacedKeys: (event.replacedKeys || []).map((key) => String(key)),
       cards: (event.cards || []).map((card) => ({
         key: String(card.key),
         creationIndex: card.creationIndex,
@@ -175,6 +194,17 @@ function mosaicReplayEventLogFullReplay(cards, event, freezeDepth) {
   );
 }
 
+function mosaicReplayEventLogEpochReplay(cards, event, freezeDepth) {
+  const replayed = mosaicEpochReplay(
+    cards,
+    event.replacedKeys,
+    event.cards,
+    event.trackCount,
+    freezeDepth,
+  );
+  return replayed.map(({ candidates, ...card }) => card);
+}
+
 function mosaicReplayEventLog(log) {
   if (!log || log.version !== MOSAIC_EVENT_LOG_VERSION) {
     throw new Error("unsupported mosaic event-log version");
@@ -205,6 +235,9 @@ function mosaicReplayEventLog(log) {
     } else if (event.type === "full-replay") {
       trackCount = mosaicTrackCount(event.trackCount);
       cards = mosaicReplayEventLogFullReplay(cards, event, freezeDepth);
+    } else if (event.type === "epoch-replay") {
+      trackCount = mosaicTrackCount(event.trackCount);
+      cards = mosaicReplayEventLogEpochReplay(cards, event, freezeDepth);
     } else {
       throw new Error("unknown mosaic event-log event type: " + event.type);
     }

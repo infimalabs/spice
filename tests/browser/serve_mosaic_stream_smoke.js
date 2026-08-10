@@ -82,11 +82,201 @@ function mosaicStreamResetLane(lane) {
   lane.mosaicEventLog = mosaicCreateEventLog(mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicNextCreationIndex = 0;
   lane.mosaicNextBackfillCreationIndex = -1;
-  lane.mosaicAppliedByKey = new Map();
+  lane.mosaicAppliedByNode = new WeakMap();
+  lane.mosaicMeasuredNodes = new Set();
   lane.mosaicPrevMaxRow = 0;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
   lane.mosaicPlaneEl = null;
+  lane.mosaicSettled = false;
+  if (lane.mosaicSettleTimer) clearTimeout(lane.mosaicSettleTimer);
+  lane.mosaicSettleTimer = 0;
+}
+
+function mosaicStreamEpochItem(key, minute, lines, kind, threadId) {
+  const html = Array.from(
+    { length: lines },
+    (_, index) => key + " line " + index,
+  ).join("<br>");
+  return {
+    ack_count: 0,
+    ack_keys: [],
+    index: minute,
+    key,
+    kind: kind || "assistant",
+    threadId: threadId || "epoch-member-a",
+    timestamp: new Date(2026, 0, 2, 0, minute, 0).toISOString(),
+    display_html: kind === "compaction" ? "compacted context" : html,
+    display_text: kind === "compaction" ? "compacted context" : html,
+    text: kind === "compaction" ? "compacted context" : html,
+  };
+}
+
+function mosaicStreamEpochSnapshot(lane, keys) {
+  return keys
+    .map((key) => {
+      const card = lane.mosaicCards.find((candidate) => candidate.key === key);
+      const node = lane.mosaicPlaneEl.querySelector(
+        '[data-message-key="' + CSS.escape(key) + '"]',
+      );
+      return {
+        key,
+        lattice: card ? { ...card } : null,
+        transform: node ? node.style.transform : "",
+        width: node ? node.style.width : "",
+        height: node ? node.style.height : "",
+      };
+    })
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function mosaicStreamFullReplayCount(lane) {
+  return lane.mosaicEventLog.events.filter(
+    (event) => event.type === "full-replay",
+  ).length;
+}
+
+// A second fused member's backlog lands between already-settled cards. The
+// tall first card leaves enough deterministic room in the other six tracks
+// for the short arrival, so the epoch can be reconciled without moving either
+// surrounding compaction divider or either adjacent epoch.
+function mosaicStreamFusedEpochReplayCheck() {
+  const lane = mosaicStreamResolveLane();
+  const member = {
+    targetId: "epoch-member-b",
+    activeThreadId: "epoch-member-b-thread",
+    targetThreadId: "epoch-member-b-thread",
+    knownMessages: [],
+    knownMessageKeys: new Set(),
+  };
+  mosaicStreamResetLane(lane);
+  lane.retainedMessageLimit = 100;
+  const initial = [
+    mosaicStreamEpochItem("epoch-newer", 150, 2),
+    mosaicStreamEpochItem("epoch-comp-newer", 120, 1, "compaction"),
+    mosaicStreamEpochItem("epoch-short", 90, 1),
+    mosaicStreamEpochItem("epoch-tall", 60, 14),
+    mosaicStreamEpochItem("epoch-comp-older", 30, 1, "compaction"),
+    mosaicStreamEpochItem("epoch-older", 0, 2),
+  ];
+  lane.knownMessages = initial;
+  lane.knownMessageKeys = new Set(initial.map((item) => item.key));
+  member.knownMessages = [];
+  member.knownMessageKeys = new Set();
+  const originalGroupMembers = laneGroupMemberLanes;
+  laneGroupMemberLanes = function (candidate) {
+    return candidate === lane ? [lane, member] : originalGroupMembers(candidate);
+  };
+  try {
+    mosaicRenderMessageStream(lane, laneGroupMergedMessages(lane));
+    mosaicSettleNow(lane);
+  } catch (error) {
+    laneGroupMemberLanes = originalGroupMembers;
+    throw error;
+  }
+
+  const outsideKeys = [
+    "epoch-newer",
+    "epoch-comp-newer",
+    "epoch-comp-older",
+    "epoch-older",
+  ];
+  const before = mosaicStreamEpochSnapshot(lane, outsideKeys);
+  const fullReplaysBefore = mosaicStreamFullReplayCount(lane);
+  const writes = [];
+  const originalApply = mosaicApplyCardPosition;
+  mosaicApplyCardPosition = function (node, card, previous, ...args) {
+    const next = originalApply(node, card, previous, ...args);
+    if (next !== previous) writes.push(card.key);
+    return next;
+  };
+  try {
+    const backlog = mosaicStreamEpochItem(
+      "epoch-member-b-backlog",
+      75,
+      1,
+      "assistant",
+      "epoch-member-b",
+    );
+    member.knownMessages = [backlog];
+    member.knownMessageKeys = new Set([backlog.key]);
+    mosaicRenderMessageStream(lane, laneGroupMergedMessages(lane));
+  } finally {
+    mosaicApplyCardPosition = originalApply;
+    laneGroupMemberLanes = originalGroupMembers;
+  }
+
+  const event = lane.mosaicEventLog.events.at(-1) || null;
+  const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
+  return {
+    before,
+    after: mosaicStreamEpochSnapshot(lane, outsideKeys),
+    outsideWrites: writes.filter((key) => outsideKeys.includes(key)),
+    fullReplaysBefore,
+    fullReplaysAfter: mosaicStreamFullReplayCount(lane),
+    backlogPresent: lane.mosaicCards.some(
+      (card) => card.key === "epoch-member-b-backlog",
+    ),
+    overlap: mosaicStreamCardsOverlap(lane.mosaicCards),
+    replayMatches:
+      JSON.stringify(mosaicEventLogLayout(lane.mosaicCards)) ===
+      JSON.stringify(replayed.layout),
+    event,
+  };
+}
+
+// Time rules have derived keys, so changing timestamp adjacency removes one
+// structural key and adds another without adding a message. Drive the live
+// mosaic entry/reconcile path directly with a stable older compaction floor;
+// the second render occurs after the settle latch and must remain epoch-local.
+function mosaicStreamTimeRuleEpochReplayCheck() {
+  const lane = mosaicStreamResolveLane();
+  mosaicStreamResetLane(lane);
+  const first = mosaicStreamEpochItem("time-first", 60, 2);
+  const following = mosaicStreamEpochItem("time-following", 80, 2);
+  const olderBarrier = mosaicStreamEpochItem(
+    "time-comp-older",
+    30,
+    1,
+    "compaction",
+  );
+  mosaicRenderMessageStream(lane, [first, following, olderBarrier]);
+  mosaicSettleNow(lane);
+
+  const outsideKeys = ["time-comp-older"];
+  const before = mosaicStreamEpochSnapshot(lane, outsideKeys);
+  const fullReplaysBefore = mosaicStreamFullReplayCount(lane);
+  const writes = [];
+  const originalApply = mosaicApplyCardPosition;
+  mosaicApplyCardPosition = function (node, card, previous, ...args) {
+    const next = originalApply(node, card, previous, ...args);
+    if (next !== previous) writes.push(card.key);
+    return next;
+  };
+  try {
+    following.timestamp = new Date(2026, 0, 2, 2, 20, 0).toISOString();
+    mosaicRenderMessageStream(lane, [first, following, olderBarrier]);
+  } finally {
+    mosaicApplyCardPosition = originalApply;
+  }
+
+  const event = lane.mosaicEventLog.events.at(-1) || null;
+  const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
+  return {
+    before,
+    after: mosaicStreamEpochSnapshot(lane, outsideKeys),
+    outsideWrites: writes.filter((key) => outsideKeys.includes(key)),
+    fullReplaysBefore,
+    fullReplaysAfter: mosaicStreamFullReplayCount(lane),
+    rulePresent: lane.mosaicCards.some(
+      (card) => card.key === "time-rule:time-following",
+    ),
+    overlap: mosaicStreamCardsOverlap(lane.mosaicCards),
+    replayMatches:
+      JSON.stringify(mosaicEventLogLayout(lane.mosaicCards)) ===
+      JSON.stringify(replayed.layout),
+    event,
+  };
 }
 
 function mosaicStreamBottomDistance(lane) {
@@ -701,6 +891,12 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamEventLogReplayCheck,
       mosaicStreamMeasureClobberCheck,
       mosaicStreamBulkAppendCheck,
+      mosaicStreamEpochItem,
+      mosaicStreamEpochSnapshot,
+      mosaicStreamFullReplayCount,
+      mosaicStreamCardsOverlap,
+      mosaicStreamFusedEpochReplayCheck,
+      mosaicStreamTimeRuleEpochReplayCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -984,6 +1180,21 @@ function assertEventLogReplayInvariants(eventLogReplay, fail) {
     fail("mosaic event-log replay did not reproduce the live lattice byte-identically");
 }
 
+function assertEpochReplayInvariants(result, expected, fail) {
+  if (JSON.stringify(result.before) !== JSON.stringify(result.after))
+    fail(expected + " changed a card outside the affected compaction epoch");
+  if (result.outsideWrites.length)
+    fail(expected + " wrote an outside card position: " + result.outsideWrites.join(","));
+  if (result.fullReplaysAfter !== result.fullReplaysBefore)
+    fail(expected + " entered whole-board full replay");
+  if (result.overlap)
+    fail(expected + " produced overlapping cards: " + JSON.stringify(result.overlap));
+  if (!result.replayMatches)
+    fail(expected + " event log did not reproduce the live epoch lattice");
+  if (!result.event || result.event.type !== "epoch-replay")
+    fail(expected + " did not record an epoch-replay event");
+}
+
 function assertMosaicStreamResult(result) {
   if (result.measureClobber.mismatches.length)
     throw new Error(
@@ -1014,6 +1225,23 @@ function assertMosaicStreamResult(result) {
   assertBarrierResetInvariants(result.barrierResult, fail);
   assertBackfillInvariants(result.backfillResult, fail);
   assertEventLogReplayInvariants(result.eventLogReplay, fail);
+  assertEpochReplayInvariants(result.fusedEpochReplay, "fused backlog", fail);
+  if (!result.fusedEpochReplay.backlogPresent)
+    fail("fused backlog card was not reconciled");
+  if (result.fusedEpochReplay.event.cause !== "interleaved-message-insertion")
+    fail("fused backlog replay did not classify its structural cause");
+  if (
+    result.fusedEpochReplay.event.olderBarrierKey !== "epoch-comp-older" ||
+    result.fusedEpochReplay.event.newerBarrierKey !== "epoch-comp-newer"
+  )
+    fail("fused backlog replay did not identify both nearest compaction barriers");
+  assertEpochReplayInvariants(result.timeRuleEpochReplay, "time-rule churn", fail);
+  if (!result.timeRuleEpochReplay.rulePresent)
+    fail("time-rule churn did not add its derived rule card");
+  if (result.timeRuleEpochReplay.event.cause !== "derived-time-rule-change")
+    fail("time-rule replay did not classify its structural cause");
+  if (result.timeRuleEpochReplay.event.olderBarrierKey !== "time-comp-older")
+    fail("time-rule replay did not identify its nearest compaction floor");
 }
 
 async function waitForMosaicStreamGlobals(page) {
@@ -1024,6 +1252,7 @@ async function waitForMosaicStreamGlobals(page) {
       "trimKnownMessages",
       "mosaicReplayEventLog",
       "mosaicEventLogLayout",
+      "laneGroupMergedMessages",
     ],
   });
 }
@@ -1049,6 +1278,12 @@ async function run() {
       const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
       const measureClobber = await page.evaluate(mosaicStreamMeasureClobberCheck);
       const bulkAppend = await page.evaluate(mosaicStreamBulkAppendCheck);
+      const fusedEpochReplay = await page.evaluate(
+        mosaicStreamFusedEpochReplayCheck,
+      );
+      const timeRuleEpochReplay = await page.evaluate(
+        mosaicStreamTimeRuleEpochReplayCheck,
+      );
       const result = {
         insertResult,
         removalResult,
@@ -1062,6 +1297,8 @@ async function run() {
         eventLogReplay,
         measureClobber,
         bulkAppend,
+        fusedEpochReplay,
+        timeRuleEpochReplay,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };
