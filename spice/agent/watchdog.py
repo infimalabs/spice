@@ -67,7 +67,7 @@ from spice.transcript.assembly import (
     AssembledMessageReducer,
     SpanKind,
 )
-from spice.transcript.decode import decode_parsed_line
+from spice.transcript.decode import decode_stdout_parsed_line
 from spice.transcript.events import (
     AssistantText,
     Compaction,
@@ -760,13 +760,13 @@ class SupervisedProseFold:
 
 
 class JsonStdoutScanner:
-    """Read a stream-json `exec` stdout as typed transcript facts.
+    """Read a JSONL `exec` stdout as typed transcript facts.
 
-    Each stdout line is one transcript record in the driver's own dialect, so
-    it crosses into typed events exactly once, through the same decode the
-    transcript reader uses. A line carrying prose and a tool call together
-    stays both facts instead of collapsing to whichever one a canonical
-    projection kept.
+    Each stdout line crosses into typed events exactly once through the
+    driver's stdout decode. Drivers may share that dialect with their durable
+    transcript or provide a distinct exec adapter; the reducer above either
+    form is identical. A line carrying prose and a tool call together stays
+    both facts instead of collapsing to whichever one a projection kept.
 
     Compaction reports on its own callback rather than as activity: a
     compacting agent is alive but has produced nothing, so it must hold the
@@ -801,7 +801,7 @@ class JsonStdoutScanner:
             return
         if not isinstance(raw, dict):
             return
-        events = decode_parsed_line(
+        events = decode_stdout_parsed_line(
             raw, self._driver, source=STDOUT_SOURCE, line=self._line
         )
         compactions = [event for event in events if isinstance(event, Compaction)]

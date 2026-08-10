@@ -624,7 +624,29 @@ def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
         "1jNXjwdF.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
-    process = _FakeProcess(stdout=io.StringIO("codex\nalpha beta\nexec\n"))
+    records = [
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "message-1",
+                "type": "agent_message",
+                "phase": "commentary",
+                "text": "alpha beta",
+            },
+        },
+        {
+            "type": "item.started",
+            "item": {
+                "id": "command-1",
+                "type": "command_execution",
+                "command": "spice task status",
+                "status": "in_progress",
+            },
+        },
+    ]
+    process = _FakeProcess(
+        stdout=io.StringIO("".join(f"{json.dumps(record)}\n" for record in records))
+    )
     log_path = repo / "supervisor.log"
     activities: list[str] = []
 

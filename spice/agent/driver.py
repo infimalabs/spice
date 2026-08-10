@@ -31,6 +31,7 @@ from typing import Any, Callable, Iterable, Mapping, overload
 
 from spice import defaults
 from spice.agent.claudetranscript import claude_line_events
+from spice.agent.codexexec import codex_exec_line_events
 from spice.agent.codextranscript import codex_line_events
 from spice.errors import SpiceError
 from spice.extensions import (
@@ -87,11 +88,11 @@ LAUNCH_KNOBS: frozenset[str] = frozenset(
 class AgentDriver:
     """One agent CLI's dialect, and the only place its shape is known.
 
-    Transcript hooks and the escape hatch. Three hooks carry dialect knowledge
-    across the substrate seam: `transcript_line_events` decodes a raw line into
-    typed events, `context_snapshot_fields` reads per-turn token usage, and
-    `stream_failure_fields` types a terminal stdout failure. Everything above
-    the seam consumes typed events and never inspects a dialect's raw shape.
+    Transcript and stdout hooks carry dialect knowledge across the substrate
+    seam: each surface decodes a raw line into typed events, while
+    `context_snapshot_fields` reads per-turn token usage and
+    `stream_failure_fields` types a terminal failure. Everything above the seam
+    consumes typed events and never inspects a dialect's raw shape.
 
     A hook is the escape hatch for a genuinely dialect-local signal, and the bar
     is deliberately high: the fact must exist in one dialect's wire format and
@@ -124,7 +125,7 @@ class AgentDriver:
     out_of_credits_patterns: tuple[re.Pattern[str], ...] = ()
     # How the supervisor reassembles assistant messages from `exec` stdout:
     # "marker" reads the driver's plain-text section markers; "json" parses
-    # one JSON event per line (a stream-json transcript echoed to stdout).
+    # one driver-owned JSON event per line.
     stdout_format: str = "marker"
     # Optional driver-owned support boundary for hook-delivered steering after
     # native tool calls. Consumers must check this rather than assuming every
@@ -254,6 +255,17 @@ class AgentDriver:
             line=line,
         )
 
+    def stdout_line_events(
+        self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
+    ) -> list[TranscriptEvent]:
+        """Decode one JSON stdout record into the typed event vocabulary.
+
+        Most drivers echo their transcript dialect to stdout, so the default is
+        deliberately the transcript hook. A CLI with a distinct exec envelope
+        overrides only this method; supervision above the seam stays shared.
+        """
+        return self.transcript_line_events(raw, source=source, line=line)
+
     def _with_reader_facts(
         self,
         raw: dict[str, Any],
@@ -261,6 +273,7 @@ class AgentDriver:
         *,
         source: str,
         line: int,
+        stdout: bool = False,
     ) -> list[TranscriptEvent]:
         timestamp = raw.get("timestamp")
         stamper = LineStamper(
@@ -273,7 +286,11 @@ class AgentDriver:
         cwd = raw.get("cwd")
         if isinstance(cwd, str) and cwd:
             decoded.append(WorkingDirectory(at=stamper.stamp(), path=cwd))
-        context = self.context_snapshot_fields(raw)
+        context = (
+            self.stdout_context_snapshot_fields(raw)
+            if stdout
+            else self.context_snapshot_fields(raw)
+        )
         if context is not None:
             decoded.append(
                 ContextUsage(
@@ -283,7 +300,11 @@ class AgentDriver:
                     model_context_window=context.model_context_window,
                 )
             )
-        failure = self.stream_failure_fields(raw)
+        failure = (
+            self.stdout_stream_failure_fields(raw)
+            if stdout
+            else self.stream_failure_fields(raw)
+        )
         if failure is not None:
             failure_kind = failure.get("kind")
             if isinstance(failure_kind, str) and failure_kind:
@@ -314,6 +335,12 @@ class AgentDriver:
             model_context_window=_as_int(info.get("model_context_window"), None),
         )
 
+    def stdout_context_snapshot_fields(
+        self, raw: dict[str, Any]
+    ) -> ContextUsageFields | None:
+        """Decode usage from JSON stdout; defaults to the transcript shape."""
+        return self.context_snapshot_fields(raw)
+
     def process_failure_kind(self, *, exit_code: int, output: str) -> str:
         del exit_code
         return (
@@ -325,7 +352,7 @@ class AgentDriver:
         )
 
     def stream_failure_fields(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Terminal failure fields carried by one stdout stream line, or None.
+        """Terminal failure fields carried by one transcript line, or None.
 
         A driver whose CLI reports account-level rejections structurally (an
         error-flagged result event, a rate-limit event with a reset horizon)
@@ -336,6 +363,12 @@ class AgentDriver:
         """
         del raw
         return None
+
+    def stdout_stream_failure_fields(
+        self, raw: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Decode a JSON stdout failure; defaults to the transcript shape."""
+        return self.stream_failure_fields(raw)
 
 
 PLAYWRIGHT_MCP_SERVER_NAME = defaults.string("agent", "playwright_mcp", "server_name")
@@ -611,11 +644,68 @@ class CodexDriver(AgentDriver):
                 "danger-full-access",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "--dangerously-bypass-hook-trust",
+                "--json",
             ]
         )
         if thread_id:
             return [*command, "resume", thread_id, prompt]
         return [*command, prompt]
+
+    def stdout_line_events(
+        self, raw: dict[str, Any], *, source: str = UNLOCATED_SOURCE, line: int = 0
+    ) -> list[TranscriptEvent]:
+        return self._with_reader_facts(
+            raw,
+            codex_exec_line_events(raw, source=source, line=line),
+            source=source,
+            line=line,
+            stdout=True,
+        )
+
+    def stdout_context_snapshot_fields(
+        self, raw: dict[str, Any]
+    ) -> ContextUsageFields | None:
+        transcript = super().stdout_context_snapshot_fields(raw)
+        if transcript is not None:
+            return transcript
+        if raw.get("type") != "turn.completed":
+            return None
+        usage = raw.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        input_tokens = _as_int(usage.get("input_tokens"))
+        output_tokens = _as_int(usage.get("output_tokens"))
+        total = input_tokens + output_tokens
+        if total <= 0:
+            return None
+        last = TokenUsage(
+            input_tokens=input_tokens,
+            cached_input_tokens=_as_int(usage.get("cached_input_tokens")),
+            cache_write_input_tokens=0,
+            output_tokens=output_tokens,
+            reasoning_output_tokens=_as_int(usage.get("reasoning_output_tokens")),
+            total_tokens=total,
+        )
+        return ContextUsageFields(
+            last=last,
+            cumulative=last,
+            model_context_window=self.default_context_window or None,
+        )
+
+    def stdout_stream_failure_fields(
+        self, raw: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if raw.get("type") not in {"error", "turn.failed"}:
+            return None
+        encoded = json.dumps(raw, sort_keys=True)
+        if (
+            "UsageLimitExceeded" in encoded
+            or '"http_status_code": 429' in encoded
+            or '"httpStatusCode": 429' in encoded
+        ):
+            return {"kind": "out-of-credits"}
+        kind = self.process_failure_kind(exit_code=0, output=encoded)
+        return {"kind": kind} if kind else None
 
 
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
@@ -1233,9 +1323,10 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
         {"context compacted", "exec", "tokens used", "user"}
     ),
     stdout_compaction_marker="context compacted",
-    session_id_pattern=re.compile(r"^session id:\s*(\S+)\s*$", re.MULTILINE),
+    session_id_pattern=re.compile(r'"thread_id"\s*:\s*"([0-9a-fA-F-]{36})"'),
     stdout_activity_markers=frozenset({"context compacted", "exec"}),
     out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
+    stdout_format="json",
     post_tool_hook=PostToolHookCapability(
         config_surface="Codex config.toml hooks.PostToolUse",
         supported_tools=("Bash", "apply_patch", "MCP"),

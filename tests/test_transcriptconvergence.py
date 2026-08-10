@@ -79,7 +79,10 @@ def test_fresh_both_driver_fixtures_cross_every_shared_projection(
     assert_parity(
         supervised_judgments,
         replayed_judgments,
-        corpus=cases,
+        # Claude's JSON stdout is its transcript dialect. Codex exec JSON has a
+        # deliberately distinct adapter, covered by test_codexexecevents and
+        # launch-history tests; rollout bytes are not valid Codex stdout bytes.
+        corpus=tuple(case for case in cases if case.driver is CLAUDE_DRIVER),
         labels=("watchdog stdout", "watchdog replay"),
     )
     assert_parity(
