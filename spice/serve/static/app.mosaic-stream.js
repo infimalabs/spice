@@ -502,52 +502,67 @@ function mosaicEntryIsCompaction(entry) {
 // epoch, not a trusted boundary. Time rules are full-span layout cards too,
 // but they are derived from adjacency and can appear/disappear as part of
 // the change, so they cannot partition structural replay.
-function mosaicStructuralReplayPlan(entries, previousKeySet, addedKeys) {
-  const addedKeySet = new Set(addedKeys);
-  const affectedIndexes = [];
-  let insertedMessage = false;
-  for (let index = 0; index < entries.length; index += 1) {
-    if (!addedKeySet.has(entries[index].key)) continue;
-    affectedIndexes.push(index);
-    if (entries[index].item) insertedMessage = true;
-  }
-  const firstAffected = affectedIndexes.length
-    ? Math.min(...affectedIndexes)
-    : 0;
-  const lastAffected = affectedIndexes.length
-    ? Math.max(...affectedIndexes)
-    : entries.length - 1;
-
-  let newerBarrierIndex = -1;
-  for (let index = firstAffected - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (mosaicEntryIsCompaction(entry) && previousKeySet.has(entry.key)) {
-      newerBarrierIndex = index;
-      break;
-    }
-  }
-  let olderBarrierIndex = entries.length;
-  for (let index = lastAffected + 1; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (mosaicEntryIsCompaction(entry) && previousKeySet.has(entry.key)) {
-      olderBarrierIndex = index;
-      break;
-    }
-  }
-
+function mosaicStructuralReplayPlan(
+  startIndex,
+  endIndex,
+  newerBarrierKey,
+  olderBarrierKey,
+  insertedMessage,
+) {
   return {
+    startIndex,
+    endIndex,
+    newerBarrierKey,
+    olderBarrierKey,
     cause: insertedMessage
       ? "interleaved-message-insertion"
       : "derived-time-rule-change",
-    startIndex: newerBarrierIndex + 1,
-    endIndex: olderBarrierIndex,
-    newerBarrierKey:
-      newerBarrierIndex >= 0 ? entries[newerBarrierIndex].key : "",
-    olderBarrierKey:
-      olderBarrierIndex < entries.length
-        ? entries[olderBarrierIndex].key
-        : "",
   };
+}
+
+function mosaicStructuralReplayPlans(entries, previousKeySet, addedKeys) {
+  const addedKeySet = new Set(addedKeys);
+  const plans = [];
+  let startIndex = 0;
+  let newerBarrierKey = "";
+  let affected = false;
+  let insertedMessage = false;
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (mosaicEntryIsCompaction(entry) && previousKeySet.has(entry.key)) {
+      if (affected) {
+        plans.push(
+          mosaicStructuralReplayPlan(
+            startIndex,
+            index,
+            newerBarrierKey,
+            entry.key,
+            insertedMessage,
+          ),
+        );
+      }
+      startIndex = index + 1;
+      newerBarrierKey = entry.key;
+      affected = false;
+      insertedMessage = false;
+      continue;
+    }
+    if (!addedKeySet.has(entry.key)) continue;
+    affected = true;
+    if (entry.item) insertedMessage = true;
+  }
+  if (affected) {
+    plans.push(
+      mosaicStructuralReplayPlan(
+        startIndex,
+        entries.length,
+        newerBarrierKey,
+        "",
+        insertedMessage,
+      ),
+    );
+  }
+  return plans;
 }
 
 // Creation indexes are stable order labels, not array offsets. Re-label only
@@ -894,34 +909,36 @@ function mosaicRunStructuralReconcile(
   addedKeys,
   widthOnly,
 ) {
-  const plan = mosaicStructuralReplayPlan(
+  const plans = mosaicStructuralReplayPlans(
     entries,
     previousKeySet,
     addedKeys,
   );
-  const bounded = mosaicRunEpochReplay(
-    lane,
-    entries,
-    nodesByKey,
-    geometry,
-    plan,
-  );
-  if (bounded.applied) {
-    if (!widthOnly) {
-      mosaicRunContentDiffPass(
-        lane,
-        entries,
-        nodesByKey,
-        geometry,
-        false,
-      );
+  for (const plan of plans) {
+    const bounded = mosaicRunEpochReplay(
+      lane,
+      entries,
+      nodesByKey,
+      geometry,
+      plan,
+    );
+    if (!bounded.applied) {
+      mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
+        ...plan,
+        fallbackReason: bounded.fallbackReason,
+      });
+      return;
     }
-    return;
   }
-  mosaicRunFullReplay(lane, entries, nodesByKey, geometry, {
-    ...plan,
-    fallbackReason: bounded.fallbackReason,
-  });
+  if (!widthOnly) {
+    mosaicRunContentDiffPass(
+      lane,
+      entries,
+      nodesByKey,
+      geometry,
+      false,
+    );
+  }
 }
 
 function mosaicRunIncrementalReconcile(
