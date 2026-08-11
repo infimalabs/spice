@@ -37,6 +37,7 @@ from spice.tasks import (
 from spice.tasks.git import boundaries
 from spice.tasks.claimstate import (
     CLAIM_CLEAR,
+    _claim_worktree_matches,
     _claimed_task_capture_recovery_message,
     _live_claim,
     _live_claim_text,
@@ -75,7 +76,9 @@ def claim(handle: str, *, steal: bool = False) -> str:
     _require_pending(row, "claim")
     actor = tw.current_actor()
     owner = str(row.get("claim_by") or "")
-    if owner == actor and row.get("start"):
+    site = current_claim_site()
+    same_actor_active = owner == actor and bool(row.get("start"))
+    if same_actor_active and _claim_worktree_matches(row, site.worktree):
         _require_single_active_slot(actor, action="task claim", target=row)
         # Claiming the task this actor already holds is an ownership no-op,
         # not new work and not a lease-renewal surface. In particular, do not
@@ -98,13 +101,15 @@ def claim(handle: str, *, steal: bool = False) -> str:
         )
     uuid = identity.uuid_of(row)
     guarded = not steal and owner != actor
-    # Every path reaching this point changes ownership or repairs a partial
-    # claim, so bring the tree to the current baseline before recording it.
-    notes = boundaries.prepare_for_claim().notes
+    # A same-actor active row from another worktree is a real site repair, not
+    # the current-worktree no-op above. Preserve that established repair path
+    # without treating its current-task work as unrelated dirt; every other
+    # path starts or transfers work and must pass the clean-tree boundary.
+    notes = [] if same_actor_active else boundaries.prepare_for_claim().notes
     if not do_claim(
         uuid,
         actor,
-        site=current_claim_site(),
+        site=site,
         context_thread=None,
         lease_seconds=None,
         guard_unclaimed=guarded,
