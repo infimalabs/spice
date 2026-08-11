@@ -442,6 +442,30 @@ def test_task_claim_different_task_still_refuses_with_dirty_current_work(
     assert identity.resolve(other) == other_before
 
 
+def test_task_claim_same_actor_other_worktree_repairs_the_claim_site(
+    remote_task_repo,
+):
+    handle = create.add(
+        "Same actor repairs a claim from another worktree",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    task_id = identity.uuid_of(identity.resolve(handle))
+    other_worktree = remote_task_repo.parent / "other-worktree"
+    tw.run([task_id, "modify", f"claim_worktree:{other_worktree}"])
+    before = identity.resolve(handle)
+    version_before = opslog.task_version(task_id)
+
+    output = ops.claim(handle)
+    after = identity.resolve(handle)
+
+    assert output == f"{handle}\n{ops.claim_drive_line(handle)}"
+    assert Path(after["claim_worktree"]) == remote_task_repo
+    assert after["claim_at"] != before["claim_at"]
+    assert opslog.task_version(task_id) > version_before
+
+
 def test_task_add_claim_second_slot_leads_with_unclaiming_the_held_task(task_repo):
     held = create.add(
         "First claim owns the slot",
