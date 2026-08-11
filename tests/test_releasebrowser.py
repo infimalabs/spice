@@ -35,6 +35,55 @@ def _load_manifest() -> dict[str, Any]:
     return _node("console.log(JSON.stringify(require(process.argv[1])))", str(MANIFEST))
 
 
+def test_release_browser_runner_help_needs_no_repository_bootstrap(
+    tmp_path: Path,
+) -> None:
+    isolated_runner = tmp_path / RUNNER.name
+    isolated_runner.write_text(RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+
+    for argument in ("--help", "-h"):
+        result = subprocess.run(
+            ["node", str(isolated_runner), argument],
+            cwd=tmp_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        assert result.stderr == ""
+        assert "Usage: node tests/browser/run_release_smokes.js" in result.stdout
+        assert "--check-manifest" in result.stdout
+
+
+def test_release_browser_runner_refuses_unknown_options() -> None:
+    result = subprocess.run(
+        ["node", str(RUNNER), "--unknown"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("unknown option: --unknown\n\nUsage: ")
+
+
+def test_release_browser_runner_checks_default_manifest() -> None:
+    result = subprocess.run(
+        ["node", str(RUNNER), "--check-manifest"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout == "PASS release browser manifest completeness\n"
+
+
 def test_release_browser_manifest_classifies_every_smoke_once() -> None:
     manifest = _load_manifest()
     release_safe = [entry["path"] for entry in manifest["releaseSafe"]]
