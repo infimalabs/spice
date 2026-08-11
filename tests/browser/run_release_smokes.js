@@ -7,7 +7,15 @@ const repoRoot = path.resolve(browserDir, "..", "..");
 const defaultManifestPath = path.join(browserDir, "release_smoke_manifest.js");
 const maxParallel = 4;
 const scenarioTimeoutMs = 120000;
+const argumentErrorExitCode = 2;
 const reportPathEnv = "SPICE_RELEASE_BROWSER_REPORT"; // env-policy: allow
+const runnerUsage = [
+  "Usage: node tests/browser/run_release_smokes.js [--check-manifest | MANIFEST]",
+  "",
+  "Options:",
+  "  -h, --help        Show this help.",
+  "  --check-manifest  Validate the default manifest without running smokes.",
+].join("\n");
 
 function loadManifest(manifestPath) {
   const loaded = require(manifestPath);
@@ -168,12 +176,35 @@ function checkDefaultManifest() {
   console.log("PASS release browser manifest completeness");
 }
 
+function parseArguments(argv) {
+  if (argv.length > 1)
+    return {
+      error: "expected at most one argument, received " + argv.length,
+    };
+  const [argument] = argv;
+  if (argument === "--help" || argument === "-h") return { mode: "help" };
+  if (argument === "--check-manifest") return { mode: "check-manifest" };
+  if (argument?.startsWith("-"))
+    return { error: "unknown option: " + argument };
+  return { manifestPath: argument, mode: "run" };
+}
+
 async function main() {
-  if (process.argv[2] === "--check-manifest") {
+  const options = parseArguments(process.argv.slice(2));
+  if (options.error) {
+    console.error(options.error + "\n\n" + runnerUsage);
+    process.exitCode = argumentErrorExitCode;
+    return;
+  }
+  if (options.mode === "help") {
+    console.log(runnerUsage);
+    return;
+  }
+  if (options.mode === "check-manifest") {
     checkDefaultManifest();
     return;
   }
-  await run(process.argv[2]);
+  await run(options.manifestPath);
 }
 
 if (require.main === module) {
