@@ -74,9 +74,20 @@ def claim(handle: str, *, steal: bool = False) -> str:
     row = identity.resolve(handle)
     _require_pending(row, "claim")
     actor = tw.current_actor()
+    owner = str(row.get("claim_by") or "")
+    if owner == actor and row.get("start"):
+        _require_single_active_slot(actor, action="task claim", target=row)
+        # Claiming the task this actor already holds is an ownership no-op,
+        # not new work and not a lease-renewal surface. In particular, do not
+        # run the clean-tree claim boundary or rewrite claim metadata: the
+        # current task's dirty/uncaptured work is exactly what the claim owns,
+        # and `task reclaim` is the explicit operation for refreshing its
+        # lease. Returning the ordinary drive guidance keeps repeated `claim`
+        # invocations idempotent all the way through the CLI.
+        handle_text = identity.render_handle(row)
+        return "\n".join([handle_text, claim_drive_line(handle_text)])
     _require_manual_claim_allowed(row, actor)
     _require_single_active_slot(actor, action="task claim", target=row)
-    owner = str(row.get("claim_by") or "")
     if owner and owner != actor and not steal:
         raise SpiceError(
             f"use --steal to take the task; it is already claimed by {owner}"
@@ -87,10 +98,9 @@ def claim(handle: str, *, steal: bool = False) -> str:
         )
     uuid = identity.uuid_of(row)
     guarded = not steal and owner != actor
-    # A fresh claim (not a repair of our own already-active row) brings the
-    # tree to the current baseline before the claim records its commit.
-    is_repair = owner == actor and bool(row.get("start"))
-    notes = [] if is_repair else boundaries.prepare_for_claim().notes
+    # Every path reaching this point changes ownership or repairs a partial
+    # claim, so bring the tree to the current baseline before recording it.
+    notes = boundaries.prepare_for_claim().notes
     if not do_claim(
         uuid,
         actor,
