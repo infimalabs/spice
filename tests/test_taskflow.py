@@ -24,6 +24,7 @@ from spice.tasks import (
     create,
     identity,
     ops,
+    opslog,
     render,
     tw,
 )
@@ -372,6 +373,73 @@ def test_task_claim_second_slot_leads_with_unclaiming_the_held_task(task_repo):
         f"claiming {other}; task claim would create multiple active "
         f"claims for {ACTOR_A}"
     )
+
+
+@pytest.mark.parametrize("local_state", ["dirty", "uncaptured-commit"])
+def test_task_claim_owned_active_task_is_a_git_state_agnostic_noop(
+    remote_task_repo, local_state
+):
+    handle = create.add(
+        "Repeat claim preserves current work",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    before = identity.resolve(handle)
+    task_id = identity.uuid_of(before)
+    version_before = opslog.task_version(task_id)
+    if local_state == "dirty":
+        (remote_task_repo / "current-task.txt").write_text(
+            "uncommitted current-task work\n",
+            encoding="utf-8",
+        )
+    else:
+        _make_loose_commit(
+            remote_task_repo,
+            subject="uncaptured current-task work",
+        )
+
+    output = ops.claim(handle)
+
+    assert output == f"{handle}\n{ops.claim_drive_line(handle)}"
+    assert identity.resolve(handle) == before
+    # Exact row equality covers claim identity, phase, timestamps, and lease;
+    # the durable operation version additionally proves no duplicate claim
+    # transaction was appended behind an unchanged projection.
+    assert opslog.task_version(task_id) == version_before
+
+
+def test_task_claim_different_task_still_refuses_with_dirty_current_work(
+    remote_task_repo,
+):
+    held = create.add(
+        "Dirty work remains owned by this task",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+        claim=True,
+    )
+    other = create.add(
+        "Dirty work cannot switch here",
+        project="task.unit",
+        origin="ack:1jN54zJJ",
+    )
+    held_before = identity.resolve(held)
+    other_before = identity.resolve(other)
+    (remote_task_repo / "current-task.txt").write_text(
+        "uncommitted current-task work\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.claim(other)
+
+    assert str(exc_info.value) == (
+        f"run `spice task unclaim {held}` (or complete it) before "
+        f"claiming {other}; task claim would create multiple active "
+        f"claims for {ACTOR_A}"
+    )
+    assert identity.resolve(held) == held_before
+    assert identity.resolve(other) == other_before
 
 
 def test_task_add_claim_second_slot_leads_with_unclaiming_the_held_task(task_repo):
