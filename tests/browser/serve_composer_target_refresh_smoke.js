@@ -42,6 +42,7 @@ async function run() {
           "renderComposerQuoteBands",
           "refreshTargets",
           "syncComposerShards",
+          "updateLiveRelativeTimes",
         ],
       });
       await page.addScriptTag({ content: installPayloadFactory });
@@ -66,6 +67,28 @@ function assertTargetRefreshResult(result, configs) {
     throw new Error("refresh event order diverged: " + JSON.stringify(result));
   if (result.disappearanceDurationMs !== 0)
     throw new Error("task context disappeared during refresh: " + JSON.stringify(result));
+  if (
+    result.before.some(
+      (snapshot) =>
+        snapshot.processStatus !== "startup-stalled" ||
+        snapshot.visualStatus !== "startup-stalled" ||
+        !snapshot.placeholder.includes("startup-stalled"),
+    )
+  )
+    throw new Error("fixture did not reproduce startup stall: " + JSON.stringify(result));
+  for (const phase of [result.afterTargets, result.afterSubscribe]) {
+    if (
+      phase.some(
+        (snapshot) =>
+          snapshot.processStatus !== "running" ||
+          snapshot.visualStatus === "startup-stalled" ||
+          snapshot.placeholder.includes("startup-stalled"),
+      )
+    )
+      throw new Error(
+        "fresh status regressed to cached startup stall: " + JSON.stringify(result),
+      );
+  }
   for (const phase of [result.before, result.afterTargets, result.afterSubscribe]) {
     phase.forEach((snapshot, index) => {
       const expectedAttachment = "attachment-" + index;

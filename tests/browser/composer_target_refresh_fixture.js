@@ -69,11 +69,13 @@ function refreshSnapshotLane(lane, config, original) {
   const quoteTextarea = lane.element.querySelector("textarea[data-quote-draft-id]");
   const attachments = lane.shardAttachments.get(lane.targetId) || [];
   const quotes = lane.quoteDrafts.get(lane.targetId) || [];
+  const statusLine = lane.lastRenderedStatusLine || {};
   return {
     attachmentIds: attachments.map((item) => item.id),
     claimedTaskLabel: laneClaimedTaskLabel(laneClaimedTask(lane)),
     draft: textarea ? textarea.value : "",
     placeholder: textarea ? textarea.placeholder : "",
+    processStatus: statusLine.agentProcessStatus || "",
     quoteDraftIds: quotes.map((item) => item.id),
     quoteDraftText: quotes.map((item) => item.text).join("|"),
     quoteTextareaSame: quoteTextarea === original.quoteTextarea,
@@ -82,7 +84,21 @@ function refreshSnapshotLane(lane, config, original) {
       textarea && textarea.placeholder.includes(config.handle + ", " + config.phase),
     ),
     textareaSame: textarea === original.textarea,
+    visualStatus: statusLine.agentVisualStatus || "",
   };
+}
+
+function refreshSeedStalledStatus(lanes) {
+  for (const lane of lanes) {
+    const statusLine = {
+      ...(lane.lastRenderedStatusLine || {}),
+      agentProcessStatus: "startup-stalled",
+      agentVisualStatus: "startup-stalled",
+    };
+    lane.latestPayload = { ...(lane.latestPayload || {}), statusLine };
+    applyRetainedLaneStatus(lane, statusLine);
+    syncComposerPlaceholders(laneGroupHost(lane));
+  }
 }
 
 function refreshSeedDraft(lane, config, index) {
@@ -196,9 +212,11 @@ async function runTargetRefreshScenario(configs) {
   const originals = lanes.map((lane, index) =>
     refreshSeedDraft(lane, configs[index], index),
   );
+  refreshSeedStalledStatus(lanes);
   const before = refreshSnapshots(lanes, configs, originals);
   const refreshStartedAt = performance.now();
   await refreshTargetsThroughRequest(targets, eventOrder);
+  updateLiveRelativeTimes();
   const afterTargets = refreshSnapshots(lanes, configs, originals);
   await refreshSubscribeClaims(lanes, configs, eventOrder);
   const afterSubscribe = refreshSnapshots(lanes, configs, originals);
@@ -224,6 +242,7 @@ const PAGE_HELPERS = [
   refreshLanePayload,
   refreshSnapshotLane,
   refreshSeedDraft,
+  refreshSeedStalledStatus,
   refreshCreateLanes,
   refreshSnapshots,
   refreshTargetsThroughRequest,

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import lifecycle, lifecyclebinding, sidechannel
-from spice.agent.driver import CLAUDE_DRIVER
-from spice.agent.watchdog import AgentStartupSignal
+from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER
+from spice.agent.watchdog import AgentStartupSignal, JsonStdoutScanner
 from spice.process.groups import PROCESS_GROUP_TERMINATION_BOUND_SECONDS
 from spice.tasks import claimstate
 
@@ -127,6 +127,65 @@ def test_first_activity_transitions_starting_agent_to_ready_with_hook_warning(
     assert ready.ready is True
     assert ready.ready_at.endswith("Z")
     assert log_path.read_text(encoding="utf-8") == hooks_warning
+
+
+def test_codex_json_command_start_transitions_starting_agent_to_ready(
+    tmp_path, monkeypatch
+):
+    log_path = tmp_path / "codex-startup.log"
+    log_path.write_text("", encoding="utf-8")
+    process = _FakeProcess(returncode=None)
+    state = lifecycle.build_agent_state(
+        process=process,
+        action="resume",
+        command=["codex", "exec", "--json", "prompt"],
+        driver="codex",
+        model="gpt-test",
+        reasoning_effort="high",
+        thread_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        prompt_skill_path=tmp_path / "skill.md",
+        log_path=log_path,
+        fast_mode=False,
+        startup_status=lifecycle.AGENT_STARTUP_STARTING,
+    )
+    lifecycle.write_agent_state(tmp_path, state)
+    monkeypatch.setattr(lifecyclebinding, "process_id_is_running", lambda _pid: True)
+    monkeypatch.setattr(
+        lifecyclebinding, "process_group_is_running", lambda _pgid: True
+    )
+    signal = AgentStartupSignal()
+    scanner = JsonStdoutScanner(
+        lambda _text: None,
+        CODEX_DRIVER,
+        on_activity=signal.note_activity,
+    )
+    stalled = lifecycle.Event()
+    watcher = lifecycle.Thread(
+        target=lifecycle._watch_agent_startup,
+        args=(tmp_path, process, log_path, signal, stalled),
+        kwargs={"grace_seconds": THREAD_JOIN_TIMEOUT_SECONDS},
+    )
+
+    watcher.start()
+    scanner.process_line(
+        json.dumps(
+            {
+                "type": "item.started",
+                "item": {
+                    "id": "item_cmd",
+                    "type": "command_execution",
+                    "command": "spice task next",
+                    "status": "in_progress",
+                },
+            }
+        )
+    )
+    watcher.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
+
+    ready = lifecycle.agent_status(tmp_path)
+    assert ready.process_status == "running"
+    assert ready.ready is True
+    assert stalled.is_set() is False
 
 
 def _startup_outcome(signal: AgentStartupSignal, *, compacting_seconds: float) -> str:
