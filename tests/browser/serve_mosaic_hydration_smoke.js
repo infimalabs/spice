@@ -15,7 +15,10 @@ const HYDRATION_BATCH_A = 12;
 const HYDRATION_BATCH_B = 10;
 const HYDRATION_BATCH_C = 8;
 const HYDRATION_STAGE_GAP_MS = 120;
-const HYDRATION_MIN_REPLAYS = 3;
+// Initial layout plus the sibling mount's true topology crossing are the only
+// required full replays. Same-topology width changes and staged structural
+// arrivals reconcile without whole-board replay.
+const HYDRATION_MIN_REPLAYS = 2;
 const HYDRATION_MAX_REPLAYS = 5;
 const HYDRATION_SETTLE_TIMEOUT_MS = 8000;
 
