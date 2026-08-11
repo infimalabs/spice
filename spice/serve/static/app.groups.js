@@ -98,21 +98,34 @@ let laneTeamMenuDismissHandler = null;
 // ordering, replacement) is owned by the lane store; this binds the app's
 // openness and lifetime-capture adapters to that store transition. The store
 // publishes a "laneGroups" change and the DOM materialization below is the
-// subscriber side effect.
-function reconcileLaneGroups(groupRuns) {
-  laneStore.applyLaneGroups(groupRuns, {
+// subscriber side effect. Snapshot metadata identifies the lanes whose own
+// team changed; the store adds topology deltas. Only their visible hosts enter
+// chrome/message reconciliation, so an unrelated lane is never repainted.
+function reconcileLaneGroups(groupRuns, affectedTargetIds = []) {
+  const transition = laneStore.applyLaneGroups(groupRuns, {
     isLaneOpen,
     captureLaneState: laneLifetimeRuntimeState,
   });
-  for (const lane of laneStore.lanesSnapshot()) {
-    syncFusedLaneChrome(lane);
-    renderMessagesIfChanged(lane);
+  const changedTargetIds = new Set([
+    ...transition.changedTargetIds,
+    ...affectedTargetIds.map((targetId) => String(targetId || "")),
+  ]);
+  const affectedHosts = new Map();
+  for (const targetId of changedTargetIds) {
+    const lane = laneStore.laneForId(targetId);
+    if (!lane || !isLaneOpen(lane)) continue;
+    const host = laneGroupHost(lane);
+    affectedHosts.set(host.targetId, host);
+  }
+  for (const host of affectedHosts.values()) {
+    syncFusedLaneChrome(host);
+    renderMessagesIfChanged(host);
   }
   // Fusion and splitting can change only lane classes: when the members are
   // already adjacent, no child-list mutation reaches the board observer.
   // Reconcile activity at the topology boundary so every concrete member's
   // server query immediately reflects its newly visible (or offscreen) group.
-  scheduleLiveBusLaneActivitySync();
+  if (transition.changedTargetIds.length) scheduleLiveBusLaneActivitySync();
 }
 
 // The store's topology transition drives the lane class, weight, and DOM-order
@@ -124,20 +137,28 @@ laneStore.subscribe((change) => {
 });
 
 function materializeLaneGroupTransition(transition) {
-  for (const lane of laneStore.lanesSnapshot()) {
-    lane.element.classList.remove("lane--shadowed");
-    lane.element.style.removeProperty("--lane-weight");
+  const changedTargetIds = new Set(transition.changedTargetIds);
+  for (const targetId of changedTargetIds) {
+    const lane = laneStore.laneForId(targetId);
+    if (!lane) continue;
+    const topology = laneStore.laneGroupTopology(targetId);
+    if (topology && topology.role === "member")
+      lane.element.classList.add("lane--shadowed");
+    else lane.element.classList.remove("lane--shadowed");
+    if (topology && topology.role === "host") {
+      lane.element.style.setProperty(
+        "--lane-weight",
+        String(topology.memberTargetIds.length),
+      );
+    } else lane.element.style.removeProperty("--lane-weight");
   }
   for (const run of transition.runs) {
+    if (!changedTargetIds.has(run.hostTargetId)) continue;
     const host = laneStore.laneForId(run.hostTargetId);
     if (!host) continue;
     const members = run.memberTargetIds
       .map((targetId) => laneStore.laneForId(targetId))
       .filter(Boolean);
-    host.element.style.setProperty(
-      "--lane-weight",
-      String(run.memberTargetIds.length),
-    );
     restoreLaneLifetimeRuntimeState(
       host,
       pendingLaneLifetimeStateForMembers(
@@ -145,8 +166,6 @@ function materializeLaneGroupTransition(transition) {
         transition.priorLaneStateByTargetId,
       ),
     );
-    for (const member of members)
-      if (member !== host) member.element.classList.add("lane--shadowed");
     syncLaneGroupDomOrder(host);
   }
 }

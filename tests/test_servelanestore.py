@@ -107,12 +107,14 @@ def test_lane_consumers_use_the_exact_store_registry_surface():
     assert calls == {
         "registerLane": 2,
         "removeLane": 1,
-        "laneForId": 31,
+        # Group reconciliation now resolves only transition-affected target
+        # ids instead of scanning and repainting the whole lane registry.
+        "laneForId": 33,
         "hasLane": 8,
         # The relative-time tick once walked every lane a second time to sync
         # fused status; it now collects the fused hosts during the first walk
         # and drives those, so that snapshot consumer is gone by design.
-        "lanesSnapshot": 22,
+        "lanesSnapshot": 20,
     }
 
 

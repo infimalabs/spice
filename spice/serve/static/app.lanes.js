@@ -238,7 +238,11 @@ laneStore.subscribe((change) => {
 laneStore.subscribe((change) => {
   if (change.kind !== "teamSnapshot") return;
   if (change.transition.disposition !== "applied") return;
-  reconcileLaneGroups(change.transition.groupRuns);
+  const affectedTargetIds = [
+    ...change.transition.adds,
+    ...change.transition.updates,
+  ].map((laneChange) => laneChange.targetId);
+  reconcileLaneGroups(change.transition.groupRuns, affectedTargetIds);
 });
 
 // Menu refresh, filter panes, and lane-hint persistence are explicit store

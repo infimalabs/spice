@@ -40,6 +40,10 @@ const fuse = store.applyLaneGroups([["a", "b"]], {
 assert(observed[0] === fuse, "subscriber receives the fusion transition identity");
 assert(Object.isFrozen(fuse), "published lane-group transition is immutable");
 assert(
+  JSON.stringify(fuse.changedTargetIds) === JSON.stringify(["a", "b"]),
+  "fusion reports only the targets whose topology changed",
+);
+assert(
   JSON.stringify({
     runs: fuse.runs,
     prior: fuse.priorLaneStateByTargetId.get("b"),
@@ -64,6 +68,10 @@ const reorder = store.applyLaneGroups([["b", "a"]], {
   captureLaneState,
 });
 assert(
+  JSON.stringify(reorder.changedTargetIds) === JSON.stringify(["a", "b"]),
+  "member reordering marks the whole reordered group changed",
+);
+assert(
   JSON.stringify({
     runs: reorder.runs,
     role: store.laneGroupTopology("a").role,
@@ -82,6 +90,10 @@ const grow = store.applyLaneGroups([["b", "a", "c"]], {
   isLaneOpen,
   captureLaneState,
 });
+assert(
+  JSON.stringify(grow.changedTargetIds) === JSON.stringify(["a", "b", "c"]),
+  "group growth marks existing and joining members changed",
+);
 assert(
   JSON.stringify({
     runs: grow.runs,
@@ -135,4 +147,15 @@ assert(
       d: "host",
     }),
   "split empties the run set and a later fusion re-forms from a fresh host",
+);
+
+// Reapplying identical topology is an inert transition: downstream consumers
+// can skip every lane when the team snapshot changed unrelated state only.
+const unchanged = store.applyLaneGroups([["d", "c"]], {
+  isLaneOpen,
+  captureLaneState,
+});
+assert(
+  unchanged.changedTargetIds.length === 0,
+  "identical topology reports no changed targets",
 );

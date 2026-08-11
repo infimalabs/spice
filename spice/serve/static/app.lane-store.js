@@ -366,6 +366,7 @@ class ServeLaneStore {
     const priorLaneStateByTargetId = new Map();
     for (const lane of this.#lanes.values())
       priorLaneStateByTargetId.set(lane.targetId, captureLaneState(lane));
+    const previousTopologyByTargetId = this.#groupTopologyByTargetId;
     const previousHostByMemberTargetId = this.#laneGroupHostByMemberTargetId();
     const nextTopology = new Map();
     const runs = [];
@@ -399,10 +400,15 @@ class ServeLaneStore {
           );
       runs.push(Object.freeze({ hostTargetId, memberTargetIds: members }));
     }
+    const changedTargetIds = this.#laneGroupChangedTargetIds(
+      previousTopologyByTargetId,
+      nextTopology,
+    );
     this.#groupTopologyByTargetId = nextTopology;
     const transition = Object.freeze({
       runs: Object.freeze(runs),
       priorLaneStateByTargetId,
+      changedTargetIds,
     });
     this.#notify(Object.freeze({ kind: "laneGroups", transition }));
     return transition;
@@ -417,6 +423,34 @@ class ServeLaneStore {
         hosts.set(targetId, topology.hostTargetId);
     }
     return hosts;
+  }
+
+  #laneGroupChangedTargetIds(previousTopology, nextTopology) {
+    const targetIds = new Set([
+      ...previousTopology.keys(),
+      ...nextTopology.keys(),
+    ]);
+    return Object.freeze(
+      Array.from(targetIds).filter(
+        (targetId) =>
+          !this.#sameLaneGroupTopology(
+            previousTopology.get(targetId),
+            nextTopology.get(targetId),
+          ),
+      ),
+    );
+  }
+
+  #sameLaneGroupTopology(previous, next) {
+    if (previous === next) return true;
+    if (!previous || !next) return false;
+    if (previous.role !== next.role || previous.hostTargetId !== next.hostTargetId)
+      return false;
+    if (previous.memberTargetIds.length !== next.memberTargetIds.length)
+      return false;
+    return previous.memberTargetIds.every(
+      (targetId, index) => targetId === next.memberTargetIds[index],
+    );
   }
 
   #stableLaneGroupHost(memberTargetIds, previousHostByMemberTargetId) {
