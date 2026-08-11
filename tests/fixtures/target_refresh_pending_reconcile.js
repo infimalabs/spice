@@ -76,7 +76,11 @@ const composerDraft = { text: "operator draft" };
 const focusToken = { name: "focused textarea" };
 const cachedPayload = {
   messages: transcriptMessages,
-  statusLine: { agentProcessStatus: "running", preview: "cached preview" },
+  statusLine: {
+    agentProcessStatus: "startup-stalled",
+    agentVisualStatus: "startup-stalled",
+    preview: "cached preview",
+  },
 };
 const currentMetrics = { completed: 1 };
 const lane = {
@@ -143,7 +147,8 @@ const refreshedTarget = {
   },
   laneInfo: refreshedInfo,
   statusLine: {
-    agentProcessStatus: "idle",
+    agentProcessStatus: "running",
+    agentVisualStatus: "running",
     preview: "refreshed target status",
   },
   chrome: {
@@ -218,7 +223,8 @@ assert(!("chrome" in storedTarget), "inventory stores chrome only in its reducer
 assert(lane.laneMetrics === currentMetrics, "on-demand metrics survive refresh");
 assert(lane.laneInfo === refreshedInfo, "non-faceted lane info updates");
 assert(
-  lane.latestPayload === cachedPayload &&
+  lane.latestPayload !== cachedPayload &&
+    lane.latestPayload.messages === transcriptMessages &&
     lane.knownMessages === knownMessages &&
     lane.composerDraft === composerDraft &&
     lane.focusToken === focusToken,
@@ -226,8 +232,16 @@ assert(
 );
 assert(
   statusWrites.at(-1).pendingInboxCount === 0 &&
-    statusWrites.at(-1).lastAssistantAt === "2026-07-26T05:00:00Z",
+    statusWrites.at(-1).lastAssistantAt === "2026-07-26T05:00:00Z" &&
+    statusWrites.at(-1).agentProcessStatus === "running" &&
+    lane.latestPayload.statusLine.agentProcessStatus === "running",
   "status presentation overlays canonical pending and activity",
+);
+context.applyRetainedLaneStatus(lane, lane.latestPayload.statusLine);
+assert(
+  statusWrites.at(-1).agentProcessStatus === "running" &&
+    lane.lastRenderedStatusLine.agentVisualStatus !== "startup-stalled",
+  "a relative-time replay cannot restore the cached startup stall",
 );
 
 const recordBeforeFailure = laneStore.laneChrome(lane.targetId);

@@ -226,10 +226,15 @@ function renderLanePayloadPresentation(lane, payload) {
     renderLaneInfoPane(laneGroupHost(lane));
   }
   if (payload.statusLine) {
-    applyRetainedLaneStatus(
+    const statusLine = applyRetainedLaneStatus(
       lane,
       laneChromeStatusLine(lane, payload.statusLine),
     );
+    // Relative-time ticks replay latestPayload. Keep its non-transcript status
+    // current when target inventory refreshes an already-open lane, or that
+    // replay can restore a lifecycle value from before the refresh.
+    if (lane.latestPayload)
+      lane.latestPayload = { ...lane.latestPayload, statusLine };
   }
   const host = laneGroupHost(lane);
   if (identityChanged || payload.statusLine) {
