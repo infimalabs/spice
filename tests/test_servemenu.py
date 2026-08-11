@@ -476,8 +476,13 @@ def test_static_spice_menu_replaces_picker_lane():
     assert 'if (change.kind !== "teamSnapshot") return;' in app_lanes
     assert "materializeTeamSnapshotTransition(change.transition);" in app_lanes
     assert (
-        'if (change.transition.disposition !== "applied") return;\n'
-        "  reconcileLaneGroups(change.transition.groupRuns);" in app_lanes
+        "const affectedTargetIds = [\n"
+        "    ...change.transition.adds,\n"
+        "    ...change.transition.updates," in app_lanes
+    )
+    assert (
+        "reconcileLaneGroups(change.transition.groupRuns, affectedTargetIds);"
+        in app_lanes
     )
     assert (
         "if (transition.adds.length || transition.removes.length)\n"
