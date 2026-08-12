@@ -430,11 +430,18 @@ function mosaicAttachHistorySentinels(lane, visibleItems) {
     );
     if (!card) continue;
     for (const member of members) {
-      card.append(historySentinelForLane(member));
+      const sentinel = historySentinelForLane(member);
+      // A newest message does not change the oldest retained card. Re-appending
+      // its already-correct sentinel still emits a remove/add mutation pair,
+      // making every otherwise-incremental agent response churn old card DOM.
+      if (sentinel.parentNode !== card) card.append(sentinel);
       attachedAny = true;
     }
   }
-  if (!attachedAny) lane.messagesEl.append(historySentinelForLane(lane));
+  if (!attachedAny) {
+    const sentinel = historySentinelForLane(lane);
+    if (sentinel.parentNode !== lane.messagesEl) lane.messagesEl.append(sentinel);
+  }
 }
 
 function renderEmptyTeamMessages(lane) {
