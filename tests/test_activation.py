@@ -515,6 +515,8 @@ def test_activation_preserves_inherited_rust_hooks_in_a_linked_worktree(
     _run(repo, "git", "config", "core.hooksPath", rust_hooks)
     lane = tmp_path / "lane"
     _run(repo, "git", "worktree", "add", "-b", "lane", str(lane))
+    _run(lane, "git", "config", "--worktree", "core.hooksPath", ".spice/hooks")
+    _run(lane, "git", "config", "--worktree", "--unset", "core.hooksPath")
     monkeypatch.chdir(lane)
     _stub_activation_non_hook_side_effects(monkeypatch)
     common_config = repo / ".git" / "config"
