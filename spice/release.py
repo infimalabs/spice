@@ -67,6 +67,17 @@ PYPI_URL = "https://pypi.org/pypi/spice-harness/json"
 SIGINT_EXIT_CODE = 130
 
 
+class _ReleaseApplyHelpFormatter(argparse.HelpFormatter):
+    """Render argparse's optional value with the mounted boundary's syntax."""
+
+    def format_help(self) -> str:
+        return (
+            super()
+            .format_help()
+            .replace("--apply [PLAN_DIGEST]", "--apply[=PLAN_DIGEST]")
+        )
+
+
 def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -179,6 +190,7 @@ def _mark_authored_release(
 
 
 def _add_apply_options(parser: argparse.ArgumentParser) -> None:
+    parser.formatter_class = _ReleaseApplyHelpFormatter
     parser.add_argument(
         "--apply",
         nargs="?",
