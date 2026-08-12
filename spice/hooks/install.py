@@ -16,6 +16,7 @@ from spice.hooks.initplan import (
     HOOK_ARGS as HOOK_ARGS,
     HOOKS_DIRNAME,
     STATE_GITIGNORE_CONTENT,
+    InitOperation,
     InitializationPlan,
     InitializationMode,
     apply_initialization_plan,
@@ -44,6 +45,45 @@ def install_hooks_for_repo(repo_root: Path) -> list[str]:
     plan = plan_hook_installation(repo_root)
     apply_initialization_plan(plan)
     return initialization_detail_rows(plan, include_ready=False)
+
+
+def observe_hooks_for_repo(repo_root: Path) -> tuple[str, list[str]]:
+    """Report the effective hook selection without repairing or claiming it."""
+    plan = plan_hook_installation(repo_root)
+    expected_path = f"{STATE_DIRNAME}/{HOOKS_DIRNAME}"
+    by_target = {operation.target: operation for operation in plan.operations}
+    selection = by_target["core.hooksPath"]
+    effective_path = selection.previous_effective_value
+    if effective_path != expected_path:
+        state = "external" if effective_path is not None else "unconfigured"
+        return state, [f"core.hooksPath={effective_path or '-'}"]
+
+    hook_operations = [
+        (name, by_target[f"{expected_path}/{name}"]) for name in HOOK_ARGS
+    ]
+    incomplete = [
+        _incomplete_hook_detail(name, operation)
+        for name, operation in hook_operations
+        if operation.will_change
+    ]
+    if incomplete:
+        return "incomplete", [*incomplete, f"core.hooksPath={effective_path}"]
+    return "configured", [
+        *(f"hook {name} -> {expected_path}/{name}" for name in HOOK_ARGS),
+        f"core.hooksPath={effective_path}",
+    ]
+
+
+def _incomplete_hook_detail(name: str, operation: InitOperation) -> str:
+    if operation.previous_value is None:
+        state = "missing"
+    elif operation.previous_value != operation.generated_value:
+        state = "stale"
+    elif operation.previous_mode != operation.generated_mode:
+        state = "not-executable"
+    else:  # pragma: no cover - every planned file delta is classified above
+        state = "different"
+    return f"hook {name}={state}"
 
 
 def materialize_state_gitignore(repo_root: Path) -> bool:

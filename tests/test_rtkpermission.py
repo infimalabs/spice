@@ -109,7 +109,9 @@ def _isolate_activation(monkeypatch: pytest.MonkeyPatch) -> None:
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli, "_observe_activation_hooks", lambda _repo: ("configured", [])
+    )
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
         agent_cli,

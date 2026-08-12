@@ -144,7 +144,9 @@ def _activation_packet(repo_root, monkeypatch):
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli, "_observe_activation_hooks", lambda _repo: ("configured", [])
+    )
     monkeypatch.setattr(
         agent_cli,
         "_renew_activation_claim",
