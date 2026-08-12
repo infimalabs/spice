@@ -114,6 +114,7 @@ def plan_initialization(
                 scope_path=worktree_config,
                 target="core.hooksPath",
                 generated_value=HOOKS_PATH,
+                preserve_matching_effective=True,
             ),
             _file_operation(
                 resolved_root,
@@ -397,9 +398,15 @@ def _config_operation(
     scope_path: Path,
     target: str,
     generated_value: str,
+    preserve_matching_effective: bool = False,
 ) -> InitOperation:
     previous_value = git_config_file_get(scope_path, target)
     effective = _git_config_get(repo_root, target)
+    managed = not (
+        preserve_matching_effective
+        and previous_value is None
+        and effective == generated_value
+    )
     return InitOperation(
         kind=InitOperationKind.GIT_CONFIG,
         target=target,
@@ -418,6 +425,7 @@ def _config_operation(
         ),
         initialization_mode=mode,
         introduced=previous_value is None,
+        managed=managed,
         previous_effective_value=effective,
         introduced_scope_path=not _path_exists(scope_path),
     )
