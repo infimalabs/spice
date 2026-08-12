@@ -31,6 +31,19 @@ def test_markdown_splits_paragraphs_and_lists_without_blank_lines():
     assert "<p>Done.</p>" in html
 
 
+def test_markdown_preserves_fenced_code_between_surrounding_paragraphs():
+    command = "spice task add --acceptance=" + "literal-value-" * 24 + "<unsafe>"
+    text = f"Before the fence.\n\n```text\n{command}\n```\n\nAfter the fence."
+
+    html = render_message_html(text)
+
+    assert html == (
+        "<p>Before the fence.</p>"
+        f"<pre><code>{command.replace('<', '&lt;').replace('>', '&gt;')}</code></pre>"
+        "<p>After the fence.</p>"
+    )
+
+
 def test_markdown_renders_pipe_table_with_inline_cells():
     html = render_message_html(
         "Here is the data:\n"
