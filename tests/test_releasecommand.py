@@ -251,6 +251,8 @@ def test_release_docs_show_lane_release_workflow():
         "spice release minor --apply",
         "spice release minor --apply=<plan-digest>  # apply the exact previewed plan",
     ]
+    assert "--apply[=PLAN_DIGEST]" in minor_help
+    assert "--apply [PLAN_DIGEST]" not in minor_help
     assert "assert its digest with --apply=PLAN_DIGEST" in normalized_minor_help
     assert "not a separated digest argument" in normalized_minor_help
     assert (

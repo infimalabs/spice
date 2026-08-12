@@ -162,6 +162,23 @@ def test_mounted_release_apply_requires_an_explicit_digest(tmp_path, monkeypatch
     assert calls == [(["release-tool", "prepare", "patch", "--apply"], "", True)]
 
 
+def test_mounted_release_rejects_a_separated_apply_digest(tmp_path, monkeypatch):
+    mount, effects, calls = _release_mount(tmp_path, monkeypatch)
+    args = release.build_release_parser().parse_args(["prepare", "patch"])
+    digest = release.plan_release(args, tmp_path).payload()["plan_digest"]
+
+    with pytest.raises(SpiceError, match="requires --apply="):
+        run_mounted_command(
+            mount,
+            ["prepare", "patch", "--apply", digest],
+        )
+
+    assert effects == []
+    assert calls == [
+        (["release-tool", "prepare", "patch", "--apply", digest], "", True)
+    ]
+
+
 def test_stale_mounted_release_digest_refuses_before_execution(
     tmp_path, monkeypatch, capsys
 ):
