@@ -897,7 +897,12 @@ def test_static_team_stream_history_sentinels_track_each_member_lane():
         "return laneIsFusedHost(lane) ? laneGroupMemberLanes(lane) : [lane];"
         in app_stream
     )
-    assert "card.append(historySentinelForLane(member));" in app_stream
+    assert "const sentinel = historySentinelForLane(member);" in app_stream
+    assert "if (sentinel.parentNode !== card) card.append(sentinel);" in app_stream
+    assert (
+        "if (sentinel.parentNode !== lane.messagesEl) lane.messagesEl.append(sentinel);"
+        in app_stream
+    )
     assert "lane.historySentinelEl.dataset.historyTargetId = lane.targetId;" in (
         app_stream
     )

@@ -28,6 +28,7 @@ const releaseSafe = [
   { path: "serve_mosaic_hydration_smoke.js" },
   { path: "serve_mosaic_idle_start_smoke.js" },
   { path: "serve_mosaic_join_smoke.js" },
+  { path: "serve_mosaic_same_thread_start_smoke.js" },
   { path: "serve_mosaic_performance_smoke.js", serial: true },
   { path: "serve_mosaic_reduced_motion_smoke.js" },
   { path: "serve_mosaic_render_smoke.js" },
