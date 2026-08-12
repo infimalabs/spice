@@ -222,8 +222,11 @@ def test_release_docs_state_the_publish_time_composition_contract():
 def test_release_docs_show_lane_release_workflow():
     release_doc = Path("docs/release.md").read_text(encoding="utf-8")
     release_section = release_doc.split("\n\n", 1)[1]
-    help_text = build_release_parser().format_help()
+    parser = build_release_parser()
+    help_text = parser.format_help()
+    minor_help = parser._subparsers._group_actions[0].choices["minor"].format_help()
     normalized_help = " ".join(help_text.split())
+    normalized_minor_help = " ".join(minor_help.split())
     normalized_section = " ".join(release_section.split())
     release_commands = (
         release_section.split("```sh", 1)[1].split("```", 1)[0].strip().splitlines()
@@ -246,12 +249,20 @@ def test_release_docs_show_lane_release_workflow():
         "spice release publish --notes-file /tmp/spice-release-notes.md --apply",
         "spice release minor           # preview one-pass bump, validation, and publish",
         "spice release minor --apply",
+        "spice release minor --apply=<plan-digest>  # apply the exact previewed plan",
     ]
+    assert "assert its digest with --apply=PLAN_DIGEST" in normalized_minor_help
+    assert "not a separated digest argument" in normalized_minor_help
     assert (
         "Bare `minor`, `patch`, `prepare`, `publish`, and `github` also remain "
         "mutation-free: each renders its ordered release plan, while `--json` "
         "renders the same plan for machines. Only `--apply` runs that plan."
         in normalized_section
+    )
+    assert (
+        "pass its digest in the same argument as `--apply=<plan-digest>`; the "
+        "mounted command boundary does not accept the separated form `--apply "
+        "<plan-digest>`" in normalized_section
     )
     assert (
         "Before `prepare`, the bare `spice release range` command resolves the "

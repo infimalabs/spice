@@ -185,8 +185,9 @@ def _add_apply_options(parser: argparse.ArgumentParser) -> None:
         const=True,
         metavar="PLAN_DIGEST",
         help=(
-            "Execute the ordered plan, optionally asserting its digest; "
-            "bare invocation only previews."
+            "Execute the ordered plan with bare --apply, or assert its digest "
+            "with --apply=PLAN_DIGEST (not a separated digest argument); "
+            "omitting --apply previews only."
         ),
     )
     parser.add_argument(
