@@ -639,13 +639,45 @@ def test_custom_common_hooks_path_is_preserved_as_effective_prior_state(tmp_path
         operation.previous_effective_value,
         operation.generated_value,
         operation.introduced,
-    ) == (None, ".custom-hooks", ".spice/hooks", True)
+        operation.managed,
+        operation.will_change,
+    ) == (None, ".custom-hooks", ".spice/hooks", True, True, True)
     apply_initialization_plan(plan)
     assert _git_config_file(repo / ".git" / "config", "core.hooksPath") == (
         ".custom-hooks"
     )
     assert _git_config_file(repo / ".git" / "config.worktree", "core.hooksPath") == (
         ".spice/hooks"
+    )
+
+
+def test_matching_effective_common_hooks_path_suppresses_worktree_write(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    _git(repo, "config", "core.hooksPath", ".spice/hooks")
+
+    plan = plan_initialization(repo)
+    operation = _operation(
+        plan,
+        "core.hooksPath",
+        InitOperationScope.WORKTREE_GIT_CONFIG,
+    )
+
+    assert (
+        operation.previous_value,
+        operation.previous_effective_value,
+        operation.generated_value,
+        operation.introduced,
+        operation.managed,
+        operation.will_change,
+    ) == (None, ".spice/hooks", ".spice/hooks", True, False, False)
+
+    apply_initialization_plan(plan)
+
+    assert _git_config_file(repo / ".git" / "config", "core.hooksPath") == (
+        ".spice/hooks"
+    )
+    assert (
+        git_config_file_get(repo / ".git" / "config.worktree", "core.hooksPath") is None
     )
 
 
