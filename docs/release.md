@@ -21,6 +21,7 @@ spice release notes > /tmp/spice-release-notes.md
 spice release publish --notes-file /tmp/spice-release-notes.md --apply
 spice release minor           # preview one-pass bump, validation, and publish
 spice release minor --apply
+spice release minor --apply=<plan-digest>  # apply the exact previewed plan
 ```
 
 `spice release check` answers "would this tree pass a release?" without
@@ -29,9 +30,11 @@ against the version already in the tree, and then stops: nothing is bumped,
 committed, tagged, pushed, or published. Bare `minor`, `patch`, `prepare`,
 `publish`, and `github` also remain mutation-free: each renders its ordered
 release plan, while `--json` renders the same plan for machines. Only `--apply`
-runs that plan. `check` and the applied release path share one gate body on
-purpose: a separate verification path would drift until it certified something
-the release does not actually run.
+runs that plan. To pin execution to an exact preview, pass its digest in the
+same argument as `--apply=<plan-digest>`; the mounted command boundary does not
+accept the separated form `--apply <plan-digest>`. `check` and the applied
+release path share one gate body on purpose: a separate verification path would
+drift until it certified something the release does not actually run.
 
 The first release gate is the installed-runtime boundary. A branch can contain
 passing lifecycle, task, and schema code while the fleet's `spice` tool still
