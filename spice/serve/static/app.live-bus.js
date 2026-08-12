@@ -552,10 +552,12 @@ function applyLaneBusPayloadState(lane, payload, source) {
   lane.serverReachable = true;
   const threadChanged = syncLaneThreadId(lane, payload);
   if (threadChanged) {
-    // A renewal hands the lane to a new agent UUID, but the lane is the
-    // operator's space, not the agent's: history survives the handoff, only
-    // render fingerprints drop so the merged stream repaints cleanly.
-    lane.renderedMessageFingerprint = "";
+    // A renewal hands the lane to a new agent UUID, but the retained message
+    // stream is still the operator's unchanged space. Old cards already carry
+    // their producer/thread identity, and a first message from the successor
+    // invalidates the stream fingerprint on its own. Reset only status here:
+    // forcing the message fingerprint dirty makes a chrome-only startup walk
+    // every settled card through mosaic reconciliation for no visible change.
     lane.renderedStatusFingerprint = "";
   }
   removePayloadMessages(lane, payload);
