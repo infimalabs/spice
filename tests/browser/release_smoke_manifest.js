@@ -20,6 +20,7 @@ const releaseSafe = [
   { path: "serve_live_text_slot_smoke.js" },
   { path: "serve_menu_smoke.js" },
   { path: "serve_mobile_layout_smoke.js" },
+  { path: "serve_message_code_block_containment_smoke.js" },
   { path: "serve_mosaic_ack_resolution_smoke.js" },
   { path: "serve_mosaic_capacity_smoke.js" },
   { path: "serve_mosaic_compaction_retention_smoke.js" },

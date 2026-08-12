@@ -122,6 +122,7 @@
 .message-body {
   --quote-accent: var(--message-occupant-accent, var(--accent));
   flex: 1 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .message-body p { margin: 0 0 6px; }
@@ -138,13 +139,16 @@
   text-underline-offset: 2px;
 }
 .message-body a:hover { text-decoration-color: currentColor; }
-.message-body pre {
+.message-body pre,
+.ack-quote pre {
   background: var(--bg);
   border-radius: 6px;
+  max-width: 100%;
   overflow-x: auto;
   padding: 7px 9px;
 }
-.message-body code { font: 12px/1.4 ui-monospace, monospace; }
+.message-body code,
+.ack-quote code { font: 12px/1.4 ui-monospace, monospace; }
 .message-body table {
   border-collapse: collapse;
   display: block;
@@ -333,6 +337,7 @@
   display: grid;
   gap: 4px;
   margin: 3px 0 5px;
+  min-width: 0;
 }
 .ack-quote {
   --quote-accent: var(--accent);
@@ -342,6 +347,7 @@
   font-size: 0.8125rem;
   line-height: 1.34;
   margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
   padding: var(--quote-pad-block) var(--quote-pad-inline);
 }
