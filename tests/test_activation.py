@@ -16,6 +16,7 @@ from spice.agent.activation import (
 )
 from spice.agent.driver import DRIVER
 from spice.agent.rtkhealth import RTK_MINIMUM_VERSION_TEXT, RtkHealth
+from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.tasks import claimstate, config, create, identity, tw
 from tests.test_reposcaffolding import run as _run
 
@@ -64,8 +65,8 @@ def test_activation_reports_rtk_health_and_completes_every_setup_step(
     )
     monkeypatch.setattr(
         agent_cli,
-        "_install_activation_hooks",
-        lambda _repo: events.append("hooks") or ["hook-row"],
+        "_observe_activation_hooks",
+        lambda _repo: events.append("hooks") or ("configured", ["hook-row"]),
     )
     monkeypatch.setattr(
         agent_cli,
@@ -125,7 +126,9 @@ def test_activation_converges_an_already_stale_skill_by_raw_bytes(
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli, "_observe_activation_hooks", lambda _repo: ("configured", [])
+    )
     monkeypatch.setattr(
         agent_cli,
         "_renew_activation_claim",
@@ -296,7 +299,9 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli, "_observe_activation_hooks", lambda _repo: ("configured", [])
+    )
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
 
@@ -355,7 +360,11 @@ def test_activation_renews_a_claim_without_advancing_a_behind_tree(
             "_bind_activation_thread",
             lambda _repo: SimpleNamespace(thread_id=ACTOR),
         )
-        monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+        monkeypatch.setattr(
+            agent_cli,
+            "_observe_activation_hooks",
+            lambda _repo: ("configured", []),
+        )
         monkeypatch.setattr(
             agent_cli, "_materialize_activation_skill", lambda _repo: None
         )
@@ -381,7 +390,9 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id="actor-a"),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+    monkeypatch.setattr(
+        agent_cli, "_observe_activation_hooks", lambda _repo: ("configured", [])
+    )
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(agent_cli, "_activation_steering_token", lambda _repo: "tok")
     monkeypatch.setattr(
@@ -433,7 +444,11 @@ def test_activation_packet_reports_an_unreadable_lease_and_still_arms_the_agent(
             "_bind_activation_thread",
             lambda _repo: SimpleNamespace(thread_id=ACTOR),
         )
-        monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
+        monkeypatch.setattr(
+            agent_cli,
+            "_observe_activation_hooks",
+            lambda _repo: ("configured", []),
+        )
         monkeypatch.setattr(
             agent_cli, "_materialize_activation_skill", lambda _repo: None
         )
@@ -491,20 +506,83 @@ def test_repeated_activation_leaves_a_lane_behind_upstream_byte_identical(
     assert _git(repo, "rev-parse", "origin/main") != before_tracking
 
 
-def _stub_activation_side_effects(monkeypatch) -> None:
-    """Silence the packet's declared writers so only git is left to observe.
+def test_activation_preserves_inherited_rust_hooks_in_a_linked_worktree(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    _run(repo, "git", "config", "extensions.worktreeConfig", "true")
+    rust_hooks = ".spice-rs/hooks"
+    _run(repo, "git", "config", "core.hooksPath", rust_hooks)
+    lane = tmp_path / "lane"
+    _run(repo, "git", "worktree", "add", "-b", "lane", str(lane))
+    monkeypatch.chdir(lane)
+    _stub_activation_non_hook_side_effects(monkeypatch)
+    common_config = repo / ".git" / "config"
+    worktree_config = (
+        Path(_git(lane, "rev-parse", "--absolute-git-dir")) / "config.worktree"
+    )
+    before_common = common_config.read_bytes()
+    before_worktree = (
+        worktree_config.read_bytes() if worktree_config.is_file() else None
+    )
 
-    Activation legitimately writes lane state, git hooks, and the generated
-    skill file -- that last one lands in the worktree, so it would move the
-    manifest on its own. Each is stubbed by name, which also means a new writer
-    added later shows up as movement rather than hiding behind these.
+    packet = agent_cli.render_activation_packet(lane)
+
+    assert common_config.read_bytes() == before_common
+    assert (
+        worktree_config.read_bytes() if worktree_config.is_file() else None
+    ) == before_worktree
+    assert not hooks_dir(lane).exists()
+    assert _git(lane, "config", "--get", "core.hooksPath") == rust_hooks
+    assert "dev_hooks=external" in packet
+    assert f"dev_hooks_detail=core.hooksPath={rust_hooks}" in packet
+
+
+def test_activation_observes_configured_python_hooks_without_rewriting(
+    tmp_path, monkeypatch
+):
+    repo = _repo_with_upstream(tmp_path)
+    install_hooks_for_repo(repo)
+    monkeypatch.chdir(repo)
+    _stub_activation_non_hook_side_effects(monkeypatch)
+    common_config = repo / ".git" / "config"
+    worktree_config = repo / ".git" / "config.worktree"
+    before_common = common_config.read_bytes()
+    before_worktree = worktree_config.read_bytes()
+    before_hooks = {
+        path.name: (path.read_bytes(), path.stat().st_mode)
+        for path in hooks_dir(repo).iterdir()
+    }
+
+    packet = agent_cli.render_activation_packet(repo)
+
+    assert common_config.read_bytes() == before_common
+    assert worktree_config.read_bytes() == before_worktree
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mode)
+        for path in hooks_dir(repo).iterdir()
+    } == before_hooks
+    assert "dev_hooks=configured" in packet
+    assert "dev_hooks_detail=hook pre-commit -> .spice/hooks/pre-commit" in packet
+    assert "dev_hooks_detail=core.hooksPath=.spice/hooks" in packet
+
+
+def _stub_activation_side_effects(monkeypatch) -> None:
+    """Silence the packet's remaining writers so only Git is left to observe."""
+    _stub_activation_non_hook_side_effects(monkeypatch)
+
+
+def _stub_activation_non_hook_side_effects(monkeypatch) -> None:
+    """Silence activation's lane-state and generated-skill writers.
+
+    Hook inspection deliberately remains live so these tests detect any future
+    activation path that starts mutating hook files or Git configuration.
     """
     monkeypatch.setattr(
         agent_cli,
         "_bind_activation_thread",
         lambda _repo: SimpleNamespace(thread_id=ACTOR),
     )
-    monkeypatch.setattr(agent_cli, "_install_activation_hooks", lambda _repo: [])
     monkeypatch.setattr(agent_cli, "_materialize_activation_skill", lambda _repo: None)
     monkeypatch.setattr(
         agent_cli,
