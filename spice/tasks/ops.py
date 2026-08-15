@@ -195,7 +195,9 @@ def unclaim(handle: str | None = None) -> str:
     return identity.render_handle(row)
 
 
-def _deferred_intake_mods(row: dict[str, Any], *, at: str) -> tuple[str, ...]:
+def _deferred_intake_mods(
+    row: dict[str, Any], *, at: str, remains_claimed: bool = False
+) -> tuple[str, ...]:
     """Clear pre-intake deferral and start its suspended SLA in one mutation."""
     from spice.tasks import create
 
@@ -209,7 +211,9 @@ def _deferred_intake_mods(row: dict[str, Any], *, at: str) -> tuple[str, ...]:
         *due_mods,
         readiness.transition_arg(
             at=at,
-            ready=readiness.ready_after_clearing_wait(row, at=at),
+            ready=(
+                not remains_claimed and readiness.ready_after_clearing_wait(row, at=at)
+            ),
         ),
     )
 
@@ -240,10 +244,14 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
             raise SpiceError(
                 "claim the deferred oops triage task in place with "
                 f"`spice task claim {rendered}` because it is already in plan "
-                "mode, then create and connect public child tasks; cannot wake "
-                f"it: {rendered}"
+                "mode; before adding dependency edges or completing it, promote "
+                "it with "
+                f"`spice task wake {rendered} --into PUBLIC_PROJECT`; cannot "
+                f"bare-wake it: {rendered}"
             )
-        if row.get("start") or str(row.get("claim_by") or ""):
+        claimed = bool(row.get("start") or str(row.get("claim_by") or ""))
+        claimed_oops_promotion = target is not None and alloc.is_oops(row)
+        if claimed and not claimed_oops_promotion:
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
 
     base_mods: list[str] = []
@@ -253,7 +261,13 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     woke_at = tw.now_iso()
     for row in rows:
         mods_by_uuid[identity.uuid_of(row)] = (
-            *_deferred_intake_mods(row, at=woke_at),
+            *_deferred_intake_mods(
+                row,
+                at=woke_at,
+                remains_claimed=bool(
+                    row.get("start") or str(row.get("claim_by") or "")
+                ),
+            ),
             *base_mods,
         )
     groups: dict[tuple[str, ...], list[str]] = {}
@@ -1238,14 +1252,49 @@ def note(handle: str, text: str) -> str:
     return f"noted {identity.render_handle(row)}"
 
 
+def _oops_dependency_state(row: dict[str, Any]) -> str:
+    if row.get("start") or str(row.get("claim_by") or ""):
+        return "claimed"
+    if str(row.get("wait") or ""):
+        return "waiting"
+    return str(row.get("status") or "unknown")
+
+
+def _require_public_dependency_endpoints(rows: Sequence[dict[str, Any]]) -> None:
+    offenders: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if alloc.is_oops(row):
+            offenders.setdefault(identity.uuid_of(row), row)
+    if not offenders:
+        return
+    details = "; ".join(
+        f"{identity.render_handle(row)} "
+        f"(project={row.get('project')}, state={_oops_dependency_state(row)})"
+        for row in offenders.values()
+    )
+    repairs = ", ".join(
+        f"`spice task wake {identity.render_handle(row)} --into PUBLIC_PROJECT`"
+        for row in offenders.values()
+    )
+    raise SpiceError(
+        "cannot edit dependency edges while oops rows remain hidden: "
+        f"{details}. First run {repairs} to promote every offending row into "
+        "an admitted public project; then retry"
+    )
+
+
 def depends(handle: str, after: list[str], *, not_after: Sequence[str] = ()) -> str:
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
     rendered = identity.render_handle(row)
     existing = set(_dependency_uuids(row))
+    addition_rows = [identity.resolve(dep) for dep in dict.fromkeys(after)]
+    # Oops identity is authoritative only on the freshly resolved project.
+    # Resolve and classify the entire add-side endpoint set before any other
+    # validation or write so one hidden endpoint refuses the request wholesale.
+    _require_public_dependency_endpoints([row, *addition_rows])
     additions: list[tuple[str, str]] = []
-    for dep in dict.fromkeys(after):
-        dep_row = identity.resolve(dep)
+    for dep_row in addition_rows:
         dep_uuid = identity.uuid_of(dep_row)
         if dep_uuid == uuid:
             raise SpiceError("a task cannot depend on itself")

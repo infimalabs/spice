@@ -501,8 +501,10 @@ def test_wake_bare_oops_leads_with_claiming_it_in_place(task_repo):
 
     assert str(exc_info.value) == (
         "claim the deferred oops triage task in place with "
-        f"`spice task claim {handle}` because it is already in plan mode, then "
-        f"create and connect public child tasks; cannot wake it: {handle}"
+        f"`spice task claim {handle}` because it is already in plan mode; before "
+        "adding dependency edges or completing it, promote it with "
+        f"`spice task wake {handle} --into PUBLIC_PROJECT`; cannot bare-wake "
+        f"it: {handle}"
     )
 
 
