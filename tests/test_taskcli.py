@@ -300,6 +300,32 @@ def test_task_depends_after_accumulates_all_edges(task_repo, capsys, repeated_fl
     ) == sorted(children)
 
 
+def test_task_depends_cli_refuses_oops_prerequisite_without_mutation(task_repo, capsys):
+    parent = create.add(
+        "CLI parent remains dependency-free",
+        project="task.unit",
+        acceptance=["parent acceptance"],
+        origin="ack:1jN54zJJ",
+    )
+    hidden = ops.oops(
+        "CLI hidden prerequisite",
+        description="must be promoted first",
+        origin="ack:1jN54zJJ",
+    ).split()[1]
+    args = _with_backend(
+        build_parser().parse_args(["task", "depends", parent, "--after", hidden])
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        args.func(args)
+
+    message = str(exc_info.value)
+    assert f"{hidden} (project={config.OOPS_PROJECT}, state=waiting)" in message
+    assert f"spice task wake {hidden} --into PUBLIC_PROJECT" in message
+    assert identity.resolve(parent).get("depends", []) == []
+    assert capsys.readouterr().out == ""
+
+
 def test_task_wake_parser_accepts_multiple_handles():
     args = build_parser().parse_args(
         [
