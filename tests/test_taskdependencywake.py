@@ -6,6 +6,7 @@ import shutil
 
 import pytest
 
+from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import (
@@ -36,6 +37,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
 
 
@@ -631,6 +633,26 @@ def test_task_wake_into_still_refuses_active_or_claimed(task_repo):
 
     with pytest.raises(SpiceError, match="active or claimed"):
         ops.wake([claimed], into="task.unit")
+
+
+def test_task_wake_into_refuses_claimed_oops_owned_by_peer(task_repo, monkeypatch):
+    created = ops.oops(
+        "Peer-owned oops stays reserved",
+        description="only its claimant may promote it",
+        origin="ack:1jN54zJJ",
+    )
+    handle = created.split()[1]
+    ops.claim(handle)
+    before = identity.resolve(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+
+    with pytest.raises(SpiceError, match=f"task claimed by {ACTOR_A}"):
+        ops.wake([handle], into="task.unit")
+
+    row = identity.resolve(handle)
+    assert row["project"] == config.OOPS_PROJECT
+    assert row.get("wait") == before.get("wait")
+    assert row["claim_by"] == ACTOR_A
 
 
 def test_drive_wake_auto_subscribes_woken_project(task_repo):
