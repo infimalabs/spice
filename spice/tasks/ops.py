@@ -253,6 +253,8 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
         claimed_oops_promotion = target is not None and alloc.is_oops(row)
         if claimed and not claimed_oops_promotion:
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
+        if claimed and claimed_oops_promotion:
+            _require_owner(row, tw.current_actor(), "promote")
 
     base_mods: list[str] = []
     if target is not None:
