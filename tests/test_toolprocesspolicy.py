@@ -75,6 +75,29 @@ def test_each_bounded_tool_policy_has_a_catalogued_production_caller():
     assert _tool_policy_callers() == EXPECTED_TOOL_POLICY_CALLERS
 
 
+def test_internal_git_process_environment_disables_only_optional_locks(monkeypatch):
+    monkeypatch.setenv(groups.GIT_OPTIONAL_LOCKS_ENV, "ambient")
+    caller_env = {"PRESERVED": "yes", groups.GIT_OPTIONAL_LOCKS_ENV: "caller"}
+
+    ambient_git = groups.internal_process_environment(["git", "status"], None)
+    explicit_git = groups.internal_process_environment(
+        ["/usr/bin/git", "commit"], caller_env
+    )
+    non_git = groups.internal_process_environment(["python", "-V"], caller_env)
+
+    assert ambient_git is not None
+    assert ambient_git[groups.GIT_OPTIONAL_LOCKS_ENV] == "0"
+    assert explicit_git == {
+        "PRESERVED": "yes",
+        groups.GIT_OPTIONAL_LOCKS_ENV: "0",
+    }
+    assert caller_env == {
+        "PRESERVED": "yes",
+        groups.GIT_OPTIONAL_LOCKS_ENV: "caller",
+    }
+    assert non_git is caller_env
+
+
 def test_extension_policy_admits_a_150_second_rust_gate_through_one_lookup(
     monkeypatch,
 ):

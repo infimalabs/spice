@@ -33,11 +33,31 @@ STREAMED_OUTPUT_TICK_SECONDS = 0.25
 PROCESS_PROBE_TIMEOUT_SECONDS = 5.0
 PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS = 2.0
 PROCESS_GROUP_TERMINATION_MAX_PROBES = 2
+GIT_OPTIONAL_LOCKS_ENV = "GIT_OPTIONAL_LOCKS"  # env-policy: allow
+GIT_EXECUTABLE_NAMES = frozenset({"git", "git.exe"})
 PROCESS_GROUP_TERMINATION_BOUND_SECONDS = (
     PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS
     + PROCESS_GROUP_TERMINATION_MAX_PROBES * PROCESS_PROBE_TIMEOUT_SECONDS
     + PROCESS_POLL_INTERVAL_SECONDS
 )
+
+
+def internal_process_environment(
+    command: list[str], env: dict[str, str] | None
+) -> dict[str, str] | None:
+    """Return the child environment for one Python-managed process.
+
+    Git's optional index refresh can replace an otherwise unchanged worktree
+    index while a concurrent hook is validating its generation. Every internal
+    Git child therefore opts out at the shared spawn boundary. Required Git
+    mutations still take their mandatory locks. Non-Git and user-shell children
+    never pass through this policy and retain their existing environment.
+    """
+    if not command or Path(command[0]).name.casefold() not in GIT_EXECUTABLE_NAMES:
+        return env
+    child_env = dict(os.environ if env is None else env)  # env-policy: allow
+    child_env[GIT_OPTIONAL_LOCKS_ENV] = "0"
+    return child_env
 
 
 def popen_new_process_group_kwargs() -> dict[str, Any]:
@@ -255,7 +275,7 @@ def run_bounded_process_group(
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,
         text=text,
-        env=env,
+        env=internal_process_environment(command, env),
         stdin=subprocess.PIPE if input_data is not None else None,
         **popen_new_process_group_kwargs(),
     )
@@ -359,7 +379,7 @@ def _stream_until_exit(
             stdout=sink,
             stderr=subprocess.STDOUT,
             text=True,
-            env=env,
+            env=internal_process_environment(command, env),
             **popen_new_process_group_kwargs(),
         )
         try:
