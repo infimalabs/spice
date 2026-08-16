@@ -81,7 +81,15 @@ def configure_agent_parser(subparsers: Any) -> None:
         "reply",
         help="Reply to steering: retire keys named in your ACK/NACK lines.",
     )
-    reply.add_argument("text", nargs="*", metavar="TEXT")
+    reply.add_argument(
+        "text",
+        nargs="*",
+        metavar="TEXT",
+        help=(
+            "ACK/NACK reply text; a redundant leading key repeated in the "
+            "header is canonicalized"
+        ),
+    )
     reply.set_defaults(func=handle_agent)
 
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
@@ -200,6 +208,7 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
     )
     from spice.mail.ackgrammar import ack_content_by_key
     from spice.mail.inbox import inbox_item_key
+    from spice.mail.replies import canonical_reply_text
 
     text = (
         " ".join(args.text).strip() if getattr(args, "text", None) else sys.stdin.read()
@@ -212,6 +221,11 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
             "no ACK or NACK header in the reply; lead with "
             "'ACK <key>: <what changed>' and/or 'NACK <key>: <why not>'"
         )
+    text = canonical_reply_text(
+        text,
+        ack_keys=list(acks),
+        nack_keys=list(nacks),
+    )
     reasonless = list(
         dict.fromkeys(
             key
@@ -266,7 +280,7 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
 def _log_reply_card(
     repo_root: Path, text: str, ack_keys: list[str], nack_keys: list[str]
 ) -> None:
-    """Record a fallback card for a newly consumed reply with no prose yet."""
+    """Record an independent card for a newly consumed command-path reply."""
     from spice.agent.lifecycle import utc_now
     from spice.agent.paths import current_agent_thread_id
     from spice.mail.replies import append_reply_record

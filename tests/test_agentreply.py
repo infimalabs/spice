@@ -1,6 +1,7 @@
-"""spice agent reply retirement and fallback-card behavior."""
+"""spice agent reply retirement and independent reply-card behavior."""
 
 import io
+import json
 
 import pytest
 
@@ -16,7 +17,7 @@ from spice.mail.ackstate import (
     ack_state_records,
 )
 from spice.mail.inbox import collect_inbox_items, write_inbox_item
-from spice.mail.replies import append_reply_record, read_reply_records
+from spice.mail.replies import append_reply_record, read_reply_records, reply_log_path
 from spice.serve.messagepresentation import reply_card_message
 from tests.test_reposcaffolding import init_identified_repo as _init_git_repo
 
@@ -191,6 +192,49 @@ def test_agent_reply_parses_mixed_polarities_once(tmp_path, monkeypatch, capsys)
     ]
 
 
+def test_agent_reply_canonicalizes_redundant_positional_key(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    write_agent_thread_pointer(repo, THREAD)
+    write_inbox_item(repo, f"{KEY}.txt", "do X")
+    response = f"ACK {KEY}: shipped without a visible prefix"
+    args = build_parser().parse_args(["agent", "reply", KEY, response])
+
+    assert agent_cli.handle_agent(args) == 0
+
+    state = ack_state_records(repo)[0]
+    assert state.ack_text == response
+    record = read_reply_records(repo, THREAD)[0]
+    assert record["text"] == response
+    card = reply_card_message(
+        "2026-07-06T01:00:00.000000Z#reply-card:0",
+        0,
+        "2026-07-06T01:00:00.000000Z",
+        record["text"],
+    )
+    assert card.preamble_html == ""
+    assert card.display_text == "Shipped without a visible prefix"
+    assert capsys.readouterr().out == f"ack {KEY}: retired\n"
+
+
+def test_agent_reply_preserves_non_key_preamble(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    write_agent_thread_pointer(repo, THREAD)
+    write_inbox_item(repo, f"{KEY}.txt", "do X")
+    response = f"Status update.\nACK {KEY}: shipped with context"
+    args = build_parser().parse_args(["agent", "reply", response])
+
+    assert agent_cli.handle_agent(args) == 0
+
+    assert ack_state_records(repo)[0].ack_text == response
+    assert read_reply_records(repo, THREAD)[0]["text"] == response
+
+
 def test_reply_record_synthesizes_a_chip_bearing_card():
     # The reply text runs through the ordinary ACK-message builder, so the card
     # carries the acknowledgment key as a chip -- exactly like a prose ACK.
@@ -219,6 +263,28 @@ def test_reply_log_round_trips(tmp_path):
     records = read_reply_records(tmp_path, THREAD)
     assert records[0]["ackKeys"] == [KEY]
     assert records[0]["nackKeys"] == []
+
+
+def test_reply_log_normalizes_legacy_redundant_key_prefix(tmp_path):
+    _init_git_repo(tmp_path)
+    path = reply_log_path(tmp_path, THREAD)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-07-06T01:00:00.000000Z",
+                "text": f"{KEY} ACK {KEY}: legacy reply",
+                "ackKeys": [KEY],
+                "nackKeys": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    canonical = f"ACK {KEY}: legacy reply"
+    assert read_reply_records(tmp_path, THREAD)[0]["text"] == canonical
+    assert json.loads(path.read_text(encoding="utf-8"))["text"] == canonical
 
 
 def test_agent_reply_ack_state_is_recorded_as_acknowledged(tmp_path, monkeypatch):

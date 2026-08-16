@@ -179,6 +179,28 @@ def test_agent_help_exposes_show_as_the_sole_inspection_command():
     assert "Show the bound agent's state." in help_text
 
 
+def test_agent_reply_help_exposes_redundant_key_canonicalization():
+    parser = build_parser()
+    top_level = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    agent_parser = top_level.choices["agent"]
+    agent_actions = next(
+        action
+        for action in agent_parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+
+    help_text = agent_actions.choices["reply"].format_help()
+
+    assert (
+        "a redundant leading key repeated in the header is canonicalized"
+        in " ".join(help_text.split())
+    )
+
+
 def test_agent_show_parses_to_agent_handler():
     show = build_parser().parse_args(["agent", "show"])
 

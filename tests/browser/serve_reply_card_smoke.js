@@ -21,18 +21,20 @@ async function run() {
         const lane = resolveIsolatedLane("reply-card-smoke-team");
 
         const timestamp = "2027-01-01T00:00:00.000000Z";
+        const replyKey = "reply-smoke-key";
+        const replyBody = "Did the thing without exposing the raw key";
         lane.knownMessages = [
           {
             ack_count: 1,
-            ack_keys: ["reply-smoke-key"],
-            ack_segments: [{ keys: ["reply-smoke-key"], html: "" }],
+            ack_keys: [replyKey],
+            ack_segments: [{ keys: [replyKey], html: "<p>" + replyBody + "</p>" }],
             index: 0,
             key: timestamp + "#reply-card:0",
             kind: "reply",
             timestamp,
-            display_html: "",
-            display_text: "",
-            text: "ACK reply-smoke-key: did the thing",
+            display_html: "<p>" + replyBody + "</p>",
+            display_text: replyBody,
+            text: "ACK " + replyKey + ": " + replyBody,
           },
         ];
         lane.renderedMessageFingerprint = "";
@@ -44,10 +46,13 @@ async function run() {
         const badgeLabels = Array.from(root.querySelectorAll(".badge .badge-label")).map(
           (el) => el.textContent,
         );
+        const bodyText = card?.querySelector(".message-body")?.textContent || "";
         return {
           rendered: Boolean(card),
           badgeLabels,
           hasAckBadge: badgeLabels.includes("ACK"),
+          bodyText,
+          rawKeyVisibleInBody: bodyText.includes(replyKey),
         };
       });
     },
@@ -59,6 +64,10 @@ function assertResult(result) {
     throw new Error("reply card did not render as a mosaic card: " + JSON.stringify(result));
   if (!result.hasAckBadge)
     throw new Error("reply card rendered without its ACK chip: " + JSON.stringify(result));
+  if (result.rawKeyVisibleInBody)
+    throw new Error("reply card exposed its raw ACK key: " + JSON.stringify(result));
+  if (result.bodyText !== "Did the thing without exposing the raw key")
+    throw new Error("reply card body changed unexpectedly: " + JSON.stringify(result));
 }
 
 if (require.main === module) {
