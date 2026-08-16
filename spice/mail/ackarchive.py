@@ -18,11 +18,13 @@ from typing import Any, Iterable, Mapping
 
 from spice.errors import SpiceError
 from spice.mail.ackgrammar import (
+    AckSegment,
     ack_content_by_key,
     extract_ack_segments_from_text,
     extract_nack_segments_from_text,
     has_noop_ack_marker,
     keyed_response_reason,
+    split_keyed_response,
 )
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
@@ -176,6 +178,36 @@ class NackArchivalSummary:
     reasonless: list[str]
 
 
+@dataclass(frozen=True)
+class KeyedResponseArchivalSummary:
+    """Both polarities processed in the supervisor's deterministic order."""
+
+    ack: AckArchivalSummary
+    nack: NackArchivalSummary
+
+
+@dataclass(frozen=True)
+class ParsedKeyedResponseSegments:
+    """ACK and NACK segments produced by one unified grammar pass."""
+
+    ack: tuple[AckSegment, ...]
+    nack: tuple[AckSegment, ...]
+
+
+def parse_keyed_response_segments(message_text: str) -> ParsedKeyedResponseSegments:
+    """Parse both response polarities once and retain their shared boundaries."""
+    _preamble, responses = split_keyed_response(message_text)
+    ack: list[AckSegment] = []
+    nack: list[AckSegment] = []
+    for response in responses:
+        segment = AckSegment(keys=response.keys, content=response.content)
+        if response.disposition == ACK_DISPOSITION_ACKED:
+            ack.append(segment)
+        elif response.disposition == ACK_DISPOSITION_REFUSED:
+            nack.append(segment)
+    return ParsedKeyedResponseSegments(ack=tuple(ack), nack=tuple(nack))
+
+
 def summarize_ack_archival(
     repo_root: str | Path | None, message_text: str
 ) -> AckArchivalSummary:
@@ -187,13 +219,29 @@ def summarize_ack_archival(
     supervisor can tell the agent exactly which acknowledgments landed.
     """
     segments = extract_ack_segments_from_text(message_text)
+    return _summarize_ack_archival(
+        repo_root,
+        message_text,
+        segments,
+        noop=has_noop_ack_marker(message_text),
+    )
+
+
+def _summarize_ack_archival(
+    repo_root: str | Path | None,
+    message_text: str,
+    segments: Iterable[AckSegment],
+    *,
+    noop: bool = False,
+) -> AckArchivalSummary:
+    segments = tuple(segments)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
     if not requested:
         return AckArchivalSummary(
             archived=[],
             already_acked=[],
             unmatched=[],
-            noop=has_noop_ack_marker(message_text),
+            noop=noop,
         )
     try:
         already_acked_keys = _consumed_state_keys(
@@ -235,6 +283,15 @@ def summarize_nack_archival(
 ) -> NackArchivalSummary:
     """Archive inbox items NACK'd by one assistant message as refused."""
     segments = extract_nack_segments_from_text(message_text)
+    return _summarize_nack_archival(repo_root, message_text, segments)
+
+
+def _summarize_nack_archival(
+    repo_root: str | Path | None,
+    message_text: str,
+    segments: Iterable[AckSegment],
+) -> NackArchivalSummary:
+    segments = tuple(segments)
     reasonless = list(
         dict.fromkeys(
             key
@@ -304,6 +361,25 @@ def summarize_nack_archival(
         unmatched=unmatched,
         reasonless=reasonless,
     )
+
+
+def summarize_keyed_response_archival(
+    repo_root: str | Path | None,
+    message_text: str,
+    *,
+    parsed: ParsedKeyedResponseSegments | None = None,
+) -> KeyedResponseArchivalSummary:
+    """Process one reply exactly as supervised prose: NACK, then ACK.
+
+    The order is part of the contract. A message that somehow names one key
+    under both polarities resolves through the NACK authority first, matching
+    ``process_supervised_assistant_message`` rather than whichever caller
+    happened to invoke a low-level archive function first.
+    """
+    responses = parsed or parse_keyed_response_segments(message_text)
+    nack = _summarize_nack_archival(repo_root, message_text, responses.nack)
+    ack = _summarize_ack_archival(repo_root, message_text, responses.ack)
+    return KeyedResponseArchivalSummary(ack=ack, nack=nack)
 
 
 def nack_response_is_honored(content: str) -> bool:
