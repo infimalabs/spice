@@ -5,9 +5,13 @@ which reuses the same _merge_synthetic_cards but sources cards from
 read_reply_records instead of the task backend.
 """
 
-from spice.serve.messagepresentation import AssistantMessage
+from dataclasses import replace
+
+from spice.serve.messagepresentation import AssistantMessage, reply_card_message
 from spice.serve.payload import message
 from spice.transcript.timestamps import parse_timestamp
+
+KEY = "1jNmXPHm"
 
 
 def _message(timestamp):
@@ -75,3 +79,55 @@ def test_reply_card_tail_merge_drops_cards_older_than_visible_window(
     keys = [item.key for item in merged]
     assert "2026-06-10T06:00:00.000001Z#reply-card:0" not in keys  # stale dropped
     assert "2026-06-10T12:00:01.000001Z#reply-card:1" in keys  # fresh kept
+
+
+def test_transcript_keyed_response_replaces_matching_reply_card(monkeypatch, tmp_path):
+    timestamp = "2026-06-10T12:00:01.000001Z"
+    text = f"ACK {KEY}: fixed the parser"
+    records = [{"timestamp": timestamp, "text": text}]
+    monkeypatch.setattr(message, "read_reply_records", lambda _root, _thread: records)
+    transcript = replace(
+        reply_card_message(f"{timestamp}#100", 100, timestamp, text),
+        kind="assistant",
+        source_kind="assistant_text",
+    )
+    removed: list[str] = []
+
+    merged = message._merge_reply_card_messages(
+        "a" * 32,
+        [transcript],
+        repo_root=tmp_path,
+        worktree_id="wt",
+        limit=5,
+        removed_keys=removed,
+    )
+
+    assert merged == [transcript]
+    assert removed == [f"{timestamp}#reply-card:0"]
+
+
+def test_distinct_transcript_response_does_not_hide_reply_card(monkeypatch, tmp_path):
+    timestamp = "2026-06-10T12:00:01.000001Z"
+    records = [{"timestamp": timestamp, "text": f"ACK {KEY}: first response"}]
+    monkeypatch.setattr(message, "read_reply_records", lambda _root, _thread: records)
+    transcript = replace(
+        reply_card_message(
+            f"{timestamp}#100", 100, timestamp, f"ACK {KEY}: different response"
+        ),
+        kind="assistant",
+        source_kind="assistant_text",
+    )
+    removed: list[str] = []
+
+    merged = message._merge_reply_card_messages(
+        "a" * 32,
+        [transcript],
+        repo_root=tmp_path,
+        worktree_id="wt",
+        limit=5,
+        after="",
+        removed_keys=removed,
+    )
+
+    assert {item.kind for item in merged} == {"assistant", "reply"}
+    assert removed == []

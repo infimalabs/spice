@@ -1,12 +1,11 @@
 """Per-thread agent reply log.
 
 `spice agent reply` retires steering keys without emitting assistant prose, so
-the lane has nothing to render for that turn. It appends one record here per
-reply submission; the serve message payload reads these and synthesizes a single
-lane card (response text + acknowledged keys + ACK chip) per submission, exactly
-as if the agent had replied in prose. This is a spice-owned log, decoupled from
-the ack-state database, so it never double-renders a prose ACK that already has
-its own transcript card.
+the lane may have nothing to render for that turn. A newly consumed reply is
+appended here and Serve synthesizes a lane card immediately. If matching prose
+later reaches the transcript, payload projection suppresses this fallback card
+and publishes its key for live-client removal, leaving the transcript message
+as the single durable presentation.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ def append_reply_record(
     ack_keys: list[str],
     nack_keys: list[str],
 ) -> None:
-    """Append one reply submission. One line == one lane card."""
+    """Append one reply submission. One line == one fallback card identity."""
     path = reply_log_path(repo_root, thread_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {

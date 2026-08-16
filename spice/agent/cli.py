@@ -194,42 +194,79 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
     each key's reason is its segment body, not a separate flag.
     """
     from spice.mail.ackarchive import (
-        archive_ackd_inbox_items,
-        archive_nackd_inbox_items,
+        nack_response_is_honored,
+        parse_keyed_response_segments,
+        summarize_keyed_response_archival,
     )
-    from spice.mail.ackgrammar import (
-        ack_content_by_key,
-        extract_ack_segments_from_text,
-        extract_nack_segments_from_text,
-    )
+    from spice.mail.ackgrammar import ack_content_by_key
     from spice.mail.inbox import inbox_item_key
 
     text = (
         " ".join(args.text).strip() if getattr(args, "text", None) else sys.stdin.read()
     )
-    acks = ack_content_by_key(extract_ack_segments_from_text(text))
-    nacks = ack_content_by_key(extract_nack_segments_from_text(text))
+    parsed = parse_keyed_response_segments(text)
+    acks = ack_content_by_key(parsed.ack)
+    nacks = ack_content_by_key(parsed.nack)
     if not acks and not nacks:
         raise SpiceError(
             "no ACK or NACK header in the reply; lead with "
             "'ACK <key>: <what changed>' and/or 'NACK <key>: <why not>'"
         )
-    retired = archive_ackd_inbox_items(
-        repo_root, list(acks), ack_text=text, ack_content_by_key=acks
+    reasonless = list(
+        dict.fromkeys(
+            key
+            for segment in parsed.nack
+            if not nack_response_is_honored(segment.content)
+            for key in segment.keys
+        )
     )
-    refused = archive_nackd_inbox_items(
-        repo_root, list(nacks), nack_text=text, nack_content_by_key=nacks
+    if reasonless:
+        raise SpiceError(
+            "NACK requires a reason before any steering is retired: "
+            + ", ".join(reasonless)
+        )
+    canonical_acks = {inbox_item_key(key): key for key in acks}
+    canonical_nacks = {inbox_item_key(key): key for key in nacks}
+    conflicts = [
+        canonical_acks[key] for key in canonical_acks if key in canonical_nacks
+    ]
+    if conflicts:
+        raise SpiceError(
+            "one reply cannot ACK and NACK the same steering key: "
+            + ", ".join(conflicts)
+        )
+    summary = summarize_keyed_response_archival(repo_root, text, parsed=parsed)
+    newly_consumed = [*summary.ack.archived, *summary.nack.refused]
+    if newly_consumed:
+        _log_reply_card(repo_root, text, list(acks), list(nacks))
+    _print_reply_summary(
+        "ack",
+        list(acks),
+        (
+            ("retired", summary.ack.archived),
+            ("already acknowledged", summary.ack.already_acked),
+            ("no pending item matched", summary.ack.unmatched),
+        ),
+        inbox_item_key,
     )
-    _log_reply_card(repo_root, text, list(acks), list(nacks))
-    _print_reply_outcomes("ack", acks, retired, inbox_item_key)
-    _print_reply_outcomes("nack", nacks, refused, inbox_item_key)
+    _print_reply_summary(
+        "nack",
+        list(nacks),
+        (
+            ("refused", summary.nack.refused),
+            ("already refused", summary.nack.already_refused),
+            ("already acknowledged", summary.nack.already_acked),
+            ("no pending item matched", summary.nack.unmatched),
+        ),
+        inbox_item_key,
+    )
     return 0
 
 
 def _log_reply_card(
     repo_root: Path, text: str, ack_keys: list[str], nack_keys: list[str]
 ) -> None:
-    """Record this reply so the lane can render one card for it (no prose)."""
+    """Record a fallback card for a newly consumed reply with no prose yet."""
     from spice.agent.lifecycle import utc_now
     from spice.agent.paths import current_agent_thread_id
     from spice.mail.replies import append_reply_record
@@ -247,11 +284,15 @@ def _log_reply_card(
     )
 
 
-def _print_reply_outcomes(label, content_by_key, retired, canonical_key) -> None:
-    retired_keys = {canonical_key(key) for key in retired}
-    for key in content_by_key:
-        matched = canonical_key(key) in retired_keys
-        print(f"{label} {key}: {'retired' if matched else 'no pending item matched'}")
+def _print_reply_summary(label, requested, outcomes, canonical_key) -> None:
+    status_by_key = {
+        canonical_key(key): status for status, keys in outcomes for key in keys
+    }
+    for key in requested:
+        print(
+            f"{label} {key}: "
+            f"{status_by_key.get(canonical_key(key), 'no pending item matched')}"
+        )
 
 
 def render_agent_status(
