@@ -161,52 +161,15 @@ def _merge_reply_card_messages(
     limit: int,
     after: str | None = None,
     before: str | None = None,
-    removed_keys: list[str] | None = None,
 ) -> list[AssistantMessage]:
-    all_cards = _reply_card_messages_for_thread(
+    cards = _reply_card_messages_for_thread(
         thread_id,
         repo_root=repo_root,
         worktree_id=worktree_id,
-        after=None,
-        before=None,
+        after=_card_window_after(items, after, before),
+        before=before,
     )
-    transcript_signatures = {
-        signature
-        for item in items
-        if item.kind in {"assistant", "final"}
-        if (signature := _keyed_response_signature(item)) is not None
-    }
-    duplicates = [
-        card
-        for card in all_cards
-        if _keyed_response_signature(card) in transcript_signatures
-    ]
-    if removed_keys is not None:
-        for card in duplicates:
-            if card.key not in removed_keys:
-                removed_keys.append(card.key)
-    duplicate_keys = {card.key for card in duplicates}
-    window_after = _card_window_after(items, after, before)
-    cards = [
-        card
-        for card in all_cards
-        if card.key not in duplicate_keys
-        and _message_inside_time_boundary(
-            card,
-            after=window_after,
-            before=before,
-        )
-    ]
     return _merge_synthetic_cards(items, cards, limit=limit, after=after, before=before)
-
-
-def _keyed_response_signature(
-    item: AssistantMessage,
-) -> tuple[str, tuple[str, ...], tuple[str, ...]] | None:
-    text = item.text.strip()
-    if not text or not item.ack_keys:
-        return None
-    return (text, tuple(item.ack_keys), tuple(item.nack_keys))
 
 
 def _reply_card_messages_for_thread(
@@ -545,7 +508,6 @@ def _read_thread_messages(
         before=before,
         task_board=task_board,
     )
-    removed_keys = list(cursor.removed_keys) if cursor is not None else []
     items = _merge_reply_card_messages(
         thread_id,
         items,
@@ -554,8 +516,8 @@ def _read_thread_messages(
         limit=limit,
         after=after,
         before=before,
-        removed_keys=removed_keys,
     )
+    removed_keys = list(cursor.removed_keys) if cursor is not None else []
     return _ThreadMessages(
         items=items,
         error=read.error,

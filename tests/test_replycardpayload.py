@@ -12,6 +12,7 @@ from spice.serve.payload import message
 from spice.transcript.timestamps import parse_timestamp
 
 KEY = "1jNmXPHm"
+KEY_B = "1jyG6kSc"
 
 
 def _message(timestamp):
@@ -81,7 +82,7 @@ def test_reply_card_tail_merge_drops_cards_older_than_visible_window(
     assert "2026-06-10T12:00:01.000001Z#reply-card:1" in keys  # fresh kept
 
 
-def test_transcript_keyed_response_replaces_matching_reply_card(monkeypatch, tmp_path):
+def test_transcript_and_reply_card_remain_independent_messages(monkeypatch, tmp_path):
     timestamp = "2026-06-10T12:00:01.000001Z"
     text = f"ACK {KEY}: fixed the parser"
     records = [{"timestamp": timestamp, "text": text}]
@@ -91,22 +92,21 @@ def test_transcript_keyed_response_replaces_matching_reply_card(monkeypatch, tmp
         kind="assistant",
         source_kind="assistant_text",
     )
-    removed: list[str] = []
-
     merged = message._merge_reply_card_messages(
         "a" * 32,
         [transcript],
         repo_root=tmp_path,
         worktree_id="wt",
         limit=5,
-        removed_keys=removed,
+        after="",
     )
 
-    assert merged == [transcript]
-    assert removed == [f"{timestamp}#reply-card:0"]
+    assert {item.kind for item in merged} == {"assistant", "reply"}
 
 
-def test_distinct_transcript_response_does_not_hide_reply_card(monkeypatch, tmp_path):
+def test_distinct_transcript_response_does_not_hide_reply_card_with_same_keys(
+    monkeypatch, tmp_path
+):
     timestamp = "2026-06-10T12:00:01.000001Z"
     records = [{"timestamp": timestamp, "text": f"ACK {KEY}: first response"}]
     monkeypatch.setattr(message, "read_reply_records", lambda _root, _thread: records)
@@ -117,8 +117,6 @@ def test_distinct_transcript_response_does_not_hide_reply_card(monkeypatch, tmp_
         kind="assistant",
         source_kind="assistant_text",
     )
-    removed: list[str] = []
-
     merged = message._merge_reply_card_messages(
         "a" * 32,
         [transcript],
@@ -126,8 +124,29 @@ def test_distinct_transcript_response_does_not_hide_reply_card(monkeypatch, tmp_
         worktree_id="wt",
         limit=5,
         after="",
-        removed_keys=removed,
     )
 
     assert {item.kind for item in merged} == {"assistant", "reply"}
-    assert removed == []
+
+
+def test_distinct_keyed_response_does_not_hide_reply_card(monkeypatch, tmp_path):
+    timestamp = "2026-06-10T12:00:01.000001Z"
+    records = [{"timestamp": timestamp, "text": f"ACK {KEY}: first response"}]
+    monkeypatch.setattr(message, "read_reply_records", lambda _root, _thread: records)
+    transcript = replace(
+        reply_card_message(
+            f"{timestamp}#100", 100, timestamp, f"ACK {KEY_B}: other steering"
+        ),
+        kind="assistant",
+        source_kind="assistant_text",
+    )
+    merged = message._merge_reply_card_messages(
+        "a" * 32,
+        [transcript],
+        repo_root=tmp_path,
+        worktree_id="wt",
+        limit=5,
+        after="",
+    )
+
+    assert {item.kind for item in merged} == {"assistant", "reply"}
