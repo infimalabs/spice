@@ -96,11 +96,15 @@ def test_rtk_rewrite_protocol_degrades_invalid_results_to_native(
     }
 
 
-def test_wrapper_git_route_inherits_ambient_supervisor_environment(tmp_path):
+def test_wrapper_git_route_preserves_the_ambient_user_environment(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "caller-choice")
     env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
     source = "ambient" if env is None else "explicit"
 
     assert source == "ambient"
+    assert os.environ["GIT_OPTIONAL_LOCKS"] == "caller-choice"  # env-policy: allow
 
 
 def test_wrapper_spice_routes_inherit_ambient_env(tmp_path, monkeypatch):
