@@ -258,7 +258,7 @@ function edgeSpeechParagraphs(raw) {
 
 const markdownImagePattern = /!\[([^\]]*)\]\([^)]*\)/g;
 const markdownLinkPattern = /\[([^\]]+)\]\((?:\\.|[^)])+\)/g;
-const gitHashPattern = /\b[0-9a-f]{7,40}\b/gi;
+const gitHashPattern = /\b[0-9a-f]{7,}\b/gi;
 const utcDateTimePattern =
   /\b(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|\+00:00)\b/g;
 const utcMonthNames = [

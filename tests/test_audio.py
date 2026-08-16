@@ -128,6 +128,16 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
     assert seen["phase"] == "serve-speech-external"
 
 
+def test_backend_speech_preparation_truncates_long_hash_like_identifiers():
+    boundary_hash = "12345678" * 5
+    rust_hash = "0123456789abcdef" * 6
+    embedded_hex = f"prefix{'a' * 96}suffix"
+
+    assert audio.prepare_say_text(
+        f"Boundary {boundary_hash}; Rust {rust_hash}; keep {embedded_hex}."
+    ) == (f"Boundary 12345678; Rust 89abcdef; keep {embedded_hex}.")
+
+
 def test_external_speech_rate_reaches_the_command_through_its_named_slot(
     tmp_path, monkeypatch
 ):

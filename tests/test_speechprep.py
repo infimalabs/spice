@@ -21,6 +21,23 @@ def test_speech_text_preparation_speaks_git_hash_prefix():
     )
 
 
+def test_speech_text_preparation_truncates_long_hash_like_identifiers():
+    boundary_hash = "a" * 40
+    rust_hash = "0123456789abcdef" * 6
+
+    assert _prepare_speech(f"Boundary {boundary_hash}; Rust digest {rust_hash}.") == (
+        "Boundary commit a a a a a a a; Rust digest commit 0 1 2 3 4 5 6."
+    )
+
+
+def test_speech_text_preparation_leaves_non_hash_words_unchanged():
+    embedded_hex = f"prefix{'a' * 96}suffix"
+    non_hex = "g" * 96
+    source = f"Keep {embedded_hex} and {non_hex}."
+
+    assert _prepare_speech(source) == source
+
+
 def test_speech_text_preparation_keeps_existing_commit_label():
     assert _prepare_speech("See commit a21c3c1 and sha f647d55.") == (
         "See commit a 2 1 c 3 c 1 and sha f 6 4 7 d 5 5."
