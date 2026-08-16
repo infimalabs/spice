@@ -25,7 +25,7 @@ DEFAULT_SAY_RATE_MULTIPLIER = 1.0
 MIN_SAY_RATE_MULTIPLIER = 0.5
 MAX_SAY_RATE_MULTIPLIER = 2.0
 _SAY_WORDISH_SLASH_TOKEN_RE = re.compile(r"\S+")
-_SAY_FULL_GIT_HASH_RE = re.compile(r"(?<![0-9A-Fa-f])([0-9A-Fa-f]{40})(?![0-9A-Fa-f])")
+_SAY_LONG_HASH_RE = re.compile(r"(?<![0-9A-Za-z_])([0-9A-Fa-f]{40,})(?![0-9A-Za-z_])")
 _SAY_UTC_DATETIME_RE = re.compile(
     r"(?<![0-9A-Za-z])("
     r"[0-9]{8}T[0-9]{6,12}Z|"
@@ -134,14 +134,15 @@ class ExternalCommandSpeechBackend:
 def prepare_say_text(text: str) -> str:
     """Massage text on its way to the TTS engine.
 
-    Markdown links and images collapse to their labels; full git hashes and
-    UTC stamps collapse to their last eight characters; a word-like token
-    with exactly one internal slash has that slash replaced with a space
-    (macOS `say` pronounces slash-heavy agent text too literally).
+    Markdown links and images collapse to their labels; standalone long
+    hexadecimal identifiers and UTC stamps collapse to their last eight
+    characters; a word-like token with exactly one internal slash has that
+    slash replaced with a space (macOS `say` pronounces slash-heavy agent text
+    too literally).
     """
     prepared = _SAY_MARKDOWN_IMAGE_RE.sub(lambda match: match.group(1) or "image", text)
     prepared = _SAY_MARKDOWN_LINK_RE.sub(lambda match: match.group(1), prepared)
-    prepared = _SAY_FULL_GIT_HASH_RE.sub(
+    prepared = _SAY_LONG_HASH_RE.sub(
         lambda match: match.group(1)[-_SAY_IDENTIFIER_SPOKEN_LENGTH:], prepared
     )
     prepared = _SAY_UTC_DATETIME_RE.sub(
