@@ -13,6 +13,7 @@ from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.process import git
 from spice.process.groups import ProcessDeadlineExceeded
+from spice.agent import cli as agent_cli
 from spice.agent import lifecyclebinding
 from spice.tasks.git import boundaries, merging, plumbing
 from tests.test_reposcaffolding import init_committed_repo as _init_repo
@@ -965,6 +966,38 @@ def test_head_advance_refreshes_generated_skill_from_advanced_tree(tmp_path, adv
     assert target.read_bytes() == expected
 
 
+def test_activation_after_head_advance_preserves_checkout_skill_through_noop_boundary(
+    tmp_path, monkeypatch
+):
+    repo, target, expected = _repo_with_stale_generated_skill(tmp_path)
+    installed = tmp_path / "installed" / "SKILL.md"
+    installed.parent.mkdir()
+    installed.write_bytes(b"stale installed Python skill\n")
+    monkeypatch.setattr(lifecyclebinding, "packaged_skill_path", lambda: installed)
+
+    def generated_skill_state() -> tuple[bytes, int, int, int]:
+        observed = target.stat()
+        return (
+            target.read_bytes(),
+            observed.st_ino,
+            observed.st_mtime_ns,
+            observed.st_ctime_ns,
+        )
+
+    advanced = boundaries.prepare_for_claim(repo)
+    after_advance = generated_skill_state()
+    activated = agent_cli._materialize_activation_skill(repo)
+    after_activation = generated_skill_state()
+    current = boundaries.prepare_for_claim(repo)
+    after_noop = generated_skill_state()
+
+    assert advanced.notes == ["updated working tree to the current baseline"]
+    assert activated == target.resolve()
+    assert current.notes == []
+    assert after_advance[0] == expected
+    assert after_advance == after_activation == after_noop
+
+
 @pytest.mark.parametrize(
     ("advance", "expected_notes"),
     [
@@ -1325,7 +1358,19 @@ def _repo_with_stale_generated_skill(
     packaged.parent.mkdir(parents=True)
     packaged.write_bytes(b"old packaged skill\n")
     (repo / ".gitignore").write_text(".agents/\n", encoding="utf-8")
-    _run(repo, "git", "add", ".gitignore", packaged.as_posix())
+    cargo_manifest = repo / "Cargo.toml"
+    cargo_manifest.write_text('[workspace]\nmembers = ["spice"]\n', encoding="utf-8")
+    rust_policy = repo / "spice-rust.toml"
+    rust_policy.write_text("# Rust Spice repository policy.\n", encoding="utf-8")
+    _run(
+        repo,
+        "git",
+        "add",
+        ".gitignore",
+        packaged.as_posix(),
+        cargo_manifest.as_posix(),
+        rust_policy.as_posix(),
+    )
     _run(repo, "git", "commit", "-m", "seed packaged skill")
     _run(repo, "git", "push", "origin", "main")
 

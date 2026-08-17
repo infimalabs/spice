@@ -55,6 +55,9 @@ WORKTREE_SKILL_GITIGNORE_CONTENT = (
     "/SKILL.md\n"
 )
 PACKAGED_SKILL_RESOURCE = ("spice.agent", "SKILL.md")
+CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH = Path("spice") / "agent" / "SKILL.md"
+PYTHON_SPICE_CHECKOUT_SENTINEL = Path("spice") / "cli" / "entry.py"
+RUST_SPICE_CHECKOUT_SENTINELS = (Path("Cargo.toml"), Path("spice-rust.toml"))
 AGENT_STATE_FILE = "state.json"
 # The team-authority schema constant the supervisor imported when it started.
 # An editable deployment reaches new processes immediately and running ones
@@ -352,7 +355,7 @@ def materialize_worktree_skill(
     skill nothing can decode instead of the ordinary missing-skill answer.
     """
     target = worktree_skill_path(repo_root)
-    packaged = packaged_path or packaged_skill_path()
+    packaged = materialization_skill_source(repo_root, packaged_path=packaged_path)
     if not packaged.is_file():
         if target.is_file():
             materialize_worktree_skill_gitignore(repo_root)
@@ -376,6 +379,31 @@ def materialize_worktree_skill(
     except OSError:
         return _readable_worktree_skill(repo_root)
     return target
+
+
+def materialization_skill_source(
+    repo_root: Path, *, packaged_path: Path | None = None
+) -> Path:
+    """Select the one source used to materialize a worktree-bound skill.
+
+    An explicit source belongs to a caller such as a task boundary that has
+    already resolved the tree it advanced. Otherwise a Python or Rust Spice
+    source checkout owns its canonical ``spice/agent/SKILL.md``; every other
+    repository uses the installed Python package source. The Rust policy and
+    Cargo manifests distinguish that checkout from an unrelated repository
+    that happens to carry the same relative file name.
+    """
+    if packaged_path is not None:
+        return packaged_path
+    root = repo_root.expanduser().resolve()
+    checkout_source = root / CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
+    python_checkout = (root / PYTHON_SPICE_CHECKOUT_SENTINEL).is_file()
+    rust_checkout = all(
+        (root / sentinel).is_file() for sentinel in RUST_SPICE_CHECKOUT_SENTINELS
+    )
+    if checkout_source.is_file() and (python_checkout or rust_checkout):
+        return checkout_source
+    return packaged_skill_path()
 
 
 def materialize_worktree_skill_gitignore(repo_root: Path) -> Path | None:
