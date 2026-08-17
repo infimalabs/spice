@@ -222,6 +222,22 @@ def test_available_skill_path_materializes_into_the_worktree(tmp_path):
     )
 
 
+def test_available_skill_path_uses_installed_source_outside_a_spice_checkout(
+    tmp_path, monkeypatch
+):
+    installed = tmp_path / "installed" / "SKILL.md"
+    installed.parent.mkdir()
+    installed.write_bytes(b"installed Python skill\n")
+    coincidental = tmp_path / "spice" / "agent" / "SKILL.md"
+    coincidental.parent.mkdir(parents=True)
+    coincidental.write_bytes(b"unrelated repository skill\n")
+    monkeypatch.setattr(lifecyclebinding, "packaged_skill_path", lambda: installed)
+
+    located = lifecycle.available_skill_path(tmp_path, required=True)
+
+    assert located.read_bytes() == b"installed Python skill\n"
+
+
 def test_available_skill_path_required_fails_without_worktree_skill(
     tmp_path, monkeypatch
 ):

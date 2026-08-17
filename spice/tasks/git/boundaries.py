@@ -157,12 +157,7 @@ def _refresh_generated_skill_after_advance(repo_root: Path) -> str | None:
     """
     from spice.agent import lifecyclebinding
 
-    checkout_source = repo_root / CHECKOUT_PACKAGED_SKILL_RELATIVE_PATH
-    packaged = (
-        checkout_source
-        if checkout_source.is_file()
-        else lifecyclebinding.packaged_skill_path()
-    )
+    packaged = lifecyclebinding.materialization_skill_source(repo_root)
     try:
         target = lifecyclebinding.materialize_worktree_skill(
             repo_root, packaged_path=packaged
