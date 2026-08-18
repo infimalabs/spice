@@ -55,6 +55,11 @@ from spice.agent.runwatch import (
     write_side_channel_chunk as write_side_channel_chunk,
 )
 from spice.paths import atomic_write_json, repo_root_from_cwd
+from spice.process.groups import (
+    guard_process_group_until_parent_exit,
+    popen_new_process_group_kwargs,
+    terminate_and_reap_process_group,
+)
 from spice.agent.sidechannelnotify import (
     side_channel_marker_path as side_channel_marker_path,
 )
@@ -162,28 +167,44 @@ def run_agent_command(
     )
     try:
         if environment is None:
-            process = popen_factory(command)
+            process = popen_factory(command, **popen_new_process_group_kwargs())
         else:
-            process = popen_factory(command, env=environment)
+            process = popen_factory(
+                command,
+                env=environment,
+                **popen_new_process_group_kwargs(),
+            )
     except FileNotFoundError:
         executable = command[0] if command else ""
         stderr.write(f"spice agent run: command not found: {executable}\n")
         stderr.flush()
         return COMMAND_NOT_FOUND_EXIT_CODE
-    watch_thread = start_agent_side_channel_watch(
-        repo_root,
-        parent_pid=int(getattr(process, "pid", 0) or 0),
-        stderr=stderr,
-        initial_inbox_signature=initial_inbox_signature,
+    parent_exit_guard = (
+        guard_process_group_until_parent_exit(process)
+        if isinstance(process, subprocess.Popen)
+        else None
     )
+    completed = False
+    watch_thread = None
     try:
+        watch_thread = start_agent_side_channel_watch(
+            repo_root,
+            parent_pid=int(getattr(process, "pid", 0) or 0),
+            stderr=stderr,
+            initial_inbox_signature=initial_inbox_signature,
+        )
         wait = getattr(process, "wait", None)
         if wait is None:
             returncode = process.poll()
         else:
             returncode = wait()
+        completed = True
         return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
     finally:
+        if not completed and isinstance(process, subprocess.Popen):
+            terminate_and_reap_process_group(process)
+        if parent_exit_guard is not None:
+            parent_exit_guard.disarm()
         join_agent_side_channel_watch(watch_thread)
 
 

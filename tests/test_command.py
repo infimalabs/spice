@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import io
 import os
+import signal
 import subprocess
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +22,7 @@ from spice.agent.maximmetrics import (
 )
 from spice.agent.shadow import shadow_environment
 from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
+from spice.process.groups import process_id_is_running
 
 COMMAND_WORKING_STATE_ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 COMMAND_WORKING_STATE_NOW = 1_767_225_600.0
@@ -63,7 +67,9 @@ def _run_working_state_command(repo_root: Path) -> str:
     exit_code = wrap.run_agent_command(
         repo_root,
         ["true"],
-        popen_factory=lambda _command, env=None: _CommandWorkingStateProcess(),
+        popen_factory=lambda _command, env=None, **_kwargs: (
+            _CommandWorkingStateProcess()
+        ),
         stderr=stderr,
     )
     assert exit_code == COMMAND_WORKING_STATE_EXIT_CODE
@@ -165,7 +171,7 @@ def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monke
             events.append(("wait", None, None))
             return 0
 
-    def fake_popen(command: list[str], env=None) -> FakeProcess:
+    def fake_popen(command: list[str], env=None, **_kwargs) -> FakeProcess:
         events.append(("popen", command, env))
         return FakeProcess()
 
@@ -295,7 +301,7 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
             events.append(("wait", None, None))
             return 0
 
-    def fake_popen(command: list[str], env=None) -> FakeProcess:
+    def fake_popen(command: list[str], env=None, **_kwargs) -> FakeProcess:
         env_snapshot = (
             None if env is None else (env.get("ZDOTDIR"), env.get("BASH_ENV"))
         )
@@ -353,7 +359,7 @@ def test_run_agent_command_reports_missing_command_without_traceback(
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     stderr = io.StringIO()
 
-    def fake_popen(command, env=None):
+    def fake_popen(command, env=None, **_kwargs):
         raise FileNotFoundError(2, "No such file or directory", command[0])
 
     exit_code = wrap.run_agent_command(
@@ -365,6 +371,90 @@ def test_run_agent_command_reports_missing_command_without_traceback(
 
     assert exit_code == wrap.COMMAND_NOT_FOUND_EXIT_CODE
     assert "command not found: nonexistent-cmd-xyz" in stderr.getvalue()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX parent-death guardian")
+def test_run_agent_command_parent_death_reaps_tree_and_releases_lock(
+    tmp_path: Path,
+) -> None:
+    fcntl = pytest.importorskip("fcntl")
+    command_pid_path = tmp_path / "command.pid"
+    descendant_pid_path = tmp_path / "descendant.pid"
+    ready_path = tmp_path / "descendant.ready"
+    lock_path = tmp_path / "exclusive-resource.lock"
+    descendant_source = (
+        "import fcntl, os, pathlib, sys, time; "
+        "lock = open(sys.argv[1], 'a+', encoding='utf-8'); "
+        "fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB); "
+        "pathlib.Path(sys.argv[2]).write_text(str(os.getpid()), encoding='utf-8'); "
+        "pathlib.Path(sys.argv[3]).write_text('ready', encoding='utf-8'); "
+        "time.sleep(60)"
+    )
+    command_source = (
+        "import os, pathlib, subprocess, sys, time; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8'); "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[5], "
+        "sys.argv[3], sys.argv[2], sys.argv[4]]); "
+        "time.sleep(60)"
+    )
+    wrapper_source = (
+        "import sys; from spice.agent import wrap; "
+        "wrap._rtk_rewrite_permitted = lambda *args, **kwargs: False; "
+        "raise SystemExit(wrap.run_agent_command(None, "
+        "[sys.executable, '-c', sys.argv[1], *sys.argv[2:]]))"
+    )
+    wrapper = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            wrapper_source,
+            command_source,
+            str(command_pid_path),
+            str(descendant_pid_path),
+            str(lock_path),
+            str(ready_path),
+            descendant_source,
+        ],
+        cwd=tmp_path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    command_pid: int | None = None
+    descendant_pid: int | None = None
+    try:
+        ready_deadline = time.monotonic() + 5.0
+        while (
+            not command_pid_path.is_file()
+            or not descendant_pid_path.is_file()
+            or not ready_path.is_file()
+        ) and time.monotonic() < ready_deadline:
+            assert wrapper.poll() is None
+            time.sleep(0.01)
+        command_pid = int(command_pid_path.read_text(encoding="utf-8"))
+        descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
+
+        os.kill(wrapper.pid, signal.SIGKILL)
+        wrapper.wait(timeout=2.0)
+        reaping_deadline = time.monotonic() + 3.0
+        while (
+            process_id_is_running(command_pid) or process_id_is_running(descendant_pid)
+        ) and time.monotonic() < reaping_deadline:
+            time.sleep(0.01)
+
+        assert not process_id_is_running(command_pid)
+        assert not process_id_is_running(descendant_pid)
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait(timeout=2.0)
+        if command_pid is not None and process_id_is_running(command_pid):
+            try:
+                os.killpg(command_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_wrapper_leaves_plain_commands_native_without_rtk_rewrite():
@@ -495,7 +585,7 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
             events.append(("wait", None, None))
             return 0
 
-    def fake_popen(command: list[str], env=None) -> FakeProcess:
+    def fake_popen(command: list[str], env=None, **_kwargs) -> FakeProcess:
         events.append(
             (
                 "popen",
@@ -561,7 +651,7 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
             events.append(("wait", None, None))
             return 0
 
-    def fake_popen(command: list[str], env=None) -> FakeProcess:
+    def fake_popen(command: list[str], env=None, **_kwargs) -> FakeProcess:
         source = "ambient" if env is None else "explicit"
         shadow = (
             os.environ["GIT_CONFIG_SYSTEM"]  # env-policy: allow

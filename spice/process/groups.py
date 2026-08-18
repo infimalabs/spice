@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import ctypes
 from ctypes import wintypes
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import signal
@@ -39,6 +40,14 @@ PROCESS_GROUP_TERMINATION_BOUND_SECONDS = (
     PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS
     + PROCESS_GROUP_TERMINATION_MAX_PROBES * PROCESS_PROBE_TIMEOUT_SECONDS
     + PROCESS_POLL_INTERVAL_SECONDS
+)
+PARENT_EXIT_GUARDIAN_GRACE_SECONDS = 0.25
+PARENT_EXIT_GUARDIAN_REAP_SECONDS = 1.0
+PARENT_EXIT_GUARDIAN_SCRIPT = (
+    "if IFS= read -r marker; then exit 0; fi; "
+    'kill -TERM -- -"$1" || exit 0; '
+    f"sleep {PARENT_EXIT_GUARDIAN_GRACE_SECONDS:g}; "
+    'kill -KILL -- -"$1" || true'
 )
 
 
@@ -88,6 +97,98 @@ def terminate_process_group(
         signum=signal.SIGTERM if signum is None else signum,
         timeout_seconds=timeout_seconds,
     )
+
+
+def terminate_and_reap_process_group(
+    process: subprocess.Popen[Any],
+    *,
+    timeout_seconds: float = PROCESS_GROUP_TERMINATION_TIMEOUT_SECONDS,
+) -> None:
+    """Terminate a complete child group and reap its leader.
+
+    Group termination and leader reaping are separate obligations.  The
+    former reaches descendants even when the leader has already exited; the
+    latter prevents an interrupted command surface from leaving its direct
+    child as a zombie.
+    """
+    terminate_process_group(process, timeout_seconds=timeout_seconds)
+    try:
+        process.wait(timeout=PARENT_EXIT_GUARDIAN_GRACE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=PARENT_EXIT_GUARDIAN_GRACE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+@dataclass
+class ParentExitProcessGroupGuard:
+    """Disarmable witness that kills a process group if its parent vanishes."""
+
+    observer: subprocess.Popen[Any] | None = None
+
+    def disarm(self) -> None:
+        observer = self.observer
+        self.observer = None
+        if observer is None:
+            return
+        if observer.stdin is not None:
+            try:
+                observer.stdin.write(b".\n")
+                observer.stdin.close()
+            except OSError:
+                pass
+        try:
+            observer.wait(timeout=PARENT_EXIT_GUARDIAN_REAP_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                observer.kill()
+            except OSError:
+                pass
+            try:
+                observer.wait(timeout=PARENT_EXIT_GUARDIAN_GRACE_SECONDS)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+
+def guard_process_group_until_parent_exit(
+    process: subprocess.Popen[Any],
+) -> ParentExitProcessGroupGuard:
+    """Keep a POSIX child group bound to this Python process's lifetime.
+
+    The command leader is already in its own process group.  A tiny shell
+    process in a separate session waits on a pipe held only by this parent: a normal
+    command completion writes one byte to disarm it, while TERM, HUP, KILL, or
+    any other abrupt parent loss produces EOF and makes the guardian terminate
+    the complete command group.  A separate executable avoids unsafe Python
+    fork-after-threads behavior and adds no polling to the normal command path.
+
+    Windows retains the explicit exception cleanup path.  Its process-tree
+    termination primitive is still used whenever Python regains control.
+    """
+    if _is_windows():
+        return ParentExitProcessGroupGuard()
+    try:
+        observer = subprocess.Popen(
+            [
+                "/bin/sh",
+                "-c",
+                PARENT_EXIT_GUARDIAN_SCRIPT,
+                "spice-parent-exit-guard",
+                str(process.pid),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **popen_new_process_group_kwargs(),
+        )
+    except OSError:
+        return ParentExitProcessGroupGuard()
+    return ParentExitProcessGroupGuard(observer=observer)
 
 
 def process_group_is_running(process_group_id: int | None) -> bool:
