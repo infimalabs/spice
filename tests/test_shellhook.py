@@ -849,7 +849,7 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
         def wait(self):
             return 0
 
-    def popen(command, *, env):
+    def popen(command, *, env, **_kwargs):
         child_commands.append(command)
         child_environments.append(env)
         return Process()

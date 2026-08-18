@@ -47,7 +47,7 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
             events.append(("wait", None, None))
             return 7
 
-    def fake_popen(command: list[str], env=None) -> FakeProcess:
+    def fake_popen(command: list[str], env=None, **_kwargs) -> FakeProcess:
         events.append(
             (
                 "popen",
