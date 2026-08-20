@@ -19,7 +19,10 @@ args = ["--yes", "@playwright/mcp@latest", "--headless"]
 
 [agent.claude]
 default_model = "claude-opus-4-8"
-auto_compact_window_tokens = 200000
+auto_compact_window_tokens = 250000
+
+[agent.codex]
+auto_compact_window_tokens = 250000
 
 [judge]
 bin = "afm-cli"

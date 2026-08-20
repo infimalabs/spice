@@ -281,6 +281,7 @@ CONFIG_SCHEMA = _table(
             children={
                 "playwright_mcp": _table(("server_name", "command", "args")),
                 "claude": _table(("default_model", "auto_compact_window_tokens")),
+                "codex": _table(("auto_compact_window_tokens",)),
             },
         ),
         "judge": _table(

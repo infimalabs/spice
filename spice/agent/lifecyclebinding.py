@@ -10,8 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from spice.agent.claudeautocompact import claude_auto_compact_environment
 from spice.agent.driver import (
-    claude_auto_compact_environment,
     driver_for,
     select_driver,
 )

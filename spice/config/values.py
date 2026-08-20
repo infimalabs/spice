@@ -450,6 +450,10 @@ def configured_claude_auto_compact_window(repo_root: Path | None = None) -> int:
     return layered_integer(repo_root, AGENT_KEY, "claude", "auto_compact_window_tokens")
 
 
+def configured_codex_auto_compact_window(repo_root: Path | None = None) -> int:
+    return layered_integer(repo_root, AGENT_KEY, "codex", "auto_compact_window_tokens")
+
+
 def configured_serve_host(repo_root: Path | None = None) -> str:
     return layered_string(repo_root, "serve", "host")
 

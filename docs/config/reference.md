@@ -376,6 +376,7 @@ distillation likewise skips candidates whose judge call fails.
 | `playwright_mcp.args` | Base argv before Spice appends its generated browser configuration. |
 | `claude.default_model` | Claude model used when no layered `agent.model` or explicit launch model exists. |
 | `claude.auto_compact_window_tokens` | Claude auto-compaction window exported at launch. |
+| `codex.auto_compact_window_tokens` | Codex auto-compaction window, sent as a `model_auto_compact_token_limit` config override at launch. |
 
 Repository and worktree configuration may additionally set `model`, `effort`,
 and `driver`. These optional launch overrides have no packaged value; the

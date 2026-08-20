@@ -14,9 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from spice.agent.driver import (
+from spice.agent.claudeautocompact import (
     CLAUDE_AUTO_COMPACT_WINDOW_ENV,
     CLAUDE_AUTO_COMPACT_WINDOW_TOKENS,
+    claude_auto_compact_environment,
+)
+from spice.agent.driver import (
     CLAUDE_DENIED_TOOLS,
     CLAUDE_DRIVER,
     CLAUDE_NATIVE_TASK_TOOLS,
@@ -29,7 +32,6 @@ from spice.agent.driver import (
     PLAYWRIGHT_MCP_SERVER_NAME,
     RATE_LIMIT_HTTP_STATUS,
     SPICE_AGENT_DRIVER_ENV,
-    claude_auto_compact_environment,
     driver_for,
     playwright_mcp_args,
     post_tool_hook_config_path,
@@ -716,7 +718,7 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
     assert fields is not None
     assert fields.last.total_tokens == cache_read + output
-    # Overflow no longer promotes to the 1M tier; it stays pinned at 200K so
+    # Overflow no longer promotes to the 1M tier; it stays pinned at 250K so
     # pressure reads past 100% and drives compaction.
     assert fields.model_context_window == CLAUDE_DRIVER.default_context_window
 

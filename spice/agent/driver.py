@@ -31,6 +31,7 @@ from typing import Any, Callable, Iterable, Mapping, overload
 
 from spice import defaults
 from spice.agent.claudetranscript import claude_line_events
+from spice.agent.codexautocompact import codex_auto_compact_config_overrides
 from spice.agent.codexexec import codex_exec_line_events
 from spice.agent.codextranscript import codex_line_events
 from spice.errors import SpiceError
@@ -623,6 +624,7 @@ class CodexDriver(AgentDriver):
             *post_tool_hook_codex_config_overrides(repo_root, self),
             f'model_reasoning_effort="{reasoning_effort or self.default_reasoning_effort}"',
             *playwright_mcp_config_overrides(repo_root),
+            *codex_auto_compact_config_overrides(repo_root),
         ]
         if personality:
             config_overrides.append(f'personality="{personality}"')
@@ -784,21 +786,6 @@ CLAUDE_DENIED_TOOLS = (
     *CLAUDE_SUPERVISED_TASK_TOOLS,
     "Monitor",
 )
-# Claude Code reads this at launch and takes it as the token count at which it
-# reactively summarizes the conversation, taking precedence over its own
-# `/config` auto-compact setting. Left unset, a session can run toward its
-# real (possibly ~1M-token overflow-tier) API ceiling before compacting --
-# matching the operator's own observation that auto-compact did not appear to
-# trigger before ~1M tokens. 200_000 is the 200K standard-tier ceiling that
-# context_snapshot_fields already meters pressure against (see its "always
-# meter against the standard tier" comment below): the goal is only to cap the
-# 1M overflow tier back down to that standard window, not to compact early, so
-# a long-running lane compacts at the tier ceiling without operator
-# intervention.
-CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"  # env-policy: allow
-CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = defaults.integer(
-    "agent", "claude", "auto_compact_window_tokens"
-)
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     # The live claude.ai rejection reads "You've hit your monthly spend limit";
@@ -824,28 +811,6 @@ def claude_effort(value: str) -> str:
 def resolve_claude_model(value: str = "") -> str:
     model = (value or "").strip()
     return model or CLAUDE_DEFAULT_MODEL
-
-
-def claude_auto_compact_environment(
-    repo_root: Path | None, *, base_env: Mapping[str, str]
-) -> dict[str, str]:
-    """Env addition that gets Claude Code compacting before its real ceiling.
-
-    A no-op for a non-Claude worktree, and a no-op when the operator (or a
-    parent process) already set the variable explicitly -- this only supplies
-    a default, never overrides one already in play.
-    """
-    if driver_for(repo_root) is not CLAUDE_DRIVER:
-        return {}
-    if CLAUDE_AUTO_COMPACT_WINDOW_ENV in base_env:
-        return {}
-    from spice.config.values import configured_claude_auto_compact_window
-
-    return {
-        CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(
-            configured_claude_auto_compact_window(repo_root)
-        )
-    }
 
 
 def claude_settings_json(
@@ -1070,9 +1035,9 @@ class ClaudeDriver(AgentDriver):
         return ContextUsageFields(
             last=last,
             cumulative=last,
-            # Always meter against the standard tier so context pressure builds
-            # and the agent compacts near 200K — matching other agents and not
-            # drifting up to a larger (1M) API context.
+            # Always meter against the configured ceiling so context pressure
+            # builds and the agent compacts near 250K — matching other agents
+            # and not drifting up to a larger (1M) API context.
             model_context_window=self.default_context_window or None,
         )
 
@@ -1361,7 +1326,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     stdout_section_markers=frozenset(),
     stdout_compaction_marker="",
     session_id_pattern=re.compile(r'"session_id"\s*:\s*"([0-9a-fA-F-]{36})"'),
-    default_context_window=200000,
+    default_context_window=250000,
     out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
     stdout_format="json",
     post_tool_hook=PostToolHookCapability(

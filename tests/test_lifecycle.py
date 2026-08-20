@@ -19,6 +19,7 @@ from spice.agent import (
     sidechannelnotify,
     wrap,
 )
+from spice.agent.codexautocompact import CODEX_AUTO_COMPACT_WINDOW_TOKENS
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
@@ -211,6 +212,9 @@ def test_codex_driver_command_honors_explicit_fast_mode_and_playwright_mcp(
         (agent_root / "playwright-mcp.json").read_text(encoding="utf-8")
     ) == {"browser": {"contextOptions": {"colorScheme": "dark"}}}
     assert 'personality="pragmatic"' in configs
+    assert (
+        f"model_auto_compact_token_limit={CODEX_AUTO_COMPACT_WINDOW_TOKENS}"
+    ) in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command.count("--json") == 1
     assert command[-3:] == ["resume", "thread-1", prompt]

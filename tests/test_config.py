@@ -18,6 +18,7 @@ SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
 SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
 SAY_WORDS_PER_MINUTE_OVERRIDE = 222
 CLAUDE_AUTO_COMPACT_WINDOW_OVERRIDE = 123_456
+CODEX_AUTO_COMPACT_WINDOW_OVERRIDE = 654_321
 JUDGE_TIMEOUT_OVERRIDE_SECONDS = 17.5
 SERVE_PORT_OVERRIDE = 9876
 pytestmark = pytest.mark.usefixtures("git_worktree_tmp_path")
@@ -116,6 +117,9 @@ def test_packaged_scalar_families_reach_their_typed_consumers(tmp_path, monkeypa
         default_model = "claude-configured"
         auto_compact_window_tokens = 123456
 
+        [agent.codex]
+        auto_compact_window_tokens = 654321
+
         [judge]
         bin = "configured-judge"
         portable_bin = "configured-portable-judge"
@@ -151,6 +155,10 @@ def test_packaged_scalar_families_reach_their_typed_consumers(tmp_path, monkeypa
     assert (
         values.configured_claude_auto_compact_window(tmp_path)
         == CLAUDE_AUTO_COMPACT_WINDOW_OVERRIDE
+    )
+    assert (
+        values.configured_codex_auto_compact_window(tmp_path)
+        == CODEX_AUTO_COMPACT_WINDOW_OVERRIDE
     )
     assert values.configured_judge_bin(tmp_path) == "configured-judge"
     assert values.configured_judge_model(tmp_path) == "configured-model"
