@@ -9,8 +9,6 @@ RTK_TRUTH_PATHS = (
     "CONFIG.md",
     "docs/config/reference.md",
     "docs/cli/wrapper-commands.md",
-    "docs/design/INVARIANTS.md",
-    "docs/design/accepted/transparent-steering-injection.md",
 )
 
 
