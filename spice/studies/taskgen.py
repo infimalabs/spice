@@ -89,7 +89,15 @@ def _matching_rows(
         if str(row.get("project") or "") == spec.project
         and finding_tag in _row_tags(row)
     ]
-    return sorted(matches, key=lambda row: str(row.get("incepted") or ""))
+    return sorted(
+        matches,
+        key=lambda row: (
+            identity.incepted_micros(str(row["incepted"]))
+            if row.get("incepted")
+            else -1,
+            str(row.get("incepted") or ""),
+        ),
+    )
 
 
 def _finding_tag(spec: StudyTaskSpec) -> str:

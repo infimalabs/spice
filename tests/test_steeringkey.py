@@ -21,6 +21,7 @@ def _init_git_repo(path: Path) -> None:
 def test_steering_token_is_stable_base52_and_minted_once(tmp_path):
     _init_git_repo(tmp_path)
     token = steering_token(tmp_path)
+    assert len(token) == 9
     assert token and all(ch in identity.ALPHABET for ch in token)
     assert steering_token(tmp_path) == token  # reused, not re-minted
 

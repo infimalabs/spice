@@ -40,7 +40,7 @@ def _rows() -> list[dict]:
     return [
         {
             "uuid": "u-seed",
-            "incepted": "1kG0aaaa",
+            "incepted": "1kG0BBBB",
             "project": "task.lineage",
             "description": 'Draw the board\'s "origin" forest — pass #1',
             "status": "completed",
@@ -58,7 +58,7 @@ def _rows() -> list[dict]:
             "description": "A description long past the truncation limit, "
             "so the label has to be cut and ellipsed before mermaid sees it",
             "status": "completed",
-            "origin": "task:LINEAGE-1kG0aaaa",
+            "origin": "task:LINEAGE-1kG0BBBB",
             "origin_worktree": "worktrees/spice-a",
             "origin_thread": "thread-a",
             "review_author": "thread-g",
@@ -88,7 +88,7 @@ def _rows() -> list[dict]:
             "project": "smoke",
             "description": "Smoke residue that must not reach any view",
             "status": "deleted",
-            "origin": "task:LINEAGE-1kG0aaaa",
+            "origin": "task:LINEAGE-1kG0BBBB",
             "phase_0": "todo",
             "phase_i": 0,
         },
@@ -156,7 +156,7 @@ def test_fixed_ceiling_is_reproducible_across_live_board_churn(monkeypatch) -> N
             "project": "task.lineage",
             "description": "Post-ceiling row touching every graph",
             "status": "completed",
-            "origin": "task:LINEAGE-1kG0aaaa",
+            "origin": "task:LINEAGE-1kG0BBBB",
             "origin_worktree": "worktrees/spice-z",
             "origin_thread": "thread-z",
             "review_author": "thread-g",
@@ -179,7 +179,7 @@ def test_origin_edges_link_child_to_the_task_that_caused_it() -> None:
     rows = graph.live_rows(_rows())
 
     assert graph.origin_edges(rows) == [
-        ("LINEAGE-1kG0aaaa", "LINEAGE-9kG0bbbb"),
+        ("LINEAGE-1kG0BBBB", "LINEAGE-9kG0bbbb"),
         ("LINEAGE-9kG0bbbb", "MOSAIC-1kG0cccc"),
     ]
 
@@ -188,8 +188,8 @@ def test_dependency_edges_resolve_the_uuid_keyed_depends_list() -> None:
     rows = graph.live_rows(_rows())
 
     assert graph.dependency_edges(rows) == [
-        ("LINEAGE-1kG0aaaa", "LINEAGE-9kG0bbbb"),
-        ("LINEAGE-1kG0aaaa", "MOSAIC-1kG0cccc"),
+        ("LINEAGE-1kG0BBBB", "LINEAGE-9kG0bbbb"),
+        ("LINEAGE-1kG0BBBB", "MOSAIC-1kG0cccc"),
         ("LINEAGE-9kG0bbbb", "MOSAIC-1kG0cccc"),
     ]
 
@@ -242,7 +242,7 @@ def test_phase_edges_exclude_configured_steps_the_task_has_not_reached() -> None
 
 
 def test_node_id_rewrites_handles_mermaid_grammar_would_reject() -> None:
-    assert graph.node_id("LINEAGE-1kG0aaaa") == "LINEAGE_1kG0aaaa"
+    assert graph.node_id("LINEAGE-1kG0BBBB") == "LINEAGE_1kG0BBBB"
     assert graph.node_id("9kG0bbbb") == "n9kG0bbbb"
 
     with pytest.raises(SpiceError, match="empty handle"):

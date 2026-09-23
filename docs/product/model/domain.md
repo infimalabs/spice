@@ -92,8 +92,8 @@ never a separate type. Every rule written for teams must hold for a team of one.
 
 ```mermaid
 flowchart LR
-  T["inception instant"] --> E["epoch millis"]
-  E --> B["base52, 8 chars,<br/>order-preserving"]
+  T["inception instant"] --> E["epoch microseconds"]
+  E --> B["base52, 9 chars,<br/>order-preserving within generation"]
   B --> I["incepted — the ONLY stored id"]
   P["project's rightmost segment"] --> K["KEY — derived, never stored"]
   I --> H["rendered handle"]
@@ -106,12 +106,18 @@ task's name is derived.
 **Invariant —** Re-homing a task to a different project changes its rendered
 handle **for free**, because the key was never stored.
 
-**Invariant —** The stamp is sortable as a plain string, so identity ordering is
-inception ordering with no parsing.
+**Invariant —** Stamps of the same width sort as plain strings into inception
+order. Retained eight-character millisecond stamps keep their identity; compare
+decoded microseconds when ordering them alongside nine-character stamps.
 
 **Policy —** The alphabet omits vowels in both cases, so a stamp can never
-accidentally spell a word. Collisions advance the instant by 1 ms rather than
+accidentally spell a word. Collisions advance the instant by one microsecond rather than
 adding entropy, preserving sortability.
+
+**Policy —** New task stamps, inbox keys, and steering tokens use the same
+nine-character codec. Readers accept both widths without rewriting existing
+identities. The last representable current instant is
+`2058-02-02T20:04:43.635711Z`; out-of-range minting fails instead of wrapping.
 
 **INC** — the alphabet, the width, the separator.
 

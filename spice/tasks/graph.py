@@ -55,14 +55,16 @@ def live_rows(
     """
     source = tw.export() if rows is None else rows
     stamp = _ceiling_stamp(ceiling)
+    ceiling_micros = identity.incepted_micros(stamp) if stamp else None
     return [
         row
         for row in source
         if (include_deleted or str(row.get("status") or "") != "deleted")
         and (
-            not stamp
+            ceiling_micros is None
             or (
-                bool(row_stamp := str(row.get("incepted") or "")) and row_stamp <= stamp
+                bool(row_stamp := str(row.get("incepted") or ""))
+                and identity.incepted_micros(row_stamp) <= ceiling_micros
             )
         )
     ]

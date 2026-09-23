@@ -18,11 +18,9 @@ from spice.tasks.git import boundaries
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
 TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-# Inbox keys are base52 moment stamps like 1kF4sdFJ, optionally carrying a
+# Inbox keys are current or retained base52 moment stamps, optionally carrying a
 # `-N` collision suffix from inbox filename publishing.
-TASK_ORIGIN_ACK_KEY_RE = re.compile(
-    rf"^[{identity.ALPHABET}]{{{identity.STAMP_WIDTH}}}(?:-\d+)?$"
-)
+TASK_ORIGIN_ACK_KEY_RE = re.compile(rf"\A{identity.STAMP_PATTERN}(?:-\d+)?\Z")
 TASK_ORIGIN_REQUIRED_ERROR = (
     "task creation requires an origin: reference the acknowledgment that "
     "steered it (--origin ack:<inbox-key> / origin=ack:<inbox-key>) or the "

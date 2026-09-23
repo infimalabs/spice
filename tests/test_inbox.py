@@ -61,7 +61,10 @@ _DATED_EPOCH_MS = 1767225600000  # 2026-01-01T00:00:00Z
 
 
 def _dated_inbox_name(index: int) -> str:
-    return f"{identity.encode_width(_DATED_EPOCH_MS + index)}.txt"
+    stamp = identity.encode_width(
+        _DATED_EPOCH_MS + index, width=identity.LEGACY_STAMP_WIDTH
+    )
+    return f"{stamp}.txt"
 
 
 def test_write_then_collect_round_trip(tmp_path):
@@ -392,7 +395,7 @@ def _init_repo(path):
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
-def test_generated_keys_are_unique_across_linked_worktrees_in_one_millisecond(
+def test_generated_keys_are_unique_across_linked_worktrees_in_one_microsecond(
     tmp_path, monkeypatch
 ):
     repo = tmp_path / "repo"
@@ -413,14 +416,15 @@ def test_generated_keys_are_unique_across_linked_worktrees_in_one_millisecond(
         cwd=repo,
         check=True,
     )
-    monkeypatch.setattr(identity, "epoch_millis", lambda _when=None: _DATED_EPOCH_MS)
+    micros = _DATED_EPOCH_MS * identity.MICROS_PER_MILLISECOND
+    monkeypatch.setattr(identity, "epoch_micros", lambda _when=None: micros)
     text = compose_inbox_text(body="operator broadcast", priority=None, stop=False)
 
     first = write_inbox_item(repo, None, text)
     second = write_inbox_item(peer, None, text)
 
-    assert first.name == f"{identity.encode_width(_DATED_EPOCH_MS)}.txt"
-    assert second.name == f"{identity.encode_width(_DATED_EPOCH_MS + 1)}.txt"
+    assert first.name == f"{identity.encode_width(micros)}.txt"
+    assert second.name == f"{identity.encode_width(micros + 1)}.txt"
     assert summarize_ack_archival(
         repo, f"ACK {inbox_item_key(first.name)}: first lane handled it."
     ).archived == [inbox_item_key(first.name)]

@@ -309,8 +309,8 @@ def test_ingest_digest_applies_unchanged_document_despite_runtime_identity_chang
         "# Root\nAcceptance: unchanged criterion\nFlow: todo\n",
         encoding="utf-8",
     )
-    minted_millis = iter((1_700_000_000_000, 1_700_000_001_000))
-    monkeypatch.setattr(identity, "epoch_millis", lambda: next(minted_millis))
+    minted_micros = iter((1_700_000_000_000_000, 1_700_000_001_000_000))
+    monkeypatch.setattr(identity, "epoch_micros", lambda: next(minted_micros))
     parser = build_parser()
     base = [
         "task",
