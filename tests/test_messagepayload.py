@@ -264,12 +264,21 @@ def _identity_status(
     )
 
 
-def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("stamp", "timestamp"),
+    [
+        ("1k4Yh62d", "2026-06-10T12:00:01.001000Z"),
+        ("bnZCRxw3j", "2023-11-14T22:13:20.000001Z"),
+    ],
+)
+def test_cli_created_task_row_renders_standalone_task_card(
+    tmp_path, monkeypatch, stamp, timestamp
+):
     actor = "a" * 32
     row = {
         "id": 42,
         "uuid": "task-uuid-42",
-        "incepted": "1k4Yh62d",
+        "incepted": stamp,
         "description": "CLI follow-up",
         "project": "serve.ui",
         "acceptance": ("Task card comes from the backend | Second backend criterion"),
@@ -344,7 +353,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert item["kind"] == "task_card"
     assert item["source_kind"] == "cli_task_created"
     assert item["task_card_count"] == 1
-    assert item["timestamp"] == "2026-06-10T12:00:01.001000Z"
+    assert item["timestamp"] == timestamp
     assert item["display_text"] == "Task capture: CLI follow-up (serve.ui)"
     assert item["preview"] == "Task capture: CLI follow-up (serve.ui)"
     assert '<blockquote class="task-directive-quote">' in item["display_html"]
@@ -359,7 +368,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         '<div class="task-directive-property">'
         "<dt>acceptance</dt><dd>Second backend criterion</dd>" in item["display_html"]
     )
-    assert "<dt>handle</dt><dd>UI-1k4Yh62d</dd>" in item["display_html"]
+    assert f"<dt>handle</dt><dd>UI-{stamp}</dd>" in item["display_html"]
 
 
 def test_task_card_renders_description_before_acceptance_and_keeps_field_order(

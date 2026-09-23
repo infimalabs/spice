@@ -88,8 +88,8 @@
 | Situation | Expected | Ref |
 | --- | --- | --- |
 | A task is re-homed to another project | its rendered handle changes; its stored identity does not | [A task's inception stamp is its only stored identity](../invariants/identity.md#identity-a-task-s-inception-stamp-is-its-only-stored-identity) |
-| Handles are sorted as plain strings | the order matches inception order | [The stamp is a fixed-width, order-preserving base-52 encoding of inception time](../invariants/identity.md#identity-the-stamp-is-a-fixed-width-order-preserving-base-encoding-of-inception-time) |
-| Many tasks are minted in the same millisecond | each gets a distinct, still-ordered stamp | [The stamp alphabet omits vowels in both cases](../invariants/identity.md#identity-the-stamp-alphabet-omits-vowels-in-both-cases) |
+| Stamps of the same width are sorted as plain strings | the order matches inception order; mixed widths use decoded microseconds | [The stamp is a fixed-width, order-preserving base-52 encoding of inception time](../invariants/identity.md#identity-the-stamp-is-a-fixed-width-order-preserving-base-encoding-of-inception-time) |
+| Many tasks are minted in the same microsecond | each gets a distinct, still-ordered stamp | [The stamp alphabet omits vowels in both cases](../invariants/identity.md#identity-the-stamp-alphabet-omits-vowels-in-both-cases) |
 | A facet arrives twice with the same order | applied once; the second is ignored as stale | [Each authority carries its own freshness counter](../invariants/identity.md#identity-each-authority-carries-its-own-freshness-counter) |
 | An authority restarts and resumes at a lower revision | its newer epoch still supersedes | [Freshness is a total order over (epoch, revision)](../invariants/identity.md#identity-freshness-is-a-total-order-over-epoch-revision) |
 | A producer offers a non-monotone value as a generation | refused at the producer | [Only a monotone count may be published as a generation](../invariants/identity.md#identity-only-a-monotone-count-may-be-published-as-a-generation) |

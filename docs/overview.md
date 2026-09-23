@@ -53,6 +53,10 @@ HTTP, and live-bus producers only project the authority's settled decision, so
 rendering a lane cannot become a second launch policy. The durable inbox and
 task facts remain available to retry when a bounded caller wait expires.
 
+The [blocking-surface audit](cli/blocking-surfaces.md) records each Python
+blocking call's bound or lifetime owner. Its call-site inventory is checked
+against the implementation by the test suite.
+
 ### Authority And Replayable State
 
 Spice keeps facts that cannot be reconstructed in their owning stores: team

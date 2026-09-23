@@ -6,8 +6,10 @@ import ast
 import re
 from pathlib import Path
 
+from spice.tasks.identity import STAMP_PATTERN
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-AUDIT_PATH = PROJECT_ROOT / "docs" / "design" / "accepted" / "unbounded-wait-audit.md"
+AUDIT_PATH = PROJECT_ROOT / "docs" / "cli" / "blocking-surfaces.md"
 DIRECT_BLOCKING_CALLS = {
     "fcntl.flock",
     "select.select",
@@ -60,7 +62,7 @@ def test_blocking_surface_audit_rows_name_classification_and_actionable_owner():
     assert all(any(label in row for label in classification_labels) for row in rows)
     actionable_rows = [row for row in rows if "actionable" in row.lower()]
     assert all(
-        re.search(r"`[A-Z][A-Z0-9]*-1k[A-Za-z0-9]+`", row) for row in actionable_rows
+        re.search(rf"`[A-Z][A-Z0-9]*-{STAMP_PATTERN}`", row) for row in actionable_rows
     )
 
 

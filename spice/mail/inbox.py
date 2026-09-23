@@ -201,7 +201,9 @@ def collect_inbox_snapshot(repo_root: str | Path | None) -> InboxSnapshot:
     archive_dir = directory / INBOX_ARCHIVE_DIRNAME
     items: list[InboxItem] = []
     signature: list[tuple[str, int, int]] = []
-    for path in sorted(_file_paths(directory), key=lambda item: item.name):
+    for path in sorted(
+        _file_paths(directory), key=lambda item: _inbox_name_order(item.name)
+    ):
         if path.name.endswith(".tmp") or path.suffix != ".txt":
             continue
         try:
@@ -229,7 +231,7 @@ def collect_pending_inbox_entries(
     """List pending inbox items from directory metadata alone (no body reads).
 
     Mirrors the file selection of :func:`collect_inbox_snapshot` -- prune stale
-    artifacts, keep published ``.txt`` items, order by name -- but stops at
+    artifacts, keep published ``.txt`` items, order by decoded key time -- but stops at
     ``scandir``/``stat`` so identity callers never pay for reading and parsing
     every queued body.
     """
@@ -261,7 +263,7 @@ def collect_pending_inbox_entries(
                 )
     except OSError:
         return []
-    entries.sort(key=lambda item: item.name)
+    entries.sort(key=lambda item: _inbox_name_order(item.name))
     return entries
 
 
@@ -595,6 +597,15 @@ def _inbox_key_epoch(name: str) -> float | None:
     if not identity.INCEPTED_RE.match(stamp):
         return None
     return identity.incepted_datetime(stamp).timestamp()
+
+
+def _inbox_name_order(name: str) -> tuple[int, str]:
+    """Order timed keys across generations, retaining stable custom filenames."""
+    stamp = inbox_item_key(name).split("-", 1)[0]
+    micros = (
+        identity.incepted_micros(stamp) if identity.INCEPTED_RE.fullmatch(stamp) else -1
+    )
+    return micros, name
 
 
 def _ack_state_record_attachments(record: Any) -> tuple[InboxAttachment, ...]:
@@ -1150,7 +1161,7 @@ def mint_inbox_key(repo_root: Path) -> str:
     Linked worktrees have separate pending inbox directories but one ACK-state
     database. A clock-only key therefore cannot rely on a filename collision in
     one inbox to distinguish simultaneous sends to sibling worktrees. Persist
-    the last allocated millisecond under the same shared state root as ACK
+    the last allocated stamp under the same shared state root as ACK
     history and advance it under a repository-wide lock.
     """
     sequence_path = shared_state_path(repo_root, INBOX_KEY_SEQUENCE_FILENAME)
@@ -1168,10 +1179,10 @@ def mint_inbox_key(repo_root: Path) -> str:
             raise SpiceError(
                 f"inbox key sequence at {sequence_path} is invalid: {previous!r}"
             )
-        millis = identity.epoch_millis()
+        micros = identity.epoch_micros()
         if previous:
-            millis = max(millis, identity.decode(previous) + 1)
-        key = identity.encode_width(millis)
+            micros = max(micros, identity.incepted_micros(previous) + 1)
+        key = identity.encode_width(micros)
         atomic_write_text(sequence_path, key + "\n")
         return key
 

@@ -267,21 +267,20 @@ def test_primary_runtime_docs_do_not_describe_per_tree_runtime_magic():
     assert offenders == []
 
 
-def test_accepted_runtime_model_requires_installed_tree_evidence():
-    runtime = (
-        PROJECT_ROOT / "docs/design/accepted/single-install-runtime-model.md"
-    ).read_text(encoding="utf-8")
-    boundary = runtime.split("## Deployment Evidence Boundary", maxsplit=1)[1].split(
-        "## Per-Tree-Runtime Magic Removed", maxsplit=1
-    )[0]
-    text = _collapsed(boundary)
+def test_runtime_model_requires_independent_deployment_evidence():
+    model = _collapsed(
+        (PROJECT_ROOT / "docs/product/planes/distribution.md").read_text(
+            encoding="utf-8"
+        )
+    )
+    release = _collapsed((PROJECT_ROOT / "docs/release.md").read_text(encoding="utf-8"))
 
-    assert "no fleet effect" in text
-    assert "team-authority schema version" in text
-    assert "_refresh_generated_skill_after_advance" in boundary
-    assert "/path/to/installed/python -P -c" in boundary
-    assert "b.__file__" in boundary
-    assert "interpreter inside the candidate worktree" in text
-    assert "Release and task evidence must not claim" in text
-    assert "read_bytes() == Path(...).read_bytes()" in boundary
-    assert "human-oriented diff" in text
+    assert "Evidence comes from an **independently installed** deployment" in model
+    assert "The probe runs isolated" in model
+    assert "checkout must itself be clean" in model
+    assert "recomputed locally before it is believed" in model
+    assert "runs it with `-P` and no `PYTHONPATH`" in release
+    assert "`spice.tasks.git.boundaries.__file__`" in release
+    assert "An interpreter inside the candidate worktree cannot self-certify" in release
+    assert "refuses uncommitted deployment edits" in release
+    assert "comparing raw bytes, not a rendered diff" in release

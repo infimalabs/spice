@@ -19,7 +19,7 @@ from spice.tasks.identity import (
     decode,
     encode,
     encode_width,
-    epoch_millis,
+    epoch_micros,
     key_for,
     mint_incepted,
     render_handle,
@@ -711,10 +711,10 @@ def test_codec_fixed_width_preserves_numeric_order():
     assert encoded == sorted(encoded)
 
 
-def test_epoch_millis_counts_whole_milliseconds():
+def test_epoch_micros_counts_whole_microseconds():
     from datetime import UTC, datetime
 
-    assert epoch_millis(datetime(1970, 1, 1, tzinfo=UTC)) == 0
+    assert epoch_micros(datetime(1970, 1, 1, tzinfo=UTC)) == 0
 
 
 def _write_state_db(codex_home, thread_id, transcript) -> None:

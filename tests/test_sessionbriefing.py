@@ -954,7 +954,9 @@ def _record_ack_state_asks(repo, asks: list[tuple[str, str]]) -> None:
 
 
 def _ack_key(ts: str) -> str:
-    return task_identity.encode_width(int(_epoch_seconds(ts) * 1000))
+    return task_identity.encode_width(
+        int(_epoch_seconds(ts) * 1000), width=task_identity.LEGACY_STAMP_WIDTH
+    )
 
 
 def _epoch_seconds(ts: str) -> float:

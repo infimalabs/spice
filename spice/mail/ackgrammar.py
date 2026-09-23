@@ -7,8 +7,8 @@ An ACK in the harness idiom looks like:
 The detector treats text as an ACK iff it carries:
 
 1. The exact ALL-CAPS word `ACK` as a standalone token, AND
-2. One or more non-hyphen-prefixed inbox-key-shaped substrings: an
-   8-character base52 moment stamp (the `spice.tasks.identity` alphabet),
+2. One or more non-hyphen-prefixed inbox-key-shaped substrings: a
+   nine-character base52 microsecond stamp or retained eight-character stamp,
    optionally carrying a `-N` collision suffix from inbox filename
    publishing.
 
@@ -92,10 +92,9 @@ _ACK_NARRATION_WORDS = frozenset(
         "writing",
     }
 )
-# Key grammar: an 8-character base52 moment stamp, optionally carrying a
+# Key grammar: a current or retained base52 moment stamp, optionally carrying a
 # `-N` collision suffix from inbox filename publishing.
 _KEY_STAMP_CHARS = frozenset(identity.ALPHABET)
-_KEY_STAMP_WIDTH = identity.STAMP_WIDTH
 
 
 def extract_ack_keys_from_text(text: str) -> Iterator[str]:
@@ -530,7 +529,15 @@ def _ack_key_end(text: str, start: int, limit: int) -> int | None:
 
 
 def _ack_key_shape_end(text: str, start: int, limit: int) -> int | None:
-    end = start + _KEY_STAMP_WIDTH
+    for width in identity.STAMP_WIDTHS:
+        end = _ack_stamp_end(text, start, limit, width)
+        if end is not None:
+            return end
+    return None
+
+
+def _ack_stamp_end(text: str, start: int, limit: int, width: int) -> int | None:
+    end = start + width
     if end > limit:
         return None
     for index in range(start, end):

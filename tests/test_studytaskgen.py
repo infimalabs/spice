@@ -237,6 +237,27 @@ def test_immediate_study_task_inherits_active_claim_origin(study_task_backend):
     assert str(child_row.get("wait") or "") == ""
 
 
+def test_reused_study_finding_is_oldest_across_stamp_generations(study_task_backend):
+    spec = _task_spec("Mixed generation finding", ("path.py", "symbol"))
+    controls = StudyTaskCreationControls(
+        deferred=False, origin=ACK_ORIGIN, print_created=False
+    )
+    first = create_study_tasks([spec], controls=controls)[0]
+    first_row = identity.resolve(first)
+    tw.run([identity.uuid_of(first_row), "modify", "incepted:bnZCRxw3h"])
+    later = create.add(
+        spec.title,
+        project=spec.project,
+        tags=list(first_row["tags"]),
+        acceptance=list(spec.acceptance),
+        origin=ACK_ORIGIN,
+    )
+    tw.run([identity.uuid_of(identity.resolve(later)), "modify", "incepted:1dzGkSrK"])
+
+    reused = create_study_tasks([spec], controls=controls)
+    assert [identity.incepted_of_handle(handle) for handle in reused] == ["bnZCRxw3h"]
+
+
 def _patch_study_scans(monkeypatch) -> None:
     monkeypatch.setattr(
         studies_cli.reachability,

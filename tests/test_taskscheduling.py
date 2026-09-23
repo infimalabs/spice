@@ -70,11 +70,11 @@ def test_canonical_utc_handles_utc_and_chicago_across_dst():
 
 
 def test_oops_wait_is_exactly_one_week_from_canonical_inception(task_repo, monkeypatch):
-    inception_millis = int(OOPS_INSTANT.timestamp() * identity.MILLIS_PER_SECOND)
+    inception_micros = identity.epoch_micros(OOPS_INSTANT)
     monkeypatch.setattr(
         identity,
-        "epoch_millis",
-        lambda when=None: inception_millis,
+        "epoch_micros",
+        lambda when=None: inception_micros,
     )
 
     created = ops.oops("One-week oops wait", origin=ORIGIN)

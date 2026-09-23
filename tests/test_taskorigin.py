@@ -25,14 +25,15 @@ def _seed_task(title: str = "Provenance root") -> str:
     )
 
 
-def test_origin_accepts_ack_task_and_bare_forms(task_repo):
+@pytest.mark.parametrize("ack_key", [ACK_KEY, "bnZCRxw3h"])
+def test_origin_accepts_ack_task_and_bare_forms(task_repo, ack_key):
     assert task_repo.is_dir()
     root = _seed_task()
 
     explicit_ack = create.add(
         "Explicit ack origin",
         project="task.unit",
-        origin=f"ack:{ACK_KEY}",
+        origin=f"ack:{ack_key}",
         priority="medium",
         acceptance=["ack realm"],
     )
@@ -47,7 +48,7 @@ def test_origin_accepts_ack_task_and_bare_forms(task_repo):
         "Bare ack key auto-realms",
         project="task.unit",
         # A bare inbox-key-shaped value lands in the ack realm without a prefix.
-        origin=ACK_KEY,
+        origin=ack_key,
         priority="medium",
         acceptance=["bare ack"],
     )
@@ -59,9 +60,9 @@ def test_origin_accepts_ack_task_and_bare_forms(task_repo):
         acceptance=["bare task"],
     )
 
-    assert identity.resolve(explicit_ack)["origin"] == f"ack:{ACK_KEY}"
+    assert identity.resolve(explicit_ack)["origin"] == f"ack:{ack_key}"
     assert identity.resolve(explicit_task)["origin"] == f"task:{root}"
-    assert identity.resolve(bare_ack)["origin"] == f"ack:{ACK_KEY}"
+    assert identity.resolve(bare_ack)["origin"] == f"ack:{ack_key}"
     assert identity.resolve(bare_task)["origin"] == f"task:{root}"
 
 

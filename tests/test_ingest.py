@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from spice.cli.parser import build_parser
-from spice.cli.withdrawn import DRY_RUN_WITHDRAWAL_RELEASE
 from spice.commandplan import PLAN_DIGEST_HEX_LENGTH
 from spice.errors import SpiceError
 from spice.tasks import cli as task_cli
@@ -43,10 +42,12 @@ def _actor() -> str:
     return tw.canonical_actor(tw.current_actor())
 
 
-def test_accepted_task_document_contract_tracks_live_ingest_cli():
-    contract = Path("docs/design/accepted/task-documents.md").read_text(
-        encoding="utf-8"
+def test_task_document_contract_tracks_live_ingest_cli():
+    root = Path(__file__).resolve().parents[1]
+    contract = " ".join(
+        (root / "docs/product/interfaces.md").read_text(encoding="utf-8").split()
     )
+    release = " ".join((root / "docs/release.md").read_text(encoding="utf-8").split())
     parser = build_parser()
     command = [
         "task",
@@ -60,18 +61,18 @@ def test_accepted_task_document_contract_tracks_live_ingest_cli():
 
     preview = parser.parse_args(command)
     applying = parser.parse_args([*command, "--apply"])
+    digest = "a" * PLAN_DIGEST_HEX_LENGTH
+    pinned = parser.parse_args([*command, f"--apply={digest}"])
 
     assert preview.apply is None
     assert applying.apply is True
-    assert "what bare `spice task ingest` does" in contract
-    assert "what `spice task ingest --apply[=<plan-digest>]` does" in contract
-    assert f"`--dry-run` was withdrawn in {DRY_RUN_WITHDRAWAL_RELEASE}" in contract
-    assert contract.count("`--dry-run`") == 2
-    assert "`--dry-run` prints the plan" not in contract
-    assert "`--dry-run` stops before execution" not in contract
-    assert "`spice/tasks/markdown.py`" not in contract
-    for module in ("apply.py", "classifier.py", "dialect.py", "ledger.py"):
-        assert f"`spice/tasks/markdown/{module}`" in contract
+    assert pinned.apply == digest
+    assert "## Task documents — prose and board" in contract
+    assert "Ingest is **idempotent against identity**" in contract
+    assert "Matching is scoped to a project **and** an origin" in contract
+    assert "`spice task ingest` now preview their plans" in release
+    assert "use the bare command to preview and `--apply` to execute" in release
+    assert "pass its digest in the same argument as `--apply=<plan-digest>`" in release
 
 
 def _family_task(
@@ -309,8 +310,8 @@ def test_ingest_digest_applies_unchanged_document_despite_runtime_identity_chang
         "# Root\nAcceptance: unchanged criterion\nFlow: todo\n",
         encoding="utf-8",
     )
-    minted_millis = iter((1_700_000_000_000, 1_700_000_001_000))
-    monkeypatch.setattr(identity, "epoch_millis", lambda: next(minted_millis))
+    minted_micros = iter((1_700_000_000_000_000, 1_700_000_001_000_000))
+    monkeypatch.setattr(identity, "epoch_micros", lambda: next(minted_micros))
     parser = build_parser()
     base = [
         "task",
